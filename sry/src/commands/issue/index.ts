@@ -1,6 +1,6 @@
 import { buildRouteMap } from "@stricli/core";
-import { listCommand } from "./list.js";
 import { getCommand } from "./get.js";
+import { listCommand } from "./list.js";
 
 export const issueRoute = buildRouteMap({
   routes: {
@@ -15,4 +15,3 @@ export const issueRoute = buildRouteMap({
     hideRoute: {},
   },
 });
-

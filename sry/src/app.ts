@@ -1,10 +1,10 @@
 import { buildApplication, buildRouteMap } from "@stricli/core";
+import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
+import { dsnRoute } from "./commands/dsn/index.js";
+import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
-import { issueRoute } from "./commands/issue/index.js";
-import { apiCommand } from "./commands/api.js";
-import { dsnRoute } from "./commands/dsn/index.js";
 
 const routes = buildRouteMap({
   routes: {
@@ -30,4 +30,3 @@ export const app = buildApplication(routes, {
     currentVersion: "0.1.0",
   },
 });
-

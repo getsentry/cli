@@ -1,6 +1,10 @@
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type { TokenResponse } from "../types/index.js";
 import { setAuthToken } from "./config.js";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 // OAuth configuration for Sentry
 const SENTRY_OAUTH_AUTHORIZE = "https://sentry.io/oauth/authorize/";
@@ -38,7 +42,9 @@ const defaultConfig: OAuthConfig = {
 function generateState(): string {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
-  return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join(
+    ""
+  );
 }
 
 /**
@@ -76,7 +82,7 @@ export async function exchangeCodeForToken(
 ): Promise<TokenResponse> {
   const { clientId, clientSecret } = { ...defaultConfig, ...config };
 
-  if (!clientId || !clientSecret) {
+  if (!(clientId && clientSecret)) {
     throw new Error(
       "OAuth credentials not configured. Set SRY_CLIENT_ID and SRY_CLIENT_SECRET environment variables."
     );
@@ -110,7 +116,7 @@ export async function exchangeCodeForToken(
  */
 export function startCallbackServer(
   expectedState: string,
-  timeout: number = 300000 // 5 minutes default
+  timeout = 300_000 // 5 minutes default
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -292,7 +298,7 @@ export async function performOAuthFlow(
 ): Promise<TokenResponse> {
   const { clientId, clientSecret } = { ...defaultConfig, ...config };
 
-  if (!clientId || !clientSecret) {
+  if (!(clientId && clientSecret)) {
     throw new Error(
       "OAuth credentials not configured.\n\n" +
         "Please set the following environment variables:\n" +
@@ -333,7 +339,7 @@ export async function refreshAccessToken(
 ): Promise<TokenResponse> {
   const { clientId, clientSecret } = { ...defaultConfig, ...config };
 
-  if (!clientId || !clientSecret) {
+  if (!(clientId && clientSecret)) {
     throw new Error(
       "OAuth credentials not configured. Set SRY_CLIENT_ID and SRY_CLIENT_SECRET environment variables."
     );

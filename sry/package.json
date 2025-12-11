@@ -12,10 +12,12 @@
     "build:all": "FOSSILIZE_PLATFORMS=darwin-arm64,darwin-x64,linux-x64,win32-x64 fossilize src/bin.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.3.8",
     "@types/bun": "latest",
     "@types/node": "^20",
     "fossilize": "^0.5.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ultracite": "6.3.10"
   },
   "dependencies": {
     "@stricli/auto-complete": "^1.2.4",

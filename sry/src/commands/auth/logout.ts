@@ -1,6 +1,6 @@
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
-import { clearAuth, isAuthenticated, getConfigPath } from "../../lib/config.js";
+import { clearAuth, getConfigPath, isAuthenticated } from "../../lib/config.js";
 
 export const logoutCommand = buildCommand({
   docs: {
@@ -25,4 +25,3 @@ export const logoutCommand = buildCommand({
     process.stdout.write(`  Credentials removed from: ${getConfigPath()}\n`);
   },
 });
-

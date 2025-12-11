@@ -1,7 +1,6 @@
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { detectDSN } from "../../lib/dsn-finder.js";
-import { setDefaults } from "../../lib/config.js";
 
 interface DetectFlags {
   readonly json: boolean;
@@ -48,7 +47,9 @@ export const detectCommand = buildCommand({
         process.stdout.write("  - next.config.js\n");
         process.stdout.write("  - sentry.properties\n");
         process.stdout.write("  - package.json\n");
-        process.stdout.write("  - Common source directories (src/, lib/, app/)\n");
+        process.stdout.write(
+          "  - Common source directories (src/, lib/, app/)\n"
+        );
         return;
       }
 
@@ -91,4 +92,3 @@ export const detectCommand = buildCommand({
     }
   },
 });
-

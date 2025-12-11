@@ -1,7 +1,7 @@
-import type { StricliContext } from "@stricli/core";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
+import type { StricliContext } from "@stricli/core";
 
 export interface SryContext extends StricliContext {
   readonly fs: typeof fs;
@@ -28,4 +28,3 @@ export function buildContext(process: NodeJS.Process): SryContext {
     configDir,
   };
 }
-

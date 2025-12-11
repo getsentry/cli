@@ -1,6 +1,6 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
-import { listProjects, listOrganizations } from "../../lib/api-client.js";
+import { listOrganizations, listProjects } from "../../lib/api-client.js";
 import { getDefaultOrganization } from "../../lib/config.js";
 import type { SentryProject } from "../../types/index.js";
 
@@ -111,9 +111,8 @@ export const listCommand = buildCommand({
 
       // Filter by platform if specified
       if (flags.platform) {
-        allProjects = allProjects.filter(
-          (p) =>
-            p.platform?.toLowerCase().includes(flags.platform!.toLowerCase())
+        allProjects = allProjects.filter((p) =>
+          p.platform?.toLowerCase().includes(flags.platform!.toLowerCase())
         );
       }
 
@@ -168,4 +167,3 @@ export const listCommand = buildCommand({
     }
   },
 });
-

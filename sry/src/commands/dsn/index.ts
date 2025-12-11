@@ -13,4 +13,3 @@ export const dsnRoute = buildRouteMap({
     hideRoute: {},
   },
 });
-

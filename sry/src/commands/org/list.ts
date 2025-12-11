@@ -60,9 +60,7 @@ export const listCommand = buildCommand({
       const maxSlugLen = Math.max(...limitedOrgs.map((o) => o.slug.length));
 
       // Print header
-      process.stdout.write(
-        `${"SLUG".padEnd(maxSlugLen)}  NAME\n`
-      );
+      process.stdout.write(`${"SLUG".padEnd(maxSlugLen)}  NAME\n`);
 
       // Print organizations
       for (const org of limitedOrgs) {
@@ -81,4 +79,3 @@ export const listCommand = buildCommand({
     }
   },
 });
-

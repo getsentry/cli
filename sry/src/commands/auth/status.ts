@@ -1,13 +1,13 @@
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
+import { listOrganizations } from "../../lib/api-client.js";
 import {
-  isAuthenticated,
-  readConfig,
   getConfigPath,
   getDefaultOrganization,
   getDefaultProject,
+  isAuthenticated,
+  readConfig,
 } from "../../lib/config.js";
-import { listOrganizations } from "../../lib/api-client.js";
 
 interface StatusFlags {
   readonly showToken: boolean;
@@ -70,7 +70,7 @@ export const statusCommand = buildCommand({
           `Expires: ${expiresAt.toLocaleString()} (${hoursRemaining}h remaining)\n`
         );
       } else {
-        process.stdout.write(`Expires: Expired\n`);
+        process.stdout.write("Expires: Expired\n");
       }
     }
 
@@ -107,4 +107,3 @@ export const statusCommand = buildCommand({
     }
   },
 });
-

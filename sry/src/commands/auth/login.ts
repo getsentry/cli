@@ -1,11 +1,11 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
+import { getConfigPath, isAuthenticated } from "../../lib/config.js";
 import {
-  performOAuthFlow,
   completeOAuthFlow,
+  performOAuthFlow,
   setApiToken,
 } from "../../lib/oauth.js";
-import { isAuthenticated, getConfigPath } from "../../lib/config.js";
 
 interface LoginFlags {
   readonly token?: string;
@@ -63,7 +63,9 @@ export const loginCommand = buildCommand({
 
     try {
       process.stdout.write("Opening browser for Sentry authorization...\n");
-      process.stdout.write("Waiting for authorization (timeout: " + flags.timeout + "s)...\n\n");
+      process.stdout.write(
+        "Waiting for authorization (timeout: " + flags.timeout + "s)...\n\n"
+      );
 
       // Perform the full OAuth flow
       const tokenResponse = await performOAuthFlow();
@@ -73,7 +75,7 @@ export const loginCommand = buildCommand({
 
       process.stdout.write("\n✓ Authentication successful!\n");
       process.stdout.write(`  Config saved to: ${getConfigPath()}\n`);
-      
+
       if (tokenResponse.expires_in) {
         const hours = Math.round(tokenResponse.expires_in / 3600);
         process.stdout.write(`  Token expires in: ${hours} hours\n`);

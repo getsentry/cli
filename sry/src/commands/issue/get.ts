@@ -1,7 +1,7 @@
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { getIssue, getLatestEvent } from "../../lib/api-client.js";
-import type { SentryIssue, SentryEvent } from "../../types/index.js";
+import type { SentryEvent, SentryIssue } from "../../types/index.js";
 
 interface GetFlags {
   readonly json: boolean;
@@ -13,7 +13,9 @@ function formatIssueDetails(issue: SentryIssue): string {
 
   // Header
   lines.push(`${issue.shortId}: ${issue.title}`);
-  lines.push("═".repeat(Math.min(80, issue.title.length + issue.shortId.length + 2)));
+  lines.push(
+    "═".repeat(Math.min(80, issue.title.length + issue.shortId.length + 2))
+  );
   lines.push("");
 
   // Status and level
@@ -87,7 +89,8 @@ function formatEventDetails(event: SentryEvent): string {
     if (event.user.email) lines.push(`  Email:    ${event.user.email}`);
     if (event.user.username) lines.push(`  Username: ${event.user.username}`);
     if (event.user.id) lines.push(`  ID:       ${event.user.id}`);
-    if (event.user.ip_address) lines.push(`  IP:       ${event.user.ip_address}`);
+    if (event.user.ip_address)
+      lines.push(`  IP:       ${event.user.ip_address}`);
   }
 
   if (event.sdk) {
@@ -176,4 +179,3 @@ export const getCommand = buildCommand({
     }
   },
 });
-

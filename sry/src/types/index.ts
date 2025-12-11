@@ -174,4 +174,3 @@ export interface DSNDetectionResult {
   source: string;
   filePath: string;
 }
-

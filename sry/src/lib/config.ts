@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import type { SryConfig } from "../types/index.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".sry");
@@ -8,11 +8,11 @@ const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 /**
  * Ensure the config directory exists
- * 
+ *
  * Permissions follow SSH conventions for sensitive files:
  * - Directory: 700 (drwx------)
  * - Config file: 600 (-rw-------)
- * 
+ *
  * @see https://superuser.com/a/215506/26230
  */
 function ensureConfigDir(): void {
@@ -61,12 +61,12 @@ export function updateConfig(updates: Partial<SryConfig>): SryConfig {
  */
 export function getAuthToken(): string | undefined {
   const config = readConfig();
-  
+
   // Check if token has expired
   if (config.auth?.expiresAt && Date.now() > config.auth.expiresAt) {
-    return undefined;
+    return;
   }
-  
+
   return config.auth?.token;
 }
 
@@ -79,7 +79,7 @@ export function setAuthToken(
   refreshToken?: string
 ): void {
   const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : undefined;
-  
+
   updateConfig({
     auth: {
       token,
@@ -115,10 +115,7 @@ export function getDefaultProject(): string | undefined {
 /**
  * Set default organization and/or project
  */
-export function setDefaults(
-  organization?: string,
-  project?: string
-): void {
+export function setDefaults(organization?: string, project?: string): void {
   const config = readConfig();
   config.defaults = {
     ...config.defaults,
@@ -141,4 +138,3 @@ export function isAuthenticated(): boolean {
 export function getConfigPath(): string {
   return CONFIG_FILE;
 }
-

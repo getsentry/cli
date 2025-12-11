@@ -7,9 +7,7 @@ export const orgRoute = buildRouteMap({
   },
   docs: {
     brief: "Work with Sentry organizations",
-    fullDescription:
-      "List and manage Sentry organizations you have access to.",
+    fullDescription: "List and manage Sentry organizations you have access to.",
     hideRoute: {},
   },
 });
-

@@ -1,10 +1,7 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
-import { listIssues, listProjects } from "../../lib/api-client.js";
-import {
-  getDefaultOrganization,
-  getDefaultProject,
-} from "../../lib/config.js";
+import { listIssues } from "../../lib/api-client.js";
+import { getDefaultOrganization, getDefaultProject } from "../../lib/config.js";
 import { detectDSN } from "../../lib/dsn-finder.js";
 import type { SentryIssue } from "../../types/index.js";
 
@@ -19,11 +16,7 @@ interface ListFlags {
 
 function formatIssue(issue: SentryIssue): string {
   const status =
-    issue.status === "resolved"
-      ? "✓"
-      : issue.status === "ignored"
-        ? "−"
-        : "●";
+    issue.status === "resolved" ? "✓" : issue.status === "ignored" ? "−" : "●";
   const level = issue.level.toUpperCase().padEnd(7);
   const count = `${issue.count}`.padStart(5);
   const shortId = issue.shortId.padEnd(15);
@@ -69,7 +62,9 @@ export const listCommand = buildCommand({
         parse: (value: string) => {
           const valid = ["date", "new", "priority", "freq", "user"];
           if (!valid.includes(value)) {
-            throw new Error(`Invalid sort value. Must be one of: ${valid.join(", ")}`);
+            throw new Error(
+              `Invalid sort value. Must be one of: ${valid.join(", ")}`
+            );
           }
           return value as "date" | "new" | "priority" | "freq" | "user";
         },
@@ -87,11 +82,11 @@ export const listCommand = buildCommand({
     const { process } = this;
 
     // Determine organization and project
-    let org = flags.org || getDefaultOrganization();
-    let project = flags.project || getDefaultProject();
+    const org = flags.org || getDefaultOrganization();
+    const project = flags.project || getDefaultProject();
 
     // Try to detect from DSN if not specified
-    if (!org || !project) {
+    if (!(org && project)) {
       try {
         const detection = await detectDSN(process.cwd());
         if (detection) {
@@ -106,7 +101,7 @@ export const listCommand = buildCommand({
       }
     }
 
-    if (!org || !project) {
+    if (!(org && project)) {
       process.stderr.write(
         "Error: Organization and project are required.\n\n" +
           "Please specify them using:\n" +
@@ -140,12 +135,8 @@ export const listCommand = buildCommand({
       process.stdout.write(
         `Issues in ${org}/${project} (showing ${issues.length}):\n\n`
       );
-      process.stdout.write(
-        "  STATUS  SHORT ID         COUNT  TITLE\n"
-      );
-      process.stdout.write(
-        "─".repeat(80) + "\n"
-      );
+      process.stdout.write("  STATUS  SHORT ID         COUNT  TITLE\n");
+      process.stdout.write("─".repeat(80) + "\n");
 
       // Issues
       for (const issue of issues) {
@@ -153,8 +144,7 @@ export const listCommand = buildCommand({
       }
 
       process.stdout.write(
-        "\n" +
-          `Tip: Use 'sry issue get <SHORT_ID>' to view issue details.\n`
+        "\n" + `Tip: Use 'sry issue get <SHORT_ID>' to view issue details.\n`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -163,4 +153,3 @@ export const listCommand = buildCommand({
     }
   },
 });
-

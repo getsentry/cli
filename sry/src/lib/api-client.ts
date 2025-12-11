@@ -1,10 +1,10 @@
-import { getAuthToken } from "./config.js";
 import type {
+  SentryEvent,
+  SentryIssue,
   SentryOrganization,
   SentryProject,
-  SentryIssue,
-  SentryEvent,
 } from "../types/index.js";
+import { getAuthToken } from "./config.js";
 
 const SENTRY_API_BASE = "https://sentry.io/api/0";
 
@@ -33,7 +33,7 @@ export async function apiRequest<T>(
   options: ApiRequestOptions = {}
 ): Promise<T> {
   const token = getAuthToken();
-  
+
   if (!token) {
     throw new SentryApiError(
       "Not authenticated. Run 'sry auth login' first.",
@@ -104,7 +104,7 @@ export async function rawApiRequest(
   options: ApiRequestOptions & { headers?: Record<string, string> } = {}
 ): Promise<{ status: number; headers: Headers; body: unknown }> {
   const token = getAuthToken();
-  
+
   if (!token) {
     throw new SentryApiError(
       "Not authenticated. Run 'sry auth login' first.",
@@ -190,9 +190,7 @@ export async function getProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<SentryProject> {
-  return apiRequest<SentryProject>(
-    `/projects/${orgSlug}/${projectSlug}/`
-  );
+  return apiRequest<SentryProject>(`/projects/${orgSlug}/${projectSlug}/`);
 }
 
 /**
@@ -209,15 +207,18 @@ export async function listIssues(
     statsPeriod?: string;
   } = {}
 ): Promise<SentryIssue[]> {
-  return apiRequest<SentryIssue[]>(`/projects/${orgSlug}/${projectSlug}/issues/`, {
-    params: {
-      query: options.query,
-      cursor: options.cursor,
-      limit: options.limit,
-      sort: options.sort,
-      statsPeriod: options.statsPeriod,
-    },
-  });
+  return apiRequest<SentryIssue[]>(
+    `/projects/${orgSlug}/${projectSlug}/issues/`,
+    {
+      params: {
+        query: options.query,
+        cursor: options.cursor,
+        limit: options.limit,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    }
+  );
 }
 
 /**
@@ -246,4 +247,3 @@ export async function updateIssueStatus(
     body: { status },
   });
 }
-

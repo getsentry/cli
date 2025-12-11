@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ParsedDSN, DSNDetectionResult } from "../types/index.js";
+import type { DSNDetectionResult, ParsedDSN } from "../types/index.js";
 
 // DSN pattern: https://<public_key>@<host>/<project_id>
 const DSN_REGEX =
@@ -138,10 +138,7 @@ export async function detectDSN(
           };
         }
       }
-    } catch {
-      // Skip files we can't read
-      continue;
-    }
+    } catch {}
   }
 
   // Try recursive search in common directories
@@ -164,7 +161,7 @@ export async function detectDSN(
 async function searchDirectory(
   dirPath: string,
   maxDepth: number,
-  currentDepth: number = 0
+  currentDepth = 0
 ): Promise<DSNDetectionResult | null> {
   if (currentDepth > maxDepth) {
     return null;
@@ -184,18 +181,19 @@ async function searchDirectory(
         // Only check relevant file extensions
         const ext = path.extname(entry.name);
         if (
-          ![
-            ".js",
-            ".ts",
-            ".jsx",
-            ".tsx",
-            ".py",
-            ".rb",
-            ".env",
-            ".json",
-            ".properties",
-          ].includes(ext) &&
-          !entry.name.startsWith(".env")
+          !(
+            [
+              ".js",
+              ".ts",
+              ".jsx",
+              ".tsx",
+              ".py",
+              ".rb",
+              ".env",
+              ".json",
+              ".properties",
+            ].includes(ext) || entry.name.startsWith(".env")
+          )
         ) {
           continue;
         }
@@ -247,4 +245,3 @@ export function getProjectIdFromDSN(dsn: string): string | null {
   const parsed = parseDSN(dsn);
   return parsed?.projectId || null;
 }
-
