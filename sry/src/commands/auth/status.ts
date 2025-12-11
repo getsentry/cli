@@ -1,3 +1,9 @@
+/**
+ * sry auth status
+ *
+ * Display authentication status and verify credentials.
+ */
+
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
@@ -8,10 +14,79 @@ import {
   isAuthenticated,
   readConfig,
 } from "../../lib/config.js";
+import { formatExpiration, maskToken } from "../../lib/formatters/human.js";
+import type { SryConfig } from "../../types/index.js";
 
 type StatusFlags = {
   readonly showToken: boolean;
 };
+
+/**
+ * Write token information
+ */
+function writeTokenInfo(
+  stdout: NodeJS.WriteStream,
+  config: SryConfig,
+  showToken: boolean
+): void {
+  if (!config.auth?.token) {
+    return;
+  }
+
+  const tokenDisplay = showToken
+    ? config.auth.token
+    : maskToken(config.auth.token);
+  stdout.write(`Token: ${tokenDisplay}\n`);
+
+  if (config.auth.expiresAt) {
+    stdout.write(`Expires: ${formatExpiration(config.auth.expiresAt)}\n`);
+  }
+}
+
+/**
+ * Write default settings
+ */
+function writeDefaults(stdout: NodeJS.WriteStream): void {
+  const defaultOrg = getDefaultOrganization();
+  const defaultProject = getDefaultProject();
+
+  if (!(defaultOrg || defaultProject)) {
+    return;
+  }
+
+  stdout.write("\nDefaults:\n");
+  if (defaultOrg) {
+    stdout.write(`  Organization: ${defaultOrg}\n`);
+  }
+  if (defaultProject) {
+    stdout.write(`  Project: ${defaultProject}\n`);
+  }
+}
+
+/**
+ * Verify credentials by fetching organizations
+ */
+async function verifyCredentials(stdout: NodeJS.WriteStream): Promise<void> {
+  stdout.write("\nVerifying credentials...\n");
+
+  try {
+    const orgs = await listOrganizations();
+    stdout.write(
+      `\n✓ Access verified. You have access to ${orgs.length} organization(s):\n`
+    );
+
+    const maxDisplay = 5;
+    for (const org of orgs.slice(0, maxDisplay)) {
+      stdout.write(`  - ${org.name} (${org.slug})\n`);
+    }
+    if (orgs.length > maxDisplay) {
+      stdout.write(`  ... and ${orgs.length - maxDisplay} more\n`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    stdout.write(`\n✗ Could not verify credentials: ${message}\n`);
+  }
+}
 
 export const statusCommand = buildCommand({
   docs: {
@@ -31,79 +106,23 @@ export const statusCommand = buildCommand({
   },
   async func(this: SryContext, flags: StatusFlags): Promise<void> {
     const { process } = this;
+    const { stdout } = process;
 
     const config = readConfig();
     const authenticated = isAuthenticated();
 
-    process.stdout.write(`Config file: ${getConfigPath()}\n\n`);
+    stdout.write(`Config file: ${getConfigPath()}\n\n`);
 
     if (!authenticated) {
-      process.stdout.write("Status: Not authenticated\n");
-      process.stdout.write("\nRun 'sry auth login' to authenticate.\n");
+      stdout.write("Status: Not authenticated\n");
+      stdout.write("\nRun 'sry auth login' to authenticate.\n");
       return;
     }
 
-    process.stdout.write("Status: Authenticated ✓\n\n");
+    stdout.write("Status: Authenticated ✓\n\n");
 
-    // Show token info
-    if (config.auth?.token) {
-      if (flags.showToken) {
-        process.stdout.write(`Token: ${config.auth.token}\n`);
-      } else {
-        const masked =
-          config.auth.token.substring(0, 8) +
-          "..." +
-          config.auth.token.substring(config.auth.token.length - 4);
-        process.stdout.write(`Token: ${masked}\n`);
-      }
-    }
-
-    // Show expiration
-    if (config.auth?.expiresAt) {
-      const expiresAt = new Date(config.auth.expiresAt);
-      const now = new Date();
-      if (expiresAt > now) {
-        const hoursRemaining = Math.round(
-          (expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60)
-        );
-        process.stdout.write(
-          `Expires: ${expiresAt.toLocaleString()} (${hoursRemaining}h remaining)\n`
-        );
-      } else {
-        process.stdout.write("Expires: Expired\n");
-      }
-    }
-
-    // Show defaults
-    const defaultOrg = getDefaultOrganization();
-    const defaultProject = getDefaultProject();
-
-    if (defaultOrg || defaultProject) {
-      process.stdout.write("\nDefaults:\n");
-      if (defaultOrg) {
-        process.stdout.write(`  Organization: ${defaultOrg}\n`);
-      }
-      if (defaultProject) {
-        process.stdout.write(`  Project: ${defaultProject}\n`);
-      }
-    }
-
-    // Try to fetch user info
-    process.stdout.write("\nVerifying credentials...\n");
-    try {
-      const orgs = await listOrganizations();
-      process.stdout.write(
-        `\n✓ Access verified. You have access to ${orgs.length} organization(s):\n`
-      );
-      for (const org of orgs.slice(0, 5)) {
-        process.stdout.write(`  - ${org.name} (${org.slug})\n`);
-      }
-      if (orgs.length > 5) {
-        process.stdout.write(`  ... and ${orgs.length - 5} more\n`);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stdout.write(`\n✗ Could not verify credentials: ${message}\n`);
-    }
+    writeTokenInfo(stdout, config, flags.showToken);
+    writeDefaults(stdout);
+    await verifyCredentials(stdout);
   },
 });

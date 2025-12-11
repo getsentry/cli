@@ -1,7 +1,18 @@
+/**
+ * sry project list
+ *
+ * List projects in an organization.
+ */
+
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { listOrganizations, listProjects } from "../../lib/api-client.js";
 import { getDefaultOrganization } from "../../lib/config.js";
+import {
+  calculateProjectSlugWidth,
+  formatProjectRow,
+} from "../../lib/formatters/human.js";
+import { writeJson } from "../../lib/formatters/json.js";
 import type { SentryProject } from "../../types/index.js";
 
 type ListFlags = {
@@ -11,18 +22,72 @@ type ListFlags = {
   readonly platform?: string;
 };
 
-function formatProject(
-  project: SentryProject,
-  maxSlugLen: number,
-  showOrg: boolean,
-  orgSlug?: string
-): string {
-  const slug = showOrg
-    ? `${orgSlug}/${project.slug}`.padEnd(maxSlugLen)
-    : project.slug.padEnd(maxSlugLen);
-  const platform = (project.platform || "").padEnd(20);
-  const name = project.name;
-  return `${slug}  ${platform}  ${name}`;
+type ProjectWithOrg = SentryProject & { orgSlug?: string };
+
+/**
+ * Fetch projects for a single organization
+ */
+async function fetchOrgProjects(orgSlug: string): Promise<ProjectWithOrg[]> {
+  const projects = await listProjects(orgSlug);
+  return projects.map((p) => ({ ...p, orgSlug }));
+}
+
+/**
+ * Fetch projects from all accessible organizations
+ */
+async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
+  const orgs = await listOrganizations();
+  const results: ProjectWithOrg[] = [];
+
+  for (const org of orgs) {
+    try {
+      const projects = await fetchOrgProjects(org.slug);
+      results.push(...projects);
+    } catch {
+      // Skip orgs we can't access
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Filter projects by platform
+ */
+function filterByPlatform(
+  projects: ProjectWithOrg[],
+  platform?: string
+): ProjectWithOrg[] {
+  if (!platform) {
+    return projects;
+  }
+  const lowerPlatform = platform.toLowerCase();
+  return projects.filter((p) =>
+    p.platform?.toLowerCase().includes(lowerPlatform)
+  );
+}
+
+/**
+ * Write project list header
+ */
+function writeHeader(stdout: NodeJS.WriteStream, slugWidth: number): void {
+  stdout.write(`${"SLUG".padEnd(slugWidth)}  ${"PLATFORM".padEnd(20)}  NAME\n`);
+}
+
+/**
+ * Write project rows
+ */
+function writeRows(
+  stdout: NodeJS.WriteStream,
+  projects: ProjectWithOrg[],
+  slugWidth: number,
+  showOrg: boolean
+): void {
+  for (const project of projects) {
+    stdout.write(
+      `${formatProjectRow(project, { showOrg, orgSlug: project.orgSlug, slugWidth })}\n`
+    );
+  }
 }
 
 export const listCommand = buildCommand({
@@ -81,88 +146,50 @@ export const listCommand = buildCommand({
     orgArg?: string
   ): Promise<void> {
     const { process } = this;
+    const { stdout, stderr } = process;
 
     try {
-      // Determine organization
-      const orgSlug = orgArg || flags.org || getDefaultOrganization();
+      const orgSlug = orgArg ?? flags.org ?? getDefaultOrganization();
+      const showOrg = !orgSlug;
 
-      let allProjects: Array<SentryProject & { orgSlug?: string }> = [];
-      let showOrg = false;
-
+      // Fetch projects
+      let allProjects: ProjectWithOrg[];
       if (orgSlug) {
-        // List projects for specific org
-        const projects = await listProjects(orgSlug);
-        allProjects = projects.map((p) => ({ ...p, orgSlug }));
+        allProjects = await fetchOrgProjects(orgSlug);
       } else {
-        // List projects from all organizations
-        showOrg = true;
-        const orgs = await listOrganizations();
-        for (const org of orgs) {
-          try {
-            const projects = await listProjects(org.slug);
-            allProjects.push(
-              ...projects.map((p) => ({ ...p, orgSlug: org.slug }))
-            );
-          } catch {
-            // Skip orgs we can't access
-          }
-        }
+        allProjects = await fetchAllOrgProjects();
       }
 
-      // Filter by platform if specified
-      if (flags.platform) {
-        allProjects = allProjects.filter((p) =>
-          p.platform?.toLowerCase().includes(flags.platform?.toLowerCase())
-        );
-      }
-
-      // Limit results
-      const limitedProjects = allProjects.slice(0, flags.limit);
+      // Filter and limit
+      const filtered = filterByPlatform(allProjects, flags.platform);
+      const limited = filtered.slice(0, flags.limit);
 
       if (flags.json) {
-        process.stdout.write(`${JSON.stringify(limitedProjects, null, 2)}\n`);
+        writeJson(stdout, limited);
         return;
       }
 
-      if (limitedProjects.length === 0) {
-        if (orgSlug) {
-          process.stdout.write(
-            `No projects found in organization '${orgSlug}'.\n`
-          );
-        } else {
-          process.stdout.write("No projects found.\n");
-        }
+      if (limited.length === 0) {
+        const msg = orgSlug
+          ? `No projects found in organization '${orgSlug}'.\n`
+          : "No projects found.\n";
+        stdout.write(msg);
         return;
       }
 
-      // Calculate max slug length for alignment
-      const maxSlugLen = Math.max(
-        ...limitedProjects.map((p) =>
-          showOrg ? `${p.orgSlug}/${p.slug}`.length : p.slug.length
-        ),
-        4 // minimum "SLUG" header length
-      );
+      const slugWidth = calculateProjectSlugWidth(limited, showOrg);
 
-      // Print header
-      process.stdout.write(
-        `${"SLUG".padEnd(maxSlugLen)}  ${"PLATFORM".padEnd(20)}  NAME\n`
-      );
+      writeHeader(stdout, slugWidth);
+      writeRows(stdout, limited, slugWidth, showOrg);
 
-      // Print projects
-      for (const project of limitedProjects) {
-        process.stdout.write(
-          `${formatProject(project, maxSlugLen, showOrg, project.orgSlug)}\n`
-        );
-      }
-
-      if (allProjects.length > flags.limit) {
-        process.stdout.write(
-          `\nShowing ${flags.limit} of ${allProjects.length} projects\n`
+      if (filtered.length > flags.limit) {
+        stdout.write(
+          `\nShowing ${flags.limit} of ${filtered.length} projects\n`
         );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Error listing projects: ${message}\n`);
+      stderr.write(`Error listing projects: ${message}\n`);
       process.exitCode = 1;
     }
   },

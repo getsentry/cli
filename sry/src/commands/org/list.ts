@@ -1,18 +1,22 @@
+/**
+ * sry org list
+ *
+ * List organizations the user has access to.
+ */
+
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
-import type { SentryOrganization } from "../../types/index.js";
+import {
+  calculateOrgSlugWidth,
+  formatOrgRow,
+} from "../../lib/formatters/human.js";
+import { writeJson } from "../../lib/formatters/json.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
 };
-
-function formatOrg(org: SentryOrganization, maxSlugLen: number): string {
-  const slug = org.slug.padEnd(maxSlugLen);
-  const name = org.name;
-  return `${slug}  ${name}`;
-}
 
 export const listCommand = buildCommand({
   docs: {
@@ -41,40 +45,40 @@ export const listCommand = buildCommand({
   },
   async func(this: SryContext, flags: ListFlags): Promise<void> {
     const { process } = this;
+    const { stdout, stderr } = process;
 
     try {
       const orgs = await listOrganizations();
       const limitedOrgs = orgs.slice(0, flags.limit);
 
       if (flags.json) {
-        process.stdout.write(`${JSON.stringify(limitedOrgs, null, 2)}\n`);
+        writeJson(stdout, limitedOrgs);
         return;
       }
 
       if (limitedOrgs.length === 0) {
-        process.stdout.write("No organizations found.\n");
+        stdout.write("No organizations found.\n");
         return;
       }
 
-      // Calculate max slug length for alignment
-      const maxSlugLen = Math.max(...limitedOrgs.map((o) => o.slug.length));
+      const slugWidth = calculateOrgSlugWidth(limitedOrgs);
 
-      // Print header
-      process.stdout.write(`${"SLUG".padEnd(maxSlugLen)}  NAME\n`);
+      // Header
+      stdout.write(`${"SLUG".padEnd(slugWidth)}  NAME\n`);
 
-      // Print organizations
+      // Rows
       for (const org of limitedOrgs) {
-        process.stdout.write(`${formatOrg(org, maxSlugLen)}\n`);
+        stdout.write(`${formatOrgRow(org, slugWidth)}\n`);
       }
 
       if (orgs.length > flags.limit) {
-        process.stdout.write(
+        stdout.write(
           `\nShowing ${flags.limit} of ${orgs.length} organizations\n`
         );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Error listing organizations: ${message}\n`);
+      stderr.write(`Error listing organizations: ${message}\n`);
       process.exitCode = 1;
     }
   },

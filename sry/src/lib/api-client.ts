@@ -1,3 +1,9 @@
+/**
+ * Sentry API Client
+ *
+ * Handles authenticated requests to the Sentry API.
+ */
+
 import type {
   SentryEvent,
   SentryIssue,
@@ -8,16 +14,25 @@ import { getAuthToken } from "./config.js";
 
 const SENTRY_API_BASE = "https://sentry.io/api/0";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Error Handling
+// ─────────────────────────────────────────────────────────────────────────────
+
 export class SentryApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly detail?: string
-  ) {
+  readonly status: number;
+  readonly detail?: string;
+
+  constructor(message: string, status: number, detail?: string) {
     super(message);
     this.name = "SentryApiError";
+    this.status = status;
+    this.detail = detail;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Request Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 type ApiRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -26,12 +41,51 @@ type ApiRequestOptions = {
 };
 
 /**
- * Make an authenticated request to the Sentry API
+ * Build URL with query parameters
  */
-export async function apiRequest<T>(
+function buildUrl(
   endpoint: string,
-  options: ApiRequestOptions = {}
-): Promise<T> {
+  params?: Record<string, string | number | boolean | undefined>
+): string {
+  const url = endpoint.startsWith("http")
+    ? endpoint
+    : `${SENTRY_API_BASE}${endpoint}`;
+
+  if (!params) {
+    return url;
+  }
+
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) {
+      searchParams.set(key, String(value));
+    }
+  }
+
+  const queryString = searchParams.toString();
+  return queryString ? `${url}?${queryString}` : url;
+}
+
+/**
+ * Parse response body as JSON or text
+ */
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Get auth headers for requests
+ */
+function getAuthHeaders(): Record<string, string> {
   const token = getAuthToken();
 
   if (!token) {
@@ -41,30 +95,27 @@ export async function apiRequest<T>(
     );
   }
 
-  const { method = "GET", body, params } = options;
-
-  // Build URL with query parameters
-  let url = endpoint.startsWith("http")
-    ? endpoint
-    : `${SENTRY_API_BASE}${endpoint}`;
-
-  if (params) {
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) {
-        searchParams.set(key, String(value));
-      }
-    }
-    const queryString = searchParams.toString();
-    if (queryString) {
-      url += `?${queryString}`;
-    }
-  }
-
-  const headers: Record<string, string> = {
+  return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core Request Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Make an authenticated request to the Sentry API
+ */
+export async function apiRequest<T>(
+  endpoint: string,
+  options: ApiRequestOptions = {}
+): Promise<T> {
+  const { method = "GET", body, params } = options;
+
+  const url = buildUrl(endpoint, params);
+  const headers = getAuthHeaders();
 
   const response = await fetch(url, {
     method,
@@ -75,8 +126,8 @@ export async function apiRequest<T>(
   if (!response.ok) {
     let detail: string | undefined;
     try {
-      const errorBody = await response.json();
-      detail = errorBody.detail || JSON.stringify(errorBody);
+      const errorBody = (await response.json()) as { detail?: string };
+      detail = errorBody.detail ?? JSON.stringify(errorBody);
     } catch {
       detail = await response.text();
     }
@@ -87,13 +138,8 @@ export async function apiRequest<T>(
     );
   }
 
-  // Handle empty responses
-  const text = await response.text();
-  if (!text) {
-    return {} as T;
-  }
-
-  return JSON.parse(text) as T;
+  const body2 = await parseResponseBody(response);
+  return body2 as T;
 }
 
 /**
@@ -103,37 +149,11 @@ export async function rawApiRequest(
   endpoint: string,
   options: ApiRequestOptions & { headers?: Record<string, string> } = {}
 ): Promise<{ status: number; headers: Headers; body: unknown }> {
-  const token = getAuthToken();
-
-  if (!token) {
-    throw new SentryApiError(
-      "Not authenticated. Run 'sry auth login' first.",
-      401
-    );
-  }
-
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
 
-  let url = endpoint.startsWith("http")
-    ? endpoint
-    : `${SENTRY_API_BASE}${endpoint}`;
-
-  if (params) {
-    const searchParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) {
-        searchParams.set(key, String(value));
-      }
-    }
-    const queryString = searchParams.toString();
-    if (queryString) {
-      url += `?${queryString}`;
-    }
-  }
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
+  const url = buildUrl(endpoint, params);
+  const headers = {
+    ...getAuthHeaders(),
     ...customHeaders,
   };
 
@@ -143,13 +163,7 @@ export async function rawApiRequest(
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const text = await response.text();
-  let responseBody: unknown;
-  try {
-    responseBody = JSON.parse(text);
-  } catch {
-    responseBody = text;
-  }
+  const responseBody = await parseResponseBody(response);
 
   return {
     status: response.status,
@@ -158,35 +172,35 @@ export async function rawApiRequest(
   };
 }
 
-// High-level API methods
+// ─────────────────────────────────────────────────────────────────────────────
+// High-level API Methods
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * List organizations the user has access to
  */
-export async function listOrganizations(): Promise<SentryOrganization[]> {
+export function listOrganizations(): Promise<SentryOrganization[]> {
   return apiRequest<SentryOrganization[]>("/organizations/");
 }
 
 /**
  * Get a specific organization
  */
-export async function getOrganization(
-  orgSlug: string
-): Promise<SentryOrganization> {
+export function getOrganization(orgSlug: string): Promise<SentryOrganization> {
   return apiRequest<SentryOrganization>(`/organizations/${orgSlug}/`);
 }
 
 /**
  * List projects in an organization
  */
-export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
+export function listProjects(orgSlug: string): Promise<SentryProject[]> {
   return apiRequest<SentryProject[]>(`/organizations/${orgSlug}/projects/`);
 }
 
 /**
  * Get a specific project
  */
-export async function getProject(
+export function getProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<SentryProject> {
@@ -196,7 +210,7 @@ export async function getProject(
 /**
  * List issues for a project
  */
-export async function listIssues(
+export function listIssues(
   orgSlug: string,
   projectSlug: string,
   options: {
@@ -224,21 +238,21 @@ export async function listIssues(
 /**
  * Get a specific issue by ID
  */
-export async function getIssue(issueId: string): Promise<SentryIssue> {
+export function getIssue(issueId: string): Promise<SentryIssue> {
   return apiRequest<SentryIssue>(`/issues/${issueId}/`);
 }
 
 /**
  * Get the latest event for an issue
  */
-export async function getLatestEvent(issueId: string): Promise<SentryEvent> {
+export function getLatestEvent(issueId: string): Promise<SentryEvent> {
   return apiRequest<SentryEvent>(`/issues/${issueId}/events/latest/`);
 }
 
 /**
  * Update an issue's status
  */
-export async function updateIssueStatus(
+export function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored"
 ): Promise<SentryIssue> {

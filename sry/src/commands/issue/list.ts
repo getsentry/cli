@@ -1,8 +1,15 @@
+/**
+ * sry issue list
+ *
+ * List issues from a Sentry project.
+ */
+
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { listIssues } from "../../lib/api-client.js";
 import { getDefaultOrganization, getDefaultProject } from "../../lib/config.js";
-import { detectDSN } from "../../lib/dsn-finder.js";
+import { divider, formatIssueRow } from "../../lib/formatters/human.js";
+import { writeJson } from "../../lib/formatters/json.js";
 import type { SentryIssue } from "../../types/index.js";
 
 type ListFlags = {
@@ -14,22 +21,66 @@ type ListFlags = {
   readonly json: boolean;
 };
 
-function formatIssue(issue: SentryIssue): string {
-  const status =
-    issue.status === "resolved" ? "✓" : issue.status === "ignored" ? "−" : "●";
-  const level = issue.level.toUpperCase().padEnd(7);
-  const count = `${issue.count}`.padStart(5);
-  const shortId = issue.shortId.padEnd(15);
+type SortValue = "date" | "new" | "priority" | "freq" | "user";
 
-  return `${status} ${level} ${shortId} ${count}  ${issue.title}`;
+const VALID_SORT_VALUES: SortValue[] = [
+  "date",
+  "new",
+  "priority",
+  "freq",
+  "user",
+];
+
+function parseSort(value: string): SortValue {
+  if (!VALID_SORT_VALUES.includes(value as SortValue)) {
+    throw new Error(
+      `Invalid sort value. Must be one of: ${VALID_SORT_VALUES.join(", ")}`
+    );
+  }
+  return value as SortValue;
+}
+
+/**
+ * Write issue list header
+ */
+function writeListHeader(
+  stdout: NodeJS.WriteStream,
+  org: string,
+  project: string,
+  count: number
+): void {
+  stdout.write(`Issues in ${org}/${project} (showing ${count}):\n\n`);
+  stdout.write("  STATUS  SHORT ID         COUNT  TITLE\n");
+  stdout.write(`${divider(80)}\n`);
+}
+
+/**
+ * Write issue list rows
+ */
+function writeIssueRows(
+  stdout: NodeJS.WriteStream,
+  issues: SentryIssue[]
+): void {
+  for (const issue of issues) {
+    stdout.write(`${formatIssueRow(issue)}\n`);
+  }
+}
+
+/**
+ * Write list footer with tip
+ */
+function writeListFooter(stdout: NodeJS.WriteStream): void {
+  stdout.write(
+    "\nTip: Use 'sry issue get <SHORT_ID>' to view issue details.\n"
+  );
 }
 
 export const listCommand = buildCommand({
   docs: {
     brief: "List issues in a project",
     fullDescription:
-      "List issues from a Sentry project. By default, uses the project detected from your DSN " +
-      "or configured defaults. Use --org and --project to specify explicitly.",
+      "List issues from a Sentry project. Use --org and --project to specify " +
+      "the target, or set defaults with 'sry config set'.",
   },
   parameters: {
     flags: {
@@ -59,15 +110,7 @@ export const listCommand = buildCommand({
       },
       sort: {
         kind: "parsed",
-        parse: (value: string) => {
-          const valid = ["date", "new", "priority", "freq", "user"];
-          if (!valid.includes(value)) {
-            throw new Error(
-              `Invalid sort value. Must be one of: ${valid.join(", ")}`
-            );
-          }
-          return value as "date" | "new" | "priority" | "freq" | "user";
-        },
+        parse: parseSort,
         brief: "Sort by: date, new, priority, freq, user",
         default: "date" as const,
       },
@@ -80,29 +123,14 @@ export const listCommand = buildCommand({
   },
   async func(this: SryContext, flags: ListFlags): Promise<void> {
     const { process } = this;
+    const { stdout, stderr } = process;
 
-    // Determine organization and project
-    const org = flags.org || getDefaultOrganization();
-    const project = flags.project || getDefaultProject();
-
-    // Try to detect from DSN if not specified
-    if (!(org && project)) {
-      try {
-        const detection = await detectDSN(process.cwd());
-        if (detection) {
-          process.stdout.write(
-            `Detected Sentry project from ${detection.source}\n\n`
-          );
-          // Note: We'd need to look up org/project from DSN via API
-          // For now, require explicit org/project
-        }
-      } catch {
-        // Ignore detection errors
-      }
-    }
+    // Resolve organization and project
+    const org = flags.org ?? getDefaultOrganization();
+    const project = flags.project ?? getDefaultProject();
 
     if (!(org && project)) {
-      process.stderr.write(
+      stderr.write(
         "Error: Organization and project are required.\n\n" +
           "Please specify them using:\n" +
           "  sry issue list --org <org-slug> --project <project-slug>\n\n" +
@@ -122,33 +150,21 @@ export const listCommand = buildCommand({
       });
 
       if (flags.json) {
-        process.stdout.write(`${JSON.stringify(issues, null, 2)}\n`);
+        writeJson(stdout, issues);
         return;
       }
 
       if (issues.length === 0) {
-        process.stdout.write("No issues found.\n");
+        stdout.write("No issues found.\n");
         return;
       }
 
-      // Header
-      process.stdout.write(
-        `Issues in ${org}/${project} (showing ${issues.length}):\n\n`
-      );
-      process.stdout.write("  STATUS  SHORT ID         COUNT  TITLE\n");
-      process.stdout.write(`${"─".repeat(80)}\n`);
-
-      // Issues
-      for (const issue of issues) {
-        process.stdout.write(`${formatIssue(issue)}\n`);
-      }
-
-      process.stdout.write(
-        "\nTip: Use 'sry issue get <SHORT_ID>' to view issue details.\n"
-      );
+      writeListHeader(stdout, org, project, issues.length);
+      writeIssueRows(stdout, issues);
+      writeListFooter(stdout);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Error listing issues: ${message}\n`);
+      stderr.write(`Error listing issues: ${message}\n`);
       process.exitCode = 1;
     }
   },

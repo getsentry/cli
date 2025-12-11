@@ -1,12 +1,15 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+/**
+ * Stricli Context
+ *
+ * Provides dependency injection for CLI commands.
+ * Following Stricli's "context" pattern for testability.
+ */
+
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { StricliContext } from "@stricli/core";
 
 export interface SryContext extends StricliContext {
-  readonly fs: typeof fs;
-  readonly path: typeof path;
-  readonly os: typeof os;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
   readonly homeDir: string;
@@ -14,14 +17,11 @@ export interface SryContext extends StricliContext {
 }
 
 export function buildContext(process: NodeJS.Process): SryContext {
-  const homeDir = os.homedir();
-  const configDir = path.join(homeDir, ".sry");
+  const homeDir = homedir();
+  const configDir = join(homeDir, ".sry");
 
   return {
     process,
-    fs,
-    path,
-    os,
     env: process.env,
     cwd: process.cwd(),
     homeDir,

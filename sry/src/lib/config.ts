@@ -1,23 +1,30 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+/**
+ * Configuration Management
+ *
+ * Handles reading/writing the ~/.sry/config.json file.
+ * Permissions follow SSH conventions for sensitive files.
+ *
+ * @see https://superuser.com/a/215506/26230
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { SryConfig } from "../types/index.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".sry");
-const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+const CONFIG_DIR = join(homedir(), ".sry");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 /**
  * Ensure the config directory exists
  *
- * Permissions follow SSH conventions for sensitive files:
+ * Permissions:
  * - Directory: 700 (drwx------)
  * - Config file: 600 (-rw-------)
- *
- * @see https://superuser.com/a/215506/26230
  */
 function ensureConfigDir(): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   }
 }
 
@@ -26,10 +33,10 @@ function ensureConfigDir(): void {
  */
 export function readConfig(): SryConfig {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
+    if (!existsSync(CONFIG_FILE)) {
       return {};
     }
-    const content = fs.readFileSync(CONFIG_FILE, "utf-8");
+    const content = readFileSync(CONFIG_FILE, "utf-8");
     return JSON.parse(content) as SryConfig;
   } catch {
     return {};
@@ -41,7 +48,7 @@ export function readConfig(): SryConfig {
  */
 export function writeConfig(config: SryConfig): void {
   ensureConfigDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
     mode: 0o600,
   });
 }

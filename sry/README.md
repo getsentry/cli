@@ -61,12 +61,6 @@ sry api /issues/123/ --method PUT --field status=resolved
 sry api /organizations/ --include                    # Show headers
 ```
 
-### DSN Detection
-
-```bash
-sry dsn detect       # Find Sentry DSN in current project
-```
-
 ## Build
 
 ```bash

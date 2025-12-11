@@ -1,27 +1,33 @@
+/**
+ * sry auth logout
+ *
+ * Clear stored authentication credentials.
+ */
+
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { clearAuth, getConfigPath, isAuthenticated } from "../../lib/config.js";
 
 export const logoutCommand = buildCommand({
   docs: {
-    brief: "Log out from Sentry",
+    brief: "Log out of Sentry",
     fullDescription:
-      "Remove stored authentication credentials. " +
-      "After logging out, you will need to run 'sry auth login' to authenticate again.",
+      "Remove stored authentication credentials from the configuration file.",
   },
   parameters: {
     flags: {},
   },
-  async func(this: SryContext): Promise<void> {
+  func(this: SryContext): void {
     const { process } = this;
+    const { stdout } = process;
 
     if (!isAuthenticated()) {
-      process.stdout.write("You are not currently authenticated.\n");
+      stdout.write("Not currently authenticated.\n");
       return;
     }
 
     clearAuth();
-    process.stdout.write("✓ Logged out successfully\n");
-    process.stdout.write(`  Credentials removed from: ${getConfigPath()}\n`);
+    stdout.write("✓ Logged out successfully.\n");
+    stdout.write(`  Credentials removed from: ${getConfigPath()}\n`);
   },
 });

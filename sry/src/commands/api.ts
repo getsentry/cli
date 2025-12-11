@@ -1,15 +1,82 @@
+/**
+ * sry api
+ *
+ * Make raw authenticated API requests to Sentry.
+ * Similar to 'gh api' for GitHub.
+ */
+
 import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../context.js";
 import { rawApiRequest } from "../lib/api-client.js";
 
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+
 type ApiFlags = {
-  readonly method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  readonly method: HttpMethod;
   readonly field: string[];
   readonly header: string[];
   readonly include: boolean;
   readonly silent: boolean;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Request Parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VALID_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
+
+/**
+ * Parse HTTP method from string
+ */
+function parseMethod(value: string): HttpMethod {
+  const upper = value.toUpperCase();
+  if (!VALID_METHODS.includes(upper as HttpMethod)) {
+    throw new Error(
+      `Invalid method: ${value}. Must be one of: ${VALID_METHODS.join(", ")}`
+    );
+  }
+  return upper as HttpMethod;
+}
+
+/**
+ * Parse a single key=value field into nested object structure
+ */
+function parseFieldValue(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Set a nested value in an object using dot notation key
+ */
+function setNestedValue(
+  obj: Record<string, unknown>,
+  key: string,
+  value: unknown
+): void {
+  const keys = key.split(".");
+  let current = obj;
+
+  for (let i = 0; i < keys.length - 1; i++) {
+    const k = keys[i];
+    if (!(k in current)) {
+      current[k] = {};
+    }
+    current = current[k] as Record<string, unknown>;
+  }
+
+  const lastKey = keys.at(-1);
+  if (lastKey) {
+    current[lastKey] = value;
+  }
+}
+
+/**
+ * Parse field arguments into request body object
+ */
 function parseFields(fields: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
@@ -20,31 +87,18 @@ function parseFields(fields: string[]): Record<string, unknown> {
     }
 
     const key = field.substring(0, eqIndex);
-    let value: unknown = field.substring(eqIndex + 1);
+    const rawValue = field.substring(eqIndex + 1);
+    const value = parseFieldValue(rawValue);
 
-    // Try to parse as JSON for complex values
-    try {
-      value = JSON.parse(value as string);
-    } catch {
-      // Keep as string if not valid JSON
-    }
-
-    // Handle nested keys like "data.name"
-    const keys = key.split(".");
-    let current = result;
-    for (let i = 0; i < keys.length - 1; i++) {
-      const k = keys[i];
-      if (!(k in current)) {
-        current[k] = {};
-      }
-      current = current[k] as Record<string, unknown>;
-    }
-    current[keys.at(-1)] = value;
+    setNestedValue(result, key, value);
   }
 
   return result;
 }
 
+/**
+ * Parse header arguments into headers object
+ */
 function parseHeaders(headers: string[]): Record<string, string> {
   const result: Record<string, string> = {};
 
@@ -61,6 +115,44 @@ function parseHeaders(headers: string[]): Record<string, string> {
 
   return result;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Response Output
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Write response headers to stdout
+ */
+function writeResponseHeaders(
+  stdout: NodeJS.WriteStream,
+  status: number,
+  headers: Headers
+): void {
+  stdout.write(`HTTP ${status}\n`);
+  headers.forEach((value, key) => {
+    stdout.write(`${key}: ${value}\n`);
+  });
+  stdout.write("\n");
+}
+
+/**
+ * Write response body to stdout
+ */
+function writeResponseBody(stdout: NodeJS.WriteStream, body: unknown): void {
+  if (body === null || body === undefined) {
+    return;
+  }
+
+  if (typeof body === "object") {
+    stdout.write(`${JSON.stringify(body, null, 2)}\n`);
+  } else {
+    stdout.write(`${String(body)}\n`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Command Definition
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const apiCommand = buildCommand({
   docs: {
@@ -87,16 +179,7 @@ export const apiCommand = buildCommand({
     flags: {
       method: {
         kind: "parsed",
-        parse: (value: string) => {
-          const valid = ["GET", "POST", "PUT", "DELETE", "PATCH"];
-          const upper = value.toUpperCase();
-          if (!valid.includes(upper)) {
-            throw new Error(
-              `Invalid method: ${value}. Must be one of: ${valid.join(", ")}`
-            );
-          }
-          return upper as "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
-        },
+        parse: parseMethod,
         brief: "HTTP method (GET, POST, PUT, DELETE, PATCH)",
         default: "GET" as const,
         variableName: "X",
@@ -133,28 +216,21 @@ export const apiCommand = buildCommand({
     endpoint: string
   ): Promise<void> {
     const { process } = this;
+    const { stdout, stderr } = process;
 
     try {
-      // Parse request body from fields
       const body =
-        flags.field && flags.field.length > 0
-          ? parseFields(flags.field)
-          : undefined;
-
-      // Parse additional headers
+        flags.field?.length > 0 ? parseFields(flags.field) : undefined;
       const headers =
-        flags.header && flags.header.length > 0
-          ? parseHeaders(flags.header)
-          : undefined;
+        flags.header?.length > 0 ? parseHeaders(flags.header) : undefined;
 
-      // Make the request
       const response = await rawApiRequest(endpoint, {
         method: flags.method,
         body,
         headers,
       });
 
-      // Silent mode - just set exit code
+      // Silent mode - only set exit code
       if (flags.silent) {
         if (response.status >= 400) {
           process.exitCode = 1;
@@ -162,23 +238,13 @@ export const apiCommand = buildCommand({
         return;
       }
 
-      // Include headers in output
+      // Output headers if requested
       if (flags.include) {
-        process.stdout.write(`HTTP ${response.status}\n`);
-        response.headers.forEach((value, key) => {
-          process.stdout.write(`${key}: ${value}\n`);
-        });
-        process.stdout.write("\n");
+        writeResponseHeaders(stdout, response.status, response.headers);
       }
 
       // Output body
-      if (response.body !== null && response.body !== undefined) {
-        if (typeof response.body === "object") {
-          process.stdout.write(`${JSON.stringify(response.body, null, 2)}\n`);
-        } else {
-          process.stdout.write(`${String(response.body)}\n`);
-        }
-      }
+      writeResponseBody(stdout, response.body);
 
       // Set exit code for error responses
       if (response.status >= 400) {
@@ -186,7 +252,7 @@ export const apiCommand = buildCommand({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`Error: ${message}\n`);
+      stderr.write(`Error: ${message}\n`);
       process.exitCode = 1;
     }
   },
