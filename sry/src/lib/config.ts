@@ -94,7 +94,7 @@ export function setAuthToken(
  */
 export function clearAuth(): void {
   const config = readConfig();
-  delete config.auth;
+  config.auth = undefined;
   writeConfig(config);
 }
 

@@ -9,9 +9,9 @@ import {
   readConfig,
 } from "../../lib/config.js";
 
-interface StatusFlags {
+type StatusFlags = {
   readonly showToken: boolean;
-}
+};
 
 export const statusCommand = buildCommand({
   docs: {

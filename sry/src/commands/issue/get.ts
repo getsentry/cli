@@ -3,10 +3,10 @@ import type { SryContext } from "../../context.js";
 import { getIssue, getLatestEvent } from "../../lib/api-client.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
 
-interface GetFlags {
+type GetFlags = {
   readonly json: boolean;
   readonly event: boolean;
-}
+};
 
 function formatIssueDetails(issue: SentryIssue): string {
   const lines: string[] = [];
@@ -86,11 +86,18 @@ function formatEventDetails(event: SentryEvent): string {
   if (event.user) {
     lines.push("");
     lines.push("User:");
-    if (event.user.email) lines.push(`  Email:    ${event.user.email}`);
-    if (event.user.username) lines.push(`  Username: ${event.user.username}`);
-    if (event.user.id) lines.push(`  ID:       ${event.user.id}`);
-    if (event.user.ip_address)
+    if (event.user.email) {
+      lines.push(`  Email:    ${event.user.email}`);
+    }
+    if (event.user.username) {
+      lines.push(`  Username: ${event.user.username}`);
+    }
+    if (event.user.id) {
+      lines.push(`  ID:       ${event.user.id}`);
+    }
+    if (event.user.ip_address) {
       lines.push(`  IP:       ${event.user.ip_address}`);
+    }
   }
 
   if (event.sdk) {
@@ -163,14 +170,14 @@ export const getCommand = buildCommand({
 
       if (flags.json) {
         const output = event ? { issue, event } : { issue };
-        process.stdout.write(JSON.stringify(output, null, 2) + "\n");
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
         return;
       }
 
-      process.stdout.write(formatIssueDetails(issue) + "\n");
+      process.stdout.write(`${formatIssueDetails(issue)}\n`);
 
       if (event) {
-        process.stdout.write(formatEventDetails(event) + "\n");
+        process.stdout.write(`${formatEventDetails(event)}\n`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

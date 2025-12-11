@@ -2,10 +2,10 @@ import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../../context.js";
 import { detectDSN } from "../../lib/dsn-finder.js";
 
-interface DetectFlags {
+type DetectFlags = {
   readonly json: boolean;
   readonly save: boolean;
-}
+};
 
 export const detectCommand = buildCommand({
   docs: {
@@ -54,7 +54,7 @@ export const detectCommand = buildCommand({
       }
 
       if (flags.json) {
-        process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
         return;
       }
 

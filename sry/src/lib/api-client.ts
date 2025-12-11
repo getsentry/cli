@@ -19,11 +19,11 @@ export class SentryApiError extends Error {
   }
 }
 
-interface ApiRequestOptions {
+type ApiRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
   params?: Record<string, string | number | boolean | undefined>;
-}
+};
 
 /**
  * Make an authenticated request to the Sentry API

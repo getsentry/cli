@@ -1,6 +1,6 @@
 // Sentry API Types
 
-export interface SentryOrganization {
+export type SentryOrganization = {
   id: string;
   slug: string;
   name: string;
@@ -12,9 +12,9 @@ export interface SentryOrganization {
     avatarUuid: string | null;
   };
   features: string[];
-}
+};
 
-export interface SentryProject {
+export type SentryProject = {
   id: string;
   slug: string;
   name: string;
@@ -40,9 +40,9 @@ export interface SentryProject {
   };
   color: string;
   status: string;
-}
+};
 
-export interface SentryIssue {
+export type SentryIssue = {
   id: string;
   shortId: string;
   title: string;
@@ -86,9 +86,9 @@ export interface SentryIssue {
   userCount: number;
   firstSeen: string;
   lastSeen: string;
-}
+};
 
-export interface SentryEvent {
+export type SentryEvent = {
   eventID: string;
   id: string;
   projectID: string;
@@ -119,11 +119,11 @@ export interface SentryEvent {
     username?: string;
     ip_address?: string;
   } | null;
-}
+};
 
 // Config Types
 
-export interface SryConfig {
+export type SryConfig = {
   auth?: {
     token?: string;
     refreshToken?: string;
@@ -133,44 +133,44 @@ export interface SryConfig {
     organization?: string;
     project?: string;
   };
-}
+};
 
 // OAuth Types
 
-export interface DeviceCodeResponse {
+export type DeviceCodeResponse = {
   device_code: string;
   user_code: string;
   verification_uri: string;
   verification_uri_complete?: string;
   expires_in: number;
   interval: number;
-}
+};
 
-export interface TokenResponse {
+export type TokenResponse = {
   access_token: string;
   token_type: string;
   expires_in: number;
   refresh_token?: string;
   scope?: string;
-}
+};
 
-export interface TokenErrorResponse {
+export type TokenErrorResponse = {
   error: string;
   error_description?: string;
-}
+};
 
 // DSN Types
 
-export interface ParsedDSN {
+export type ParsedDSN = {
   protocol: string;
   publicKey: string;
   host: string;
   projectId: string;
-}
+};
 
-export interface DSNDetectionResult {
+export type DSNDetectionResult = {
   dsn: string;
   parsed: ParsedDSN;
   source: string;
   filePath: string;
-}
+};

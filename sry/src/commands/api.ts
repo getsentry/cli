@@ -2,13 +2,13 @@ import { buildCommand } from "@stricli/core";
 import type { SryContext } from "../context.js";
 import { rawApiRequest } from "../lib/api-client.js";
 
-interface ApiFlags {
+type ApiFlags = {
   readonly method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   readonly field: string[];
   readonly header: string[];
   readonly include: boolean;
   readonly silent: boolean;
-}
+};
 
 function parseFields(fields: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -39,7 +39,7 @@ function parseFields(fields: string[]): Record<string, unknown> {
       }
       current = current[k] as Record<string, unknown>;
     }
-    current[keys[keys.length - 1]] = value;
+    current[keys.at(-1)] = value;
   }
 
   return result;
@@ -174,9 +174,9 @@ export const apiCommand = buildCommand({
       // Output body
       if (response.body !== null && response.body !== undefined) {
         if (typeof response.body === "object") {
-          process.stdout.write(JSON.stringify(response.body, null, 2) + "\n");
+          process.stdout.write(`${JSON.stringify(response.body, null, 2)}\n`);
         } else {
-          process.stdout.write(String(response.body) + "\n");
+          process.stdout.write(`${String(response.body)}\n`);
         }
       }
 

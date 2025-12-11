@@ -5,14 +5,14 @@ import { getDefaultOrganization, getDefaultProject } from "../../lib/config.js";
 import { detectDSN } from "../../lib/dsn-finder.js";
 import type { SentryIssue } from "../../types/index.js";
 
-interface ListFlags {
+type ListFlags = {
   readonly org?: string;
   readonly project?: string;
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "priority" | "freq" | "user";
   readonly json: boolean;
-}
+};
 
 function formatIssue(issue: SentryIssue): string {
   const status =
@@ -122,7 +122,7 @@ export const listCommand = buildCommand({
       });
 
       if (flags.json) {
-        process.stdout.write(JSON.stringify(issues, null, 2) + "\n");
+        process.stdout.write(`${JSON.stringify(issues, null, 2)}\n`);
         return;
       }
 
@@ -136,15 +136,15 @@ export const listCommand = buildCommand({
         `Issues in ${org}/${project} (showing ${issues.length}):\n\n`
       );
       process.stdout.write("  STATUS  SHORT ID         COUNT  TITLE\n");
-      process.stdout.write("─".repeat(80) + "\n");
+      process.stdout.write(`${"─".repeat(80)}\n`);
 
       // Issues
       for (const issue of issues) {
-        process.stdout.write(formatIssue(issue) + "\n");
+        process.stdout.write(`${formatIssue(issue)}\n`);
       }
 
       process.stdout.write(
-        "\n" + `Tip: Use 'sry issue get <SHORT_ID>' to view issue details.\n`
+        "\nTip: Use 'sry issue get <SHORT_ID>' to view issue details.\n"
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

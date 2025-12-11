@@ -3,10 +3,10 @@ import type { SryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
 import type { SentryOrganization } from "../../types/index.js";
 
-interface ListFlags {
+type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
-}
+};
 
 function formatOrg(org: SentryOrganization, maxSlugLen: number): string {
   const slug = org.slug.padEnd(maxSlugLen);
@@ -47,7 +47,7 @@ export const listCommand = buildCommand({
       const limitedOrgs = orgs.slice(0, flags.limit);
 
       if (flags.json) {
-        process.stdout.write(JSON.stringify(limitedOrgs, null, 2) + "\n");
+        process.stdout.write(`${JSON.stringify(limitedOrgs, null, 2)}\n`);
         return;
       }
 
@@ -64,7 +64,7 @@ export const listCommand = buildCommand({
 
       // Print organizations
       for (const org of limitedOrgs) {
-        process.stdout.write(formatOrg(org, maxSlugLen) + "\n");
+        process.stdout.write(`${formatOrg(org, maxSlugLen)}\n`);
       }
 
       if (orgs.length > flags.limit) {

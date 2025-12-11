@@ -16,11 +16,11 @@ const CALLBACK_URL = `http://127.0.0.1:${CALLBACK_PORT}/callback`;
 const CLIENT_ID = process.env.SRY_CLIENT_ID || "";
 const CLIENT_SECRET = process.env.SRY_CLIENT_SECRET || "";
 
-interface OAuthConfig {
+type OAuthConfig = {
   clientId: string;
   clientSecret: string;
   scopes: string[];
-}
+};
 
 const defaultConfig: OAuthConfig = {
   clientId: CLIENT_ID,

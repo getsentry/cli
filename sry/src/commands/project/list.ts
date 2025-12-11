@@ -4,12 +4,12 @@ import { listOrganizations, listProjects } from "../../lib/api-client.js";
 import { getDefaultOrganization } from "../../lib/config.js";
 import type { SentryProject } from "../../types/index.js";
 
-interface ListFlags {
+type ListFlags = {
   readonly org?: string;
   readonly limit: number;
   readonly json: boolean;
   readonly platform?: string;
-}
+};
 
 function formatProject(
   project: SentryProject,
@@ -112,7 +112,7 @@ export const listCommand = buildCommand({
       // Filter by platform if specified
       if (flags.platform) {
         allProjects = allProjects.filter((p) =>
-          p.platform?.toLowerCase().includes(flags.platform!.toLowerCase())
+          p.platform?.toLowerCase().includes(flags.platform?.toLowerCase())
         );
       }
 
@@ -120,7 +120,7 @@ export const listCommand = buildCommand({
       const limitedProjects = allProjects.slice(0, flags.limit);
 
       if (flags.json) {
-        process.stdout.write(JSON.stringify(limitedProjects, null, 2) + "\n");
+        process.stdout.write(`${JSON.stringify(limitedProjects, null, 2)}\n`);
         return;
       }
 
@@ -151,7 +151,7 @@ export const listCommand = buildCommand({
       // Print projects
       for (const project of limitedProjects) {
         process.stdout.write(
-          formatProject(project, maxSlugLen, showOrg, project.orgSlug) + "\n"
+          `${formatProject(project, maxSlugLen, showOrg, project.orgSlug)}\n`
         );
       }
 

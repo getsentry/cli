@@ -7,10 +7,10 @@ import {
   setApiToken,
 } from "../../lib/oauth.js";
 
-interface LoginFlags {
+type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
-}
+};
 
 export const loginCommand = buildCommand({
   docs: {
@@ -64,7 +64,7 @@ export const loginCommand = buildCommand({
     try {
       process.stdout.write("Opening browser for Sentry authorization...\n");
       process.stdout.write(
-        "Waiting for authorization (timeout: " + flags.timeout + "s)...\n\n"
+        `Waiting for authorization (timeout: ${flags.timeout}s)...\n\n`
       );
 
       // Perform the full OAuth flow
