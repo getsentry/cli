@@ -1,0 +1,21 @@
+{
+  "name": "@sry/oauth-proxy",
+  "version": "0.1.0",
+  "description": "OAuth proxy server for sry CLI device flow",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --env-file=../../.env dev.ts",
+    "dev:3000": "PORT=3000 bun run --env-file=../../.env dev.ts",
+    "dev:vercel": "vercel dev --listen 3000",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vercel": "^39"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  }
+}

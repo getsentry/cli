@@ -5,15 +5,13 @@ A gh-like CLI for Sentry.
 ## Setup
 
 ```bash
-# Set OAuth credentials
-export SRY_CLIENT_ID="your-client-id"
-export SRY_CLIENT_SECRET="your-client-secret"
-
-# Login
+# Login via OAuth (device flow)
 sry auth login
 ```
 
-Or use an API token:
+You'll be given a URL and a code to enter. Once you authorize, the CLI will automatically receive your token.
+
+Or use an API token directly:
 
 ```bash
 sry auth login --token YOUR_SENTRY_API_TOKEN
@@ -24,7 +22,7 @@ sry auth login --token YOUR_SENTRY_API_TOKEN
 ### Auth
 
 ```bash
-sry auth login      # Login via OAuth
+sry auth login      # Login via OAuth device flow
 sry auth logout     # Logout
 sry auth status     # Check auth status
 ```
@@ -61,13 +59,19 @@ sry api /issues/123/ --method PUT --field status=resolved
 sry api /organizations/ --include                    # Show headers
 ```
 
-## Build
+## Development
+
+This is a Turborepo monorepo with:
+- `packages/cli` - The sry CLI
+- `apps/oauth-proxy` - OAuth proxy server (deployed on Vercel)
 
 ```bash
 bun install
-bun run dev --help                    # Run in dev mode
-npx fossilize src/bin.ts              # Build binary
-codesign --sign - dist-bin/bin-*      # Sign for macOS
+bun run dev --help                    # Run CLI in dev mode
+
+# Build
+cd packages/cli
+bun run build                         # Build binary
 ```
 
 ## Config
