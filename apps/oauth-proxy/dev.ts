@@ -239,10 +239,13 @@ app.post("/device/code", (c) => {
     `[device/code] Created: ${userCode} -> ${deviceCode.slice(0, 8)}...`
   );
 
+  const verificationUri = `http://127.0.0.1:${PORT}/device/authorize`;
+
   return c.json({
     device_code: deviceCode,
     user_code: userCode,
-    verification_uri: `http://127.0.0.1:${PORT}/device/authorize`,
+    verification_uri: verificationUri,
+    verification_uri_complete: `http://127.0.0.1:${PORT}/device/verify?user_code=${userCode}`,
     expires_in: DEVICE_CODE_EXPIRES_IN,
     interval: POLLING_INTERVAL,
   });

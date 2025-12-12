@@ -254,6 +254,7 @@ app.post("/device/code", (c) => {
     device_code: deviceCode,
     user_code: userCode,
     verification_uri: `${baseUrl}/device/authorize`,
+    verification_uri_complete: `${baseUrl}/device/verify?user_code=${userCode}`,
     expires_in: DEVICE_CODE_EXPIRES_IN,
     interval: POLLING_INTERVAL,
   });
