@@ -1,4 +1,4 @@
-# sry
+# sentry-cli-next
 
 A gh-like CLI for Sentry.
 
@@ -6,7 +6,7 @@ A gh-like CLI for Sentry.
 
 ```bash
 # Login via OAuth (device flow)
-sry auth login
+sentry auth login
 ```
 
 You'll be given a URL and a code to enter. Once you authorize, the CLI will automatically receive your token.
@@ -14,7 +14,7 @@ You'll be given a URL and a code to enter. Once you authorize, the CLI will auto
 Or use an API token directly:
 
 ```bash
-sry auth login --token YOUR_SENTRY_API_TOKEN
+sentry auth login --token YOUR_SENTRY_API_TOKEN
 ```
 
 ## Commands
@@ -22,47 +22,47 @@ sry auth login --token YOUR_SENTRY_API_TOKEN
 ### Auth
 
 ```bash
-sry auth login      # Login via OAuth device flow
-sry auth logout     # Logout
-sry auth status     # Check auth status
+sentry auth login      # Login via OAuth device flow
+sentry auth logout     # Logout
+sentry auth status     # Check auth status
 ```
 
 ### Organizations
 
 ```bash
-sry org list                 # List all orgs
-sry org list --json          # Output as JSON
+sentry org list                 # List all orgs
+sentry org list --json          # Output as JSON
 ```
 
 ### Projects
 
 ```bash
-sry project list                        # List all projects
-sry project list my-org                 # List projects in org
-sry project list --platform javascript  # Filter by platform
+sentry project list                        # List all projects
+sentry project list my-org                 # List projects in org
+sentry project list --platform javascript  # Filter by platform
 ```
 
 ### Issues
 
 ```bash
-sry issue list --org my-org --project my-project     # List issues
-sry issue list --org my-org --project my-project --json
-sry issue get 123456789                              # Get issue by ID
-sry issue get 123456789 --event                      # Include latest event
+sentry issue list --org my-org --project my-project     # List issues
+sentry issue list --org my-org --project my-project --json
+sentry issue get 123456789                              # Get issue by ID
+sentry issue get 123456789 --event                      # Include latest event
 ```
 
 ### API
 
 ```bash
-sry api /organizations/                              # GET request
-sry api /issues/123/ --method PUT --field status=resolved
-sry api /organizations/ --include                    # Show headers
+sentry api /organizations/                              # GET request
+sentry api /issues/123/ --method PUT --field status=resolved
+sentry api /organizations/ --include                    # Show headers
 ```
 
 ## Development
 
 This is a Turborepo monorepo with:
-- `packages/cli` - The sry CLI
+- `packages/cli` - The Sentry CLI
 - `apps/oauth-proxy` - OAuth proxy server (deployed on Vercel)
 
 ```bash
@@ -76,4 +76,4 @@ bun run build                         # Build binary
 
 ## Config
 
-Stored in `~/.sry/config.json` (mode 600).
+Stored in `~/.sentry-cli-next/config.json` (mode 600).

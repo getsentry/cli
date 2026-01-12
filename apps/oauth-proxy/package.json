@@ -1,7 +1,7 @@
 {
-  "name": "@sry/oauth-proxy",
+  "name": "@sentry/oauth-proxy",
   "version": "0.1.0",
-  "description": "OAuth proxy server for sry CLI device flow",
+  "description": "OAuth proxy server for Sentry CLI device flow",
   "type": "module",
   "scripts": {
     "dev": "bun run --env-file=../../.env dev.ts",
