@@ -17,8 +17,8 @@ const PORT = Number(process.env.PORT) || 8723;
 const SENTRY_OAUTH_AUTHORIZE = "https://sentry.io/oauth/authorize/";
 const SENTRY_OAUTH_TOKEN = "https://sentry.io/oauth/token/";
 
-const CLIENT_ID = process.env.SRY_CLIENT_ID ?? "";
-const CLIENT_SECRET = process.env.SRY_CLIENT_SECRET ?? "";
+const CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
+const CLIENT_SECRET = process.env.SENTRY_CLIENT_SECRET ?? "";
 
 const DEVICE_CODE_EXPIRES_IN = 900;
 const POLLING_INTERVAL = 5;
@@ -39,7 +39,7 @@ const SCOPES = [
 
 if (!(CLIENT_ID && CLIENT_SECRET)) {
   console.error(
-    "❌ Missing SRY_CLIENT_ID or SRY_CLIENT_SECRET. Create a .env file in the project root."
+    "❌ Missing SENTRY_CLIENT_ID or SENTRY_CLIENT_SECRET. Create a .env file in the project root."
   );
   process.exit(1);
 }
@@ -158,13 +158,13 @@ function authorizePage(error?: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Authorize</title>
+	<title>Sentry CLI - Authorize</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
 <body>
 	<div class="container">
-		<h1>🔐 sry CLI</h1>
+		<h1>🔐 Sentry CLI</h1>
 		<p class="subtitle">Enter the code shown in your terminal</p>
 		<form method="GET" action="/device/verify">
 			<input type="text" name="user_code" placeholder="XXXX-0000" maxlength="9" required autofocus>
@@ -180,7 +180,7 @@ function successPage(): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Success</title>
+	<title>Sentry CLI - Success</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
@@ -197,7 +197,7 @@ function errorPage(message: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Error</title>
+	<title>Sentry CLI - Error</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
@@ -220,7 +220,7 @@ const app = new Hono();
 app.use("*", cors());
 
 app.get("/", (c) =>
-  c.json({ status: "ok", service: "sry-oauth-proxy", mode: "development" })
+  c.json({ status: "ok", service: "sentry-oauth-proxy", mode: "development" })
 );
 
 app.post("/device/code", (c) => {
@@ -422,7 +422,7 @@ Endpoints:
 
 To test with the CLI:
   cd packages/cli
-  SRY_OAUTH_PROXY_URL=http://127.0.0.1:${PORT} bun run src/bin.ts auth login
+  SENTRY_OAUTH_PROXY_URL=http://127.0.0.1:${PORT} bun run src/bin.ts auth login
 `);
 
 export default {

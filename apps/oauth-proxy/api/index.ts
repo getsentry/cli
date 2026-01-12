@@ -17,8 +17,8 @@ const SENTRY_OAUTH_AUTHORIZE = "https://sentry.io/oauth/authorize/";
 const SENTRY_OAUTH_TOKEN = "https://sentry.io/oauth/token/";
 
 // These are set in Vercel environment variables
-const CLIENT_ID = process.env.SRY_CLIENT_ID ?? "";
-const CLIENT_SECRET = process.env.SRY_CLIENT_SECRET ?? "";
+const CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
+const CLIENT_SECRET = process.env.SENTRY_CLIENT_SECRET ?? "";
 
 // Device flow configuration
 const DEVICE_CODE_EXPIRES_IN = 900; // 15 minutes
@@ -157,13 +157,13 @@ function authorizePage(error?: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Authorize</title>
+	<title>Sentry CLI - Authorize</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
 <body>
 	<div class="container">
-		<h1>🔐 sry CLI</h1>
+		<h1>🔐 Sentry CLI</h1>
 		<p class="subtitle">Enter the code shown in your terminal</p>
 		<form method="GET" action="/device/verify">
 			<input type="text" name="user_code" placeholder="XXXX-0000" maxlength="9" required autofocus>
@@ -179,7 +179,7 @@ function successPage(): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Success</title>
+	<title>Sentry CLI - Success</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
@@ -196,7 +196,7 @@ function errorPage(message: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
-	<title>sry CLI - Error</title>
+	<title>Sentry CLI - Error</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<style>${HTML_STYLE}</style>
 </head>
@@ -220,7 +220,7 @@ const app = new Hono();
 app.use("*", cors());
 
 // Health check
-app.get("/", (c) => c.json({ status: "ok", service: "sry-oauth-proxy" }));
+app.get("/", (c) => c.json({ status: "ok", service: "sentry-oauth-proxy" }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Device Flow Endpoints

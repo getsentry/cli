@@ -1,5 +1,5 @@
 {
-  "name": "sry",
+  "name": "sentry-cli-next",
   "version": "0.1.0",
   "private": true,
   "description": "A gh-like CLI for Sentry",

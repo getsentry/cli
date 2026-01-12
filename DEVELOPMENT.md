@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide explains how to develop and test the sry CLI and OAuth proxy locally.
+This guide explains how to develop and test the Sentry CLI and OAuth proxy locally.
 
 ## Prerequisites
 
@@ -10,11 +10,11 @@ This guide explains how to develop and test the sry CLI and OAuth proxy locally.
 ## Project Structure
 
 ```
-sry/
+sentry-cli-next/
 ├── apps/
 │   └── oauth-proxy/     # Hono server for device flow OAuth
 └── packages/
-    └── cli/             # The sry CLI
+    └── cli/             # The Sentry CLI
 ```
 
 ## Setup
@@ -28,8 +28,8 @@ bun install
 2. Create a `.env` file in the project root:
 
 ```
-SRY_CLIENT_ID=your-sentry-oauth-client-id
-SRY_CLIENT_SECRET=your-sentry-oauth-client-secret
+SENTRY_CLIENT_ID=your-sentry-oauth-client-id
+SENTRY_CLIENT_SECRET=your-sentry-oauth-client-secret
 ```
 
 Get these from your Sentry OAuth application settings.
@@ -51,7 +51,7 @@ This starts the proxy on `http://127.0.0.1:8723` (matching your Sentry OAuth app
 
 ```bash
 cd packages/cli
-SRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
+SENTRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
 ```
 
 ## Testing the Device Flow
@@ -62,7 +62,7 @@ SRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
 
 ```bash
 cd packages/cli
-SRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
+SENTRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
 ```
 
 3. You'll see output like:
@@ -104,16 +104,16 @@ When creating your Sentry OAuth application, set:
 
 ### OAuth Proxy
 
-| Variable            | Description                    |
-| ------------------- | ------------------------------ |
-| `SRY_CLIENT_ID`     | Sentry OAuth app client ID     |
-| `SRY_CLIENT_SECRET` | Sentry OAuth app client secret |
+| Variable               | Description                    |
+| ---------------------- | ------------------------------ |
+| `SENTRY_CLIENT_ID`     | Sentry OAuth app client ID     |
+| `SENTRY_CLIENT_SECRET` | Sentry OAuth app client secret |
 
 ### CLI
 
-| Variable              | Description     | Default                        |
-| --------------------- | --------------- | ------------------------------ |
-| `SRY_OAUTH_PROXY_URL` | OAuth proxy URL | `https://sry-oauth.vercel.app` |
+| Variable                 | Description     | Default                        |
+| ------------------------ | --------------- | ------------------------------ |
+| `SENTRY_OAUTH_PROXY_URL` | OAuth proxy URL | `https://sry-oauth.vercel.app` |
 
 ## Deploying the OAuth Proxy
 
@@ -122,8 +122,8 @@ cd apps/oauth-proxy
 bunx vercel
 
 # Set environment variables in Vercel dashboard or via CLI:
-bunx vercel env add SRY_CLIENT_ID
-bunx vercel env add SRY_CLIENT_SECRET
+bunx vercel env add SENTRY_CLIENT_ID
+bunx vercel env add SENTRY_CLIENT_SECRET
 ```
 
 After deployment, update the default `OAUTH_PROXY_URL` in `packages/cli/src/lib/oauth.ts` to your Vercel URL.
