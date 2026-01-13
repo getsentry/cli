@@ -137,10 +137,35 @@ await Bun.build({
     outfile: "dist/sentry",
   },
   define: {
-    CLI_VERSION: `"${version}"`,
+    CLI_VERSION: JSON.stringify(version),
+    // Inject secrets at build time for npm distribution
+    SENTRY_CLIENT_ID_BUILD: JSON.stringify(process.env.SENTRY_CLIENT_ID ?? ""),
   },
   sourcemap: "external",
 });
+```
+
+**Build-time secrets pattern:**
+
+For values that need to be baked into the binary (like OAuth client IDs):
+
+1. Read from env in build script: `process.env.SENTRY_CLIENT_ID`
+2. Inject via `define`: `SENTRY_CLIENT_ID_BUILD: JSON.stringify(value)`
+3. Use in code with runtime override support:
+
+```typescript
+// Declare the build-time constant
+declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
+
+// Allow runtime override (for self-hosted), fall back to build-time value
+const CLIENT_ID =
+  process.env.SENTRY_CLIENT_ID ??
+  (typeof SENTRY_CLIENT_ID_BUILD !== "undefined" ? SENTRY_CLIENT_ID_BUILD : "");
+```
+
+**Build command with secrets:**
+```bash
+SENTRY_CLIENT_ID=xxx bun run build:all
 ```
 
 Supported targets:
