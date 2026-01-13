@@ -1,0 +1,279 @@
+---
+description: Bun CLI Development Standards - Leveraging Bun's native APIs for optimal performance
+globs: "packages/cli/**/*.{ts,tsx}"
+alwaysApply: true
+---
+
+# Bun CLI Development Standards
+
+This project uses **Bun** as both runtime and build tool. Always prefer Bun-native APIs over Node.js equivalents for better performance and cleaner code.
+
+## Bun API Reference
+
+Full documentation: https://bun.sh/docs
+
+## File Operations
+
+**Use Bun's file APIs instead of `node:fs` for reading/writing:**
+
+```typescript
+// Reading files
+const file = Bun.file(filepath);
+if (await file.exists()) {
+  const text = await file.text();      // Read as string
+  const json = await file.json();      // Parse JSON directly
+  const buffer = await file.bytes();   // Read as Uint8Array
+}
+
+// Writing files
+await Bun.write(filepath, content);           // String or Buffer
+await Bun.write(filepath, Bun.file(other));   // Copy file
+
+// File metadata
+const stats = await Bun.file(filepath).stat();
+```
+
+**Exception:** Use `node:fs` for directory creation with specific permissions:
+```typescript
+import { mkdirSync } from "node:fs";
+mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+```
+
+Docs: https://bun.sh/docs/api/file-io
+
+## Process Spawning
+
+**Use `Bun.spawn()` and `Bun.which()` instead of `node:child_process`:**
+
+```typescript
+// Find executable
+const git = Bun.which("git");  // Returns path or null
+
+// Spawn process
+const proc = Bun.spawn(["git", "status"], {
+  cwd: "/path/to/repo",
+  stdout: "pipe",
+  stderr: "pipe",
+  env: { ...process.env, CUSTOM: "value" },
+});
+
+// Read output
+const stdout = await Bun.readableStreamToText(proc.stdout);
+const exitCode = await proc.exited;
+```
+
+Docs: https://bun.sh/docs/api/spawn
+
+## Shell Commands (Scripting)
+
+**For build scripts and automation, use `Bun.$`:**
+
+```typescript
+import { $ } from "bun";
+
+// Tagged template shell commands
+await $`git add . && git commit -m "message"`;
+const sha = await $`git rev-parse HEAD`.text();
+
+// With error handling
+const result = await $`npm test`.nothrow();
+if (result.exitCode !== 0) {
+  console.error(result.stderr.toString());
+}
+```
+
+Docs: https://bun.sh/docs/runtime/shell
+
+## Glob Pattern Matching
+
+**Use `Bun.Glob` for file discovery:**
+
+```typescript
+const glob = new Bun.Glob("**/*.{ts,js}");
+
+for await (const file of glob.scan({ cwd: "./src", onlyFiles: true })) {
+  console.log(file);
+}
+
+// Check if path matches pattern
+if (glob.match("src/index.ts")) {
+  // ...
+}
+```
+
+Docs: https://bun.sh/docs/api/glob
+
+## HTTP Server (if needed)
+
+**Use `Bun.serve()` for local servers (OAuth callbacks, etc.):**
+
+```typescript
+const server = Bun.serve({
+  port: 0,  // Auto-assign port
+  fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/callback") {
+      return new Response("Success!");
+    }
+    return new Response("Not found", { status: 404 });
+  },
+});
+
+console.log(`Server running on port ${server.port}`);
+server.stop();  // When done
+```
+
+Docs: https://bun.sh/docs/api/http
+
+## Building Binaries
+
+**Use `Bun.build()` with `compile` option for standalone executables:**
+
+```typescript
+await Bun.build({
+  entrypoints: ["./src/bin.ts"],
+  compile: {
+    target: "bun-darwin-arm64",  // or linux-x64, windows-x64, etc.
+    outfile: "dist/sentry",
+  },
+  define: {
+    CLI_VERSION: `"${version}"`,
+  },
+  sourcemap: "external",
+});
+```
+
+Supported targets:
+- `bun-darwin-arm64`, `bun-darwin-x64`, `bun-darwin-x64-baseline`
+- `bun-linux-x64`, `bun-linux-arm64`, `bun-linux-x64-baseline`
+- `bun-linux-x64-musl`, `bun-linux-arm64-musl`
+- `bun-windows-x64`, `bun-windows-x64-baseline`
+
+Baseline variants target older CPUs without AVX2 support.
+
+Docs: https://bun.sh/docs/bundler/executables
+
+## Utilities
+
+```typescript
+// Sleep
+await Bun.sleep(1000);  // 1 second
+
+// Fast hashing
+const hash = Bun.hash.xxHash32(data);
+
+// TOML parsing
+const config = Bun.TOML.parse(content);
+
+// Module resolution
+const path = await Bun.resolve("package/file", import.meta.dir);
+
+// Environment
+const value = Bun.env.MY_VAR;
+
+// Direct I/O
+Bun.stderr.write("Error message\n");
+const input = await Bun.stdin.text();
+```
+
+## Testing
+
+**Use `bun:test` for all tests:**
+
+```typescript
+import { describe, expect, test, mock, beforeEach } from "bun:test";
+
+describe("feature", () => {
+  test("should work", async () => {
+    expect(await someFunction()).toBe(expected);
+  });
+});
+
+// Mocking
+mock.module("./some-module", () => ({
+  default: () => "mocked",
+}));
+```
+
+Run tests: `bun test`
+
+Docs: https://bun.sh/docs/cli/test
+
+## What NOT to Use
+
+Avoid these Node.js APIs when Bun equivalents exist:
+
+| Avoid | Use Instead |
+|-------|-------------|
+| `fs.readFileSync()` | `await Bun.file(path).text()` |
+| `fs.writeFileSync()` | `await Bun.write(path, content)` |
+| `fs.existsSync()` | `await Bun.file(path).exists()` |
+| `child_process.spawn()` | `Bun.spawn()` |
+| `child_process.exec()` | `Bun.$\`command\`` |
+| `which` package | `Bun.which()` |
+| `glob` package | `new Bun.Glob()` |
+| `fast-glob` | `new Bun.Glob()` |
+
+**Keep using `node:fs` for:**
+- Directory creation with permissions (`mkdirSync` with `mode`)
+- Operations that need sync behavior in specific contexts
+
+## CLI Framework
+
+This project uses **Stricli** (`@stricli/core`) for CLI command definitions. Key patterns:
+
+```typescript
+import { buildCommand, buildRouteMap } from "@stricli/core";
+
+export const myCommand = buildCommand({
+  docs: {
+    brief: "Short description",
+    fullDescription: "Detailed description with examples",
+  },
+  parameters: {
+    flags: {
+      json: { kind: "boolean", brief: "Output as JSON", default: false },
+      limit: { kind: "parsed", parse: Number, brief: "Max items", default: 10 },
+    },
+  },
+  async func(this: SentryContext, flags) {
+    // Implementation - all config functions are async, use await
+  },
+});
+```
+
+## Validation
+
+Use **Zod** for runtime validation of configs and API responses:
+
+```typescript
+import { z } from "zod";
+
+const ConfigSchema = z.object({
+  token: z.string(),
+  org: z.string().optional(),
+});
+
+type Config = z.infer<typeof ConfigSchema>;
+
+// Validates and throws if invalid
+const config = ConfigSchema.parse(rawData);
+
+// Returns { success: boolean, data?, error? }
+const result = ConfigSchema.safeParse(rawData);
+```
+
+Docs: https://zod.dev
+
+## Async Patterns
+
+All config functions in this project are async. Always await them:
+
+```typescript
+// Config operations
+const token = await getAuthToken();
+const isAuth = await isAuthenticated();
+const org = await getDefaultOrganization();
+await setAuthToken(token, expiresIn);
+await clearAuth();
+```
