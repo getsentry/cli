@@ -61,18 +61,14 @@ sentry api /organizations/ --include                    # Show headers
 
 ## Development
 
-This is a Turborepo monorepo with:
-- `packages/cli` - The Sentry CLI
-- `apps/oauth-proxy` - OAuth proxy server (deployed on Vercel)
-
 ```bash
 bun install
-bun run dev --help                    # Run CLI in dev mode
-
-# Build
 cd packages/cli
-bun run build                         # Build binary
+bun run --env-file=../../.env.local src/bin.ts --help    # Run CLI in dev mode
+bun run build                                             # Build binary
 ```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.
 
 ## Config
 

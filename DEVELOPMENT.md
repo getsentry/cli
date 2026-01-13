@@ -1,7 +1,5 @@
 # Development Guide
 
-This guide explains how to develop and test the Sentry CLI and OAuth proxy locally.
-
 ## Prerequisites
 
 - [Bun](https://bun.sh/) installed
@@ -11,8 +9,6 @@ This guide explains how to develop and test the Sentry CLI and OAuth proxy local
 
 ```
 sentry-cli-next/
-├── apps/
-│   └── oauth-proxy/     # Hono server for device flow OAuth
 └── packages/
     └── cli/             # The Sentry CLI
 ```
@@ -25,75 +21,54 @@ sentry-cli-next/
 bun install
 ```
 
-2. Create a `.env` file in the project root:
+2. Create a `.env.local` file in the project root:
 
 ```
 SENTRY_CLIENT_ID=your-sentry-oauth-client-id
-SENTRY_CLIENT_SECRET=your-sentry-oauth-client-secret
 ```
 
-Get these from your Sentry OAuth application settings.
+Get the client ID from your Sentry OAuth application settings.
+
+**Note:** No client secret is needed - the CLI uses OAuth 2.0 Device Authorization Grant (RFC 8628) which is designed for public clients.
 
 ## Running Locally
 
-Open two terminal windows:
-
-**Terminal 1 - OAuth Proxy:**
-
-```bash
-cd apps/oauth-proxy
-bun run dev
-```
-
-This starts the proxy on `http://127.0.0.1:8723` (matching your Sentry OAuth app's redirect URI).
-
-**Terminal 2 - CLI:**
-
 ```bash
 cd packages/cli
-SENTRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
+bun run --env-file=../../.env.local src/bin.ts auth login
 ```
 
 ## Testing the Device Flow
 
-1. Start the OAuth proxy (see above)
-
-2. Run the CLI login command:
+1. Run the CLI login command:
 
 ```bash
 cd packages/cli
-SENTRY_OAUTH_PROXY_URL=http://127.0.0.1:8723 bun run src/bin.ts auth login
+bun run --env-file=../../.env.local src/bin.ts auth login
 ```
 
-3. You'll see output like:
+2. You'll see output like:
 
 ```
 Starting authentication...
 
-To authenticate, visit:
-  http://127.0.0.1:8723/device/authorize
+Opening browser...
+If it doesn't open, visit: https://sentry.io/oauth/device/
+Code: ABCD-EFGH
 
-And enter code: ABCD-1234
-
-Waiting for authorization (press Ctrl+C to cancel)...
+Waiting for authorization...
 ```
 
-4. Open the URL in your browser and enter the code
-
-5. You'll be redirected to Sentry to authorize
-
-6. After authorizing, the CLI will receive the token and save it
+3. The browser will open to Sentry's device authorization page
+4. Enter the code and authorize the application
+5. The CLI will automatically receive the token and save it
 
 ## Sentry OAuth App Configuration
 
-When creating your Sentry OAuth application, set:
+When creating your Sentry OAuth application:
 
-- **Redirect URI**:
-
-  - For local development: `http://127.0.0.1:8723/callback`
-  - For production: `https://your-vercel-app.vercel.app/callback`
-
-- **Scopes**: Select the scopes your CLI needs:
+- **Redirect URI**: Not required for device flow
+- **Scopes**: The CLI requests these scopes:
   - `project:read`, `project:write`
   - `org:read`
   - `event:read`, `event:write`
@@ -102,28 +77,25 @@ When creating your Sentry OAuth application, set:
 
 ## Environment Variables
 
-### OAuth Proxy
+| Variable           | Description                          | Default              |
+| ------------------ | ------------------------------------ | -------------------- |
+| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID           | (required)           |
+| `SENTRY_URL`       | Sentry instance URL (for self-hosted)| `https://sentry.io`  |
 
-| Variable               | Description                    |
-| ---------------------- | ------------------------------ |
-| `SENTRY_CLIENT_ID`     | Sentry OAuth app client ID     |
-| `SENTRY_CLIENT_SECRET` | Sentry OAuth app client secret |
-
-### CLI
-
-| Variable                 | Description     | Default                        |
-| ------------------------ | --------------- | ------------------------------ |
-| `SENTRY_OAUTH_PROXY_URL` | OAuth proxy URL | `https://sry-oauth.vercel.app` |
-
-## Deploying the OAuth Proxy
+## Building
 
 ```bash
-cd apps/oauth-proxy
-bunx vercel
-
-# Set environment variables in Vercel dashboard or via CLI:
-bunx vercel env add SENTRY_CLIENT_ID
-bunx vercel env add SENTRY_CLIENT_SECRET
+cd packages/cli
+bun run build
 ```
 
-After deployment, update the default `OAUTH_PROXY_URL` in `packages/cli/src/lib/oauth.ts` to your Vercel URL.
+## Architecture
+
+The CLI uses the OAuth 2.0 Device Authorization Grant ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)) for authentication. This flow is designed for CLI tools and other devices that can't easily handle browser redirects:
+
+1. CLI requests a device code from Sentry
+2. User is shown a code and URL to visit
+3. CLI polls Sentry until the user authorizes
+4. CLI receives access token and stores it locally
+
+No proxy server is needed - the CLI communicates directly with Sentry.
