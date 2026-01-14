@@ -1,0 +1,91 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/cli/**'
+      - '.github/workflows/publish.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: packages/cli
+
+jobs:
+  publish:
+    name: Build and Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Bump version
+        id: version
+        run: |
+          # Read current version
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Parse major.minor.patch
+          MAJOR=$(echo $CURRENT_VERSION | cut -d. -f1)
+          MINOR=$(echo $CURRENT_VERSION | cut -d. -f2)
+          PATCH=$(echo $CURRENT_VERSION | cut -d. -f3)
+          
+          # Increment minor version (0.X.Y -> 0.X+1.0)
+          NEW_MINOR=$((MINOR + 1))
+          NEW_VERSION="${MAJOR}.${NEW_MINOR}.0"
+          echo "New version: $NEW_VERSION"
+          
+          # Update package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build all platforms
+        env:
+          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+        run: bun run build:all
+
+      - name: Package main CLI
+        run: bun run package
+
+      - name: Setup npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
+      - name: Publish platform packages
+        run: |
+          for pkg in sentry-darwin-arm64 sentry-darwin-x64 sentry-linux-arm64 sentry-linux-x64 sentry-windows-x64; do
+            echo "Publishing $pkg..."
+            cd dist/$pkg && npm publish --access public && cd ../..
+          done
+
+      - name: Publish main package
+        run: |
+          cd dist/@betegon-sentry && npm publish --access public
+
+      - name: Commit version bump
+        run: |
+          cd ../..
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add packages/cli/package.json
+          git commit -m "chore: bump CLI version to ${{ steps.version.outputs.version }}"
+          git push
