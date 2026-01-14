@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/cli/**'
+      - '.github/workflows/ci.yml'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: packages/cli
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build (current platform only)
+        env:
+          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+        run: bun run build
+
+      - name: Smoke test
+        run: |
+          ./dist/sentry-linux-x64/bin/sentry --help
+          echo "Build successful!"
