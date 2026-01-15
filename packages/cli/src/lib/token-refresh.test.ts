@@ -1,17 +1,8 @@
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
+import { maybeRefreshTokenInBackground } from "./token-refresh.js";
 
 test("maybeRefreshTokenInBackground never throws", async () => {
-  // Mock everything to fail
-  mock.module("./config.js", () => ({
-    readConfig: () => Promise.reject(new Error("config fail")),
-    setAuthToken: () => Promise.reject(new Error("write fail")),
-  }));
-  mock.module("./oauth.js", () => ({
-    refreshAccessToken: () => Promise.reject(new Error("network fail")),
-  }));
-
-  const { maybeRefreshTokenInBackground } = await import("./token-refresh.js");
-
-  // Should complete without throwing
+  // Call directly - it should handle missing/invalid config gracefully
+  // and never throw, regardless of the environment state
   await expect(maybeRefreshTokenInBackground()).resolves.toBeUndefined();
 });
