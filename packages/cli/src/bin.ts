@@ -8,4 +8,4 @@ import { maybeRefreshTokenInBackground } from "./lib/token-refresh.js";
 // Runs in parallel with the command, never throws, never blocks
 maybeRefreshTokenInBackground();
 
-run(app, process.argv.slice(2), buildContext(process));
+await run(app, process.argv.slice(2), buildContext(process));

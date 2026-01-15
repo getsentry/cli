@@ -1,16 +1,20 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { listOrganizations } from "../../lib/api-client.js";
 import { openBrowser } from "../../lib/browser.js";
-import { getConfigPath, isAuthenticated } from "../../lib/config.js";
 import {
-  completeOAuthFlow,
-  performDeviceFlow,
-  setApiToken,
-} from "../../lib/oauth.js";
+  clearAuth,
+  getConfigPath,
+  isAuthenticated,
+  setAuthToken,
+} from "../../lib/config.js";
+import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
+import { generateQRCode } from "../../lib/qrcode.js";
 
 type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
+  readonly qr: boolean;
 };
 
 export const loginCommand = buildCommand({
@@ -35,6 +39,11 @@ export const loginCommand = buildCommand({
         brief: "Timeout for OAuth flow in seconds (default: 900)",
         default: 900,
       },
+      qr: {
+        kind: "boolean",
+        brief: "Show QR code for mobile scanning",
+        default: true,
+      },
     },
   },
   async func(this: SentryContext, flags: LoginFlags): Promise<void> {
@@ -50,7 +59,20 @@ export const loginCommand = buildCommand({
 
     // Token-based authentication
     if (flags.token) {
-      await setApiToken(flags.token);
+      // Save token first, then validate by making an API call
+      await setAuthToken(flags.token);
+
+      // Validate the token by trying to list organizations
+      try {
+        await listOrganizations();
+      } catch {
+        // Token is invalid - clear it and throw
+        await clearAuth();
+        throw new Error(
+          "Invalid API token. Please check your token and try again."
+        );
+      }
+
       process.stdout.write("✓ Authenticated with API token\n");
       process.stdout.write(`  Config saved to: ${getConfigPath()}\n`);
       return;
@@ -67,13 +89,23 @@ export const loginCommand = buildCommand({
             verificationUri,
             verificationUriComplete
           ) => {
-            process.stdout.write("Opening browser...\n");
-            process.stdout.write(
-              `If it doesn't open, visit: ${verificationUri}\n`
-            );
+            const browserOpened = await openBrowser(verificationUriComplete);
+            if (browserOpened) {
+              process.stdout.write("Opening browser...\n\n");
+            }
+
+            if (flags.qr) {
+              process.stdout.write(
+                "Scan this QR code or visit the URL below:\n\n"
+              );
+              const qr = await generateQRCode(verificationUriComplete);
+              process.stdout.write(qr);
+              process.stdout.write("\n");
+            }
+
+            process.stdout.write(`URL: ${verificationUri}\n`);
             process.stdout.write(`Code: ${userCode}\n\n`);
             process.stdout.write("Waiting for authorization...\n");
-            await openBrowser(verificationUriComplete);
           },
           onPolling: () => {
             // Could add a spinner or dots here
@@ -93,8 +125,7 @@ export const loginCommand = buildCommand({
       process.stdout.write(`  Config saved to: ${getConfigPath()}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`\n✗ Authentication failed: ${message}\n`);
-      process.exitCode = 1;
+      throw new Error(`Authentication failed: ${message}`);
     }
   },
 });
