@@ -5,9 +5,7 @@ import { buildContext } from "./context.js";
 import { maybeRefreshTokenInBackground } from "./lib/token-refresh.js";
 
 // Fire-and-forget: proactively refresh token if expiring soon
-// This runs in parallel with the actual command and never blocks
-maybeRefreshTokenInBackground().catch(() => {
-  // Silently ignore - user will see auth error on next expired request
-});
+// Runs in parallel with the command, never throws, never blocks
+maybeRefreshTokenInBackground();
 
 run(app, process.argv.slice(2), buildContext(process));

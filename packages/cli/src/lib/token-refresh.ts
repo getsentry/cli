@@ -17,43 +17,49 @@ const REFRESH_THRESHOLD_MS = 5 * 24 * 60 * 60 * 1000;
  * Check if token needs refresh and refresh it in the background.
  *
  * This function is designed to be called fire-and-forget.
- * It silently succeeds or fails without affecting the caller.
+ * It NEVER throws - all errors are silently ignored.
  *
  * @example
- * // At CLI startup (fire-and-forget)
- * maybeRefreshTokenInBackground().catch(() => {});
+ * // At CLI startup (fire-and-forget, no .catch() needed)
+ * maybeRefreshTokenInBackground();
  */
 export async function maybeRefreshTokenInBackground(): Promise<void> {
-  const config = await readConfig();
+  try {
+    const config = await readConfig();
 
-  // Skip if no auth configured
-  if (!config.auth?.token) {
-    return;
+    // Skip if no auth configured
+    if (!config.auth?.token) {
+      return;
+    }
+
+    // Skip if no refresh token (e.g., API token auth, not OAuth)
+    if (!config.auth.refreshToken) {
+      return;
+    }
+
+    // Skip if no expiration info (shouldn't happen, but be safe)
+    if (!config.auth.expiresAt) {
+      return;
+    }
+
+    // Check if token expires within 5 days
+    const timeUntilExpiry = config.auth.expiresAt - Date.now();
+    if (timeUntilExpiry > REFRESH_THRESHOLD_MS) {
+      return; // Token is still fresh, no action needed
+    }
+
+    // Token needs refresh - do it
+    const tokenResponse = await refreshAccessToken(config.auth.refreshToken);
+
+    // Save the new token
+    await setAuthToken(
+      tokenResponse.access_token,
+      tokenResponse.expires_in,
+      tokenResponse.refresh_token
+    );
+  } catch {
+    // Silently ignore all errors - this is fire-and-forget
+    // If refresh fails, the token will expire naturally and
+    // the user will need to re-login with `sentry auth login`
   }
-
-  // Skip if no refresh token (e.g., API token auth, not OAuth)
-  if (!config.auth.refreshToken) {
-    return;
-  }
-
-  // Skip if no expiration info (shouldn't happen, but be safe)
-  if (!config.auth.expiresAt) {
-    return;
-  }
-
-  // Check if token expires within 5 days
-  const timeUntilExpiry = config.auth.expiresAt - Date.now();
-  if (timeUntilExpiry > REFRESH_THRESHOLD_MS) {
-    return; // Token is still fresh, no action needed
-  }
-
-  // Token needs refresh - do it
-  const tokenResponse = await refreshAccessToken(config.auth.refreshToken);
-
-  // Save the new token
-  await setAuthToken(
-    tokenResponse.access_token,
-    tokenResponse.expires_in,
-    tokenResponse.refresh_token
-  );
 }
