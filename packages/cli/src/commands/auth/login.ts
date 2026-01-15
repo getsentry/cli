@@ -91,11 +91,6 @@ export const loginCommand = buildCommand({
 
       process.stdout.write("✓ Authentication successful!\n");
       process.stdout.write(`  Config saved to: ${getConfigPath()}\n`);
-
-      if (tokenResponse.expires_in) {
-        const hours = Math.round(tokenResponse.expires_in / 3600);
-        process.stdout.write(`  Token expires in: ${hours} hours\n`);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(`\n✗ Authentication failed: ${message}\n`);

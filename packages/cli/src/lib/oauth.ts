@@ -275,3 +275,41 @@ export async function completeOAuthFlow(
 export async function setApiToken(token: string): Promise<void> {
   await setAuthToken(token);
 }
+
+/**
+ * Refresh an access token using the refresh token
+ *
+ * Used to proactively refresh tokens before they expire, so users
+ * don't get logged out unexpectedly.
+ *
+ * Per RFC 6749 §6 and RFC 8628 §5.6, public clients (like CLIs) can refresh
+ * tokens with just client_id, without requiring client_secret.
+ *
+ * @see https://docs.sentry.io/api/auth/#refreshing-tokens
+ * @see https://datatracker.ietf.org/doc/html/rfc6749#section-6
+ * @see https://datatracker.ietf.org/doc/html/rfc8628#section-5.6
+ */
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<TokenResponse> {
+  if (!SENTRY_CLIENT_ID) {
+    throw new Error("SENTRY_CLIENT_ID is required for token refresh");
+  }
+
+  const response = await fetch(`${SENTRY_URL}/oauth/token/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: SENTRY_CLIENT_ID,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Token refresh failed: ${error}`);
+  }
+
+  return response.json() as Promise<TokenResponse>;
+}
