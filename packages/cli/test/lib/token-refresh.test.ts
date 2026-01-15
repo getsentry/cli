@@ -1,5 +1,11 @@
+/**
+ * Token Refresh Tests
+ *
+ * Verifies the background token refresh behavior.
+ */
+
 import { expect, test } from "bun:test";
-import { maybeRefreshTokenInBackground } from "./token-refresh.js";
+import { maybeRefreshTokenInBackground } from "../../src/lib/token-refresh.js";
 
 test("maybeRefreshTokenInBackground never throws", async () => {
   // Call directly - it should handle missing/invalid config gracefully
