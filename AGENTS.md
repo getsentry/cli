@@ -191,7 +191,52 @@ import type { SentryContext } from "../../context.js";
 import { getAuthToken } from "../../lib/config.js";
 ```
 
+## Commenting & Documentation (JSDoc-first)
+
+### Default Rule
+- **Prefer JSDoc over inline comments.**
+- Code should be readable without narrating what it already says.
+
+### Required: JSDoc
+Add JSDoc comments on:
+- **Every exported function, class, and type** (and important internal ones).
+- **Types/interfaces**: document each field/property (what it represents, units, allowed values, meaning of `null`, defaults).
+
+Include in JSDoc:
+- What it does
+- Key business rules / constraints
+- Assumptions and edge cases
+- Side effects
+- Why it exists (when non-obvious)
+
+### Inline Comments (rare)
+Inline comments are **allowed only** when they add information the code cannot express:
+- **"Why"** — business reason, constraint, historical context
+- **Non-obvious behavior** — surprising edge cases
+- **Workarounds** — bugs in dependencies, platform quirks
+- **Hardcoded values** — why hardcoded, what would break if changed
+
+Inline comments are **NOT allowed** if they just restate the code:
+```typescript
+// Bad:
+if (!person) // if no person  
+i++          // increment i   
+return result // return result 
+
+// Good:
+// Required by GDPR Article 17 — user requested deletion
+await deleteUserData(userId)
+```
+
+### Goal
+Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
+
 ## Testing (bun:test)
+
+**Test files go in `packages/cli/test/`**, not alongside source files.
+- Name test files: `*.test.ts`
+- Mirror source structure: `test/lib/config.test.ts` tests `src/lib/config.ts`
+- E2E tests go in `test/e2e/`
 
 ```typescript
 import { describe, expect, test, mock } from "bun:test";
@@ -217,3 +262,4 @@ mock.module("./some-module", () => ({
 | Add config types | `packages/cli/src/types/config.ts` |
 | Add utility | `packages/cli/src/lib/` |
 | Build scripts | `packages/cli/script/` |
+| Add tests | `packages/cli/test/` (mirror `src/` structure) |
