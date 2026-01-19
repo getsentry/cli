@@ -13,7 +13,7 @@
     },
     "packages/cli": {
       "name": "@betegon/sentry",
-      "version": "0.2.0",
+      "version": "0.10.0",
       "bin": {
         "sentry": "./bin/sentry",
       },
@@ -21,6 +21,7 @@
         "@ast-grep/napi": "^0.31.0",
         "@stricli/auto-complete": "^1.2.4",
         "@stricli/core": "^1.2.4",
+        "ky": "^1.14.2",
         "qrcode-terminal": "^0.12.0",
         "zod": "^3.24.0",
       },
@@ -110,6 +111,8 @@
     "glob": ["glob@13.0.0", "", { "dependencies": { "minimatch": "^10.1.1", "minipass": "^7.1.2", "path-scurry": "^2.0.0" } }, "sha512-tvZgpqk6fz4BaNZ66ZsRaZnbHvP/jG3uKJvAZOwEVUL4RTA5nJeeLYfyN9/VA8NX/V3IBG+hkeuGpKjvELkVhA=="],
 
     "jsonc-parser": ["jsonc-parser@3.3.1", "", {}, "sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ=="],
+
+    "ky": ["ky@1.14.2", "", {}, "sha512-q3RBbsO5A5zrPhB6CaCS8ZUv+NWCXv6JJT4Em0i264G9W0fdPB8YRfnnEi7Dm7X7omAkBIPojzYJ2D1oHTHqug=="],
 
     "lru-cache": ["lru-cache@11.2.4", "", {}, "sha512-B5Y16Jr9LB9dHVkh6ZevG+vAbOsNOYCX+sXvFWFu7B3Iz5mijW3zdbMyhsh8ANd2mSWBYdJgnqi+mL7/LrOPYg=="],
 
