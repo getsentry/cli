@@ -29,8 +29,8 @@ turbo typecheck                          # Check all packages
 bun run typecheck                        # Check single package (from packages/cli)
 
 # Linting & Formatting
-npx ultracite check                      # Check for issues
-npx ultracite fix                        # Auto-fix issues (run before committing)
+bun run lint                             # Check for issues (via turbo)
+bun run lint:fix                         # Auto-fix issues (run before committing)
 
 # Testing
 bun test                                 # Run all tests
