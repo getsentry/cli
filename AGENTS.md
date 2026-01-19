@@ -147,25 +147,24 @@ if (result.success) {
 
 ### Error Handling
 
-```typescript
-// Custom error classes extend Error
-export class SentryApiError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "SentryApiError";
-    this.status = status;
-  }
-}
+All CLI errors extend the `CliError` base class from `src/lib/errors.ts`:
 
-// In commands: catch and write to stderr
-try {
-  // ...
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`Error: ${message}\n`);
-  process.exitCode = 1;
-}
+```typescript
+// Error hierarchy in src/lib/errors.ts
+CliError (base)
+├── ApiError (HTTP/API failures - status, detail, endpoint)
+├── AuthError (authentication - reason: 'not_authenticated' | 'expired' | 'invalid')
+├── ConfigError (configuration - suggestion?)
+├── ValidationError (input validation - field?)
+└── DeviceFlowError (OAuth flow - code)
+
+// Usage: throw specific error types
+import { ApiError, AuthError } from "../lib/errors.js";
+throw new AuthError("not_authenticated");
+throw new ApiError("Request failed", 404, "Not found");
+
+// In commands: let errors propagate to central handler
+// The bin.ts entry point catches and formats all errors consistently
 ```
 
 ### Async Config Functions
