@@ -135,7 +135,10 @@ export const listCommand = buildCommand({
       throw new ContextError(
         "Organization and project",
         "sentry issue list --org <org-slug> --project <project-slug>",
-        ["Set SENTRY_DSN environment variable for automatic detection"]
+        [
+          "Run from a directory with a Sentry-configured project",
+          "Set SENTRY_DSN environment variable",
+        ]
       );
     }
 

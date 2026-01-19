@@ -55,7 +55,8 @@ export const getCommand = buildCommand({
 
     if (!resolved) {
       throw new ContextError("Organization", "sentry org get <org-slug>", [
-        "Set SENTRY_DSN environment variable for automatic detection",
+        "Run from a directory with a Sentry-configured project",
+        "Set SENTRY_DSN environment variable",
       ]);
     }
 
