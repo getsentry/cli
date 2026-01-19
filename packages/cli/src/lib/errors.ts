@@ -130,6 +130,11 @@ export class ConfigError extends CliError {
 // Context Errors (Missing Required Context)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const DEFAULT_CONTEXT_ALTERNATIVES = [
+  "Run from a directory with a Sentry-configured project",
+  "Set SENTRY_DSN environment variable",
+] as const;
+
 /**
  * Missing required context errors (org, project, etc).
  *
@@ -137,14 +142,18 @@ export class ConfigError extends CliError {
  *
  * @param resource - What is required (e.g., "Organization", "Organization and project")
  * @param command - Primary usage example (e.g., "sentry org get <org-slug>")
- * @param alternatives - Optional alternative ways to resolve (e.g., "Set SENTRY_DSN...")
+ * @param alternatives - Alternative ways to resolve (defaults to DSN/project detection hints)
  */
 export class ContextError extends CliError {
   readonly resource: string;
   readonly command: string;
   readonly alternatives: string[];
 
-  constructor(resource: string, command: string, alternatives: string[] = []) {
+  constructor(
+    resource: string,
+    command: string,
+    alternatives: string[] = [...DEFAULT_CONTEXT_ALTERNATIVES]
+  ) {
     super(`${resource} is required.`);
     this.name = "ContextError";
     this.resource = resource;

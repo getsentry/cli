@@ -98,11 +98,7 @@ export const getCommand = buildCommand({
     if (!target) {
       throw new ContextError(
         "Organization and project",
-        `sentry event get ${eventId} --org <org-slug> --project <project-slug>`,
-        [
-          "Run from a directory with a Sentry-configured project",
-          "Set SENTRY_DSN environment variable",
-        ]
+        `sentry event get ${eventId} --org <org-slug> --project <project-slug>`
       );
     }
 

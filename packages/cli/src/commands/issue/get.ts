@@ -109,11 +109,7 @@ export const getCommand = buildCommand({
       if (!resolved) {
         throw new ContextError(
           "Organization",
-          `sentry issue get ${issueId} --org <org-slug>`,
-          [
-            "Run from a directory with a Sentry-configured project",
-            "Set SENTRY_DSN environment variable",
-          ]
+          `sentry issue get ${issueId} --org <org-slug>`
         );
       }
       issue = await getIssueByShortId(resolved.org, issueId);

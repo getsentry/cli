@@ -54,10 +54,7 @@ export const getCommand = buildCommand({
     const resolved = await resolveOrg({ org: orgSlug, cwd });
 
     if (!resolved) {
-      throw new ContextError("Organization", "sentry org get <org-slug>", [
-        "Run from a directory with a Sentry-configured project",
-        "Set SENTRY_DSN environment variable",
-      ]);
+      throw new ContextError("Organization", "sentry org get <org-slug>");
     }
 
     const org = await getOrganization(resolved.org);

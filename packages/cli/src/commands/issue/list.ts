@@ -134,11 +134,7 @@ export const listCommand = buildCommand({
     if (!target) {
       throw new ContextError(
         "Organization and project",
-        "sentry issue list --org <org-slug> --project <project-slug>",
-        [
-          "Run from a directory with a Sentry-configured project",
-          "Set SENTRY_DSN environment variable",
-        ]
+        "sentry issue list --org <org-slug> --project <project-slug>"
       );
     }
 
