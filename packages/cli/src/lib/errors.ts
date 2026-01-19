@@ -127,6 +127,49 @@ export class ConfigError extends CliError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Context Errors (Missing Required Context)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Missing required context errors (org, project, etc).
+ *
+ * Provides consistent error formatting with usage hints and alternatives.
+ *
+ * @param resource - What is required (e.g., "Organization", "Organization and project")
+ * @param command - Primary usage example (e.g., "sentry org get <org-slug>")
+ * @param alternatives - Optional alternative ways to resolve (e.g., "Set SENTRY_DSN...")
+ */
+export class ContextError extends CliError {
+  readonly resource: string;
+  readonly command: string;
+  readonly alternatives: string[];
+
+  constructor(resource: string, command: string, alternatives: string[] = []) {
+    super(`${resource} is required.`);
+    this.name = "ContextError";
+    this.resource = resource;
+    this.command = command;
+    this.alternatives = alternatives;
+  }
+
+  override format(): string {
+    const lines = [
+      `${this.resource} is required.`,
+      "",
+      "Specify it using:",
+      `  ${this.command}`,
+    ];
+    if (this.alternatives.length > 0) {
+      lines.push("", "Or:");
+      for (const alt of this.alternatives) {
+        lines.push(`  - ${alt}`);
+      }
+    }
+    return lines.join("\n");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Validation Errors
 // ─────────────────────────────────────────────────────────────────────────────
 

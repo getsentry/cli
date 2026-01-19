@@ -12,6 +12,7 @@ import {
   getLatestEvent,
   isShortId,
 } from "../../lib/api-client.js";
+import { ContextError } from "../../lib/errors.js";
 import {
   formatEventDetails,
   formatIssueDetails,
@@ -106,11 +107,10 @@ export const getCommand = buildCommand({
       // Short ID requires organization context
       const resolved = await resolveOrg({ org: flags.org, cwd });
       if (!resolved) {
-        throw new Error(
-          "Organization is required for short ID lookup.\n\n" +
-            "Please specify it using:\n" +
-            `  sentry issue get ${issueId} --org <org-slug>\n\n` +
-            "Or set SENTRY_DSN environment variable for automatic detection."
+        throw new ContextError(
+          "Organization",
+          `sentry issue get ${issueId} --org <org-slug>`,
+          ["Set SENTRY_DSN environment variable for automatic detection"]
         );
       }
       issue = await getIssueByShortId(resolved.org, issueId);
