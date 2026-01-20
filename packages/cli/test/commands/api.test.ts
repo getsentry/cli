@@ -42,29 +42,14 @@ describe("parseMethod", () => {
 });
 
 describe("parseFieldValue", () => {
-  test("parses JSON strings", () => {
+  test("parses valid JSON values", () => {
     expect(parseFieldValue('"hello"')).toBe("hello");
-  });
-
-  test("parses JSON numbers", () => {
     expect(parseFieldValue("123")).toBe(123);
     expect(parseFieldValue("3.14")).toBe(3.14);
-  });
-
-  test("parses JSON booleans", () => {
     expect(parseFieldValue("true")).toBe(true);
     expect(parseFieldValue("false")).toBe(false);
-  });
-
-  test("parses JSON null", () => {
     expect(parseFieldValue("null")).toBe(null);
-  });
-
-  test("parses JSON arrays", () => {
     expect(parseFieldValue("[1,2,3]")).toEqual([1, 2, 3]);
-  });
-
-  test("parses JSON objects", () => {
     expect(parseFieldValue('{"a":1}')).toEqual({ a: 1 });
   });
 
