@@ -13,6 +13,11 @@ on:
       - '.github/workflows/test.yml'
   workflow_dispatch: # Manual trigger
 
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
 jobs:
   test:
     name: Run Tests
@@ -38,4 +43,11 @@ jobs:
           SENTRY_TEST_AUTH_TOKEN: ${{ secrets.SENTRY_TEST_AUTH_TOKEN }}
           SENTRY_TEST_ORG: ${{ secrets.SENTRY_TEST_ORG }}
           SENTRY_TEST_PROJECT: ${{ secrets.SENTRY_TEST_PROJECT }}
-        run: bun test
+        run: bun test  --reporter=junit --reporter-outfile=./report.junit.xml --coverage --coverage-reporter=lcov
+
+      - name: Upload Coverage
+        uses: getsentry/codecov-action@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          post-pr-comment: true
+
