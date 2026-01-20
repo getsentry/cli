@@ -49,7 +49,5 @@ jobs:
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          directory: ./coverage
-          coverage-format: lcov
           post-pr-comment: true
 
