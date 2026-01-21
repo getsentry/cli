@@ -44,6 +44,10 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -59,7 +63,12 @@ jobs:
           SENTRY_TEST_AUTH_TOKEN: ${{ secrets.SENTRY_TEST_AUTH_TOKEN }}
           SENTRY_TEST_ORG: ${{ secrets.SENTRY_TEST_ORG }}
           SENTRY_TEST_PROJECT: ${{ secrets.SENTRY_TEST_PROJECT }}
-        run: bun test
+        run: bun test --coverage --coverage-reporter=lcov
+      - name: Upload Coverage
+        uses: getsentry/codecov-action@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          post-pr-comment: true
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
