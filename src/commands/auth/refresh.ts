@@ -6,7 +6,12 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { readConfig, setAuthToken } from "../../lib/config.js";
+import {
+  DEFAULT_TOKEN_LIFETIME_MS,
+  REFRESH_THRESHOLD,
+  readConfig,
+  setAuthToken,
+} from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
@@ -24,12 +29,6 @@ type RefreshResult = {
   expiresIn?: number;
   expiresAt?: string;
 };
-
-/** Refresh when less than 10% of token lifetime remains (matches config.ts) */
-const REFRESH_THRESHOLD = 0.1;
-
-/** Default token lifetime assumption (1 hour) for tokens without issuedAt */
-const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
 
 export const refreshCommand = buildCommand({
   docs: {

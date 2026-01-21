@@ -113,10 +113,10 @@ export async function getAuthToken(): Promise<string | undefined> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Refresh when less than 10% of token lifetime remains */
-const REFRESH_THRESHOLD = 0.1;
+export const REFRESH_THRESHOLD = 0.1;
 
 /** Default token lifetime assumption (1 hour) for tokens without issuedAt */
-const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
+export const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
 
 /** Shared promise for concurrent refresh requests */
 let refreshPromise: Promise<string> | null = null;
