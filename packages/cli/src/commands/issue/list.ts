@@ -57,7 +57,7 @@ function writeListHeader(
   count: number
 ): void {
   stdout.write(`Issues in ${org}/${project} (showing ${count}):\n\n`);
-  stdout.write(muted(formatIssueListHeader() + "\n"));
+  stdout.write(muted(`${formatIssueListHeader()}\n`));
   stdout.write(`${divider(80)}\n`);
 }
 

@@ -168,7 +168,9 @@ export function divider(length = 80, char = "─"): string {
  * - >= 3 days: Short date (e.g., "Jan 18")
  */
 export function formatRelativeTime(dateString: string | undefined): string {
-  if (!dateString) return muted("—").padEnd(10);
+  if (!dateString) {
+    return muted("—").padEnd(10);
+  }
 
   const date = new Date(dateString);
   const now = Date.now();
@@ -262,7 +264,7 @@ function wrapTitle(text: string, startCol: number, termWidth: number): string {
   }
 
   // First line has no indent, continuation lines do
-  return lines.join("\n" + indent);
+  return lines.join(`\n${indent}`);
 }
 
 /**
