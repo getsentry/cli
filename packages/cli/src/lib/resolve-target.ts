@@ -24,6 +24,7 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
+import { AuthError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -248,8 +249,12 @@ async function resolveDsnToTarget(
       detectedFrom,
       packagePath: dsn.packagePath,
     };
-  } catch {
-    // API call failed, skip this DSN
+  } catch (error) {
+    // Auth errors should propagate - user needs to log in
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Other errors (API, network) - skip this DSN silently
     return null;
   }
 }
