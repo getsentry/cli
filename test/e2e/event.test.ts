@@ -42,7 +42,7 @@ afterEach(() => {
   if (originalConfigDir) {
     process.env.SENTRY_CLI_CONFIG_DIR = originalConfigDir;
   } else {
-    process.env.SENTRY_CLI_CONFIG_DIR = undefined;
+    delete process.env.SENTRY_CLI_CONFIG_DIR;
   }
 });
 

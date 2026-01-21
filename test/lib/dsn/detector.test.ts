@@ -46,11 +46,11 @@ describe("DSN Detector (New Module)", () => {
     // Clear any cached DSN for the test directory
     await clearDsnCache(testDir);
     // Clear SENTRY_DSN env var
-    process.env.SENTRY_DSN = undefined;
+    delete process.env.SENTRY_DSN;
   });
 
   afterEach(() => {
-    process.env.SENTRY_DSN = undefined;
+    delete process.env.SENTRY_DSN;
     cleanupDir(testDir);
     cleanupDir(TEST_CONFIG_DIR);
   });
