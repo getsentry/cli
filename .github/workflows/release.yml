@@ -11,14 +11,14 @@ on:
         required: false
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
+  ci:
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
     secrets: inherit
 
   release:
-    needs: [build]
+    needs: [ci]
     uses: getsentry/craft/.github/workflows/release.yml@v2
     with:
       version: ${{ inputs.version }}
