@@ -124,3 +124,45 @@ export function formatResolutionError(error: Error, dsnRaw: string): string {
 
   return lines.join("\n");
 }
+
+/**
+ * Project info needed for footer formatting.
+ * Avoids circular dependency with resolve-target.ts.
+ */
+type ProjectInfo = {
+  orgDisplay: string;
+  projectDisplay: string;
+  detectedFrom?: string;
+};
+
+/**
+ * Format a footer message when multiple Sentry projects were detected.
+ * Used by commands to inform users about monorepo context.
+ *
+ * @param projects - Array of resolved project info
+ * @returns Formatted footer message
+ *
+ * @example
+ * ```
+ * Found 2 Sentry projects:
+ *   • my-org / frontend (from packages/frontend/.env)
+ *   • my-org / backend (from src/sentry.ts)
+ * Use --org and --project to target a specific project.
+ * ```
+ */
+export function formatMultipleProjectsFooter(projects: ProjectInfo[]): string {
+  if (projects.length <= 1) {
+    return "";
+  }
+
+  const lines = [`Found ${projects.length} Sentry projects:`];
+
+  for (const p of projects) {
+    const source = p.detectedFrom ? ` (from ${p.detectedFrom})` : "";
+    lines.push(`  • ${p.orgDisplay} / ${p.projectDisplay}${source}`);
+  }
+
+  lines.push("Use --org and --project to target a specific project.");
+
+  return lines.join("\n");
+}

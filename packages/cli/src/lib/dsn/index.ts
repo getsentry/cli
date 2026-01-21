@@ -38,6 +38,7 @@ export { getAccessibleProjects, resolveProject } from "./resolver.js";
 
 export {
   formatConflictError,
+  formatMultipleProjectsFooter,
   formatNoDsnError,
   formatResolutionError,
 } from "./errors.js";
@@ -74,6 +75,7 @@ export type {
 export {
   createDetectedDsn,
   extractOrgIdFromHost,
+  inferPackagePath,
   isValidDsn,
   parseDsn,
 } from "./parser.js";

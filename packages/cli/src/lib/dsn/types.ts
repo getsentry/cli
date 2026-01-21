@@ -45,6 +45,8 @@ export type DetectedDsn = ParsedDsn & {
   source: DsnSource;
   /** File path (relative to cwd) if detected from file */
   sourcePath?: string;
+  /** Package/app directory path for monorepo grouping (e.g., "packages/frontend", "apps/web") */
+  packagePath?: string;
   /** Cached resolution info if available */
   resolved?: ResolvedProjectInfo;
 };
@@ -126,15 +128,34 @@ export const CachedDsnEntrySchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Result of DSN detection (may have conflicts)
+ * Result of DSN detection with support for monorepos.
+ *
+ * In monorepos, multiple DSNs are valid (different packages/apps may have different Sentry projects).
+ * The `primary` DSN is always the first one found, and `all` contains every detected DSN.
  */
 export type DsnDetectionResult = {
-  /** Primary DSN to use (null if conflict or not found) */
+  /** Primary DSN to use (first found, null only if none found) */
   primary: DetectedDsn | null;
-  /** All detected DSNs (for conflict reporting) */
+  /** All detected DSNs across the codebase */
   all: DetectedDsn[];
-  /** Whether there's a conflict (multiple different DSNs) */
-  conflict: boolean;
+  /** Whether multiple different DSNs were found (common in monorepos) */
+  hasMultiple: boolean;
   /** Detected project language (for future use) */
   language?: string;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Common monorepo root directories to scan for packages/apps with their own DSN.
+ * Used by both env-file detection and package path inference.
+ */
+export const MONOREPO_ROOTS = [
+  "packages",
+  "apps",
+  "libs",
+  "services",
+  "modules",
+] as const;

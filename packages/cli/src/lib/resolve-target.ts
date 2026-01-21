@@ -17,7 +17,13 @@ import {
   getDefaultProject,
   setCachedProject,
 } from "./config.js";
-import { detectDsn, getDsnSourceDescription } from "./dsn/index.js";
+import type { DetectedDsn } from "./dsn/index.js";
+import {
+  detectAllDsns,
+  detectDsn,
+  formatMultipleProjectsFooter,
+  getDsnSourceDescription,
+} from "./dsn/index.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -37,6 +43,18 @@ export type ResolvedTarget = {
   projectDisplay: string;
   /** Source description if auto-detected (e.g., ".env.local", "src/index.ts") */
   detectedFrom?: string;
+  /** Package path in monorepo (e.g., "packages/frontend") */
+  packagePath?: string;
+};
+
+/**
+ * Result of resolving all targets (for monorepo-aware commands).
+ */
+export type ResolvedTargets = {
+  /** All resolved targets */
+  targets: ResolvedTarget[];
+  /** Footer message to display if multiple projects detected */
+  footer?: string;
 };
 
 /**
@@ -166,6 +184,160 @@ export async function resolveOrgFromDsn(
     org: dsn.orgId,
     detectedFrom,
   };
+}
+
+/**
+ * Resolve a single detected DSN to a ResolvedTarget.
+ * Uses cache when available, otherwise fetches from API.
+ *
+ * @param dsn - Detected DSN to resolve
+ * @returns Resolved target or null if resolution failed
+ */
+async function resolveDsnToTarget(
+  dsn: DetectedDsn
+): Promise<ResolvedTarget | null> {
+  if (!(dsn.orgId && dsn.projectId)) {
+    return null;
+  }
+
+  const detectedFrom = getDsnSourceDescription(dsn);
+
+  // Check cache first
+  const cached = await getCachedProject(dsn.orgId, dsn.projectId);
+  if (cached) {
+    return {
+      org: cached.orgSlug,
+      project: cached.projectSlug,
+      orgDisplay: cached.orgName,
+      projectDisplay: cached.projectName,
+      detectedFrom,
+      packagePath: dsn.packagePath,
+    };
+  }
+
+  // Cache miss — fetch project details and cache them
+  try {
+    const projectInfo = await getProject(dsn.orgId, dsn.projectId);
+
+    if (projectInfo.organization) {
+      await setCachedProject(dsn.orgId, dsn.projectId, {
+        orgSlug: projectInfo.organization.slug,
+        orgName: projectInfo.organization.name,
+        projectSlug: projectInfo.slug,
+        projectName: projectInfo.name,
+      });
+
+      return {
+        org: projectInfo.organization.slug,
+        project: projectInfo.slug,
+        orgDisplay: projectInfo.organization.name,
+        projectDisplay: projectInfo.name,
+        detectedFrom,
+        packagePath: dsn.packagePath,
+      };
+    }
+
+    // Fallback to numeric IDs if org info missing
+    return {
+      org: dsn.orgId,
+      project: dsn.projectId,
+      orgDisplay: dsn.orgId,
+      projectDisplay: projectInfo.name,
+      detectedFrom,
+      packagePath: dsn.packagePath,
+    };
+  } catch {
+    // API call failed, skip this DSN
+    return null;
+  }
+}
+
+/**
+ * Resolve all targets for monorepo-aware commands.
+ *
+ * When multiple DSNs are detected, resolves all of them in parallel
+ * and returns a footer message for display.
+ *
+ * Resolution priority:
+ * 1. CLI flags (--org and --project) - returns single target
+ * 2. Config defaults - returns single target
+ * 3. DSN auto-detection - may return multiple targets
+ *
+ * @param options - Resolution options with flags and cwd
+ * @returns All resolved targets and optional footer message
+ * @throws Error if only one of org/project flags is provided
+ */
+export async function resolveAllTargets(
+  options: ResolveOptions
+): Promise<ResolvedTargets> {
+  const { org, project, cwd } = options;
+
+  // 1. CLI flags take priority (both must be provided together)
+  if (org && project) {
+    return {
+      targets: [
+        {
+          org,
+          project,
+          orgDisplay: org,
+          projectDisplay: project,
+        },
+      ],
+    };
+  }
+
+  // Error if only one flag is provided
+  if (org || project) {
+    const missing = org ? "--project" : "--org";
+    const provided = org ? "--org" : "--project";
+    throw new Error(
+      `${provided} was specified but ${missing} is also required.\n` +
+        "Please provide both --org and --project flags together."
+    );
+  }
+
+  // 2. Config defaults
+  const defaultOrg = await getDefaultOrganization();
+  const defaultProject = await getDefaultProject();
+  if (defaultOrg && defaultProject) {
+    return {
+      targets: [
+        {
+          org: defaultOrg,
+          project: defaultProject,
+          orgDisplay: defaultOrg,
+          projectDisplay: defaultProject,
+        },
+      ],
+    };
+  }
+
+  // 3. DSN auto-detection (may find multiple in monorepos)
+  const detection = await detectAllDsns(cwd);
+
+  if (detection.all.length === 0) {
+    return { targets: [] };
+  }
+
+  // Resolve all DSNs in parallel
+  const resolvedTargets = await Promise.all(
+    detection.all.map((dsn) => resolveDsnToTarget(dsn))
+  );
+
+  // Filter out failed resolutions
+  const targets = resolvedTargets.filter(
+    (t): t is ResolvedTarget => t !== null
+  );
+
+  if (targets.length === 0) {
+    return { targets: [] };
+  }
+
+  // Format footer if multiple projects detected
+  const footer =
+    targets.length > 1 ? formatMultipleProjectsFooter(targets) : undefined;
+
+  return { targets, footer };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

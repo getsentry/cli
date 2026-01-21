@@ -3,11 +3,15 @@
  *
  * Detects DSN from .env files in the project directory.
  * Supports various .env file variants in priority order.
+ *
+ * For monorepos, also scans common package directories (packages/, apps/, etc.)
+ * to find DSNs in individual packages/apps.
  */
 
 import { join } from "node:path";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
+import { MONOREPO_ROOTS } from "./types.js";
 
 /**
  * .env file names to search (in priority order)
@@ -93,10 +97,11 @@ export async function detectFromEnvFiles(
 }
 
 /**
- * Detect DSN from ALL .env files (for conflict detection)
+ * Detect DSN from ALL .env files including monorepo packages.
  *
- * Unlike detectFromEnvFiles, this doesn't stop at the first match.
- * Used to find all DSNs when checking for conflicts.
+ * Searches:
+ * 1. Root .env files (.env.local, .env, etc.)
+ * 2. Monorepo package directories (packages/star/.env, apps/star/.env, etc.)
  *
  * @param cwd - Directory to search in
  * @returns Array of all detected DSNs
@@ -106,6 +111,7 @@ export async function detectFromAllEnvFiles(
 ): Promise<DetectedDsn[]> {
   const results: DetectedDsn[] = [];
 
+  // 1. Check root .env files
   for (const filename of ENV_FILES) {
     const filepath = join(cwd, filename);
     const file = Bun.file(filepath);
@@ -126,6 +132,85 @@ export async function detectFromAllEnvFiles(
       }
     } catch {
       // Skip files we can't read
+    }
+  }
+
+  // 2. Check monorepo package directories
+  const monorepoResults = await detectEnvFilesInMonorepo(cwd);
+  results.push(...monorepoResults);
+
+  return results;
+}
+
+/**
+ * Try to detect DSN from .env files in a specific package directory.
+ *
+ * @param pkgDir - Full path to the package directory
+ * @param packagePath - Relative package path (e.g., "packages/frontend")
+ * @returns Detected DSN or null if not found
+ */
+async function detectDsnInPackage(
+  pkgDir: string,
+  packagePath: string
+): Promise<DetectedDsn | null> {
+  for (const envFile of ENV_FILES) {
+    const envPath = join(pkgDir, envFile);
+    const file = Bun.file(envPath);
+
+    if (!(await file.exists())) {
+      continue;
+    }
+
+    try {
+      const content = await file.text();
+      const dsn = parseEnvFile(content);
+
+      if (dsn) {
+        const sourcePath = `${packagePath}/${envFile}`;
+        return createDetectedDsn(dsn, "env_file", sourcePath, packagePath);
+      }
+    } catch {
+      // Skip files we can't read
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detect DSN from .env files in monorepo package directories.
+ *
+ * Scans common monorepo patterns like packages/*, apps/*, etc.
+ * for .env files containing SENTRY_DSN.
+ *
+ * @param cwd - Root directory to search from
+ * @returns Array of detected DSNs with packagePath set
+ */
+export async function detectEnvFilesInMonorepo(
+  cwd: string
+): Promise<DetectedDsn[]> {
+  const results: DetectedDsn[] = [];
+  const pkgGlob = new Bun.Glob("*");
+
+  for (const monorepoRoot of MONOREPO_ROOTS) {
+    const rootDir = join(cwd, monorepoRoot);
+
+    try {
+      // Scan for subdirectories (each is a potential package/app)
+      for await (const pkgName of pkgGlob.scan({
+        cwd: rootDir,
+        onlyFiles: false,
+      })) {
+        const pkgDir = join(rootDir, pkgName);
+        const packagePath = `${monorepoRoot}/${pkgName}`;
+
+        const detected = await detectDsnInPackage(pkgDir, packagePath);
+        if (detected) {
+          results.push(detected);
+        }
+      }
+    } catch {
+      // Directory doesn't exist or scan failed, skip this monorepo root
     }
   }
 

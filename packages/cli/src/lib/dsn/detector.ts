@@ -96,15 +96,15 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
 }
 
 /**
- * Detect all DSNs in a directory (for conflict detection)
+ * Detect all DSNs in a directory (supports monorepos)
  *
  * Unlike detectDsn, this finds ALL DSNs from all sources.
- * Used when we need to check for conflicts.
+ * Useful for monorepos with multiple Sentry projects.
  *
  * Collection order matches priority: code > .env files > env var
  *
  * @param cwd - Directory to search in
- * @returns Detection result with all found DSNs and conflict status
+ * @returns Detection result with all found DSNs and hasMultiple flag
  */
 export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   const allDsns: DetectedDsn[] = [];
@@ -124,7 +124,7 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     addDsn(dsn);
   }
 
-  // 2. Check all .env files
+  // 2. Check all .env files (includes monorepo packages/apps)
   const envFileDsns = await detectFromAllEnvFiles(cwd);
   for (const dsn of envFileDsns) {
     addDsn(dsn);
@@ -136,14 +136,13 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     addDsn(envDsn);
   }
 
-  // Determine if there's a conflict (multiple DIFFERENT DSNs)
-  const uniqueRawDsns = new Set(allDsns.map((d) => d.raw));
-  const conflict = uniqueRawDsns.size > 1;
+  // Multiple DSNs is valid in monorepos (different packages/apps)
+  const hasMultiple = allDsns.length > 1;
 
   return {
-    primary: conflict ? null : (allDsns[0] ?? null),
+    primary: allDsns[0] ?? null,
     all: allDsns,
-    conflict,
+    hasMultiple,
   };
 }
 

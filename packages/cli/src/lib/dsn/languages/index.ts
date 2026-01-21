@@ -6,7 +6,7 @@
  */
 
 import { extname, join } from "node:path";
-import { createDetectedDsn } from "../parser.js";
+import { createDetectedDsn, inferPackagePath } from "../parser.js";
 import type { DetectedDsn } from "../types.js";
 import { goDetector } from "./go.js";
 import { javaDetector } from "./java.js";
@@ -103,7 +103,8 @@ export async function detectFromCode(cwd: string): Promise<DetectedDsn | null> {
       const dsn = detector.extractDsn(content);
 
       if (dsn) {
-        return createDetectedDsn(dsn, "code", relativePath);
+        const packagePath = inferPackagePath(relativePath);
+        return createDetectedDsn(dsn, "code", relativePath, packagePath);
       }
     } catch {
       // Skip files we can't read
@@ -114,11 +115,12 @@ export async function detectFromCode(cwd: string): Promise<DetectedDsn | null> {
 }
 
 /**
- * Detect DSN from ALL source code files (for conflict detection).
+ * Detect DSN from ALL source code files.
  * Unlike detectFromCode, this doesn't stop at the first match.
+ * Useful for monorepos with multiple Sentry projects.
  *
  * @param cwd - Directory to search in
- * @returns Array of all detected DSNs
+ * @returns Array of all detected DSNs with packagePath inferred
  */
 export async function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
   const results: DetectedDsn[] = [];
@@ -140,7 +142,13 @@ export async function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
       const dsn = detector.extractDsn(content);
 
       if (dsn) {
-        const detected = createDetectedDsn(dsn, "code", relativePath);
+        const packagePath = inferPackagePath(relativePath);
+        const detected = createDetectedDsn(
+          dsn,
+          "code",
+          relativePath,
+          packagePath
+        );
         if (detected) {
           results.push(detected);
         }

@@ -9,7 +9,12 @@
  * For SaaS DSNs, the host contains the org ID in the pattern: oXXX.ingest...
  */
 
-import type { DetectedDsn, DsnSource, ParsedDsn } from "./types.js";
+import {
+  type DetectedDsn,
+  type DsnSource,
+  MONOREPO_ROOTS,
+  type ParsedDsn,
+} from "./types.js";
 
 /**
  * Regular expression to match org ID from Sentry SaaS ingest hosts
@@ -113,12 +118,14 @@ export function isValidDsn(value: string): boolean {
  * @param raw - Raw DSN string
  * @param source - Where the DSN was detected from
  * @param sourcePath - Relative path to source file (for file-based sources)
+ * @param packagePath - Package/app directory for monorepo grouping (e.g., "packages/frontend")
  * @returns DetectedDsn with parsed components, or null if DSN is invalid
  */
 export function createDetectedDsn(
   raw: string,
   source: DsnSource,
-  sourcePath?: string
+  sourcePath?: string,
+  packagePath?: string
 ): DetectedDsn | null {
   const parsed = parseDsn(raw);
   if (!parsed) {
@@ -130,5 +137,34 @@ export function createDetectedDsn(
     raw,
     source,
     sourcePath,
+    packagePath,
   };
+}
+
+/**
+ * Infer package path from a source file path.
+ *
+ * Detects common monorepo patterns like:
+ * - packages/frontend/src/index.ts → "packages/frontend"
+ * - apps/web/.env → "apps/web"
+ * - src/index.ts → undefined (root project)
+ *
+ * @param sourcePath - Relative path to source file
+ * @returns Package path or undefined if at root
+ */
+export function inferPackagePath(sourcePath: string): string | undefined {
+  const parts = sourcePath.split("/");
+  const root = parts[0];
+  const pkg = parts[1];
+
+  // Check if path starts with a common monorepo directory pattern
+  if (
+    root &&
+    pkg &&
+    MONOREPO_ROOTS.includes(root as (typeof MONOREPO_ROOTS)[number])
+  ) {
+    return `${root}/${pkg}`;
+  }
+
+  return;
 }
