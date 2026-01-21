@@ -17,8 +17,8 @@ import {
   type SentryProject,
   SentryProjectSchema,
 } from "../types/index.js";
-import { getAuthToken } from "./config.js";
-import { ApiError, AuthError } from "./errors.js";
+import { getValidAuthToken } from "./config.js";
+import { ApiError } from "./errors.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";
 
@@ -68,18 +68,23 @@ type ApiRequestOptions<T = unknown> = {
   schema?: z.ZodType<T>;
 };
 
+/** Track if we've already attempted a 401 retry to prevent infinite loops */
+let hasAttemptedRefreshRetry = false;
+
 /**
  * Create a configured ky instance with retry, timeout, and authentication.
+ *
+ * Features:
+ * - Automatic token refresh via getValidAuthToken() (proactive)
+ * - 401 response handling with token refresh and retry (reactive)
+ * - Configurable retry for transient errors
  *
  * @throws {AuthError} When not authenticated
  * @throws {ApiError} When API request fails
  */
 async function createApiClient(): Promise<KyInstance> {
-  const token = await getAuthToken();
-
-  if (!token) {
-    throw new AuthError("not_authenticated");
-  }
+  // getValidAuthToken() handles proactive token refresh
+  const token = await getValidAuthToken();
 
   return ky.create({
     prefixUrl: getApiBaseUrl(),
@@ -95,6 +100,34 @@ async function createApiClient(): Promise<KyInstance> {
       "Content-Type": "application/json",
     },
     hooks: {
+      afterResponse: [
+        async (request, options, response) => {
+          // On 401, try refreshing token and retry once
+          if (response.status === 401 && !hasAttemptedRefreshRetry) {
+            hasAttemptedRefreshRetry = true;
+            try {
+              // Get a fresh token (will trigger refresh if needed)
+              const newToken = await getValidAuthToken();
+
+              // Retry the request with the new token
+              return ky(request.url, {
+                ...options,
+                headers: {
+                  ...options.headers,
+                  Authorization: `Bearer ${newToken}`,
+                },
+                retry: 0, // Don't retry the retry
+              });
+            } catch {
+              // Refresh failed, return original 401 response
+              return response;
+            } finally {
+              hasAttemptedRefreshRetry = false;
+            }
+          }
+          return response;
+        },
+      ],
       beforeError: [
         async (error) => {
           const { response } = error;

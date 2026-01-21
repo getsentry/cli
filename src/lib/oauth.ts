@@ -12,7 +12,7 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { setAuthToken } from "./config.js";
-import { ApiError, ConfigError, DeviceFlowError } from "./errors.js";
+import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -309,4 +309,95 @@ export async function completeOAuthFlow(
  */
 export async function setApiToken(token: string): Promise<void> {
   await setAuthToken(token);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Token Refresh (RFC 6749 Section 6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Refresh an access token using a refresh token.
+ *
+ * Implements RFC 6749 Section 6 - Refreshing an Access Token.
+ * The server may optionally return a new refresh token (rotation).
+ *
+ * @param refreshToken - The refresh token from the previous authorization
+ * @returns New token response with updated access_token and optional new refresh_token
+ * @throws {ConfigError} When SENTRY_CLIENT_ID is not configured
+ * @throws {AuthError} When refresh fails (token revoked, expired, or invalid)
+ * @throws {ApiError} When unable to connect to Sentry
+ */
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<TokenResponse> {
+  if (!SENTRY_CLIENT_ID) {
+    throw new ConfigError(
+      "SENTRY_CLIENT_ID is required for token refresh",
+      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${SENTRY_URL}/oauth/token/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: SENTRY_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+  } catch (error) {
+    const isConnectionError =
+      error instanceof Error &&
+      (error.message.includes("ECONNREFUSED") ||
+        error.message.includes("fetch failed") ||
+        error.message.includes("network"));
+
+    if (isConnectionError) {
+      throw new ApiError(
+        `Cannot connect to Sentry at ${SENTRY_URL}`,
+        0,
+        "Check your network connection and SENTRY_URL configuration"
+      );
+    }
+    throw error;
+  }
+
+  if (!response.ok) {
+    // Parse error response for better error messages
+    let errorDetail = "Token refresh failed";
+    try {
+      const errorData = await response.json();
+      const errorResult = TokenErrorResponseSchema.safeParse(errorData);
+      if (errorResult.success) {
+        errorDetail =
+          errorResult.data.error_description ?? errorResult.data.error;
+      }
+    } catch {
+      // Ignore JSON parse errors
+    }
+
+    // Common refresh failures: token revoked, expired, or invalid
+    throw new AuthError(
+      "expired",
+      `Session expired: ${errorDetail}. Run 'sentry auth login' to re-authenticate.`
+    );
+  }
+
+  const data = await response.json();
+  const result = TokenResponseSchema.safeParse(data);
+
+  if (!result.success) {
+    throw new ApiError(
+      "Invalid response from token refresh endpoint",
+      response.status,
+      result.error.errors.map((e) => e.message).join(", "),
+      "/oauth/token/"
+    );
+  }
+
+  return result.data;
 }

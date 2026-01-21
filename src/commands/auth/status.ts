@@ -43,6 +43,13 @@ function writeTokenInfo(
   if (config.auth.expiresAt) {
     stdout.write(`Expires: ${formatExpiration(config.auth.expiresAt)}\n`);
   }
+
+  // Show refresh token status
+  if (config.auth.refreshToken) {
+    stdout.write(`Auto-refresh: ${success("enabled")}\n`);
+  } else {
+    stdout.write("Auto-refresh: disabled (no refresh token)\n");
+  }
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 } from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
+import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 
@@ -126,8 +127,9 @@ export const loginCommand = buildCommand({
     stdout.write(`  Config saved to: ${getConfigPath()}\n`);
 
     if (tokenResponse.expires_in) {
-      const hours = Math.round(tokenResponse.expires_in / 3600);
-      stdout.write(`  Token expires in: ${hours} hours\n`);
+      stdout.write(
+        `  Token expires in: ${formatDuration(tokenResponse.expires_in)}\n`
+      );
     }
   },
 });
