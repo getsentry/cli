@@ -334,10 +334,20 @@ export async function resolveAllTargets(
     detection.all.map((dsn) => resolveDsnToTarget(dsn))
   );
 
-  // Filter out failed resolutions
-  const targets = resolvedTargets.filter(
-    (t): t is ResolvedTarget => t !== null
-  );
+  // Filter out failed resolutions and deduplicate by org+project
+  // (multiple DSNs with different keys can point to same project)
+  const seen = new Set<string>();
+  const targets = resolvedTargets.filter((t): t is ResolvedTarget => {
+    if (t === null) {
+      return false;
+    }
+    const key = `${t.org}:${t.project}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 
   if (targets.length === 0) {
     return {
