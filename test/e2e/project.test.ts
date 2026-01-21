@@ -56,30 +56,38 @@ describe("sentry org list", () => {
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test("lists organizations with valid auth", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "lists organizations with valid auth",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["org", "list"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["org", "list"], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    // Should contain header and at least one org
-    expect(result.stdout).toContain("SLUG");
-  });
+      expect(result.exitCode).toBe(0);
+      // Should contain header and at least one org
+      expect(result.stdout).toContain("SLUG");
+    },
+    { timeout: 15_000 }
+  );
 
-  test("supports --json output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "supports --json output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["org", "list", "--json"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["org", "list", "--json"], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThan(0);
-  });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBeGreaterThan(0);
+    },
+    { timeout: 15_000 }
+  );
 });
 
 describe("sentry project list", () => {
@@ -92,35 +100,43 @@ describe("sentry project list", () => {
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test("lists projects with valid auth and org filter", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "lists projects with valid auth and org filter",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    // Use --org flag to filter by organization
-    const result = await runCli(
-      ["project", "list", "--org", TEST_ORG, "--limit", "5"],
-      {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-      }
-    );
+      // Use --org flag to filter by organization
+      const result = await runCli(
+        ["project", "list", "--org", TEST_ORG, "--limit", "5"],
+        {
+          env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        }
+      );
 
-    expect(result.exitCode).toBe(0);
-  });
+      expect(result.exitCode).toBe(0);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("supports --json output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "supports --json output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    // Use --org flag to filter by organization
-    const result = await runCli(
-      ["project", "list", "--org", TEST_ORG, "--json", "--limit", "5"],
-      {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-      }
-    );
+      // Use --org flag to filter by organization
+      const result = await runCli(
+        ["project", "list", "--org", TEST_ORG, "--json", "--limit", "5"],
+        {
+          env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        }
+      );
 
-    expect(result.exitCode).toBe(0);
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
-  });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+    },
+    { timeout: 15_000 }
+  );
 });
 
 describe("sentry org get", () => {
@@ -133,40 +149,52 @@ describe("sentry org get", () => {
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test("gets organization details", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "gets organization details",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["org", "get", TEST_ORG], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["org", "get", TEST_ORG], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(TEST_ORG);
-    expect(result.stdout).toContain("Slug:");
-  });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(TEST_ORG);
+      expect(result.stdout).toContain("Slug:");
+    },
+    { timeout: 15_000 }
+  );
 
-  test("supports --json output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "supports --json output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["org", "get", TEST_ORG, "--json"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["org", "get", TEST_ORG, "--json"], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    const data = JSON.parse(result.stdout);
-    expect(data.slug).toBe(TEST_ORG);
-  });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(data.slug).toBe(TEST_ORG);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("handles non-existent org", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "handles non-existent org",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["org", "get", "nonexistent-org-12345"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["org", "get", "nonexistent-org-12345"], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
-  });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
+    },
+    { timeout: 15_000 }
+  );
 });
 
 describe("sentry project get", () => {
@@ -204,31 +232,39 @@ describe("sentry project get", () => {
     );
   });
 
-  test("gets project details", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "gets project details",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["project", "get", TEST_PROJECT, "--org", TEST_ORG],
-      { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
-    );
+      const result = await runCli(
+        ["project", "get", TEST_PROJECT, "--org", TEST_ORG],
+        { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
+      );
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(TEST_PROJECT);
-    expect(result.stdout).toContain("Slug:");
-  });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(TEST_PROJECT);
+      expect(result.stdout).toContain("Slug:");
+    },
+    { timeout: 15_000 }
+  );
 
-  test("supports --json output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "supports --json output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["project", "get", TEST_PROJECT, "--org", TEST_ORG, "--json"],
-      { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
-    );
+      const result = await runCli(
+        ["project", "get", TEST_PROJECT, "--org", TEST_ORG, "--json"],
+        { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
+      );
 
-    expect(result.exitCode).toBe(0);
-    const data = JSON.parse(result.stdout);
-    expect(data.slug).toBe(TEST_PROJECT);
-  });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(data.slug).toBe(TEST_PROJECT);
+    },
+    { timeout: 15_000 }
+  );
 
   test(
     "handles non-existent project",
