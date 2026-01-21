@@ -121,7 +121,7 @@ export async function detectFromCode(cwd: string): Promise<DetectedDsn | null> {
  * @param cwd - Directory to search in
  * @returns Array of all detected DSNs with packagePath inferred
  */
-export async function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
+export function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
   return scanCodeFiles(cwd, false);
 }
 
@@ -138,6 +138,40 @@ export async function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
 function shouldSkipPath(filepath: string): boolean {
   const parts = filepath.split("/");
   return parts.some((part) => allSkipDirs.has(part));
+}
+
+/**
+ * Process a single code file and extract DSN if present.
+ *
+ * @param cwd - Base directory
+ * @param relativePath - Relative path to the file
+ * @returns Detected DSN or null
+ */
+async function processCodeFile(
+  cwd: string,
+  relativePath: string
+): Promise<DetectedDsn | null> {
+  const detector = getDetectorForFile(relativePath);
+  if (!detector) {
+    return null;
+  }
+
+  const filepath = join(cwd, relativePath);
+
+  try {
+    const content = await Bun.file(filepath).text();
+    const dsn = detector.extractDsn(content);
+
+    if (!dsn) {
+      return null;
+    }
+
+    const packagePath = inferPackagePath(relativePath);
+    return createDetectedDsn(dsn, "code", relativePath, packagePath);
+  } catch {
+    // Skip files we can't read
+    return null;
+  }
 }
 
 /**
@@ -158,36 +192,12 @@ async function scanCodeFiles(
       continue;
     }
 
-    const detector = getDetectorForFile(relativePath);
-    if (!detector) {
-      continue;
-    }
-
-    const filepath = join(cwd, relativePath);
-
-    try {
-      const content = await Bun.file(filepath).text();
-      const dsn = detector.extractDsn(content);
-
-      if (dsn) {
-        const packagePath = inferPackagePath(relativePath);
-        const detected = createDetectedDsn(
-          dsn,
-          "code",
-          relativePath,
-          packagePath
-        );
-
-        if (detected) {
-          results.push(detected);
-
-          if (stopOnFirst) {
-            return results;
-          }
-        }
+    const detected = await processCodeFile(cwd, relativePath);
+    if (detected) {
+      results.push(detected);
+      if (stopOnFirst) {
+        return results;
       }
-    } catch {
-      // Skip files we can't read
     }
   }
 

@@ -27,19 +27,13 @@ type ListFlags = {
   readonly project?: string;
   readonly query?: string;
   readonly limit: number;
-  readonly sort: "date" | "new" | "priority" | "freq" | "user";
+  readonly sort: "date" | "new" | "freq" | "user";
   readonly json: boolean;
 };
 
-type SortValue = "date" | "new" | "priority" | "freq" | "user";
+type SortValue = "date" | "new" | "freq" | "user";
 
-const VALID_SORT_VALUES: SortValue[] = [
-  "date",
-  "new",
-  "priority",
-  "freq",
-  "user",
-];
+const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list --org <org> --project <project>";
@@ -187,7 +181,7 @@ export const listCommand = buildCommand({
       sort: {
         kind: "parsed",
         parse: parseSort,
-        brief: "Sort by: date, new, priority, freq, user",
+        brief: "Sort by: date, new, freq, user",
         default: "date" as const,
       },
       json: {

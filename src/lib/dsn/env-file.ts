@@ -181,7 +181,9 @@ export async function detectFromMonorepoEnvFiles(
         // Only process directories, not files
         try {
           const stats = await stat(pkgDir);
-          if (!stats.isDirectory()) continue;
+          if (!stats.isDirectory()) {
+            continue;
+          }
         } catch {
           continue;
         }
