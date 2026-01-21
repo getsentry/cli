@@ -12,6 +12,7 @@ import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,
   formatProjectDetails,
+  writeJson,
   writeOutput,
 } from "../../lib/formatters/index.js";
 import {
@@ -185,11 +186,7 @@ export const getCommand = buildCommand({
 
     // JSON output - array if multiple, single object if one
     if (flags.json) {
-      const jsonOutput = projects.length === 1 ? projects[0] : projects;
-      writeOutput(stdout, jsonOutput as SentryProject, {
-        json: true,
-        formatHuman: formatProjectDetails,
-      });
+      writeJson(stdout, projects.length === 1 ? projects[0] : projects);
       return;
     }
 
