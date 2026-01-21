@@ -6,8 +6,9 @@
  * Binaries are uploaded to GitHub Releases.
  *
  * Usage:
- *   bun run script/build.ts           # Build for all platforms
- *   bun run script/build.ts --single  # Build for current platform only
+ *   bun run script/build.ts                        # Build for all platforms
+ *   bun run script/build.ts --single               # Build for current platform only
+ *   bun run script/build.ts --target darwin-x64    # Build for specific target (cross-compile)
  *
  * Output structure:
  *   dist/
@@ -92,10 +93,25 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
   return true;
 }
 
+/** Parse target string (e.g., "darwin-x64" or "linux-arm64") into BuildTarget */
+function parseTarget(targetStr: string): BuildTarget | null {
+  // Handle "windows" alias for "win32"
+  const normalized = targetStr.replace("windows-", "win32-");
+  const [os, arch] = normalized.split("-") as [
+    BuildTarget["os"],
+    BuildTarget["arch"],
+  ];
+
+  const target = ALL_TARGETS.find((t) => t.os === os && t.arch === arch);
+  return target ?? null;
+}
+
 /** Main build function */
 async function build(): Promise<void> {
   const args = process.argv.slice(2);
   const singleBuild = args.includes("--single");
+  const targetIndex = args.indexOf("--target");
+  const targetArg = targetIndex !== -1 ? args[targetIndex + 1] : null;
 
   console.log(`\nSentry CLI Build v${VERSION}`);
   console.log("=".repeat(40));
@@ -112,7 +128,19 @@ async function build(): Promise<void> {
   // Determine targets
   let targets: BuildTarget[];
 
-  if (singleBuild) {
+  if (targetArg) {
+    // Explicit target specified (for cross-compilation)
+    const target = parseTarget(targetArg);
+    if (!target) {
+      console.error(`Invalid target: ${targetArg}`);
+      console.error(
+        `Valid targets: ${ALL_TARGETS.map((t) => `${t.os === "win32" ? "windows" : t.os}-${t.arch}`).join(", ")}`
+      );
+      process.exit(1);
+    }
+    targets = [target];
+    console.log(`\nBuilding for target: ${getPackageName(target)}`);
+  } else if (singleBuild) {
     const currentTarget = ALL_TARGETS.find(
       (t) => t.os === process.platform && t.arch === process.arch
     );

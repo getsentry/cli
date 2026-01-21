@@ -92,7 +92,7 @@ jobs:
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
-        run: bun run build
+        run: bun run build --target ${{ matrix.target }}
       - name: Smoke test
         shell: bash
         run: |
