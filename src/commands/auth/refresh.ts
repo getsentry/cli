@@ -25,6 +25,17 @@ type RefreshResult = {
   expiresAt?: string;
 };
 
+/**
+ * Threshold for proactive token refresh (matches config.ts).
+ * Refresh when less than 10% of token lifetime remains.
+ */
+const REFRESH_THRESHOLD = 0.1;
+
+/**
+ * Default token lifetime assumption (1 hour) for tokens without issuedAt.
+ */
+const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
+
 export const refreshCommand = buildCommand({
   docs: {
     brief: "Refresh your authentication token",
@@ -79,24 +90,30 @@ Examples:
     }
 
     // Check if refresh is needed (unless --force)
+    // Use the same 10% threshold as automatic refresh in config.ts
     if (!flags.force && config.auth.expiresAt) {
-      const remainingMs = config.auth.expiresAt - Date.now();
-      const remainingMinutes = Math.floor(remainingMs / 60_000);
+      const now = Date.now();
+      const expiresAt = config.auth.expiresAt;
+      const issuedAt =
+        config.auth.issuedAt ?? expiresAt - DEFAULT_TOKEN_LIFETIME_MS;
+      const totalLifetime = expiresAt - issuedAt;
+      const remainingLifetime = expiresAt - now;
+      const remainingRatio = remainingLifetime / totalLifetime;
 
-      // Only skip refresh if token has >5 minutes remaining
-      if (remainingMinutes > 5) {
+      // Only skip refresh if token has >10% of lifetime remaining
+      if (remainingRatio > REFRESH_THRESHOLD && now < expiresAt) {
         const result: RefreshResult = {
           success: true,
           refreshed: false,
           message: "Token still valid",
-          expiresIn: Math.floor(remainingMs / 1000),
+          expiresIn: Math.floor(remainingLifetime / 1000),
         };
 
         if (flags.json) {
           stdout.write(`${JSON.stringify(result)}\n`);
         } else {
           stdout.write(
-            `Token still valid (expires in ${formatDuration(Math.floor(remainingMs / 1000))}).\n` +
+            `Token still valid (expires in ${formatDuration(Math.floor(remainingLifetime / 1000))}).\n` +
               "Use --force to refresh anyway.\n"
           );
         }
@@ -107,7 +124,7 @@ Examples:
     // Perform refresh
     const tokenResponse = await refreshAccessToken(config.auth.refreshToken);
 
-    // Store new tokens (server may rotate refresh token)
+    // Store new tokens
     await setAuthToken(
       tokenResponse.access_token,
       tokenResponse.expires_in,

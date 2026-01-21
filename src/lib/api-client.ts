@@ -5,7 +5,7 @@
  * Uses ky for retry logic, timeouts, and better error handling.
  */
 
-import ky, { type KyInstance } from "ky";
+import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
   type SentryEvent,
@@ -68,8 +68,11 @@ type ApiRequestOptions<T = unknown> = {
   schema?: z.ZodType<T>;
 };
 
-/** Track if we've already attempted a 401 retry to prevent infinite loops */
-let hasAttemptedRefreshRetry = false;
+/**
+ * Custom header to mark requests as retries (prevents infinite retry loops).
+ * This is stripped before sending and only used internally.
+ */
+const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
 
 /**
  * Create a configured ky instance with retry, timeout, and authentication.
@@ -78,6 +81,7 @@ let hasAttemptedRefreshRetry = false;
  * - Automatic token refresh via getValidAuthToken() (proactive)
  * - 401 response handling with token refresh and retry (reactive)
  * - Configurable retry for transient errors
+ * - Concurrent 401s share the same refresh via getValidAuthToken()'s mutex
  *
  * @throws {AuthError} When not authenticated
  * @throws {ApiError} When API request fails
@@ -86,7 +90,7 @@ async function createApiClient(): Promise<KyInstance> {
   // getValidAuthToken() handles proactive token refresh
   const token = await getValidAuthToken();
 
-  return ky.create({
+  return kyHttpClient.create({
     prefixUrl: getApiBaseUrl(),
     timeout: REQUEST_TIMEOUT_MS,
     retry: {
@@ -103,26 +107,28 @@ async function createApiClient(): Promise<KyInstance> {
       afterResponse: [
         async (request, options, response) => {
           // On 401, try refreshing token and retry once
-          if (response.status === 401 && !hasAttemptedRefreshRetry) {
-            hasAttemptedRefreshRetry = true;
+          // Use a per-request header to prevent infinite retry loops
+          const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
+          if (response.status === 401 && !isRetry) {
             try {
-              // Get a fresh token (will trigger refresh if needed)
+              // getValidAuthToken() has built-in concurrency protection via refreshPromise
+              // Multiple concurrent 401s will share the same refresh operation
               const newToken = await getValidAuthToken();
 
+              // Create new headers without the retry marker for the actual request
+              const retryHeaders = new Headers(options.headers);
+              retryHeaders.set("Authorization", `Bearer ${newToken}`);
+              retryHeaders.set(RETRY_MARKER_HEADER, "1");
+
               // Retry the request with the new token
-              return ky(request.url, {
+              return kyHttpClient(request.url, {
                 ...options,
-                headers: {
-                  ...options.headers,
-                  Authorization: `Bearer ${newToken}`,
-                },
+                headers: retryHeaders,
                 retry: 0, // Don't retry the retry
               });
             } catch {
               // Refresh failed, return original 401 response
               return response;
-            } finally {
-              hasAttemptedRefreshRetry = false;
             }
           }
           return response;

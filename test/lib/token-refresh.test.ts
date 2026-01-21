@@ -4,7 +4,7 @@
  * Tests for automatic token refresh functionality.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -97,13 +97,10 @@ describe("getValidAuthToken", () => {
       },
     });
 
-    try {
-      await getValidAuthToken();
-      expect.unreachable("Should have thrown AuthError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AuthError);
-      expect((err as Error).message).toMatch(/no refresh token/i);
-    }
+    await expect(getValidAuthToken()).rejects.toThrow(AuthError);
+    // Auth was cleared by the first call, so verify that separately
+    const config = await readConfig();
+    expect(config.auth).toBeUndefined();
   });
 
   test("clears auth when expired with no refresh token", async () => {
@@ -178,5 +175,57 @@ describe("token storage on refresh", () => {
     expect(config.auth?.expiresAt).toBeLessThanOrEqual(after + 7200 * 1000);
     expect(config.auth?.issuedAt).toBeGreaterThanOrEqual(before);
     expect(config.auth?.issuedAt).toBeLessThanOrEqual(after);
+  });
+});
+
+describe("token refresh with mocked oauth", () => {
+  test("calls refreshAccessToken and stores new tokens when below threshold", async () => {
+    // Track if refresh was called
+    let refreshCalled = false;
+    const mockNewToken = "refreshed-access-token";
+    const mockNewRefreshToken = "refreshed-refresh-token";
+
+    // Mock the oauth module
+    mock.module("../../src/lib/oauth.js", () => ({
+      refreshAccessToken: async () => {
+        refreshCalled = true;
+        return {
+          access_token: mockNewToken,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: mockNewRefreshToken,
+        };
+      },
+    }));
+
+    // Set up a token that needs refresh (5% remaining)
+    const now = Date.now();
+    const lifetime = 3600 * 1000;
+    const remaining = lifetime * 0.05;
+
+    await writeConfig({
+      auth: {
+        token: "old-token",
+        issuedAt: now - lifetime + remaining,
+        expiresAt: now + remaining,
+        refreshToken: "old-refresh-token",
+      },
+    });
+
+    // Re-import to get mocked version
+    const { getValidAuthToken: getValidAuthTokenMocked } = await import(
+      "../../src/lib/config.js"
+    );
+
+    // This should trigger refresh
+    const token = await getValidAuthTokenMocked();
+
+    expect(refreshCalled).toBe(true);
+    expect(token).toBe(mockNewToken);
+
+    // Verify new tokens were stored
+    const config = await readConfig();
+    expect(config.auth?.token).toBe(mockNewToken);
+    expect(config.auth?.refreshToken).toBe(mockNewRefreshToken);
   });
 });

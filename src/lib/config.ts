@@ -144,7 +144,7 @@ async function performTokenRefresh(refreshToken: string): Promise<string> {
   try {
     const tokenResponse = await refreshAccessToken(refreshToken);
 
-    // Store new tokens (server may rotate refresh token)
+    // Store new tokens
     await setAuthToken(
       tokenResponse.access_token,
       tokenResponse.expires_in,
