@@ -10,11 +10,16 @@
 
 import { join } from "node:path";
 import { createDetectedDsn } from "./parser.js";
+import { scanSpecificFiles } from "./scanner.js";
 import type { DetectedDsn } from "./types.js";
 import { MONOREPO_ROOTS } from "./types.js";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * .env file names to search (in priority order)
+ * .env file names to search (in priority order).
  *
  * More specific files (.env.local, .env.development.local) are checked first
  * as they typically contain environment-specific overrides.
@@ -26,22 +31,35 @@ export const ENV_FILES = [
   ".env",
   ".env.development",
   ".env.production",
-];
+] as const;
 
 /**
  * Pattern to match SENTRY_DSN in .env files.
  * Handles: SENTRY_DSN=value, SENTRY_DSN="value", SENTRY_DSN='value'
  * Also handles trailing comments: SENTRY_DSN=value # comment
  */
-const ENV_FILE_PATTERN = /^SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
+const ENV_DSN_PATTERN = /^SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DSN Extraction
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Parse a .env file and extract SENTRY_DSN value
+ * Extract SENTRY_DSN value from .env file content.
  *
- * @param content - File content
+ * Parses the content line by line, skipping comments and empty lines.
+ * Handles quoted values and trailing comments.
+ *
+ * @param content - Raw file content
  * @returns DSN string or null if not found
+ *
+ * @example
+ * ```typescript
+ * extractDsnFromEnvContent('SENTRY_DSN="https://key@sentry.io/123"')
+ * // Returns: "https://key@sentry.io/123"
+ * ```
  */
-export function parseEnvFile(content: string): string | null {
+export function extractDsnFromEnvContent(content: string): string | null {
   const lines = content.split("\n");
 
   for (const line of lines) {
@@ -53,7 +71,7 @@ export function parseEnvFile(content: string): string | null {
     }
 
     // Match SENTRY_DSN=value or SENTRY_DSN="value" or SENTRY_DSN='value'
-    const match = trimmed.match(ENV_FILE_PATTERN);
+    const match = trimmed.match(ENV_DSN_PATTERN);
     if (match?.[2]) {
       return match[2];
     }
@@ -62,10 +80,19 @@ export function parseEnvFile(content: string): string | null {
   return null;
 }
 
+// Legacy alias for backwards compatibility
+export const parseEnvFile = extractDsnFromEnvContent;
+export const extractDsnFromEnvFile = extractDsnFromEnvContent;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Detection Functions
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Detect DSN from .env files in the given directory
+ * Detect DSN from .env files in the given directory.
  *
  * Searches files in priority order and returns the first valid DSN found.
+ * Does NOT scan monorepo subdirectories - use detectFromAllEnvFiles for that.
  *
  * @param cwd - Directory to search in
  * @returns First detected DSN or null if not found
@@ -73,27 +100,17 @@ export function parseEnvFile(content: string): string | null {
 export async function detectFromEnvFiles(
   cwd: string
 ): Promise<DetectedDsn | null> {
-  for (const filename of ENV_FILES) {
-    const filepath = join(cwd, filename);
-    const file = Bun.file(filepath);
+  const results = await scanSpecificFiles(cwd, [...ENV_FILES], {
+    stopOnFirst: true,
+    processFile: (_relativePath, content) => {
+      const dsn = extractDsnFromEnvContent(content);
+      return dsn ? { dsn } : null;
+    },
+    createDsn: (raw, relativePath) =>
+      createDetectedDsn(raw, "env_file", relativePath),
+  });
 
-    if (!(await file.exists())) {
-      continue;
-    }
-
-    try {
-      const content = await file.text();
-      const dsn = parseEnvFile(content);
-
-      if (dsn) {
-        return createDetectedDsn(dsn, "env_file", filename);
-      }
-    } catch {
-      // Skip files we can't read
-    }
-  }
-
-  return null;
+  return results[0] ?? null;
 }
 
 /**
@@ -111,71 +128,28 @@ export async function detectFromAllEnvFiles(
 ): Promise<DetectedDsn[]> {
   const results: DetectedDsn[] = [];
 
-  // 1. Check root .env files
-  for (const filename of ENV_FILES) {
-    const filepath = join(cwd, filename);
-    const file = Bun.file(filepath);
-
-    if (!(await file.exists())) {
-      continue;
-    }
-
-    try {
-      const content = await file.text();
-      const dsn = parseEnvFile(content);
-
-      if (dsn) {
-        const detected = createDetectedDsn(dsn, "env_file", filename);
-        if (detected) {
-          results.push(detected);
-        }
-      }
-    } catch {
-      // Skip files we can't read
-    }
-  }
+  // 1. Check root .env files (all of them, not just first)
+  const rootResults = await scanSpecificFiles(cwd, [...ENV_FILES], {
+    stopOnFirst: false,
+    processFile: (_relativePath, content) => {
+      const dsn = extractDsnFromEnvContent(content);
+      return dsn ? { dsn } : null;
+    },
+    createDsn: (raw, relativePath) =>
+      createDetectedDsn(raw, "env_file", relativePath),
+  });
+  results.push(...rootResults);
 
   // 2. Check monorepo package directories
-  const monorepoResults = await detectEnvFilesInMonorepo(cwd);
+  const monorepoResults = await detectFromMonorepoEnvFiles(cwd);
   results.push(...monorepoResults);
 
   return results;
 }
 
-/**
- * Try to detect DSN from .env files in a specific package directory.
- *
- * @param pkgDir - Full path to the package directory
- * @param packagePath - Relative package path (e.g., "packages/frontend")
- * @returns Detected DSN or null if not found
- */
-async function detectDsnInPackage(
-  pkgDir: string,
-  packagePath: string
-): Promise<DetectedDsn | null> {
-  for (const envFile of ENV_FILES) {
-    const envPath = join(pkgDir, envFile);
-    const file = Bun.file(envPath);
-
-    if (!(await file.exists())) {
-      continue;
-    }
-
-    try {
-      const content = await file.text();
-      const dsn = parseEnvFile(content);
-
-      if (dsn) {
-        const sourcePath = `${packagePath}/${envFile}`;
-        return createDetectedDsn(dsn, "env_file", sourcePath, packagePath);
-      }
-    } catch {
-      // Skip files we can't read
-    }
-  }
-
-  return null;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Monorepo Support
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Detect DSN from .env files in monorepo package directories.
@@ -186,7 +160,7 @@ async function detectDsnInPackage(
  * @param cwd - Root directory to search from
  * @returns Array of detected DSNs with packagePath set
  */
-export async function detectEnvFilesInMonorepo(
+export async function detectFromMonorepoEnvFiles(
   cwd: string
 ): Promise<DetectedDsn[]> {
   const results: DetectedDsn[] = [];
@@ -218,13 +192,35 @@ export async function detectEnvFilesInMonorepo(
 }
 
 /**
- * Extract DSN from a specific .env file content
+ * Detect DSN from .env files in a specific package directory.
  *
- * Used by cache verification to check a specific file without scanning all.
- *
- * @param content - File content
- * @returns DSN string or null if not found
+ * @param pkgDir - Full path to the package directory
+ * @param packagePath - Relative package path (e.g., "packages/frontend")
+ * @returns Detected DSN or null if not found
  */
-export function extractDsnFromEnvFile(content: string): string | null {
-  return parseEnvFile(content);
+async function detectDsnInPackage(
+  pkgDir: string,
+  packagePath: string
+): Promise<DetectedDsn | null> {
+  const results = await scanSpecificFiles(pkgDir, [...ENV_FILES], {
+    stopOnFirst: true,
+    processFile: (_relativePath, content) => {
+      const dsn = extractDsnFromEnvContent(content);
+      return dsn ? { dsn, metadata: { packagePath } } : null;
+    },
+    createDsn: (raw, relativePath, metadata) => {
+      const sourcePath = `${packagePath}/${relativePath}`;
+      return createDetectedDsn(
+        raw,
+        "env_file",
+        sourcePath,
+        metadata?.packagePath
+      );
+    },
+  });
+
+  return results[0] ?? null;
 }
+
+// Legacy export name for backwards compatibility with detector.ts
+export const detectEnvFilesInMonorepo = detectFromMonorepoEnvFiles;

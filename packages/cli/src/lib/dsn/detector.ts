@@ -12,18 +12,18 @@
  * 3. SENTRY_DSN environment variable
  */
 
-import { extname, join } from "node:path";
+import { join } from "node:path";
 import { getCachedDsn, setCachedDsn } from "./cache.js";
 import { detectFromEnv, SENTRY_DSN_ENV } from "./env.js";
 import {
   detectFromAllEnvFiles,
   detectFromEnvFiles,
-  extractDsnFromEnvFile,
+  extractDsnFromEnvContent,
 } from "./env-file.js";
 import {
   detectAllFromCode,
   detectFromCode,
-  languageDetectors,
+  getDetectorForFile,
 } from "./languages/index.js";
 import { createDetectedDsn, parseDsn } from "./parser.js";
 import type {
@@ -213,16 +213,13 @@ function extractDsnFromContent(
 ): string | null {
   switch (source) {
     case "env_file":
-      return extractDsnFromEnvFile(content);
+      return extractDsnFromEnvContent(content);
     case "code": {
       if (!sourcePath) {
         return null;
       }
       // Find the right language detector based on file extension
-      const ext = extname(sourcePath);
-      const detector = languageDetectors.find((d) =>
-        d.extensions.includes(ext)
-      );
+      const detector = getDetectorForFile(sourcePath);
       return detector?.extractDsn(content) ?? null;
     }
     default:
