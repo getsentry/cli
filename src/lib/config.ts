@@ -139,6 +139,7 @@ async function performTokenRefresh(
   storedRefreshToken: string
 ): Promise<RefreshTokenResult> {
   const { refreshAccessToken } = await import("./oauth.js");
+  const { AuthError } = await import("./errors.js");
 
   try {
     const tokenResponse = await refreshAccessToken(storedRefreshToken);
@@ -158,7 +159,11 @@ async function performTokenRefresh(
       expiresIn: tokenResponse.expires_in,
     };
   } catch (error) {
-    await clearAuth();
+    // Only clear auth if the server explicitly rejected the refresh token.
+    // Don't clear on network errors - the existing token may still be valid.
+    if (error instanceof AuthError) {
+      await clearAuth();
+    }
     throw error;
   }
 }
