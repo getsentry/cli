@@ -39,6 +39,23 @@ async function fetchOrgProjects(orgSlug: string): Promise<ProjectWithOrg[]> {
 }
 
 /**
+ * Fetch projects for a single org, returning empty array on non-auth errors.
+ * Auth errors propagate so user sees "please log in" message.
+ */
+async function fetchOrgProjectsSafe(
+  orgSlug: string
+): Promise<ProjectWithOrg[]> {
+  try {
+    return await fetchOrgProjects(orgSlug);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return [];
+  }
+}
+
+/**
  * Fetch projects from all accessible organizations.
  * Skips orgs where the user lacks access.
  *
@@ -52,7 +69,10 @@ async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
     try {
       const projects = await fetchOrgProjects(org.slug);
       results.push(...projects);
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthError) {
+        throw error;
+      }
       // User may lack access to some orgs
     }
   }
@@ -215,7 +235,7 @@ export const listCommand = buildCommand({
     let allProjects: ProjectWithOrg[];
     if (orgsToFetch.length > 0) {
       const results = await Promise.all(
-        orgsToFetch.map((org) => fetchOrgProjects(org).catch(() => []))
+        orgsToFetch.map((org) => fetchOrgProjectsSafe(org))
       );
       allProjects = results.flat();
     } else {
