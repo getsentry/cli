@@ -17,7 +17,7 @@ import {
   type SentryProject,
   SentryProjectSchema,
 } from "../types/index.js";
-import { getValidAuthToken } from "./config.js";
+import { refreshToken } from "./config.js";
 import { ApiError } from "./errors.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";
@@ -78,8 +78,7 @@ const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
  * @throws {ApiError} When API request fails
  */
 async function createApiClient(): Promise<KyInstance> {
-  // getValidAuthToken() handles proactive token refresh
-  const token = await getValidAuthToken();
+  const { token } = await refreshToken();
 
   return kyHttpClient.create({
     prefixUrl: getApiBaseUrl(),
@@ -97,11 +96,11 @@ async function createApiClient(): Promise<KyInstance> {
     hooks: {
       afterResponse: [
         async (request, options, response) => {
-          // On 401, try refreshing token and retry once
+          // On 401, force token refresh and retry once
           const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
           if (response.status === 401 && !isRetry) {
             try {
-              const newToken = await getValidAuthToken();
+              const { token: newToken } = await refreshToken({ force: true });
               const retryHeaders = new Headers(options.headers);
               retryHeaders.set("Authorization", `Bearer ${newToken}`);
               retryHeaders.set(RETRY_MARKER_HEADER, "1");

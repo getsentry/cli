@@ -6,23 +6,17 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  DEFAULT_TOKEN_LIFETIME_MS,
-  REFRESH_THRESHOLD,
-  readConfig,
-  setAuthToken,
-} from "../../lib/config.js";
+import { readConfig, refreshToken } from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
-import { refreshAccessToken } from "../../lib/oauth.js";
 
 type RefreshFlags = {
   readonly json: boolean;
   readonly force: boolean;
 };
 
-type RefreshResult = {
+type RefreshOutput = {
   success: boolean;
   refreshed: boolean;
   message: string;
@@ -67,13 +61,10 @@ Examples:
   },
   async func(this: SentryContext, flags: RefreshFlags): Promise<void> {
     const { stdout } = this;
+
+    // Pre-check for refresh token availability (better error message)
     const config = await readConfig();
-
-    if (!config.auth?.token) {
-      throw new AuthError("not_authenticated");
-    }
-
-    if (!config.auth.refreshToken) {
+    if (!config.auth?.refreshToken && config.auth?.token) {
       throw new AuthError(
         "invalid",
         "No refresh token available. You may be using a manual API token.\n" +
@@ -81,63 +72,30 @@ Examples:
       );
     }
 
-    if (!flags.force && config.auth.expiresAt) {
-      const now = Date.now();
-      const expiresAt = config.auth.expiresAt;
-      const issuedAt =
-        config.auth.issuedAt ?? expiresAt - DEFAULT_TOKEN_LIFETIME_MS;
-      const totalLifetime = expiresAt - issuedAt;
-      const remainingLifetime = expiresAt - now;
-      const remainingRatio = remainingLifetime / totalLifetime;
+    const result = await refreshToken({ force: flags.force });
 
-      // Only skip refresh if token has >10% of lifetime remaining
-      if (remainingRatio > REFRESH_THRESHOLD && now < expiresAt) {
-        const result: RefreshResult = {
-          success: true,
-          refreshed: false,
-          message: "Token still valid",
-          expiresIn: Math.floor(remainingLifetime / 1000),
-        };
-
-        if (flags.json) {
-          stdout.write(`${JSON.stringify(result)}\n`);
-        } else {
-          stdout.write(
-            `Token still valid (expires in ${formatDuration(Math.floor(remainingLifetime / 1000))}).\n` +
-              "Use --force to refresh anyway.\n"
-          );
-        }
-        return;
-      }
-    }
-
-    // Perform refresh
-    const tokenResponse = await refreshAccessToken(config.auth.refreshToken);
-
-    // Store new tokens
-    await setAuthToken(
-      tokenResponse.access_token,
-      tokenResponse.expires_in,
-      tokenResponse.refresh_token ?? config.auth.refreshToken
-    );
-
-    const expiresAt = new Date(
-      Date.now() + tokenResponse.expires_in * 1000
-    ).toISOString();
-
-    const result: RefreshResult = {
+    const output: RefreshOutput = {
       success: true,
-      refreshed: true,
-      message: "Token refreshed successfully",
-      expiresIn: tokenResponse.expires_in,
-      expiresAt,
+      refreshed: result.refreshed,
+      message: result.refreshed
+        ? "Token refreshed successfully"
+        : "Token still valid",
+      expiresIn: result.expiresIn,
+      expiresAt: result.expiresAt
+        ? new Date(result.expiresAt).toISOString()
+        : undefined,
     };
 
     if (flags.json) {
-      stdout.write(`${JSON.stringify(result)}\n`);
+      stdout.write(`${JSON.stringify(output)}\n`);
+    } else if (result.refreshed) {
+      stdout.write(
+        `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(result.expiresIn ?? 0)}.\n`
+      );
     } else {
       stdout.write(
-        `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(tokenResponse.expires_in)}.\n`
+        `Token still valid (expires in ${formatDuration(result.expiresIn ?? 0)}).\n` +
+          "Use --force to refresh anyway.\n"
       );
     }
   },

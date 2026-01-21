@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  getValidAuthToken,
   readConfig,
+  refreshToken,
   setAuthToken,
   writeConfig,
 } from "../../src/lib/config.js";
@@ -55,7 +55,7 @@ describe("setAuthToken with issuedAt", () => {
   });
 });
 
-describe("getValidAuthToken", () => {
+describe("refreshToken", () => {
   test("returns token when no expiration is set (manual API token)", async () => {
     await writeConfig({
       auth: {
@@ -63,8 +63,9 @@ describe("getValidAuthToken", () => {
       },
     });
 
-    const token = await getValidAuthToken();
-    expect(token).toBe("manual-api-token");
+    const result = await refreshToken();
+    expect(result.token).toBe("manual-api-token");
+    expect(result.refreshed).toBe(false);
   });
 
   test("returns token when more than 10% of lifetime remains", async () => {
@@ -79,12 +80,14 @@ describe("getValidAuthToken", () => {
       },
     });
 
-    const token = await getValidAuthToken();
-    expect(token).toBe("fresh-token");
+    const result = await refreshToken();
+    expect(result.token).toBe("fresh-token");
+    expect(result.refreshed).toBe(false);
+    expect(result.expiresIn).toBeGreaterThan(0);
   });
 
   test("throws AuthError when not authenticated", async () => {
-    await expect(getValidAuthToken()).rejects.toThrow(AuthError);
+    await expect(refreshToken()).rejects.toThrow(AuthError);
   });
 
   test("throws AuthError when token is expired and no refresh token", async () => {
@@ -97,7 +100,7 @@ describe("getValidAuthToken", () => {
       },
     });
 
-    await expect(getValidAuthToken()).rejects.toThrow(AuthError);
+    await expect(refreshToken()).rejects.toThrow(AuthError);
     // Auth was cleared by the first call, so verify that separately
     const config = await readConfig();
     expect(config.auth).toBeUndefined();
@@ -112,7 +115,7 @@ describe("getValidAuthToken", () => {
     });
 
     try {
-      await getValidAuthToken();
+      await refreshToken();
     } catch {
       // Expected
     }
@@ -138,8 +141,9 @@ describe("proactive refresh threshold", () => {
     });
 
     // Should return token without refreshing (>10% remaining)
-    const token = await getValidAuthToken();
-    expect(token).toBe("nearly-expired-but-ok");
+    const result = await refreshToken();
+    expect(result.token).toBe("nearly-expired-but-ok");
+    expect(result.refreshed).toBe(false);
   });
 
   test("token with 9% remaining triggers refresh threshold", async () => {
@@ -158,7 +162,7 @@ describe("proactive refresh threshold", () => {
 
     // This would attempt refresh if refreshAccessToken wasn't mocked
     // Since it's not mocked, this will fail to refresh, but proves the threshold triggers
-    await expect(getValidAuthToken()).rejects.toThrow();
+    await expect(refreshToken()).rejects.toThrow();
   });
 });
 
@@ -213,19 +217,71 @@ describe("token refresh with mocked oauth", () => {
     });
 
     // Re-import to get mocked version
-    const { getValidAuthToken: getValidAuthTokenMocked } = await import(
+    const { refreshToken: refreshTokenMocked } = await import(
       "../../src/lib/config.js"
     );
 
     // This should trigger refresh
-    const token = await getValidAuthTokenMocked();
+    const result = await refreshTokenMocked();
 
     expect(refreshCalled).toBe(true);
-    expect(token).toBe(mockNewToken);
+    expect(result.token).toBe(mockNewToken);
+    expect(result.refreshed).toBe(true);
 
     // Verify new tokens were stored
     const config = await readConfig();
     expect(config.auth?.token).toBe(mockNewToken);
     expect(config.auth?.refreshToken).toBe(mockNewRefreshToken);
+  });
+});
+
+describe("force refresh", () => {
+  test("force: true refreshes even when token has plenty of lifetime remaining", async () => {
+    let refreshCalled = false;
+    const mockNewToken = "force-refreshed-token";
+
+    mock.module("../../src/lib/oauth.js", () => ({
+      refreshAccessToken: async () => {
+        refreshCalled = true;
+        return {
+          access_token: mockNewToken,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "new-refresh-token",
+        };
+      },
+    }));
+
+    // Set up a token with 90% remaining (way above threshold)
+    const now = Date.now();
+    const lifetime = 3600 * 1000;
+
+    await writeConfig({
+      auth: {
+        token: "valid-token",
+        issuedAt: now - lifetime * 0.1, // 10% elapsed
+        expiresAt: now + lifetime * 0.9, // 90% remaining
+        refreshToken: "old-refresh-token",
+      },
+    });
+
+    // Re-import to get mocked version
+    const { refreshToken: refreshTokenMocked } = await import(
+      "../../src/lib/config.js"
+    );
+
+    // Without force, should NOT refresh
+    const normalResult = await refreshTokenMocked();
+    expect(normalResult.refreshed).toBe(false);
+    expect(normalResult.token).toBe("valid-token");
+
+    // Reset for force test
+    refreshCalled = false;
+
+    // With force: true, SHOULD refresh
+    const forceResult = await refreshTokenMocked({ force: true });
+    expect(refreshCalled).toBe(true);
+    expect(forceResult.refreshed).toBe(true);
+    expect(forceResult.token).toBe(mockNewToken);
   });
 });
