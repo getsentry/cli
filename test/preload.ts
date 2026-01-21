@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 
 // Load .env.local for test credentials (SENTRY_TEST_*)
 // This mimics what would happen in CI where secrets are injected as env vars
-const envLocalPath = resolve(import.meta.dir, "../../../.env.local");
+const envLocalPath = resolve(import.meta.dir, "../.env.local");
 if (existsSync(envLocalPath)) {
   const content = readFileSync(envLocalPath, "utf-8");
   for (const line of content.split("\n")) {
