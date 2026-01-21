@@ -80,8 +80,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-      - name: List artifacts
-        run: find . -type f
       - name: Upload combined artifacts
         uses: actions/upload-artifact@v4
         with:
