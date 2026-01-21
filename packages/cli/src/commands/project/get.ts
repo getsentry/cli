@@ -146,13 +146,26 @@ export const getCommand = buildCommand({
     const { stdout, cwd } = this;
 
     // Resolve targets (may find multiple in monorepos)
-    const { targets: resolvedTargets, footer } = await resolveAllTargets({
+    const {
+      targets: resolvedTargets,
+      footer,
+      skippedSelfHosted,
+    } = await resolveAllTargets({
       org: flags.org,
       project: projectSlug,
       cwd,
     });
 
     if (resolvedTargets.length === 0) {
+      // Provide more helpful error if self-hosted DSNs were detected but couldn't be resolved
+      if (skippedSelfHosted) {
+        throw new ContextError(
+          "Organization and project",
+          "sentry project get <project-slug> --org <org-slug>\n\n" +
+            `Note: Found ${skippedSelfHosted} self-hosted DSN(s) that cannot be resolved automatically.\n` +
+            "Self-hosted Sentry instances require explicit --org and --project flags."
+        );
+      }
       throw new ContextError(
         "Organization and project",
         "sentry project get <project-slug> --org <org-slug>"

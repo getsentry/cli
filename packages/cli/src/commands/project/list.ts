@@ -107,6 +107,7 @@ type OrgResolution = {
   orgs: string[];
   footer?: string;
   showOrg: boolean;
+  skippedSelfHosted?: number;
 };
 
 /**
@@ -130,7 +131,9 @@ async function resolveOrgsToFetch(
 
   // 3. Auto-detect from DSNs (may find multiple in monorepos)
   try {
-    const { targets, footer } = await resolveAllTargets({ cwd });
+    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
+      cwd,
+    });
 
     if (targets.length > 0) {
       const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
@@ -138,8 +141,12 @@ async function resolveOrgsToFetch(
         orgs: uniqueOrgs,
         footer,
         showOrg: uniqueOrgs.length > 1,
+        skippedSelfHosted,
       };
     }
+
+    // No resolvable targets, but may have self-hosted DSNs
+    return { orgs: [], showOrg: true, skippedSelfHosted };
   } catch {
     // Fall through to empty orgs
   }
@@ -196,6 +203,7 @@ export const listCommand = buildCommand({
       orgs: orgsToFetch,
       footer,
       showOrg,
+      skippedSelfHosted,
     } = await resolveOrgsToFetch(flags.org, cwd);
 
     // Fetch projects from all orgs (or all accessible if none detected)
@@ -241,6 +249,13 @@ export const listCommand = buildCommand({
 
     if (footer) {
       stdout.write(`\n${footer}\n`);
+    }
+
+    if (skippedSelfHosted) {
+      stdout.write(
+        `\nNote: Skipped ${skippedSelfHosted} self-hosted DSN(s). ` +
+          "Use --org to specify organization explicitly.\n"
+      );
     }
   },
 });

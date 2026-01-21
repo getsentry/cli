@@ -55,6 +55,8 @@ export type ResolvedTargets = {
   targets: ResolvedTarget[];
   /** Footer message to display if multiple projects detected */
   footer?: string;
+  /** Number of self-hosted DSNs that were detected but couldn't be resolved */
+  skippedSelfHosted?: number;
 };
 
 /**
@@ -319,7 +321,10 @@ export async function resolveAllTargets(
     return { targets: [] };
   }
 
-  // Resolve all DSNs in parallel
+  // Count self-hosted DSNs (no orgId) - these can't be resolved via API
+  const selfHostedCount = detection.all.filter((d) => !d.orgId).length;
+
+  // Resolve all DSNs in parallel (self-hosted ones will return null)
   const resolvedTargets = await Promise.all(
     detection.all.map((dsn) => resolveDsnToTarget(dsn))
   );
@@ -330,14 +335,21 @@ export async function resolveAllTargets(
   );
 
   if (targets.length === 0) {
-    return { targets: [] };
+    return {
+      targets: [],
+      skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+    };
   }
 
   // Format footer if multiple projects detected
   const footer =
     targets.length > 1 ? formatMultipleProjectsFooter(targets) : undefined;
 
-  return { targets, footer };
+  return {
+    targets,
+    footer,
+    skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
