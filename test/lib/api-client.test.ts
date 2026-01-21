@@ -218,4 +218,44 @@ describe("401 retry behavior", () => {
     );
     expect(oauthRequests).toHaveLength(1);
   });
+
+  test("does not retry for manual API tokens (no refresh token)", async () => {
+    // Manual API tokens have no expiry and no refresh token
+    // When they get 401, refreshToken() returns { refreshed: false }
+    // The handler should NOT retry with the same token
+    await setAuthToken("manual-api-token"); // No expiry, no refresh token
+
+    const requests: RequestLog[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push({
+        url: req.url,
+        method: req.method,
+        authorization: req.headers.get("Authorization"),
+        isRetry: req.headers.get("x-sentry-cli-retry") === "1",
+      });
+
+      // Always return 401
+      return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await expect(listOrganizations()).rejects.toThrow();
+
+    // Should have exactly 1 API request - no retry since token can't be refreshed
+    const apiRequests = requests.filter((r) =>
+      r.url.includes("/api/0/organizations")
+    );
+    expect(apiRequests).toHaveLength(1);
+    expect(apiRequests[0].isRetry).toBe(false);
+
+    // No OAuth refresh should have been attempted (no refresh token available)
+    const oauthRequests = requests.filter((r) =>
+      r.url.includes("/oauth/token/")
+    );
+    expect(oauthRequests).toHaveLength(0);
+  });
 });

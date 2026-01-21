@@ -100,7 +100,15 @@ async function createApiClient(): Promise<KyInstance> {
           const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
           if (response.status === 401 && !isRetry) {
             try {
-              const { token: newToken } = await refreshToken({ force: true });
+              const { token: newToken, refreshed } = await refreshToken({
+                force: true,
+              });
+
+              // Don't retry if token wasn't refreshed (e.g., manual API token)
+              if (!refreshed) {
+                return response;
+              }
+
               const retryHeaders = new Headers(options.headers);
               retryHeaders.set("Authorization", `Bearer ${newToken}`);
               retryHeaders.set(RETRY_MARKER_HEADER, "1");
