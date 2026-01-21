@@ -8,6 +8,7 @@
  * to find DSNs in individual packages/apps.
  */
 
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createDetectedDsn } from "./parser.js";
 import { scanSpecificFiles } from "./scanner.js";
@@ -176,6 +177,15 @@ export async function detectFromMonorepoEnvFiles(
         onlyFiles: false,
       })) {
         const pkgDir = join(rootDir, pkgName);
+
+        // Only process directories, not files
+        try {
+          const stats = await stat(pkgDir);
+          if (!stats.isDirectory()) continue;
+        } catch {
+          continue;
+        }
+
         const packagePath = `${monorepoRoot}/${pkgName}`;
 
         const detected = await detectDsnInPackage(pkgDir, packagePath);
