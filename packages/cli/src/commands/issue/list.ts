@@ -91,12 +91,37 @@ type IssueListResult = {
 };
 
 /**
- * Compare issues by lastSeen date (most recent first).
+ * Compare two optional date strings (most recent first).
  */
-function compareByLastSeen(a: SentryIssue, b: SentryIssue): number {
-  const dateA = a.lastSeen ? new Date(a.lastSeen).getTime() : 0;
-  const dateB = b.lastSeen ? new Date(b.lastSeen).getTime() : 0;
+function compareDates(a: string | undefined, b: string | undefined): number {
+  const dateA = a ? new Date(a).getTime() : 0;
+  const dateB = b ? new Date(b).getTime() : 0;
   return dateB - dateA;
+}
+
+/**
+ * Get comparator function for the specified sort option.
+ *
+ * @param sort - Sort option from CLI flags
+ * @returns Comparator function for Array.sort()
+ */
+function getComparator(
+  sort: SortValue
+): (a: SentryIssue, b: SentryIssue) => number {
+  switch (sort) {
+    case "date":
+      return (a, b) => compareDates(a.lastSeen, b.lastSeen);
+    case "new":
+      return (a, b) => compareDates(a.firstSeen, b.firstSeen);
+    case "freq":
+      return (a, b) =>
+        Number.parseInt(b.count ?? "0", 10) -
+        Number.parseInt(a.count ?? "0", 10);
+    case "user":
+      return (a, b) => (b.userCount ?? 0) - (a.userCount ?? 0);
+    default:
+      return (a, b) => compareDates(a.lastSeen, b.lastSeen);
+  }
 }
 
 /**
@@ -218,9 +243,9 @@ export const listCommand = buildCommand({
       );
     }
 
-    // Merge all issues from all projects and sort by recency
+    // Merge all issues from all projects and sort by user preference
     const allIssues = validResults.flatMap((r) => r.issues);
-    allIssues.sort(compareByLastSeen);
+    allIssues.sort(getComparator(flags.sort));
 
     // JSON output
     if (flags.json) {
