@@ -8,6 +8,7 @@ import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations, listProjects } from "../../lib/api-client.js";
 import { getDefaultOrganization } from "../../lib/config.js";
+import { AuthError } from "../../lib/errors.js";
 import {
   calculateProjectSlugWidth,
   formatProjectRow,
@@ -147,8 +148,12 @@ async function resolveOrgsToFetch(
 
     // No resolvable targets, but may have self-hosted DSNs
     return { orgs: [], showOrg: true, skippedSelfHosted };
-  } catch {
-    // Fall through to empty orgs
+  } catch (error) {
+    // Auth errors should propagate - user needs to log in
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Fall through to empty orgs for other errors (network, etc.)
   }
 
   return { orgs: [], showOrg: true };
