@@ -2,43 +2,220 @@
  * API Client Tests
  *
  * Tests for the Sentry API client 401 retry behavior.
- *
- * The 401 handler behavior is validated through:
- *
- * 1. Unit test in token-refresh.test.ts: "server-side token revocation scenario"
- *    - Proves refreshToken({ force: true }) bypasses threshold and fetches new token
- *    - This is the key fix: without force, a revoked token would be reused
- *
- * 2. Code inspection tests below verify the api-client implementation
+ * Uses manual fetch mocking to avoid polluting the module cache.
  */
 
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { listOrganizations } from "../../src/lib/api-client.js";
+import { setAuthToken } from "../../src/lib/config.js";
 
-describe("api-client 401 retry implementation", () => {
-  const apiClientPath = join(import.meta.dir, "../../src/lib/api-client.ts");
-  const sourceCode = readFileSync(apiClientPath, "utf-8");
+// Test config directory
+let testConfigDir: string;
+let originalFetch: typeof globalThis.fetch;
 
-  test("calls refreshToken with force:true on 401 response", () => {
-    // The key fix for server-side token revocation:
-    // On 401, must call refreshToken({ force: true }) to bypass threshold
-    expect(sourceCode).toContain("refreshToken({ force: true })");
+/**
+ * Tracks requests made during a test
+ */
+type RequestLog = {
+  url: string;
+  method: string;
+  authorization: string | null;
+  isRetry: boolean;
+};
+
+beforeEach(async () => {
+  testConfigDir = join(
+    process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
+    `test-api-${Math.random().toString(36).slice(2)}`
+  );
+  mkdirSync(testConfigDir, { recursive: true });
+  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+
+  // Set required env var for OAuth refresh
+  process.env.SENTRY_CLIENT_ID = "test-client-id";
+
+  // Save original fetch
+  originalFetch = globalThis.fetch;
+
+  // Set up initial auth token with a refresh token so 401 retry can get a new token
+  await setAuthToken("initial-token", 3600, "test-refresh-token");
+});
+
+afterEach(() => {
+  // Restore original fetch
+  globalThis.fetch = originalFetch;
+
+  try {
+    rmSync(testConfigDir, { recursive: true, force: true });
+  } catch {
+    // Ignore cleanup errors
+  }
+});
+
+describe("401 retry behavior", () => {
+  test("retries request with new token on 401 response", async () => {
+    const requests: RequestLog[] = [];
+    let apiRequestCount = 0;
+
+    // Mock fetch to return 401 on first API request, then success
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push({
+        url: req.url,
+        method: req.method,
+        authorization: req.headers.get("Authorization"),
+        isRetry: req.headers.get("x-sentry-cli-retry") === "1",
+      });
+
+      // OAuth token refresh endpoint - return new token
+      if (req.url.includes("/oauth/token/")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "refreshed-token",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-refresh-token",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // API requests
+      apiRequestCount += 1;
+
+      // First API request: return 401
+      if (apiRequestCount === 1) {
+        return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Retry request: return success
+      return new Response(
+        JSON.stringify([{ id: "1", slug: "test-org", name: "Test Org" }]),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    };
+
+    const result = await listOrganizations();
+
+    // Verify successful result from retry
+    expect(result).toEqual([{ id: "1", slug: "test-org", name: "Test Org" }]);
+
+    // Verify request sequence:
+    // 1. Initial request with initial-token -> 401
+    // 2. OAuth refresh request
+    // 3. Retry with refreshed-token -> 200
+    expect(requests).toHaveLength(3);
+
+    // First API request
+    expect(requests[0].url).toContain("/api/0/organizations");
+    expect(requests[0].authorization).toBe("Bearer initial-token");
+    expect(requests[0].isRetry).toBe(false);
+
+    // OAuth refresh request
+    expect(requests[1].url).toContain("/oauth/token/");
+
+    // Retry API request with new token
+    expect(requests[2].url).toContain("/api/0/organizations");
+    expect(requests[2].authorization).toBe("Bearer refreshed-token");
+    expect(requests[2].isRetry).toBe(true);
   });
 
-  test("401 handler is in afterResponse hook", () => {
-    // Must be in afterResponse to intercept before ky's error handling
-    expect(sourceCode).toContain("afterResponse:");
-    expect(sourceCode).toContain("response.status === 401");
-  });
+  test("does not retry on non-401 errors", async () => {
+    const requests: RequestLog[] = [];
 
-  test("retry marker header prevents infinite loops", () => {
-    // Uses a header to mark requests as retries
-    expect(sourceCode).toContain(
-      'const RETRY_MARKER_HEADER = "x-sentry-cli-retry"'
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push({
+        url: req.url,
+        method: req.method,
+        authorization: req.headers.get("Authorization"),
+        isRetry: req.headers.get("x-sentry-cli-retry") === "1",
+      });
+
+      // Return 403 (not 401) - this should not trigger our retry logic
+      return new Response(JSON.stringify({ detail: "Forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await expect(listOrganizations()).rejects.toThrow();
+
+    // Should only have initial request, no OAuth refresh, no retry
+    // (ky may retry on certain errors but 403 is not one of them)
+    const apiRequests = requests.filter((r) =>
+      r.url.includes("/api/0/organizations")
     );
-    expect(sourceCode).toContain("request.headers.get(RETRY_MARKER_HEADER)");
-    expect(sourceCode).toContain("&& !isRetry");
-    expect(sourceCode).toContain('retryHeaders.set(RETRY_MARKER_HEADER, "1")');
+    expect(apiRequests).toHaveLength(1);
+    expect(apiRequests[0].isRetry).toBe(false);
+
+    // No OAuth refresh should have been attempted
+    const oauthRequests = requests.filter((r) =>
+      r.url.includes("/oauth/token/")
+    );
+    expect(oauthRequests).toHaveLength(0);
+  });
+
+  test("does not retry infinitely on repeated 401s", async () => {
+    const requests: RequestLog[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push({
+        url: req.url,
+        method: req.method,
+        authorization: req.headers.get("Authorization"),
+        isRetry: req.headers.get("x-sentry-cli-retry") === "1",
+      });
+
+      // OAuth refresh - return token but it will still be rejected
+      if (req.url.includes("/oauth/token/")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "still-invalid-token",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-refresh-token",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Always return 401 for API requests
+      return new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await expect(listOrganizations()).rejects.toThrow();
+
+    // Should have exactly 2 API requests (initial + one retry, no infinite loop)
+    const apiRequests = requests.filter((r) =>
+      r.url.includes("/api/0/organizations")
+    );
+    expect(apiRequests).toHaveLength(2);
+    expect(apiRequests[0].isRetry).toBe(false);
+    expect(apiRequests[1].isRetry).toBe(true);
+
+    // OAuth refresh should have been called once (after first 401)
+    const oauthRequests = requests.filter((r) =>
+      r.url.includes("/oauth/token/")
+    );
+    expect(oauthRequests).toHaveLength(1);
   });
 });

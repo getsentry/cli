@@ -105,37 +105,19 @@ async function createApiClient(): Promise<KyInstance> {
               retryHeaders.set("Authorization", `Bearer ${newToken}`);
               retryHeaders.set(RETRY_MARKER_HEADER, "1");
 
+              // Spread options but remove prefixUrl since request.url is already absolute
+              const { prefixUrl: _, ...retryOptions } = options;
               return kyHttpClient(request.url, {
-                ...options,
+                ...retryOptions,
                 headers: retryHeaders,
                 retry: 0,
               });
             } catch {
+              // Token refresh failed, return original 401 response
               return response;
             }
           }
           return response;
-        },
-      ],
-      beforeError: [
-        async (error) => {
-          const { response } = error;
-          if (response) {
-            const text = await response.text();
-            let detail: string | undefined;
-            try {
-              const body = JSON.parse(text) as { detail?: string };
-              detail = body.detail ?? JSON.stringify(body);
-            } catch {
-              detail = text;
-            }
-            throw new ApiError(
-              `API request failed: ${response.status} ${response.statusText}`,
-              response.status,
-              detail
-            );
-          }
-          return error;
         },
       ],
     },
@@ -186,11 +168,33 @@ export async function apiRequest<T>(
   const { method = "GET", body, params, schema } = options;
   const client = await createApiClient();
 
-  const response = await client(normalizePath(endpoint), {
-    method,
-    json: body,
-    searchParams: buildSearchParams(params),
-  });
+  let response: Response;
+  try {
+    response = await client(normalizePath(endpoint), {
+      method,
+      json: body,
+      searchParams: buildSearchParams(params),
+    });
+  } catch (error) {
+    // Transform ky HTTPError into ApiError
+    if (error && typeof error === "object" && "response" in error) {
+      const kyError = error as { response: Response };
+      const text = await kyError.response.text();
+      let detail: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { detail?: string };
+        detail = parsed.detail ?? JSON.stringify(parsed);
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
+        kyError.response.status,
+        detail
+      );
+    }
+    throw error;
+  }
 
   const data = await response.json();
 
