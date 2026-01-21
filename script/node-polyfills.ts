@@ -8,8 +8,6 @@
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
 
-import fg from "fast-glob";
-
 declare global {
   var Bun: typeof BunPolyfill;
 }
@@ -75,10 +73,13 @@ const BunPolyfill = {
     constructor(pattern: string) {
       this.pattern = pattern;
     }
-    scan(opts?: { cwd?: string }): AsyncIterable<string> {
-      return fg.stream(this.pattern, {
+    async *scan(opts?: { cwd?: string }): AsyncIterable<string> {
+      const results = await glob(this.pattern, {
         cwd: opts?.cwd || process.cwd(),
-      }) as AsyncIterable<string>;
+      });
+      for (const result of results) {
+        yield result;
+      }
     }
   },
 };

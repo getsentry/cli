@@ -40,8 +40,8 @@ const result = await build({
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
   },
-  // Keep Node.js built-ins external - they're available in the runtime
-  packages: "external",
+  // Only externalize Node.js built-ins - bundle all npm packages
+  external: ["node:*"],
   metafile: true,
 });
 
