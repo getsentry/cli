@@ -169,7 +169,9 @@ describe("DSN Detector (New Module)", () => {
       const distDsn = "https://dist@o222.ingest.sentry.io/222";
 
       // Put DSNs in directories that should be skipped
-      mkdirSync(join(testDir, "node_modules/some-package"), { recursive: true });
+      mkdirSync(join(testDir, "node_modules/some-package"), {
+        recursive: true,
+      });
       writeFileSync(
         join(testDir, "node_modules/some-package/index.js"),
         `Sentry.init({ dsn: "${nodeModulesDsn}" })`

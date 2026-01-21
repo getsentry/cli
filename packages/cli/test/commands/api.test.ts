@@ -1,3 +1,4 @@
+// biome-ignore-all lint/performance/useTopLevelRegex: regex in test assertions is fine
 /**
  * API Command Unit Tests
  *

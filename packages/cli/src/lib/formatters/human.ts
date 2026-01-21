@@ -368,6 +368,7 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
  * @param header - Optional header text (defaults to "Latest Event")
  * @returns Array of formatted lines
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: formatting logic
 export function formatEventDetails(
   event: SentryEvent,
   header = "Latest Event"

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/performance/noBarrelFile: intentional public API
 /**
  * Type definitions for the Sentry CLI
  *

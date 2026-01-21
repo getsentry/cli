@@ -89,11 +89,11 @@ export function mockProcess() {
 // CLI Runner
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface CliResult {
+export type CliResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
-}
+};
 
 /**
  * Run CLI command and capture output

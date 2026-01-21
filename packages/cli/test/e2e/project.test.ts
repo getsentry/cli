@@ -243,6 +243,6 @@ describe("sentry project get", () => {
       expect(result.exitCode).toBe(1);
       expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
     },
-    { timeout: 15000 }
+    { timeout: 15_000 }
   );
 });

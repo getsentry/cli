@@ -16,10 +16,14 @@ if (existsSync(envLocalPath)) {
   const content = readFileSync(envLocalPath, "utf-8");
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
 
     const eqIndex = trimmed.indexOf("=");
-    if (eqIndex === -1) continue;
+    if (eqIndex === -1) {
+      continue;
+    }
 
     const key = trimmed.slice(0, eqIndex).trim();
     let value = trimmed.slice(eqIndex + 1).trim();
@@ -48,10 +52,10 @@ process.env.SENTRY_CLI_CONFIG_DIR = testDir;
 
 // Clear Sentry environment variables to ensure clean state
 // (but preserve SENTRY_TEST_* vars for E2E tests)
-delete process.env.SENTRY_DSN;
-delete process.env.SENTRY_AUTH_TOKEN;
-delete process.env.SENTRY_CLIENT_ID;
-delete process.env.SENTRY_URL;
+process.env.SENTRY_DSN = undefined;
+process.env.SENTRY_AUTH_TOKEN = undefined;
+process.env.SENTRY_CLIENT_ID = undefined;
+process.env.SENTRY_URL = undefined;
 
 // Cleanup after all tests
 process.on("exit", () => {

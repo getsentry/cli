@@ -3,5 +3,25 @@
   "extends": ["ultracite/core"],
   "javascript": {
     "globals": ["Bun"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/cli/test/**/*.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "useTopLevelRegex": "off",
+            "noDelete": "off"
+          },
+          "style": {
+            "useBlockStatements": "off",
+            "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "useAwait": "off"
+          }
+        }
+      }
+    }
+  ]
 }
