@@ -136,6 +136,34 @@ const DEFAULT_CONTEXT_ALTERNATIVES = [
 ] as const;
 
 /**
+ * Build the formatted context error message with usage hints.
+ *
+ * @param resource - What is required (e.g., "Organization")
+ * @param command - Usage example command
+ * @param alternatives - Alternative ways to provide the context
+ * @returns Formatted multi-line error message
+ */
+function buildContextMessage(
+  resource: string,
+  command: string,
+  alternatives: string[]
+): string {
+  const lines = [
+    `${resource} is required.`,
+    "",
+    "Specify it using:",
+    `  ${command}`,
+  ];
+  if (alternatives.length > 0) {
+    lines.push("", "Or:");
+    for (const alt of alternatives) {
+      lines.push(`  - ${alt}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
  * Missing required context errors (org, project, etc).
  *
  * Provides consistent error formatting with usage hints and alternatives.
@@ -154,7 +182,8 @@ export class ContextError extends CliError {
     command: string,
     alternatives: string[] = [...DEFAULT_CONTEXT_ALTERNATIVES]
   ) {
-    super(`${resource} is required.`);
+    // Include full formatted message so it's shown even when caught by external handlers
+    super(buildContextMessage(resource, command, alternatives));
     this.name = "ContextError";
     this.resource = resource;
     this.command = command;
@@ -162,19 +191,8 @@ export class ContextError extends CliError {
   }
 
   override format(): string {
-    const lines = [
-      `${this.resource} is required.`,
-      "",
-      "Specify it using:",
-      `  ${this.command}`,
-    ];
-    if (this.alternatives.length > 0) {
-      lines.push("", "Or:");
-      for (const alt of this.alternatives) {
-        lines.push(`  - ${alt}`);
-      }
-    }
-    return lines.join("\n");
+    // Message already contains the formatted output
+    return this.message;
   }
 }
 

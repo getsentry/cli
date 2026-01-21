@@ -154,6 +154,7 @@ export const getCommand = buildCommand({
       org: flags.org,
       project: projectSlug,
       cwd,
+      usageHint: "sentry project get <project-slug> --org <org-slug>",
     });
 
     if (resolvedTargets.length === 0) {

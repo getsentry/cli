@@ -24,7 +24,7 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
-import { AuthError } from "./errors.js";
+import { AuthError, ContextError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -80,6 +80,8 @@ export type ResolveOptions = {
   project?: string;
   /** Current working directory for DSN detection */
   cwd: string;
+  /** Usage hint shown when only one of org/project is provided */
+  usageHint?: string;
 };
 
 /**
@@ -295,11 +297,9 @@ export async function resolveAllTargets(
 
   // Error if only one flag is provided
   if (org || project) {
-    const missing = org ? "--project" : "--org";
-    const provided = org ? "--org" : "--project";
-    throw new Error(
-      `${provided} was specified but ${missing} is also required.\n` +
-        "Please provide both --org and --project flags together."
+    throw new ContextError(
+      "Organization and project",
+      options.usageHint ?? "sentry <command> --org <org> --project <project>"
     );
   }
 
@@ -390,11 +390,9 @@ export async function resolveOrgAndProject(
 
   // Error if only one flag is provided
   if (org || project) {
-    const missing = org ? "--project" : "--org";
-    const provided = org ? "--org" : "--project";
-    throw new Error(
-      `${provided} was specified but ${missing} is also required.\n` +
-        "Please provide both --org and --project flags together."
+    throw new ContextError(
+      "Organization and project",
+      options.usageHint ?? "sentry <command> --org <org> --project <project>"
     );
   }
 
