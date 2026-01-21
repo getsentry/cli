@@ -1,13 +1,7 @@
 name: Build
-on:
-  push:
-    branches: [main, release/**]
-  pull_request:
-  workflow_call:
 
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+on:
+  workflow_call:
 
 jobs:
   build-binary:
@@ -28,7 +22,7 @@ jobs:
           - target: windows-x64
             os: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
         working-directory: packages/cli
@@ -47,7 +41,7 @@ jobs:
             ./dist/sentry-${{ matrix.target }}/bin/sentry --help
           fi
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
           path: packages/cli/dist/sentry-*/bin/sentry*
@@ -56,9 +50,9 @@ jobs:
     name: Build npm Package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: bun install
@@ -75,7 +69,7 @@ jobs:
         working-directory: packages/cli
         run: npm pack
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: npm-package
           path: packages/cli/*.tgz
@@ -85,11 +79,11 @@ jobs:
     needs: [build-binary, build-npm]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v4
       - name: List artifacts
         run: find . -type f
       - name: Upload combined artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ github.sha }}
           path: |
