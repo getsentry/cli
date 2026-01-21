@@ -52,10 +52,10 @@ process.env.SENTRY_CLI_CONFIG_DIR = testDir;
 
 // Clear Sentry environment variables to ensure clean state
 // (but preserve SENTRY_TEST_* vars for E2E tests)
-process.env.SENTRY_DSN = undefined;
-process.env.SENTRY_AUTH_TOKEN = undefined;
-process.env.SENTRY_CLIENT_ID = undefined;
-process.env.SENTRY_URL = undefined;
+delete process.env.SENTRY_DSN;
+delete process.env.SENTRY_AUTH_TOKEN;
+delete process.env.SENTRY_CLIENT_ID;
+delete process.env.SENTRY_URL;
 
 // Cleanup after all tests
 process.on("exit", () => {
