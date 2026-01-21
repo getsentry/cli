@@ -32,7 +32,7 @@ const result = await build({
   bundle: true,
   minify: true,
   platform: "node",
-  target: "node18",
+  target: "node22",
   format: "esm",
   outfile: "./dist/bin.mjs",
   inject: ["./script/node-polyfills.ts"],
