@@ -53,11 +53,21 @@ const BunPolyfill = {
     }
   },
 
-  spawn(cmd: string[], opts?: { stdio?: string[] }) {
+  spawn(
+    cmd: string[],
+    opts?: { stdout?: "pipe" | "ignore"; stderr?: "pipe" | "ignore" }
+  ) {
     const [command, ...args] = cmd;
+    // Map Bun's stdout/stderr options to Node's stdio array format
+    // Currently only supports "ignore" - "pipe" would require returning streams
+    const stdio: ("pipe" | "ignore")[] = [
+      "ignore", // stdin
+      opts?.stdout ?? "ignore",
+      opts?.stderr ?? "ignore",
+    ];
     const proc = nodeSpawn(command, args, {
       detached: true,
-      stdio: (opts?.stdio as "ignore") || "ignore",
+      stdio,
     });
     return {
       unref() {
