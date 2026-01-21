@@ -1,0 +1,29 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (semver, bump type, or "auto")
+        required: true
+        default: 'auto'
+      force:
+        description: Force release even with blockers
+        required: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+    secrets: inherit
+
+  release:
+    needs: [build]
+    uses: getsentry/craft/.github/workflows/release.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      force: ${{ inputs.force }}
+      publish_repo: getsentry/publish
+    secrets: inherit
+    permissions:
+      contents: write

@@ -6,17 +6,10 @@ on:
     paths:
       - 'packages/cli/**'
       - '.github/workflows/test.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'packages/cli/**'
-      - '.github/workflows/test.yml'
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
-  pull-requests: write
 
 jobs:
   test:
@@ -27,13 +20,9 @@ jobs:
         working-directory: packages/cli
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         run: bun install
@@ -43,11 +32,10 @@ jobs:
           SENTRY_TEST_AUTH_TOKEN: ${{ secrets.SENTRY_TEST_AUTH_TOKEN }}
           SENTRY_TEST_ORG: ${{ secrets.SENTRY_TEST_ORG }}
           SENTRY_TEST_PROJECT: ${{ secrets.SENTRY_TEST_PROJECT }}
-        run: bun test  --reporter=junit --reporter-outfile=./report.junit.xml --coverage --coverage-reporter=lcov
+        run: bun test --reporter=junit --reporter-outfile=./report.junit.xml --coverage --coverage-reporter=lcov
 
       - name: Upload Coverage
-        uses: getsentry/codecov-action@main
+        uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          post-pr-comment: true
-
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/cli/coverage/lcov.info

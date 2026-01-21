@@ -24,9 +24,12 @@ const routes = buildRouteMap({
   },
 });
 
+declare const SENTRY_CLI_VERSION: string;
+
 export const app = buildApplication(routes, {
   name: "sentry",
   versionInfo: {
-    currentVersion: "0.1.0",
+    currentVersion:
+      typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0",
   },
 });

@@ -1,0 +1,97 @@
+name: Build
+on:
+  push:
+    branches: [main, release/**]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-binary:
+    name: Build Binary (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            os: macos-latest
+          - target: darwin-x64
+            os: macos-13
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+        working-directory: packages/cli
+      - name: Build
+        working-directory: packages/cli
+        env:
+          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+        run: bun run build
+      - name: Smoke test
+        working-directory: packages/cli
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            ./dist/sentry-windows-x64/bin/sentry.exe --help
+          else
+            ./dist/sentry-${{ matrix.target }}/bin/sentry --help
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sentry-${{ matrix.target }}
+          path: packages/cli/dist/sentry-*/bin/sentry*
+
+  build-npm:
+    name: Build npm Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: bun install
+        working-directory: packages/cli
+      - name: Bundle
+        working-directory: packages/cli
+        env:
+          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+        run: bun run bundle
+      - name: Smoke test (Node.js)
+        working-directory: packages/cli
+        run: node dist/bin.mjs --help
+      - name: Pack
+        working-directory: packages/cli
+        run: npm pack
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-package
+          path: packages/cli/*.tgz
+
+  merge-artifacts:
+    name: Merge Artifacts
+    needs: [build-binary, build-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+      - name: List artifacts
+        run: find . -type f
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ github.sha }}
+          path: |
+            sentry-*/
+            npm-package/*.tgz

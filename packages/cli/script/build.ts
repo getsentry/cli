@@ -3,7 +3,7 @@
  * Build script for Sentry CLI
  *
  * Creates standalone executables for multiple platforms using Bun.build().
- * Each platform gets its own npm package structure in dist/.
+ * Binaries are uploaded to GitHub Releases.
  *
  * Usage:
  *   bun run script/build.ts           # Build for all platforms
@@ -13,10 +13,8 @@
  *   dist/
  *     sentry-darwin-arm64/
  *       bin/sentry
- *       package.json
  *     sentry-darwin-x64/
  *       bin/sentry
- *       package.json
  *     ...
  */
 
@@ -25,14 +23,10 @@ import pkg from "../package.json";
 
 const VERSION = pkg.version;
 
-/**
- * Build-time constants injected into the binary
- */
+/** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
-/**
- * Build targets configuration
- */
+/** Build targets configuration */
 type BuildTarget = {
   os: "darwin" | "linux" | "win32";
   arch: "arm64" | "x64";
@@ -46,24 +40,18 @@ const ALL_TARGETS: BuildTarget[] = [
   { os: "win32", arch: "x64" },
 ];
 
-/**
- * Get package name for a target (uses "windows" instead of "win32" for npm)
- */
+/** Get package name for a target (uses "windows" instead of "win32") */
 function getPackageName(target: BuildTarget): string {
   const platformName = target.os === "win32" ? "windows" : target.os;
   return `sentry-${platformName}-${target.arch}`;
 }
 
-/**
- * Get Bun compile target string
- */
+/** Get Bun compile target string */
 function getBunTarget(target: BuildTarget): string {
   return `bun-${target.os}-${target.arch}`;
 }
 
-/**
- * Build for a single target
- */
+/** Build for a single target */
 async function buildTarget(target: BuildTarget): Promise<boolean> {
   const packageName = getPackageName(target);
   const binaryName = target.os === "win32" ? "sentry.exe" : "sentry";
@@ -100,30 +88,12 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
     return false;
   }
 
-  // Create package.json for this platform package
-  // Note: os field uses "win32" for Windows (npm's convention)
-  await Bun.file(`dist/${packageName}/package.json`).write(
-    JSON.stringify(
-      {
-        name: packageName,
-        version: VERSION,
-        os: [target.os],
-        cpu: [target.arch],
-        description: "Platform-specific binary for @betegon/sentry CLI",
-      },
-      null,
-      2
-    )
-  );
-
   console.log(`    -> ${outfile}`);
   return true;
 }
 
-/**
- * Main build function
- */
-async function build(): Promise<Record<string, string>> {
+/** Main build function */
+async function build(): Promise<void> {
   const args = process.argv.slice(2);
   const singleBuild = args.includes("--single");
 
@@ -165,7 +135,6 @@ async function build(): Promise<Record<string, string>> {
   console.log("");
 
   // Build all targets
-  const binaries: Record<string, string> = {};
   let successCount = 0;
   let failCount = 0;
 
@@ -173,7 +142,6 @@ async function build(): Promise<Record<string, string>> {
     const success = await buildTarget(target);
     if (success) {
       successCount += 1;
-      binaries[getPackageName(target)] = VERSION;
     } else {
       failCount += 1;
     }
@@ -186,10 +154,6 @@ async function build(): Promise<Record<string, string>> {
   if (failCount > 0) {
     process.exit(1);
   }
-
-  return binaries;
 }
 
-// Run build and export binaries for use by package.ts
-const binaries = await build();
-export { binaries, VERSION };
+await build();

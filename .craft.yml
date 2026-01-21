@@ -1,0 +1,20 @@
+minVersion: '2.14.0'
+changelog:
+  policy: auto
+preReleaseCommand: >-
+  node -p "
+    const {execSync} = require('child_process');
+    execSync('npm --no-git-tag-version version ' + process.env.CRAFT_NEW_VERSION, {cwd: 'packages/cli'}).toString();
+  "
+postReleaseCommand: >-
+  node -p "
+    const {execSync} = require('child_process');
+    execSync('npm --no-git-tag-version version preminor --preid=dev', {cwd: 'packages/cli'});
+    execSync('git diff --quiet || git commit -anm \"meta: Bump new development version\\n\\n#skip-changelog\" && git pull --rebase && git push').toString();
+  "
+requireNames:
+  - /^sentry-.+$/
+  - /^sentry-.*\.tgz$/
+targets:
+  - name: npm
+  - name: github
