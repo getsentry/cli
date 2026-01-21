@@ -22,11 +22,6 @@ export type CachedProject = z.infer<typeof CachedProjectSchema>;
 
 /**
  * Schema for authentication configuration
- *
- * @property token - The OAuth access token or manual API token
- * @property refreshToken - OAuth refresh token for automatic token renewal
- * @property expiresAt - Unix timestamp (ms) when the access token expires
- * @property issuedAt - Unix timestamp (ms) when the access token was issued
  */
 export const AuthConfigSchema = z.object({
   token: z.string().optional(),

@@ -25,15 +25,10 @@ type RefreshResult = {
   expiresAt?: string;
 };
 
-/**
- * Threshold for proactive token refresh (matches config.ts).
- * Refresh when less than 10% of token lifetime remains.
- */
+/** Refresh when less than 10% of token lifetime remains (matches config.ts) */
 const REFRESH_THRESHOLD = 0.1;
 
-/**
- * Default token lifetime assumption (1 hour) for tokens without issuedAt.
- */
+/** Default token lifetime assumption (1 hour) for tokens without issuedAt */
 const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
 
 export const refreshCommand = buildCommand({
@@ -75,12 +70,10 @@ Examples:
     const { stdout } = this;
     const config = await readConfig();
 
-    // Check if authenticated
     if (!config.auth?.token) {
       throw new AuthError("not_authenticated");
     }
 
-    // Check for refresh token
     if (!config.auth.refreshToken) {
       throw new AuthError(
         "invalid",
@@ -89,8 +82,6 @@ Examples:
       );
     }
 
-    // Check if refresh is needed (unless --force)
-    // Use the same 10% threshold as automatic refresh in config.ts
     if (!flags.force && config.auth.expiresAt) {
       const now = Date.now();
       const expiresAt = config.auth.expiresAt;

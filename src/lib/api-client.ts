@@ -68,20 +68,11 @@ type ApiRequestOptions<T = unknown> = {
   schema?: z.ZodType<T>;
 };
 
-/**
- * Custom header to mark requests as retries (prevents infinite retry loops).
- * This is stripped before sending and only used internally.
- */
+/** Header to mark requests as retries, preventing infinite retry loops */
 const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
 
 /**
  * Create a configured ky instance with retry, timeout, and authentication.
- *
- * Features:
- * - Automatic token refresh via getValidAuthToken() (proactive)
- * - 401 response handling with token refresh and retry (reactive)
- * - Configurable retry for transient errors
- * - Concurrent 401s share the same refresh via getValidAuthToken()'s mutex
  *
  * @throws {AuthError} When not authenticated
  * @throws {ApiError} When API request fails
@@ -107,27 +98,20 @@ async function createApiClient(): Promise<KyInstance> {
       afterResponse: [
         async (request, options, response) => {
           // On 401, try refreshing token and retry once
-          // Use a per-request header to prevent infinite retry loops
           const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
           if (response.status === 401 && !isRetry) {
             try {
-              // getValidAuthToken() has built-in concurrency protection via refreshPromise
-              // Multiple concurrent 401s will share the same refresh operation
               const newToken = await getValidAuthToken();
-
-              // Create new headers without the retry marker for the actual request
               const retryHeaders = new Headers(options.headers);
               retryHeaders.set("Authorization", `Bearer ${newToken}`);
               retryHeaders.set(RETRY_MARKER_HEADER, "1");
 
-              // Retry the request with the new token
               return kyHttpClient(request.url, {
                 ...options,
                 headers: retryHeaders,
-                retry: 0, // Don't retry the retry
+                retry: 0,
               });
             } catch {
-              // Refresh failed, return original 401 response
               return response;
             }
           }

@@ -317,15 +317,6 @@ export async function setApiToken(token: string): Promise<void> {
 
 /**
  * Refresh an access token using a refresh token.
- *
- * Implements RFC 6749 Section 6 - Refreshing an Access Token.
- * The server may optionally return a new refresh token (rotation).
- *
- * @param refreshToken - The refresh token from the previous authorization
- * @returns New token response with updated access_token and optional new refresh_token
- * @throws {ConfigError} When SENTRY_CLIENT_ID is not configured
- * @throws {AuthError} When refresh fails (token revoked, expired, or invalid)
- * @throws {ApiError} When unable to connect to Sentry
  */
 export async function refreshAccessToken(
   refreshToken: string
@@ -367,7 +358,6 @@ export async function refreshAccessToken(
   }
 
   if (!response.ok) {
-    // Parse error response for better error messages
     let errorDetail = "Token refresh failed";
     try {
       const errorData = await response.json();
@@ -380,7 +370,6 @@ export async function refreshAccessToken(
       // Ignore JSON parse errors
     }
 
-    // Common refresh failures: token revoked, expired, or invalid
     throw new AuthError(
       "expired",
       `Session expired: ${errorDetail}. Run 'sentry auth login' to re-authenticate.`
