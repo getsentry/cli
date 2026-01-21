@@ -1,4 +1,4 @@
-# sentry-cli-next
+# sentry
 
 A gh-like CLI for Sentry.
 
@@ -63,9 +63,8 @@ sentry api /organizations/ --include                    # Show headers
 
 ```bash
 bun install
-cd packages/cli
-bun run --env-file=../../.env.local src/bin.ts --help    # Run CLI in dev mode
-bun run build                                             # Build binary
+bun run --env-file=.env.local src/bin.ts --help    # Run CLI in dev mode
+bun run build                                       # Build binary
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.

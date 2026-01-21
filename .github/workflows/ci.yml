@@ -4,11 +4,19 @@ on:
   push:
     branches: [main, release/**]
     paths:
-      - 'packages/cli/**'
+      - 'src/**'
+      - 'test/**'
+      - 'script/**'
+      - 'package.json'
+      - 'bun.lock'
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
-      - 'packages/cli/**'
+      - 'src/**'
+      - 'test/**'
+      - 'script/**'
+      - 'package.json'
+      - 'bun.lock'
       - '.github/workflows/ci.yml'
   workflow_call:
 
@@ -20,15 +28,12 @@ jobs:
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/cli
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           cache: true
-          cache-dependency-path: packages/cli/bun.lock
+          cache-dependency-path: bun.lock
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
@@ -36,15 +41,12 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/cli
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           cache: true
-          cache-dependency-path: packages/cli/bun.lock
+          cache-dependency-path: bun.lock
       - run: bun install --frozen-lockfile
       - name: Test
         env:
@@ -76,16 +78,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           cache: true
-          cache-dependency-path: packages/cli/bun.lock
+          cache-dependency-path: bun.lock
       - run: bun install --frozen-lockfile
-        working-directory: packages/cli
       - name: Build
-        working-directory: packages/cli
         env:
           SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
         run: bun run build
       - name: Smoke test
-        working-directory: packages/cli
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
@@ -97,7 +96,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
-          path: packages/cli/dist/sentry-*/bin/sentry*
+          path: dist/sentry-*/bin/sentry*
 
   build-npm:
     name: Build npm Package
@@ -108,28 +107,23 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           cache: true
-          cache-dependency-path: packages/cli/bun.lock
+          cache-dependency-path: bun.lock
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: bun install --frozen-lockfile
-        working-directory: packages/cli
       - name: Bundle
-        working-directory: packages/cli
         env:
           SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
         run: bun run bundle
       - name: Smoke test (Node.js)
-        working-directory: packages/cli
         run: node dist/bin.mjs --help
-      - name: Pack
-        working-directory: packages/cli
-        run: npm pack
+      - run: npm pack
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: npm-package
-          path: packages/cli/*.tgz
+          path: '*.tgz'
 
   merge-artifacts:
     name: Merge Artifacts

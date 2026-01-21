@@ -27,7 +27,7 @@ const SENTRY_URL = process.env.SENTRY_URL ?? "https://sentry.io";
  * Build-time: Injected via Bun.build({ define: { SENTRY_CLIENT_ID: "..." } })
  * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
  *
- * @see packages/cli/script/build.ts
+ * @see script/build.ts
  */
 declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
 const SENTRY_CLIENT_ID =

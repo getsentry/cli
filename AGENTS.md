@@ -11,25 +11,23 @@ Before working on this codebase, read the Cursor rules:
 
 ## Quick Reference: Commands
 
-> **Note**: Always check `package.json` and `packages/cli/package.json` for the latest scripts.
+> **Note**: Always check `package.json` for the latest scripts.
 
 ```bash
 # Development
 bun install                              # Install dependencies
-bun run dev                              # Run CLI in dev mode (from packages/cli)
-bun run --env-file=../../.env.local src/bin.ts  # Dev with env vars
+bun run dev                              # Run CLI in dev mode
+bun run --env-file=.env.local src/bin.ts # Dev with env vars
 
 # Build
 bun run build                            # Build for current platform
 bun run build:all                        # Build for all platforms
-turbo build                              # Build all packages
 
 # Type Checking
-turbo typecheck                          # Check all packages
-bun run typecheck                        # Check single package (from packages/cli)
+bun run typecheck                        # Check types
 
 # Linting & Formatting
-bun run lint                             # Check for issues (via turbo)
+bun run lint                             # Check for issues
 bun run lint:fix                         # Auto-fix issues (run before committing)
 
 # Testing
@@ -70,20 +68,18 @@ mkdirSync(dir, { recursive: true, mode: 0o700 });
 ## Architecture
 
 ```
-stellar-orchid/
-├── packages/
-│   └── cli/                    # Main CLI package
-│       ├── src/
-│       │   ├── bin.ts          # Entry point
-│       │   ├── app.ts          # Stricli application setup
-│       │   ├── context.ts      # Dependency injection context
-│       │   ├── commands/       # CLI commands (auth/, issue/, org/, project/)
-│       │   ├── lib/            # Shared utilities (api-client, config, oauth)
-│       │   └── types/          # TypeScript types and Zod schemas
-│       └── script/             # Build scripts
-├── .cursor/rules/              # Cursor AI rules (read these!)
-├── biome.jsonc                 # Linting config (extends ultracite)
-└── turbo.json                  # Turborepo config
+sentry-cli/
+├── src/
+│   ├── bin.ts          # Entry point
+│   ├── app.ts          # Stricli application setup
+│   ├── context.ts      # Dependency injection context
+│   ├── commands/       # CLI commands (auth/, issue/, org/, project/)
+│   ├── lib/            # Shared utilities (api-client, config, oauth)
+│   └── types/          # TypeScript types and Zod schemas
+├── test/               # Test files (mirrors src/ structure)
+├── script/             # Build scripts
+├── .cursor/rules/      # Cursor AI rules (read these!)
+└── biome.jsonc         # Linting config (extends ultracite)
 ```
 
 ## Key Patterns
@@ -232,7 +228,7 @@ Minimal comments, maximum clarity. Comments explain **intent and reasoning**, no
 
 ## Testing (bun:test)
 
-**Test files go in `packages/cli/test/`**, not alongside source files.
+**Test files go in `test/`**, not alongside source files.
 - Name test files: `*.test.ts`
 - Mirror source structure: `test/lib/config.test.ts` tests `src/lib/config.ts`
 - E2E tests go in `test/e2e/`
@@ -256,9 +252,9 @@ mock.module("./some-module", () => ({
 
 | What | Where |
 |------|-------|
-| Add new command | `packages/cli/src/commands/<domain>/` |
-| Add API types | `packages/cli/src/types/sentry.ts` |
-| Add config types | `packages/cli/src/types/config.ts` |
-| Add utility | `packages/cli/src/lib/` |
-| Build scripts | `packages/cli/script/` |
-| Add tests | `packages/cli/test/` (mirror `src/` structure) |
+| Add new command | `src/commands/<domain>/` |
+| Add API types | `src/types/sentry.ts` |
+| Add config types | `src/types/config.ts` |
+| Add utility | `src/lib/` |
+| Build scripts | `script/` |
+| Add tests | `test/` (mirror `src/` structure) |

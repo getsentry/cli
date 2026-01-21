@@ -6,7 +6,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/cli/test/**/*.ts"],
+      "includes": ["test/**/*.ts"],
       "linter": {
         "rules": {
           "performance": {
