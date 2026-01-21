@@ -285,3 +285,58 @@ describe("force refresh", () => {
     expect(forceResult.token).toBe(mockNewToken);
   });
 });
+
+describe("server-side token revocation scenario", () => {
+  test("force refresh works when token appears valid but was revoked server-side", async () => {
+    // This test simulates the bug scenario:
+    // 1. Client has a token with 90% lifetime remaining (looks valid)
+    // 2. Server revokes the token (returns 401)
+    // 3. Without force:true, refreshToken() would return the same invalid token
+    // 4. With force:true, refreshToken() fetches a new token
+
+    let refreshCalled = false;
+    const revokedToken = "revoked-by-server-token";
+    const newToken = "fresh-token-after-revocation";
+
+    mock.module("../../src/lib/oauth.js", () => ({
+      refreshAccessToken: async () => {
+        refreshCalled = true;
+        return {
+          access_token: newToken,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "new-refresh-token",
+        };
+      },
+    }));
+
+    // Set up a token that looks valid (90% remaining) but imagine server revoked it
+    const now = Date.now();
+    const lifetime = 3600 * 1000;
+
+    await writeConfig({
+      auth: {
+        token: revokedToken,
+        issuedAt: now - lifetime * 0.1, // 10% elapsed
+        expiresAt: now + lifetime * 0.9, // 90% remaining - looks valid!
+        refreshToken: "stored-refresh-token",
+      },
+    });
+
+    const { refreshToken: refreshTokenMocked } = await import(
+      "../../src/lib/config.js"
+    );
+
+    // Without force: returns the same (revoked) token - this is the bug!
+    const withoutForce = await refreshTokenMocked();
+    expect(withoutForce.token).toBe(revokedToken);
+    expect(withoutForce.refreshed).toBe(false);
+    expect(refreshCalled).toBe(false);
+
+    // With force: true (what 401 handler does), fetches new token
+    const withForce = await refreshTokenMocked({ force: true });
+    expect(withForce.token).toBe(newToken);
+    expect(withForce.refreshed).toBe(true);
+    expect(refreshCalled).toBe(true);
+  });
+});
