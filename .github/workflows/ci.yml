@@ -91,7 +91,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build
         env:
-          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
         run: bun run build
       - name: Smoke test
         shell: bash
@@ -126,7 +126,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Bundle
         env:
-          SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
+          SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
         run: bun run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.mjs --help
