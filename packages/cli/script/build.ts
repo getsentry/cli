@@ -101,10 +101,12 @@ async function build(): Promise<void> {
   console.log("=".repeat(40));
 
   if (!SENTRY_CLIENT_ID) {
-    console.warn(
-      "\nWarning: SENTRY_CLIENT_ID not set. OAuth will not work in the built binary."
+    console.error(
+      "\nError: SENTRY_CLIENT_ID environment variable is required."
     );
-    console.warn("   Set it via: SENTRY_CLIENT_ID=xxx bun run build\n");
+    console.error("   The CLI requires OAuth to function.");
+    console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run build\n");
+    process.exit(1);
   }
 
   // Determine targets

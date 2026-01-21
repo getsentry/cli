@@ -21,10 +21,10 @@ console.log(`\nBundling sentry v${VERSION} for npm`);
 console.log("=".repeat(40));
 
 if (!SENTRY_CLIENT_ID) {
-  console.warn(
-    "\nWarning: SENTRY_CLIENT_ID not set. OAuth will not work in the bundled package."
-  );
-  console.warn("   Set it via: SENTRY_CLIENT_ID=xxx bun run bundle\n");
+  console.error("\nError: SENTRY_CLIENT_ID environment variable is required.");
+  console.error("   The CLI requires OAuth to function.");
+  console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run bundle\n");
+  process.exit(1);
 }
 
 const result = await build({
