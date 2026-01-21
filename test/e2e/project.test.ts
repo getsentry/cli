@@ -227,8 +227,11 @@ describe("sentry project get", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr + result.stdout).toMatch(
-      /--org was specified but --project is also required/i
+    // Should show error with usage hint
+    const output = result.stderr + result.stdout;
+    expect(output).toMatch(/organization and project is required/i);
+    expect(output).toContain(
+      "sentry project get <project-slug> --org <org-slug>"
     );
   });
 

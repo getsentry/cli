@@ -7,13 +7,14 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations, listProjects } from "../../lib/api-client.js";
-import { getCachedProject, getDefaultOrganization } from "../../lib/config.js";
-import { detectDsn, getDsnSourceDescription } from "../../lib/dsn/index.js";
+import { getDefaultOrganization } from "../../lib/config.js";
+import { AuthError } from "../../lib/errors.js";
 import {
   calculateProjectSlugWidth,
   formatProjectRow,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { resolveAllTargets } from "../../lib/resolve-target.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
 type ListFlags = {
@@ -38,6 +39,23 @@ async function fetchOrgProjects(orgSlug: string): Promise<ProjectWithOrg[]> {
 }
 
 /**
+ * Fetch projects for a single org, returning empty array on non-auth errors.
+ * Auth errors propagate so user sees "please log in" message.
+ */
+async function fetchOrgProjectsSafe(
+  orgSlug: string
+): Promise<ProjectWithOrg[]> {
+  try {
+    return await fetchOrgProjects(orgSlug);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return [];
+  }
+}
+
+/**
  * Fetch projects from all accessible organizations.
  * Skips orgs where the user lacks access.
  *
@@ -51,7 +69,10 @@ async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
     try {
       const projects = await fetchOrgProjects(org.slug);
       results.push(...projects);
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthError) {
+        throw error;
+      }
       // User may lack access to some orgs
     }
   }
@@ -102,33 +123,60 @@ function writeRows(
   }
 }
 
-/** Result of resolving organization from DSN detection */
-type DsnOrgResult = {
-  orgSlug: string;
-  detectedFrom: string;
+/** Result of resolving organizations to fetch projects from */
+type OrgResolution = {
+  orgs: string[];
+  footer?: string;
+  showOrg: boolean;
+  skippedSelfHosted?: number;
 };
 
 /**
- * Attempt to resolve organization slug from DSN in the current directory.
- * Uses cached project info when available to get the org slug.
- *
- * @param cwd - Current working directory to search for DSN
- * @returns Org slug and detection source, or null if not found
+ * Resolve which organizations to fetch projects from.
+ * Uses CLI flag, config defaults, or DSN auto-detection.
  */
-async function resolveOrgFromDsn(cwd: string): Promise<DsnOrgResult | null> {
-  const dsn = await detectDsn(cwd);
-  if (!dsn?.orgId) {
-    return null;
+async function resolveOrgsToFetch(
+  orgFlag: string | undefined,
+  cwd: string
+): Promise<OrgResolution> {
+  // 1. If --org flag provided, use it directly
+  if (orgFlag) {
+    return { orgs: [orgFlag], showOrg: false };
   }
 
-  // Prefer cached org slug over numeric ID for better display
-  const cached = await getCachedProject(dsn.orgId, dsn.projectId);
-  const orgSlug = cached?.orgSlug ?? dsn.orgId;
+  // 2. Check config defaults
+  const defaultOrg = await getDefaultOrganization();
+  if (defaultOrg) {
+    return { orgs: [defaultOrg], showOrg: false };
+  }
 
-  return {
-    orgSlug,
-    detectedFrom: getDsnSourceDescription(dsn),
-  };
+  // 3. Auto-detect from DSNs (may find multiple in monorepos)
+  try {
+    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
+      cwd,
+    });
+
+    if (targets.length > 0) {
+      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      return {
+        orgs: uniqueOrgs,
+        footer,
+        showOrg: uniqueOrgs.length > 1,
+        skippedSelfHosted,
+      };
+    }
+
+    // No resolvable targets, but may have self-hosted DSNs
+    return { orgs: [], showOrg: true, skippedSelfHosted };
+  } catch (error) {
+    // Auth errors should propagate - user needs to log in
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Fall through to empty orgs for other errors (network, etc.)
+  }
+
+  return { orgs: [], showOrg: true };
 }
 
 export const listCommand = buildCommand({
@@ -175,32 +223,30 @@ export const listCommand = buildCommand({
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
     const { stdout, cwd } = this;
 
-    // Resolve organization from multiple sources
-    let orgSlug = flags.org ?? (await getDefaultOrganization());
-    let detectedFrom: string | undefined;
+    // Resolve which organizations to fetch from
+    const {
+      orgs: orgsToFetch,
+      footer,
+      showOrg,
+      skippedSelfHosted,
+    } = await resolveOrgsToFetch(flags.org, cwd);
 
-    // Try DSN auto-detection if no org specified
-    if (!orgSlug) {
-      const dsnResult = await resolveOrgFromDsn(cwd).catch(() => null);
-      if (dsnResult) {
-        orgSlug = dsnResult.orgSlug;
-        detectedFrom = dsnResult.detectedFrom;
-      }
-    }
-
-    const showOrg = !orgSlug;
-
-    // Fetch projects
+    // Fetch projects from all orgs (or all accessible if none detected)
     let allProjects: ProjectWithOrg[];
-    if (orgSlug) {
-      allProjects = await fetchOrgProjects(orgSlug);
+    if (orgsToFetch.length > 0) {
+      const results = await Promise.all(
+        orgsToFetch.map((org) => fetchOrgProjectsSafe(org))
+      );
+      allProjects = results.flat();
     } else {
       allProjects = await fetchAllOrgProjects();
     }
 
-    // Filter and limit
+    // Filter and limit (limit is per-org when multiple orgs)
     const filtered = filterByPlatform(allProjects, flags.platform);
-    const limited = filtered.slice(0, flags.limit);
+    const limitCount =
+      orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
+    const limited = filtered.slice(0, limitCount);
 
     if (flags.json) {
       writeJson(stdout, limited);
@@ -208,26 +254,33 @@ export const listCommand = buildCommand({
     }
 
     if (limited.length === 0) {
-      const msg = orgSlug
-        ? `No projects found in organization '${orgSlug}'.\n`
-        : "No projects found.\n";
+      const msg =
+        orgsToFetch.length === 1
+          ? `No projects found in organization '${orgsToFetch[0]}'.\n`
+          : "No projects found.\n";
       stdout.write(msg);
       return;
     }
 
     const slugWidth = calculateProjectSlugWidth(limited, showOrg);
-
     writeHeader(stdout, slugWidth);
     writeRows(stdout, limited, slugWidth, showOrg);
 
-    if (filtered.length > flags.limit) {
-      stdout.write(`\nShowing ${flags.limit} of ${filtered.length} projects\n`);
+    if (filtered.length > limited.length) {
+      stdout.write(
+        `\nShowing ${limited.length} of ${filtered.length} projects\n`
+      );
     }
 
-    // Show detection source and hint if auto-detected
-    if (detectedFrom) {
-      stdout.write(`\nDetected from ${detectedFrom}\n`);
-      stdout.write("Use --org to see projects from other organizations.\n");
+    if (footer) {
+      stdout.write(`\n${footer}\n`);
+    }
+
+    if (skippedSelfHosted) {
+      stdout.write(
+        `\nNote: Skipped ${skippedSelfHosted} self-hosted DSN(s). ` +
+          "Use --org to specify organization explicitly.\n"
+      );
     }
   },
 });

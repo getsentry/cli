@@ -93,6 +93,7 @@ export const getCommand = buildCommand({
       org: flags.org,
       project: flags.project,
       cwd,
+      usageHint: `sentry event get ${eventId} --org <org> --project <project>`,
     });
 
     if (!target) {

@@ -189,19 +189,19 @@ describe("DSN Detector (New Module)", () => {
     });
   });
 
-  describe("detectAllDsns (conflict detection)", () => {
-    test("detects single DSN with no conflict", async () => {
+  describe("detectAllDsns (monorepo support)", () => {
+    test("detects single DSN", async () => {
       const dsn = "https://key@o123.ingest.sentry.io/456";
       writeFileSync(join(testDir, ".env"), `SENTRY_DSN=${dsn}`);
 
       const result = await detectAllDsns(testDir);
 
-      expect(result.conflict).toBe(false);
+      expect(result.hasMultiple).toBe(false);
       expect(result.primary?.raw).toBe(dsn);
       expect(result.all).toHaveLength(1);
     });
 
-    test("detects conflict with different DSNs in different files", async () => {
+    test("detects multiple DSNs in different files", async () => {
       const dsn1 = "https://a@o111.ingest.sentry.io/111";
       const dsn2 = "https://b@o222.ingest.sentry.io/222";
 
@@ -210,12 +210,13 @@ describe("DSN Detector (New Module)", () => {
 
       const result = await detectAllDsns(testDir);
 
-      expect(result.conflict).toBe(true);
-      expect(result.primary).toBeNull();
+      expect(result.hasMultiple).toBe(true);
+      // Primary is now first found, not null
+      expect(result.primary?.raw).toBe(dsn2); // .env.local has higher priority
       expect(result.all).toHaveLength(2);
     });
 
-    test("no conflict when same DSN in multiple files", async () => {
+    test("deduplicates same DSN in multiple files", async () => {
       const dsn = "https://key@o123.ingest.sentry.io/456";
 
       writeFileSync(join(testDir, ".env"), `SENTRY_DSN=${dsn}`);
@@ -223,13 +224,13 @@ describe("DSN Detector (New Module)", () => {
 
       const result = await detectAllDsns(testDir);
 
-      expect(result.conflict).toBe(false);
+      expect(result.hasMultiple).toBe(false);
       expect(result.primary?.raw).toBe(dsn);
       // Should dedupe
       expect(result.all).toHaveLength(1);
     });
 
-    test("detects conflict between env file and code", async () => {
+    test("detects multiple DSNs from env file and code", async () => {
       const envDsn = "https://env@o111.ingest.sentry.io/111";
       const codeDsn = "https://code@o222.ingest.sentry.io/222";
 
@@ -242,11 +243,13 @@ describe("DSN Detector (New Module)", () => {
 
       const result = await detectAllDsns(testDir);
 
-      expect(result.conflict).toBe(true);
+      expect(result.hasMultiple).toBe(true);
+      // Code DSN has higher priority, so it's first
+      expect(result.primary?.raw).toBe(codeDsn);
       expect(result.all).toHaveLength(2);
     });
 
-    test("includes env var in conflict detection", async () => {
+    test("includes env var in detection", async () => {
       const envVarDsn = "https://var@o111.ingest.sentry.io/111";
       const envFileDsn = "https://file@o222.ingest.sentry.io/222";
 
@@ -255,10 +258,66 @@ describe("DSN Detector (New Module)", () => {
 
       const result = await detectAllDsns(testDir);
 
-      expect(result.conflict).toBe(true);
+      expect(result.hasMultiple).toBe(true);
       expect(result.all).toHaveLength(2);
       expect(result.all.map((d) => d.raw)).toContain(envVarDsn);
       expect(result.all.map((d) => d.raw)).toContain(envFileDsn);
+    });
+
+    test("detects DSNs in monorepo package directories", async () => {
+      const frontendDsn = "https://frontend@o111.ingest.sentry.io/111";
+      const backendDsn = "https://backend@o222.ingest.sentry.io/222";
+
+      // Create monorepo structure
+      mkdirSync(join(testDir, "packages/frontend"), { recursive: true });
+      mkdirSync(join(testDir, "packages/backend"), { recursive: true });
+
+      writeFileSync(
+        join(testDir, "packages/frontend/.env"),
+        `SENTRY_DSN=${frontendDsn}`
+      );
+      writeFileSync(
+        join(testDir, "packages/backend/.env"),
+        `SENTRY_DSN=${backendDsn}`
+      );
+
+      const result = await detectAllDsns(testDir);
+
+      expect(result.hasMultiple).toBe(true);
+      expect(result.all).toHaveLength(2);
+      expect(result.all.map((d) => d.raw)).toContain(frontendDsn);
+      expect(result.all.map((d) => d.raw)).toContain(backendDsn);
+
+      // Check packagePath is set correctly
+      const frontend = result.all.find((d) => d.raw === frontendDsn);
+      const backend = result.all.find((d) => d.raw === backendDsn);
+      expect(frontend?.packagePath).toBe("packages/frontend");
+      expect(backend?.packagePath).toBe("packages/backend");
+    });
+
+    test("detects DSNs in apps directory", async () => {
+      const webDsn = "https://web@o111.ingest.sentry.io/111";
+      const mobileDsn = "https://mobile@o222.ingest.sentry.io/222";
+
+      // Create apps structure (common in Turborepo)
+      mkdirSync(join(testDir, "apps/web"), { recursive: true });
+      mkdirSync(join(testDir, "apps/mobile"), { recursive: true });
+
+      writeFileSync(join(testDir, "apps/web/.env"), `SENTRY_DSN=${webDsn}`);
+      writeFileSync(
+        join(testDir, "apps/mobile/.env"),
+        `SENTRY_DSN=${mobileDsn}`
+      );
+
+      const result = await detectAllDsns(testDir);
+
+      expect(result.hasMultiple).toBe(true);
+      expect(result.all).toHaveLength(2);
+
+      const web = result.all.find((d) => d.raw === webDsn);
+      const mobile = result.all.find((d) => d.raw === mobileDsn);
+      expect(web?.packagePath).toBe("apps/web");
+      expect(mobile?.packagePath).toBe("apps/mobile");
     });
   });
 

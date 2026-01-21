@@ -163,8 +163,8 @@ export const SentryIssueSchema = z
     isUnhandled: z.boolean().optional(),
     count: z.string().optional(),
     userCount: z.number().optional(),
-    firstSeen: z.string().optional(),
-    lastSeen: z.string().optional(),
+    firstSeen: z.string().datetime({ offset: true }).optional(),
+    lastSeen: z.string().datetime({ offset: true }).optional(),
   })
   .passthrough();
 
