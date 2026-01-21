@@ -31,10 +31,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
         with:
-          cache: true
-          cache-dependency-path: bun.lock
-      - run: bun install --frozen-lockfile
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
 
@@ -44,10 +47,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
         with:
-          cache: true
-          cache-dependency-path: bun.lock
-      - run: bun install --frozen-lockfile
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
       - name: Test
         env:
           SENTRY_TEST_AUTH_TOKEN: ${{ secrets.SENTRY_TEST_AUTH_TOKEN }}
@@ -76,10 +82,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
         with:
-          cache: true
-          cache-dependency-path: bun.lock
-      - run: bun install --frozen-lockfile
+          path: node_modules
+          key: node-modules-${{ matrix.os }}-${{ hashFiles('bun.lock') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
@@ -105,13 +114,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
-          cache-dependency-path: bun.lock
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: bun install --frozen-lockfile
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
       - name: Bundle
         env:
           SENTRY_CLIENT_ID: ${{ secrets.SENTRY_CLIENT_ID }}
