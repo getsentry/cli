@@ -8,6 +8,8 @@
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
 
+import { glob } from "tinyglobby";
+
 declare global {
   var Bun: typeof BunPolyfill;
 }
