@@ -69,16 +69,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Native builds (can run smoke test)
           - target: darwin-arm64
             os: macos-latest
-          - target: darwin-x64
-            os: macos-latest
-          - target: linux-arm64
-            os: ubuntu-latest
+            can-test: true
           - target: linux-x64
             os: ubuntu-latest
+            can-test: true
           - target: windows-x64
             os: windows-latest
+            can-test: true
+          # Cross-compiled builds (cannot run smoke test)
+          - target: darwin-x64
+            os: macos-latest
+            can-test: false
+          - target: linux-arm64
+            os: ubuntu-latest
+            can-test: false
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -94,6 +101,7 @@ jobs:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
         run: bun run build --target ${{ matrix.target }}
       - name: Smoke test
+        if: matrix.can-test
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
