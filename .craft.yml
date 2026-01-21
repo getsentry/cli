@@ -1,0 +1,15 @@
+minVersion: '2.14.0'
+changelog:
+  policy: auto
+preReleaseCommand: npm --no-git-tag-version version ${CRAFT_NEW_VERSION}
+postReleaseCommand: >-
+  npm --no-git-tag-version version preminor --preid=dev &&
+  git diff --quiet || (git commit -anm "meta: Bump new development version
+
+  #skip-changelog" && git pull --rebase && git push)
+requireNames:
+  - /^sentry-.+$/
+  - /^sentry-.*\.tgz$/
+targets:
+  - name: npm
+  - name: github

@@ -5,14 +5,6 @@
 - [Bun](https://bun.sh/) installed
 - A Sentry OAuth application (create one at https://sentry.io/settings/account/api/applications/)
 
-## Project Structure
-
-```
-sentry-cli-next/
-└── packages/
-    └── cli/             # The Sentry CLI
-```
-
 ## Setup
 
 1. Install dependencies:
@@ -34,8 +26,7 @@ Get the client ID from your Sentry OAuth application settings.
 ## Running Locally
 
 ```bash
-cd packages/cli
-bun run --env-file=../../.env.local src/bin.ts auth login
+bun run --env-file=.env.local src/bin.ts auth login
 ```
 
 ## Testing the Device Flow
@@ -43,8 +34,7 @@ bun run --env-file=../../.env.local src/bin.ts auth login
 1. Run the CLI login command:
 
 ```bash
-cd packages/cli
-bun run --env-file=../../.env.local src/bin.ts auth login
+bun run --env-file=.env.local src/bin.ts auth login
 ```
 
 2. You'll see output like:
@@ -85,7 +75,6 @@ When creating your Sentry OAuth application:
 ## Building
 
 ```bash
-cd packages/cli
 bun run build
 ```
 
