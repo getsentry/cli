@@ -11,12 +11,12 @@
  *   bun run script/build.ts --target darwin-x64    # Build for specific target (cross-compile)
  *
  * Output structure:
- *   dist/
- *     sentry-darwin-arm64/
- *       bin/sentry
- *     sentry-darwin-x64/
- *       bin/sentry
- *     ...
+ *   dist-bin/
+ *     sentry-darwin-arm64
+ *     sentry-darwin-x64
+ *     sentry-linux-arm64
+ *     sentry-linux-x64
+ *     sentry-windows-x64.exe
  */
 
 import { $ } from "bun";
@@ -55,13 +55,14 @@ function getBunTarget(target: BuildTarget): string {
 /** Build for a single target */
 async function buildTarget(target: BuildTarget): Promise<boolean> {
   const packageName = getPackageName(target);
-  const binaryName = target.os === "win32" ? "sentry.exe" : "sentry";
-  const outfile = `dist/${packageName}/bin/${binaryName}`;
+  const extension = target.os === "win32" ? ".exe" : "";
+  const binaryName = `${packageName}${extension}`;
+  const outfile = `dist-bin/${binaryName}`;
 
   console.log(`  Building ${packageName}...`);
 
   // Create directory structure
-  await $`mkdir -p dist/${packageName}/bin`;
+  await $`mkdir -p dist-bin`;
 
   const result = await Bun.build({
     entrypoints: ["./src/bin.ts"],
@@ -159,8 +160,8 @@ async function build(): Promise<void> {
     console.log(`\nBuilding for ${targets.length} targets`);
   }
 
-  // Clean dist directory
-  await $`rm -rf dist`;
+  // Clean output directory
+  await $`rm -rf dist-bin`;
 
   console.log("");
 
