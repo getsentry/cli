@@ -29,12 +29,16 @@ type GetFlags = {
 /**
  * Try to fetch the latest event for an issue.
  * Returns undefined if the fetch fails (non-blocking).
+ *
+ * @param orgSlug - Organization slug for API routing
+ * @param issueId - Issue ID (numeric)
  */
 async function tryGetLatestEvent(
+  orgSlug: string,
   issueId: string
 ): Promise<SentryEvent | undefined> {
   try {
-    return await getLatestEvent(issueId);
+    return await getLatestEvent(orgSlug, issueId);
   } catch {
     return;
   }
@@ -52,7 +56,12 @@ function writeHumanOutput(
   stdout.write(`${issueLines.join("\n")}\n`);
 
   if (event) {
-    const eventLines = formatEventDetails(event);
+    // Pass issue permalink for constructing replay links
+    const eventLines = formatEventDetails(
+      event,
+      "Latest Event",
+      issue.permalink
+    );
     stdout.write(`${eventLines.join("\n")}\n`);
   }
 }
@@ -101,6 +110,7 @@ export const getCommand = buildCommand({
     const { stdout, cwd } = this;
 
     let issue: SentryIssue;
+    let orgSlug: string | undefined;
 
     // Check if it's a short ID (contains letters) vs numeric ID
     if (isShortId(issueId)) {
@@ -112,14 +122,20 @@ export const getCommand = buildCommand({
           `sentry issue get ${issueId} --org <org-slug>`
         );
       }
-      issue = await getIssueByShortId(resolved.org, issueId);
+      orgSlug = resolved.org;
+      issue = await getIssueByShortId(orgSlug, issueId);
     } else {
       // Numeric ID can be fetched directly
       issue = await getIssue(issueId);
+      // Try to resolve org for event fetching
+      const resolved = await resolveOrg({ org: flags.org, cwd });
+      orgSlug = resolved?.org;
     }
 
-    // Always fetch the latest event for full context
-    const event = await tryGetLatestEvent(issue.id);
+    // Fetch the latest event for full context (requires org slug)
+    const event = orgSlug
+      ? await tryGetLatestEvent(orgSlug, issue.id)
+      : undefined;
 
     if (flags.json) {
       const output = event ? { issue, event } : { issue };
