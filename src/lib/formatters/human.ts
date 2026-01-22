@@ -13,11 +13,11 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 import {
-  bold,
   green,
   levelColor,
   muted,
   statusColor,
+  underline,
   yellow,
 } from "./colors.js";
 
@@ -287,15 +287,15 @@ export type FormatShortIdOptions = {
 };
 
 /**
- * Format a short ID with the unique suffix highlighted in bold.
+ * Format a short ID with the unique suffix highlighted with underline.
  *
- * Single project mode: "CRAFT-G" → "CRAFT-**G**" (suffix bolded)
+ * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
  * Multi-project mode: "SPOTLIGHT-WEBSITE-2A" with alias "w" and strippedPrefix "spotlight-"
- *   → "SPOTLIGHT-**W**EBSITE-**2A**" (alias char in remainder and suffix bolded)
+ *   → "SPOTLIGHT-_W_EBSITE-_2A_" (alias char in remainder and suffix underlined)
  *
  * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
  * @param options - Formatting options (projectSlug, projectAlias, strippedPrefix)
- * @returns Formatted short ID with bold highlights
+ * @returns Formatted short ID with underline highlights
  */
 export function formatShortId(
   shortId: string,
@@ -327,9 +327,9 @@ export function formatShortId(
     const strippedLen = strippedPrefix?.length ?? 0;
     const aliasStartInSlug = strippedLen;
 
-    // Build the formatted output: PROJECT-SLUG with alias part bolded, then -SUFFIX bolded
+    // Build the formatted output: PROJECT-SLUG with alias part underlined, then -SUFFIX underlined
     // e.g., "SPOTLIGHT-WEBSITE" with alias "w", strippedPrefix "spotlight-"
-    //   → aliasStartInSlug = 10, so we bold chars 10-11 (the "W")
+    //   → aliasStartInSlug = 10, so we underline chars 10-11 (the "W")
     const beforeAlias = upperSlug.slice(0, aliasStartInSlug);
     const aliasChars = upperSlug.slice(
       aliasStartInSlug,
@@ -337,14 +337,14 @@ export function formatShortId(
     );
     const afterAlias = upperSlug.slice(aliasStartInSlug + aliasLen);
 
-    return `${beforeAlias}${bold(aliasChars)}${afterAlias}-${bold(suffix.toUpperCase())}`;
+    return `${beforeAlias}${underline(aliasChars)}${afterAlias}-${underline(suffix.toUpperCase())}`;
   }
 
-  // Single project mode: show full shortId with suffix bolded
+  // Single project mode: show full shortId with suffix underlined
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
-      return `${prefix}${bold(suffix.toUpperCase())}`;
+      return `${prefix}${underline(suffix.toUpperCase())}`;
     }
   }
 

@@ -36,6 +36,7 @@ export const white = (text: string): string => chalk.hex(COLORS.white)(text);
 export const cyan = (text: string): string => chalk.hex(COLORS.cyan)(text);
 export const muted = (text: string): string => chalk.hex(COLORS.muted)(text);
 export const bold = (text: string): string => chalk.bold(text);
+export const underline = (text: string): string => chalk.underline(text);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Semantic Helpers
