@@ -1,12 +1,16 @@
 minVersion: '2.14.0'
 changelog:
   policy: auto
-preReleaseCommand: npm --no-git-tag-version version ${CRAFT_NEW_VERSION}
+preReleaseCommand: >-
+  node -p "
+    const {execSync} = require('child_process');
+    execSync('npm --no-git-tag-version version ' + process.env.CRAFT_NEW_VERSION).toString();
+  "
 postReleaseCommand: >-
-  npm --no-git-tag-version version preminor --preid=dev &&
-  git diff --quiet || (git commit -anm "meta: Bump new development version
-
-  #skip-changelog" && git pull --rebase && git push)
+  node -p "
+    const {execSync} = require('child_process');
+    execSync('npm --no-git-tag-version version preminor --preid=dev');
+    execSync('git diff --quiet || (git commit -anm \'meta: Bump new development version\\n\\n#skip-changelog\' && git pull --rebase && git push)').toString();"
 requireNames:
   - /^sentry-.+$/
   - /^sentry-.*\.tgz$/
