@@ -28,16 +28,21 @@ type GetFlags = {
   readonly json: boolean;
 };
 
-/** Pattern for short suffix validation (alphanumeric only, no hyphens) */
-const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]+$/;
+/**
+ * Pattern for short suffix validation.
+ * Must contain at least one letter (to distinguish from numeric issue IDs).
+ * Can be alphanumeric but pure numbers like "12345" are NOT short suffixes.
+ */
+const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]*[a-zA-Z][a-zA-Z0-9]*$/;
 
 /** Pattern for alias-suffix format (e.g., "f-g", "fr-a3", "spotlight-e-4y") */
 const ALIAS_SUFFIX_PATTERN = /^(.+)-([a-zA-Z0-9]+)$/i;
 
 /**
  * Check if input looks like a short suffix (just the unique part without project prefix).
- * A short suffix has no hyphen and contains only alphanumeric characters.
- * Examples: "G", "A3", "b2", "ABC"
+ * A short suffix has no hyphen and must contain at least one letter.
+ * Pure numeric strings are treated as issue IDs, not short suffixes.
+ * Examples: "G", "A3", "b2", "ABC" (but NOT "12345")
  */
 function isShortSuffix(input: string): boolean {
   return !input.includes("-") && SHORT_SUFFIX_PATTERN.test(input);
