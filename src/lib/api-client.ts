@@ -51,11 +51,6 @@ function normalizePath(endpoint: string): string {
   return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
 }
 
-/**
- * Pattern to detect short IDs (contain letters, vs numeric IDs which are just digits)
- */
-const SHORT_ID_PATTERN = /[a-zA-Z]/;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -354,15 +349,6 @@ export function getIssueByShortId(
       schema: SentryIssueSchema,
     }
   );
-}
-
-/**
- * Check if a string looks like a short ID (e.g., PROJECT-ABC)
- * vs a numeric ID (e.g., 123456)
- */
-export function isShortId(issueId: string): boolean {
-  // Short IDs contain letters and hyphens, numeric IDs are just digits
-  return SHORT_ID_PATTERN.test(issueId);
 }
 
 /**

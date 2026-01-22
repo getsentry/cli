@@ -13,11 +13,11 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 import {
+  boldUnderline,
   green,
   levelColor,
   muted,
   statusColor,
-  underline,
   yellow,
 } from "./colors.js";
 
@@ -325,7 +325,7 @@ export function formatShortId(
     // Find where the alias corresponds to in the project slug
     // If strippedPrefix exists, the alias is from the remainder after stripping
     const strippedLen = strippedPrefix?.length ?? 0;
-    const aliasStartInSlug = strippedLen;
+    const aliasStartInSlug = Math.min(strippedLen, upperSlug.length);
 
     // Build the formatted output: PROJECT-SLUG with alias part underlined, then -SUFFIX underlined
     // e.g., "SPOTLIGHT-WEBSITE" with alias "w", strippedPrefix "spotlight-"
@@ -337,14 +337,14 @@ export function formatShortId(
     );
     const afterAlias = upperSlug.slice(aliasStartInSlug + aliasLen);
 
-    return `${beforeAlias}${underline(aliasChars)}${afterAlias}-${underline(suffix.toUpperCase())}`;
+    return `${beforeAlias}${boldUnderline(aliasChars)}${afterAlias}-${boldUnderline(suffix.toUpperCase())}`;
   }
 
-  // Single project mode: show full shortId with suffix underlined
+  // Single project mode: show full shortId with suffix highlighted
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
-      return `${prefix}${underline(suffix.toUpperCase())}`;
+      return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
     }
   }
 

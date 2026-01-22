@@ -274,12 +274,16 @@ function attachFormatOptions(
     result.issues.map((issue) => {
       const key = `${result.target.org}:${result.target.project}`;
       const alias = aliasMap.get(key);
+      // Only pass strippedPrefix if this project actually has that prefix
+      // (e.g., "spotlight" doesn't have "spotlight-" prefix, but "spotlight-electron" does)
+      const hasPrefix =
+        strippedPrefix && result.target.project.startsWith(strippedPrefix);
       return {
         issue,
         formatOptions: {
           projectSlug: result.target.project,
           projectAlias: alias,
-          strippedPrefix: strippedPrefix || undefined,
+          strippedPrefix: hasPrefix ? strippedPrefix : undefined,
         },
       };
     })

@@ -1,54 +1,14 @@
 /**
- * Tests for issue get command utilities
+ * Tests for issue ID parsing utilities
  */
 
 import { describe, expect, test } from "bun:test";
-
-// Re-implement the parsing functions for testing
-// (since they're not exported from the module)
-
-/** Pattern for short suffix validation (alphanumeric only, no hyphens) */
-const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]+$/;
-
-/** Pattern for alias-suffix format (e.g., "f-g", "fr-a3", "spotlight-e-4y") */
-const ALIAS_SUFFIX_PATTERN = /^(.+)-([a-zA-Z0-9]+)$/i;
-
-/**
- * Check if input looks like a short suffix (just the unique part without project prefix).
- * A short suffix has no hyphen and contains only alphanumeric characters.
- * Examples: "G", "A3", "b2", "ABC", "12"
- */
-function isShortSuffix(input: string): boolean {
-  return !input.includes("-") && SHORT_SUFFIX_PATTERN.test(input);
-}
-
-/**
- * Try to parse input as alias-suffix format.
- */
-function parseAliasSuffix(
-  input: string
-): { alias: string; suffix: string } | null {
-  const match = ALIAS_SUFFIX_PATTERN.exec(input);
-  if (!(match?.[1] && match[2])) {
-    return null;
-  }
-  return { alias: match[1].toLowerCase(), suffix: match[2].toUpperCase() };
-}
-
-/**
- * Expand a short suffix to a full short ID using the project slug.
- */
-function expandToFullShortId(suffix: string, projectSlug: string): string {
-  return `${projectSlug.toUpperCase()}-${suffix.toUpperCase()}`;
-}
-
-/**
- * Check if a string looks like a Sentry short ID (contains letters).
- * This distinguishes from numeric IDs (e.g., 123456).
- */
-function isShortId(id: string): boolean {
-  return /[a-zA-Z]/.test(id);
-}
+import {
+  expandToFullShortId,
+  isShortId,
+  isShortSuffix,
+  parseAliasSuffix,
+} from "../../src/lib/issue-id.js";
 
 describe("isShortSuffix", () => {
   test("returns true for simple alphanumeric suffixes", () => {
