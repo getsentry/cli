@@ -1,87 +1,12 @@
 /**
- * Tests for issue list command utilities
+ * Tests for alias generation utilities
  */
 
 import { describe, expect, test } from "bun:test";
-
-// Import the functions we want to test by re-implementing them here
-// (since they're not exported from the module)
-
-/**
- * Find the common word prefix shared by strings that have word boundaries.
- */
-function findCommonWordPrefix(strings: string[]): string {
-  if (strings.length < 2) {
-    return "";
-  }
-
-  const getFirstWord = (s: string): string | null => {
-    const lower = s.toLowerCase();
-    const boundaryIdx = Math.max(lower.indexOf("-"), lower.indexOf("_"));
-    if (boundaryIdx > 0) {
-      return lower.slice(0, boundaryIdx + 1);
-    }
-    return null;
-  };
-
-  const firstWords: string[] = [];
-  for (const s of strings) {
-    const word = getFirstWord(s);
-    if (word) {
-      firstWords.push(word);
-    }
-  }
-
-  if (firstWords.length < 2) {
-    return "";
-  }
-
-  const candidate = firstWords[0];
-  if (!candidate) {
-    return "";
-  }
-
-  const allMatch = firstWords.every((w) => w === candidate);
-  if (!allMatch) {
-    return "";
-  }
-
-  return candidate;
-}
-
-/**
- * Find the shortest unique prefix for each string in the array.
- */
-function findShortestUniquePrefixes(strings: string[]): Map<string, string> {
-  const result = new Map<string, string>();
-
-  for (const str of strings) {
-    const lowerStr = str.toLowerCase();
-    let prefixLen = 1;
-
-    while (prefixLen <= lowerStr.length) {
-      const prefix = lowerStr.slice(0, prefixLen);
-      const isUnique = strings.every((other) => {
-        if (other === str) {
-          return true;
-        }
-        return !other.toLowerCase().startsWith(prefix);
-      });
-
-      if (isUnique) {
-        result.set(str, prefix);
-        break;
-      }
-      prefixLen += 1;
-    }
-
-    if (!result.has(str)) {
-      result.set(str, lowerStr);
-    }
-  }
-
-  return result;
-}
+import {
+  findCommonWordPrefix,
+  findShortestUniquePrefixes,
+} from "../../src/lib/alias.js";
 
 describe("findCommonWordPrefix", () => {
   test("finds common prefix with hyphen boundary", () => {

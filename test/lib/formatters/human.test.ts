@@ -271,4 +271,49 @@ describe("formatShortId", () => {
       expect(stripAnsi(results[2])).toBe("WORKER-C3");
     });
   });
+
+  describe("ANSI formatting (FORCE_COLOR=1)", () => {
+    // Note: These tests verify formatting is applied when colors are enabled.
+    // In CI/test environments without TTY, chalk may disable colors.
+    // Run with FORCE_COLOR=1 to test color output.
+
+    // Helper to check for ANSI escape codes
+    function hasAnsiCodes(str: string): boolean {
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
+      return /\x1b\[[0-9;]*m/.test(str);
+    }
+
+    // Check if colors are enabled (chalk respects FORCE_COLOR env)
+    const colorsEnabled = process.env.FORCE_COLOR === "1";
+
+    test("single project mode applies formatting to suffix", () => {
+      const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
+      // Content is always correct
+      expect(stripAnsi(result)).toBe("CRAFT-G");
+      // ANSI codes only present when colors enabled
+      if (colorsEnabled) {
+        expect(hasAnsiCodes(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(stripAnsi(result).length);
+      }
+    });
+
+    test("multi-project mode applies formatting to alias and suffix", () => {
+      const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
+        projectSlug: "spotlight-electron",
+        projectAlias: "e",
+        strippedPrefix: "spotlight-",
+      });
+      expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
+      if (colorsEnabled) {
+        expect(hasAnsiCodes(result)).toBe(true);
+        expect(result.length).toBeGreaterThan(stripAnsi(result).length);
+      }
+    });
+
+    test("no formatting when no options provided", () => {
+      const result = formatShortId("CRAFT-G");
+      expect(hasAnsiCodes(result)).toBe(false);
+      expect(result).toBe("CRAFT-G");
+    });
+  });
 });
