@@ -7,20 +7,16 @@ import { describe, expect, test } from "bun:test";
 // Re-implement the parsing functions for testing
 // (since they're not exported from the module)
 
-/**
- * Pattern for short suffix validation.
- * Must contain at least one letter (to distinguish from numeric issue IDs).
- * Can be alphanumeric but pure numbers like "12345" are NOT short suffixes.
- */
-const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]*[a-zA-Z][a-zA-Z0-9]*$/;
+/** Pattern for short suffix validation (alphanumeric only, no hyphens) */
+const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]+$/;
 
 /** Pattern for alias-suffix format (e.g., "f-g", "fr-a3", "spotlight-e-4y") */
 const ALIAS_SUFFIX_PATTERN = /^(.+)-([a-zA-Z0-9]+)$/i;
 
 /**
  * Check if input looks like a short suffix (just the unique part without project prefix).
- * A short suffix has no hyphen and must contain at least one letter.
- * Pure numeric strings are treated as issue IDs, not short suffixes.
+ * A short suffix has no hyphen and contains only alphanumeric characters.
+ * Examples: "G", "A3", "b2", "ABC", "12"
  */
 function isShortSuffix(input: string): boolean {
   return !input.includes("-") && SHORT_SUFFIX_PATTERN.test(input);
@@ -55,7 +51,7 @@ function isShortId(id: string): boolean {
 }
 
 describe("isShortSuffix", () => {
-  test("returns true for simple alphanumeric suffixes with letters", () => {
+  test("returns true for simple alphanumeric suffixes", () => {
     expect(isShortSuffix("G")).toBe(true);
     expect(isShortSuffix("4Y")).toBe(true);
     expect(isShortSuffix("abc")).toBe(true);
@@ -63,10 +59,12 @@ describe("isShortSuffix", () => {
     expect(isShortSuffix("1a2")).toBe(true);
   });
 
-  test("returns false for pure numeric strings (issue IDs)", () => {
-    expect(isShortSuffix("12345")).toBe(false);
-    expect(isShortSuffix("0")).toBe(false);
-    expect(isShortSuffix("99999999999")).toBe(false);
+  test("returns true for pure numeric strings (valid short ID suffixes)", () => {
+    // Pure numbers like "12" are valid suffixes (e.g., CRAFT-12)
+    // The command logic handles fallback to numeric ID when no project context
+    expect(isShortSuffix("12")).toBe(true);
+    expect(isShortSuffix("0")).toBe(true);
+    expect(isShortSuffix("12345")).toBe(true);
   });
 
   test("returns false for strings with hyphens", () => {
@@ -215,6 +213,8 @@ describe("short ID resolution flow", () => {
       "SPOTLIGHT-ELECTRON-4Y"
     );
     expect(resolveIssueId("G", "craft")).toBe("CRAFT-G");
+    // Pure numeric suffix works when project context is available
+    expect(resolveIssueId("12", "craft")).toBe("CRAFT-12");
   });
 
   test("passes through full short ID", () => {
