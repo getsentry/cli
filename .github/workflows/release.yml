@@ -11,16 +11,7 @@ on:
         required: false
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
-      actions: read
-      pull-requests: write
-    secrets: inherit
-
   release:
-    needs: [ci]
     uses: getsentry/craft/.github/workflows/release.yml@v2
     with:
       version: ${{ inputs.version }}
