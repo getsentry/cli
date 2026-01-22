@@ -7,11 +7,7 @@
 
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
-import type {
-  AutofixResponse,
-  AutofixState,
-  AutofixUpdatePayload,
-} from "../types/autofix.js";
+import type { AutofixResponse, AutofixState } from "../types/autofix.js";
 import {
   type IssueSummary,
   IssueSummarySchema,
@@ -451,21 +447,22 @@ export async function getAutofixState(
 /**
  * Update an autofix run (e.g., select root cause, continue to PR).
  *
+ * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
  * @param runId - The autofix run ID
  * @param payload - The update payload (select_root_cause, select_solution, create_pr)
  * @returns The response from the API
  */
 export function updateAutofix(
+  orgSlug: string,
   issueId: string,
-  runId: number,
-  payload: AutofixUpdatePayload
+  runId: number
 ): Promise<unknown> {
-  return apiRequest(`/issues/${issueId}/autofix/update/`, {
+  return apiRequest(`/organizations/${orgSlug}/issues/${issueId}/autofix/`, {
     method: "POST",
     body: {
       run_id: runId,
-      payload,
+      step: "solution",
     },
   });
 }

@@ -117,15 +117,17 @@ export type RootCauseSelection = z.infer<typeof RootCauseSelectionSchema>;
 // Autofix Step
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AutofixStepSchema = z.object({
-  id: z.string(),
-  key: z.string(),
-  status: z.string(),
-  title: z.string(),
-  progress: z.array(ProgressMessageSchema).optional(),
-  causes: z.array(RootCauseSchema).optional(),
-  selection: RootCauseSelectionSchema.optional(),
-});
+export const AutofixStepSchema = z
+  .object({
+    id: z.string(),
+    key: z.string(),
+    status: z.string(),
+    title: z.string(),
+    progress: z.array(ProgressMessageSchema).optional(),
+    causes: z.array(RootCauseSchema).optional(),
+    selection: RootCauseSelectionSchema.optional(),
+  })
+  .passthrough(); // Allow additional fields like artifacts
 
 export type AutofixStep = z.infer<typeof AutofixStepSchema>;
 
@@ -172,27 +174,58 @@ export const PullRequestInfoSchema = z.object({
 export type PullRequestInfo = z.infer<typeof PullRequestInfoSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Solution Artifact (from fix command)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A single step in the solution plan */
+export const SolutionStepSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+});
+
+export type SolutionStep = z.infer<typeof SolutionStepSchema>;
+
+/** Solution data containing the plan to fix the issue */
+export const SolutionDataSchema = z.object({
+  one_line_summary: z.string(),
+  steps: z.array(SolutionStepSchema),
+});
+
+export type SolutionData = z.infer<typeof SolutionDataSchema>;
+
+/** Solution artifact from the autofix response */
+export const SolutionArtifactSchema = z.object({
+  key: z.literal("solution"),
+  data: SolutionDataSchema,
+  reason: z.string().optional(),
+});
+
+export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Autofix State
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AutofixStateSchema = z.object({
-  run_id: z.number(),
-  status: z.string(),
-  updated_at: z.string().optional(),
-  request: z
-    .object({
-      organization_id: z.number().optional(),
-      project_id: z.number().optional(),
-      repos: z.array(z.unknown()).optional(),
-    })
-    .optional(),
-  codebases: z.record(z.string(), CodebaseInfoSchema).optional(),
-  steps: z.array(AutofixStepSchema).optional(),
-  repositories: z.array(RepositoryInfoSchema).optional(),
-  coding_agents: z.record(z.string(), z.unknown()).optional(),
-  created_at: z.string().optional(),
-  completed_at: z.string().optional(),
-});
+export const AutofixStateSchema = z
+  .object({
+    run_id: z.number(),
+    status: z.string(),
+    updated_at: z.string().optional(),
+    request: z
+      .object({
+        organization_id: z.number().optional(),
+        project_id: z.number().optional(),
+        repos: z.array(z.unknown()).optional(),
+      })
+      .optional(),
+    codebases: z.record(z.string(), CodebaseInfoSchema).optional(),
+    steps: z.array(AutofixStepSchema).optional(),
+    repositories: z.array(RepositoryInfoSchema).optional(),
+    coding_agents: z.record(z.string(), z.unknown()).optional(),
+    created_at: z.string().optional(),
+    completed_at: z.string().optional(),
+  })
+  .passthrough(); // Allow additional fields like blocks
 
 export type AutofixState = z.infer<typeof AutofixStateSchema>;
 
@@ -315,6 +348,79 @@ export function extractPrUrl(state: AutofixState): string | undefined {
   }
 
   return;
+}
+
+/** Artifact structure used in blocks and steps */
+type ArtifactEntry = { key: string; data: unknown; reason?: string };
+
+/** Structure that may contain artifacts */
+type WithArtifacts = { artifacts?: ArtifactEntry[] };
+
+/**
+ * Search artifacts array for a solution artifact.
+ */
+function findSolutionInArtifacts(
+  artifacts: ArtifactEntry[]
+): SolutionArtifact | null {
+  for (const artifact of artifacts) {
+    if (artifact.key === "solution") {
+      const result = SolutionArtifactSchema.safeParse(artifact);
+      if (result.success) {
+        return result.data;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Search an array of containers (blocks or steps) for a solution artifact.
+ */
+function searchContainersForSolution(
+  containers: WithArtifacts[]
+): SolutionArtifact | null {
+  for (const container of containers) {
+    if (container.artifacts) {
+      const solution = findSolutionInArtifacts(container.artifacts);
+      if (solution) {
+        return solution;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract solution artifact from autofix state.
+ * Searches through both blocks and steps for the solution artifact.
+ *
+ * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * @returns SolutionArtifact if found, null otherwise
+ */
+export function extractSolution(state: AutofixState): SolutionArtifact | null {
+  // Access blocks and steps from passthrough fields
+  const stateWithExtras = state as AutofixState & {
+    blocks?: WithArtifacts[];
+    steps?: WithArtifacts[];
+  };
+
+  // Search in blocks first (explorer mode / newer API)
+  if (stateWithExtras.blocks) {
+    const solution = searchContainersForSolution(stateWithExtras.blocks);
+    if (solution) {
+      return solution;
+    }
+  }
+
+  // Search in steps (regular autofix API)
+  if (stateWithExtras.steps) {
+    const solution = searchContainersForSolution(stateWithExtras.steps);
+    if (solution) {
+      return solution;
+    }
+  }
+
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

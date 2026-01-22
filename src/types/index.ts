@@ -22,6 +22,9 @@ export type {
   RootCause,
   RootCauseArtifact,
   RootCauseData,
+  SolutionArtifact,
+  SolutionData,
+  SolutionStep,
   StoppingPoint,
 } from "./autofix.js";
 export {
@@ -37,11 +40,15 @@ export {
   extractPrUrl,
   extractRootCauseArtifact,
   extractRootCauses,
+  extractSolution,
   getLatestProgress,
   isTerminalStatus,
   RootCauseArtifactSchema,
   RootCauseDataSchema,
   RootCauseSchema,
+  SolutionArtifactSchema,
+  SolutionDataSchema,
+  SolutionStepSchema,
   STOPPING_POINTS,
   TERMINAL_STATUSES,
 } from "./autofix.js";

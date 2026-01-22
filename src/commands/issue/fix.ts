@@ -11,15 +11,14 @@ import { getAutofixState, updateAutofix } from "../../lib/api-client.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import {
   formatAutofixError,
-  formatPrNotFound,
-  formatPrResult,
+  formatSolution,
 } from "../../lib/formatters/autofix.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
 import {
   type AutofixState,
-  extractPrUrl,
   extractRootCauses,
+  extractSolution,
   type RootCause,
 } from "../../types/autofix.js";
 import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
@@ -200,11 +199,7 @@ export const fixCommand = buildCommand({
       }
 
       // Update autofix to continue to PR creation
-      await updateAutofix(numericId, state.run_id, {
-        type: "select_root_cause",
-        cause_id: causeId,
-        stopping_point: "open_pr",
-      });
+      await updateAutofix(org, numericId, state.run_id);
 
       // Poll until PR is created
       const finalState = await pollAutofixState({
@@ -227,26 +222,27 @@ export const fixCommand = buildCommand({
         throw new Error("Fix creation was cancelled.");
       }
 
-      // Try to extract PR URL
-      const prUrl = extractPrUrl(finalState);
+      // Extract solution artifact
+      const solution = extractSolution(finalState);
 
       // Output results
       if (flags.json) {
         writeJson(stdout, {
           run_id: finalState.run_id,
           status: finalState.status,
-          pr_url: prUrl ?? null,
+          solution: solution?.data ?? null,
         });
         return;
       }
 
       // Human-readable output
-      if (prUrl) {
-        const lines = formatPrResult(prUrl);
+      if (solution) {
+        const lines = formatSolution(solution);
         stdout.write(`${lines.join("\n")}\n`);
       } else {
-        const lines = formatPrNotFound();
-        stdout.write(`${lines.join("\n")}\n`);
+        stderr.write(
+          "No solution found. Check the Sentry web UI for details.\n"
+        );
       }
     } catch (error) {
       // Handle API errors with friendly messages

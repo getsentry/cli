@@ -10,6 +10,7 @@ import type {
   AutofixStep,
   RootCause,
   RootCauseArtifact,
+  SolutionArtifact,
 } from "../../types/autofix.js";
 import { cyan, green, muted, yellow } from "./colors.js";
 
@@ -429,6 +430,62 @@ export function formatRootCauseArtifact(artifact: RootCauseArtifact): string[] {
       const step = artifact.data.reproduction_steps[i];
       if (step) {
         lines.push(`  ${i + 1}. ${step}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Solution Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format a solution artifact for human-readable display.
+ *
+ * Output format:
+ * Solution
+ * ════════════════════════════════════════════════════════════
+ *
+ * Summary:
+ *   {one_line_summary}
+ *
+ * Steps to implement:
+ *   1. {title}
+ *      {description}
+ *
+ *   2. {title}
+ *      {description}
+ *   ...
+ *
+ * @param solution - Solution artifact from autofix
+ * @returns Array of formatted lines
+ */
+export function formatSolution(solution: SolutionArtifact): string[] {
+  const lines: string[] = [];
+
+  // Header
+  lines.push("");
+  lines.push(bold("Solution"));
+  lines.push("═".repeat(60));
+  lines.push("");
+
+  // Summary
+  lines.push(yellow("Summary:"));
+  lines.push(`  ${solution.data.one_line_summary}`);
+  lines.push("");
+
+  // Steps to implement
+  if (solution.data.steps.length > 0) {
+    lines.push(cyan("Steps to implement:"));
+    lines.push("");
+    for (let i = 0; i < solution.data.steps.length; i++) {
+      const step = solution.data.steps[i];
+      if (step) {
+        lines.push(`  ${i + 1}. ${bold(step.title)}`);
+        lines.push(`     ${muted(step.description)}`);
+        lines.push("");
       }
     }
   }
