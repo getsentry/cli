@@ -335,27 +335,48 @@ describe("pollAutofixState", () => {
 
   test("writes progress to stderr when not in JSON mode", async () => {
     let stderrOutput = "";
+    let fetchCount = 0;
 
-    globalThis.fetch = async () =>
-      new Response(
+    // Return PROCESSING first to allow animation interval to fire,
+    // then COMPLETED on second call
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+
+      if (fetchCount === 1) {
+        return new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_345,
+              status: "PROCESSING",
+              steps: [
+                {
+                  id: "step-1",
+                  key: "analysis",
+                  status: "PROCESSING",
+                  title: "Analysis",
+                  progress: [
+                    {
+                      message: "Analyzing...",
+                      timestamp: "2025-01-01T00:00:00Z",
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(
         JSON.stringify({
           autofix: {
             run_id: 12_345,
             status: "COMPLETED",
-            steps: [
-              {
-                id: "step-1",
-                key: "analysis",
-                status: "COMPLETED",
-                title: "Analysis",
-                progress: [
-                  {
-                    message: "Analyzing...",
-                    timestamp: "2025-01-01T00:00:00Z",
-                  },
-                ],
-              },
-            ],
+            steps: [],
           },
         }),
         {
@@ -363,6 +384,7 @@ describe("pollAutofixState", () => {
           headers: { "Content-Type": "application/json" },
         }
       );
+    };
 
     const stderrMock = {
       write: (s: string) => {
@@ -375,6 +397,7 @@ describe("pollAutofixState", () => {
       issueId: "123456789",
       stderr: stderrMock,
       json: false,
+      pollIntervalMs: 100, // Allow animation interval (80ms) to fire
     });
 
     expect(stderrOutput).toContain("Analyzing");

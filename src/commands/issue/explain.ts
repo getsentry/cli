@@ -1,16 +1,20 @@
 /**
  * sentry issue explain
  *
- * Get an AI-generated summary and analysis of a Sentry issue.
+ * Get root cause analysis for a Sentry issue using Seer AI.
  */
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getIssueSummary } from "../../lib/api-client.js";
+import { getAutofixState, triggerAutofix } from "../../lib/api-client.js";
 import { ApiError } from "../../lib/errors.js";
+import {
+  formatAutofixError,
+  formatRootCauseList,
+} from "../../lib/formatters/autofix.js";
 import { writeJson } from "../../lib/formatters/index.js";
-import { formatIssueSummary } from "../../lib/formatters/summary.js";
-import { resolveOrgAndIssueId } from "./utils.js";
+import { extractRootCauses } from "../../types/autofix.js";
+import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
 type ExplainFlags = {
   readonly org?: string;
@@ -19,14 +23,14 @@ type ExplainFlags = {
 
 export const explainCommand = buildCommand({
   docs: {
-    brief: "Analyze an issue using Seer AI",
+    brief: "Analyze an issue's root cause using Seer AI",
     fullDescription:
-      "Get an AI-generated summary and root cause analysis for a Sentry issue.\n\n" +
-      "This command uses Seer AI to analyze the issue and provide:\n" +
-      "  - A headline summary of what's happening\n" +
-      "  - What's wrong with the code\n" +
-      "  - Stack trace analysis\n" +
-      "  - Possible root cause\n\n" +
+      "Get a root cause analysis for a Sentry issue using Seer AI.\n\n" +
+      "This command analyzes the issue and provides:\n" +
+      "  - Identified root causes\n" +
+      "  - Reproduction steps\n" +
+      "  - Relevant code locations\n\n" +
+      "The analysis may take a few minutes for new issues.\n\n" +
       "Examples:\n" +
       "  sentry issue explain 123456789\n" +
       "  sentry issue explain MYPROJECT-ABC --org my-org\n" +
@@ -73,34 +77,56 @@ export const explainCommand = buildCommand({
         `sentry issue explain ${issueId} --org <org-slug>`
       );
 
-      if (!flags.json) {
-        stderr.write(`Analyzing issue ${issueId}...\n`);
+      // 1. Check for existing analysis
+      let state = await getAutofixState(org, numericId);
+
+      // Handle error status, we are gonna retry the analysis
+      if (state?.status === "ERROR") {
+        stderr.write("Root cause analysis failed, retrying...\n");
+        state = null;
       }
 
-      // Get the AI-generated summary
-      const summary = await getIssueSummary(org, numericId);
+      // 2. Trigger new analysis if none exists
+      if (!state) {
+        if (!flags.json) {
+          stderr.write("Starting root cause analysis...\n");
+        }
+        await triggerAutofix(org, numericId);
+      }
 
-      // Output results
+      // 3. Poll until complete (if not already completed)
+      if (!state || state.status !== "COMPLETED") {
+        state = await pollAutofixState({
+          orgSlug: org,
+          issueId: numericId,
+          stderr,
+          json: flags.json,
+          stopOnWaitingForUser: true,
+        });
+      }
+
+      // 4. Extract root causes from steps
+      const causes = extractRootCauses(state);
+      if (causes.length === 0) {
+        throw new Error(
+          "Analysis completed but no root causes found. " +
+            "The issue may not have enough context for root cause analysis."
+        );
+      }
+
+      // 5. Output results
       if (flags.json) {
-        writeJson(stdout, summary);
+        writeJson(stdout, causes);
         return;
       }
 
       // Human-readable output
-      const lines = formatIssueSummary(summary);
+      const lines = formatRootCauseList(causes, issueId);
       stdout.write(`${lines.join("\n")}\n`);
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
-        if (error.status === 404) {
-          throw new Error(
-            "Issue not found, or AI summaries are not available for this issue."
-          );
-        }
-        if (error.status === 403) {
-          throw new Error("AI features are not enabled for this organization.");
-        }
-        throw new Error(error.detail ?? "Failed to analyze issue.");
+        throw new Error(formatAutofixError(error.status, error.detail));
       }
       throw error;
     }

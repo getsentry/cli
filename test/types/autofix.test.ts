@@ -6,9 +6,11 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  type AutofixExplorerState,
   type AutofixState,
   type AutofixStep,
   extractPrUrl,
+  extractRootCauseArtifact,
   extractRootCauses,
   getLatestProgress,
   isTerminalStatus,
@@ -301,5 +303,138 @@ describe("extractPrUrl", () => {
     };
 
     expect(extractPrUrl(state)).toBe("https://github.com/org/repo/pull/789");
+  });
+});
+
+describe("extractRootCauseArtifact", () => {
+  test("extracts root_cause artifact from blocks", () => {
+    const state: AutofixExplorerState = {
+      run_id: 123,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Analyzing..." },
+          timestamp: "2025-01-01T00:00:00Z",
+        },
+        {
+          id: "block-2",
+          message: { role: "assistant", content: "Found root cause" },
+          timestamp: "2025-01-01T00:01:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Database connection timeout",
+                five_whys: [
+                  "Connection pool exhausted",
+                  "Too many concurrent requests",
+                  "Missing connection limits",
+                ],
+                reproduction_steps: [
+                  "Start 100 concurrent requests",
+                  "Wait for pool exhaustion",
+                  "Observe timeout",
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const artifact = extractRootCauseArtifact(state);
+    expect(artifact).not.toBeNull();
+    expect(artifact?.key).toBe("root_cause");
+    expect(artifact?.data.one_line_description).toBe(
+      "Database connection timeout"
+    );
+    expect(artifact?.data.five_whys).toHaveLength(3);
+    expect(artifact?.data.reproduction_steps).toHaveLength(3);
+  });
+
+  test("returns null when no blocks", () => {
+    const state: AutofixExplorerState = {
+      run_id: 123,
+      status: "COMPLETED",
+    };
+
+    expect(extractRootCauseArtifact(state)).toBeNull();
+  });
+
+  test("returns null when blocks have no artifacts", () => {
+    const state: AutofixExplorerState = {
+      run_id: 123,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Processing" },
+          timestamp: "2025-01-01T00:00:00Z",
+        },
+      ],
+    };
+
+    expect(extractRootCauseArtifact(state)).toBeNull();
+  });
+
+  test("returns null when no root_cause artifact exists", () => {
+    const state: AutofixExplorerState = {
+      run_id: 123,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Found code" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "code_snippet",
+              data: { code: "const x = 1;" },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(extractRootCauseArtifact(state)).toBeNull();
+  });
+
+  test("finds root_cause in later blocks", () => {
+    const state: AutofixExplorerState = {
+      run_id: 123,
+      status: "COMPLETED",
+      blocks: [
+        {
+          id: "block-1",
+          message: { role: "assistant", content: "Starting" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [{ key: "other", data: {} }],
+        },
+        {
+          id: "block-2",
+          message: { role: "assistant", content: "More analysis" },
+          timestamp: "2025-01-01T00:01:00Z",
+        },
+        {
+          id: "block-3",
+          message: { role: "assistant", content: "Found it" },
+          timestamp: "2025-01-01T00:02:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Memory leak in loop",
+                five_whys: ["Objects not released"],
+                reproduction_steps: ["Run loop 1000 times"],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const artifact = extractRootCauseArtifact(state);
+    expect(artifact?.data.one_line_description).toBe("Memory leak in loop");
   });
 });

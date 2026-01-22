@@ -13,13 +13,17 @@ import { ContextError } from "../../lib/errors.js";
 import {
   formatProgressLine,
   getProgressMessage,
+  truncateProgressMessage,
 } from "../../lib/formatters/autofix.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { type AutofixState, isTerminalStatus } from "../../types/autofix.js";
 import type { Writer } from "../../types/index.js";
 
 /** Default polling interval in milliseconds */
-const DEFAULT_POLL_INTERVAL_MS = 3000;
+const DEFAULT_POLL_INTERVAL_MS = 1000;
+
+/** Animation interval for spinner updates (independent of polling) */
+const ANIMATION_INTERVAL_MS = 80;
 
 /** Default timeout in milliseconds (10 minutes) */
 const DEFAULT_TIMEOUT_MS = 600_000;
@@ -130,20 +134,9 @@ function shouldStopPolling(
 }
 
 /**
- * Update progress display with spinner animation.
- */
-function updateProgressDisplay(
-  stderr: Writer,
-  state: AutofixState,
-  tick: number
-): void {
-  const message = getProgressMessage(state);
-  stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
-}
-
-/**
  * Poll autofix state until completion or timeout.
  * Displays progress spinner and messages to stderr when not in JSON mode.
+ * Animation runs at 80ms intervals independently of polling frequency.
  *
  * @param options - Polling configuration
  * @returns Final autofix state
@@ -165,29 +158,40 @@ export async function pollAutofixState(
 
   const startTime = Date.now();
   let tick = 0;
+  let currentMessage = "Waiting for analysis to start...";
 
-  while (Date.now() - startTime < timeoutMs) {
-    const state = await getAutofixState(orgSlug, issueId);
-
-    if (!state) {
-      await Bun.sleep(pollIntervalMs);
-      continue;
-    }
-
-    if (!json) {
-      updateProgressDisplay(stderr, state, tick);
+  // Animation timer runs independently of polling for smooth spinner
+  let animationTimer: Timer | undefined;
+  if (!json) {
+    animationTimer = setInterval(() => {
+      const display = truncateProgressMessage(currentMessage);
+      stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
       tick += 1;
-    }
-
-    if (shouldStopPolling(state, stopOnWaitingForUser)) {
-      if (!json) {
-        stderr.write("\n");
-      }
-      return state;
-    }
-
-    await Bun.sleep(pollIntervalMs);
+    }, ANIMATION_INTERVAL_MS);
   }
 
-  throw new Error(timeoutMessage);
+  try {
+    while (Date.now() - startTime < timeoutMs) {
+      const state = await getAutofixState(orgSlug, issueId);
+
+      if (state) {
+        // Update message for animation loop to display
+        currentMessage = getProgressMessage(state);
+
+        if (shouldStopPolling(state, stopOnWaitingForUser)) {
+          return state;
+        }
+      }
+
+      await Bun.sleep(pollIntervalMs);
+    }
+
+    throw new Error(timeoutMessage);
+  } finally {
+    // Clean up animation timer
+    if (animationTimer) {
+      clearInterval(animationTimer);
+      stderr.write("\n");
+    }
+  }
 }

@@ -4,12 +4,16 @@
  * Formatting utilities for Seer Autofix command output.
  */
 
+import chalk from "chalk";
 import type {
   AutofixState,
   AutofixStep,
   RootCause,
+  RootCauseArtifact,
 } from "../../types/autofix.js";
 import { cyan, green, muted, yellow } from "./colors.js";
+
+const bold = (text: string): string => chalk.bold(text);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Spinner Frames
@@ -29,6 +33,22 @@ export function getSpinnerFrame(tick: number): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Progress Formatting
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Maximum length for progress messages to fit in a single terminal line */
+const MAX_PROGRESS_LENGTH = 300;
+
+/**
+ * Truncate a progress message to fit in a single terminal line.
+ *
+ * @param message - Progress message to truncate
+ * @returns Truncated message with ellipsis if needed
+ */
+export function truncateProgressMessage(message: string): string {
+  if (message.length <= MAX_PROGRESS_LENGTH) {
+    return message;
+  }
+  return `${message.slice(0, MAX_PROGRESS_LENGTH - 3)}...`;
+}
 
 /**
  * Format a progress message with spinner.
@@ -193,16 +213,7 @@ export function formatRootCauseList(
 
   // Add hint for next steps
   lines.push("");
-  if (causes.length === 1) {
-    lines.push(
-      muted(`To create a fix, run: sentry issue fix ${issueId} --cause 0`)
-    );
-  } else {
-    lines.push(
-      muted(`To create a fix, run: sentry issue fix ${issueId} --cause <id>`)
-    );
-    lines.push(muted(`  where <id> is 0-${causes.length - 1}`));
-  }
+  lines.push(muted(`To create a fix, run: sentry issue fix ${issueId}`));
 
   return lines;
 }
@@ -350,4 +361,77 @@ export function formatAutofixError(status: number, detail?: string): string {
     default:
       return detail ?? "An error occurred with the autofix request.";
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Explorer Mode Root Cause Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format the root cause analysis header.
+ */
+export function formatRootCauseAnalysisHeader(): string[] {
+  return [bold("Root Cause Analysis"), "═".repeat(60)];
+}
+
+/**
+ * Format a root cause artifact from explorer mode for human-readable display.
+ *
+ * Output format:
+ * Root Cause Analysis
+ * ════════════════════════════════════════════════════════════
+ *
+ * Summary:
+ *   {one_line_description}
+ *
+ * Why This Happened:
+ *   1. {five_whys[0]}
+ *   2. {five_whys[1]}
+ *   ...
+ *
+ * Steps to Reproduce:
+ *   1. {reproduction_steps[0]}
+ *   2. {reproduction_steps[1]}
+ *   ...
+ *
+ * @param artifact - Root cause artifact from explorer mode
+ * @returns Array of formatted lines
+ */
+export function formatRootCauseArtifact(artifact: RootCauseArtifact): string[] {
+  const lines: string[] = [];
+
+  // Header
+  lines.push("");
+  lines.push(...formatRootCauseAnalysisHeader());
+  lines.push("");
+
+  // Summary
+  lines.push(yellow("Summary:"));
+  lines.push(`  ${artifact.data.one_line_description}`);
+  lines.push("");
+
+  // Five Whys
+  if (artifact.data.five_whys.length > 0) {
+    lines.push(cyan("Why This Happened:"));
+    for (let i = 0; i < artifact.data.five_whys.length; i++) {
+      const why = artifact.data.five_whys[i];
+      if (why) {
+        lines.push(`  ${i + 1}. ${why}`);
+      }
+    }
+    lines.push("");
+  }
+
+  // Reproduction Steps
+  if (artifact.data.reproduction_steps.length > 0) {
+    lines.push(green("Steps to Reproduce:"));
+    for (let i = 0; i < artifact.data.reproduction_steps.length; i++) {
+      const step = artifact.data.reproduction_steps[i];
+      if (step) {
+        lines.push(`  ${i + 1}. ${step}`);
+      }
+    }
+  }
+
+  return lines;
 }

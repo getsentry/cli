@@ -7,14 +7,10 @@
 
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
-import {
-  type AutofixResponse,
-  AutofixResponseSchema,
-  type AutofixState,
-  type AutofixTriggerResponse,
-  AutofixTriggerResponseSchema,
-  type AutofixUpdatePayload,
-  type StoppingPoint,
+import type {
+  AutofixResponse,
+  AutofixState,
+  AutofixUpdatePayload,
 } from "../types/autofix.js";
 import {
   type IssueSummary,
@@ -417,48 +413,22 @@ export function updateIssueStatus(
 // Autofix (Seer) API Methods
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TriggerAutofixOptions = {
-  /** Where to stop the autofix process */
-  stoppingPoint?: StoppingPoint;
-  /** Specific event ID to analyze (uses recommended event if not provided) */
-  eventId?: string;
-  /** Custom instruction to guide the autofix process */
-  instruction?: string;
-};
-
 /**
  * Trigger an autofix run for an issue.
  *
+ * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @param options - Options for the autofix run
  * @returns The run_id for polling status
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export function triggerAutofix(
   orgSlug: string,
-  issueId: string,
-  options: TriggerAutofixOptions = {}
-): Promise<AutofixTriggerResponse> {
-  const body: Record<string, unknown> = {};
-
-  if (options.stoppingPoint) {
-    body.stoppingPoint = options.stoppingPoint;
-  }
-  if (options.eventId) {
-    body.eventId = options.eventId;
-  }
-  if (options.instruction) {
-    body.instruction = options.instruction;
-  }
-
-  return apiRequest<AutofixTriggerResponse>(
-    `organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    {
-      method: "POST",
-      body,
-      schema: AutofixTriggerResponseSchema,
-    }
-  );
+  issueId: string
+): Promise<unknown> {
+  return apiRequest(`organizations/${orgSlug}/issues/${issueId}/autofix/`, {
+    method: "POST",
+    body: { step: "root_cause" },
+  });
 }
 
 /**
@@ -472,11 +442,9 @@ export async function getAutofixState(
   issueId: string
 ): Promise<AutofixState | null> {
   const response = await apiRequest<AutofixResponse>(
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    {
-      schema: AutofixResponseSchema,
-    }
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`
   );
+
   return response.autofix;
 }
 
