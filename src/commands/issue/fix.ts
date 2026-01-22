@@ -7,67 +7,28 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  getAutofixState,
-  getIssueByShortId,
-  isShortId,
-  updateAutofix,
-} from "../../lib/api-client.js";
-import { ApiError, ContextError, ValidationError } from "../../lib/errors.js";
+import { getAutofixState, updateAutofix } from "../../lib/api-client.js";
+import { ApiError, ValidationError } from "../../lib/errors.js";
 import {
   formatAutofixError,
   formatPrNotFound,
-  formatProgressLine,
   formatPrResult,
-  getProgressMessage,
 } from "../../lib/formatters/autofix.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   type AutofixState,
   extractPrUrl,
   extractRootCauses,
-  isTerminalStatus,
   type RootCause,
 } from "../../types/autofix.js";
-import type { Writer } from "../../types/index.js";
-
-/** Polling interval in milliseconds */
-const POLL_INTERVAL_MS = 3000;
-
-/** Maximum time to wait for PR creation in milliseconds (10 minutes) */
-const TIMEOUT_MS = 600_000;
+import { pollAutofixState, resolveIssueId } from "./utils.js";
 
 type FixFlags = {
   readonly org?: string;
   readonly cause?: number;
   readonly json: boolean;
 };
-
-/**
- * Resolve the numeric issue ID from either a numeric ID or short ID.
- */
-async function resolveIssueId(
-  issueId: string,
-  org: string | undefined,
-  cwd: string
-): Promise<string> {
-  if (!isShortId(issueId)) {
-    return issueId;
-  }
-
-  const resolved = await resolveOrg({ org, cwd });
-  if (!resolved) {
-    throw new ContextError(
-      "Organization",
-      `sentry issue fix ${issueId} --org <org-slug>`
-    );
-  }
-
-  const issue = await getIssueByShortId(resolved.org, issueId);
-  return issue.id;
-}
 
 /**
  * Validate that an autofix run exists and has completed root cause analysis.
@@ -157,55 +118,6 @@ function validateCauseSelection(
   return causeId;
 }
 
-/**
- * Poll for PR creation completion.
- */
-async function pollUntilPrCreated(
-  issueId: string,
-  _stdout: Writer,
-  stderr: Writer,
-  json: boolean
-): Promise<AutofixState> {
-  const startTime = Date.now();
-  let tick = 0;
-  let lastMessage = "";
-
-  while (Date.now() - startTime < TIMEOUT_MS) {
-    const state = await getAutofixState(issueId);
-
-    if (!state) {
-      await Bun.sleep(POLL_INTERVAL_MS);
-      continue;
-    }
-
-    // Show progress if not in JSON mode
-    if (!json) {
-      const message = getProgressMessage(state);
-      if (message !== lastMessage) {
-        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
-        lastMessage = message;
-      } else {
-        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
-      }
-      tick += 1;
-    }
-
-    // Check if we're done
-    if (isTerminalStatus(state.status)) {
-      if (!json) {
-        stderr.write("\n");
-      }
-      return state;
-    }
-
-    await Bun.sleep(POLL_INTERVAL_MS);
-  }
-
-  throw new Error(
-    "PR creation timed out after 10 minutes. Check the issue in Sentry web UI."
-  );
-}
-
 export const fixCommand = buildCommand({
   docs: {
     brief: "Create a PR with a fix using Seer AI",
@@ -263,7 +175,12 @@ export const fixCommand = buildCommand({
 
     try {
       // Resolve the numeric issue ID
-      const numericId = await resolveIssueId(issueId, flags.org, cwd);
+      const numericId = await resolveIssueId(
+        issueId,
+        flags.org,
+        cwd,
+        `sentry issue fix ${issueId} --org <org-slug>`
+      );
 
       // Get current autofix state
       const currentState = await getAutofixState(numericId);
@@ -290,12 +207,10 @@ export const fixCommand = buildCommand({
       });
 
       // Poll until PR is created
-      const finalState = await pollUntilPrCreated(
-        numericId,
-        stdout,
-        stderr,
-        flags.json
-      );
+      const finalState = await pollAutofixState(numericId, stderr, flags.json, {
+        timeoutMessage:
+          "PR creation timed out after 10 minutes. Check the issue in Sentry web UI.",
+      });
 
       // Handle errors
       if (finalState.status === "ERROR") {

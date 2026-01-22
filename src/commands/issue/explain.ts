@@ -6,29 +6,15 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  getAutofixState,
-  getIssueByShortId,
-  isShortId,
-  triggerAutofix,
-} from "../../lib/api-client.js";
-import { ApiError, ContextError } from "../../lib/errors.js";
+import { triggerAutofix } from "../../lib/api-client.js";
+import { ApiError } from "../../lib/errors.js";
 import {
   formatAutofixError,
-  formatProgressLine,
   formatRootCauseList,
-  getProgressMessage,
 } from "../../lib/formatters/autofix.js";
 import { writeJson } from "../../lib/formatters/index.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
-import { extractRootCauses, isTerminalStatus } from "../../types/autofix.js";
-import type { Writer } from "../../types/index.js";
-
-/** Polling interval in milliseconds */
-const POLL_INTERVAL_MS = 3000;
-
-/** Maximum time to wait for completion in milliseconds (10 minutes) */
-const TIMEOUT_MS = 600_000;
+import { extractRootCauses } from "../../types/autofix.js";
+import { pollAutofixState, resolveIssueId } from "./utils.js";
 
 type ExplainFlags = {
   readonly org?: string;
@@ -36,101 +22,6 @@ type ExplainFlags = {
   readonly instruction?: string;
   readonly json: boolean;
 };
-
-/**
- * Resolve the numeric issue ID from either a numeric ID or short ID.
- *
- * @param issueId - User-provided issue ID (numeric or short)
- * @param org - Optional org slug for short ID resolution
- * @param cwd - Current working directory
- * @returns Numeric issue ID
- */
-async function resolveIssueId(
-  issueId: string,
-  org: string | undefined,
-  cwd: string
-): Promise<string> {
-  if (!isShortId(issueId)) {
-    return issueId;
-  }
-
-  // Short ID requires organization context
-  const resolved = await resolveOrg({ org, cwd });
-  if (!resolved) {
-    throw new ContextError(
-      "Organization",
-      `sentry issue explain ${issueId} --org <org-slug>`
-    );
-  }
-
-  const issue = await getIssueByShortId(resolved.org, issueId);
-  return issue.id;
-}
-
-/**
- * Poll for autofix completion with progress display.
- *
- * @param issueId - Numeric issue ID
- * @param stdout - Output writer
- * @param stderr - Error writer
- * @param json - Whether to suppress progress output (for JSON mode)
- */
-async function pollUntilComplete(
-  issueId: string,
-  _stdout: Writer,
-  stderr: Writer,
-  json: boolean
-): Promise<ReturnType<typeof getAutofixState>> {
-  const startTime = Date.now();
-  let tick = 0;
-  let lastMessage = "";
-
-  while (Date.now() - startTime < TIMEOUT_MS) {
-    const state = await getAutofixState(issueId);
-
-    if (!state) {
-      // No autofix state yet, keep waiting
-      await Bun.sleep(POLL_INTERVAL_MS);
-      continue;
-    }
-
-    // Show progress if not in JSON mode
-    if (!json) {
-      const message = getProgressMessage(state);
-      if (message !== lastMessage) {
-        // Clear current line and write new progress
-        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
-        lastMessage = message;
-      } else {
-        // Update spinner
-        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
-      }
-      tick += 1;
-    }
-
-    // Check if we're done
-    if (isTerminalStatus(state.status)) {
-      if (!json) {
-        stderr.write("\n");
-      }
-      return state;
-    }
-
-    // Also check for WAITING_FOR_USER_RESPONSE which means root cause is ready
-    if (state.status === "WAITING_FOR_USER_RESPONSE") {
-      if (!json) {
-        stderr.write("\n");
-      }
-      return state;
-    }
-
-    await Bun.sleep(POLL_INTERVAL_MS);
-  }
-
-  throw new Error(
-    "Analysis timed out after 10 minutes. Check the issue in Sentry web UI."
-  );
-}
 
 export const explainCommand = buildCommand({
   docs: {
@@ -192,7 +83,12 @@ export const explainCommand = buildCommand({
 
     try {
       // Resolve the numeric issue ID
-      const numericId = await resolveIssueId(issueId, flags.org, cwd);
+      const numericId = await resolveIssueId(
+        issueId,
+        flags.org,
+        cwd,
+        `sentry issue explain ${issueId} --org <org-slug>`
+      );
 
       if (!flags.json) {
         stderr.write(`Analyzing issue ${issueId}...\n`);
@@ -205,17 +101,12 @@ export const explainCommand = buildCommand({
         instruction: flags.instruction,
       });
 
-      // Poll until complete
-      const finalState = await pollUntilComplete(
-        numericId,
-        stdout,
-        stderr,
-        flags.json
-      );
-
-      if (!finalState) {
-        throw new Error("No autofix state returned.");
-      }
+      // Poll until complete (stop when root cause is ready)
+      const finalState = await pollAutofixState(numericId, stderr, flags.json, {
+        stopOnWaitingForUser: true,
+        timeoutMessage:
+          "Analysis timed out after 10 minutes. Check the issue in Sentry web UI.",
+      });
 
       // Handle errors
       if (finalState.status === "ERROR") {
