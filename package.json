@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.2.0",
+  "version": "0.2.0-dev",
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "type": "module",
   "bin": {
