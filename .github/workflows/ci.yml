@@ -114,15 +114,15 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            ./dist/sentry-windows-x64/bin/sentry.exe --help
+            ./dist-bin/sentry-windows-x64.exe --help
           else
-            ./dist/sentry-${{ matrix.target }}/bin/sentry --help
+            ./dist-bin/sentry-${{ matrix.target }} --help
           fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
-          path: dist/sentry-*/bin/sentry*
+          path: dist-bin/sentry-*
 
   build-npm:
     name: Build npm Package (Node ${{ matrix.node }})
