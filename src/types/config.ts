@@ -21,6 +21,28 @@ export const CachedProjectSchema = z.object({
 export type CachedProject = z.infer<typeof CachedProjectSchema>;
 
 /**
+ * Schema for project alias entry (used for short issue ID resolution)
+ */
+export const ProjectAliasEntrySchema = z.object({
+  orgSlug: z.string(),
+  projectSlug: z.string(),
+});
+
+export type ProjectAliasEntry = z.infer<typeof ProjectAliasEntrySchema>;
+
+/**
+ * Schema for cached project aliases (A, B, C... -> org/project mapping)
+ */
+export const ProjectAliasesSchema = z.object({
+  /** Map of alias letter to project info */
+  aliases: z.record(ProjectAliasEntrySchema),
+  /** Timestamp when aliases were set */
+  cachedAt: z.number(),
+});
+
+export type ProjectAliases = z.infer<typeof ProjectAliasesSchema>;
+
+/**
  * Schema for authentication configuration
  */
 export const AuthConfigSchema = z.object({
@@ -55,6 +77,11 @@ export const SentryConfigSchema = z.object({
    * Value: cached DSN entry with source and resolution info
    */
   dsnCache: z.record(CachedDsnEntrySchema).optional(),
+  /**
+   * Cached project aliases for short issue ID resolution.
+   * Set by `issue list` when multiple projects are detected.
+   */
+  projectAliases: ProjectAliasesSchema.optional(),
 });
 
 export type SentryConfig = z.infer<typeof SentryConfigSchema>;

@@ -337,7 +337,8 @@ export function getIssue(issueId: string): Promise<SentryIssue> {
 
 /**
  * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D)
- * Requires organization context to resolve the short ID
+ * Requires organization context to resolve the short ID.
+ * The shortId is normalized to uppercase for case-insensitive matching.
  *
  * @see https://docs.sentry.io/api/events/retrieve-an-issue/
  */
@@ -345,8 +346,10 @@ export function getIssueByShortId(
   orgSlug: string,
   shortId: string
 ): Promise<SentryIssue> {
+  // Normalize to uppercase for case-insensitive matching
+  const normalizedShortId = shortId.toUpperCase();
   return apiRequest<SentryIssue>(
-    `/organizations/${orgSlug}/issues/${shortId}/`,
+    `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
     {
       schema: SentryIssueSchema,
     }
