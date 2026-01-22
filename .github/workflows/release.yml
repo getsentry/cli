@@ -4,19 +4,28 @@ on:
     inputs:
       version:
         description: Version to release (semver, bump type, or "auto")
-        required: true
+        required: false
         default: 'auto'
       force:
         description: Force release even with blockers
         required: false
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   release:
-    uses: getsentry/craft/.github/workflows/release.yml@v2
-    with:
-      version: ${{ inputs.version }}
-      force: ${{ inputs.force }}
-      publish_repo: getsentry/publish
-    secrets: inherit
-    permissions:
-      contents: write
+    runs-on: ubuntu-latest
+    name: Release a new version
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare release
+        uses: getsentry/craft@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: ${{ inputs.version }}
+          force: ${{ inputs.force }}
