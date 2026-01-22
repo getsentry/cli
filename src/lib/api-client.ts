@@ -8,6 +8,15 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type AutofixResponse,
+  AutofixResponseSchema,
+  type AutofixState,
+  type AutofixTriggerResponse,
+  AutofixTriggerResponseSchema,
+  type AutofixUpdatePayload,
+  type StoppingPoint,
+} from "../types/autofix.js";
+import {
   type SentryEvent,
   SentryEventSchema,
   type SentryIssue,
@@ -399,5 +408,89 @@ export function updateIssueStatus(
     method: "PUT",
     body: { status },
     schema: SentryIssueSchema,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Autofix (Seer) API Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TriggerAutofixOptions = {
+  /** Where to stop the autofix process */
+  stoppingPoint?: StoppingPoint;
+  /** Specific event ID to analyze (uses recommended event if not provided) */
+  eventId?: string;
+  /** Custom instruction to guide the autofix process */
+  instruction?: string;
+};
+
+/**
+ * Trigger an autofix run for an issue.
+ *
+ * @param issueId - The numeric Sentry issue ID
+ * @param options - Options for the autofix run
+ * @returns The run_id for polling status
+ * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
+ */
+export function triggerAutofix(
+  issueId: string,
+  options: TriggerAutofixOptions = {}
+): Promise<AutofixTriggerResponse> {
+  const body: Record<string, unknown> = {};
+
+  if (options.stoppingPoint) {
+    body.stoppingPoint = options.stoppingPoint;
+  }
+  if (options.eventId) {
+    body.eventId = options.eventId;
+  }
+  if (options.instruction) {
+    body.instruction = options.instruction;
+  }
+
+  return apiRequest<AutofixTriggerResponse>(`/issues/${issueId}/autofix/`, {
+    method: "POST",
+    body,
+    schema: AutofixTriggerResponseSchema,
+  });
+}
+
+/**
+ * Get the current autofix state for an issue.
+ *
+ * @param issueId - The numeric Sentry issue ID
+ * @returns The autofix state, or null if no autofix has been run
+ */
+export async function getAutofixState(
+  issueId: string
+): Promise<AutofixState | null> {
+  const response = await apiRequest<AutofixResponse>(
+    `/issues/${issueId}/autofix/`,
+    {
+      schema: AutofixResponseSchema,
+    }
+  );
+  return response.autofix;
+}
+
+/**
+ * Update an autofix run (e.g., select root cause, continue to PR).
+ *
+ * @param issueId - The numeric Sentry issue ID
+ * @param runId - The autofix run ID
+ * @param payload - The update payload (select_root_cause, select_solution, create_pr)
+ * @returns The response from the API
+ */
+export function updateAutofix(
+  issueId: string,
+  runId: number,
+  payload: AutofixUpdatePayload
+): Promise<unknown> {
+  return apiRequest(`/issues/${issueId}/autofix/update/`, {
+    method: "POST",
+    body: {
+      run_id: runId,
+      payload,
+    },
   });
 }

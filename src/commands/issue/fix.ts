@@ -1,0 +1,341 @@
+/**
+ * sentry issue fix
+ *
+ * Create a pull request with a fix for a Sentry issue using Seer AI.
+ * Requires that 'sentry issue explain' has been run first.
+ */
+
+import { buildCommand, numberParser } from "@stricli/core";
+import type { SentryContext } from "../../context.js";
+import {
+  getAutofixState,
+  getIssueByShortId,
+  isShortId,
+  updateAutofix,
+} from "../../lib/api-client.js";
+import { ApiError, ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  formatAutofixError,
+  formatPrNotFound,
+  formatProgressLine,
+  formatPrResult,
+  getProgressMessage,
+} from "../../lib/formatters/autofix.js";
+import { muted } from "../../lib/formatters/colors.js";
+import { writeJson } from "../../lib/formatters/index.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  type AutofixState,
+  extractPrUrl,
+  extractRootCauses,
+  isTerminalStatus,
+  type RootCause,
+} from "../../types/autofix.js";
+import type { Writer } from "../../types/index.js";
+
+/** Polling interval in milliseconds */
+const POLL_INTERVAL_MS = 3000;
+
+/** Maximum time to wait for PR creation in milliseconds (10 minutes) */
+const TIMEOUT_MS = 600_000;
+
+type FixFlags = {
+  readonly org?: string;
+  readonly cause?: number;
+  readonly json: boolean;
+};
+
+/**
+ * Resolve the numeric issue ID from either a numeric ID or short ID.
+ */
+async function resolveIssueId(
+  issueId: string,
+  org: string | undefined,
+  cwd: string
+): Promise<string> {
+  if (!isShortId(issueId)) {
+    return issueId;
+  }
+
+  const resolved = await resolveOrg({ org, cwd });
+  if (!resolved) {
+    throw new ContextError(
+      "Organization",
+      `sentry issue fix ${issueId} --org <org-slug>`
+    );
+  }
+
+  const issue = await getIssueByShortId(resolved.org, issueId);
+  return issue.id;
+}
+
+/**
+ * Validate that an autofix run exists and has completed root cause analysis.
+ *
+ * @param state - Current autofix state
+ * @param issueId - Issue ID for error messages
+ * @returns The validated state and root causes
+ */
+function validateAutofixState(
+  state: AutofixState | null,
+  issueId: string
+): { state: AutofixState; causes: RootCause[] } {
+  if (!state) {
+    throw new ValidationError(
+      `No root cause analysis found for issue ${issueId}.\n` +
+        `Run 'sentry issue explain ${issueId}' first.`
+    );
+  }
+
+  // Check if the autofix is in a state where we can continue
+  const validStatuses = ["COMPLETED", "WAITING_FOR_USER_RESPONSE"];
+  if (!validStatuses.includes(state.status)) {
+    if (state.status === "PROCESSING") {
+      throw new ValidationError(
+        "Root cause analysis is still in progress. Please wait for it to complete."
+      );
+    }
+    if (state.status === "ERROR") {
+      throw new ValidationError(
+        "Root cause analysis failed. Check the Sentry web UI for details."
+      );
+    }
+    throw new ValidationError(
+      `Cannot create fix: autofix is in '${state.status}' state.`
+    );
+  }
+
+  const causes = extractRootCauses(state);
+  if (causes.length === 0) {
+    throw new ValidationError(
+      "No root causes identified. Cannot create a fix without a root cause."
+    );
+  }
+
+  return { state, causes };
+}
+
+/**
+ * Validate the cause selection.
+ */
+function validateCauseSelection(
+  causes: RootCause[],
+  selectedCause: number | undefined,
+  issueId: string
+): number {
+  // If only one cause and none specified, use it
+  if (causes.length === 1 && selectedCause === undefined) {
+    return 0;
+  }
+
+  // If multiple causes and none specified, error with list
+  if (causes.length > 1 && selectedCause === undefined) {
+    const lines = [
+      "Multiple root causes found. Please specify one with --cause <id>:",
+      "",
+    ];
+    for (let i = 0; i < causes.length; i++) {
+      const cause = causes[i];
+      if (cause) {
+        lines.push(`  ${i}: ${cause.description.slice(0, 60)}...`);
+      }
+    }
+    lines.push("");
+    lines.push(`Example: sentry issue fix ${issueId} --cause 0`);
+    throw new ValidationError(lines.join("\n"));
+  }
+
+  const causeId = selectedCause ?? 0;
+
+  // Validate the cause ID is in range
+  if (causeId < 0 || causeId >= causes.length) {
+    throw new ValidationError(
+      `Invalid cause ID: ${causeId}. Valid range is 0-${causes.length - 1}.`
+    );
+  }
+
+  return causeId;
+}
+
+/**
+ * Poll for PR creation completion.
+ */
+async function pollUntilPrCreated(
+  issueId: string,
+  _stdout: Writer,
+  stderr: Writer,
+  json: boolean
+): Promise<AutofixState> {
+  const startTime = Date.now();
+  let tick = 0;
+  let lastMessage = "";
+
+  while (Date.now() - startTime < TIMEOUT_MS) {
+    const state = await getAutofixState(issueId);
+
+    if (!state) {
+      await Bun.sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+
+    // Show progress if not in JSON mode
+    if (!json) {
+      const message = getProgressMessage(state);
+      if (message !== lastMessage) {
+        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
+        lastMessage = message;
+      } else {
+        stderr.write(`\r\x1b[K${formatProgressLine(message, tick)}`);
+      }
+      tick += 1;
+    }
+
+    // Check if we're done
+    if (isTerminalStatus(state.status)) {
+      if (!json) {
+        stderr.write("\n");
+      }
+      return state;
+    }
+
+    await Bun.sleep(POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    "PR creation timed out after 10 minutes. Check the issue in Sentry web UI."
+  );
+}
+
+export const fixCommand = buildCommand({
+  docs: {
+    brief: "Create a PR with a fix using Seer AI",
+    fullDescription:
+      "Create a pull request with a fix for a Sentry issue using Seer AI.\n\n" +
+      "This command requires that 'sentry issue explain' has been run first " +
+      "to identify the root cause. It will then generate code changes and " +
+      "create a pull request with the fix.\n\n" +
+      "If multiple root causes were identified, use --cause to specify which one.\n\n" +
+      "Prerequisites:\n" +
+      "  - GitHub integration configured for your organization\n" +
+      "  - Code mappings set up for your project\n" +
+      "  - Repository write access for the integration\n\n" +
+      "Examples:\n" +
+      "  sentry issue fix 123456789 --cause 0\n" +
+      "  sentry issue fix MYPROJECT-ABC --org my-org --cause 1",
+  },
+  parameters: {
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          brief: "Issue ID or short ID (e.g., MYPROJECT-ABC or 123456789)",
+          parse: String,
+        },
+      ],
+    },
+    flags: {
+      org: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Organization slug (required for short IDs if not auto-detected)",
+        optional: true,
+      },
+      cause: {
+        kind: "parsed",
+        parse: numberParser,
+        brief: "Root cause ID to fix (required if multiple causes exist)",
+        optional: true,
+      },
+      json: {
+        kind: "boolean",
+        brief: "Output as JSON",
+        default: false,
+      },
+    },
+  },
+  async func(
+    this: SentryContext,
+    flags: FixFlags,
+    issueId: string
+  ): Promise<void> {
+    const { stdout, stderr, cwd } = this;
+
+    try {
+      // Resolve the numeric issue ID
+      const numericId = await resolveIssueId(issueId, flags.org, cwd);
+
+      // Get current autofix state
+      const currentState = await getAutofixState(numericId);
+
+      // Validate we have a completed root cause analysis
+      const { state, causes } = validateAutofixState(currentState, issueId);
+
+      // Validate cause selection
+      const causeId = validateCauseSelection(causes, flags.cause, issueId);
+      const selectedCause = causes[causeId];
+
+      if (!flags.json) {
+        stderr.write(`Creating fix for cause #${causeId}...\n`);
+        if (selectedCause) {
+          stderr.write(`${muted(`"${selectedCause.description}"`)}\n\n`);
+        }
+      }
+
+      // Update autofix to continue to PR creation
+      await updateAutofix(numericId, state.run_id, {
+        type: "select_root_cause",
+        cause_id: causeId,
+        stopping_point: "open_pr",
+      });
+
+      // Poll until PR is created
+      const finalState = await pollUntilPrCreated(
+        numericId,
+        stdout,
+        stderr,
+        flags.json
+      );
+
+      // Handle errors
+      if (finalState.status === "ERROR") {
+        throw new Error(
+          "Fix creation failed. Check the Sentry web UI for details."
+        );
+      }
+
+      if (finalState.status === "CANCELLED") {
+        throw new Error("Fix creation was cancelled.");
+      }
+
+      // Try to extract PR URL
+      const prUrl = extractPrUrl(finalState);
+
+      // Output results
+      if (flags.json) {
+        writeJson(stdout, {
+          run_id: finalState.run_id,
+          status: finalState.status,
+          pr_url: prUrl ?? null,
+        });
+        return;
+      }
+
+      // Human-readable output
+      if (prUrl) {
+        const lines = formatPrResult(prUrl);
+        stdout.write(`${lines.join("\n")}\n`);
+      } else {
+        const lines = formatPrNotFound();
+        stdout.write(`${lines.join("\n")}\n`);
+      }
+    } catch (error) {
+      // Handle API errors with friendly messages
+      if (error instanceof ApiError) {
+        const message = formatAutofixError(error.status, error.detail);
+        throw new Error(message);
+      }
+      throw error;
+    }
+  },
+});

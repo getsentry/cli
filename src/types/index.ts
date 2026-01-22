@@ -7,6 +7,31 @@
 
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
+// Autofix types
+export type {
+  AutofixResponse,
+  AutofixState,
+  AutofixStatus,
+  AutofixStep,
+  AutofixTriggerResponse,
+  AutofixUpdatePayload,
+  RootCause,
+  StoppingPoint,
+} from "./autofix.js";
+export {
+  AUTOFIX_STATUSES,
+  AutofixResponseSchema,
+  AutofixStateSchema,
+  AutofixStepSchema,
+  AutofixTriggerResponseSchema,
+  extractPrUrl,
+  extractRootCauses,
+  getLatestProgress,
+  isTerminalStatus,
+  RootCauseSchema,
+  STOPPING_POINTS,
+  TERMINAL_STATUSES,
+} from "./autofix.js";
 // Configuration types
 export type { CachedProject, SentryConfig } from "./config.js";
 export { SentryConfigSchema } from "./config.js";
