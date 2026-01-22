@@ -52,6 +52,8 @@ export {
 export type {
   IssueLevel,
   IssueStatus,
+  IssueSummary,
+  IssueSummaryScores,
   SentryEvent,
   SentryIssue,
   SentryOrganization,
@@ -60,6 +62,8 @@ export type {
 export {
   ISSUE_LEVELS,
   ISSUE_STATUSES,
+  IssueSummarySchema,
+  IssueSummaryScoresSchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,

@@ -22,7 +22,7 @@ import {
   extractRootCauses,
   type RootCause,
 } from "../../types/autofix.js";
-import { pollAutofixState, resolveIssueId } from "./utils.js";
+import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
 type FixFlags = {
   readonly org?: string;
@@ -174,8 +174,8 @@ export const fixCommand = buildCommand({
     const { stdout, stderr, cwd } = this;
 
     try {
-      // Resolve the numeric issue ID
-      const numericId = await resolveIssueId(
+      // Resolve org and issue ID
+      const { org, issueId: numericId } = await resolveOrgAndIssueId(
         issueId,
         flags.org,
         cwd,
@@ -183,7 +183,7 @@ export const fixCommand = buildCommand({
       );
 
       // Get current autofix state
-      const currentState = await getAutofixState(numericId);
+      const currentState = await getAutofixState(org, numericId);
 
       // Validate we have a completed root cause analysis
       const { state, causes } = validateAutofixState(currentState, issueId);
@@ -207,7 +207,11 @@ export const fixCommand = buildCommand({
       });
 
       // Poll until PR is created
-      const finalState = await pollAutofixState(numericId, stderr, flags.json, {
+      const finalState = await pollAutofixState({
+        orgSlug: org,
+        issueId: numericId,
+        stderr,
+        json: flags.json,
         timeoutMessage:
           "PR creation timed out after 10 minutes. Check the issue in Sentry web UI.",
       });

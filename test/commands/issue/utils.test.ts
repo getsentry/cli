@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   pollAutofixState,
   resolveIssueId,
+  resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
 import { setAuthToken } from "../../../src/lib/config.js";
 
@@ -124,7 +125,80 @@ describe("resolveIssueId", () => {
   });
 });
 
+describe("resolveOrgAndIssueId", () => {
+  test("returns org and numeric issue ID when org is provided", async () => {
+    const result = await resolveOrgAndIssueId(
+      "123456789",
+      "my-org",
+      "/tmp",
+      "sentry issue explain 123456789 --org <org>"
+    );
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("123456789");
+  });
+
+  test("resolves short ID to numeric ID", async () => {
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/my-org/issues/PROJECT-ABC")) {
+        return new Response(
+          JSON.stringify({
+            id: "987654321",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId(
+      "PROJECT-ABC",
+      "my-org",
+      "/tmp",
+      "sentry issue explain PROJECT-ABC --org <org>"
+    );
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("987654321");
+  });
+
+  test("throws ContextError when org cannot be resolved", async () => {
+    delete process.env.SENTRY_DSN;
+
+    await expect(
+      resolveOrgAndIssueId(
+        "123456789",
+        undefined,
+        "/nonexistent/path",
+        "sentry issue explain 123456789 --org <org>"
+      )
+    ).rejects.toThrow("Organization");
+  });
+});
+
 describe("pollAutofixState", () => {
+  const mockStderr = {
+    write: () => {
+      // Intentionally empty - suppress output in tests
+    },
+  };
+
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;
 
@@ -145,12 +219,12 @@ describe("pollAutofixState", () => {
       );
     };
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-    const result = await pollAutofixState("123456789", mockStderr, true);
+    const result = await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
 
     expect(result.status).toBe("COMPLETED");
     expect(fetchCount).toBe(1);
@@ -172,12 +246,12 @@ describe("pollAutofixState", () => {
         }
       );
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-    const result = await pollAutofixState("123456789", mockStderr, true);
+    const result = await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
 
     expect(result.status).toBe("ERROR");
   });
@@ -198,12 +272,11 @@ describe("pollAutofixState", () => {
         }
       );
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-    const result = await pollAutofixState("123456789", mockStderr, true, {
+    const result = await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
       stopOnWaitingForUser: true,
     });
 
@@ -248,12 +321,11 @@ describe("pollAutofixState", () => {
       );
     };
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-    const result = await pollAutofixState("123456789", mockStderr, true, {
+    const result = await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
       pollIntervalMs: 10, // Short interval for test
     });
 
@@ -292,13 +364,18 @@ describe("pollAutofixState", () => {
         }
       );
 
-    const mockStderr = {
+    const stderrMock = {
       write: (s: string) => {
         stderrOutput += s;
       },
     };
 
-    await pollAutofixState("123456789", mockStderr, false);
+    await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: stderrMock,
+      json: false,
+    });
 
     expect(stderrOutput).toContain("Analyzing");
   });
@@ -319,14 +396,12 @@ describe("pollAutofixState", () => {
         }
       );
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-
     await expect(
-      pollAutofixState("123456789", mockStderr, true, {
+      pollAutofixState({
+        orgSlug: "test-org",
+        issueId: "123456789",
+        stderr: mockStderr,
+        json: true,
         timeoutMs: 50,
         pollIntervalMs: 20,
         timeoutMessage: "Custom timeout message",
@@ -363,12 +438,11 @@ describe("pollAutofixState", () => {
       );
     };
 
-    const mockStderr = {
-      write: () => {
-        // Intentionally empty - suppress output in tests
-      },
-    };
-    const result = await pollAutofixState("123456789", mockStderr, true, {
+    const result = await pollAutofixState({
+      orgSlug: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
       pollIntervalMs: 10,
     });
 

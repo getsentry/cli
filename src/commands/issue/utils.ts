@@ -55,7 +55,54 @@ export async function resolveIssueId(
   return issue.id;
 }
 
-type PollOptions = {
+type ResolvedIssue = {
+  /** Resolved organization slug */
+  org: string;
+  /** Numeric issue ID */
+  issueId: string;
+};
+
+/**
+ * Resolve both organization slug and numeric issue ID.
+ * Required for endpoints that need both (like /summarize/).
+ *
+ * @param issueId - User-provided issue ID (numeric or short)
+ * @param org - Optional org slug
+ * @param cwd - Current working directory for org resolution
+ * @param commandHint - Command example for error messages
+ * @returns Object with org slug and numeric issue ID
+ * @throws {ContextError} When organization cannot be resolved
+ */
+export async function resolveOrgAndIssueId(
+  issueId: string,
+  org: string | undefined,
+  cwd: string,
+  commandHint: string
+): Promise<ResolvedIssue> {
+  // Always need org for endpoints like /summarize/
+  const resolved = await resolveOrg({ org, cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", commandHint);
+  }
+
+  // If it's a short ID, resolve to numeric ID
+  if (isShortId(issueId)) {
+    const issue = await getIssueByShortId(resolved.org, issueId);
+    return { org: resolved.org, issueId: issue.id };
+  }
+
+  return { org: resolved.org, issueId };
+}
+
+type PollAutofixOptions = {
+  /** Organization slug */
+  orgSlug: string;
+  /** Numeric issue ID */
+  issueId: string;
+  /** Writer for progress output */
+  stderr: Writer;
+  /** Whether to suppress progress output (JSON mode) */
+  json: boolean;
   /** Polling interval in milliseconds (default: 3000) */
   pollIntervalMs?: number;
   /** Maximum time to wait in milliseconds (default: 600000 = 10 minutes) */
@@ -98,20 +145,18 @@ function updateProgressDisplay(
  * Poll autofix state until completion or timeout.
  * Displays progress spinner and messages to stderr when not in JSON mode.
  *
- * @param issueId - Numeric issue ID
- * @param stderr - Writer for progress output
- * @param json - Whether to suppress progress output (JSON mode)
  * @param options - Polling configuration
  * @returns Final autofix state
  * @throws {Error} On timeout
  */
 export async function pollAutofixState(
-  issueId: string,
-  stderr: Writer,
-  json: boolean,
-  options: PollOptions = {}
+  options: PollAutofixOptions
 ): Promise<AutofixState> {
   const {
+    orgSlug,
+    issueId,
+    stderr,
+    json,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     timeoutMessage = "Operation timed out after 10 minutes. Check the issue in Sentry web UI.",
@@ -122,7 +167,7 @@ export async function pollAutofixState(
   let tick = 0;
 
   while (Date.now() - startTime < timeoutMs) {
-    const state = await getAutofixState(issueId);
+    const state = await getAutofixState(orgSlug, issueId);
 
     if (!state) {
       await Bun.sleep(pollIntervalMs);

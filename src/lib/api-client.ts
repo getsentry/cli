@@ -17,6 +17,8 @@ import {
   type StoppingPoint,
 } from "../types/autofix.js";
 import {
+  type IssueSummary,
+  IssueSummarySchema,
   type SentryEvent,
   SentryEventSchema,
   type SentryIssue,
@@ -433,6 +435,7 @@ type TriggerAutofixOptions = {
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export function triggerAutofix(
+  orgSlug: string,
   issueId: string,
   options: TriggerAutofixOptions = {}
 ): Promise<AutofixTriggerResponse> {
@@ -448,11 +451,14 @@ export function triggerAutofix(
     body.instruction = options.instruction;
   }
 
-  return apiRequest<AutofixTriggerResponse>(`/issues/${issueId}/autofix/`, {
-    method: "POST",
-    body,
-    schema: AutofixTriggerResponseSchema,
-  });
+  return apiRequest<AutofixTriggerResponse>(
+    `organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    {
+      method: "POST",
+      body,
+      schema: AutofixTriggerResponseSchema,
+    }
+  );
 }
 
 /**
@@ -462,10 +468,11 @@ export function triggerAutofix(
  * @returns The autofix state, or null if no autofix has been run
  */
 export async function getAutofixState(
+  orgSlug: string,
   issueId: string
 ): Promise<AutofixState | null> {
   const response = await apiRequest<AutofixResponse>(
-    `/issues/${issueId}/autofix/`,
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
       schema: AutofixResponseSchema,
     }
@@ -493,4 +500,28 @@ export function updateAutofix(
       payload,
     },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue Summary API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get an AI-generated summary of an issue.
+ *
+ * @param orgSlug - The organization slug
+ * @param issueId - The numeric Sentry issue ID
+ * @returns The issue summary with headline, cause analysis, and scores
+ */
+export function getIssueSummary(
+  orgSlug: string,
+  issueId: string
+): Promise<IssueSummary> {
+  return apiRequest<IssueSummary>(
+    `/organizations/${orgSlug}/issues/${issueId}/summarize/`,
+    {
+      method: "POST",
+      schema: IssueSummarySchema,
+    }
+  );
 }
