@@ -25,7 +25,7 @@
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
     "@types/bun": "latest",
-    "@types/node": "^20",
+    "@types/node": "^22",
     "@types/qrcode-terminal": "^0.12.2",
     "chalk": "^5.6.2",
     "esbuild": "^0.25.0",
