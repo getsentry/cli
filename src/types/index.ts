@@ -25,20 +25,65 @@ export {
 
 // Sentry API types and schemas
 export type {
+  // Breadcrumb types
+  Breadcrumb,
+  BreadcrumbsEntry,
+  // Context types
+  BrowserContext,
+  DeviceContext,
+  // Stack trace types
+  ExceptionEntry,
+  ExceptionValue,
+  // Issue types
   IssueLevel,
+  IssuePriority,
   IssueStatus,
+  IssueSubstatus,
+  Mechanism,
+  OsContext,
+  Release,
+  // Request types
+  RequestEntry,
+  // Event types
   SentryEvent,
   SentryIssue,
+  // Organization & Project
   SentryOrganization,
   SentryProject,
+  // Span types
+  Span,
+  SpanEntry,
+  StackFrame,
+  Stacktrace,
+  TraceContext,
+  UserGeo,
 } from "./sentry.js";
 export {
+  // Schemas
+  BreadcrumbSchema,
+  BreadcrumbsEntrySchema,
+  BrowserContextSchema,
+  DeviceContextSchema,
+  ExceptionEntrySchema,
+  ExceptionValueSchema,
+  // Constants
   ISSUE_LEVELS,
+  ISSUE_PRIORITIES,
   ISSUE_STATUSES,
+  MechanismSchema,
+  OsContextSchema,
+  ReleaseSchema,
+  RequestEntrySchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  SpanEntrySchema,
+  SpanSchema,
+  StackFrameSchema,
+  StacktraceSchema,
+  TraceContextSchema,
+  UserGeoSchema,
 } from "./sentry.js";
 
 // I/O types
