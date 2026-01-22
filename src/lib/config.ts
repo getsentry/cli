@@ -92,7 +92,10 @@ export async function updateConfig(
 }
 
 /**
- * Get the stored authentication token
+ * Get the stored authentication token.
+ *
+ * Returns undefined if the token has expired. For automatic token refresh,
+ * use `refreshToken()` instead.
  */
 export async function getAuthToken(): Promise<string | undefined> {
   const config = await readConfig();
@@ -105,21 +108,146 @@ export async function getAuthToken(): Promise<string | undefined> {
   return config.auth?.token;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Automatic Token Refresh
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Refresh when less than 10% of token lifetime remains */
+export const REFRESH_THRESHOLD = 0.1;
+
+/** Default token lifetime assumption (1 hour) for tokens without issuedAt */
+export const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
+
+export type RefreshTokenOptions = {
+  /** Bypass threshold check and always refresh */
+  force?: boolean;
+};
+
+export type RefreshTokenResult = {
+  token: string;
+  refreshed: boolean;
+  /** Unix timestamp (ms) when token expires */
+  expiresAt?: number;
+  /** Seconds until token expires */
+  expiresIn?: number;
+};
+
+/** Shared promise for concurrent refresh requests */
+let refreshPromise: Promise<RefreshTokenResult> | null = null;
+
+async function performTokenRefresh(
+  storedRefreshToken: string
+): Promise<RefreshTokenResult> {
+  const { refreshAccessToken } = await import("./oauth.js");
+  const { AuthError } = await import("./errors.js");
+
+  try {
+    const tokenResponse = await refreshAccessToken(storedRefreshToken);
+    const now = Date.now();
+    const expiresAt = now + tokenResponse.expires_in * 1000;
+
+    await setAuthToken(
+      tokenResponse.access_token,
+      tokenResponse.expires_in,
+      tokenResponse.refresh_token ?? storedRefreshToken
+    );
+
+    return {
+      token: tokenResponse.access_token,
+      refreshed: true,
+      expiresAt,
+      expiresIn: tokenResponse.expires_in,
+    };
+  } catch (error) {
+    // Only clear auth if the server explicitly rejected the refresh token.
+    // Don't clear on network errors - the existing token may still be valid.
+    if (error instanceof AuthError) {
+      await clearAuth();
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get a valid authentication token, refreshing if needed or forced.
+ *
+ * @param options.force - Bypass threshold check and always refresh (e.g., after 401)
+ */
+export async function refreshToken(
+  options: RefreshTokenOptions = {}
+): Promise<RefreshTokenResult> {
+  const { force = false } = options;
+  const { AuthError } = await import("./errors.js");
+  const config = await readConfig();
+
+  if (!config.auth?.token) {
+    throw new AuthError("not_authenticated");
+  }
+
+  const now = Date.now();
+  const expiresAt = config.auth.expiresAt;
+
+  // Token without expiry - return as-is (can't refresh)
+  if (!expiresAt) {
+    return { token: config.auth.token, refreshed: false };
+  }
+
+  const issuedAt =
+    config.auth.issuedAt ?? expiresAt - DEFAULT_TOKEN_LIFETIME_MS;
+  const totalLifetime = expiresAt - issuedAt;
+  const remainingLifetime = expiresAt - now;
+  const remainingRatio = remainingLifetime / totalLifetime;
+  const expiresIn = Math.max(0, Math.floor(remainingLifetime / 1000));
+
+  // Return existing token if still valid and not forcing refresh
+  if (!force && remainingRatio > REFRESH_THRESHOLD && now < expiresAt) {
+    return {
+      token: config.auth.token,
+      refreshed: false,
+      expiresAt,
+      expiresIn,
+    };
+  }
+
+  if (!config.auth.refreshToken) {
+    await clearAuth();
+    throw new AuthError(
+      "expired",
+      "Session expired and no refresh token available. Run 'sentry auth login'."
+    );
+  }
+
+  // Deduplicate concurrent refresh requests
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = performTokenRefresh(config.auth.refreshToken);
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
 /**
  * Store authentication credentials
  */
 export async function setAuthToken(
   token: string,
   expiresIn?: number,
-  refreshToken?: string
+  newRefreshToken?: string
 ): Promise<void> {
-  const expiresAt = expiresIn ? Date.now() + expiresIn * 1000 : undefined;
+  const now = Date.now();
+  const expiresAt = expiresIn ? now + expiresIn * 1000 : undefined;
+  const issuedAt = expiresIn ? now : undefined;
 
   await updateConfig({
     auth: {
       token,
-      refreshToken,
+      refreshToken: newRefreshToken,
       expiresAt,
+      issuedAt,
     },
   });
 }

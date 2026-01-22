@@ -5,7 +5,7 @@
  * Uses ky for retry logic, timeouts, and better error handling.
  */
 
-import ky, { type KyInstance } from "ky";
+import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
   type SentryEvent,
@@ -17,8 +17,8 @@ import {
   type SentryProject,
   SentryProjectSchema,
 } from "../types/index.js";
-import { getAuthToken } from "./config.js";
-import { ApiError, AuthError } from "./errors.js";
+import { refreshToken } from "./config.js";
+import { ApiError } from "./errors.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";
 
@@ -68,6 +68,9 @@ type ApiRequestOptions<T = unknown> = {
   schema?: z.ZodType<T>;
 };
 
+/** Header to mark requests as retries, preventing infinite retry loops */
+const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
+
 /**
  * Create a configured ky instance with retry, timeout, and authentication.
  *
@@ -75,13 +78,9 @@ type ApiRequestOptions<T = unknown> = {
  * @throws {ApiError} When API request fails
  */
 async function createApiClient(): Promise<KyInstance> {
-  const token = await getAuthToken();
+  const { token } = await refreshToken();
 
-  if (!token) {
-    throw new AuthError("not_authenticated");
-  }
-
-  return ky.create({
+  return kyHttpClient.create({
     prefixUrl: getApiBaseUrl(),
     timeout: REQUEST_TIMEOUT_MS,
     retry: {
@@ -95,25 +94,38 @@ async function createApiClient(): Promise<KyInstance> {
       "Content-Type": "application/json",
     },
     hooks: {
-      beforeError: [
-        async (error) => {
-          const { response } = error;
-          if (response) {
-            const text = await response.text();
-            let detail: string | undefined;
+      afterResponse: [
+        async (request, options, response) => {
+          // On 401, force token refresh and retry once
+          const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
+          if (response.status === 401 && !isRetry) {
             try {
-              const body = JSON.parse(text) as { detail?: string };
-              detail = body.detail ?? JSON.stringify(body);
+              const { token: newToken, refreshed } = await refreshToken({
+                force: true,
+              });
+
+              // Don't retry if token wasn't refreshed (e.g., manual API token)
+              if (!refreshed) {
+                return response;
+              }
+
+              const retryHeaders = new Headers(options.headers);
+              retryHeaders.set("Authorization", `Bearer ${newToken}`);
+              retryHeaders.set(RETRY_MARKER_HEADER, "1");
+
+              // Spread options but remove prefixUrl since request.url is already absolute
+              const { prefixUrl: _, ...retryOptions } = options;
+              return kyHttpClient(request.url, {
+                ...retryOptions,
+                headers: retryHeaders,
+                retry: 0,
+              });
             } catch {
-              detail = text;
+              // Token refresh failed, return original 401 response
+              return response;
             }
-            throw new ApiError(
-              `API request failed: ${response.status} ${response.statusText}`,
-              response.status,
-              detail
-            );
           }
-          return error;
+          return response;
         },
       ],
     },
@@ -164,11 +176,33 @@ export async function apiRequest<T>(
   const { method = "GET", body, params, schema } = options;
   const client = await createApiClient();
 
-  const response = await client(normalizePath(endpoint), {
-    method,
-    json: body,
-    searchParams: buildSearchParams(params),
-  });
+  let response: Response;
+  try {
+    response = await client(normalizePath(endpoint), {
+      method,
+      json: body,
+      searchParams: buildSearchParams(params),
+    });
+  } catch (error) {
+    // Transform ky HTTPError into ApiError
+    if (error && typeof error === "object" && "response" in error) {
+      const kyError = error as { response: Response };
+      const text = await kyError.response.text();
+      let detail: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { detail?: string };
+        detail = parsed.detail ?? JSON.stringify(parsed);
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
+        kyError.response.status,
+        detail
+      );
+    }
+    throw error;
+  }
 
   const data = await response.json();
 

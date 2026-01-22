@@ -221,3 +221,84 @@ describe("defaults management", () => {
     expect(project).toBeUndefined();
   });
 });
+
+describe("refreshToken error handling", () => {
+  test("network error during refresh does not clear auth", async () => {
+    // Set up a token that needs refresh (expired but has refresh token)
+    const now = Date.now();
+    await writeConfig({
+      auth: {
+        token: "still-valid-token",
+        issuedAt: now - 7200 * 1000,
+        expiresAt: now - 100, // Expired
+        refreshToken: "my-refresh-token",
+      },
+    });
+
+    // Set required env var for OAuth
+    process.env.SENTRY_CLIENT_ID = "test-client-id";
+
+    // Mock fetch to simulate network error
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("fetch failed: network error");
+    };
+
+    try {
+      const { refreshToken } = await import("../../src/lib/config.js");
+      await refreshToken();
+      // Should not reach here
+      expect(true).toBe(false);
+    } catch (error) {
+      // Expected to throw ApiError for network failure
+      expect(error).toBeDefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // Auth should NOT be cleared on network error
+    const config = await readConfig();
+    expect(config.auth?.token).toBe("still-valid-token");
+    expect(config.auth?.refreshToken).toBe("my-refresh-token");
+  });
+
+  test("auth error during refresh clears auth", async () => {
+    // Set up a token that needs refresh
+    const now = Date.now();
+    await writeConfig({
+      auth: {
+        token: "revoked-token",
+        issuedAt: now - 7200 * 1000,
+        expiresAt: now - 100, // Expired
+        refreshToken: "invalid-refresh-token",
+      },
+    });
+
+    process.env.SENTRY_CLIENT_ID = "test-client-id";
+
+    // Mock fetch to simulate server rejecting refresh token
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description: "Token revoked",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+
+    try {
+      const { refreshToken } = await import("../../src/lib/config.js");
+      await refreshToken();
+      expect(true).toBe(false);
+    } catch (error) {
+      expect(error).toBeDefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    // Auth SHOULD be cleared when server rejects refresh token
+    const config = await readConfig();
+    expect(config.auth).toBeUndefined();
+  });
+});

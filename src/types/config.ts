@@ -27,6 +27,7 @@ export const AuthConfigSchema = z.object({
   token: z.string().optional(),
   refreshToken: z.string().optional(),
   expiresAt: z.number().optional(),
+  issuedAt: z.number().optional(),
 });
 
 /**

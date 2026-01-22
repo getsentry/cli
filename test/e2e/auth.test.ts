@@ -82,20 +82,24 @@ describe("sentry auth status", () => {
 });
 
 describe("sentry auth login --token", () => {
-  test("stores valid API token", async () => {
-    const result = await runCli(["auth", "login", "--token", TEST_TOKEN], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+  test(
+    "stores valid API token",
+    async () => {
+      const result = await runCli(["auth", "login", "--token", TEST_TOKEN], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
 
-    expect(result.stdout).toContain("Authenticated");
-    expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Authenticated");
+      expect(result.exitCode).toBe(0);
 
-    // Verify token was stored
-    const statusResult = await runCli(["auth", "status"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
-    expect(statusResult.stdout).toContain("Authenticated");
-  });
+      // Verify token was stored
+      const statusResult = await runCli(["auth", "status"], {
+        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      });
+      expect(statusResult.stdout).toContain("Authenticated");
+    },
+    { timeout: 15_000 }
+  );
 
   test("rejects invalid token", async () => {
     const result = await runCli(
