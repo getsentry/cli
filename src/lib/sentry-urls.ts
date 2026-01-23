@@ -12,7 +12,7 @@ const DEFAULT_SENTRY_URL = "https://sentry.io";
  * Supports self-hosted instances via SENTRY_URL env var.
  */
 export function getSentryBaseUrl(): string {
-	return process.env.SENTRY_URL ?? DEFAULT_SENTRY_URL;
+  return process.env.SENTRY_URL ?? DEFAULT_SENTRY_URL;
 }
 
 /**
@@ -22,7 +22,7 @@ export function getSentryBaseUrl(): string {
  * @returns Full URL to the organization page
  */
 export function buildOrgUrl(orgSlug: string): string {
-	return `${getSentryBaseUrl()}/organizations/${orgSlug}/`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/`;
 }
 
 /**
@@ -33,7 +33,7 @@ export function buildOrgUrl(orgSlug: string): string {
  * @returns Full URL to the project settings page
  */
 export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
-	return `${getSentryBaseUrl()}/settings/${orgSlug}/projects/${projectSlug}/`;
+  return `${getSentryBaseUrl()}/settings/${orgSlug}/projects/${projectSlug}/`;
 }
 
 /**
@@ -45,5 +45,5 @@ export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
  * @returns Full URL to search results showing the event
  */
 export function buildEventSearchUrl(orgSlug: string, eventId: string): string {
-	return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/?query=event.id:${eventId}`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/?query=event.id:${eventId}`;
 }
