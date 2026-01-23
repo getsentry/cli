@@ -223,7 +223,7 @@ export const SentryIssueSchema = z
 export type SentryIssue = z.infer<typeof SentryIssueSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Trace & Spans
+// Trace Context
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const TraceContextSchema = z
@@ -238,30 +238,6 @@ export const TraceContextSchema = z
   .passthrough();
 
 export type TraceContext = z.infer<typeof TraceContextSchema>;
-
-export const SpanSchema = z
-  .object({
-    span_id: z.string(),
-    parent_span_id: z.string().nullable().optional(),
-    trace_id: z.string().optional(),
-    op: z.string().optional(),
-    description: z.string().nullable().optional(),
-    start_timestamp: z.number().optional(),
-    timestamp: z.number().optional(),
-    status: z.string().optional(),
-    tags: z.record(z.string()).optional(),
-    data: z.record(z.unknown()).optional(),
-  })
-  .passthrough();
-
-export type Span = z.infer<typeof SpanSchema>;
-
-export const SpanEntrySchema = z.object({
-  type: z.literal("spans"),
-  data: z.array(SpanSchema),
-});
-
-export type SpanEntry = z.infer<typeof SpanEntrySchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stack Frame & Exception Entry

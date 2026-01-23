@@ -16,8 +16,6 @@ import type {
   SentryIssue,
   SentryOrganization,
   SentryProject,
-  Span,
-  SpanEntry,
   StackFrame,
 } from "../../types/index.js";
 import {
@@ -68,7 +66,6 @@ type EntryTypeMap = {
   exception: ExceptionEntry;
   breadcrumbs: BreadcrumbsEntry;
   request: RequestEntry;
-  spans: SpanEntry;
 };
 
 /**
@@ -462,145 +459,6 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
   lines.push(`Link:       ${issue.permalink}`);
 
   return lines;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Span Tree Formatting
-// ─────────────────────────────────────────────────────────────────────────────
-
-type SpanNode = {
-  span: Span;
-  children: SpanNode[];
-};
-
-/**
- * Format span duration in a human-readable format.
- */
-function formatSpanDuration(span: Span): string {
-  if (span.start_timestamp === undefined || span.timestamp === undefined) {
-    return "";
-  }
-  const durationMs = (span.timestamp - span.start_timestamp) * 1000;
-  if (durationMs < 1) {
-    return `${(durationMs * 1000).toFixed(0)}µs`;
-  }
-  if (durationMs < 1000) {
-    return `${durationMs.toFixed(1)}ms`;
-  }
-  return `${(durationMs / 1000).toFixed(2)}s`;
-}
-
-/**
- * Build a tree structure from a flat list of spans.
- */
-function buildSpanTree(spans: Span[], rootSpanId?: string): SpanNode[] {
-  const spanMap = new Map<string, SpanNode>();
-  const roots: SpanNode[] = [];
-
-  // Create nodes for all spans
-  for (const span of spans) {
-    spanMap.set(span.span_id, { span, children: [] });
-  }
-
-  // Build parent-child relationships
-  for (const span of spans) {
-    const node = spanMap.get(span.span_id);
-    if (!node) {
-      continue;
-    }
-
-    const parentId = span.parent_span_id;
-    if (parentId && spanMap.has(parentId)) {
-      const parent = spanMap.get(parentId);
-      parent?.children.push(node);
-    } else if (!parentId || parentId === rootSpanId) {
-      // Root span or orphan
-      roots.push(node);
-    } else {
-      // Parent not in span list (could be the transaction span)
-      roots.push(node);
-    }
-  }
-
-  // Sort children by start_timestamp
-  const sortByTimestamp = (a: SpanNode, b: SpanNode) => {
-    const aStart = a.span.start_timestamp ?? 0;
-    const bStart = b.span.start_timestamp ?? 0;
-    return aStart - bStart;
-  };
-
-  const sortTree = (nodes: SpanNode[]): void => {
-    nodes.sort(sortByTimestamp);
-    for (const node of nodes) {
-      sortTree(node.children);
-    }
-  };
-
-  sortTree(roots);
-  return roots;
-}
-
-/**
- * Format a span tree as indented lines.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: tree traversal logic
-function formatSpanTree(nodes: SpanNode[], prefix = ""): string[] {
-  const lines: string[] = [];
-
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    if (!node) {
-      continue;
-    }
-
-    const isLastNode = i === nodes.length - 1;
-    const connector = isLastNode ? "└─" : "├─";
-    const childPrefix = isLastNode ? "  " : "│ ";
-
-    const op = node.span.op ?? "span";
-    const desc = node.span.description ?? "";
-    const duration = formatSpanDuration(node.span);
-    const status = node.span.status;
-    const statusIndicator = status && status !== "ok" ? ` [${status}]` : "";
-
-    const spanLine = duration
-      ? `${op}: ${desc} (${duration})${statusIndicator}`
-      : `${op}: ${desc}${statusIndicator}`;
-
-    lines.push(`${prefix}${connector} ${spanLine}`);
-
-    if (node.children.length > 0) {
-      const childLines = formatSpanTree(node.children, prefix + childPrefix);
-      lines.push(...childLines);
-    }
-  }
-
-  return lines;
-}
-
-/**
- * Extract spans from event entries.
- */
-function extractSpansFromEvent(event: SentryEvent): Span[] {
-  if (!event.entries) {
-    return [];
-  }
-
-  for (const entry of event.entries) {
-    // Check if this entry is a spans entry
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "type" in entry &&
-      entry.type === "spans" &&
-      "data" in entry &&
-      Array.isArray(entry.data)
-    ) {
-      return (entry as SpanEntry).data;
-    }
-  }
-
-  return [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1033,19 +891,6 @@ export function formatEventDetails(
     for (const tag of event.tags) {
       lines.push(`  ${tag.key}: ${tag.value}`);
     }
-  }
-
-  // Span tree (for transaction events)
-  const spans = extractSpansFromEvent(event);
-  if (spans.length > 0) {
-    const rootSpanId = traceCtx?.span_id;
-    const tree = buildSpanTree(spans, rootSpanId);
-    lines.push("");
-    lines.push(muted("─── Spans ───"));
-    lines.push("");
-    lines.push(`Spans (${spans.length}):`);
-    const treeLines = formatSpanTree(tree);
-    lines.push(...treeLines);
   }
 
   return lines;
