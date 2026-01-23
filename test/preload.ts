@@ -48,7 +48,8 @@ const testDir = join(homedir(), `.sentry-cli-test-${process.pid}`);
 mkdirSync(testDir, { recursive: true });
 
 // Override config directory for all tests
-process.env.SENTRY_CLI_CONFIG_DIR = testDir;
+// Note: This must match CONFIG_DIR_ENV_VAR from src/lib/config.ts
+process.env.SENTRY_CONFIG_DIR = testDir;
 
 // Clear Sentry environment variables to ensure clean state
 // (but preserve SENTRY_TEST_* vars for E2E tests)

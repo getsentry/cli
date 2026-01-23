@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/config.js";
 import {
   clearDsnCache,
   getCachedDsn,
@@ -21,7 +22,7 @@ const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-cache");
 describe("DSN Cache", () => {
   beforeEach(() => {
     // Set up test config directory
-    process.env.SENTRY_CLI_CONFIG_DIR = TEST_CONFIG_DIR;
+    process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
     mkdirSync(TEST_CONFIG_DIR, { recursive: true });
   });
 

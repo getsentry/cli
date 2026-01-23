@@ -51,11 +51,6 @@ function normalizePath(endpoint: string): string {
   return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
 }
 
-/**
- * Pattern to detect short IDs (contain letters, vs numeric IDs which are just digits)
- */
-const SHORT_ID_PATTERN = /[a-zA-Z]/;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -337,7 +332,8 @@ export function getIssue(issueId: string): Promise<SentryIssue> {
 
 /**
  * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D)
- * Requires organization context to resolve the short ID
+ * Requires organization context to resolve the short ID.
+ * The shortId is normalized to uppercase for case-insensitive matching.
  *
  * @see https://docs.sentry.io/api/events/retrieve-an-issue/
  */
@@ -345,8 +341,10 @@ export function getIssueByShortId(
   orgSlug: string,
   shortId: string
 ): Promise<SentryIssue> {
+  // Normalize to uppercase for case-insensitive matching
+  const normalizedShortId = shortId.toUpperCase();
   return apiRequest<SentryIssue>(
-    `/organizations/${orgSlug}/issues/${shortId}/`,
+    `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
     {
       schema: SentryIssueSchema,
     }
@@ -354,21 +352,22 @@ export function getIssueByShortId(
 }
 
 /**
- * Check if a string looks like a short ID (e.g., PROJECT-ABC)
- * vs a numeric ID (e.g., 123456)
+ * Get the latest event for an issue.
+ * Uses org-scoped endpoint for proper multi-region support.
+ *
+ * @param orgSlug - Organization slug (required for multi-region routing)
+ * @param issueId - Issue ID (numeric)
  */
-export function isShortId(issueId: string): boolean {
-  // Short IDs contain letters and hyphens, numeric IDs are just digits
-  return SHORT_ID_PATTERN.test(issueId);
-}
-
-/**
- * Get the latest event for an issue
- */
-export function getLatestEvent(issueId: string): Promise<SentryEvent> {
-  return apiRequest<SentryEvent>(`/issues/${issueId}/events/latest/`, {
-    schema: SentryEventSchema,
-  });
+export function getLatestEvent(
+  orgSlug: string,
+  issueId: string
+): Promise<SentryEvent> {
+  return apiRequest<SentryEvent>(
+    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
+    {
+      schema: SentryEventSchema,
+    }
+  );
 }
 
 /**

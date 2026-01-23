@@ -8,7 +8,12 @@
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
 // Configuration types
-export type { CachedProject, SentryConfig } from "./config.js";
+export type {
+  CachedProject,
+  ProjectAliasEntry,
+  ProjectAliases,
+  SentryConfig,
+} from "./config.js";
 export { SentryConfigSchema } from "./config.js";
 
 // OAuth types and schemas
@@ -25,20 +30,60 @@ export {
 
 // Sentry API types and schemas
 export type {
+  // Breadcrumb types
+  Breadcrumb,
+  BreadcrumbsEntry,
+  // Context types
+  BrowserContext,
+  DeviceContext,
+  // Stack trace types
+  ExceptionEntry,
+  ExceptionValue,
+  // Issue types
   IssueLevel,
+  IssuePriority,
   IssueStatus,
+  IssueSubstatus,
+  Mechanism,
+  OsContext,
+  Release,
+  // Request types
+  RequestEntry,
+  // Event types
   SentryEvent,
   SentryIssue,
+  // Organization & Project
   SentryOrganization,
   SentryProject,
+  StackFrame,
+  Stacktrace,
+  TraceContext,
+  UserGeo,
 } from "./sentry.js";
 export {
+  // Schemas
+  BreadcrumbSchema,
+  BreadcrumbsEntrySchema,
+  BrowserContextSchema,
+  DeviceContextSchema,
+  ExceptionEntrySchema,
+  ExceptionValueSchema,
+  // Constants
   ISSUE_LEVELS,
+  ISSUE_PRIORITIES,
   ISSUE_STATUSES,
+  MechanismSchema,
+  OsContextSchema,
+  ReleaseSchema,
+  RequestEntrySchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  StackFrameSchema,
+  StacktraceSchema,
+  TraceContextSchema,
+  UserGeoSchema,
 } from "./sentry.js";
 
 // I/O types

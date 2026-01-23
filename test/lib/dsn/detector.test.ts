@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/config.js";
 import { clearDsnCache, getCachedDsn } from "../../../src/lib/dsn/cache.js";
 import {
   detectAllDsns,
@@ -41,7 +42,7 @@ describe("DSN Detector (New Module)", () => {
 
   beforeEach(async () => {
     testDir = createTempDir();
-    process.env.SENTRY_CLI_CONFIG_DIR = TEST_CONFIG_DIR;
+    process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
     mkdirSync(TEST_CONFIG_DIR, { recursive: true });
     // Clear any cached DSN for the test directory
     await clearDsnCache(testDir);

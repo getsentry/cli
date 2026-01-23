@@ -5,10 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test credentials from environment - these MUST be set
 const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
@@ -23,27 +22,14 @@ if (!(TEST_TOKEN && TEST_ORG && TEST_PROJECT)) {
 
 // Each test gets its own config directory
 let testConfigDir: string;
-let originalConfigDir: string | undefined;
 
-beforeEach(() => {
-  originalConfigDir = process.env.SENTRY_CLI_CONFIG_DIR;
-  testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR || "/tmp",
-    `e2e-issue-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+beforeEach(async () => {
+  testConfigDir = await createTestConfigDir("e2e-issue-");
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
-afterEach(() => {
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-  if (originalConfigDir) {
-    process.env.SENTRY_CLI_CONFIG_DIR = originalConfigDir;
-  }
+afterEach(async () => {
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("sentry issue list", () => {
@@ -51,7 +37,7 @@ describe("sentry issue list", () => {
     const result = await runCli(
       ["issue", "list", "--org", "test-org", "--project", "test-project"],
       {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       }
     );
 
@@ -65,7 +51,7 @@ describe("sentry issue list", () => {
     const result = await runCli(
       ["issue", "list", "--org", TEST_ORG, "--project", TEST_PROJECT],
       {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       }
     );
 
@@ -89,7 +75,7 @@ describe("sentry issue list", () => {
           "--json",
         ],
         {
-          env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
         }
       );
 
@@ -105,7 +91,7 @@ describe("sentry issue list", () => {
 describe("sentry issue get", () => {
   test("requires authentication", async () => {
     const result = await runCli(["issue", "get", "12345"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);
@@ -116,7 +102,7 @@ describe("sentry issue get", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["issue", "get", "99999999999"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);

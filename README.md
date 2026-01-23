@@ -71,4 +71,4 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.
 
 ## Config
 
-Stored in `~/.sentry-cli-next/config.json` (mode 600).
+Stored in `~/.sentry/config.json` (mode 600).
