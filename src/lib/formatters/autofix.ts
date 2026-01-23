@@ -194,7 +194,7 @@ export function formatRootCauseList(
 
   // Add hint for next steps
   lines.push("");
-  lines.push(muted(`To create a fix, run: sentry issue fix ${issueId}`));
+  lines.push(muted(`To create a plan, run: sentry issue plan ${issueId}`));
 
   return lines;
 }

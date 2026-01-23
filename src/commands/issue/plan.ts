@@ -1,7 +1,7 @@
 /**
- * sentry issue fix
+ * sentry issue plan
  *
- * Create a pull request with a fix for a Sentry issue using Seer AI.
+ * Create a pull request with a plan for a Sentry issue using Seer AI.
  * Requires that 'sentry issue explain' has been run first.
  */
 
@@ -26,7 +26,7 @@ import {
 } from "../../types/autofix.js";
 import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
-type FixFlags = {
+type PlanFlags = {
   readonly org?: string;
   readonly cause?: number;
   readonly json: boolean;
@@ -64,14 +64,14 @@ function validateAutofixState(
       );
     }
     throw new ValidationError(
-      `Cannot create fix: autofix is in '${state.status}' state.`
+      `Cannot create plan: autofix is in '${state.status}' state.`
     );
   }
 
   const causes = extractRootCauses(state);
   if (causes.length === 0) {
     throw new ValidationError(
-      "No root causes identified. Cannot create a fix without a root cause."
+      "No root causes identified. Cannot create a plan without a root cause."
     );
   }
 
@@ -104,7 +104,7 @@ function validateCauseSelection(
       }
     }
     lines.push("");
-    lines.push(`Example: sentry issue fix ${issueId} --cause 0`);
+    lines.push(`Example: sentry issue plan ${issueId} --cause 0`);
     throw new ValidationError(lines.join("\n"));
   }
 
@@ -120,22 +120,22 @@ function validateCauseSelection(
   return causeId;
 }
 
-export const fixCommand = buildCommand({
+export const planCommand = buildCommand({
   docs: {
-    brief: "Create a PR with a fix using Seer AI",
+    brief: "Create a PR with a plan using Seer AI",
     fullDescription:
-      "Create a pull request with a fix for a Sentry issue using Seer AI.\n\n" +
+      "Create a pull request with a plan for a Sentry issue using Seer AI.\n\n" +
       "This command requires that 'sentry issue explain' has been run first " +
       "to identify the root cause. It will then generate code changes and " +
-      "create a pull request with the fix.\n\n" +
+      "create a pull request with the plan.\n\n" +
       "If multiple root causes were identified, use --cause to specify which one.\n\n" +
       "Prerequisites:\n" +
       "  - GitHub integration configured for your organization\n" +
       "  - Code mappings set up for your project\n" +
       "  - Repository write access for the integration\n\n" +
       "Examples:\n" +
-      "  sentry issue fix 123456789 --cause 0\n" +
-      "  sentry issue fix MYPROJECT-ABC --org my-org --cause 1",
+      "  sentry issue plan 123456789 --cause 0\n" +
+      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1",
   },
   parameters: {
     positional: {
@@ -158,7 +158,7 @@ export const fixCommand = buildCommand({
       cause: {
         kind: "parsed",
         parse: numberParser,
-        brief: "Root cause ID to fix (required if multiple causes exist)",
+        brief: "Root cause ID to plan (required if multiple causes exist)",
         optional: true,
       },
       json: {
@@ -170,7 +170,7 @@ export const fixCommand = buildCommand({
   },
   async func(
     this: SentryContext,
-    flags: FixFlags,
+    flags: PlanFlags,
     issueId: string
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
@@ -181,7 +181,7 @@ export const fixCommand = buildCommand({
         issueId,
         flags.org,
         cwd,
-        `sentry issue fix ${issueId} --org <org-slug>`
+        `sentry issue plan ${issueId} --org <org-slug>`
       );
 
       // Get current autofix state
@@ -195,7 +195,7 @@ export const fixCommand = buildCommand({
       const selectedCause = causes[causeId];
 
       if (!flags.json) {
-        stderr.write(`Creating fix for cause #${causeId}...\n`);
+        stderr.write(`Creating plan for cause #${causeId}...\n`);
         if (selectedCause) {
           stderr.write(`${muted(`"${selectedCause.description}"`)}\n\n`);
         }
@@ -217,12 +217,12 @@ export const fixCommand = buildCommand({
       // Handle errors
       if (finalState.status === "ERROR") {
         throw new Error(
-          "Fix creation failed. Check the Sentry web UI for details."
+          "Plan creation failed. Check the Sentry web UI for details."
         );
       }
 
       if (finalState.status === "CANCELLED") {
-        throw new Error("Fix creation was cancelled.");
+        throw new Error("Plan creation was cancelled.");
       }
 
       // Extract solution artifact

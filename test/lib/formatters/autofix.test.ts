@@ -178,16 +178,16 @@ describe("formatRootCause", () => {
 });
 
 describe("formatRootCauseList", () => {
-  test("formats single cause with fix hint", () => {
+  test("formats single cause with plan hint", () => {
     const causes: RootCause[] = [{ id: 0, description: "Single root cause" }];
 
     const lines = formatRootCauseList(causes, "ISSUE-123");
     const output = lines.join("\n");
     expect(output).toContain("Single root cause");
-    expect(output).toContain("sentry issue fix ISSUE-123");
+    expect(output).toContain("sentry issue plan ISSUE-123");
   });
 
-  test("formats multiple causes with fix hint", () => {
+  test("formats multiple causes with plan hint", () => {
     const causes: RootCause[] = [
       { id: 0, description: "First cause" },
       { id: 1, description: "Second cause" },
@@ -197,7 +197,7 @@ describe("formatRootCauseList", () => {
     const output = lines.join("\n");
     expect(output).toContain("First cause");
     expect(output).toContain("Second cause");
-    expect(output).toContain("sentry issue fix ISSUE-456");
+    expect(output).toContain("sentry issue plan ISSUE-456");
   });
 
   test("handles empty causes array", () => {

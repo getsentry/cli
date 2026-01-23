@@ -1,7 +1,7 @@
 /**
  * Shared utilities for issue commands
  *
- * Common functionality used by explain, fix, and other issue commands.
+ * Common functionality used by explain, plan, and other issue commands.
  */
 
 import {

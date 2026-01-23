@@ -1,15 +1,15 @@
 import { buildRouteMap } from "@stricli/core";
 import { explainCommand } from "./explain.js";
-import { fixCommand } from "./fix.js";
 import { getCommand } from "./get.js";
 import { listCommand } from "./list.js";
+import { planCommand } from "./plan.js";
 
 export const issueRoute = buildRouteMap({
   routes: {
     list: listCommand,
     get: getCommand,
     explain: explainCommand,
-    fix: fixCommand,
+    plan: planCommand,
   },
   docs: {
     brief: "Manage Sentry issues",
@@ -19,7 +19,7 @@ export const issueRoute = buildRouteMap({
       "  list     List issues in a project\n" +
       "  get      Get details of a specific issue\n" +
       "  explain  Analyze an issue using Seer AI\n" +
-      "  fix      Create a PR with a fix using Seer AI",
+      "  plan     Create a PR with a plan using Seer AI",
     hideRoute: {},
   },
 });
