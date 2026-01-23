@@ -11,7 +11,11 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { CachedProject, SentryConfig } from "../types/index.js";
+import type {
+  CachedProject,
+  ProjectAliasEntry,
+  SentryConfig,
+} from "../types/index.js";
 import { SentryConfigSchema } from "../types/index.js";
 
 /**
@@ -367,5 +371,61 @@ export async function setCachedProject(
 export async function clearProjectCache(): Promise<void> {
   const config = await readConfig();
   config.projectCache = undefined;
+  await writeConfig(config);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Aliases (for short issue ID resolution)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Set project aliases for short issue ID resolution.
+ * Called by `issue list` when multiple projects are detected.
+ *
+ * @param aliases - Map of alias letter (A, B, C...) to org/project
+ */
+export async function setProjectAliases(
+  aliases: Record<string, ProjectAliasEntry>
+): Promise<void> {
+  const config = await readConfig();
+  config.projectAliases = {
+    aliases,
+    cachedAt: Date.now(),
+  };
+  await writeConfig(config);
+}
+
+/**
+ * Get project aliases for short issue ID resolution.
+ *
+ * @returns Map of alias letter to org/project, or undefined if not set
+ */
+export async function getProjectAliases(): Promise<
+  Record<string, ProjectAliasEntry> | undefined
+> {
+  const config = await readConfig();
+  return config.projectAliases?.aliases;
+}
+
+/**
+ * Get a specific project by its alias.
+ *
+ * @param alias - The alias letter (A, B, C...)
+ * @returns Project entry or undefined if not found
+ */
+export async function getProjectByAlias(
+  alias: string
+): Promise<ProjectAliasEntry | undefined> {
+  const aliases = await getProjectAliases();
+  // Case-insensitive lookup (aliases are stored lowercase)
+  return aliases?.[alias.toLowerCase()];
+}
+
+/**
+ * Clear project aliases
+ */
+export async function clearProjectAliases(): Promise<void> {
+  const config = await readConfig();
+  config.projectAliases = undefined;
   await writeConfig(config);
 }
