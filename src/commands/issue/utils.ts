@@ -4,17 +4,14 @@
  * Common functionality used by explain, plan, and other issue commands.
  */
 
-import {
-  getAutofixState,
-  getIssueByShortId,
-  isShortId,
-} from "../../lib/api-client.js";
+import { getAutofixState, getIssueByShortId } from "../../lib/api-client.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   formatProgressLine,
   getProgressMessage,
   truncateProgressMessage,
 } from "../../lib/formatters/autofix.js";
+import { isShortId } from "../../lib/issue-id.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { type AutofixState, isTerminalStatus } from "../../types/autofix.js";
 import type { Writer } from "../../types/index.js";
