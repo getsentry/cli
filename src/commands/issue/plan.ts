@@ -1,7 +1,7 @@
 /**
  * sentry issue plan
  *
- * Create a pull request with a plan for a Sentry issue using Seer AI.
+ * Generate a solution plan for a Sentry issue using Seer AI.
  * Requires that 'sentry issue explain' has been run first.
  */
 
@@ -122,17 +122,16 @@ function validateCauseSelection(
 
 export const planCommand = buildCommand({
   docs: {
-    brief: "Create a PR with a plan using Seer AI",
+    brief: "Generate a solution plan using Seer AI",
     fullDescription:
-      "Create a pull request with a plan for a Sentry issue using Seer AI.\n\n" +
+      "Generate a solution plan for a Sentry issue using Seer AI.\n\n" +
       "This command requires that 'sentry issue explain' has been run first " +
-      "to identify the root cause. It will then generate code changes and " +
-      "create a pull request with the plan.\n\n" +
+      "to identify the root cause. It will then generate a solution plan with " +
+      "specific implementation steps to fix the issue.\n\n" +
       "If multiple root causes were identified, use --cause to specify which one.\n\n" +
       "Prerequisites:\n" +
       "  - GitHub integration configured for your organization\n" +
-      "  - Code mappings set up for your project\n" +
-      "  - Repository write access for the integration\n\n" +
+      "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
       "  sentry issue plan 123456789 --cause 0\n" +
       "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1",
@@ -201,7 +200,7 @@ export const planCommand = buildCommand({
         }
       }
 
-      // Trigger solution planning to continue to PR creation
+      // Trigger solution planning to generate implementation steps
       await triggerSolutionPlanning(org, numericId, state.run_id);
 
       // Poll until PR is created

@@ -19,7 +19,7 @@ export const issueRoute = buildRouteMap({
       "  list     List issues in a project\n" +
       "  get      Get details of a specific issue\n" +
       "  explain  Analyze an issue using Seer AI\n" +
-      "  plan     Create a PR with a plan using Seer AI",
+      "  plan     Generate a solution plan using Seer AI",
     hideRoute: {},
   },
 });
