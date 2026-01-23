@@ -10,22 +10,24 @@
  * 3. Current working directory (fallback)
  */
 
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
  * Find the git root directory by searching for .git folder.
+ * Uses node:fs existsSync for directory detection (Bun.file doesn't support directories).
  *
  * @param cwd - Starting directory for search
  * @returns Git root path, or null if not found
  */
-async function findGitRoot(cwd: string): Promise<string | null> {
+function findGitRoot(cwd: string): string | null {
   let current = cwd;
 
   while (current !== "/") {
     const gitPath = join(current, ".git");
-    const gitFile = Bun.file(gitPath);
 
-    if (await gitFile.exists()) {
+    // .git can be a directory (normal repo) or a file (worktree)
+    if (existsSync(gitPath)) {
       return current;
     }
 
@@ -52,6 +54,7 @@ async function findPackageRoot(cwd: string): Promise<string | null> {
     const packagePath = join(current, "package.json");
     const packageFile = Bun.file(packagePath);
 
+    // package.json is always a file, so Bun.file works correctly
     if (await packageFile.exists()) {
       return current;
     }
@@ -79,7 +82,7 @@ async function findPackageRoot(cwd: string): Promise<string | null> {
  */
 export async function getWorkspaceRoot(cwd: string): Promise<string> {
   // Try git root first (most reliable for monorepos)
-  const gitRoot = await findGitRoot(cwd);
+  const gitRoot = findGitRoot(cwd);
   if (gitRoot) {
     return gitRoot;
   }
