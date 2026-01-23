@@ -505,6 +505,8 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
       }
     } else if (lastReleaseVersion) {
       lines.push(`Release:    ${lastReleaseVersion}`);
+    } else if (firstReleaseVersion) {
+      lines.push(`Release:    ${firstReleaseVersion}`);
     }
   }
   lines.push("");
