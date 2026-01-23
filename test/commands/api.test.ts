@@ -239,6 +239,18 @@ describe("buildQueryParams", () => {
   test("returns empty object for empty array", () => {
     expect(buildQueryParams([])).toEqual({});
   });
+
+  test("handles objects by JSON stringifying them", () => {
+    expect(buildQueryParams(['data={"key":"value"}'])).toEqual({
+      data: '{"key":"value"}',
+    });
+  });
+
+  test("handles nested objects by JSON stringifying them", () => {
+    expect(buildQueryParams(['filter={"user":{"name":"john"}}'])).toEqual({
+      filter: '{"user":{"name":"john"}}',
+    });
+  });
 });
 
 describe("prepareRequestOptions", () => {

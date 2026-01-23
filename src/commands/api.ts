@@ -159,8 +159,11 @@ export function buildQueryParams(
     const value = parseFieldValue(rawValue);
 
     // Handle arrays by creating string[] for repeated keys
+    // Handle objects by JSON stringifying them (avoid "[object Object]")
     if (Array.isArray(value)) {
       result[key] = value.map(String);
+    } else if (typeof value === "object" && value !== null) {
+      result[key] = JSON.stringify(value);
     } else {
       result[key] = String(value);
     }
