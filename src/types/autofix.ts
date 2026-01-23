@@ -40,18 +40,6 @@ export const STOPPING_POINTS = [
 export type StoppingPoint = (typeof STOPPING_POINTS)[number];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Trigger Response
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const AutofixTriggerResponseSchema = z.object({
-  run_id: z.number(),
-});
-
-export type AutofixTriggerResponse = z.infer<
-  typeof AutofixTriggerResponseSchema
->;
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Progress Message
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -7,12 +7,7 @@
 
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
-import {
-  type AutofixResponse,
-  type AutofixState,
-  type AutofixTriggerResponse,
-  AutofixTriggerResponseSchema,
-} from "../types/autofix.js";
+import type { AutofixResponse, AutofixState } from "../types/autofix.js";
 import {
   type SentryEvent,
   SentryEventSchema,
@@ -423,13 +418,12 @@ export function updateIssueStatus(
 export function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
-): Promise<AutofixTriggerResponse> {
-  return apiRequest<AutofixTriggerResponse>(
+): Promise<{ run_id: number }> {
+  return apiRequest<{ run_id: number }>(
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
       method: "POST",
       body: { step: "root_cause" },
-      schema: AutofixTriggerResponseSchema,
     }
   );
 }

@@ -7,68 +7,46 @@
 
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
-// Autofix types
 export type {
   AutofixResponse,
   AutofixState,
-  AutofixStatus,
-  AutofixStep,
-  AutofixTriggerResponse,
-  AutofixUpdatePayload,
   RootCause,
   SolutionArtifact,
-  SolutionData,
-  SolutionStep,
-  StoppingPoint,
 } from "./autofix.js";
+// Autofix types
 export {
-  AUTOFIX_STATUSES,
-  AutofixResponseSchema,
-  AutofixStateSchema,
-  AutofixStepSchema,
-  AutofixTriggerResponseSchema,
   extractRootCauses,
   extractSolution,
   isTerminalStatus,
-  RootCauseSchema,
   SolutionArtifactSchema,
-  SolutionDataSchema,
-  SolutionStepSchema,
-  STOPPING_POINTS,
   TERMINAL_STATUSES,
 } from "./autofix.js";
-// Configuration types
 export type { CachedProject, SentryConfig } from "./config.js";
+// Configuration types
 export { SentryConfigSchema } from "./config.js";
-
-// OAuth types and schemas
 export type {
   DeviceCodeResponse,
   TokenErrorResponse,
   TokenResponse,
 } from "./oauth.js";
+// OAuth types and schemas
 export {
   DeviceCodeResponseSchema,
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "./oauth.js";
-
-// Sentry API types and schemas
 export type {
   IssueLevel,
   IssueStatus,
-  IssueSummary,
-  IssueSummaryScores,
   SentryEvent,
   SentryIssue,
   SentryOrganization,
   SentryProject,
 } from "./sentry.js";
+// Sentry API types and schemas
 export {
   ISSUE_LEVELS,
   ISSUE_STATUSES,
-  IssueSummarySchema,
-  IssueSummaryScoresSchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,
