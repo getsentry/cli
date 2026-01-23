@@ -1,15 +1,15 @@
 import { buildRouteMap } from "@stricli/core";
-import { getCommand } from "./get.js";
+import { viewCommand } from "./view.js";
 
 export const eventRoute = buildRouteMap({
-  routes: {
-    get: getCommand,
-  },
-  docs: {
-    brief: "View Sentry events",
-    fullDescription:
-      "View detailed event data from Sentry. " +
-      "Use 'sentry event get <event-id>' to view a specific event.",
-    hideRoute: {},
-  },
+	routes: {
+		view: viewCommand,
+	},
+	docs: {
+		brief: "View Sentry events",
+		fullDescription:
+			"View detailed event data from Sentry. " +
+			"Use 'sentry event view <event-id>' to view a specific event.",
+		hideRoute: {},
+	},
 });
