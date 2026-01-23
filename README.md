@@ -32,6 +32,8 @@ sentry auth status     # Check auth status
 ```bash
 sentry org list                 # List all orgs
 sentry org list --json          # Output as JSON
+sentry org view my-org          # View organization details
+sentry org view my-org -w       # Open organization in browser
 ```
 
 ### Projects
@@ -40,6 +42,8 @@ sentry org list --json          # Output as JSON
 sentry project list                        # List all projects
 sentry project list my-org                 # List projects in org
 sentry project list --platform javascript  # Filter by platform
+sentry project view my-project             # View project details
+sentry project view my-project -w          # Open project in browser
 ```
 
 ### Issues
@@ -47,8 +51,16 @@ sentry project list --platform javascript  # Filter by platform
 ```bash
 sentry issue list --org my-org --project my-project     # List issues
 sentry issue list --org my-org --project my-project --json
-sentry issue get 123456789                              # Get issue by ID
-sentry issue get 123456789 --event                      # Include latest event
+sentry issue view 123456789                             # View issue by ID
+sentry issue view PROJ-ABC                              # View issue by short ID
+sentry issue view 123456789 -w                          # Open issue in browser
+```
+
+### Events
+
+```bash
+sentry event view abc123def                              # View event by ID
+sentry event view abc123def -w                           # Open event in browser
 ```
 
 ### API
