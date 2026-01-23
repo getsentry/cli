@@ -1,7 +1,7 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
-import { openBrowser } from "../../lib/browser.js";
+import { openOrShowUrl } from "../../lib/browser.js";
 import {
   clearAuth,
   getConfigPath,
@@ -12,12 +12,10 @@ import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
-import { generateQRCode } from "../../lib/qrcode.js";
 
 type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
-  readonly qr: boolean;
 };
 
 export const loginCommand = buildCommand({
@@ -42,11 +40,6 @@ export const loginCommand = buildCommand({
         brief: "Timeout for OAuth flow in seconds (default: 900)",
         // Stricli requires string defaults (raw CLI input); numberParser converts to number
         default: "900",
-      },
-      qr: {
-        kind: "boolean",
-        brief: "Show QR code for mobile scanning",
-        default: true,
       },
     },
   },
@@ -93,20 +86,17 @@ export const loginCommand = buildCommand({
           verificationUri,
           verificationUriComplete
         ) => {
-          const browserOpened = await openBrowser(verificationUriComplete);
-          if (browserOpened) {
-            stdout.write("Opening browser...\n\n");
+          const browserOpened = await openOrShowUrl(
+            stdout,
+            verificationUriComplete
+          );
+
+          if (!browserOpened) {
+            // Show shorter URL + code for easier manual entry
+            stdout.write(`URL: ${verificationUri}\n`);
+            stdout.write(`Code: ${userCode}\n\n`);
           }
 
-          if (flags.qr) {
-            stdout.write("Scan this QR code or visit the URL below:\n\n");
-            const qr = await generateQRCode(verificationUriComplete);
-            stdout.write(qr);
-            stdout.write("\n");
-          }
-
-          stdout.write(`URL: ${verificationUri}\n`);
-          stdout.write(`Code: ${userCode}\n\n`);
           stdout.write("Waiting for authorization...\n");
         },
         onPolling: () => {

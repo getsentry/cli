@@ -1,7 +1,7 @@
 /**
- * sentry issue get
+ * sentry issue view
  *
- * Get detailed information about a Sentry issue.
+ * View detailed information about a Sentry issue.
  */
 
 import { buildCommand } from "@stricli/core";
@@ -11,6 +11,7 @@ import {
   getIssueByShortId,
   getLatestEvent,
 } from "../../lib/api-client.js";
+import { openInBrowser } from "../../lib/browser.js";
 import { getProjectByAlias } from "../../lib/config.js";
 import { ContextError } from "../../lib/errors.js";
 import {
@@ -27,11 +28,98 @@ import {
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
 
-type GetFlags = {
+type ViewFlags = {
   readonly org?: string;
   readonly project?: string;
   readonly json: boolean;
+  readonly web: boolean;
 };
+
+/** Result of resolving an issue ID */
+type ResolvedIssue = {
+  issue: SentryIssue;
+  orgSlug?: string;
+};
+
+/**
+ * Resolve an alias-suffix format issue ID (e.g., "f-g").
+ * Returns null if the alias is not found in cache.
+ */
+async function resolveAliasSuffixId(
+  alias: string,
+  suffix: string
+): Promise<ResolvedIssue | null> {
+  const projectEntry = await getProjectByAlias(alias);
+  if (!projectEntry) {
+    return null;
+  }
+
+  const resolvedShortId = expandToFullShortId(suffix, projectEntry.projectSlug);
+  const issue = await getIssueByShortId(projectEntry.orgSlug, resolvedShortId);
+  return { issue, orgSlug: projectEntry.orgSlug };
+}
+
+/**
+ * Resolve a short suffix format issue ID (e.g., "G", "12").
+ * Requires project context from flags or DSN detection.
+ */
+async function resolveShortSuffixId(
+  issueId: string,
+  flags: ViewFlags,
+  cwd: string
+): Promise<ResolvedIssue> {
+  const target = await resolveOrgAndProject({
+    org: flags.org,
+    project: flags.project,
+    cwd,
+  });
+
+  if (target) {
+    const resolvedShortId = expandToFullShortId(issueId, target.project);
+    const issue = await getIssueByShortId(target.org, resolvedShortId);
+    return { issue, orgSlug: target.org };
+  }
+
+  // No project context - treat as numeric ID
+  const issue = await getIssue(issueId);
+  return { issue };
+}
+
+/**
+ * Resolve a full short ID format (e.g., "CRAFT-G").
+ * Requires organization context.
+ */
+async function resolveFullShortId(
+  issueId: string,
+  flags: ViewFlags,
+  cwd: string
+): Promise<ResolvedIssue> {
+  const resolved = await resolveOrg({ org: flags.org, cwd });
+  if (!resolved) {
+    throw new ContextError(
+      "Organization",
+      `sentry issue view ${issueId} --org <org-slug>`
+    );
+  }
+
+  const normalizedId = issueId.toUpperCase();
+  const issue = await getIssueByShortId(resolved.org, normalizedId);
+  return { issue, orgSlug: resolved.org };
+}
+
+/**
+ * Resolve a numeric issue ID.
+ * Optionally resolves org for event fetching.
+ */
+async function resolveNumericId(
+  issueId: string,
+  flags: ViewFlags,
+  cwd: string
+): Promise<ResolvedIssue> {
+  const issue = await getIssue(issueId);
+  const resolved = await resolveOrg({ org: flags.org, cwd });
+  return { issue, orgSlug: resolved?.org };
+}
 
 /**
  * Try to fetch the latest event for an issue.
@@ -73,11 +161,11 @@ function writeHumanOutput(
   }
 }
 
-export const getCommand = buildCommand({
+export const viewCommand = buildCommand({
   docs: {
-    brief: "Get details of a specific issue",
+    brief: "View details of a specific issue",
     fullDescription:
-      "Retrieve detailed information about a Sentry issue by its ID or short ID. " +
+      "View detailed information about a Sentry issue by its ID or short ID. " +
       "The latest event is automatically included for full context.\n\n" +
       "You can use just the unique suffix (e.g., 'G' instead of 'CRAFT-G') when " +
       "project context is available from DSN detection or flags.\n\n" +
@@ -119,69 +207,45 @@ export const getCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
     },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
-    flags: GetFlags,
+    flags: ViewFlags,
     issueId: string
   ): Promise<void> {
     const { stdout, cwd } = this;
 
-    let issue: SentryIssue;
-    let orgSlug: string | undefined;
-    let resolvedShortId = issueId;
-
-    // Check if input matches alias-suffix pattern (e.g., "f-g", "fr-a3")
-    // and if the alias exists in the cache
+    // Resolve issue based on ID format
+    let resolved: ResolvedIssue;
     const aliasSuffix = parseAliasSuffix(issueId);
-    const projectEntry = aliasSuffix
-      ? await getProjectByAlias(aliasSuffix.alias)
-      : null;
 
-    if (aliasSuffix && projectEntry) {
-      // Valid alias found - expand suffix using the aliased project
-      resolvedShortId = expandToFullShortId(
-        aliasSuffix.suffix,
-        projectEntry.projectSlug
+    if (aliasSuffix) {
+      const aliasResult = await resolveAliasSuffixId(
+        aliasSuffix.alias,
+        aliasSuffix.suffix
       );
-      orgSlug = projectEntry.orgSlug;
-      issue = await getIssueByShortId(orgSlug, resolvedShortId);
+      resolved =
+        aliasResult ?? (await resolveShortSuffixId(issueId, flags, cwd));
     } else if (isShortSuffix(issueId)) {
-      // Short suffix - try to expand if project context is available
-      const target = await resolveOrgAndProject({
-        org: flags.org,
-        project: flags.project,
-        cwd,
-      });
-
-      if (target) {
-        // Expand suffix to full short ID (e.g., "12" → "CRAFT-12")
-        resolvedShortId = expandToFullShortId(issueId, target.project);
-        orgSlug = target.org;
-        issue = await getIssueByShortId(orgSlug, resolvedShortId);
-      } else {
-        // No project context - treat as numeric ID (will fail if not numeric)
-        issue = await getIssue(issueId);
-      }
+      resolved = await resolveShortSuffixId(issueId, flags, cwd);
     } else if (isShortId(issueId)) {
-      // Full short ID (e.g., "CRAFT-G") - normalize to uppercase
-      resolvedShortId = issueId.toUpperCase();
-      const resolved = await resolveOrg({ org: flags.org, cwd });
-      if (!resolved) {
-        throw new ContextError(
-          "Organization",
-          `sentry issue get ${issueId} --org <org-slug>`
-        );
-      }
-      orgSlug = resolved.org;
-      issue = await getIssueByShortId(orgSlug, resolvedShortId);
+      resolved = await resolveFullShortId(issueId, flags, cwd);
     } else {
-      // Numeric ID can be fetched directly
-      issue = await getIssue(issueId);
-      // Try to resolve org for event fetching
-      const resolved = await resolveOrg({ org: flags.org, cwd });
-      orgSlug = resolved?.org;
+      resolved = await resolveNumericId(issueId, flags, cwd);
+    }
+
+    const { issue, orgSlug } = resolved;
+
+    if (flags.web) {
+      await openInBrowser(stdout, issue.permalink, "issue");
+      return;
     }
 
     // Fetch the latest event for full context (requires org slug)

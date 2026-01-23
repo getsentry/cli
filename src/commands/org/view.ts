@@ -1,25 +1,28 @@
 /**
- * sentry org get
+ * sentry org view
  *
- * Get detailed information about a Sentry organization.
+ * View detailed information about a Sentry organization.
  */
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getOrganization } from "../../lib/api-client.js";
+import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails, writeOutput } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { buildOrgUrl } from "../../lib/sentry-urls.js";
 
-type GetFlags = {
+type ViewFlags = {
   readonly json: boolean;
+  readonly web: boolean;
 };
 
-export const getCommand = buildCommand({
+export const viewCommand = buildCommand({
   docs: {
-    brief: "Get details of an organization",
+    brief: "View details of an organization",
     fullDescription:
-      "Retrieve detailed information about a Sentry organization.\n\n" +
+      "View detailed information about a Sentry organization.\n\n" +
       "The organization is resolved from:\n" +
       "  1. Positional argument <org-slug>\n" +
       "  2. Config defaults\n" +
@@ -42,11 +45,17 @@ export const getCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
     },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
-    flags: GetFlags,
+    flags: ViewFlags,
     orgSlug?: string
   ): Promise<void> {
     const { stdout, cwd } = this;
@@ -54,7 +63,12 @@ export const getCommand = buildCommand({
     const resolved = await resolveOrg({ org: orgSlug, cwd });
 
     if (!resolved) {
-      throw new ContextError("Organization", "sentry org get <org-slug>");
+      throw new ContextError("Organization", "sentry org view <org-slug>");
+    }
+
+    if (flags.web) {
+      await openInBrowser(stdout, buildOrgUrl(resolved.org), "organization");
+      return;
     }
 
     const org = await getOrganization(resolved.org);
