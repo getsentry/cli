@@ -159,6 +159,51 @@ describe("parseFields", () => {
   });
 });
 
+describe("parseFields with raw=true (--raw-field behavior)", () => {
+  test("keeps number values as strings", () => {
+    expect(parseFields(["count=123"], true)).toEqual({ count: "123" });
+    expect(parseFields(["price=3.14"], true)).toEqual({ price: "3.14" });
+  });
+
+  test("keeps boolean values as strings", () => {
+    expect(parseFields(["active=true"], true)).toEqual({ active: "true" });
+    expect(parseFields(["enabled=false"], true)).toEqual({ enabled: "false" });
+  });
+
+  test("keeps null as string", () => {
+    expect(parseFields(["value=null"], true)).toEqual({ value: "null" });
+  });
+
+  test("keeps JSON arrays as strings", () => {
+    expect(parseFields(["tags=[1,2,3]"], true)).toEqual({ tags: "[1,2,3]" });
+  });
+
+  test("keeps JSON objects as strings", () => {
+    expect(parseFields(['data={"a":1}'], true)).toEqual({ data: '{"a":1}' });
+  });
+
+  test("keeps plain strings as strings", () => {
+    expect(parseFields(["name=John"], true)).toEqual({ name: "John" });
+  });
+
+  test("handles nested keys with raw values", () => {
+    expect(parseFields(["user.age=30"], true)).toEqual({
+      user: { age: "30" },
+    });
+  });
+
+  test("handles empty value", () => {
+    expect(parseFields(["empty="], true)).toEqual({ empty: "" });
+  });
+
+  test("comparison: raw vs typed for same input", () => {
+    // Typed (default): parses JSON
+    expect(parseFields(["count=123"])).toEqual({ count: 123 });
+    // Raw: keeps as string
+    expect(parseFields(["count=123"], true)).toEqual({ count: "123" });
+  });
+});
+
 describe("parseHeaders", () => {
   test("parses single header", () => {
     expect(parseHeaders(["Content-Type: application/json"])).toEqual({

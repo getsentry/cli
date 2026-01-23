@@ -15,9 +15,12 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 type ApiFlags = {
   readonly method: HttpMethod;
   readonly field?: string[];
+  readonly "raw-field"?: string[];
   readonly header?: string[];
+  readonly input?: string;
   readonly include: boolean;
   readonly silent: boolean;
+  readonly verbose: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,6 +28,22 @@ type ApiFlags = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const VALID_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
+
+/**
+ * Read all data from stdin as a string.
+ * Uses Bun's native stream handling for efficiency.
+ */
+async function readStdin(
+  stdin: NodeJS.ReadStream & { fd: 0 }
+): Promise<string> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of stdin) {
+    chunks.push(Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+}
 
 /**
  * Parse and validate HTTP method from string.
@@ -110,11 +129,15 @@ export function setNestedValue(
  * Supports dot notation for nested keys and JSON values.
  *
  * @param fields - Array of "key=value" strings
+ * @param raw - If true, treat all values as strings (no JSON parsing)
  * @returns Parsed object with nested structure
  * @throws {Error} When field doesn't contain "="
  * @internal Exported for testing
  */
-export function parseFields(fields: string[]): Record<string, unknown> {
+export function parseFields(
+  fields: string[],
+  raw = false
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   for (const field of fields) {
@@ -125,7 +148,7 @@ export function parseFields(fields: string[]): Record<string, unknown> {
 
     const key = field.substring(0, eqIndex);
     const rawValue = field.substring(eqIndex + 1);
-    const value = parseFieldValue(rawValue);
+    const value = raw ? rawValue : parseFieldValue(rawValue);
 
     setNestedValue(result, key, value);
   }
@@ -159,11 +182,62 @@ export function parseHeaders(headers: string[]): Record<string, string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Request Body Building
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build request body from --input flag (file or stdin).
+ * Tries to parse the content as JSON, otherwise returns as string.
+ */
+async function buildBodyFromInput(
+  inputPath: string,
+  stdin: NodeJS.ReadStream & { fd: 0 }
+): Promise<Record<string, unknown> | string> {
+  let content: string;
+
+  if (inputPath === "-") {
+    content = await readStdin(stdin);
+  } else {
+    const file = Bun.file(inputPath);
+    if (!(await file.exists())) {
+      throw new Error(`File not found: ${inputPath}`);
+    }
+    content = await file.text();
+  }
+
+  // Try to parse as JSON for the API client
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return content;
+  }
+}
+
+/**
+ * Build request body from --field and --raw-field flags.
+ * Returns undefined if no fields are provided.
+ */
+function buildBodyFromFields(
+  typedFields: string[] | undefined,
+  rawFields: string[] | undefined
+): Record<string, unknown> | undefined {
+  const typed =
+    typedFields && typedFields.length > 0
+      ? parseFields(typedFields, false)
+      : {};
+  const raw =
+    rawFields && rawFields.length > 0 ? parseFields(rawFields, true) : {};
+
+  const merged = { ...typed, ...raw };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Response Output
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Write response headers to stdout
+ * Write response headers to stdout (standard format)
  */
 function writeResponseHeaders(
   stdout: Writer,
@@ -190,6 +264,39 @@ function writeResponseBody(stdout: Writer, body: unknown): void {
   } else {
     stdout.write(`${String(body)}\n`);
   }
+}
+
+/**
+ * Write verbose request output (curl-style format)
+ */
+function writeVerboseRequest(
+  stdout: Writer,
+  method: string,
+  endpoint: string,
+  headers: Record<string, string> | undefined
+): void {
+  stdout.write(`> ${method} /api/0/${endpoint}\n`);
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      stdout.write(`> ${key}: ${value}\n`);
+    }
+  }
+  stdout.write(">\n");
+}
+
+/**
+ * Write verbose response output (curl-style format)
+ */
+function writeVerboseResponse(
+  stdout: Writer,
+  status: number,
+  headers: Headers
+): void {
+  stdout.write(`< HTTP ${status}\n`);
+  headers.forEach((value, key) => {
+    stdout.write(`< ${key}: ${value}\n`);
+  });
+  stdout.write("<\n");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,34 +329,61 @@ export const apiCommand = buildCommand({
       method: {
         kind: "parsed",
         parse: parseMethod,
-        brief: "HTTP method (GET, POST, PUT, DELETE, PATCH)",
+        brief: "The HTTP method for the request",
         default: "GET" as const,
-        placeholder: "METHOD",
+        placeholder: "method",
       },
       field: {
         kind: "parsed",
         parse: String,
-        brief: "Request body field (key=value). Can be repeated.",
+        brief: "Add a typed parameter in key=value format",
+        variadic: true,
+        optional: true,
+      },
+      "raw-field": {
+        kind: "parsed",
+        parse: String,
+        brief: "Add a string parameter in key=value format",
         variadic: true,
         optional: true,
       },
       header: {
         kind: "parsed",
         parse: String,
-        brief: "Additional header (Key: Value). Can be repeated.",
+        brief: "Add a HTTP request header in key:value format",
         variadic: true,
         optional: true,
       },
+      input: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          'The file to use as body for the HTTP request (use "-" to read from standard input)',
+        optional: true,
+        placeholder: "file",
+      },
       include: {
         kind: "boolean",
-        brief: "Include response headers in output",
+        brief: "Include HTTP response status line and headers in the output",
         default: false,
       },
       silent: {
         kind: "boolean",
-        brief: "Suppress output, only set exit code",
+        brief: "Do not print the response body",
         default: false,
       },
+      verbose: {
+        kind: "boolean",
+        brief: "Include full HTTP request and response in the output",
+        default: false,
+      },
+    },
+    aliases: {
+      X: "method",
+      F: "field",
+      f: "raw-field",
+      H: "header",
+      i: "include",
     },
   },
   async func(
@@ -257,16 +391,23 @@ export const apiCommand = buildCommand({
     flags: ApiFlags,
     endpoint: string
   ): Promise<void> {
-    const { stdout } = this;
+    const { stdout, stdin } = this;
 
+    // Build request body from --input, --field, or --raw-field
     const body =
-      flags.field && flags.field.length > 0
-        ? parseFields(flags.field)
-        : undefined;
+      flags.input !== undefined
+        ? await buildBodyFromInput(flags.input, stdin)
+        : buildBodyFromFields(flags.field, flags["raw-field"]);
+
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
         : undefined;
+
+    // Verbose mode: show request details
+    if (flags.verbose) {
+      writeVerboseRequest(stdout, flags.method, endpoint, headers);
+    }
 
     const response = await rawApiRequest(endpoint, {
       method: flags.method,
@@ -284,8 +425,10 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Output headers if requested
-    if (flags.include) {
+    // Output headers (verbose or include mode)
+    if (flags.verbose) {
+      writeVerboseResponse(stdout, response.status, response.headers);
+    } else if (flags.include) {
       writeResponseHeaders(stdout, response.status, response.headers);
     }
 
