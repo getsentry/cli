@@ -380,6 +380,46 @@ export async function clearProjectCache(): Promise<void> {
   await writeConfig(config);
 }
 
+/**
+ * Get cached project information by DSN public key.
+ * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
+ *
+ * @param publicKey - The DSN public key
+ * @returns Cached project info or undefined if not cached
+ */
+export async function getCachedProjectByDsnKey(
+  publicKey: string
+): Promise<CachedProject | undefined> {
+  const config = await readConfig();
+  const key = `dsn:${publicKey}`;
+  return config.projectCache?.[key];
+}
+
+/**
+ * Cache project information by DSN public key.
+ * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
+ *
+ * @param publicKey - The DSN public key
+ * @param info - Project information to cache
+ */
+export async function setCachedProjectByDsnKey(
+  publicKey: string,
+  info: Omit<CachedProject, "cachedAt">
+): Promise<void> {
+  const config = await readConfig();
+  const key = `dsn:${publicKey}`;
+
+  config.projectCache = {
+    ...config.projectCache,
+    [key]: {
+      ...info,
+      cachedAt: Date.now(),
+    },
+  };
+
+  await writeConfig(config);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Aliases (for short issue ID resolution)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,14 +429,17 @@ export async function clearProjectCache(): Promise<void> {
  * Called by `issue list` when multiple projects are detected.
  *
  * @param aliases - Map of alias letter (A, B, C...) to org/project
+ * @param dsnFingerprint - Fingerprint of detected DSNs for cache validation
  */
 export async function setProjectAliases(
-  aliases: Record<string, ProjectAliasEntry>
+  aliases: Record<string, ProjectAliasEntry>,
+  dsnFingerprint?: string
 ): Promise<void> {
   const config = await readConfig();
   config.projectAliases = {
     aliases,
     cachedAt: Date.now(),
+    dsnFingerprint,
   };
   await writeConfig(config);
 }
@@ -415,16 +458,36 @@ export async function getProjectAliases(): Promise<
 
 /**
  * Get a specific project by its alias.
+ * Validates DSN fingerprint when both current and cached fingerprints are present.
  *
  * @param alias - The alias letter (A, B, C...)
- * @returns Project entry or undefined if not found
+ * @param currentFingerprint - Optional current DSN fingerprint for validation
+ * @returns Project entry or undefined if not found or fingerprint mismatch
  */
 export async function getProjectByAlias(
-  alias: string
+  alias: string,
+  currentFingerprint?: string
 ): Promise<ProjectAliasEntry | undefined> {
-  const aliases = await getProjectAliases();
+  const config = await readConfig();
+  const cache = config.projectAliases;
+
+  if (!cache?.aliases) {
+    return;
+  }
+
+  // Validate fingerprint: reject if current DSNs don't match cached context
+  // Note: empty string is a valid fingerprint (means no SaaS DSNs detected),
+  // so we use explicit undefined check rather than truthy check
+  if (
+    currentFingerprint !== undefined &&
+    cache.dsnFingerprint !== undefined &&
+    currentFingerprint !== cache.dsnFingerprint
+  ) {
+    return; // DSN fingerprint mismatch - don't use cache
+  }
+
   // Case-insensitive lookup (aliases are stored lowercase)
-  return aliases?.[alias.toLowerCase()];
+  return cache.aliases[alias.toLowerCase()];
 }
 
 /**

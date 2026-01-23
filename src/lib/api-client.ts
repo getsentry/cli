@@ -281,6 +281,27 @@ export function listProjects(orgSlug: string): Promise<SentryProject[]> {
 }
 
 /**
+ * Find a project by DSN public key.
+ *
+ * Uses the /api/0/projects/ endpoint with query=dsn:<key> to search
+ * across all accessible projects. This works for both SaaS and self-hosted
+ * DSNs, even when the org ID is not embedded in the DSN.
+ *
+ * @param publicKey - The DSN public key (username portion of DSN URL)
+ * @returns The matching project, or null if not found
+ */
+export async function findProjectByDsnKey(
+  publicKey: string
+): Promise<SentryProject | null> {
+  const projects = await apiRequest<SentryProject[]>("/projects/", {
+    params: { query: `dsn:${publicKey}` },
+    schema: z.array(SentryProjectSchema),
+  });
+
+  return projects[0] ?? null;
+}
+
+/**
  * Get a specific project
  */
 export function getProject(

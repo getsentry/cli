@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import type { DetectedDsn } from "../../src/lib/dsn/index.js";
 import {
+  createDsnFingerprint,
   extractOrgIdFromHost,
   isValidDsn,
   parseDsn,
@@ -128,5 +130,79 @@ describe("isValidDsn", () => {
   test("returns false for non-URL string", () => {
     const dsn = "not-a-url";
     expect(isValidDsn(dsn)).toBe(false);
+  });
+});
+
+describe("createDsnFingerprint", () => {
+  /** Helper to create a minimal DetectedDsn for testing */
+  function makeDsn(orgId: string, projectId: string): DetectedDsn {
+    return {
+      raw: `https://key@o${orgId}.ingest.sentry.io/${projectId}`,
+      protocol: "https",
+      publicKey: "key",
+      host: `o${orgId}.ingest.sentry.io`,
+      projectId,
+      orgId,
+      source: "env",
+    };
+  }
+
+  test("creates fingerprint from multiple DSNs", () => {
+    const dsns = [makeDsn("123", "456"), makeDsn("123", "789")];
+    const result = createDsnFingerprint(dsns);
+    expect(result).toBe("123:456,123:789");
+  });
+
+  test("sorts fingerprint alphabetically", () => {
+    const dsns = [makeDsn("999", "111"), makeDsn("123", "456")];
+    const result = createDsnFingerprint(dsns);
+    expect(result).toBe("123:456,999:111");
+  });
+
+  test("deduplicates same DSN from multiple sources", () => {
+    const dsn1 = makeDsn("123", "456");
+    dsn1.source = "env";
+    const dsn2 = makeDsn("123", "456");
+    dsn2.source = "file";
+
+    const result = createDsnFingerprint([dsn1, dsn2]);
+    expect(result).toBe("123:456");
+  });
+
+  test("includes DSNs without orgId using host as prefix (self-hosted)", () => {
+    const saas = makeDsn("123", "456");
+    const selfHosted: DetectedDsn = {
+      raw: "https://key@sentry.mycompany.com/1",
+      protocol: "https",
+      publicKey: "key",
+      host: "sentry.mycompany.com",
+      projectId: "1",
+      orgId: undefined,
+      source: "env",
+    };
+
+    const result = createDsnFingerprint([saas, selfHosted]);
+    // Self-hosted uses host:projectId, SaaS uses orgId:projectId
+    expect(result).toBe("123:456,sentry.mycompany.com:1");
+  });
+
+  test("returns empty string for empty array", () => {
+    const result = createDsnFingerprint([]);
+    expect(result).toBe("");
+  });
+
+  test("returns host-based fingerprint for self-hosted DSNs", () => {
+    const selfHosted: DetectedDsn = {
+      raw: "https://key@sentry.mycompany.com/1",
+      protocol: "https",
+      publicKey: "key",
+      host: "sentry.mycompany.com",
+      projectId: "1",
+      orgId: undefined,
+      source: "env",
+    };
+
+    const result = createDsnFingerprint([selfHosted]);
+    expect(result).toBe("sentry.mycompany.com:1");
   });
 });

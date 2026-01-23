@@ -14,7 +14,11 @@ export type {
   ProjectAliases,
   SentryConfig,
 } from "./config.js";
-export { SentryConfigSchema } from "./config.js";
+export {
+  ProjectAliasEntrySchema,
+  ProjectAliasesSchema,
+  SentryConfigSchema,
+} from "./config.js";
 
 // OAuth types and schemas
 export type {

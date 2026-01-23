@@ -75,6 +75,7 @@ export type {
 
 export {
   createDetectedDsn,
+  createDsnFingerprint,
   extractOrgIdFromHost,
   inferPackagePath,
   isValidDsn,

@@ -31,13 +31,20 @@ export const ProjectAliasEntrySchema = z.object({
 export type ProjectAliasEntry = z.infer<typeof ProjectAliasEntrySchema>;
 
 /**
- * Schema for cached project aliases (A, B, C... -> org/project mapping)
+ * Schema for cached project aliases (A, B, C... -> org/project mapping).
+ * Scoped by DSN fingerprint to prevent cross-project conflicts in monorepos.
  */
 export const ProjectAliasesSchema = z.object({
   /** Map of alias letter to project info */
   aliases: z.record(ProjectAliasEntrySchema),
   /** Timestamp when aliases were set */
   cachedAt: z.number(),
+  /**
+   * Fingerprint of detected DSNs for validation.
+   * Format: sorted comma-separated list of "orgId:projectId" pairs.
+   * Aliases only valid when current DSN detection matches this fingerprint.
+   */
+  dsnFingerprint: z.string().optional(),
 });
 
 export type ProjectAliases = z.infer<typeof ProjectAliasesSchema>;
@@ -79,6 +86,7 @@ export const SentryConfigSchema = z.object({
   dsnCache: z.record(CachedDsnEntrySchema).optional(),
   /**
    * Cached project aliases for short issue ID resolution.
+   * Scoped by DSN fingerprint to prevent cross-project conflicts.
    * Set by `issue list` when multiple projects are detected.
    */
   projectAliases: ProjectAliasesSchema.optional(),

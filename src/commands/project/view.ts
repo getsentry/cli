@@ -30,7 +30,7 @@ type ViewFlags = {
 };
 
 /**
- * Build an error message for missing context, including self-hosted DSN hints.
+ * Build an error message for missing context, with optional DSN resolution hint.
  */
 function buildContextError(skippedSelfHosted?: number): ContextError {
   const usageHint = "sentry project view <project-slug> --org <org-slug>";
@@ -39,8 +39,8 @@ function buildContextError(skippedSelfHosted?: number): ContextError {
     return new ContextError(
       "Organization and project",
       `${usageHint}\n\n` +
-        `Note: Found ${skippedSelfHosted} self-hosted DSN(s) that cannot be resolved automatically.\n` +
-        "Self-hosted Sentry instances require explicit --org and --project flags."
+        `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
+        "You may not have access to these projects, or you can specify --org and --project explicitly."
     );
   }
 

@@ -13,6 +13,7 @@ import {
 } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { getProjectByAlias } from "../../lib/config.js";
+import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   formatEventDetails,
@@ -43,13 +44,21 @@ type ResolvedIssue = {
 
 /**
  * Resolve an alias-suffix format issue ID (e.g., "f-g").
- * Returns null if the alias is not found in cache.
+ * Returns null if the alias is not found in cache or fingerprint doesn't match.
+ *
+ * @param alias - The project alias from the alias-suffix format
+ * @param suffix - The issue suffix
+ * @param cwd - Current working directory for DSN detection
  */
 async function resolveAliasSuffixId(
   alias: string,
-  suffix: string
+  suffix: string,
+  cwd: string
 ): Promise<ResolvedIssue | null> {
-  const projectEntry = await getProjectByAlias(alias);
+  // Detect DSNs to create fingerprint for validation
+  const detection = await detectAllDsns(cwd);
+  const fingerprint = createDsnFingerprint(detection.all);
+  const projectEntry = await getProjectByAlias(alias, fingerprint);
   if (!projectEntry) {
     return null;
   }
@@ -229,7 +238,8 @@ export const viewCommand = buildCommand({
     if (aliasSuffix) {
       const aliasResult = await resolveAliasSuffixId(
         aliasSuffix.alias,
-        aliasSuffix.suffix
+        aliasSuffix.suffix,
+        cwd
       );
       resolved =
         aliasResult ?? (await resolveShortSuffixId(issueId, flags, cwd));

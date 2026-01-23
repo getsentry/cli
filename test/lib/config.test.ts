@@ -12,6 +12,7 @@ import {
   clearAuth,
   clearProjectAliases,
   getAuthToken,
+  getCachedProjectByDsnKey,
   getDefaultOrganization,
   getDefaultProject,
   getProjectAliases,
@@ -19,6 +20,7 @@ import {
   isAuthenticated,
   readConfig,
   setAuthToken,
+  setCachedProjectByDsnKey,
   setDefaults,
   setProjectAliases,
   writeConfig,
@@ -409,5 +411,182 @@ describe("project aliases", () => {
       new: { orgSlug: "org2", projectSlug: "project2" },
     });
     expect(aliases?.old).toBeUndefined();
+  });
+});
+
+describe("DSN-fingerprinted project aliases", () => {
+  test("setProjectAliases stores dsnFingerprint", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    const config = await readConfig();
+    expect(config.projectAliases?.dsnFingerprint).toBe("123:456,123:789");
+  });
+
+  test("getProjectByAlias returns alias when fingerprint matches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // Same fingerprint
+    const project = await getProjectByAlias("e", "123:456,123:789");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns undefined when fingerprint mismatches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // Different fingerprint (different DSN context)
+    const project = await getProjectByAlias("e", "999:111");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns alias when no fingerprint stored (legacy cache)", async () => {
+    // No fingerprint stored
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    // Should work without fingerprint validation (legacy cache)
+    const project = await getProjectByAlias("e", "123:456");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns alias when no current fingerprint provided", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // No current fingerprint provided - skip validation
+    const project = await getProjectByAlias("e");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("fingerprint does not affect case-insensitive lookup", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456"
+    );
+
+    // Uppercase alias with matching fingerprint
+    const project = await getProjectByAlias("E", "123:456");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias rejects when current fingerprint is empty but cached is not", async () => {
+    // Cache was created with SaaS DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456"
+    );
+
+    // Current context has no SaaS DSNs (empty fingerprint)
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias rejects when cached fingerprint is empty but current is not", async () => {
+    // Cache was created with only self-hosted DSNs (empty fingerprint)
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context has SaaS DSNs
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "123:456");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias accepts when both fingerprints are empty", async () => {
+    // Cache was created with only self-hosted DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context also has only self-hosted DSNs
+    const project = await getProjectByAlias("e", "");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DSN Key-based Project Cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getCachedProjectByDsnKey / setCachedProjectByDsnKey", () => {
+  test("caches and retrieves project by DSN public key", async () => {
+    await setCachedProjectByDsnKey("abc123publickey", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const cached = await getCachedProjectByDsnKey("abc123publickey");
+    expect(cached).toBeDefined();
+    expect(cached?.orgSlug).toBe("my-org");
+    expect(cached?.projectSlug).toBe("my-project");
+    expect(cached?.cachedAt).toBeDefined();
+  });
+
+  test("returns undefined for unknown DSN key", async () => {
+    const cached = await getCachedProjectByDsnKey("nonexistent-key");
+    expect(cached).toBeUndefined();
+  });
+
+  test("stores with dsn: prefix to avoid collisions with orgId:projectId keys", async () => {
+    // Set by DSN key
+    await setCachedProjectByDsnKey("mykey", {
+      orgSlug: "dsn-org",
+      orgName: "DSN Org",
+      projectSlug: "dsn-project",
+      projectName: "DSN Project",
+    });
+
+    const config = await readConfig();
+    // Should be stored with "dsn:" prefix
+    expect(config.projectCache?.["dsn:mykey"]).toBeDefined();
+    expect(config.projectCache?.["dsn:mykey"]?.orgSlug).toBe("dsn-org");
   });
 });
