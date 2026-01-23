@@ -11,8 +11,11 @@ import {
   CONFIG_DIR_ENV_VAR,
   clearAuth,
   clearProjectAliases,
+  clearProjectCache,
   getAuthToken,
+  getCachedProject,
   getCachedProjectByDsnKey,
+  getConfigPath,
   getDefaultOrganization,
   getDefaultProject,
   getProjectAliases,
@@ -20,6 +23,7 @@ import {
   isAuthenticated,
   readConfig,
   setAuthToken,
+  setCachedProject,
   setCachedProjectByDsnKey,
   setDefaults,
   setProjectAliases,
@@ -588,5 +592,97 @@ describe("getCachedProjectByDsnKey / setCachedProjectByDsnKey", () => {
     // Should be stored with "dsn:" prefix
     expect(config.projectCache?.["dsn:mykey"]).toBeDefined();
     expect(config.projectCache?.["dsn:mykey"]?.orgSlug).toBe("dsn-org");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Cache (by orgId:projectId)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getCachedProject / setCachedProject / clearProjectCache", () => {
+  test("caches and retrieves project by orgId and projectId", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const cached = await getCachedProject("123", "456");
+    expect(cached).toBeDefined();
+    expect(cached?.orgSlug).toBe("my-org");
+    expect(cached?.projectSlug).toBe("my-project");
+    expect(cached?.cachedAt).toBeDefined();
+  });
+
+  test("returns undefined for unknown orgId:projectId", async () => {
+    const cached = await getCachedProject("999", "999");
+    expect(cached).toBeUndefined();
+  });
+
+  test("stores with orgId:projectId key format", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const config = await readConfig();
+    expect(config.projectCache?.["123:456"]).toBeDefined();
+    expect(config.projectCache?.["123:456"]?.orgSlug).toBe("my-org");
+  });
+
+  test("clearProjectCache removes all cached projects", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project1",
+      projectName: "Project 1",
+    });
+    await setCachedProjectByDsnKey("key1", {
+      orgSlug: "org2",
+      orgName: "Org 2",
+      projectSlug: "project2",
+      projectName: "Project 2",
+    });
+
+    await clearProjectCache();
+
+    const config = await readConfig();
+    expect(config.projectCache).toBeUndefined();
+  });
+
+  test("multiple projects can be cached independently", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project1",
+      projectName: "Project 1",
+    });
+    await setCachedProject("123", "789", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project2",
+      projectName: "Project 2",
+    });
+
+    const cached1 = await getCachedProject("123", "456");
+    const cached2 = await getCachedProject("123", "789");
+
+    expect(cached1?.projectSlug).toBe("project1");
+    expect(cached2?.projectSlug).toBe("project2");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config Path
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getConfigPath", () => {
+  test("returns the config file path", () => {
+    const path = getConfigPath();
+    expect(path).toContain("config.json");
+    expect(path).toContain(testConfigDir);
   });
 });
