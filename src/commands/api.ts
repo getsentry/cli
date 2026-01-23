@@ -170,6 +170,31 @@ export function buildQueryParams(
 }
 
 /**
+ * Prepare request options from command flags.
+ * Routes fields to either query params (GET) or request body (other methods).
+ *
+ * @param method - HTTP method
+ * @param fields - Optional array of "key=value" field strings
+ * @returns Object with body and params, one of which will be undefined
+ * @internal Exported for testing
+ */
+export function prepareRequestOptions(
+  method: HttpMethod,
+  fields?: string[]
+): {
+  body?: Record<string, unknown>;
+  params?: Record<string, string | string[]>;
+} {
+  const hasFields = fields && fields.length > 0;
+  const isBodyMethod = method !== "GET";
+
+  return {
+    body: hasFields && isBodyMethod ? parseFields(fields) : undefined,
+    params: hasFields && !isBodyMethod ? buildQueryParams(fields) : undefined,
+  };
+}
+
+/**
  * Parse header arguments into headers object.
  *
  * @param headers - Array of "Key: Value" strings
@@ -295,15 +320,7 @@ export const apiCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
-    const hasFields = flags.field && flags.field.length > 0;
-    const isBodyMethod = flags.method !== "GET";
-
-    // For GET: fields become query params; for other methods: fields become body
-    const body =
-      hasFields && isBodyMethod ? parseFields(flags.field) : undefined;
-    const params =
-      hasFields && !isBodyMethod ? buildQueryParams(flags.field) : undefined;
-
+    const { body, params } = prepareRequestOptions(flags.method, flags.field);
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
