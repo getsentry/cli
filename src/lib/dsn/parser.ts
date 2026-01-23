@@ -168,3 +168,29 @@ export function inferPackagePath(sourcePath: string): string | undefined {
 
   return;
 }
+
+/**
+ * Create a fingerprint from detected DSNs for cache validation.
+ *
+ * The fingerprint uniquely identifies the set of projects detected in a workspace.
+ * Aliases cached with one fingerprint are only valid when the same DSNs are detected.
+ *
+ * @param dsns - Array of detected DSNs
+ * @returns Fingerprint string (sorted comma-separated "orgId:projectId" pairs)
+ *
+ * @example
+ * createDsnFingerprint([
+ *   { orgId: "123", projectId: "456", ... },
+ *   { orgId: "123", projectId: "789", ... }
+ * ])
+ * // Returns: "123:456,123:789"
+ */
+export function createDsnFingerprint(dsns: DetectedDsn[]): string {
+  const keys = dsns
+    .filter((d) => d.orgId && d.projectId)
+    .map((d) => `${d.orgId}:${d.projectId}`)
+    .sort();
+
+  // Deduplicate (same DSN might be detected from multiple sources)
+  return [...new Set(keys)].join(",");
+}

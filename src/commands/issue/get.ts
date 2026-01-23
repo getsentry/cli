@@ -12,6 +12,7 @@ import {
   getLatestEvent,
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/config.js";
+import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   formatEventDetails,
@@ -25,8 +26,12 @@ import {
   parseAliasSuffix,
 } from "../../lib/issue-id.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
-import { getWorkspaceRoot } from "../../lib/workspace.js";
-import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
+import type {
+  ProjectAliasEntry,
+  SentryEvent,
+  SentryIssue,
+  Writer,
+} from "../../types/index.js";
 
 type GetFlags = {
   readonly org?: string;
@@ -113,7 +118,6 @@ export const getCommand = buildCommand({
       },
     },
   },
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
     this: SentryContext,
     flags: GetFlags,
@@ -125,20 +129,15 @@ export const getCommand = buildCommand({
     let resolvedShortId = issueId;
 
     // Check if input matches alias-suffix pattern (e.g., "f-g", "fr-a3")
-    // and if the alias exists in the cache (workspace-scoped)
+    // and if the alias exists in the cache (validated by DSN fingerprint)
     const aliasSuffix = parseAliasSuffix(issueId);
-    const workspacePath = await getWorkspaceRoot(cwd);
-    let projectEntry = aliasSuffix
-      ? await getProjectByAlias(aliasSuffix.alias, workspacePath)
-      : null;
+    let projectEntry: ProjectAliasEntry | null | undefined = null;
 
-    // Additional safety: validate org context matches if alias was found
-    if (aliasSuffix && projectEntry) {
-      const currentOrg = await resolveOrg({ org: flags.org, cwd });
-      if (currentOrg && currentOrg.org !== projectEntry.orgSlug) {
-        // Org mismatch - don't use cached alias
-        projectEntry = null;
-      }
+    if (aliasSuffix) {
+      // Detect DSNs to create fingerprint for validation
+      const detection = await detectAllDsns(cwd);
+      const fingerprint = createDsnFingerprint(detection.all);
+      projectEntry = await getProjectByAlias(aliasSuffix.alias, fingerprint);
     }
 
     if (aliasSuffix && projectEntry) {

@@ -13,6 +13,7 @@ import {
 } from "../../lib/alias.js";
 import { listIssues } from "../../lib/api-client.js";
 import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
+import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,
@@ -26,7 +27,6 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
-import { getWorkspaceRoot } from "../../lib/workspace.js";
 import type {
   ProjectAliasEntry,
   SentryIssue,
@@ -313,12 +313,13 @@ export const listCommand = buildCommand({
     const { stdout, cwd } = this;
 
     // Resolve targets (may find multiple in monorepos)
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      org: flags.org,
-      project: flags.project,
-      cwd,
-      usageHint: USAGE_HINT,
-    });
+    const { targets, footer, skippedSelfHosted, detectedDsns } =
+      await resolveAllTargets({
+        org: flags.org,
+        project: flags.project,
+        cwd,
+        usageHint: USAGE_HINT,
+      });
 
     if (targets.length === 0) {
       if (skippedSelfHosted) {
@@ -370,8 +371,8 @@ export const listCommand = buildCommand({
         };
 
     if (isMultiProject) {
-      const workspacePath = await getWorkspaceRoot(cwd);
-      await setProjectAliases(entries, workspacePath);
+      const fingerprint = createDsnFingerprint(detectedDsns ?? []);
+      await setProjectAliases(entries, fingerprint);
     } else {
       await clearProjectAliases();
     }

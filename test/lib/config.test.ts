@@ -412,90 +412,71 @@ describe("project aliases", () => {
   });
 });
 
-describe("workspace-scoped project aliases", () => {
-  test("setProjectAliases stores workspacePath", async () => {
+describe("DSN-fingerprinted project aliases", () => {
+  test("setProjectAliases stores dsnFingerprint", async () => {
     await setProjectAliases(
       {
         e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       },
-      "/home/user/monorepo"
+      "123:456,123:789"
     );
 
     const config = await readConfig();
-    expect(config.projectAliases?.workspacePath).toBe("/home/user/monorepo");
+    expect(config.projectAliases?.dsnFingerprint).toBe("123:456,123:789");
   });
 
-  test("getProjectByAlias returns alias when workspace matches", async () => {
+  test("getProjectByAlias returns alias when fingerprint matches", async () => {
     await setProjectAliases(
       {
         e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       },
-      "/home/user/monorepo"
+      "123:456,123:789"
     );
 
-    // Same workspace
-    const project = await getProjectByAlias("e", "/home/user/monorepo");
+    // Same fingerprint
+    const project = await getProjectByAlias("e", "123:456,123:789");
     expect(project).toEqual({
       orgSlug: "sentry",
       projectSlug: "spotlight-electron",
     });
   });
 
-  test("getProjectByAlias returns alias when in subdirectory of workspace", async () => {
+  test("getProjectByAlias returns undefined when fingerprint mismatches", async () => {
     await setProjectAliases(
       {
         e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       },
-      "/home/user/monorepo"
+      "123:456,123:789"
     );
 
-    // Subdirectory of workspace
-    const project = await getProjectByAlias(
-      "e",
-      "/home/user/monorepo/packages/frontend"
-    );
-    expect(project).toEqual({
-      orgSlug: "sentry",
-      projectSlug: "spotlight-electron",
-    });
-  });
-
-  test("getProjectByAlias returns undefined when workspace mismatches", async () => {
-    await setProjectAliases(
-      {
-        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
-      },
-      "/home/user/monorepo-a"
-    );
-
-    // Different workspace
-    const project = await getProjectByAlias("e", "/home/user/monorepo-b");
+    // Different fingerprint (different DSN context)
+    const project = await getProjectByAlias("e", "999:111");
     expect(project).toBeUndefined();
   });
 
-  test("getProjectByAlias returns alias when no workspace validation needed", async () => {
-    // No workspace stored
+  test("getProjectByAlias returns alias when no fingerprint stored (legacy cache)", async () => {
+    // No fingerprint stored
     await setProjectAliases({
       e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
     });
 
-    // Should work without workspace validation (legacy cache)
-    const project = await getProjectByAlias("e", "/some/other/path");
+    // Should work without fingerprint validation (legacy cache)
+    const project = await getProjectByAlias("e", "123:456");
     expect(project).toEqual({
       orgSlug: "sentry",
       projectSlug: "spotlight-electron",
     });
   });
 
-  test("getProjectByAlias returns alias when no current workspace provided", async () => {
+  test("getProjectByAlias returns alias when no current fingerprint provided", async () => {
     await setProjectAliases(
       {
         e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       },
-      "/home/user/monorepo"
+      "123:456,123:789"
     );
 
-    // No current workspace provided - skip validation
+    // No current fingerprint provided - skip validation
     const project = await getProjectByAlias("e");
     expect(project).toEqual({
       orgSlug: "sentry",
@@ -503,16 +484,16 @@ describe("workspace-scoped project aliases", () => {
     });
   });
 
-  test("workspace path does not affect case-insensitive lookup", async () => {
+  test("fingerprint does not affect case-insensitive lookup", async () => {
     await setProjectAliases(
       {
         e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       },
-      "/home/user/monorepo"
+      "123:456"
     );
 
-    // Uppercase alias with matching workspace
-    const project = await getProjectByAlias("E", "/home/user/monorepo");
+    // Uppercase alias with matching fingerprint
+    const project = await getProjectByAlias("E", "123:456");
     expect(project).toEqual({
       orgSlug: "sentry",
       projectSlug: "spotlight-electron",

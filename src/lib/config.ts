@@ -389,17 +389,17 @@ export async function clearProjectCache(): Promise<void> {
  * Called by `issue list` when multiple projects are detected.
  *
  * @param aliases - Map of alias letter (A, B, C...) to org/project
- * @param workspacePath - Absolute path to workspace root for scoping
+ * @param dsnFingerprint - Fingerprint of detected DSNs for cache validation
  */
 export async function setProjectAliases(
   aliases: Record<string, ProjectAliasEntry>,
-  workspacePath?: string
+  dsnFingerprint?: string
 ): Promise<void> {
   const config = await readConfig();
   config.projectAliases = {
     aliases,
     cachedAt: Date.now(),
-    workspacePath,
+    dsnFingerprint,
   };
   await writeConfig(config);
 }
@@ -418,15 +418,15 @@ export async function getProjectAliases(): Promise<
 
 /**
  * Get a specific project by its alias.
- * Validates workspace context when both currentWorkspace and cached workspacePath are present.
+ * Validates DSN fingerprint when both current and cached fingerprints are present.
  *
  * @param alias - The alias letter (A, B, C...)
- * @param currentWorkspace - Optional current workspace path for validation
- * @returns Project entry or undefined if not found or workspace mismatch
+ * @param currentFingerprint - Optional current DSN fingerprint for validation
+ * @returns Project entry or undefined if not found or fingerprint mismatch
  */
 export async function getProjectByAlias(
   alias: string,
-  currentWorkspace?: string
+  currentFingerprint?: string
 ): Promise<ProjectAliasEntry | undefined> {
   const config = await readConfig();
   const cache = config.projectAliases;
@@ -435,13 +435,13 @@ export async function getProjectByAlias(
     return;
   }
 
-  // Validate workspace: reject if current workspace is outside cached workspace
+  // Validate fingerprint: reject if current DSNs don't match cached context
   if (
-    currentWorkspace &&
-    cache.workspacePath &&
-    !currentWorkspace.startsWith(cache.workspacePath)
+    currentFingerprint &&
+    cache.dsnFingerprint &&
+    currentFingerprint !== cache.dsnFingerprint
   ) {
-    return; // Workspace mismatch - don't use cache
+    return; // DSN fingerprint mismatch - don't use cache
   }
 
   // Case-insensitive lookup (aliases are stored lowercase)

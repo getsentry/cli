@@ -58,6 +58,8 @@ export type ResolvedTargets = {
   footer?: string;
   /** Number of self-hosted DSNs that were detected but couldn't be resolved */
   skippedSelfHosted?: number;
+  /** All detected DSNs (for fingerprinting in alias cache) */
+  detectedDsns?: DetectedDsn[];
 };
 
 /**
@@ -353,6 +355,7 @@ export async function resolveAllTargets(
     return {
       targets: [],
       skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+      detectedDsns: detection.all,
     };
   }
 
@@ -364,6 +367,7 @@ export async function resolveAllTargets(
     targets,
     footer,
     skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+    detectedDsns: detection.all,
   };
 }
 
