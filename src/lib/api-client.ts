@@ -352,12 +352,22 @@ export function getIssueByShortId(
 }
 
 /**
- * Get the latest event for an issue
+ * Get the latest event for an issue.
+ * Uses org-scoped endpoint for proper multi-region support.
+ *
+ * @param orgSlug - Organization slug (required for multi-region routing)
+ * @param issueId - Issue ID (numeric)
  */
-export function getLatestEvent(issueId: string): Promise<SentryEvent> {
-  return apiRequest<SentryEvent>(`/issues/${issueId}/events/latest/`, {
-    schema: SentryEventSchema,
-  });
+export function getLatestEvent(
+  orgSlug: string,
+  issueId: string
+): Promise<SentryEvent> {
+  return apiRequest<SentryEvent>(
+    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
+    {
+      schema: SentryEventSchema,
+    }
+  );
 }
 
 /**
