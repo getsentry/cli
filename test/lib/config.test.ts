@@ -8,14 +8,25 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CONFIG_DIR_ENV_VAR,
   clearAuth,
+  clearProjectAliases,
+  clearProjectCache,
   getAuthToken,
+  getCachedProject,
+  getCachedProjectByDsnKey,
+  getConfigPath,
   getDefaultOrganization,
   getDefaultProject,
+  getProjectAliases,
+  getProjectByAlias,
   isAuthenticated,
   readConfig,
   setAuthToken,
+  setCachedProject,
+  setCachedProjectByDsnKey,
   setDefaults,
+  setProjectAliases,
   writeConfig,
 } from "../../src/lib/config.js";
 
@@ -24,11 +35,11 @@ let testConfigDir: string;
 
 beforeEach(() => {
   testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR!,
+    process.env[CONFIG_DIR_ENV_VAR]!,
     `test-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
 afterEach(() => {
@@ -300,5 +311,378 @@ describe("refreshToken error handling", () => {
     // Auth SHOULD be cleared when server rejects refresh token
     const config = await readConfig();
     expect(config.auth).toBeUndefined();
+  });
+});
+
+describe("project aliases", () => {
+  test("setProjectAliases stores aliases in config", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+    });
+
+    const config = await readConfig();
+    expect(config.projectAliases?.aliases).toEqual({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+    });
+    expect(config.projectAliases?.cachedAt).toBeGreaterThan(0);
+  });
+
+  test("getProjectAliases returns stored aliases", async () => {
+    await setProjectAliases({
+      f: { orgSlug: "my-org", projectSlug: "frontend" },
+      b: { orgSlug: "my-org", projectSlug: "backend" },
+    });
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toEqual({
+      f: { orgSlug: "my-org", projectSlug: "frontend" },
+      b: { orgSlug: "my-org", projectSlug: "backend" },
+    });
+  });
+
+  test("getProjectAliases returns undefined when not set", async () => {
+    const aliases = await getProjectAliases();
+    expect(aliases).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns correct project", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+      s: { orgSlug: "sentry", projectSlug: "spotlight" },
+    });
+
+    const project = await getProjectByAlias("e");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias is case-insensitive", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    expect(await getProjectByAlias("E")).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+    expect(await getProjectByAlias("e")).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns undefined for unknown alias", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    const project = await getProjectByAlias("x");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns undefined when no aliases set", async () => {
+    const project = await getProjectByAlias("e");
+    expect(project).toBeUndefined();
+  });
+
+  test("clearProjectAliases removes all aliases", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    await clearProjectAliases();
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toBeUndefined();
+  });
+
+  test("setProjectAliases overwrites existing aliases", async () => {
+    await setProjectAliases({
+      old: { orgSlug: "org1", projectSlug: "project1" },
+    });
+
+    await setProjectAliases({
+      new: { orgSlug: "org2", projectSlug: "project2" },
+    });
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toEqual({
+      new: { orgSlug: "org2", projectSlug: "project2" },
+    });
+    expect(aliases?.old).toBeUndefined();
+  });
+});
+
+describe("DSN-fingerprinted project aliases", () => {
+  test("setProjectAliases stores dsnFingerprint", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    const config = await readConfig();
+    expect(config.projectAliases?.dsnFingerprint).toBe("123:456,123:789");
+  });
+
+  test("getProjectByAlias returns alias when fingerprint matches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // Same fingerprint
+    const project = await getProjectByAlias("e", "123:456,123:789");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns undefined when fingerprint mismatches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // Different fingerprint (different DSN context)
+    const project = await getProjectByAlias("e", "999:111");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns alias when no fingerprint stored (legacy cache)", async () => {
+    // No fingerprint stored
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    // Should work without fingerprint validation (legacy cache)
+    const project = await getProjectByAlias("e", "123:456");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns alias when no current fingerprint provided", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456,123:789"
+    );
+
+    // No current fingerprint provided - skip validation
+    const project = await getProjectByAlias("e");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("fingerprint does not affect case-insensitive lookup", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456"
+    );
+
+    // Uppercase alias with matching fingerprint
+    const project = await getProjectByAlias("E", "123:456");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias rejects when current fingerprint is empty but cached is not", async () => {
+    // Cache was created with SaaS DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456"
+    );
+
+    // Current context has no SaaS DSNs (empty fingerprint)
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias rejects when cached fingerprint is empty but current is not", async () => {
+    // Cache was created with only self-hosted DSNs (empty fingerprint)
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context has SaaS DSNs
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "123:456");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias accepts when both fingerprints are empty", async () => {
+    // Cache was created with only self-hosted DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context also has only self-hosted DSNs
+    const project = await getProjectByAlias("e", "");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DSN Key-based Project Cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getCachedProjectByDsnKey / setCachedProjectByDsnKey", () => {
+  test("caches and retrieves project by DSN public key", async () => {
+    await setCachedProjectByDsnKey("abc123publickey", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const cached = await getCachedProjectByDsnKey("abc123publickey");
+    expect(cached).toBeDefined();
+    expect(cached?.orgSlug).toBe("my-org");
+    expect(cached?.projectSlug).toBe("my-project");
+    expect(cached?.cachedAt).toBeDefined();
+  });
+
+  test("returns undefined for unknown DSN key", async () => {
+    const cached = await getCachedProjectByDsnKey("nonexistent-key");
+    expect(cached).toBeUndefined();
+  });
+
+  test("stores with dsn: prefix to avoid collisions with orgId:projectId keys", async () => {
+    // Set by DSN key
+    await setCachedProjectByDsnKey("mykey", {
+      orgSlug: "dsn-org",
+      orgName: "DSN Org",
+      projectSlug: "dsn-project",
+      projectName: "DSN Project",
+    });
+
+    const config = await readConfig();
+    // Should be stored with "dsn:" prefix
+    expect(config.projectCache?.["dsn:mykey"]).toBeDefined();
+    expect(config.projectCache?.["dsn:mykey"]?.orgSlug).toBe("dsn-org");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Cache (by orgId:projectId)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getCachedProject / setCachedProject / clearProjectCache", () => {
+  test("caches and retrieves project by orgId and projectId", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const cached = await getCachedProject("123", "456");
+    expect(cached).toBeDefined();
+    expect(cached?.orgSlug).toBe("my-org");
+    expect(cached?.projectSlug).toBe("my-project");
+    expect(cached?.cachedAt).toBeDefined();
+  });
+
+  test("returns undefined for unknown orgId:projectId", async () => {
+    const cached = await getCachedProject("999", "999");
+    expect(cached).toBeUndefined();
+  });
+
+  test("stores with orgId:projectId key format", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const config = await readConfig();
+    expect(config.projectCache?.["123:456"]).toBeDefined();
+    expect(config.projectCache?.["123:456"]?.orgSlug).toBe("my-org");
+  });
+
+  test("clearProjectCache removes all cached projects", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project1",
+      projectName: "Project 1",
+    });
+    await setCachedProjectByDsnKey("key1", {
+      orgSlug: "org2",
+      orgName: "Org 2",
+      projectSlug: "project2",
+      projectName: "Project 2",
+    });
+
+    await clearProjectCache();
+
+    const config = await readConfig();
+    expect(config.projectCache).toBeUndefined();
+  });
+
+  test("multiple projects can be cached independently", async () => {
+    await setCachedProject("123", "456", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project1",
+      projectName: "Project 1",
+    });
+    await setCachedProject("123", "789", {
+      orgSlug: "org1",
+      orgName: "Org 1",
+      projectSlug: "project2",
+      projectName: "Project 2",
+    });
+
+    const cached1 = await getCachedProject("123", "456");
+    const cached2 = await getCachedProject("123", "789");
+
+    expect(cached1?.projectSlug).toBe("project1");
+    expect(cached2?.projectSlug).toBe("project2");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Config Path
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getConfigPath", () => {
+  test("returns the config file path", () => {
+    const path = getConfigPath();
+    expect(path).toContain("config.json");
+    expect(path).toContain(testConfigDir);
   });
 });

@@ -6,8 +6,8 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
 import type { CommandContext } from "@stricli/core";
+import { getConfigDir } from "./lib/config.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
@@ -20,15 +20,12 @@ export interface SentryContext extends CommandContext {
 }
 
 export function buildContext(process: NodeJS.Process): SentryContext {
-  const homeDir = homedir();
-  const configDir = join(homeDir, ".sentry-cli-next");
-
   return {
     process,
     env: process.env,
     cwd: process.cwd(),
-    homeDir,
-    configDir,
+    homeDir: homedir(),
+    configDir: getConfigDir(),
     stdout: process.stdout,
     stderr: process.stderr,
   };

@@ -18,18 +18,20 @@ sentry issue list [--org ORG] [--project PROJECT] [--json]
 
 **Rationale**: Flags are self-documenting and avoid ambiguity when multiple identifiers are needed.
 
-### Get Commands
+### View Commands
 
-Get commands use **optional positional arguments** for the primary identifier, supporting auto-detection when omitted.
+View commands use **optional positional arguments** for the primary identifier, supporting auto-detection when omitted.
 
 ```bash
-sentry org get [org-slug] [--json]                         # works with DSN if no arg
-sentry project get [project-slug] [--org ORG] [--json]     # works with DSN if no arg
-sentry issue get <issue-id> [--org ORG] [--json]           # issue ID required
-sentry event get <event-id> [--org ORG] [--project PROJECT] [--json]
+sentry org view [org-slug] [--json] [-w]                       # works with DSN if no arg
+sentry project view [project-slug] [--org ORG] [--json] [-w]   # works with DSN if no arg
+sentry issue view <issue-id> [--org ORG] [--json] [-w]         # issue ID required
+sentry event view <event-id> [--org ORG] [--project PROJECT] [--json] [-w]
 ```
 
-**Key insight**: `org get` and `project get` mirror `gh repo view` - works in context (DSN) or with explicit arg.
+**Key insight**: `org view` and `project view` mirror `gh repo view` - works in context (DSN) or with explicit arg.
+
+**Browser flag**: All view commands support `-w` (or `--web`) to open the resource in your default browser instead of displaying it in the terminal.
 
 ## Context Resolution
 
@@ -45,7 +47,8 @@ Context (org, project) is resolved in this priority order:
 |------|-------------|---------|
 | `--org` | Organization slug | Most commands |
 | `--project` | Project slug | Project/issue/event commands |
-| `--json` | Output as JSON | All get/list commands |
+| `--json` | Output as JSON | All view/list commands |
+| `-w`, `--web` | Open in browser | All view commands |
 | `--limit` | Max items to return | List commands |
 
 ## Error Handling
@@ -58,7 +61,7 @@ import { ContextError } from "../../lib/errors.js";
 if (!resolved) {
   throw new ContextError(
     "Organization",                           // What is required
-    "sentry org get <org-slug>",             // Primary usage
+    "sentry org view <org-slug>",            // Primary usage
     ["Set SENTRY_DSN for auto-detection"]    // Alternatives
   );
 }
@@ -70,7 +73,7 @@ This produces:
 Organization is required.
 
 Specify it using:
-  sentry org get <org-slug>
+  sentry org view <org-slug>
 
 Or:
   - Set SENTRY_DSN for auto-detection
@@ -78,11 +81,12 @@ Or:
 
 ## Adding New Commands
 
-1. **Choose the right pattern**: list (flags only) or get (optional positional)
+1. **Choose the right pattern**: list (flags only) or view (optional positional)
 2. **Use existing utilities**: `resolveOrg()`, `resolveOrgAndProject()` from `lib/resolve-target.ts`
 3. **Support JSON output**: All commands should have `--json` flag
-4. **Use ContextError**: For missing context errors, use `ContextError` class
-5. **Add tests**: E2E tests in `test/e2e/` directory
+4. **Support browser viewing**: View commands should have `-w`/`--web` flag
+5. **Use ContextError**: For missing context errors, use `ContextError` class
+6. **Add tests**: E2E tests in `test/e2e/` directory
 
 ## Code Style
 

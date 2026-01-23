@@ -21,9 +21,20 @@ export {
   SolutionArtifactSchema,
   TERMINAL_STATUSES,
 } from "./autofix.js";
-export type { CachedProject, SentryConfig } from "./config.js";
 // Configuration types
-export { SentryConfigSchema } from "./config.js";
+export type {
+  CachedProject,
+  ProjectAliasEntry,
+  ProjectAliases,
+  SentryConfig,
+} from "./config.js";
+export {
+  ProjectAliasEntrySchema,
+  ProjectAliasesSchema,
+  SentryConfigSchema,
+} from "./config.js";
+
+// OAuth types and schemas
 export type {
   DeviceCodeResponse,
   TokenErrorResponse,
@@ -36,21 +47,61 @@ export {
   TokenResponseSchema,
 } from "./oauth.js";
 export type {
+  // Breadcrumb types
+  Breadcrumb,
+  BreadcrumbsEntry,
+  // Context types
+  BrowserContext,
+  DeviceContext,
+  // Stack trace types
+  ExceptionEntry,
+  ExceptionValue,
+  // Issue types
   IssueLevel,
+  IssuePriority,
   IssueStatus,
+  IssueSubstatus,
+  Mechanism,
+  OsContext,
+  Release,
+  // Request types
+  RequestEntry,
+  // Event types
   SentryEvent,
   SentryIssue,
+  // Organization & Project
   SentryOrganization,
   SentryProject,
+  StackFrame,
+  Stacktrace,
+  TraceContext,
+  UserGeo,
 } from "./sentry.js";
 // Sentry API types and schemas
 export {
+  // Schemas
+  BreadcrumbSchema,
+  BreadcrumbsEntrySchema,
+  BrowserContextSchema,
+  DeviceContextSchema,
+  ExceptionEntrySchema,
+  ExceptionValueSchema,
+  // Constants
   ISSUE_LEVELS,
+  ISSUE_PRIORITIES,
   ISSUE_STATUSES,
+  MechanismSchema,
+  OsContextSchema,
+  ReleaseSchema,
+  RequestEntrySchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  StackFrameSchema,
+  StacktraceSchema,
+  TraceContextSchema,
+  UserGeoSchema,
 } from "./sentry.js";
 
 // I/O types

@@ -168,3 +168,44 @@ export function inferPackagePath(sourcePath: string): string | undefined {
 
   return;
 }
+
+/**
+ * Create a fingerprint from detected DSNs for cache validation.
+ *
+ * The fingerprint uniquely identifies the set of projects detected in a workspace.
+ * Aliases cached with one fingerprint are only valid when the same DSNs are detected.
+ *
+ * For DSNs with orgId (SaaS pattern): uses "orgId:projectId"
+ * For DSNs without orgId (self-hosted or non-standard): uses "host:projectId"
+ *
+ * @param dsns - Array of detected DSNs
+ * @returns Fingerprint string (sorted comma-separated identifier pairs)
+ *
+ * @example
+ * // SaaS DSNs with orgId
+ * createDsnFingerprint([
+ *   { orgId: "123", projectId: "456", host: "o123.ingest.sentry.io", ... },
+ *   { orgId: "123", projectId: "789", host: "o123.ingest.sentry.io", ... }
+ * ])
+ * // Returns: "123:456,123:789"
+ *
+ * @example
+ * // Self-hosted DSN without orgId
+ * createDsnFingerprint([
+ *   { projectId: "1", host: "sentry.mycompany.com", ... }
+ * ])
+ * // Returns: "sentry.mycompany.com:1"
+ */
+export function createDsnFingerprint(dsns: DetectedDsn[]): string {
+  const keys = dsns
+    .filter((d) => d.projectId)
+    .map((d) => {
+      // Use orgId if available (SaaS pattern), otherwise use host (self-hosted)
+      const prefix = d.orgId ?? d.host;
+      return `${prefix}:${d.projectId}`;
+    })
+    .sort();
+
+  // Deduplicate (same DSN might be detected from multiple sources)
+  return [...new Set(keys)].join(",");
+}

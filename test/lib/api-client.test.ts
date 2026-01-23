@@ -6,10 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { listOrganizations } from "../../src/lib/api-client.js";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test config directory
 let testConfigDir: string;
@@ -26,12 +25,8 @@ type RequestLog = {
 };
 
 beforeEach(async () => {
-  testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
-    `test-api-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  testConfigDir = await createTestConfigDir("test-api-");
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
   // Set required env var for OAuth refresh
   process.env.SENTRY_CLIENT_ID = "test-client-id";
@@ -43,15 +38,11 @@ beforeEach(async () => {
   await setAuthToken("initial-token", 3600, "test-refresh-token");
 });
 
-afterEach(() => {
+afterEach(async () => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
 
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("401 retry behavior", () => {

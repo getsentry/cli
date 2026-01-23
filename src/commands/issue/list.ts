@@ -7,10 +7,17 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import {
+  findCommonWordPrefix,
+  findShortestUniquePrefixes,
+} from "../../lib/alias.js";
 import { listIssues } from "../../lib/api-client.js";
+import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
+import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,
+  type FormatShortIdOptions,
   formatIssueListHeader,
   formatIssueRow,
   muted,
@@ -20,7 +27,11 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
-import type { SentryIssue, Writer } from "../../types/index.js";
+import type {
+  ProjectAliasEntry,
+  SentryIssue,
+  Writer,
+} from "../../types/index.js";
 
 type ListFlags = {
   readonly org?: string;
@@ -56,26 +67,51 @@ function writeListHeader(stdout: Writer, title: string): void {
   stdout.write(`${divider(80)}\n`);
 }
 
+/** Issue with formatting options attached */
+type IssueWithOptions = {
+  issue: SentryIssue;
+  formatOptions: FormatShortIdOptions;
+};
+
 /**
  * Write formatted issue rows to stdout.
  */
 function writeIssueRows(
   stdout: Writer,
-  issues: SentryIssue[],
+  issues: IssueWithOptions[],
   termWidth: number
 ): void {
-  for (const issue of issues) {
-    stdout.write(`${formatIssueRow(issue, termWidth)}\n`);
+  for (const { issue, formatOptions } of issues) {
+    stdout.write(`${formatIssueRow(issue, termWidth, formatOptions)}\n`);
   }
 }
 
 /**
  * Write footer with usage tip.
+ *
+ * @param stdout - Output writer
+ * @param mode - Display mode: 'single' (one project), 'multi' (multiple projects), or 'none'
  */
-function writeListFooter(stdout: Writer): void {
-  stdout.write(
-    "\nTip: Use 'sentry issue get <SHORT_ID>' to view issue details.\n"
-  );
+function writeListFooter(
+  stdout: Writer,
+  mode: "single" | "multi" | "none"
+): void {
+  switch (mode) {
+    case "single":
+      stdout.write(
+        "\nTip: Use 'sentry issue get <ID>' to view details (bold part works as shorthand).\n"
+      );
+      break;
+    case "multi":
+      stdout.write(
+        "\nTip: Use 'sentry issue get <alias-suffix>' to view details (e.g., 'f-g').\n"
+      );
+      break;
+    default:
+      stdout.write(
+        "\nTip: Use 'sentry issue get <SHORT_ID>' to view issue details.\n"
+      );
+  }
 }
 
 /** Issue list with target context */
@@ -83,6 +119,87 @@ type IssueListResult = {
   target: ResolvedTarget;
   issues: SentryIssue[];
 };
+
+/** Result of building project aliases */
+type AliasMapResult = {
+  aliasMap: Map<string, string>;
+  entries: Record<string, ProjectAliasEntry>;
+  /** Common prefix that was stripped from project slugs */
+  strippedPrefix: string;
+};
+
+/**
+ * Build project alias map using shortest unique prefix of project slug.
+ * Strips common word prefix before computing unique prefixes for cleaner aliases.
+ *
+ * Example: spotlight-electron, spotlight-website, spotlight → e, w, s
+ * Example: frontend, functions, backend → fr, fu, b
+ */
+function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
+  const aliasMap = new Map<string, string>();
+  const entries: Record<string, ProjectAliasEntry> = {};
+
+  // Get all project slugs
+  const projectSlugs = results.map((r) => r.target.project);
+
+  // Strip common word prefix for cleaner aliases
+  const strippedPrefix = findCommonWordPrefix(projectSlugs);
+
+  // Create remainders after stripping common prefix
+  // If stripping leaves empty string, use the original slug
+  const slugToRemainder = new Map<string, string>();
+  for (const slug of projectSlugs) {
+    const remainder = slug.slice(strippedPrefix.length);
+    slugToRemainder.set(slug, remainder || slug);
+  }
+
+  // Find shortest unique prefix for each remainder
+  const remainders = [...slugToRemainder.values()];
+  const prefixes = findShortestUniquePrefixes(remainders);
+
+  for (const result of results) {
+    const projectSlug = result.target.project;
+    const remainder = slugToRemainder.get(projectSlug) ?? projectSlug;
+    const alias = prefixes.get(remainder) ?? remainder.charAt(0).toLowerCase();
+
+    const key = `${result.target.org}:${projectSlug}`;
+    aliasMap.set(key, alias);
+    entries[alias] = {
+      orgSlug: result.target.org,
+      projectSlug,
+    };
+  }
+
+  return { aliasMap, entries, strippedPrefix };
+}
+
+/**
+ * Attach formatting options to each issue based on alias map.
+ */
+function attachFormatOptions(
+  results: IssueListResult[],
+  aliasMap: Map<string, string>,
+  strippedPrefix: string
+): IssueWithOptions[] {
+  return results.flatMap((result) =>
+    result.issues.map((issue) => {
+      const key = `${result.target.org}:${result.target.project}`;
+      const alias = aliasMap.get(key);
+      // Only pass strippedPrefix if this project actually has that prefix
+      // (e.g., "spotlight" doesn't have "spotlight-" prefix, but "spotlight-electron" does)
+      const hasPrefix =
+        strippedPrefix && result.target.project.startsWith(strippedPrefix);
+      return {
+        issue,
+        formatOptions: {
+          projectSlug: result.target.project,
+          projectAlias: alias,
+          strippedPrefix: hasPrefix ? strippedPrefix : undefined,
+        },
+      };
+    })
+  );
+}
 
 /**
  * Compare two optional date strings (most recent first).
@@ -191,24 +308,26 @@ export const listCommand = buildCommand({
       },
     },
   },
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
     const { stdout, cwd } = this;
 
     // Resolve targets (may find multiple in monorepos)
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      org: flags.org,
-      project: flags.project,
-      cwd,
-      usageHint: USAGE_HINT,
-    });
+    const { targets, footer, skippedSelfHosted, detectedDsns } =
+      await resolveAllTargets({
+        org: flags.org,
+        project: flags.project,
+        cwd,
+        usageHint: USAGE_HINT,
+      });
 
     if (targets.length === 0) {
       if (skippedSelfHosted) {
         throw new ContextError(
           "Organization and project",
           `${USAGE_HINT}\n\n` +
-            `Note: Found ${skippedSelfHosted} self-hosted DSN(s) that cannot be resolved automatically.\n` +
-            "Self-hosted Sentry instances require explicit --org and --project flags."
+            `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
+            "You may not have access to these projects, or you can specify --org and --project explicitly."
         );
       }
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -237,17 +356,47 @@ export const listCommand = buildCommand({
       );
     }
 
-    // Merge all issues from all projects and sort by user preference
-    const allIssues = validResults.flatMap((r) => r.issues);
-    allIssues.sort(getComparator(flags.sort));
+    // Determine display mode
+    const isMultiProject = validResults.length > 1;
+    const isSingleProject = validResults.length === 1;
+    const firstTarget = validResults[0]?.target;
+
+    // Build project alias map and cache it for multi-project mode
+    const { aliasMap, entries, strippedPrefix } = isMultiProject
+      ? buildProjectAliasMap(validResults)
+      : {
+          aliasMap: new Map<string, string>(),
+          entries: {},
+          strippedPrefix: "",
+        };
+
+    if (isMultiProject) {
+      const fingerprint = createDsnFingerprint(detectedDsns ?? []);
+      await setProjectAliases(entries, fingerprint);
+    } else {
+      await clearProjectAliases();
+    }
+
+    // Attach formatting options to each issue
+    const issuesWithOptions = attachFormatOptions(
+      validResults,
+      aliasMap,
+      strippedPrefix
+    );
+
+    // Sort by user preference
+    issuesWithOptions.sort((a, b) =>
+      getComparator(flags.sort)(a.issue, b.issue)
+    );
 
     // JSON output
     if (flags.json) {
+      const allIssues = issuesWithOptions.map((i) => i.issue);
       writeJson(stdout, allIssues);
       return;
     }
 
-    if (allIssues.length === 0) {
+    if (issuesWithOptions.length === 0) {
       stdout.write("No issues found.\n");
       if (footer) {
         stdout.write(`\n${footer}\n`);
@@ -256,17 +405,24 @@ export const listCommand = buildCommand({
     }
 
     // Header depends on single vs multiple projects
-    const firstTarget = validResults[0]?.target;
     const title =
-      validResults.length === 1 && firstTarget
+      isSingleProject && firstTarget
         ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
         : `Issues from ${validResults.length} projects`;
 
     writeListHeader(stdout, title);
 
     const termWidth = process.stdout.columns || 80;
-    writeIssueRows(stdout, allIssues, termWidth);
-    writeListFooter(stdout);
+    writeIssueRows(stdout, issuesWithOptions, termWidth);
+
+    // Footer mode
+    let footerMode: "single" | "multi" | "none" = "none";
+    if (isMultiProject) {
+      footerMode = "multi";
+    } else if (isSingleProject) {
+      footerMode = "single";
+    }
+    writeListFooter(stdout, footerMode);
 
     if (footer) {
       stdout.write(`\n${footer}\n`);

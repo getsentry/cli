@@ -1,21 +1,24 @@
 /**
- * sentry event get
+ * sentry event view
  *
- * Get detailed information about a Sentry event.
+ * View detailed information about a Sentry event.
  */
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getEvent } from "../../lib/api-client.js";
+import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
 
-type GetFlags = {
+type ViewFlags = {
   readonly org?: string;
   readonly project?: string;
   readonly json: boolean;
+  readonly web: boolean;
 };
 
 /**
@@ -41,11 +44,11 @@ function writeHumanOutput(
   }
 }
 
-export const getCommand = buildCommand({
+export const viewCommand = buildCommand({
   docs: {
-    brief: "Get details of a specific event",
+    brief: "View details of a specific event",
     fullDescription:
-      "Retrieve detailed information about a Sentry event by its ID.\n\n" +
+      "View detailed information about a Sentry event by its ID.\n\n" +
       "The organization and project are resolved from:\n" +
       "  1. --org and --project flags\n" +
       "  2. Config defaults\n" +
@@ -80,11 +83,17 @@ export const getCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
     },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
-    flags: GetFlags,
+    flags: ViewFlags,
     eventId: string
   ): Promise<void> {
     const { stdout, cwd } = this;
@@ -93,14 +102,23 @@ export const getCommand = buildCommand({
       org: flags.org,
       project: flags.project,
       cwd,
-      usageHint: `sentry event get ${eventId} --org <org> --project <project>`,
+      usageHint: `sentry event view ${eventId} --org <org> --project <project>`,
     });
 
     if (!target) {
       throw new ContextError(
         "Organization and project",
-        `sentry event get ${eventId} --org <org-slug> --project <project-slug>`
+        `sentry event view ${eventId} --org <org-slug> --project <project-slug>`
       );
+    }
+
+    if (flags.web) {
+      await openInBrowser(
+        stdout,
+        buildEventSearchUrl(target.org, eventId),
+        "event"
+      );
+      return;
     }
 
     const event = await getEvent(target.org, target.project, eventId);

@@ -1,13 +1,14 @@
 /**
- * sentry project get
+ * sentry project view
  *
- * Get detailed information about Sentry projects.
+ * View detailed information about Sentry projects.
  * Supports monorepos with multiple detected projects.
  */
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getProject } from "../../lib/api-client.js";
+import { openInBrowser } from "../../lib/browser.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,
@@ -19,12 +20,56 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
+import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import type { SentryProject } from "../../types/index.js";
 
-type GetFlags = {
+type ViewFlags = {
   readonly org?: string;
   readonly json: boolean;
+  readonly web: boolean;
 };
+
+/**
+ * Build an error message for missing context, with optional DSN resolution hint.
+ */
+function buildContextError(skippedSelfHosted?: number): ContextError {
+  const usageHint = "sentry project view <project-slug> --org <org-slug>";
+
+  if (skippedSelfHosted) {
+    return new ContextError(
+      "Organization and project",
+      `${usageHint}\n\n` +
+        `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
+        "You may not have access to these projects, or you can specify --org and --project explicitly."
+    );
+  }
+
+  return new ContextError("Organization and project", usageHint);
+}
+
+/**
+ * Handle --web flag: open a single project in browser.
+ * Throws if multiple targets are found.
+ */
+async function handleWebView(
+  stdout: { write: (s: string) => void },
+  resolvedTargets: ResolvedTarget[]
+): Promise<void> {
+  if (resolvedTargets.length > 1) {
+    throw new ContextError(
+      "Single project",
+      "sentry project view <project-slug> --org <org-slug> -w\n\n" +
+        `Found ${resolvedTargets.length} projects. Specify which project to open in browser.`
+    );
+  }
+
+  const target = resolvedTargets[0];
+  await openInBrowser(
+    stdout,
+    target ? buildProjectUrl(target.org, target.project) : undefined,
+    "project"
+  );
+}
 
 /**
  * Fetch project details for a single target.
@@ -103,11 +148,11 @@ function writeMultipleProjects(
   }
 }
 
-export const getCommand = buildCommand({
+export const viewCommand = buildCommand({
   docs: {
-    brief: "Get details of a project",
+    brief: "View details of a project",
     fullDescription:
-      "Retrieve detailed information about Sentry projects.\n\n" +
+      "View detailed information about Sentry projects.\n\n" +
       "The organization and project are resolved from:\n" +
       "  1. Positional argument <project-slug> and --org flag\n" +
       "  2. Config defaults\n" +
@@ -137,11 +182,17 @@ export const getCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
     },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
-    flags: GetFlags,
+    flags: ViewFlags,
     projectSlug?: string
   ): Promise<void> {
     const { stdout, cwd } = this;
@@ -155,33 +206,23 @@ export const getCommand = buildCommand({
       org: flags.org,
       project: projectSlug,
       cwd,
-      usageHint: "sentry project get <project-slug> --org <org-slug>",
+      usageHint: "sentry project view <project-slug> --org <org-slug>",
     });
 
     if (resolvedTargets.length === 0) {
-      // Provide more helpful error if self-hosted DSNs were detected but couldn't be resolved
-      if (skippedSelfHosted) {
-        throw new ContextError(
-          "Organization and project",
-          "sentry project get <project-slug> --org <org-slug>\n\n" +
-            `Note: Found ${skippedSelfHosted} self-hosted DSN(s) that cannot be resolved automatically.\n` +
-            "Self-hosted Sentry instances require explicit --org and --project flags."
-        );
-      }
-      throw new ContextError(
-        "Organization and project",
-        "sentry project get <project-slug> --org <org-slug>"
-      );
+      throw buildContextError(skippedSelfHosted);
+    }
+
+    if (flags.web) {
+      await handleWebView(stdout, resolvedTargets);
+      return;
     }
 
     // Fetch project details for all targets in parallel
     const { projects, targets } = await fetchAllProjectDetails(resolvedTargets);
 
     if (projects.length === 0) {
-      throw new ContextError(
-        "Organization and project",
-        "sentry project get <project-slug> --org <org-slug>"
-      );
+      throw buildContextError();
     }
 
     // JSON output - array if multiple, single object if one

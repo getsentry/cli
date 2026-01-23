@@ -6,13 +6,27 @@
  */
 
 import type {
+  Breadcrumb,
+  BreadcrumbsEntry,
+  ExceptionEntry,
+  ExceptionValue,
   IssueStatus,
+  RequestEntry,
   SentryEvent,
   SentryIssue,
   SentryOrganization,
   SentryProject,
+  StackFrame,
 } from "../../types/index.js";
-import { green, levelColor, muted, statusColor, yellow } from "./colors.js";
+import {
+  boldUnderline,
+  green,
+  levelColor,
+  muted,
+  red,
+  statusColor,
+  yellow,
+} from "./colors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status Formatting
@@ -32,6 +46,55 @@ const STATUS_LABELS: Record<IssueStatus, string> = {
 
 /** Maximum features to display before truncating with "... and N more" */
 const MAX_DISPLAY_FEATURES = 10;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// String Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Capitalize the first letter of a string
+ */
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Entry Extraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Map of entry type strings to their TypeScript types */
+type EntryTypeMap = {
+  exception: ExceptionEntry;
+  breadcrumbs: BreadcrumbsEntry;
+  request: RequestEntry;
+};
+
+/**
+ * Extract a typed entry from event entries by type
+ * @returns The entry if found, null otherwise
+ */
+function extractEntry<T extends keyof EntryTypeMap>(
+  event: SentryEvent,
+  type: T
+): EntryTypeMap[T] | null {
+  if (!event.entries) {
+    return null;
+  }
+  for (const entry of event.entries) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "type" in entry &&
+      entry.type === type
+    ) {
+      return entry as EntryTypeMap[T];
+    }
+  }
+  return null;
+}
+
+/** Regex to extract base URL from a permalink */
+const BASE_URL_REGEX = /^(https?:\/\/[^/]+)/;
 
 /**
  * Format a features array for display, truncating if necessary.
@@ -268,16 +331,111 @@ function wrapTitle(text: string, startCol: number, termWidth: number): string {
 }
 
 /**
+ * Options for formatting short IDs with alias highlighting.
+ */
+export type FormatShortIdOptions = {
+  /** Project slug to determine the prefix for suffix highlighting */
+  projectSlug?: string;
+  /** Project alias (e.g., "e", "w", "s") for multi-project display */
+  projectAlias?: string;
+  /** Common prefix that was stripped to compute the alias (e.g., "spotlight-") */
+  strippedPrefix?: string;
+};
+
+/**
+ * Format a short ID with the unique suffix highlighted with underline.
+ *
+ * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
+ * Multi-project mode: "SPOTLIGHT-WEBSITE-2A" with alias "w" and strippedPrefix "spotlight-"
+ *   → "SPOTLIGHT-_W_EBSITE-_2A_" (alias char in remainder and suffix underlined)
+ *
+ * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
+ * @param options - Formatting options (projectSlug, projectAlias, strippedPrefix)
+ * @returns Formatted short ID with underline highlights
+ */
+export function formatShortId(
+  shortId: string,
+  options?: FormatShortIdOptions | string
+): string {
+  // Handle legacy string parameter (projectSlug only)
+  const opts: FormatShortIdOptions =
+    typeof options === "string" ? { projectSlug: options } : (options ?? {});
+
+  const { projectSlug, projectAlias, strippedPrefix } = opts;
+
+  // Extract suffix from shortId (the part after PROJECT-)
+  const upperShortId = shortId.toUpperCase();
+  let suffix = shortId;
+  if (projectSlug) {
+    const prefix = `${projectSlug.toUpperCase()}-`;
+    if (upperShortId.startsWith(prefix)) {
+      suffix = shortId.slice(prefix.length);
+    }
+  }
+
+  // Multi-project mode: highlight alias position and suffix
+  if (projectAlias && projectSlug) {
+    const upperSlug = projectSlug.toUpperCase();
+    const aliasLen = projectAlias.length;
+
+    // Find where the alias corresponds to in the project slug
+    // If strippedPrefix exists, the alias is from the remainder after stripping
+    const strippedLen = strippedPrefix?.length ?? 0;
+    const aliasStartInSlug = Math.min(strippedLen, upperSlug.length);
+
+    // Build the formatted output: PROJECT-SLUG with alias part underlined, then -SUFFIX underlined
+    // e.g., "SPOTLIGHT-WEBSITE" with alias "w", strippedPrefix "spotlight-"
+    //   → aliasStartInSlug = 10, so we underline chars 10-11 (the "W")
+    const beforeAlias = upperSlug.slice(0, aliasStartInSlug);
+    const aliasChars = upperSlug.slice(
+      aliasStartInSlug,
+      aliasStartInSlug + aliasLen
+    );
+    const afterAlias = upperSlug.slice(aliasStartInSlug + aliasLen);
+
+    return `${beforeAlias}${boldUnderline(aliasChars)}${afterAlias}-${boldUnderline(suffix.toUpperCase())}`;
+  }
+
+  // Single project mode: show full shortId with suffix highlighted
+  if (projectSlug) {
+    const prefix = `${projectSlug.toUpperCase()}-`;
+    if (upperShortId.startsWith(prefix)) {
+      return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
+    }
+  }
+
+  return shortId.toUpperCase();
+}
+
+/**
+ * Calculate the raw display length of a formatted short ID (without ANSI codes).
+ * In all modes, we display the full shortId (just with different styling).
+ */
+function getShortIdDisplayLength(shortId: string): number {
+  return shortId.length;
+}
+
+/**
  * Format a single issue for list display.
  * Wraps long titles with proper indentation.
  *
  * @param issue - Issue to format
  * @param termWidth - Terminal width for wrapping (default 80)
+ * @param shortIdOptions - Options for formatting the short ID (projectSlug and/or projectAlias)
  */
-export function formatIssueRow(issue: SentryIssue, termWidth = 80): string {
+export function formatIssueRow(
+  issue: SentryIssue,
+  termWidth = 80,
+  shortIdOptions?: FormatShortIdOptions | string
+): string {
   const levelText = (issue.level ?? "unknown").toUpperCase().padEnd(COL_LEVEL);
   const level = levelColor(levelText, issue.level);
-  const shortId = issue.shortId.padEnd(COL_SHORT_ID);
+  const formattedShortId = formatShortId(issue.shortId, shortIdOptions);
+
+  // Calculate raw display length (without ANSI codes) for padding
+  const rawLen = getShortIdDisplayLength(issue.shortId);
+  const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
+  const shortId = `${formattedShortId}${shortIdPadding}`;
   const count = `${issue.count}`.padStart(COL_COUNT);
   const seen = formatRelativeTime(issue.lastSeen);
   const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
@@ -288,6 +446,7 @@ export function formatIssueRow(issue: SentryIssue, termWidth = 80): string {
 /**
  * Format detailed issue information
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: issue formatting logic
 export function formatIssueDetails(issue: SentryIssue): string[] {
   const lines: string[] = [];
 
@@ -300,27 +459,76 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
   );
   lines.push("");
 
-  // Status and level
-  lines.push(`Status:     ${formatStatusLabel(issue.status)}`);
-  lines.push(`Level:      ${issue.level ?? "unknown"}`);
-  lines.push(`Platform:   ${issue.platform}`);
-  lines.push(`Type:       ${issue.type}`);
+  // Status with substatus
+  let statusLine = formatStatusLabel(issue.status);
+  if (issue.substatus) {
+    statusLine += ` (${capitalize(issue.substatus)})`;
+  }
+  lines.push(`Status:     ${statusLine}`);
+
+  // Priority
+  if (issue.priority) {
+    lines.push(`Priority:   ${capitalize(issue.priority)}`);
+  }
+
+  // Level with unhandled indicator
+  let levelLine = issue.level ?? "unknown";
+  if (issue.isUnhandled) {
+    levelLine += " (unhandled)";
+  }
+  lines.push(`Level:      ${levelLine}`);
+
+  lines.push(`Platform:   ${issue.platform ?? "unknown"}`);
+  lines.push(`Type:       ${issue.type ?? "unknown"}`);
+
+  // Assignee (show early, it's important)
+  const assigneeName = issue.assignedTo?.name ?? "Unassigned";
+  lines.push(`Assignee:   ${assigneeName}`);
   lines.push("");
 
   // Project
   if (issue.project) {
     lines.push(`Project:    ${issue.project.name} (${issue.project.slug})`);
-    lines.push("");
   }
 
+  // Releases
+  const firstReleaseVersion = issue.firstRelease?.shortVersion;
+  const lastReleaseVersion = issue.lastRelease?.shortVersion;
+  if (firstReleaseVersion || lastReleaseVersion) {
+    if (firstReleaseVersion && lastReleaseVersion) {
+      if (firstReleaseVersion === lastReleaseVersion) {
+        lines.push(`Release:    ${firstReleaseVersion}`);
+      } else {
+        lines.push(
+          `Releases:   ${firstReleaseVersion} → ${lastReleaseVersion}`
+        );
+      }
+    } else if (lastReleaseVersion) {
+      lines.push(`Release:    ${lastReleaseVersion}`);
+    } else if (firstReleaseVersion) {
+      lines.push(`Release:    ${firstReleaseVersion}`);
+    }
+  }
+  lines.push("");
+
   // Stats
-  lines.push(`Events:     ${issue.count}`);
-  lines.push(`Users:      ${issue.userCount}`);
+  lines.push(`Events:     ${issue.count ?? 0}`);
+  lines.push(`Users:      ${issue.userCount ?? 0}`);
+
+  // First/Last seen with release info
   if (issue.firstSeen) {
-    lines.push(`First seen: ${new Date(issue.firstSeen).toLocaleString()}`);
+    let firstSeenLine = `First seen: ${new Date(issue.firstSeen).toLocaleString()}`;
+    if (firstReleaseVersion) {
+      firstSeenLine += ` (in ${firstReleaseVersion})`;
+    }
+    lines.push(firstSeenLine);
   }
   if (issue.lastSeen) {
-    lines.push(`Last seen:  ${new Date(issue.lastSeen).toLocaleString()}`);
+    let lastSeenLine = `Last seen:  ${new Date(issue.lastSeen).toLocaleString()}`;
+    if (lastReleaseVersion && lastReleaseVersion !== firstReleaseVersion) {
+      lastSeenLine += ` (in ${lastReleaseVersion})`;
+    }
+    lines.push(lastSeenLine);
   }
   lines.push("");
 
@@ -344,15 +552,354 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
     lines.push(`Function:   ${issue.metadata.function}`);
   }
 
-  // Assignee
-  if (issue.assignedTo) {
-    lines.push("");
-    lines.push(`Assigned:   ${issue.assignedTo.name}`);
-  }
-
   // Link
   lines.push("");
   lines.push(`Link:       ${issue.permalink}`);
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stack Trace Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format a single stack frame
+ */
+function formatStackFrame(frame: StackFrame): string[] {
+  const lines: string[] = [];
+  const fn = frame.function || "<anonymous>";
+  const file = frame.filename || frame.absPath || "<unknown>";
+  const line = frame.lineNo ?? "?";
+  const col = frame.colNo ?? "?";
+  const inAppTag = frame.inApp ? " [in-app]" : "";
+
+  lines.push(`  at ${fn} (${file}:${line}:${col})${inAppTag}`);
+
+  // Show code context if available
+  if (frame.context && frame.context.length > 0) {
+    for (const [lineNo, code] of frame.context) {
+      const isCurrentLine = lineNo === frame.lineNo;
+      const prefix = isCurrentLine ? ">" : " ";
+      const lineNumStr = String(lineNo).padStart(6);
+      const codeLine = `     ${prefix} ${lineNumStr} | ${code}`;
+      lines.push(isCurrentLine ? yellow(codeLine) : muted(codeLine));
+    }
+    lines.push(""); // blank line after context
+  }
+
+  return lines;
+}
+
+/**
+ * Format an exception value (type, message, stack trace)
+ */
+function formatExceptionValue(exception: ExceptionValue): string[] {
+  const lines: string[] = [];
+
+  // Exception type and message
+  const type = exception.type || "Error";
+  const value = exception.value || "";
+  lines.push(red(`${type}: ${value}`));
+
+  // Mechanism info
+  if (exception.mechanism) {
+    const handled = exception.mechanism.handled ? "handled" : "unhandled";
+    const mechType = exception.mechanism.type || "unknown";
+    lines.push(muted(`  mechanism: ${mechType} (${handled})`));
+  }
+  lines.push("");
+
+  // Stack trace frames (reversed - most recent first, which is last in array)
+  const frames = exception.stacktrace?.frames ?? [];
+  // Reverse frames so most recent is first (stack traces are usually bottom-up)
+  const reversedFrames = [...frames].reverse();
+  for (const frame of reversedFrames) {
+    lines.push(...formatStackFrame(frame));
+  }
+
+  return lines;
+}
+
+/**
+ * Format the full stack trace section
+ */
+function formatStackTrace(exceptionEntry: ExceptionEntry): string[] {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(muted("─── Stack Trace ───"));
+  lines.push("");
+
+  const values = exceptionEntry.data.values ?? [];
+  // Usually there's one exception, but there can be chained exceptions
+  for (const exception of values) {
+    lines.push(...formatExceptionValue(exception));
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Breadcrumbs Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format breadcrumb level with color
+ */
+function formatBreadcrumbLevel(level: string | undefined): string {
+  const lvl = (level || "info").padEnd(7);
+  switch (level) {
+    case "error":
+      return red(lvl);
+    case "warning":
+      return yellow(lvl);
+    case "debug":
+      return muted(lvl);
+    default:
+      return muted(lvl);
+  }
+}
+
+/**
+ * Format a single breadcrumb
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: breadcrumb formatting logic
+function formatBreadcrumb(breadcrumb: Breadcrumb): string {
+  const timestamp = breadcrumb.timestamp
+    ? new Date(breadcrumb.timestamp).toLocaleTimeString()
+    : "??:??:??";
+  const level = formatBreadcrumbLevel(breadcrumb.level);
+  const category = (breadcrumb.category || "default").padEnd(18);
+
+  // Build message from breadcrumb data
+  let message = breadcrumb.message || "";
+  if (!message && breadcrumb.data) {
+    // Format common breadcrumb types
+    const data = breadcrumb.data as Record<string, unknown>;
+    if (data.url && data.method) {
+      // HTTP request breadcrumb
+      const status = data.status_code ? ` → ${data.status_code}` : "";
+      message = `${data.method} ${data.url}${status}`;
+    } else if (data.from && data.to) {
+      // Navigation breadcrumb
+      message = `${data.from} → ${data.to}`;
+    } else if (data.arguments && Array.isArray(data.arguments)) {
+      // Console breadcrumb
+      message = String(data.arguments[0] || "").slice(0, 60);
+    }
+  }
+
+  // Truncate long messages
+  if (message.length > 60) {
+    message = `${message.slice(0, 57)}...`;
+  }
+
+  return `  ${timestamp}  ${level}  ${category}  ${message}`;
+}
+
+/**
+ * Format the breadcrumbs section
+ */
+function formatBreadcrumbs(breadcrumbsEntry: BreadcrumbsEntry): string[] {
+  const lines: string[] = [];
+  const breadcrumbs = breadcrumbsEntry.data.values ?? [];
+
+  if (breadcrumbs.length === 0) {
+    return lines;
+  }
+
+  lines.push("");
+  lines.push(muted("─── Breadcrumbs ───"));
+  lines.push("");
+
+  // Show all breadcrumbs, oldest first (they're usually already in order)
+  for (const breadcrumb of breadcrumbs) {
+    lines.push(formatBreadcrumb(breadcrumb));
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Request Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format the HTTP request section
+ */
+function formatRequest(requestEntry: RequestEntry): string[] {
+  const lines: string[] = [];
+  const data = requestEntry.data;
+
+  if (!data.url) {
+    return lines;
+  }
+
+  lines.push("");
+  lines.push("Request:");
+  const method = data.method || "GET";
+  lines.push(`  ${method} ${data.url}`);
+
+  // Show User-Agent if available
+  if (data.headers) {
+    for (const [key, value] of data.headers) {
+      if (key.toLowerCase() === "user-agent") {
+        const truncatedUA =
+          value.length > 70 ? `${value.slice(0, 67)}...` : value;
+        lines.push(`  User-Agent: ${truncatedUA}`);
+        break;
+      }
+    }
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Environment Context Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Format the environment contexts (browser, OS, device)
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: context formatting logic
+function formatEnvironmentContexts(event: SentryEvent): string[] {
+  const lines: string[] = [];
+  const contexts = event.contexts;
+
+  if (!contexts) {
+    return lines;
+  }
+
+  const parts: string[] = [];
+
+  // Browser
+  if (contexts.browser) {
+    const name = contexts.browser.name || "Unknown Browser";
+    const version = contexts.browser.version || "";
+    parts.push(`Browser: ${name}${version ? ` ${version}` : ""}`);
+  }
+
+  // OS
+  if (contexts.os) {
+    const name = contexts.os.name || "Unknown OS";
+    const version = contexts.os.version || "";
+    parts.push(`OS: ${name}${version ? ` ${version}` : ""}`);
+  }
+
+  // Device
+  if (contexts.device) {
+    const family = contexts.device.family || contexts.device.model || "";
+    const brand = contexts.device.brand || "";
+    if (family || brand) {
+      const device = brand ? `${family} (${brand})` : family;
+      parts.push(`Device: ${device}`);
+    }
+  }
+
+  if (parts.length > 0) {
+    lines.push("");
+    lines.push("Environment:");
+    for (const part of parts) {
+      lines.push(`  ${part}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Format user information including geo data
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: user formatting logic
+function formatUserInfo(event: SentryEvent): string[] {
+  const lines: string[] = [];
+  const user = event.user;
+
+  if (!user) {
+    return lines;
+  }
+
+  const hasUserData =
+    user.email ||
+    user.username ||
+    user.id ||
+    user.ip_address ||
+    user.name ||
+    user.geo;
+
+  if (!hasUserData) {
+    return lines;
+  }
+
+  lines.push("");
+  lines.push("User:");
+
+  if (user.name) {
+    lines.push(`  Name:     ${user.name}`);
+  }
+  if (user.email) {
+    lines.push(`  Email:    ${user.email}`);
+  }
+  if (user.username) {
+    lines.push(`  Username: ${user.username}`);
+  }
+  if (user.id) {
+    lines.push(`  ID:       ${user.id}`);
+  }
+  if (user.ip_address) {
+    lines.push(`  IP:       ${user.ip_address}`);
+  }
+
+  // Geo information
+  if (user.geo) {
+    const geo = user.geo;
+    const parts: string[] = [];
+    if (geo.city) {
+      parts.push(geo.city);
+    }
+    if (geo.region && geo.region !== geo.city) {
+      parts.push(geo.region);
+    }
+    if (geo.country_code) {
+      parts.push(`(${geo.country_code})`);
+    }
+    if (parts.length > 0) {
+      lines.push(`  Location: ${parts.join(", ")}`);
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Format replay link if available
+ */
+function formatReplayLink(
+  event: SentryEvent,
+  issuePermalink?: string
+): string[] {
+  const lines: string[] = [];
+
+  // Find replayId in tags
+  const replayTag = event.tags?.find((t) => t.key === "replayId");
+  if (!replayTag?.value) {
+    return lines;
+  }
+
+  lines.push("");
+  lines.push(muted("─── Replay ───"));
+  lines.push("");
+  lines.push(`  ID: ${replayTag.value}`);
+
+  // Try to construct replay URL from issue permalink
+  if (issuePermalink) {
+    // Extract base URL from permalink (e.g., https://org.sentry.io/issues/123/)
+    const match = BASE_URL_REGEX.exec(issuePermalink);
+    if (match?.[1]) {
+      lines.push(`  Link: ${match[1]}/replays/${replayTag.value}/`);
+    }
+  }
 
   return lines;
 }
@@ -366,54 +913,81 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
  *
  * @param event - The Sentry event to format
  * @param header - Optional header text (defaults to "Latest Event")
+ * @param issuePermalink - Optional issue permalink for constructing replay links
  * @returns Array of formatted lines
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: formatting logic
 export function formatEventDetails(
   event: SentryEvent,
-  header = "Latest Event"
+  header = "Latest Event",
+  issuePermalink?: string
 ): string[] {
   const lines: string[] = [];
 
+  // Header
   lines.push("");
-  lines.push(muted(`─── ${header} ───`));
+  lines.push(muted(`─── ${header} (${event.eventID.slice(0, 8)}) ───`));
   lines.push("");
+
+  // Basic info
   lines.push(`Event ID:   ${event.eventID}`);
   if (event.dateReceived) {
     lines.push(`Received:   ${new Date(event.dateReceived).toLocaleString()}`);
   }
-
-  if (event.user) {
-    lines.push("");
-    lines.push("User:");
-    if (event.user.email) {
-      lines.push(`  Email:    ${event.user.email}`);
-    }
-    if (event.user.username) {
-      lines.push(`  Username: ${event.user.username}`);
-    }
-    if (event.user.id) {
-      lines.push(`  ID:       ${event.user.id}`);
-    }
-    if (event.user.ip_address) {
-      lines.push(`  IP:       ${event.user.ip_address}`);
-    }
+  if (event.location) {
+    lines.push(`Location:   ${event.location}`);
   }
 
+  // Trace context
+  const traceCtx = event.contexts?.trace;
+  if (traceCtx?.trace_id) {
+    lines.push(`Trace:      ${traceCtx.trace_id}`);
+  }
+
+  // User info (including geo)
+  lines.push(...formatUserInfo(event));
+
+  // Environment contexts (browser, OS, device)
+  lines.push(...formatEnvironmentContexts(event));
+
+  // HTTP Request
+  const requestEntry = extractEntry(event, "request");
+  if (requestEntry) {
+    lines.push(...formatRequest(requestEntry));
+  }
+
+  // SDK info
   if (event.sdk) {
     lines.push("");
     lines.push(`SDK:        ${event.sdk.name} ${event.sdk.version}`);
   }
 
+  // Release info
+  if (event.release?.shortVersion) {
+    lines.push(`Release:    ${event.release.shortVersion}`);
+  }
+
+  // Stack Trace
+  const exceptionEntry = extractEntry(event, "exception");
+  if (exceptionEntry) {
+    lines.push(...formatStackTrace(exceptionEntry));
+  }
+
+  // Breadcrumbs
+  const breadcrumbsEntry = extractEntry(event, "breadcrumbs");
+  if (breadcrumbsEntry) {
+    lines.push(...formatBreadcrumbs(breadcrumbsEntry));
+  }
+
+  // Replay link
+  lines.push(...formatReplayLink(event, issuePermalink));
+
+  // Tags
   if (event.tags?.length) {
     lines.push("");
-    lines.push("Tags:");
-    const maxTags = 10;
-    for (const tag of event.tags.slice(0, maxTags)) {
+    lines.push(muted("─── Tags ───"));
+    lines.push("");
+    for (const tag of event.tags) {
       lines.push(`  ${tag.key}: ${tag.value}`);
-    }
-    if (event.tags.length > maxTags) {
-      lines.push(`  ... and ${event.tags.length - maxTags} more`);
     }
   }
 

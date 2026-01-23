@@ -5,10 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test credentials from environment - these MUST be set
 const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
@@ -21,27 +20,14 @@ if (!TEST_TOKEN) {
 
 // Each test gets its own config directory
 let testConfigDir: string;
-let originalConfigDir: string | undefined;
 
-beforeEach(() => {
-  originalConfigDir = process.env.SENTRY_CLI_CONFIG_DIR;
-  testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR || "/tmp",
-    `e2e-api-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+beforeEach(async () => {
+  testConfigDir = await createTestConfigDir("e2e-api-");
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
-afterEach(() => {
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-  if (originalConfigDir) {
-    process.env.SENTRY_CLI_CONFIG_DIR = originalConfigDir;
-  }
+afterEach(async () => {
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("sentry api", () => {
@@ -50,101 +36,129 @@ describe("sentry api", () => {
 
   test("requires authentication", async () => {
     const result = await runCli(["api", "organizations/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test("GET request works with valid auth", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "GET request works with valid auth",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["api", "organizations/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["api", "organizations/"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    // Should return JSON array of organizations
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
-  });
+      expect(result.exitCode).toBe(0);
+      // Should return JSON array of organizations
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("--include flag shows response headers", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "--include flag shows response headers",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["api", "organizations/", "--include"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["api", "organizations/", "--include"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    // Should include HTTP status and headers before JSON body
-    expect(result.stdout).toMatch(/^HTTP \d{3}/);
-    expect(result.stdout).toMatch(/content-type:/i);
-  });
+      expect(result.exitCode).toBe(0);
+      // Should include HTTP status and headers before JSON body
+      expect(result.stdout).toMatch(/^HTTP \d{3}/);
+      expect(result.stdout).toMatch(/content-type:/i);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("invalid endpoint returns non-zero exit code", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "invalid endpoint returns non-zero exit code",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["api", "nonexistent-endpoint-12345/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["api", "nonexistent-endpoint-12345/"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(1);
-  });
+      expect(result.exitCode).toBe(1);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("--silent flag suppresses output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "--silent flag suppresses output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["api", "organizations/", "--silent"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-    });
+      const result = await runCli(["api", "organizations/", "--silent"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("");
-  });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("");
+    },
+    { timeout: 15_000 }
+  );
 
-  test("--silent with error sets exit code but no output", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "--silent with error sets exit code but no output",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["api", "nonexistent-endpoint-12345/", "--silent"],
-      {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-      }
-    );
+      const result = await runCli(
+        ["api", "nonexistent-endpoint-12345/", "--silent"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe("");
-  });
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe("");
+    },
+    { timeout: 15_000 }
+  );
 
-  test("supports custom HTTP method", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "supports custom HTTP method",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    // DELETE on organizations list should return 405 Method Not Allowed
-    const result = await runCli(
-      ["api", "organizations/", "--method", "DELETE"],
-      {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-      }
-    );
+      // DELETE on organizations list should return 405 Method Not Allowed
+      const result = await runCli(
+        ["api", "organizations/", "--method", "DELETE"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
 
-    // Method not allowed or similar error - just checking it processes the flag
-    expect(result.exitCode).toBe(1);
-  });
+      // Method not allowed or similar error - just checking it processes the flag
+      expect(result.exitCode).toBe(1);
+    },
+    { timeout: 15_000 }
+  );
 
-  test("rejects invalid HTTP method", async () => {
-    await setAuthToken(TEST_TOKEN);
+  test(
+    "rejects invalid HTTP method",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["api", "organizations/", "--method", "INVALID"],
-      {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
-      }
-    );
+      const result = await runCli(
+        ["api", "organizations/", "--method", "INVALID"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
 
-    // Exit code 252 is stricli's parse error code, 1 is a general error
-    expect(result.exitCode).toBeGreaterThan(0);
-    expect(result.stderr + result.stdout).toMatch(/invalid method/i);
-  });
+      // Exit code 252 is stricli's parse error code, 1 is a general error
+      expect(result.exitCode).toBeGreaterThan(0);
+      expect(result.stderr + result.stdout).toMatch(/invalid method/i);
+    },
+    { timeout: 15_000 }
+  );
 });
