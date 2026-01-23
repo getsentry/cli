@@ -134,6 +134,79 @@ export function parseFields(fields: string[]): Record<string, unknown> {
 }
 
 /**
+ * Convert a value to string, JSON-stringifying objects to avoid "[object Object]".
+ * @internal
+ */
+function stringifyValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+/**
+ * Build query parameters from field strings for GET requests.
+ * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
+ * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
+ *
+ * @param fields - Array of "key=value" strings
+ * @returns Record suitable for URLSearchParams
+ * @throws {Error} When field doesn't contain "="
+ * @internal Exported for testing
+ */
+export function buildQueryParams(
+  fields: string[]
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const eqIndex = field.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    }
+
+    const key = field.substring(0, eqIndex);
+    const rawValue = field.substring(eqIndex + 1);
+    const value = parseFieldValue(rawValue);
+
+    // Handle arrays by creating string[] for repeated keys
+    // Use stringifyValue to handle objects (avoid "[object Object]")
+    if (Array.isArray(value)) {
+      result[key] = value.map(stringifyValue);
+    } else {
+      result[key] = stringifyValue(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Prepare request options from command flags.
+ * Routes fields to either query params (GET) or request body (other methods).
+ *
+ * @param method - HTTP method
+ * @param fields - Optional array of "key=value" field strings
+ * @returns Object with body and params, one of which will be undefined
+ * @internal Exported for testing
+ */
+export function prepareRequestOptions(
+  method: HttpMethod,
+  fields?: string[]
+): {
+  body?: Record<string, unknown>;
+  params?: Record<string, string | string[]>;
+} {
+  const hasFields = fields && fields.length > 0;
+  const isBodyMethod = method !== "GET";
+
+  return {
+    body: hasFields && isBodyMethod ? parseFields(fields) : undefined,
+    params: hasFields && !isBodyMethod ? buildQueryParams(fields) : undefined,
+  };
+}
+
+/**
  * Parse header arguments into headers object.
  *
  * @param headers - Array of "Key: Value" strings
@@ -259,10 +332,7 @@ export const apiCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
-    const body =
-      flags.field && flags.field.length > 0
-        ? parseFields(flags.field)
-        : undefined;
+    const { body, params } = prepareRequestOptions(flags.method, flags.field);
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
@@ -271,6 +341,7 @@ export const apiCommand = buildCommand({
     const response = await rawApiRequest(endpoint, {
       method: flags.method,
       body,
+      params,
       headers,
     });
 
