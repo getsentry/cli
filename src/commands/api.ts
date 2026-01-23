@@ -81,13 +81,97 @@ export function parseFieldValue(value: string): unknown {
 /** Keys that could cause prototype pollution if used in nested object assignment */
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+/** Regex to match field key format: baseKey followed by zero or more [bracket] segments */
+const FIELD_KEY_REGEX = /^([^[\]]+)((?:\[[^[\]]*\])*)$/;
+
+/** Regex to extract bracket contents from a field key */
+const BRACKET_CONTENTS_REGEX = /\[([^[\]]*)\]/g;
+
 /**
- * Set a nested value in an object using dot notation key.
- * Creates intermediate objects as needed.
+ * Parse a field key into path segments.
+ * Supports bracket notation: "user[name]" -> ["user", "name"]
+ * Supports array syntax: "tags[]" -> ["tags", ""]
+ * Supports deep nesting: "a[b][c]" -> ["a", "b", "c"]
+ *
+ * @param key - Field key with optional bracket notation
+ * @returns Array of path segments
+ * @throws {Error} When key format is invalid
+ * @internal Exported for testing
+ */
+export function parseFieldKey(key: string): string[] {
+  const match = key.match(FIELD_KEY_REGEX);
+  if (!match?.[1]) {
+    throw new Error(`Invalid field key format: ${key}`);
+  }
+
+  const baseKey = match[1];
+  const brackets = match[2] ?? "";
+
+  // Extract bracket contents: "[name][age]" -> ["name", "age"]
+  // Empty brackets [] result in empty string "" for array push
+  const segments: string[] = brackets
+    ? [...brackets.matchAll(BRACKET_CONTENTS_REGEX)].map((m) => m[1] ?? "")
+    : [];
+
+  return [baseKey, ...segments];
+}
+
+/**
+ * Validate path segments to prevent prototype pollution attacks.
+ * @throws {Error} When a segment is __proto__, constructor, or prototype
+ */
+function validatePathSegments(path: string[]): void {
+  for (const segment of path) {
+    if (DANGEROUS_KEYS.has(segment)) {
+      throw new Error(`Invalid field key: "${segment}" is not allowed`);
+    }
+  }
+}
+
+/**
+ * Navigate/create nested structure to the parent of the target key.
+ * @returns The object/array that will contain the final value
+ */
+function navigateToParent(
+  obj: Record<string, unknown>,
+  path: string[]
+): unknown {
+  let current: unknown = obj;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i] as string; // Safe: loop bounds guarantee index exists
+    const nextSegment = path[i + 1] as string;
+
+    // Empty segment only at end for arrays - skip if encountered mid-path
+    if (segment === "") {
+      continue;
+    }
+
+    const currentObj = current as Record<string, unknown>;
+    if (!Object.hasOwn(currentObj, segment)) {
+      // Create array if next segment is empty (array push syntax), else object
+      currentObj[segment] = nextSegment === "" ? [] : {};
+    }
+    current = currentObj[segment];
+  }
+
+  return current;
+}
+
+/**
+ * Set a nested value in an object using bracket notation key.
+ * Creates intermediate objects or arrays as needed.
+ *
+ * Supports:
+ * - Simple keys: "name" -> { name: value }
+ * - Nested objects: "user[name]" -> { user: { name: value } }
+ * - Deep nesting: "a[b][c]" -> { a: { b: { c: value } } }
+ * - Array push: "tags[]" with value -> { tags: [value] }
+ * - Empty array: "tags[]" with undefined -> { tags: [] }
  *
  * @param obj - Target object to modify
- * @param key - Dot-notation key (e.g., "user.name")
- * @param value - Value to set
+ * @param key - Bracket-notation key (e.g., "user[name]", "tags[]")
+ * @param value - Value to set (undefined for empty array initialization)
  * @throws {Error} When key contains dangerous segments (__proto__, constructor, prototype)
  * @internal Exported for testing
  */
@@ -96,42 +180,29 @@ export function setNestedValue(
   key: string,
   value: unknown
 ): void {
-  const keys = key.split(".");
+  const path = parseFieldKey(key);
+  validatePathSegments(path);
 
-  // Validate all key segments to prevent prototype pollution
-  for (const k of keys) {
-    if (DANGEROUS_KEYS.has(k)) {
-      throw new Error(`Invalid field key: "${k}" is not allowed`);
-    }
-  }
+  const current = navigateToParent(obj, path);
+  const lastSegment = path.at(-1);
 
-  let current = obj;
-
-  for (let i = 0; i < keys.length - 1; i++) {
-    const k = keys[i];
-    if (!k) {
-      continue; // Skip empty segments from consecutive dots
-    }
-    if (!Object.hasOwn(current, k)) {
-      current[k] = {};
-    }
-    current = current[k] as Record<string, unknown>;
-  }
-
-  const lastKey = keys.at(-1);
-  if (lastKey) {
-    current[lastKey] = value;
+  // Array push syntax: key[]=value
+  if (lastSegment === "" && Array.isArray(current) && value !== undefined) {
+    current.push(value);
+  } else if (lastSegment !== undefined && lastSegment !== "") {
+    (current as Record<string, unknown>)[lastSegment] = value;
   }
 }
 
 /**
  * Parse field arguments into request body object.
- * Supports dot notation for nested keys and JSON values.
+ * Supports bracket notation for nested keys (e.g., "user[name]=value")
+ * and array syntax (e.g., "tags[]=value" or "tags[]" for empty array).
  *
- * @param fields - Array of "key=value" strings
+ * @param fields - Array of "key=value" strings (or "key[]" for empty arrays)
  * @param raw - If true, treat all values as strings (no JSON parsing)
  * @returns Parsed object with nested structure
- * @throws {Error} When field doesn't contain "="
+ * @throws {Error} When field format is invalid
  * @internal Exported for testing
  */
 export function parseFields(
@@ -142,7 +213,13 @@ export function parseFields(
 
   for (const field of fields) {
     const eqIndex = field.indexOf("=");
+
+    // Handle empty array syntax: "key[]" without "="
     if (eqIndex === -1) {
+      if (field.endsWith("[]")) {
+        setNestedValue(result, field, undefined);
+        continue;
+      }
       throw new Error(`Invalid field format: ${field}. Expected key=value`);
     }
 
@@ -214,22 +291,59 @@ async function buildBodyFromInput(
 }
 
 /**
+ * Process a single field string and set its value in the result object.
+ * @param result - Target object to modify
+ * @param field - Field string in "key=value" or "key[]" format
+ * @param raw - If true, keep value as string (no JSON parsing)
+ * @throws {Error} When field format is invalid
+ */
+function processField(
+  result: Record<string, unknown>,
+  field: string,
+  raw: boolean
+): void {
+  const eqIndex = field.indexOf("=");
+
+  // Handle empty array syntax: "key[]" without "="
+  if (eqIndex === -1) {
+    if (field.endsWith("[]")) {
+      setNestedValue(result, field, undefined);
+      return;
+    }
+    throw new Error(`Invalid field format: ${field}. Expected key=value`);
+  }
+
+  const key = field.substring(0, eqIndex);
+  const rawValue = field.substring(eqIndex + 1);
+  const value = raw ? rawValue : parseFieldValue(rawValue);
+  setNestedValue(result, key, value);
+}
+
+/**
  * Build request body from --field and --raw-field flags.
- * Returns undefined if no fields are provided.
+ * Processes typed fields first, then raw fields, allowing raw fields
+ * to overwrite typed fields at the same path. Both field types are
+ * merged into a single object, properly handling nested keys.
+ *
+ * @returns Merged object or undefined if no fields provided
  */
 function buildBodyFromFields(
   typedFields: string[] | undefined,
   rawFields: string[] | undefined
 ): Record<string, unknown> | undefined {
-  const typed =
-    typedFields && typedFields.length > 0
-      ? parseFields(typedFields, false)
-      : {};
-  const raw =
-    rawFields && rawFields.length > 0 ? parseFields(rawFields, true) : {};
+  const result: Record<string, unknown> = {};
 
-  const merged = { ...typed, ...raw };
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  // Process typed fields first (with JSON parsing)
+  for (const field of typedFields ?? []) {
+    processField(result, field, false);
+  }
+
+  // Process raw fields second (no JSON parsing, can overwrite typed)
+  for (const field of rawFields ?? []) {
+    processField(result, field, true);
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,10 +424,17 @@ export const apiCommand = buildCommand({
       "Make a raw API request to the Sentry API. Similar to 'gh api' for GitHub. " +
       "The endpoint is relative to /api/0/ (do not include the prefix). " +
       "Authentication is handled automatically using your stored credentials.\n\n" +
+      "Field syntax (--field/-F):\n" +
+      "  key=value          Simple field (values parsed as JSON if valid)\n" +
+      "  key[sub]=value     Nested object: {key: {sub: value}}\n" +
+      "  key[]=value        Array append: {key: [value]}\n" +
+      "  key[]              Empty array: {key: []}\n\n" +
+      "Use --raw-field/-f to send values as strings without JSON parsing.\n\n" +
       "Examples:\n" +
       "  sentry api organizations/\n" +
-      "  sentry api issues/123/ --method PUT --field status=resolved\n" +
-      "  sentry api projects/my-org/my-project/issues/",
+      "  sentry api issues/123/ -X PUT -F status=resolved\n" +
+      "  sentry api projects/my-org/my-project/ -F options[sampleRate]=0.5\n" +
+      "  sentry api teams/my-org/my-team/members/ -F user[email]=user@example.com",
   },
   parameters: {
     positional: {
@@ -336,14 +457,14 @@ export const apiCommand = buildCommand({
       field: {
         kind: "parsed",
         parse: String,
-        brief: "Add a typed parameter in key=value format",
+        brief: "Add a typed parameter (key=value, key[sub]=value, key[]=value)",
         variadic: true,
         optional: true,
       },
       "raw-field": {
         kind: "parsed",
         parse: String,
-        brief: "Add a string parameter in key=value format",
+        brief: "Add a string parameter without JSON parsing",
         variadic: true,
         optional: true,
       },
@@ -404,8 +525,8 @@ export const apiCommand = buildCommand({
         ? parseHeaders(flags.header)
         : undefined;
 
-    // Verbose mode: show request details
-    if (flags.verbose) {
+    // Verbose mode: show request details (unless silent)
+    if (flags.verbose && !flags.silent) {
       writeVerboseRequest(stdout, flags.method, endpoint, headers);
     }
 

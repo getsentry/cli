@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  parseFieldKey,
   parseFields,
   parseFieldValue,
   parseHeaders,
@@ -61,6 +62,43 @@ describe("parseFieldValue", () => {
   });
 });
 
+describe("parseFieldKey", () => {
+  test("parses simple key", () => {
+    expect(parseFieldKey("name")).toEqual(["name"]);
+  });
+
+  test("parses single bracket", () => {
+    expect(parseFieldKey("user[name]")).toEqual(["user", "name"]);
+  });
+
+  test("parses multiple brackets", () => {
+    expect(parseFieldKey("a[b][c]")).toEqual(["a", "b", "c"]);
+  });
+
+  test("parses array push syntax (empty bracket)", () => {
+    expect(parseFieldKey("tags[]")).toEqual(["tags", ""]);
+  });
+
+  test("parses nested array push syntax", () => {
+    expect(parseFieldKey("user[tags][]")).toEqual(["user", "tags", ""]);
+  });
+
+  test("throws for invalid format with unmatched brackets", () => {
+    expect(() => parseFieldKey("user[name")).toThrow(
+      /Invalid field key format/
+    );
+    expect(() => parseFieldKey("user]name[")).toThrow(
+      /Invalid field key format/
+    );
+  });
+
+  test("throws for nested brackets", () => {
+    expect(() => parseFieldKey("user[[name]]")).toThrow(
+      /Invalid field key format/
+    );
+  });
+});
+
 describe("setNestedValue", () => {
   test("sets top-level value", () => {
     const obj: Record<string, unknown> = {};
@@ -68,15 +106,15 @@ describe("setNestedValue", () => {
     expect(obj).toEqual({ key: "value" });
   });
 
-  test("sets nested value with dot notation", () => {
+  test("sets nested value with bracket notation", () => {
     const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "a.b.c", "value");
+    setNestedValue(obj, "a[b][c]", "value");
     expect(obj).toEqual({ a: { b: { c: "value" } } });
   });
 
   test("preserves existing nested structure", () => {
     const obj: Record<string, unknown> = { a: { existing: true } };
-    setNestedValue(obj, "a.new", "value");
+    setNestedValue(obj, "a[new]", "value");
     expect(obj).toEqual({ a: { existing: true, new: "value" } });
   });
 
@@ -86,9 +124,29 @@ describe("setNestedValue", () => {
     expect(obj).toEqual({ key: "new" });
   });
 
+  test("handles array push syntax", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "tags[]", "foo");
+    setNestedValue(obj, "tags[]", "bar");
+    expect(obj).toEqual({ tags: ["foo", "bar"] });
+  });
+
+  test("handles empty array initialization", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "tags[]", undefined);
+    expect(obj).toEqual({ tags: [] });
+  });
+
+  test("handles nested array push", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "user[tags][]", "admin");
+    setNestedValue(obj, "user[tags][]", "editor");
+    expect(obj).toEqual({ user: { tags: ["admin", "editor"] } });
+  });
+
   test("throws for __proto__ key (prototype pollution prevention)", () => {
     const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "__proto__.evil", true)).toThrow(
+    expect(() => setNestedValue(obj, "__proto__[evil]", true)).toThrow(
       /Invalid field key: "__proto__" is not allowed/
     );
     // Verify no pollution occurred
@@ -97,29 +155,23 @@ describe("setNestedValue", () => {
 
   test("throws for nested __proto__ key", () => {
     const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "foo.__proto__.bar", true)).toThrow(
+    expect(() => setNestedValue(obj, "foo[__proto__][bar]", true)).toThrow(
       /Invalid field key: "__proto__" is not allowed/
     );
   });
 
   test("throws for constructor key", () => {
     const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "constructor.prototype.x", true)).toThrow(
-      /Invalid field key: "constructor" is not allowed/
-    );
+    expect(() =>
+      setNestedValue(obj, "constructor[prototype][x]", true)
+    ).toThrow(/Invalid field key: "constructor" is not allowed/);
   });
 
   test("throws for prototype key", () => {
     const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "prototype.y", true)).toThrow(
+    expect(() => setNestedValue(obj, "prototype[y]", true)).toThrow(
       /Invalid field key: "prototype" is not allowed/
     );
-  });
-
-  test("handles consecutive dots gracefully", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "a..b", "value");
-    expect(obj).toEqual({ a: { b: "value" } });
   });
 });
 
@@ -132,9 +184,15 @@ describe("parseFields", () => {
     expect(parseFields(["a=1", "b=2"])).toEqual({ a: 1, b: 2 });
   });
 
-  test("parses nested fields with dot notation", () => {
-    expect(parseFields(["user.name=John", "user.age=30"])).toEqual({
+  test("parses nested fields with bracket notation", () => {
+    expect(parseFields(["user[name]=John", "user[age]=30"])).toEqual({
       user: { name: "John", age: 30 },
+    });
+  });
+
+  test("parses deeply nested fields", () => {
+    expect(parseFields(["a[b][c][d]=value"])).toEqual({
+      a: { b: { c: { d: "value" } } },
     });
   });
 
@@ -149,9 +207,36 @@ describe("parseFields", () => {
     expect(parseFields(["query=a=b"])).toEqual({ query: "a=b" });
   });
 
-  test("throws for invalid field format", () => {
+  test("handles array push syntax", () => {
+    expect(parseFields(["tags[]=foo", "tags[]=bar"])).toEqual({
+      tags: ["foo", "bar"],
+    });
+  });
+
+  test("handles empty array syntax", () => {
+    expect(parseFields(["tags[]"])).toEqual({ tags: [] });
+  });
+
+  test("handles mixed object and array fields", () => {
+    expect(
+      parseFields([
+        "user[name]=John",
+        "user[roles][]=admin",
+        "user[roles][]=editor",
+      ])
+    ).toEqual({
+      user: { name: "John", roles: ["admin", "editor"] },
+    });
+  });
+
+  test("throws for invalid field format without equals", () => {
     expect(() => parseFields(["invalid"])).toThrow(/Invalid field format/);
     expect(() => parseFields(["no-equals"])).toThrow(/Invalid field format/);
+  });
+
+  test("allows empty array syntax without equals", () => {
+    // This should NOT throw - it's valid empty array syntax
+    expect(() => parseFields(["items[]"])).not.toThrow();
   });
 
   test("returns empty object for empty array", () => {
@@ -187,7 +272,7 @@ describe("parseFields with raw=true (--raw-field behavior)", () => {
   });
 
   test("handles nested keys with raw values", () => {
-    expect(parseFields(["user.age=30"], true)).toEqual({
+    expect(parseFields(["user[age]=30"], true)).toEqual({
       user: { age: "30" },
     });
   });
