@@ -389,14 +389,17 @@ export async function clearProjectCache(): Promise<void> {
  * Called by `issue list` when multiple projects are detected.
  *
  * @param aliases - Map of alias letter (A, B, C...) to org/project
+ * @param workspacePath - Absolute path to workspace root for scoping
  */
 export async function setProjectAliases(
-  aliases: Record<string, ProjectAliasEntry>
+  aliases: Record<string, ProjectAliasEntry>,
+  workspacePath?: string
 ): Promise<void> {
   const config = await readConfig();
   config.projectAliases = {
     aliases,
     cachedAt: Date.now(),
+    workspacePath,
   };
   await writeConfig(config);
 }
@@ -415,16 +418,33 @@ export async function getProjectAliases(): Promise<
 
 /**
  * Get a specific project by its alias.
+ * Validates workspace context when both currentWorkspace and cached workspacePath are present.
  *
  * @param alias - The alias letter (A, B, C...)
- * @returns Project entry or undefined if not found
+ * @param currentWorkspace - Optional current workspace path for validation
+ * @returns Project entry or undefined if not found or workspace mismatch
  */
 export async function getProjectByAlias(
-  alias: string
+  alias: string,
+  currentWorkspace?: string
 ): Promise<ProjectAliasEntry | undefined> {
-  const aliases = await getProjectAliases();
+  const config = await readConfig();
+  const cache = config.projectAliases;
+
+  if (!cache?.aliases) {
+    return undefined;
+  }
+
+  // Validate workspace if both current and cached are available
+  if (currentWorkspace && cache.workspacePath) {
+    // Check if current workspace is within (or equal to) cached workspace
+    if (!currentWorkspace.startsWith(cache.workspacePath)) {
+      return undefined; // Workspace mismatch - don't use cache
+    }
+  }
+
   // Case-insensitive lookup (aliases are stored lowercase)
-  return aliases?.[alias.toLowerCase()];
+  return cache.aliases[alias.toLowerCase()];
 }
 
 /**

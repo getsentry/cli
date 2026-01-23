@@ -411,3 +411,111 @@ describe("project aliases", () => {
     expect(aliases?.old).toBeUndefined();
   });
 });
+
+describe("workspace-scoped project aliases", () => {
+  test("setProjectAliases stores workspacePath", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo"
+    );
+
+    const config = await readConfig();
+    expect(config.projectAliases?.workspacePath).toBe("/home/user/monorepo");
+  });
+
+  test("getProjectByAlias returns alias when workspace matches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo"
+    );
+
+    // Same workspace
+    const project = await getProjectByAlias("e", "/home/user/monorepo");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns alias when in subdirectory of workspace", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo"
+    );
+
+    // Subdirectory of workspace
+    const project = await getProjectByAlias(
+      "e",
+      "/home/user/monorepo/packages/frontend"
+    );
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns undefined when workspace mismatches", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo-a"
+    );
+
+    // Different workspace
+    const project = await getProjectByAlias("e", "/home/user/monorepo-b");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns alias when no workspace validation needed", async () => {
+    // No workspace stored
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    // Should work without workspace validation (legacy cache)
+    const project = await getProjectByAlias("e", "/some/other/path");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns alias when no current workspace provided", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo"
+    );
+
+    // No current workspace provided - skip validation
+    const project = await getProjectByAlias("e");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("workspace path does not affect case-insensitive lookup", async () => {
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "/home/user/monorepo"
+    );
+
+    // Uppercase alias with matching workspace
+    const project = await getProjectByAlias("E", "/home/user/monorepo");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+});

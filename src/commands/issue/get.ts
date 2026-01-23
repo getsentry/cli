@@ -13,6 +13,7 @@ import {
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/config.js";
 import { ContextError } from "../../lib/errors.js";
+import { getWorkspaceRoot } from "../../lib/workspace.js";
 import {
   formatEventDetails,
   formatIssueDetails,
@@ -123,11 +124,21 @@ export const getCommand = buildCommand({
     let resolvedShortId = issueId;
 
     // Check if input matches alias-suffix pattern (e.g., "f-g", "fr-a3")
-    // and if the alias exists in the cache
+    // and if the alias exists in the cache (workspace-scoped)
     const aliasSuffix = parseAliasSuffix(issueId);
-    const projectEntry = aliasSuffix
-      ? await getProjectByAlias(aliasSuffix.alias)
+    const workspacePath = await getWorkspaceRoot(cwd);
+    let projectEntry = aliasSuffix
+      ? await getProjectByAlias(aliasSuffix.alias, workspacePath)
       : null;
+
+    // Additional safety: validate org context matches if alias was found
+    if (aliasSuffix && projectEntry) {
+      const currentOrg = await resolveOrg({ org: flags.org, cwd });
+      if (currentOrg && currentOrg.org !== projectEntry.orgSlug) {
+        // Org mismatch - don't use cached alias
+        projectEntry = null;
+      }
+    }
 
     if (aliasSuffix && projectEntry) {
       // Valid alias found - expand suffix using the aliased project

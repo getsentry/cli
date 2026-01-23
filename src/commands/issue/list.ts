@@ -14,6 +14,7 @@ import {
 import { listIssues } from "../../lib/api-client.js";
 import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
+import { getWorkspaceRoot } from "../../lib/workspace.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -369,7 +370,8 @@ export const listCommand = buildCommand({
         };
 
     if (isMultiProject) {
-      await setProjectAliases(entries);
+      const workspacePath = await getWorkspaceRoot(cwd);
+      await setProjectAliases(entries, workspacePath);
     } else {
       await clearProjectAliases();
     }
