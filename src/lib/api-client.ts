@@ -134,8 +134,9 @@ async function createApiClient(): Promise<KyInstance> {
  *
  * @param params - Key-value pairs to convert to search params
  * @returns URLSearchParams instance, or undefined if no valid params
+ * @internal Exported for testing
  */
-function buildSearchParams(
+export function buildSearchParams(
   params?: Record<string, string | number | boolean | string[] | undefined>
 ): URLSearchParams | undefined {
   if (!params) {

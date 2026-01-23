@@ -6,7 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { listOrganizations } from "../../src/lib/api-client.js";
+import {
+  buildSearchParams,
+  listOrganizations,
+} from "../../src/lib/api-client.js";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
@@ -248,5 +251,72 @@ describe("401 retry behavior", () => {
       r.url.includes("/oauth/token/")
     );
     expect(oauthRequests).toHaveLength(0);
+  });
+});
+
+describe("buildSearchParams", () => {
+  test("returns undefined for undefined input", () => {
+    expect(buildSearchParams(undefined)).toBeUndefined();
+  });
+
+  test("returns undefined for empty object", () => {
+    expect(buildSearchParams({})).toBeUndefined();
+  });
+
+  test("returns undefined when all values are undefined", () => {
+    expect(buildSearchParams({ a: undefined, b: undefined })).toBeUndefined();
+  });
+
+  test("builds params from simple key-value pairs", () => {
+    const result = buildSearchParams({ status: "resolved", limit: 10 });
+    expect(result).toBeDefined();
+    expect(result?.get("status")).toBe("resolved");
+    expect(result?.get("limit")).toBe("10");
+  });
+
+  test("skips undefined values", () => {
+    const result = buildSearchParams({
+      status: "resolved",
+      query: undefined,
+      limit: 10,
+    });
+    expect(result).toBeDefined();
+    expect(result?.get("status")).toBe("resolved");
+    expect(result?.get("limit")).toBe("10");
+    expect(result?.has("query")).toBe(false);
+  });
+
+  test("handles boolean values", () => {
+    const result = buildSearchParams({ active: true, archived: false });
+    expect(result).toBeDefined();
+    expect(result?.get("active")).toBe("true");
+    expect(result?.get("archived")).toBe("false");
+  });
+
+  test("handles string arrays as repeated keys", () => {
+    const result = buildSearchParams({ tags: ["error", "warning", "info"] });
+    expect(result).toBeDefined();
+    // URLSearchParams.getAll returns all values for repeated keys
+    expect(result?.getAll("tags")).toEqual(["error", "warning", "info"]);
+    // toString shows repeated keys
+    expect(result?.toString()).toBe("tags=error&tags=warning&tags=info");
+  });
+
+  test("handles mixed simple values and arrays", () => {
+    const result = buildSearchParams({
+      status: "unresolved",
+      tags: ["critical", "backend"],
+      limit: 25,
+    });
+    expect(result).toBeDefined();
+    expect(result?.get("status")).toBe("unresolved");
+    expect(result?.getAll("tags")).toEqual(["critical", "backend"]);
+    expect(result?.get("limit")).toBe("25");
+  });
+
+  test("handles empty array", () => {
+    const result = buildSearchParams({ tags: [] });
+    // Empty array produces no entries, so result should be undefined
+    expect(result).toBeUndefined();
   });
 });
