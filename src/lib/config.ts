@@ -436,9 +436,11 @@ export async function getProjectByAlias(
   }
 
   // Validate fingerprint: reject if current DSNs don't match cached context
+  // Note: empty string is a valid fingerprint (means no SaaS DSNs detected),
+  // so we use explicit undefined check rather than truthy check
   if (
-    currentFingerprint &&
-    cache.dsnFingerprint &&
+    currentFingerprint !== undefined &&
+    cache.dsnFingerprint !== undefined &&
     currentFingerprint !== cache.dsnFingerprint
   ) {
     return; // DSN fingerprint mismatch - don't use cache

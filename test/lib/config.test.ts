@@ -499,4 +499,51 @@ describe("DSN-fingerprinted project aliases", () => {
       projectSlug: "spotlight-electron",
     });
   });
+
+  test("getProjectByAlias rejects when current fingerprint is empty but cached is not", async () => {
+    // Cache was created with SaaS DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      "123:456"
+    );
+
+    // Current context has no SaaS DSNs (empty fingerprint)
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias rejects when cached fingerprint is empty but current is not", async () => {
+    // Cache was created with only self-hosted DSNs (empty fingerprint)
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context has SaaS DSNs
+    // This should reject - different workspace/context
+    const project = await getProjectByAlias("e", "123:456");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias accepts when both fingerprints are empty", async () => {
+    // Cache was created with only self-hosted DSNs
+    await setProjectAliases(
+      {
+        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      },
+      ""
+    );
+
+    // Current context also has only self-hosted DSNs
+    const project = await getProjectByAlias("e", "");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
 });
