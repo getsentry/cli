@@ -7,8 +7,10 @@
 import { describe, expect, test } from "bun:test";
 import type { DetectedDsn } from "../../src/lib/dsn/index.js";
 import {
+  createDetectedDsn,
   createDsnFingerprint,
   extractOrgIdFromHost,
+  inferPackagePath,
   isValidDsn,
   parseDsn,
 } from "../../src/lib/dsn/index.js";
@@ -204,5 +206,99 @@ describe("createDsnFingerprint", () => {
 
     const result = createDsnFingerprint([selfHosted]);
     expect(result).toBe("sentry.mycompany.com:1");
+  });
+});
+
+describe("createDetectedDsn", () => {
+  test("creates DetectedDsn from valid DSN string", () => {
+    const result = createDetectedDsn(
+      "https://abc123@o1169445.ingest.us.sentry.io/4505229541441536",
+      "env"
+    );
+
+    expect(result).toEqual({
+      raw: "https://abc123@o1169445.ingest.us.sentry.io/4505229541441536",
+      protocol: "https",
+      publicKey: "abc123",
+      host: "o1169445.ingest.us.sentry.io",
+      projectId: "4505229541441536",
+      orgId: "1169445",
+      source: "env",
+      sourcePath: undefined,
+      packagePath: undefined,
+    });
+  });
+
+  test("includes sourcePath when provided", () => {
+    const result = createDetectedDsn(
+      "https://abc123@o123.ingest.sentry.io/456",
+      "code",
+      "src/config.ts"
+    );
+
+    expect(result?.sourcePath).toBe("src/config.ts");
+  });
+
+  test("includes packagePath when provided", () => {
+    const result = createDetectedDsn(
+      "https://abc123@o123.ingest.sentry.io/456",
+      "code",
+      "packages/web/src/config.ts",
+      "packages/web"
+    );
+
+    expect(result?.packagePath).toBe("packages/web");
+  });
+
+  test("returns null for invalid DSN", () => {
+    const result = createDetectedDsn("not-a-valid-dsn", "env");
+    expect(result).toBeNull();
+  });
+
+  test("returns null for DSN without public key", () => {
+    const result = createDetectedDsn("https://sentry.io/123", "env");
+    expect(result).toBeNull();
+  });
+});
+
+describe("inferPackagePath", () => {
+  test("infers package path from packages/ directory", () => {
+    const result = inferPackagePath("packages/frontend/src/index.ts");
+    expect(result).toBe("packages/frontend");
+  });
+
+  test("infers package path from apps/ directory", () => {
+    const result = inferPackagePath("apps/web/.env");
+    expect(result).toBe("apps/web");
+  });
+
+  test("infers package path from libs/ directory", () => {
+    const result = inferPackagePath("libs/shared/config.ts");
+    expect(result).toBe("libs/shared");
+  });
+
+  test("infers package path from modules/ directory", () => {
+    const result = inferPackagePath("modules/auth/index.ts");
+    expect(result).toBe("modules/auth");
+  });
+
+  test("infers package path from services/ directory", () => {
+    const result = inferPackagePath("services/api/server.ts");
+    expect(result).toBe("services/api");
+  });
+
+  test("returns undefined for root project files", () => {
+    const result = inferPackagePath("src/index.ts");
+    expect(result).toBeUndefined();
+  });
+
+  test("returns undefined for top-level files", () => {
+    const result = inferPackagePath(".env");
+    expect(result).toBeUndefined();
+  });
+
+  test("returns undefined for non-monorepo directories", () => {
+    const result = inferPackagePath("other/path/file.ts");
+    expect(result).toBeUndefined();
   });
 });
