@@ -58,7 +58,8 @@ function normalizePath(endpoint: string): string {
 type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
-  params?: Record<string, string | number | boolean | undefined>;
+  /** Query parameters. String arrays create repeated keys (e.g., tags=1&tags=2) */
+  params?: Record<string, string | number | boolean | string[] | undefined>;
   /** Optional Zod schema for runtime validation of response data */
   schema?: z.ZodType<T>;
 };
@@ -129,12 +130,13 @@ async function createApiClient(): Promise<KyInstance> {
 
 /**
  * Build URLSearchParams from an options object, filtering out undefined values.
+ * Supports string arrays for repeated keys (e.g., { tags: ["a", "b"] } → tags=a&tags=b).
  *
  * @param params - Key-value pairs to convert to search params
  * @returns URLSearchParams instance, or undefined if no valid params
  */
 function buildSearchParams(
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<string, string | number | boolean | string[] | undefined>
 ): URLSearchParams | undefined {
   if (!params) {
     return;
@@ -142,7 +144,15 @@ function buildSearchParams(
 
   const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) {
+    if (value === undefined) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      // Repeated keys for arrays: tags=1&tags=2&tags=3
+      for (const item of value) {
+        searchParams.append(key, item);
+      }
+    } else {
       searchParams.set(key, String(value));
     }
   }

@@ -134,6 +134,42 @@ export function parseFields(fields: string[]): Record<string, unknown> {
 }
 
 /**
+ * Build query parameters from field strings for GET requests.
+ * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
+ * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
+ *
+ * @param fields - Array of "key=value" strings
+ * @returns Record suitable for URLSearchParams
+ * @throws {Error} When field doesn't contain "="
+ * @internal Exported for testing
+ */
+export function buildQueryParams(
+  fields: string[]
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const eqIndex = field.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    }
+
+    const key = field.substring(0, eqIndex);
+    const rawValue = field.substring(eqIndex + 1);
+    const value = parseFieldValue(rawValue);
+
+    // Handle arrays by creating string[] for repeated keys
+    if (Array.isArray(value)) {
+      result[key] = value.map(String);
+    } else {
+      result[key] = String(value);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Parse header arguments into headers object.
  *
  * @param headers - Array of "Key: Value" strings
@@ -259,10 +295,15 @@ export const apiCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
+    const hasFields = flags.field && flags.field.length > 0;
+    const isBodyMethod = flags.method !== "GET";
+
+    // For GET: fields become query params; for other methods: fields become body
     const body =
-      flags.field && flags.field.length > 0
-        ? parseFields(flags.field)
-        : undefined;
+      hasFields && isBodyMethod ? parseFields(flags.field) : undefined;
+    const params =
+      hasFields && !isBodyMethod ? buildQueryParams(flags.field) : undefined;
+
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
@@ -271,6 +312,7 @@ export const apiCommand = buildCommand({
     const response = await rawApiRequest(endpoint, {
       method: flags.method,
       body,
+      params,
       headers,
     });
 

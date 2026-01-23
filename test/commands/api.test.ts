@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  buildQueryParams,
   parseFields,
   parseFieldValue,
   parseHeaders,
@@ -190,5 +191,51 @@ describe("parseHeaders", () => {
 
   test("returns empty object for empty array", () => {
     expect(parseHeaders([])).toEqual({});
+  });
+});
+
+describe("buildQueryParams", () => {
+  test("builds simple key=value params", () => {
+    expect(buildQueryParams(["status=resolved", "limit=10"])).toEqual({
+      status: "resolved",
+      limit: "10",
+    });
+  });
+
+  test("handles arrays as repeated keys", () => {
+    expect(buildQueryParams(["tags=[1,2,3]"])).toEqual({
+      tags: ["1", "2", "3"],
+    });
+  });
+
+  test("handles arrays of strings", () => {
+    expect(buildQueryParams(['names=["alice","bob"]'])).toEqual({
+      names: ["alice", "bob"],
+    });
+  });
+
+  test("converts all values to strings", () => {
+    expect(buildQueryParams(["count=42", "active=true", "value=null"])).toEqual(
+      {
+        count: "42",
+        active: "true",
+        value: "null",
+      }
+    );
+  });
+
+  test("handles value with equals sign", () => {
+    expect(buildQueryParams(["query=a=b"])).toEqual({ query: "a=b" });
+  });
+
+  test("throws for invalid field format", () => {
+    expect(() => buildQueryParams(["invalid"])).toThrow(/Invalid field format/);
+    expect(() => buildQueryParams(["no-equals"])).toThrow(
+      /Invalid field format/
+    );
+  });
+
+  test("returns empty object for empty array", () => {
+    expect(buildQueryParams([])).toEqual({});
   });
 });
