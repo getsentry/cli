@@ -432,15 +432,16 @@ export async function getProjectByAlias(
   const cache = config.projectAliases;
 
   if (!cache?.aliases) {
-    return undefined;
+    return;
   }
 
-  // Validate workspace if both current and cached are available
-  if (currentWorkspace && cache.workspacePath) {
-    // Check if current workspace is within (or equal to) cached workspace
-    if (!currentWorkspace.startsWith(cache.workspacePath)) {
-      return undefined; // Workspace mismatch - don't use cache
-    }
+  // Validate workspace: reject if current workspace is outside cached workspace
+  if (
+    currentWorkspace &&
+    cache.workspacePath &&
+    !currentWorkspace.startsWith(cache.workspacePath)
+  ) {
+    return; // Workspace mismatch - don't use cache
   }
 
   // Case-insensitive lookup (aliases are stored lowercase)

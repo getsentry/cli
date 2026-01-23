@@ -13,7 +13,6 @@ import {
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/config.js";
 import { ContextError } from "../../lib/errors.js";
-import { getWorkspaceRoot } from "../../lib/workspace.js";
 import {
   formatEventDetails,
   formatIssueDetails,
@@ -26,6 +25,7 @@ import {
   parseAliasSuffix,
 } from "../../lib/issue-id.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { getWorkspaceRoot } from "../../lib/workspace.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
 
 type GetFlags = {
@@ -113,6 +113,7 @@ export const getCommand = buildCommand({
       },
     },
   },
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
     this: SentryContext,
     flags: GetFlags,

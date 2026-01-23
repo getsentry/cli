@@ -14,7 +14,6 @@ import {
 import { listIssues } from "../../lib/api-client.js";
 import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
-import { getWorkspaceRoot } from "../../lib/workspace.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -27,6 +26,7 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
+import { getWorkspaceRoot } from "../../lib/workspace.js";
 import type {
   ProjectAliasEntry,
   SentryIssue,
