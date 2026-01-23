@@ -5,10 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test credentials from environment - these MUST be set
 const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
@@ -23,27 +22,14 @@ if (!(TEST_TOKEN && TEST_ORG && TEST_PROJECT)) {
 
 // Each test gets its own config directory
 let testConfigDir: string;
-let originalConfigDir: string | undefined;
 
-beforeEach(() => {
-  originalConfigDir = process.env[CONFIG_DIR_ENV_VAR];
-  testConfigDir = join(
-    process.env[CONFIG_DIR_ENV_VAR] || "/tmp",
-    `e2e-issue-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
+beforeEach(async () => {
+  testConfigDir = await createTestConfigDir("e2e-issue-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
-afterEach(() => {
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-  if (originalConfigDir) {
-    process.env[CONFIG_DIR_ENV_VAR] = originalConfigDir;
-  }
+afterEach(async () => {
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("sentry issue list", () => {
