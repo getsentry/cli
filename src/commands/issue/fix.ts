@@ -7,7 +7,10 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getAutofixState, updateAutofix } from "../../lib/api-client.js";
+import {
+  getAutofixState,
+  triggerSolutionPlanning,
+} from "../../lib/api-client.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import {
   formatAutofixError,
@@ -198,8 +201,8 @@ export const fixCommand = buildCommand({
         }
       }
 
-      // Update autofix to continue to PR creation
-      await updateAutofix(org, numericId, state.run_id);
+      // Trigger solution planning to continue to PR creation
+      await triggerSolutionPlanning(org, numericId, state.run_id);
 
       // Poll until PR is created
       const finalState = await pollAutofixState({

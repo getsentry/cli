@@ -14,8 +14,6 @@ import {
   AutofixTriggerResponseSchema,
 } from "../types/autofix.js";
 import {
-  type IssueSummary,
-  IssueSummarySchema,
   type SentryEvent,
   SentryEventSchema,
   type SentryIssue,
@@ -415,14 +413,14 @@ export function updateIssueStatus(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Trigger an autofix run for an issue.
+ * Trigger root cause analysis for an issue using Seer AI.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
  * @returns The trigger response with run_id
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
-export function triggerAutofix(
+export function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
 ): Promise<AutofixTriggerResponse> {
@@ -454,15 +452,15 @@ export async function getAutofixState(
 }
 
 /**
- * Update an autofix run (e.g., select root cause, continue to PR).
+ * Trigger solution planning for an existing autofix run.
+ * Continues from root cause analysis to generate a solution.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
  * @param runId - The autofix run ID
- * @param payload - The update payload (select_root_cause, select_solution, create_pr)
  * @returns The response from the API
  */
-export function updateAutofix(
+export function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
   runId: number
@@ -474,28 +472,4 @@ export function updateAutofix(
       step: "solution",
     },
   });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Issue Summary API
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Get an AI-generated summary of an issue.
- *
- * @param orgSlug - The organization slug
- * @param issueId - The numeric Sentry issue ID
- * @returns The issue summary with headline, cause analysis, and scores
- */
-export function getIssueSummary(
-  orgSlug: string,
-  issueId: string
-): Promise<IssueSummary> {
-  return apiRequest<IssueSummary>(
-    `/organizations/${orgSlug}/issues/${issueId}/summarize/`,
-    {
-      method: "POST",
-      schema: IssueSummarySchema,
-    }
-  );
 }

@@ -6,7 +6,10 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getAutofixState, triggerAutofix } from "../../lib/api-client.js";
+import {
+  getAutofixState,
+  triggerRootCauseAnalysis,
+} from "../../lib/api-client.js";
 import { ApiError } from "../../lib/errors.js";
 import {
   formatAutofixError,
@@ -91,7 +94,7 @@ export const explainCommand = buildCommand({
         if (!flags.json) {
           stderr.write("Starting root cause analysis...\n");
         }
-        await triggerAutofix(org, numericId);
+        await triggerRootCauseAnalysis(org, numericId);
       }
 
       // 3. Poll until complete (if not already completed)

@@ -1,7 +1,7 @@
 /**
- * Autofix and Summary API Client Tests
+ * Autofix API Client Tests
  *
- * Tests for the autofix-related and summary API functions by mocking fetch.
+ * Tests for the autofix-related API functions by mocking fetch.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -9,9 +9,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   getAutofixState,
-  getIssueSummary,
-  triggerAutofix,
-  updateAutofix,
+  triggerRootCauseAnalysis,
+  triggerSolutionPlanning,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/config.js";
 
@@ -45,7 +44,7 @@ afterEach(() => {
   }
 });
 
-describe("triggerAutofix", () => {
+describe("triggerRootCauseAnalysis", () => {
   test("sends POST request to autofix endpoint", async () => {
     let capturedRequest: Request | undefined;
 
@@ -58,7 +57,7 @@ describe("triggerAutofix", () => {
       });
     };
 
-    await triggerAutofix("test-org", "123456789");
+    await triggerRootCauseAnalysis("test-org", "123456789");
 
     expect(capturedRequest?.method).toBe("POST");
     expect(capturedRequest?.url).toContain(
@@ -79,7 +78,7 @@ describe("triggerAutofix", () => {
       });
     };
 
-    await triggerAutofix("test-org", "123456789");
+    await triggerRootCauseAnalysis("test-org", "123456789");
 
     expect(capturedBody).toEqual({ step: "root_cause" });
   });
@@ -91,7 +90,9 @@ describe("triggerAutofix", () => {
         headers: { "Content-Type": "application/json" },
       });
 
-    await expect(triggerAutofix("test-org", "123456789")).rejects.toThrow();
+    await expect(
+      triggerRootCauseAnalysis("test-org", "123456789")
+    ).rejects.toThrow();
   });
 
   test("throws ApiError on 403 response", async () => {
@@ -101,7 +102,9 @@ describe("triggerAutofix", () => {
         headers: { "Content-Type": "application/json" },
       });
 
-    await expect(triggerAutofix("test-org", "123456789")).rejects.toThrow();
+    await expect(
+      triggerRootCauseAnalysis("test-org", "123456789")
+    ).rejects.toThrow();
   });
 });
 
@@ -184,7 +187,7 @@ describe("getAutofixState", () => {
   });
 });
 
-describe("updateAutofix", () => {
+describe("triggerSolutionPlanning", () => {
   test("sends POST request to autofix endpoint", async () => {
     let capturedRequest: Request | undefined;
     let capturedBody: unknown;
@@ -199,7 +202,7 @@ describe("updateAutofix", () => {
       });
     };
 
-    await updateAutofix("test-org", "123456789", 12_345);
+    await triggerSolutionPlanning("test-org", "123456789", 12_345);
 
     expect(capturedRequest?.method).toBe("POST");
     expect(capturedRequest?.url).toContain(
@@ -209,90 +212,5 @@ describe("updateAutofix", () => {
       run_id: 12_345,
       step: "solution",
     });
-  });
-});
-
-describe("getIssueSummary", () => {
-  test("sends POST request to summarize endpoint", async () => {
-    let capturedRequest: Request | undefined;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedRequest = new Request(input, init);
-
-      return new Response(
-        JSON.stringify({
-          groupId: "123456789",
-          headline: "Test Issue Summary",
-          whatsWrong: "Something went wrong",
-          trace: "Error in function X",
-          possibleCause: "Missing null check",
-          scores: {
-            possibleCauseConfidence: 0.85,
-            possibleCauseNovelty: 0.6,
-            isFixable: true,
-            fixabilityScore: 0.7,
-            fixabilityScoreVersion: "1.0",
-          },
-          eventId: "abc123",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    };
-
-    const result = await getIssueSummary("test-org", "123456789");
-
-    expect(result.groupId).toBe("123456789");
-    expect(result.headline).toBe("Test Issue Summary");
-    expect(result.whatsWrong).toBe("Something went wrong");
-    expect(result.possibleCause).toBe("Missing null check");
-    expect(result.scores?.possibleCauseConfidence).toBe(0.85);
-    expect(capturedRequest?.method).toBe("POST");
-    expect(capturedRequest?.url).toContain(
-      "/organizations/test-org/issues/123456789/summarize/"
-    );
-  });
-
-  test("returns summary with minimal fields", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          groupId: "123456789",
-          headline: "Simple Error",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-    const result = await getIssueSummary("test-org", "123456789");
-
-    expect(result.groupId).toBe("123456789");
-    expect(result.headline).toBe("Simple Error");
-    expect(result.whatsWrong).toBeUndefined();
-    expect(result.scores).toBeUndefined();
-  });
-
-  test("throws ApiError on 404 response", async () => {
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "Issue not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
-
-    await expect(getIssueSummary("test-org", "123456789")).rejects.toThrow();
-  });
-
-  test("throws ApiError on 403 response", async () => {
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "AI features not enabled" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      });
-
-    await expect(getIssueSummary("test-org", "123456789")).rejects.toThrow();
   });
 });
