@@ -298,58 +298,6 @@ export function extractRootCauses(state: AutofixState): RootCause[] {
   return [];
 }
 
-/**
- * Get the latest progress message from autofix steps
- */
-export function getLatestProgress(state: AutofixState): string | undefined {
-  if (!state.steps) {
-    return;
-  }
-
-  // Find the step that's currently processing or most recently updated
-  for (let i = state.steps.length - 1; i >= 0; i--) {
-    const step = state.steps[i];
-    if (step?.progress && step.progress.length > 0) {
-      const lastProgress = step.progress.at(-1);
-      return lastProgress?.message;
-    }
-  }
-
-  return;
-}
-
-/**
- * Extract PR URL from completed autofix state
- */
-export function extractPrUrl(state: AutofixState): string | undefined {
-  if (!state.steps) {
-    return;
-  }
-
-  // Look for PR info in steps or coding_agents
-  for (const step of state.steps) {
-    if (step.key === "create_pr" || step.key === "changes") {
-      // PR URL might be in the step data
-      const stepData = step as unknown as Record<string, unknown>;
-      if (typeof stepData.pr_url === "string") {
-        return stepData.pr_url;
-      }
-    }
-  }
-
-  // Check coding_agents for PR info
-  if (state.coding_agents) {
-    for (const agent of Object.values(state.coding_agents)) {
-      const agentData = agent as Record<string, unknown>;
-      if (typeof agentData.pr_url === "string") {
-        return agentData.pr_url;
-      }
-    }
-  }
-
-  return;
-}
-
 /** Artifact structure used in blocks and steps */
 type ArtifactEntry = { key: string; data: unknown; reason?: string };
 

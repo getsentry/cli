@@ -28,37 +28,6 @@ const ANIMATION_INTERVAL_MS = 80;
 /** Default timeout in milliseconds (10 minutes) */
 const DEFAULT_TIMEOUT_MS = 600_000;
 
-/**
- * Resolve the numeric issue ID from either a numeric ID or short ID.
- * Short IDs (e.g., MYPROJECT-ABC) require organization context.
- *
- * @param issueId - User-provided issue ID (numeric or short)
- * @param org - Optional org slug for short ID resolution
- * @param cwd - Current working directory for org resolution
- * @param commandHint - Command example for error messages (e.g., "sentry issue explain ISSUE-123 --org <org>")
- * @returns Numeric issue ID
- * @throws {ContextError} When short ID provided without resolvable organization
- */
-export async function resolveIssueId(
-  issueId: string,
-  org: string | undefined,
-  cwd: string,
-  commandHint: string
-): Promise<string> {
-  if (!isShortId(issueId)) {
-    return issueId;
-  }
-
-  // Short ID requires organization context
-  const resolved = await resolveOrg({ org, cwd });
-  if (!resolved) {
-    throw new ContextError("Organization", commandHint);
-  }
-
-  const issue = await getIssueByShortId(resolved.org, issueId);
-  return issue.id;
-}
-
 type ResolvedIssue = {
   /** Resolved organization slug */
   org: string;
@@ -68,7 +37,7 @@ type ResolvedIssue = {
 
 /**
  * Resolve both organization slug and numeric issue ID.
- * Required for endpoints that need both (like /summarize/).
+ * Required for autofix endpoints that need both org and issue ID.
  *
  * @param issueId - User-provided issue ID (numeric or short)
  * @param org - Optional org slug
@@ -83,7 +52,7 @@ export async function resolveOrgAndIssueId(
   cwd: string,
   commandHint: string
 ): Promise<ResolvedIssue> {
-  // Always need org for endpoints like /summarize/
+  // Always need org for endpoints like /autofix/
   const resolved = await resolveOrg({ org, cwd });
   if (!resolved) {
     throw new ContextError("Organization", commandHint);

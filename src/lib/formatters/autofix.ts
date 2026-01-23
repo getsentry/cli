@@ -7,7 +7,6 @@
 import chalk from "chalk";
 import type {
   AutofixState,
-  AutofixStep,
   RootCause,
   SolutionArtifact,
 } from "../../types/autofix.js";
@@ -95,24 +94,6 @@ export function getProgressMessage(state: AutofixState): string {
     default:
       return "Processing...";
   }
-}
-
-/**
- * Get the current step title from autofix state.
- */
-export function getCurrentStepTitle(state: AutofixState): string | undefined {
-  if (!state.steps) {
-    return;
-  }
-
-  // Find the step that's currently processing
-  for (const step of state.steps) {
-    if (step.status === "PROCESSING" || step.status === "PENDING") {
-      return step.title;
-    }
-  }
-
-  return;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,121 +195,6 @@ export function formatRootCauseList(
   // Add hint for next steps
   lines.push("");
   lines.push(muted(`To create a fix, run: sentry issue fix ${issueId}`));
-
-  return lines;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Fix / PR Result Formatting
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Format the PR creation result.
- *
- * @param prUrl - URL of the created PR
- * @returns Array of formatted lines
- */
-export function formatPrResult(prUrl: string): string[] {
-  return [
-    "",
-    green("Pull Request Created"),
-    muted("═".repeat(21)),
-    "",
-    `URL: ${cyan(prUrl)}`,
-  ];
-}
-
-/**
- * Format an error when no PR URL could be found.
- */
-export function formatPrNotFound(): string[] {
-  return [
-    "",
-    yellow("Fix process completed but no PR URL found."),
-    muted("Check the Sentry web UI for the autofix results."),
-  ];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Status Formatting
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Format autofix status for display.
- *
- * @param status - Autofix status string
- * @returns Colored status string
- */
-export function formatAutofixStatus(status: string): string {
-  switch (status) {
-    case "COMPLETED":
-      return green("Completed");
-    case "PROCESSING":
-      return cyan("Processing");
-    case "ERROR":
-      return yellow("Error");
-    case "CANCELLED":
-      return muted("Cancelled");
-    case "WAITING_FOR_USER_RESPONSE":
-      return yellow("Waiting for input");
-    default:
-      return status;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Step Formatting (for verbose/debug output)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Format an autofix step for display.
- *
- * @param step - The step to format
- * @returns Array of formatted lines
- */
-export function formatAutofixStep(step: AutofixStep): string[] {
-  const lines: string[] = [];
-
-  let statusIcon: string;
-  if (step.status === "COMPLETED") {
-    statusIcon = green("✓");
-  } else if (step.status === "PROCESSING") {
-    statusIcon = cyan("●");
-  } else {
-    statusIcon = muted("○");
-  }
-
-  lines.push(`${statusIcon} ${step.title}`);
-
-  // Show progress messages if any
-  if (step.progress && step.progress.length > 0) {
-    const lastProgress = step.progress.at(-1);
-    if (lastProgress) {
-      lines.push(`  ${muted(lastProgress.message)}`);
-    }
-  }
-
-  return lines;
-}
-
-/**
- * Format all steps summary.
- *
- * @param state - Autofix state
- * @returns Array of formatted lines
- */
-export function formatStepsSummary(state: AutofixState): string[] {
-  if (!state.steps || state.steps.length === 0) {
-    return [];
-  }
-
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(muted("Steps:"));
-
-  for (const step of state.steps) {
-    lines.push(...formatAutofixStep(step).map((line) => `  ${line}`));
-  }
 
   return lines;
 }

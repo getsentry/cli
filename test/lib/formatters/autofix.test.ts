@@ -7,12 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatAutofixError,
-  formatAutofixStatus,
-  formatPrNotFound,
   formatProgressLine,
-  formatPrResult,
   formatRootCause,
-  formatRootCauseHeader,
   formatRootCauseList,
   getProgressMessage,
   getSpinnerFrame,
@@ -181,15 +177,6 @@ describe("formatRootCause", () => {
   });
 });
 
-describe("formatRootCauseHeader", () => {
-  test("returns array of header lines", () => {
-    const lines = formatRootCauseHeader();
-    expect(Array.isArray(lines)).toBe(true);
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.join("\n")).toContain("Root Cause");
-  });
-});
-
 describe("formatRootCauseList", () => {
   test("formats single cause with fix hint", () => {
     const causes: RootCause[] = [{ id: 0, description: "Single root cause" }];
@@ -217,46 +204,6 @@ describe("formatRootCauseList", () => {
     const lines = formatRootCauseList([], "ISSUE-789");
     const output = lines.join("\n");
     expect(output).toContain("No root causes");
-  });
-});
-
-describe("formatPrResult", () => {
-  test("formats PR URL display", () => {
-    const lines = formatPrResult("https://github.com/org/repo/pull/123");
-    const output = lines.join("\n");
-    expect(output).toContain("Pull Request");
-    expect(output).toContain("https://github.com/org/repo/pull/123");
-  });
-});
-
-describe("formatPrNotFound", () => {
-  test("returns helpful message when no PR URL", () => {
-    const lines = formatPrNotFound();
-    const output = lines.join("\n");
-    expect(output).toContain("no PR URL");
-    expect(output).toContain("Sentry web UI");
-  });
-});
-
-describe("formatAutofixStatus", () => {
-  test("formats COMPLETED status", () => {
-    const result = formatAutofixStatus("COMPLETED");
-    expect(result.toLowerCase()).toContain("completed");
-  });
-
-  test("formats PROCESSING status", () => {
-    const result = formatAutofixStatus("PROCESSING");
-    expect(result.toLowerCase()).toContain("processing");
-  });
-
-  test("formats ERROR status", () => {
-    const result = formatAutofixStatus("ERROR");
-    expect(result.toLowerCase()).toContain("error");
-  });
-
-  test("formats unknown status", () => {
-    const result = formatAutofixStatus("UNKNOWN_STATUS");
-    expect(result).toBe("UNKNOWN_STATUS");
   });
 });
 

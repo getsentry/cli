@@ -9,7 +9,6 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   pollAutofixState,
-  resolveIssueId,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
 import { setAuthToken } from "../../../src/lib/config.js";
@@ -42,87 +41,6 @@ afterEach(() => {
   } catch {
     // Ignore cleanup errors
   }
-});
-
-describe("resolveIssueId", () => {
-  test("returns numeric ID unchanged", async () => {
-    // No API call needed for numeric IDs
-    const result = await resolveIssueId(
-      "123456789",
-      undefined,
-      "/tmp",
-      "sentry issue explain 123456789 --org <org>"
-    );
-
-    expect(result).toBe("123456789");
-  });
-
-  test("returns numeric-looking ID unchanged", async () => {
-    const result = await resolveIssueId(
-      "9999999999",
-      undefined,
-      "/tmp",
-      "sentry issue explain 9999999999 --org <org>"
-    );
-
-    expect(result).toBe("9999999999");
-  });
-
-  test("resolves short ID when org is provided", async () => {
-    // Mock the API calls for short ID resolution
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      // Handle both string URLs and Request objects
-      const req = new Request(input, init);
-      const url = req.url;
-
-      // Mock issue lookup by short ID (URL includes /api/0/)
-      if (url.includes("organizations/my-org/issues/PROJECT-ABC")) {
-        return new Response(
-          JSON.stringify({
-            id: "987654321",
-            shortId: "PROJECT-ABC",
-            title: "Test Issue",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "10",
-            userCount: 5,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    };
-
-    const result = await resolveIssueId(
-      "PROJECT-ABC",
-      "my-org",
-      "/tmp",
-      "sentry issue explain PROJECT-ABC --org <org>"
-    );
-
-    expect(result).toBe("987654321");
-  });
-
-  test("throws ContextError when short ID provided without org", async () => {
-    // Clear any DSN/config that might provide org context
-    delete process.env.SENTRY_DSN;
-
-    await expect(
-      resolveIssueId(
-        "PROJECT-ABC",
-        undefined,
-        "/nonexistent/path",
-        "sentry issue explain PROJECT-ABC --org <org>"
-      )
-    ).rejects.toThrow("Organization");
-  });
 });
 
 describe("resolveOrgAndIssueId", () => {
