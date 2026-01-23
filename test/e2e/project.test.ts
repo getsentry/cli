@@ -125,9 +125,9 @@ describe("sentry project list", () => {
   );
 });
 
-describe("sentry org get", () => {
+describe("sentry org view", () => {
   test("requires authentication", async () => {
-    const result = await runCli(["org", "get", TEST_ORG], {
+    const result = await runCli(["org", "view", TEST_ORG], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
@@ -140,7 +140,7 @@ describe("sentry org get", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["org", "get", TEST_ORG], {
+      const result = await runCli(["org", "view", TEST_ORG], {
         env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       });
 
@@ -156,7 +156,7 @@ describe("sentry org get", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["org", "get", TEST_ORG, "--json"], {
+      const result = await runCli(["org", "view", TEST_ORG, "--json"], {
         env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       });
 
@@ -172,7 +172,7 @@ describe("sentry org get", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["org", "get", "nonexistent-org-12345"], {
+      const result = await runCli(["org", "view", "nonexistent-org-12345"], {
         env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       });
 
@@ -183,10 +183,10 @@ describe("sentry org get", () => {
   );
 });
 
-describe("sentry project get", () => {
+describe("sentry project view", () => {
   test("requires authentication", async () => {
     const result = await runCli(
-      ["project", "get", TEST_PROJECT, "--org", TEST_ORG],
+      ["project", "view", TEST_PROJECT, "--org", TEST_ORG],
       { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
     );
 
@@ -197,7 +197,7 @@ describe("sentry project get", () => {
   test("requires org and project", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["project", "get"], {
+    const result = await runCli(["project", "view"], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
@@ -208,7 +208,7 @@ describe("sentry project get", () => {
   test("rejects partial flags (--org without project)", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["project", "get", "--org", TEST_ORG], {
+    const result = await runCli(["project", "view", "--org", TEST_ORG], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
@@ -217,7 +217,7 @@ describe("sentry project get", () => {
     const output = result.stderr + result.stdout;
     expect(output).toMatch(/organization and project is required/i);
     expect(output).toContain(
-      "sentry project get <project-slug> --org <org-slug>"
+      "sentry project view <project-slug> --org <org-slug>"
     );
   });
 
@@ -227,7 +227,7 @@ describe("sentry project get", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(
-        ["project", "get", TEST_PROJECT, "--org", TEST_ORG],
+        ["project", "view", TEST_PROJECT, "--org", TEST_ORG],
         { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
       );
 
@@ -244,7 +244,7 @@ describe("sentry project get", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(
-        ["project", "get", TEST_PROJECT, "--org", TEST_ORG, "--json"],
+        ["project", "view", TEST_PROJECT, "--org", TEST_ORG, "--json"],
         { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
       );
 
@@ -261,7 +261,7 @@ describe("sentry project get", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(
-        ["project", "get", "nonexistent-project-12345", "--org", TEST_ORG],
+        ["project", "view", "nonexistent-project-12345", "--org", TEST_ORG],
         { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
       );
 

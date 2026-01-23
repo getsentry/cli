@@ -1,11 +1,11 @@
 import { buildRouteMap } from "@stricli/core";
-import { getCommand } from "./get.js";
 import { listCommand } from "./list.js";
+import { viewCommand } from "./view.js";
 
 export const projectRoute = buildRouteMap({
   routes: {
     list: listCommand,
-    get: getCommand,
+    view: viewCommand,
   },
   docs: {
     brief: "Work with Sentry projects",

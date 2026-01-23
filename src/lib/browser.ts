@@ -5,6 +5,9 @@
  * Uses Bun.spawn and Bun.which for process management.
  */
 
+import type { Writer } from "../types/index.js";
+import { generateQRCode } from "./qrcode.js";
+
 /**
  * Open a URL in the user's default browser.
  *
@@ -58,4 +61,55 @@ export async function openBrowser(url: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Open URL in browser, or show URL + QR code as fallback.
+ *
+ * Attempts to open the browser first. If that fails (no browser available,
+ * headless environment, etc.), displays the URL and a QR code for mobile scanning.
+ *
+ * @param stdout - Output stream for messages
+ * @param url - The URL to open or display
+ * @returns true if browser opened, false if showing fallback
+ */
+export async function openOrShowUrl(
+  stdout: Writer,
+  url: string
+): Promise<boolean> {
+  const opened = await openBrowser(url);
+  if (opened) {
+    stdout.write("Opening in browser...\n");
+    return true;
+  }
+
+  // Fallback: show URL and QR code
+  stdout.write("Could not open browser. Visit this URL:\n\n");
+  stdout.write(`${url}\n\n`);
+  const qr = await generateQRCode(url);
+  stdout.write(qr);
+  stdout.write("\n");
+  return false;
+}
+
+/**
+ * Handle the --web flag for view commands.
+ *
+ * Opens the URL in a browser if available, otherwise shows URL + QR code.
+ * If URL is undefined/null, prints an error message.
+ *
+ * @param stdout - Output stream for messages
+ * @param url - The URL to open (or undefined if not available)
+ * @param entityName - Name of the entity for error message (e.g., "issue", "project")
+ */
+export async function openInBrowser(
+  stdout: Writer,
+  url: string | undefined,
+  entityName = "resource"
+): Promise<void> {
+  if (!url) {
+    stdout.write(`No URL available for this ${entityName}.\n`);
+    return;
+  }
+  await openOrShowUrl(stdout, url);
 }

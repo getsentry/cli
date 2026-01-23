@@ -88,9 +88,9 @@ describe("sentry issue list", () => {
   );
 });
 
-describe("sentry issue get", () => {
+describe("sentry issue view", () => {
   test("requires authentication", async () => {
-    const result = await runCli(["issue", "get", "12345"], {
+    const result = await runCli(["issue", "view", "12345"], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
@@ -101,7 +101,7 @@ describe("sentry issue get", () => {
   test("handles non-existent issue", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["issue", "get", "99999999999"], {
+    const result = await runCli(["issue", "view", "99999999999"], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 

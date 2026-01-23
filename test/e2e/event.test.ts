@@ -30,10 +30,10 @@ afterEach(async () => {
   await cleanupTestDir(testConfigDir);
 });
 
-describe("sentry event get", () => {
+describe("sentry event view", () => {
   test("requires authentication", async () => {
     const result = await runCli(
-      ["event", "get", "abc123", "--org", TEST_ORG, "--project", TEST_PROJECT],
+      ["event", "view", "abc123", "--org", TEST_ORG, "--project", TEST_PROJECT],
       { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
     );
 
@@ -44,7 +44,7 @@ describe("sentry event get", () => {
   test("requires org and project without DSN", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["event", "get", "abc123"], {
+    const result = await runCli(["event", "view", "abc123"], {
       env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
@@ -58,7 +58,7 @@ describe("sentry event get", () => {
     const result = await runCli(
       [
         "event",
-        "get",
+        "view",
         "nonexistent123",
         "--org",
         TEST_ORG,
