@@ -251,6 +251,20 @@ describe("buildQueryParams", () => {
       filter: '{"user":{"name":"john"}}',
     });
   });
+
+  test("handles arrays of objects by JSON stringifying each element", () => {
+    expect(
+      buildQueryParams(['filters=[{"key":"value"},{"key2":"value2"}]'])
+    ).toEqual({
+      filters: ['{"key":"value"}', '{"key2":"value2"}'],
+    });
+  });
+
+  test("handles mixed arrays with objects and primitives", () => {
+    expect(buildQueryParams(['data=[1,{"obj":true},"string"]'])).toEqual({
+      data: ["1", '{"obj":true}', "string"],
+    });
+  });
 });
 
 describe("prepareRequestOptions", () => {

@@ -134,6 +134,17 @@ export function parseFields(fields: string[]): Record<string, unknown> {
 }
 
 /**
+ * Convert a value to string, JSON-stringifying objects to avoid "[object Object]".
+ * @internal
+ */
+function stringifyValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+/**
  * Build query parameters from field strings for GET requests.
  * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
  * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
@@ -159,13 +170,11 @@ export function buildQueryParams(
     const value = parseFieldValue(rawValue);
 
     // Handle arrays by creating string[] for repeated keys
-    // Handle objects by JSON stringifying them (avoid "[object Object]")
+    // Use stringifyValue to handle objects (avoid "[object Object]")
     if (Array.isArray(value)) {
-      result[key] = value.map(String);
-    } else if (typeof value === "object" && value !== null) {
-      result[key] = JSON.stringify(value);
+      result[key] = value.map(stringifyValue);
     } else {
-      result[key] = String(value);
+      result[key] = stringifyValue(value);
     }
   }
 
