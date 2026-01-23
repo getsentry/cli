@@ -76,7 +76,7 @@ type PollAutofixOptions = {
   stderr: Writer;
   /** Whether to suppress progress output (JSON mode) */
   json: boolean;
-  /** Polling interval in milliseconds (default: 3000) */
+  /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
   /** Maximum time to wait in milliseconds (default: 600000 = 10 minutes) */
   timeoutMs?: number;
