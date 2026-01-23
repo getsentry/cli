@@ -19,6 +19,7 @@ import type {
   StackFrame,
 } from "../../types/index.js";
 import {
+  boldUnderline,
   green,
   levelColor,
   muted,
@@ -330,16 +331,111 @@ function wrapTitle(text: string, startCol: number, termWidth: number): string {
 }
 
 /**
+ * Options for formatting short IDs with alias highlighting.
+ */
+export type FormatShortIdOptions = {
+  /** Project slug to determine the prefix for suffix highlighting */
+  projectSlug?: string;
+  /** Project alias (e.g., "e", "w", "s") for multi-project display */
+  projectAlias?: string;
+  /** Common prefix that was stripped to compute the alias (e.g., "spotlight-") */
+  strippedPrefix?: string;
+};
+
+/**
+ * Format a short ID with the unique suffix highlighted with underline.
+ *
+ * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
+ * Multi-project mode: "SPOTLIGHT-WEBSITE-2A" with alias "w" and strippedPrefix "spotlight-"
+ *   → "SPOTLIGHT-_W_EBSITE-_2A_" (alias char in remainder and suffix underlined)
+ *
+ * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
+ * @param options - Formatting options (projectSlug, projectAlias, strippedPrefix)
+ * @returns Formatted short ID with underline highlights
+ */
+export function formatShortId(
+  shortId: string,
+  options?: FormatShortIdOptions | string
+): string {
+  // Handle legacy string parameter (projectSlug only)
+  const opts: FormatShortIdOptions =
+    typeof options === "string" ? { projectSlug: options } : (options ?? {});
+
+  const { projectSlug, projectAlias, strippedPrefix } = opts;
+
+  // Extract suffix from shortId (the part after PROJECT-)
+  const upperShortId = shortId.toUpperCase();
+  let suffix = shortId;
+  if (projectSlug) {
+    const prefix = `${projectSlug.toUpperCase()}-`;
+    if (upperShortId.startsWith(prefix)) {
+      suffix = shortId.slice(prefix.length);
+    }
+  }
+
+  // Multi-project mode: highlight alias position and suffix
+  if (projectAlias && projectSlug) {
+    const upperSlug = projectSlug.toUpperCase();
+    const aliasLen = projectAlias.length;
+
+    // Find where the alias corresponds to in the project slug
+    // If strippedPrefix exists, the alias is from the remainder after stripping
+    const strippedLen = strippedPrefix?.length ?? 0;
+    const aliasStartInSlug = Math.min(strippedLen, upperSlug.length);
+
+    // Build the formatted output: PROJECT-SLUG with alias part underlined, then -SUFFIX underlined
+    // e.g., "SPOTLIGHT-WEBSITE" with alias "w", strippedPrefix "spotlight-"
+    //   → aliasStartInSlug = 10, so we underline chars 10-11 (the "W")
+    const beforeAlias = upperSlug.slice(0, aliasStartInSlug);
+    const aliasChars = upperSlug.slice(
+      aliasStartInSlug,
+      aliasStartInSlug + aliasLen
+    );
+    const afterAlias = upperSlug.slice(aliasStartInSlug + aliasLen);
+
+    return `${beforeAlias}${boldUnderline(aliasChars)}${afterAlias}-${boldUnderline(suffix.toUpperCase())}`;
+  }
+
+  // Single project mode: show full shortId with suffix highlighted
+  if (projectSlug) {
+    const prefix = `${projectSlug.toUpperCase()}-`;
+    if (upperShortId.startsWith(prefix)) {
+      return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
+    }
+  }
+
+  return shortId.toUpperCase();
+}
+
+/**
+ * Calculate the raw display length of a formatted short ID (without ANSI codes).
+ * In all modes, we display the full shortId (just with different styling).
+ */
+function getShortIdDisplayLength(shortId: string): number {
+  return shortId.length;
+}
+
+/**
  * Format a single issue for list display.
  * Wraps long titles with proper indentation.
  *
  * @param issue - Issue to format
  * @param termWidth - Terminal width for wrapping (default 80)
+ * @param shortIdOptions - Options for formatting the short ID (projectSlug and/or projectAlias)
  */
-export function formatIssueRow(issue: SentryIssue, termWidth = 80): string {
+export function formatIssueRow(
+  issue: SentryIssue,
+  termWidth = 80,
+  shortIdOptions?: FormatShortIdOptions | string
+): string {
   const levelText = (issue.level ?? "unknown").toUpperCase().padEnd(COL_LEVEL);
   const level = levelColor(levelText, issue.level);
-  const shortId = issue.shortId.padEnd(COL_SHORT_ID);
+  const formattedShortId = formatShortId(issue.shortId, shortIdOptions);
+
+  // Calculate raw display length (without ANSI codes) for padding
+  const rawLen = getShortIdDisplayLength(issue.shortId);
+  const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
+  const shortId = `${formattedShortId}${shortIdPadding}`;
   const count = `${issue.count}`.padStart(COL_COUNT);
   const seen = formatRelativeTime(issue.lastSeen);
   const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);

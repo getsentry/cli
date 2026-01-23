@@ -9,13 +9,17 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clearAuth,
+  clearProjectAliases,
   getAuthToken,
   getDefaultOrganization,
   getDefaultProject,
+  getProjectAliases,
+  getProjectByAlias,
   isAuthenticated,
   readConfig,
   setAuthToken,
   setDefaults,
+  setProjectAliases,
   writeConfig,
 } from "../../src/lib/config.js";
 
@@ -300,5 +304,109 @@ describe("refreshToken error handling", () => {
     // Auth SHOULD be cleared when server rejects refresh token
     const config = await readConfig();
     expect(config.auth).toBeUndefined();
+  });
+});
+
+describe("project aliases", () => {
+  test("setProjectAliases stores aliases in config", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+    });
+
+    const config = await readConfig();
+    expect(config.projectAliases?.aliases).toEqual({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+    });
+    expect(config.projectAliases?.cachedAt).toBeGreaterThan(0);
+  });
+
+  test("getProjectAliases returns stored aliases", async () => {
+    await setProjectAliases({
+      f: { orgSlug: "my-org", projectSlug: "frontend" },
+      b: { orgSlug: "my-org", projectSlug: "backend" },
+    });
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toEqual({
+      f: { orgSlug: "my-org", projectSlug: "frontend" },
+      b: { orgSlug: "my-org", projectSlug: "backend" },
+    });
+  });
+
+  test("getProjectAliases returns undefined when not set", async () => {
+    const aliases = await getProjectAliases();
+    expect(aliases).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns correct project", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+      w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
+      s: { orgSlug: "sentry", projectSlug: "spotlight" },
+    });
+
+    const project = await getProjectByAlias("e");
+    expect(project).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias is case-insensitive", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    expect(await getProjectByAlias("E")).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+    expect(await getProjectByAlias("e")).toEqual({
+      orgSlug: "sentry",
+      projectSlug: "spotlight-electron",
+    });
+  });
+
+  test("getProjectByAlias returns undefined for unknown alias", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    const project = await getProjectByAlias("x");
+    expect(project).toBeUndefined();
+  });
+
+  test("getProjectByAlias returns undefined when no aliases set", async () => {
+    const project = await getProjectByAlias("e");
+    expect(project).toBeUndefined();
+  });
+
+  test("clearProjectAliases removes all aliases", async () => {
+    await setProjectAliases({
+      e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
+    });
+
+    await clearProjectAliases();
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toBeUndefined();
+  });
+
+  test("setProjectAliases overwrites existing aliases", async () => {
+    await setProjectAliases({
+      old: { orgSlug: "org1", projectSlug: "project1" },
+    });
+
+    await setProjectAliases({
+      new: { orgSlug: "org2", projectSlug: "project2" },
+    });
+
+    const aliases = await getProjectAliases();
+    expect(aliases).toEqual({
+      new: { orgSlug: "org2", projectSlug: "project2" },
+    });
+    expect(aliases?.old).toBeUndefined();
   });
 });
