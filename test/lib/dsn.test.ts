@@ -169,7 +169,7 @@ describe("createDsnFingerprint", () => {
     expect(result).toBe("123:456");
   });
 
-  test("filters out DSNs without orgId (self-hosted)", () => {
+  test("includes DSNs without orgId using host as prefix (self-hosted)", () => {
     const saas = makeDsn("123", "456");
     const selfHosted: DetectedDsn = {
       raw: "https://key@sentry.mycompany.com/1",
@@ -182,7 +182,8 @@ describe("createDsnFingerprint", () => {
     };
 
     const result = createDsnFingerprint([saas, selfHosted]);
-    expect(result).toBe("123:456");
+    // Self-hosted uses host:projectId, SaaS uses orgId:projectId
+    expect(result).toBe("123:456,sentry.mycompany.com:1");
   });
 
   test("returns empty string for empty array", () => {
@@ -190,7 +191,7 @@ describe("createDsnFingerprint", () => {
     expect(result).toBe("");
   });
 
-  test("returns empty string when all DSNs are self-hosted", () => {
+  test("returns host-based fingerprint for self-hosted DSNs", () => {
     const selfHosted: DetectedDsn = {
       raw: "https://key@sentry.mycompany.com/1",
       protocol: "https",
@@ -202,6 +203,6 @@ describe("createDsnFingerprint", () => {
     };
 
     const result = createDsnFingerprint([selfHosted]);
-    expect(result).toBe("");
+    expect(result).toBe("sentry.mycompany.com:1");
   });
 });

@@ -5,7 +5,11 @@
  * Uses cached resolution when available to avoid API calls.
  */
 
-import { listOrganizations, listProjects } from "../api-client.js";
+import {
+  findProjectByDsnKey,
+  listOrganizations,
+  listProjects,
+} from "../api-client.js";
 import { getCachedDsn, updateCachedResolution } from "./cache.js";
 import { getDsnSourceDescription } from "./detector.js";
 import type {
@@ -49,12 +53,30 @@ export async function resolveProject(
   }
 
   // Need to fetch from API
+  // For DSNs without orgId, try to resolve by searching with the public key
   if (!dsn.orgId) {
-    throw new Error(
-      "Cannot resolve project: DSN has no org ID. " +
-        "This may be a self-hosted Sentry instance. " +
-        "Please specify --org and --project explicitly."
-    );
+    const project = await findProjectByDsnKey(dsn.publicKey);
+    if (!project?.organization) {
+      throw new Error(
+        "Cannot resolve project: DSN could not be matched to any accessible project. " +
+          "You may not have access, or please specify --org and --project explicitly."
+      );
+    }
+
+    const resolved: ResolvedProjectInfo = {
+      orgSlug: project.organization.slug,
+      orgName: project.organization.name,
+      projectSlug: project.slug,
+      projectName: project.name,
+    };
+
+    await updateCachedResolution(cwd, resolved);
+
+    return {
+      ...resolved,
+      dsn,
+      sourceDescription: getDsnSourceDescription(dsn),
+    };
   }
 
   const resolved = await fetchProjectInfo(dsn.orgId, dsn.projectId);

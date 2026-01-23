@@ -10,12 +10,14 @@
  * 3. DSN auto-detection (source code, .env files, environment variables)
  */
 
-import { getProject } from "./api-client.js";
+import { findProjectByDsnKey, getProject } from "./api-client.js";
 import {
   getCachedProject,
+  getCachedProjectByDsnKey,
   getDefaultOrganization,
   getDefaultProject,
   setCachedProject,
+  setCachedProjectByDsnKey,
 } from "./config.js";
 import type { DetectedDsn } from "./dsn/index.js";
 import {
@@ -194,8 +196,73 @@ export async function resolveOrgFromDsn(
 }
 
 /**
+ * Resolve a DSN without orgId by searching for the project via DSN public key.
+ * Uses the /api/0/projects?query=dsn:<key> endpoint.
+ *
+ * @param dsn - Detected DSN (must have publicKey)
+ * @returns Resolved target or null if resolution failed
+ */
+async function resolveDsnByPublicKey(
+  dsn: DetectedDsn
+): Promise<ResolvedTarget | null> {
+  const detectedFrom = getDsnSourceDescription(dsn);
+
+  // Check cache first (keyed by publicKey for DSNs without orgId)
+  const cached = await getCachedProjectByDsnKey(dsn.publicKey);
+  if (cached) {
+    return {
+      org: cached.orgSlug,
+      project: cached.projectSlug,
+      orgDisplay: cached.orgName,
+      projectDisplay: cached.projectName,
+      detectedFrom,
+      packagePath: dsn.packagePath,
+    };
+  }
+
+  // Cache miss — search for project by DSN public key
+  try {
+    const projectInfo = await findProjectByDsnKey(dsn.publicKey);
+
+    if (!projectInfo) {
+      return null;
+    }
+
+    if (projectInfo.organization) {
+      await setCachedProjectByDsnKey(dsn.publicKey, {
+        orgSlug: projectInfo.organization.slug,
+        orgName: projectInfo.organization.name,
+        projectSlug: projectInfo.slug,
+        projectName: projectInfo.name,
+      });
+
+      return {
+        org: projectInfo.organization.slug,
+        project: projectInfo.slug,
+        orgDisplay: projectInfo.organization.name,
+        projectDisplay: projectInfo.name,
+        detectedFrom,
+        packagePath: dsn.packagePath,
+      };
+    }
+
+    // Project found but no org info - unusual but handle gracefully
+    return null;
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+/**
  * Resolve a single detected DSN to a ResolvedTarget.
  * Uses cache when available, otherwise fetches from API.
+ *
+ * Supports two resolution paths:
+ * 1. DSNs with orgId: Use getProject(orgId, projectId) API
+ * 2. DSNs without orgId: Use findProjectByDsnKey(publicKey) API
  *
  * @param dsn - Detected DSN to resolve
  * @returns Resolved target or null if resolution failed
@@ -203,8 +270,10 @@ export async function resolveOrgFromDsn(
 async function resolveDsnToTarget(
   dsn: DetectedDsn
 ): Promise<ResolvedTarget | null> {
-  if (!(dsn.orgId && dsn.projectId)) {
-    return null;
+  // For DSNs without orgId (self-hosted or some SaaS patterns),
+  // resolve by searching for the project via DSN public key
+  if (!dsn.orgId) {
+    return resolveDsnByPublicKey(dsn);
   }
 
   const detectedFrom = getDsnSourceDescription(dsn);
@@ -328,10 +397,7 @@ export async function resolveAllTargets(
     return { targets: [] };
   }
 
-  // Count self-hosted DSNs (no orgId) - these can't be resolved via API
-  const selfHostedCount = detection.all.filter((d) => !d.orgId).length;
-
-  // Resolve all DSNs in parallel (self-hosted ones will return null)
+  // Resolve all DSNs in parallel
   const resolvedTargets = await Promise.all(
     detection.all.map((dsn) => resolveDsnToTarget(dsn))
   );
@@ -351,10 +417,13 @@ export async function resolveAllTargets(
     return true;
   });
 
+  // Count DSNs that couldn't be resolved (API errors, permissions, etc.)
+  const unresolvedCount = resolvedTargets.filter((t) => t === null).length;
+
   if (targets.length === 0) {
     return {
       targets: [],
-      skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+      skippedSelfHosted: unresolvedCount > 0 ? unresolvedCount : undefined,
       detectedDsns: detection.all,
     };
   }
@@ -366,7 +435,7 @@ export async function resolveAllTargets(
   return {
     targets,
     footer,
-    skippedSelfHosted: selfHostedCount > 0 ? selfHostedCount : undefined,
+    skippedSelfHosted: unresolvedCount > 0 ? unresolvedCount : undefined,
     detectedDsns: detection.all,
   };
 }

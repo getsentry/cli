@@ -12,6 +12,7 @@ import {
   clearAuth,
   clearProjectAliases,
   getAuthToken,
+  getCachedProjectByDsnKey,
   getDefaultOrganization,
   getDefaultProject,
   getProjectAliases,
@@ -19,6 +20,7 @@ import {
   isAuthenticated,
   readConfig,
   setAuthToken,
+  setCachedProjectByDsnKey,
   setDefaults,
   setProjectAliases,
   writeConfig,
@@ -545,5 +547,46 @@ describe("DSN-fingerprinted project aliases", () => {
       orgSlug: "sentry",
       projectSlug: "spotlight-electron",
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DSN Key-based Project Cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("getCachedProjectByDsnKey / setCachedProjectByDsnKey", () => {
+  test("caches and retrieves project by DSN public key", async () => {
+    await setCachedProjectByDsnKey("abc123publickey", {
+      orgSlug: "my-org",
+      orgName: "My Organization",
+      projectSlug: "my-project",
+      projectName: "My Project",
+    });
+
+    const cached = await getCachedProjectByDsnKey("abc123publickey");
+    expect(cached).toBeDefined();
+    expect(cached?.orgSlug).toBe("my-org");
+    expect(cached?.projectSlug).toBe("my-project");
+    expect(cached?.cachedAt).toBeDefined();
+  });
+
+  test("returns undefined for unknown DSN key", async () => {
+    const cached = await getCachedProjectByDsnKey("nonexistent-key");
+    expect(cached).toBeUndefined();
+  });
+
+  test("stores with dsn: prefix to avoid collisions with orgId:projectId keys", async () => {
+    // Set by DSN key
+    await setCachedProjectByDsnKey("mykey", {
+      orgSlug: "dsn-org",
+      orgName: "DSN Org",
+      projectSlug: "dsn-project",
+      projectName: "DSN Project",
+    });
+
+    const config = await readConfig();
+    // Should be stored with "dsn:" prefix
+    expect(config.projectCache?.["dsn:mykey"]).toBeDefined();
+    expect(config.projectCache?.["dsn:mykey"]?.orgSlug).toBe("dsn-org");
   });
 });

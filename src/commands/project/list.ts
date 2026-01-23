@@ -278,7 +278,7 @@ export const listCommand = buildCommand({
 
     if (skippedSelfHosted) {
       stdout.write(
-        `\nNote: Skipped ${skippedSelfHosted} self-hosted DSN(s). ` +
+        `\nNote: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
           "Use --org to specify organization explicitly.\n"
       );
     }

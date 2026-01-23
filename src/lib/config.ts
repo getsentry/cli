@@ -380,6 +380,46 @@ export async function clearProjectCache(): Promise<void> {
   await writeConfig(config);
 }
 
+/**
+ * Get cached project information by DSN public key.
+ * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
+ *
+ * @param publicKey - The DSN public key
+ * @returns Cached project info or undefined if not cached
+ */
+export async function getCachedProjectByDsnKey(
+  publicKey: string
+): Promise<CachedProject | undefined> {
+  const config = await readConfig();
+  const key = `dsn:${publicKey}`;
+  return config.projectCache?.[key];
+}
+
+/**
+ * Cache project information by DSN public key.
+ * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
+ *
+ * @param publicKey - The DSN public key
+ * @param info - Project information to cache
+ */
+export async function setCachedProjectByDsnKey(
+  publicKey: string,
+  info: Omit<CachedProject, "cachedAt">
+): Promise<void> {
+  const config = await readConfig();
+  const key = `dsn:${publicKey}`;
+
+  config.projectCache = {
+    ...config.projectCache,
+    [key]: {
+      ...info,
+      cachedAt: Date.now(),
+    },
+  };
+
+  await writeConfig(config);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Aliases (for short issue ID resolution)
 // ─────────────────────────────────────────────────────────────────────────────

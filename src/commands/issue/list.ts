@@ -326,8 +326,8 @@ export const listCommand = buildCommand({
         throw new ContextError(
           "Organization and project",
           `${USAGE_HINT}\n\n` +
-            `Note: Found ${skippedSelfHosted} self-hosted DSN(s) that cannot be resolved automatically.\n` +
-            "Self-hosted Sentry instances require explicit --org and --project flags."
+            `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
+            "You may not have access to these projects, or you can specify --org and --project explicitly."
         );
       }
       throw new ContextError("Organization and project", USAGE_HINT);
