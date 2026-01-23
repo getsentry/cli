@@ -746,11 +746,16 @@ function formatBreadcrumb(breadcrumb: Breadcrumb): string {
  */
 function formatBreadcrumbs(breadcrumbsEntry: BreadcrumbsEntry): string[] {
   const lines: string[] = [];
+  const breadcrumbs = breadcrumbsEntry.data.values ?? [];
+
+  if (breadcrumbs.length === 0) {
+    return lines;
+  }
+
   lines.push("");
   lines.push(muted("─── Breadcrumbs ───"));
   lines.push("");
 
-  const breadcrumbs = breadcrumbsEntry.data.values ?? [];
   // Show all breadcrumbs, oldest first (they're usually already in order)
   for (const breadcrumb of breadcrumbs) {
     lines.push(formatBreadcrumb(breadcrumb));
