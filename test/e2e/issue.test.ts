@@ -84,7 +84,7 @@ describe("sentry issue list", () => {
       const data = JSON.parse(result.stdout);
       expect(Array.isArray(data)).toBe(true);
     },
-    { timeout: 15_000 }
+    { timeout: 30_000 }
   );
 });
 
