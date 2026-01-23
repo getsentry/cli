@@ -12,19 +12,13 @@ import {
   formatProgressLine,
   formatPrResult,
   formatRootCause,
-  formatRootCauseAnalysisHeader,
-  formatRootCauseArtifact,
   formatRootCauseHeader,
   formatRootCauseList,
   getProgressMessage,
   getSpinnerFrame,
   truncateProgressMessage,
 } from "../../../src/lib/formatters/autofix.js";
-import type {
-  AutofixState,
-  RootCause,
-  RootCauseArtifact,
-} from "../../../src/types/autofix.js";
+import type { AutofixState, RootCause } from "../../../src/types/autofix.js";
 
 describe("getSpinnerFrame", () => {
   test("returns a spinner character", () => {
@@ -295,133 +289,5 @@ describe("formatAutofixError", () => {
   test("returns generic message when no detail", () => {
     const message = formatAutofixError(500);
     expect(message).toBeTruthy();
-  });
-});
-
-describe("formatRootCauseAnalysisHeader", () => {
-  test("returns array with header and separator", () => {
-    const lines = formatRootCauseAnalysisHeader();
-    expect(Array.isArray(lines)).toBe(true);
-    expect(lines.length).toBe(2);
-    expect(lines.join("\n")).toContain("Root Cause Analysis");
-  });
-});
-
-describe("formatRootCauseArtifact", () => {
-  test("formats complete root cause artifact", () => {
-    const artifact: RootCauseArtifact = {
-      key: "root_cause",
-      data: {
-        one_line_description: "Database connection pool exhausted",
-        five_whys: [
-          "Connection pool ran out of connections",
-          "Connections were not being released",
-          "Missing finally block in database calls",
-          "Code review didn't catch the issue",
-          "No automated tests for connection cleanup",
-        ],
-        reproduction_steps: [
-          "Start the application",
-          "Make 100 concurrent database requests",
-          "Observe connection timeout errors",
-        ],
-      },
-    };
-
-    const lines = formatRootCauseArtifact(artifact);
-    const output = lines.join("\n");
-
-    // Check header
-    expect(output).toContain("Root Cause Analysis");
-
-    // Check summary
-    expect(output).toContain("Summary:");
-    expect(output).toContain("Database connection pool exhausted");
-
-    // Check five whys
-    expect(output).toContain("Why This Happened:");
-    expect(output).toContain("1. Connection pool ran out");
-    expect(output).toContain("2. Connections were not being released");
-    expect(output).toContain("5. No automated tests");
-
-    // Check reproduction steps
-    expect(output).toContain("Steps to Reproduce:");
-    expect(output).toContain("1. Start the application");
-    expect(output).toContain("3. Observe connection timeout");
-  });
-
-  test("formats artifact with minimal data", () => {
-    const artifact: RootCauseArtifact = {
-      key: "root_cause",
-      data: {
-        one_line_description: "Simple error",
-        five_whys: [],
-        reproduction_steps: [],
-      },
-    };
-
-    const lines = formatRootCauseArtifact(artifact);
-    const output = lines.join("\n");
-
-    expect(output).toContain("Root Cause Analysis");
-    expect(output).toContain("Summary:");
-    expect(output).toContain("Simple error");
-    // Should not have numbered lists when arrays are empty
-    expect(output).not.toContain("1.");
-  });
-
-  test("formats artifact with only five_whys", () => {
-    const artifact: RootCauseArtifact = {
-      key: "root_cause",
-      data: {
-        one_line_description: "Error with whys only",
-        five_whys: ["First why", "Second why"],
-        reproduction_steps: [],
-      },
-    };
-
-    const lines = formatRootCauseArtifact(artifact);
-    const output = lines.join("\n");
-
-    expect(output).toContain("Why This Happened:");
-    expect(output).toContain("1. First why");
-    expect(output).toContain("2. Second why");
-    expect(output).not.toContain("Steps to Reproduce:");
-  });
-
-  test("formats artifact with only reproduction_steps", () => {
-    const artifact: RootCauseArtifact = {
-      key: "root_cause",
-      data: {
-        one_line_description: "Error with steps only",
-        five_whys: [],
-        reproduction_steps: ["Step one", "Step two", "Step three"],
-      },
-    };
-
-    const lines = formatRootCauseArtifact(artifact);
-    const output = lines.join("\n");
-
-    expect(output).not.toContain("Why This Happened:");
-    expect(output).toContain("Steps to Reproduce:");
-    expect(output).toContain("1. Step one");
-    expect(output).toContain("3. Step three");
-  });
-
-  test("includes reason field if present", () => {
-    const artifact: RootCauseArtifact = {
-      key: "root_cause",
-      data: {
-        one_line_description: "Test error",
-        five_whys: ["Why"],
-        reproduction_steps: ["Step"],
-      },
-      reason: "Based on stack trace analysis",
-    };
-
-    const lines = formatRootCauseArtifact(artifact);
-    // The reason field is optional and may or may not be displayed
-    // Just verify the artifact formats without error
-    expect(lines.length).toBeGreaterThan(0);
   });
 });

@@ -9,10 +9,6 @@
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
 // Autofix types
 export type {
-  AutofixArtifact,
-  AutofixBlock,
-  AutofixExplorerResponse,
-  AutofixExplorerState,
   AutofixResponse,
   AutofixState,
   AutofixStatus,
@@ -20,8 +16,6 @@ export type {
   AutofixTriggerResponse,
   AutofixUpdatePayload,
   RootCause,
-  RootCauseArtifact,
-  RootCauseData,
   SolutionArtifact,
   SolutionData,
   SolutionStep,
@@ -29,22 +23,15 @@ export type {
 } from "./autofix.js";
 export {
   AUTOFIX_STATUSES,
-  AutofixArtifactSchema,
-  AutofixBlockSchema,
-  AutofixExplorerResponseSchema,
-  AutofixExplorerStateSchema,
   AutofixResponseSchema,
   AutofixStateSchema,
   AutofixStepSchema,
   AutofixTriggerResponseSchema,
   extractPrUrl,
-  extractRootCauseArtifact,
   extractRootCauses,
   extractSolution,
   getLatestProgress,
   isTerminalStatus,
-  RootCauseArtifactSchema,
-  RootCauseDataSchema,
   RootCauseSchema,
   SolutionArtifactSchema,
   SolutionDataSchema,

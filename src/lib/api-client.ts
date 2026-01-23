@@ -7,7 +7,12 @@
 
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
-import type { AutofixResponse, AutofixState } from "../types/autofix.js";
+import {
+  type AutofixResponse,
+  type AutofixState,
+  type AutofixTriggerResponse,
+  AutofixTriggerResponseSchema,
+} from "../types/autofix.js";
 import {
   type IssueSummary,
   IssueSummarySchema,
@@ -414,17 +419,21 @@ export function updateIssueStatus(
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @returns The run_id for polling status
+ * @returns The trigger response with run_id
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export function triggerAutofix(
   orgSlug: string,
   issueId: string
-): Promise<unknown> {
-  return apiRequest(`organizations/${orgSlug}/issues/${issueId}/autofix/`, {
-    method: "POST",
-    body: { step: "root_cause" },
-  });
+): Promise<AutofixTriggerResponse> {
+  return apiRequest<AutofixTriggerResponse>(
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    {
+      method: "POST",
+      body: { step: "root_cause" },
+      schema: AutofixTriggerResponseSchema,
+    }
+  );
 }
 
 /**

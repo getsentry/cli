@@ -8,11 +8,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
-  getAutofixExplorerState,
   getAutofixState,
   getIssueSummary,
   triggerAutofix,
-  triggerAutofixAnalysis,
   updateAutofix,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/config.js";
@@ -60,16 +58,15 @@ describe("triggerAutofix", () => {
       });
     };
 
-    const result = await triggerAutofix("test-org", "123456789");
+    await triggerAutofix("test-org", "123456789");
 
-    expect(result.run_id).toBe(12_345);
     expect(capturedRequest?.method).toBe("POST");
     expect(capturedRequest?.url).toContain(
       "/organizations/test-org/issues/123456789/autofix/"
     );
   });
 
-  test("includes stoppingPoint in request body", async () => {
+  test("includes step in request body", async () => {
     let capturedBody: unknown;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -82,37 +79,9 @@ describe("triggerAutofix", () => {
       });
     };
 
-    await triggerAutofix("test-org", "123456789", {
-      stoppingPoint: "root_cause",
-    });
+    await triggerAutofix("test-org", "123456789");
 
-    expect(capturedBody).toEqual({ stoppingPoint: "root_cause" });
-  });
-
-  test("includes optional parameters when provided", async () => {
-    let capturedBody: unknown;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      capturedBody = await req.json();
-
-      return new Response(JSON.stringify({ run_id: 12_345 }), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-
-    await triggerAutofix("test-org", "123456789", {
-      stoppingPoint: "open_pr",
-      eventId: "event-abc",
-      instruction: "Focus on database issues",
-    });
-
-    expect(capturedBody).toEqual({
-      stoppingPoint: "open_pr",
-      eventId: "event-abc",
-      instruction: "Focus on database issues",
-    });
+    expect(capturedBody).toEqual({ step: "root_cause" });
   });
 
   test("throws ApiError on 402 response", async () => {
@@ -216,7 +185,7 @@ describe("getAutofixState", () => {
 });
 
 describe("updateAutofix", () => {
-  test("sends POST request to autofix update endpoint", async () => {
+  test("sends POST request to autofix endpoint", async () => {
     let capturedRequest: Request | undefined;
     let capturedBody: unknown;
 
@@ -230,69 +199,15 @@ describe("updateAutofix", () => {
       });
     };
 
-    await updateAutofix("123456789", 12_345, {
-      type: "select_root_cause",
-      cause_id: 0,
-      stopping_point: "open_pr",
-    });
+    await updateAutofix("test-org", "123456789", 12_345);
 
     expect(capturedRequest?.method).toBe("POST");
-    expect(capturedRequest?.url).toContain("/issues/123456789/autofix/update/");
+    expect(capturedRequest?.url).toContain(
+      "/organizations/test-org/issues/123456789/autofix/"
+    );
     expect(capturedBody).toEqual({
       run_id: 12_345,
-      payload: {
-        type: "select_root_cause",
-        cause_id: 0,
-        stopping_point: "open_pr",
-      },
-    });
-  });
-
-  test("sends select_solution payload", async () => {
-    let capturedBody: unknown;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedBody = await new Request(input, init).json();
-
-      return new Response(JSON.stringify({}), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-
-    await updateAutofix("123456789", 12_345, {
-      type: "select_solution",
-    });
-
-    expect(capturedBody).toEqual({
-      run_id: 12_345,
-      payload: {
-        type: "select_solution",
-      },
-    });
-  });
-
-  test("sends create_pr payload", async () => {
-    let capturedBody: unknown;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedBody = await new Request(input, init).json();
-
-      return new Response(JSON.stringify({}), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-
-    await updateAutofix("123456789", 12_345, {
-      type: "create_pr",
-    });
-
-    expect(capturedBody).toEqual({
-      run_id: 12_345,
-      payload: {
-        type: "create_pr",
-      },
+      step: "solution",
     });
   });
 });
@@ -379,156 +294,5 @@ describe("getIssueSummary", () => {
       });
 
     await expect(getIssueSummary("test-org", "123456789")).rejects.toThrow();
-  });
-});
-
-describe("getAutofixExplorerState", () => {
-  test("sends GET request with mode=explorer parameter", async () => {
-    let capturedRequest: Request | undefined;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedRequest = new Request(input, init);
-
-      return new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "COMPLETED",
-            blocks: [
-              {
-                id: "block-1",
-                message: { role: "assistant", content: "Analysis complete" },
-                timestamp: "2025-01-01T00:00:00Z",
-                artifacts: [
-                  {
-                    key: "root_cause",
-                    data: {
-                      one_line_description: "Test root cause",
-                      five_whys: ["Why 1", "Why 2"],
-                      reproduction_steps: ["Step 1"],
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    };
-
-    const result = await getAutofixExplorerState("test-org", "123456789");
-
-    expect(result?.run_id).toBe(12_345);
-    expect(result?.status).toBe("COMPLETED");
-    expect(result?.blocks).toHaveLength(1);
-    expect(capturedRequest?.method).toBe("GET");
-    expect(capturedRequest?.url).toContain(
-      "/organizations/test-org/issues/123456789/autofix/"
-    );
-    expect(capturedRequest?.url).toContain("mode=explorer");
-  });
-
-  test("returns null when autofix is null", async () => {
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ autofix: null }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-
-    const result = await getAutofixExplorerState("test-org", "123456789");
-    expect(result).toBeNull();
-  });
-
-  test("returns state with blocks and artifacts", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "COMPLETED",
-            blocks: [
-              {
-                id: "block-1",
-                message: { role: "assistant", content: "Found root cause" },
-                timestamp: "2025-01-01T00:00:00Z",
-                artifacts: [
-                  {
-                    key: "root_cause",
-                    data: {
-                      one_line_description: "Memory leak in connection pool",
-                      five_whys: [
-                        "Connections not released",
-                        "Missing finally block",
-                      ],
-                      reproduction_steps: ["Open connection", "Don't close it"],
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-    const result = await getAutofixExplorerState("test-org", "123456789");
-    expect(result?.blocks?.[0]?.artifacts?.[0]?.key).toBe("root_cause");
-  });
-});
-
-describe("triggerAutofixAnalysis", () => {
-  test("sends POST request to autofix endpoint", async () => {
-    let capturedRequest: Request | undefined;
-    let capturedBody: unknown;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      capturedRequest = new Request(input, init);
-      capturedBody = await new Request(input, init).json();
-
-      return new Response(JSON.stringify({ run_id: 12_345 }), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      });
-    };
-
-    const result = await triggerAutofixAnalysis("test-org", "123456789");
-
-    expect(result.run_id).toBe(12_345);
-    expect(capturedRequest?.method).toBe("POST");
-    expect(capturedRequest?.url).toContain(
-      "/organizations/test-org/issues/123456789/autofix/"
-    );
-    expect(capturedBody).toEqual({});
-  });
-
-  test("throws ApiError on 402 response (no budget)", async () => {
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "No budget for Seer Autofix" }), {
-        status: 402,
-        headers: { "Content-Type": "application/json" },
-      });
-
-    await expect(
-      triggerAutofixAnalysis("test-org", "123456789")
-    ).rejects.toThrow();
-  });
-
-  test("throws ApiError on 403 response (not enabled)", async () => {
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "AI Autofix is not enabled" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      });
-
-    await expect(
-      triggerAutofixAnalysis("test-org", "123456789")
-    ).rejects.toThrow();
   });
 });

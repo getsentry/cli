@@ -9,7 +9,6 @@ import type {
   AutofixState,
   AutofixStep,
   RootCause,
-  RootCauseArtifact,
   SolutionArtifact,
 } from "../../types/autofix.js";
 import { cyan, green, muted, yellow } from "./colors.js";
@@ -362,79 +361,6 @@ export function formatAutofixError(status: number, detail?: string): string {
     default:
       return detail ?? "An error occurred with the autofix request.";
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Explorer Mode Root Cause Formatting
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Format the root cause analysis header.
- */
-export function formatRootCauseAnalysisHeader(): string[] {
-  return [bold("Root Cause Analysis"), "═".repeat(60)];
-}
-
-/**
- * Format a root cause artifact from explorer mode for human-readable display.
- *
- * Output format:
- * Root Cause Analysis
- * ════════════════════════════════════════════════════════════
- *
- * Summary:
- *   {one_line_description}
- *
- * Why This Happened:
- *   1. {five_whys[0]}
- *   2. {five_whys[1]}
- *   ...
- *
- * Steps to Reproduce:
- *   1. {reproduction_steps[0]}
- *   2. {reproduction_steps[1]}
- *   ...
- *
- * @param artifact - Root cause artifact from explorer mode
- * @returns Array of formatted lines
- */
-export function formatRootCauseArtifact(artifact: RootCauseArtifact): string[] {
-  const lines: string[] = [];
-
-  // Header
-  lines.push("");
-  lines.push(...formatRootCauseAnalysisHeader());
-  lines.push("");
-
-  // Summary
-  lines.push(yellow("Summary:"));
-  lines.push(`  ${artifact.data.one_line_description}`);
-  lines.push("");
-
-  // Five Whys
-  if (artifact.data.five_whys.length > 0) {
-    lines.push(cyan("Why This Happened:"));
-    for (let i = 0; i < artifact.data.five_whys.length; i++) {
-      const why = artifact.data.five_whys[i];
-      if (why) {
-        lines.push(`  ${i + 1}. ${why}`);
-      }
-    }
-    lines.push("");
-  }
-
-  // Reproduction Steps
-  if (artifact.data.reproduction_steps.length > 0) {
-    lines.push(green("Steps to Reproduce:"));
-    for (let i = 0; i < artifact.data.reproduction_steps.length; i++) {
-      const step = artifact.data.reproduction_steps[i];
-      if (step) {
-        lines.push(`  ${i + 1}. ${step}`);
-      }
-    }
-  }
-
-  return lines;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
