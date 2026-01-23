@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
 
 const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
@@ -24,13 +24,13 @@ let testConfigDir: string;
 let originalConfigDir: string | undefined;
 
 beforeEach(() => {
-  originalConfigDir = process.env.SENTRY_CLI_CONFIG_DIR;
+  originalConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR || "/tmp",
+    process.env[CONFIG_DIR_ENV_VAR] || "/tmp",
     `e2e-event-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
 afterEach(() => {
@@ -40,9 +40,9 @@ afterEach(() => {
     // Ignore cleanup errors
   }
   if (originalConfigDir) {
-    process.env.SENTRY_CLI_CONFIG_DIR = originalConfigDir;
+    process.env[CONFIG_DIR_ENV_VAR] = originalConfigDir;
   } else {
-    delete process.env.SENTRY_CLI_CONFIG_DIR;
+    delete process.env[CONFIG_DIR_ENV_VAR];
   }
 });
 
@@ -50,7 +50,7 @@ describe("sentry event get", () => {
   test("requires authentication", async () => {
     const result = await runCli(
       ["event", "get", "abc123", "--org", TEST_ORG, "--project", TEST_PROJECT],
-      { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
+      { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
     );
 
     expect(result.exitCode).toBe(1);
@@ -61,7 +61,7 @@ describe("sentry event get", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["event", "get", "abc123"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);
@@ -81,7 +81,7 @@ describe("sentry event get", () => {
         "--project",
         TEST_PROJECT,
       ],
-      { env: { SENTRY_CLI_CONFIG_DIR: testConfigDir } }
+      { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
     );
 
     expect(result.exitCode).toBe(1);

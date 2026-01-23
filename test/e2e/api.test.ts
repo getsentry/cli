@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
 
 // Test credentials from environment - these MUST be set
@@ -24,13 +24,13 @@ let testConfigDir: string;
 let originalConfigDir: string | undefined;
 
 beforeEach(() => {
-  originalConfigDir = process.env.SENTRY_CLI_CONFIG_DIR;
+  originalConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR || "/tmp",
+    process.env[CONFIG_DIR_ENV_VAR] || "/tmp",
     `e2e-api-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
 afterEach(() => {
@@ -40,7 +40,7 @@ afterEach(() => {
     // Ignore cleanup errors
   }
   if (originalConfigDir) {
-    process.env.SENTRY_CLI_CONFIG_DIR = originalConfigDir;
+    process.env[CONFIG_DIR_ENV_VAR] = originalConfigDir;
   }
 });
 
@@ -50,7 +50,7 @@ describe("sentry api", () => {
 
   test("requires authentication", async () => {
     const result = await runCli(["api", "organizations/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);
@@ -61,7 +61,7 @@ describe("sentry api", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["api", "organizations/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(0);
@@ -74,7 +74,7 @@ describe("sentry api", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["api", "organizations/", "--include"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(0);
@@ -87,7 +87,7 @@ describe("sentry api", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["api", "nonexistent-endpoint-12345/"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(1);
@@ -97,7 +97,7 @@ describe("sentry api", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["api", "organizations/", "--silent"], {
-      env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
     });
 
     expect(result.exitCode).toBe(0);
@@ -110,7 +110,7 @@ describe("sentry api", () => {
     const result = await runCli(
       ["api", "nonexistent-endpoint-12345/", "--silent"],
       {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       }
     );
 
@@ -125,7 +125,7 @@ describe("sentry api", () => {
     const result = await runCli(
       ["api", "organizations/", "--method", "DELETE"],
       {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       }
     );
 
@@ -139,7 +139,7 @@ describe("sentry api", () => {
     const result = await runCli(
       ["api", "organizations/", "--method", "INVALID"],
       {
-        env: { SENTRY_CLI_CONFIG_DIR: testConfigDir },
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
       }
     );
 

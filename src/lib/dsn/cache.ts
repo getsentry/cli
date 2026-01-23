@@ -4,7 +4,7 @@
  * Read/write DSN detection cache to global config.
  * Enables instant DSN verification on subsequent runs.
  *
- * Cache is stored in ~/.sentry-cli-next/config.json under dsnCache[directory]
+ * Cache is stored in ~/.sentry/config.json under dsnCache[directory]
  */
 
 import { readConfig, writeConfig } from "../config.js";

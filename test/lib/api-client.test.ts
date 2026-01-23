@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { listOrganizations } from "../../src/lib/api-client.js";
-import { setAuthToken } from "../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 
 // Test config directory
 let testConfigDir: string;
@@ -27,11 +27,11 @@ type RequestLog = {
 
 beforeEach(async () => {
   testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
+    process.env[CONFIG_DIR_ENV_VAR] ?? "/tmp",
     `test-api-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
   // Set required env var for OAuth refresh
   process.env.SENTRY_CLIENT_ID = "test-client-id";

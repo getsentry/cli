@@ -1,7 +1,7 @@
 /**
  * Configuration Management
  *
- * Handles reading/writing the ~/.sentry-cli-next/config.json file.
+ * Handles reading/writing the ~/.sentry/config.json file.
  * Uses Bun file APIs for I/O and Zod for validation.
  *
  * Permissions follow SSH conventions for sensitive files.
@@ -14,12 +14,18 @@ import { join } from "node:path";
 import type { CachedProject, SentryConfig } from "../types/index.js";
 import { SentryConfigSchema } from "../types/index.js";
 
+/** Environment variable to override the config directory path */
+export const CONFIG_DIR_ENV_VAR = "SENTRY_CONFIG_DIR";
+
+/** Default config directory name (relative to home directory) */
+export const DEFAULT_CONFIG_DIR_NAME = ".sentry";
+
 /**
  * Get config directory path (reads env var at runtime for test isolation)
  */
-function getConfigDir(): string {
+export function getConfigDir(): string {
   return (
-    process.env.SENTRY_CLI_CONFIG_DIR || join(homedir(), ".sentry-cli-next")
+    process.env[CONFIG_DIR_ENV_VAR] || join(homedir(), DEFAULT_CONFIG_DIR_NAME)
   );
 }
 
