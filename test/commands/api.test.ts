@@ -173,6 +173,76 @@ describe("setNestedValue", () => {
       /Invalid field key: "prototype" is not allowed/
     );
   });
+
+  // Type conflict tests (matching gh api behavior)
+  test("throws when traversing into string (simple then nested)", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "user", "John");
+    expect(() => setNestedValue(obj, "user[name]", "Jane")).toThrow(
+      /expected map type under "user", got string/
+    );
+  });
+
+  test("throws when traversing into number", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "count", 42);
+    expect(() => setNestedValue(obj, "count[value]", 100)).toThrow(
+      /expected map type under "count", got number/
+    );
+  });
+
+  test("throws when pushing to non-array (simple then array)", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "tags", "foo");
+    expect(() => setNestedValue(obj, "tags[]", "bar")).toThrow(
+      /expected array type under "tags", got string/
+    );
+  });
+
+  test("throws when pushing to object", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "tags[name]", "foo");
+    expect(() => setNestedValue(obj, "tags[]", "bar")).toThrow(
+      /expected array type under "tags", got map/
+    );
+  });
+
+  test("throws when nesting into array", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "items[]", "first");
+    expect(() => setNestedValue(obj, "items[key]", "value")).toThrow(
+      /expected map type under "items", got array/
+    );
+  });
+
+  test("allows overwriting nested with simple value", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "user[name]", "Jane");
+    setNestedValue(obj, "user", "John");
+    expect(obj).toEqual({ user: "John" });
+  });
+
+  // Invalid bracket position tests (prevents silent data loss)
+  test("throws for empty brackets in middle of path (a[][b])", () => {
+    const obj: Record<string, unknown> = {};
+    expect(() => setNestedValue(obj, "a[][b]", "value")).toThrow(
+      /empty brackets \[\] can only appear at the end/
+    );
+  });
+
+  test("throws for deeply nested empty brackets in middle", () => {
+    const obj: Record<string, unknown> = {};
+    expect(() => setNestedValue(obj, "a[b][][c]", "value")).toThrow(
+      /empty brackets \[\] can only appear at the end/
+    );
+  });
+
+  test("allows empty brackets at end with nested path", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "a[b][]", "value1");
+    setNestedValue(obj, "a[b][]", "value2");
+    expect(obj).toEqual({ a: { b: ["value1", "value2"] } });
+  });
 });
 
 describe("parseFields", () => {

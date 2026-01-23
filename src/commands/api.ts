@@ -117,20 +117,91 @@ export function parseFieldKey(key: string): string[] {
 }
 
 /**
- * Validate path segments to prevent prototype pollution attacks.
+ * Validate path segments for security and correctness.
  * @throws {Error} When a segment is __proto__, constructor, or prototype
+ * @throws {Error} When empty brackets appear before the last segment (e.g., a[][b])
  */
 function validatePathSegments(path: string[]): void {
-  for (const segment of path) {
+  for (let i = 0; i < path.length; i++) {
+    const segment = path[i] as string; // Safe: loop bounds guarantee index exists
+
+    // Check for prototype pollution
     if (DANGEROUS_KEYS.has(segment)) {
       throw new Error(`Invalid field key: "${segment}" is not allowed`);
     }
+
+    // Empty brackets ("") are only valid at the end of the path (array push syntax)
+    // Reject patterns like a[][b] which would silently lose data
+    if (segment === "" && i < path.length - 1) {
+      throw new Error(
+        "Invalid field key: empty brackets [] can only appear at the end of a key"
+      );
+    }
+  }
+}
+
+/**
+ * Get a human-readable type name for error messages.
+ * Returns "array" for arrays, "map" for objects, and typeof for primitives.
+ */
+function getTypeName(value: unknown): string {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value !== null && typeof value === "object") {
+    return "map";
+  }
+  return typeof value;
+}
+
+/**
+ * Format path segments into a bracket-notation string for error messages.
+ * E.g., ["user", "name"] at index 1 -> "user[name]"
+ */
+function formatPathForError(path: string[], endIndex: number): string {
+  const segments = path.slice(0, endIndex + 1);
+  if (segments.length === 1) {
+    return segments[0] ?? "";
+  }
+  return `${segments[0]}[${segments.slice(1).join("][")}]`;
+}
+
+/**
+ * Check if value can be traversed into (is a plain object, not array or primitive).
+ */
+function isTraversableObject(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Validate that existing value is compatible with expected traversal type.
+ * @throws {Error} When type conflict is detected
+ */
+function validateTypeCompatibility(
+  existing: unknown,
+  expectsArray: boolean,
+  path: string[],
+  index: number
+): void {
+  const pathStr = formatPathForError(path, index);
+
+  if (expectsArray && !Array.isArray(existing)) {
+    throw new Error(
+      `expected array type under "${pathStr}", got ${getTypeName(existing)}`
+    );
+  }
+
+  if (!(expectsArray || isTraversableObject(existing))) {
+    throw new Error(
+      `expected map type under "${pathStr}", got ${getTypeName(existing)}`
+    );
   }
 }
 
 /**
  * Navigate/create nested structure to the parent of the target key.
  * @returns The object/array that will contain the final value
+ * @throws {Error} When attempting to traverse into a non-object (type conflict)
  */
 function navigateToParent(
   obj: Record<string, unknown>,
@@ -148,10 +219,14 @@ function navigateToParent(
     }
 
     const currentObj = current as Record<string, unknown>;
-    if (!Object.hasOwn(currentObj, segment)) {
-      // Create array if next segment is empty (array push syntax), else object
-      currentObj[segment] = nextSegment === "" ? [] : {};
+    const expectsArray = nextSegment === "";
+
+    if (Object.hasOwn(currentObj, segment)) {
+      validateTypeCompatibility(currentObj[segment], expectsArray, path, i);
+    } else {
+      currentObj[segment] = expectsArray ? [] : {};
     }
+
     current = currentObj[segment];
   }
 
@@ -195,6 +270,35 @@ export function setNestedValue(
 }
 
 /**
+ * Process a single field string and set its value in the result object.
+ * @param result - Target object to modify
+ * @param field - Field string in "key=value" or "key[]" format
+ * @param raw - If true, keep value as string (no JSON parsing)
+ * @throws {Error} When field format is invalid
+ */
+function processField(
+  result: Record<string, unknown>,
+  field: string,
+  raw: boolean
+): void {
+  const eqIndex = field.indexOf("=");
+
+  // Handle empty array syntax: "key[]" without "="
+  if (eqIndex === -1) {
+    if (field.endsWith("[]")) {
+      setNestedValue(result, field, undefined);
+      return;
+    }
+    throw new Error(`Invalid field format: ${field}. Expected key=value`);
+  }
+
+  const key = field.substring(0, eqIndex);
+  const rawValue = field.substring(eqIndex + 1);
+  const value = raw ? rawValue : parseFieldValue(rawValue);
+  setNestedValue(result, key, value);
+}
+
+/**
  * Parse field arguments into request body object.
  * Supports bracket notation for nested keys (e.g., "user[name]=value")
  * and array syntax (e.g., "tags[]=value" or "tags[]" for empty array).
@@ -212,22 +316,7 @@ export function parseFields(
   const result: Record<string, unknown> = {};
 
   for (const field of fields) {
-    const eqIndex = field.indexOf("=");
-
-    // Handle empty array syntax: "key[]" without "="
-    if (eqIndex === -1) {
-      if (field.endsWith("[]")) {
-        setNestedValue(result, field, undefined);
-        continue;
-      }
-      throw new Error(`Invalid field format: ${field}. Expected key=value`);
-    }
-
-    const key = field.substring(0, eqIndex);
-    const rawValue = field.substring(eqIndex + 1);
-    const value = raw ? rawValue : parseFieldValue(rawValue);
-
-    setNestedValue(result, key, value);
+    processField(result, field, raw);
   }
 
   return result;
@@ -288,35 +377,6 @@ async function buildBodyFromInput(
   } catch {
     return content;
   }
-}
-
-/**
- * Process a single field string and set its value in the result object.
- * @param result - Target object to modify
- * @param field - Field string in "key=value" or "key[]" format
- * @param raw - If true, keep value as string (no JSON parsing)
- * @throws {Error} When field format is invalid
- */
-function processField(
-  result: Record<string, unknown>,
-  field: string,
-  raw: boolean
-): void {
-  const eqIndex = field.indexOf("=");
-
-  // Handle empty array syntax: "key[]" without "="
-  if (eqIndex === -1) {
-    if (field.endsWith("[]")) {
-      setNestedValue(result, field, undefined);
-      return;
-    }
-    throw new Error(`Invalid field format: ${field}. Expected key=value`);
-  }
-
-  const key = field.substring(0, eqIndex);
-  const rawValue = field.substring(eqIndex + 1);
-  const value = raw ? rawValue : parseFieldValue(rawValue);
-  setNestedValue(result, key, value);
 }
 
 /**
