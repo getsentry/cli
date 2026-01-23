@@ -431,6 +431,7 @@ export function triggerRootCauseAnalysis(
 /**
  * Get the current autofix state for an issue.
  *
+ * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
  * @returns The autofix state, or null if no autofix has been run
  */
