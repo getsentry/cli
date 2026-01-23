@@ -48,6 +48,53 @@ const STATUS_LABELS: Record<IssueStatus, string> = {
 /** Maximum features to display before truncating with "... and N more" */
 const MAX_DISPLAY_FEATURES = 10;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// String Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Capitalize the first letter of a string
+ */
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Event Entry Extraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Map of entry type strings to their TypeScript types */
+type EntryTypeMap = {
+  exception: ExceptionEntry;
+  breadcrumbs: BreadcrumbsEntry;
+  request: RequestEntry;
+  spans: SpanEntry;
+};
+
+/**
+ * Extract a typed entry from event entries by type
+ * @returns The entry if found, null otherwise
+ */
+function extractEntry<T extends keyof EntryTypeMap>(
+  event: SentryEvent,
+  type: T
+): EntryTypeMap[T] | null {
+  if (!event.entries) {
+    return null;
+  }
+  for (const entry of event.entries) {
+    if (
+      entry &&
+      typeof entry === "object" &&
+      "type" in entry &&
+      entry.type === type
+    ) {
+      return entry as EntryTypeMap[T];
+    }
+  }
+  return null;
+}
+
 /** Regex to extract base URL from a permalink */
 const BASE_URL_REGEX = /^(https?:\/\/[^/]+)/;
 
@@ -322,18 +369,13 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
   // Status with substatus
   let statusLine = formatStatusLabel(issue.status);
   if (issue.substatus) {
-    // Capitalize first letter of substatus
-    const substatus =
-      issue.substatus.charAt(0).toUpperCase() + issue.substatus.slice(1);
-    statusLine += ` (${substatus})`;
+    statusLine += ` (${capitalize(issue.substatus)})`;
   }
   lines.push(`Status:     ${statusLine}`);
 
   // Priority
   if (issue.priority) {
-    const priorityLabel =
-      issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1);
-    lines.push(`Priority:   ${priorityLabel}`);
+    lines.push(`Priority:   ${capitalize(issue.priority)}`);
   }
 
   // Level with unhandled indicator
@@ -566,26 +608,6 @@ function extractSpansFromEvent(event: SentryEvent): Span[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extract exception entry from event entries
- */
-function extractExceptionEntry(event: SentryEvent): ExceptionEntry | null {
-  if (!event.entries) {
-    return null;
-  }
-  for (const entry of event.entries) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "type" in entry &&
-      entry.type === "exception"
-    ) {
-      return entry as ExceptionEntry;
-    }
-  }
-  return null;
-}
-
-/**
  * Format a single stack frame
  */
 function formatStackFrame(frame: StackFrame): string[] {
@@ -666,26 +688,6 @@ function formatStackTrace(exceptionEntry: ExceptionEntry): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Extract breadcrumbs entry from event entries
- */
-function extractBreadcrumbsEntry(event: SentryEvent): BreadcrumbsEntry | null {
-  if (!event.entries) {
-    return null;
-  }
-  for (const entry of event.entries) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "type" in entry &&
-      entry.type === "breadcrumbs"
-    ) {
-      return entry as BreadcrumbsEntry;
-    }
-  }
-  return null;
-}
-
-/**
  * Format breadcrumb level with color
  */
 function formatBreadcrumbLevel(level: string | undefined): string {
@@ -760,26 +762,6 @@ function formatBreadcrumbs(breadcrumbsEntry: BreadcrumbsEntry): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Formatting
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Extract request entry from event entries
- */
-function extractRequestEntry(event: SentryEvent): RequestEntry | null {
-  if (!event.entries) {
-    return null;
-  }
-  for (const entry of event.entries) {
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "type" in entry &&
-      entry.type === "request"
-    ) {
-      return entry as RequestEntry;
-    }
-  }
-  return null;
-}
 
 /**
  * Format the HTTP request section
@@ -1007,7 +989,7 @@ export function formatEventDetails(
   lines.push(...formatEnvironmentContexts(event));
 
   // HTTP Request
-  const requestEntry = extractRequestEntry(event);
+  const requestEntry = extractEntry(event, "request");
   if (requestEntry) {
     lines.push(...formatRequest(requestEntry));
   }
@@ -1024,13 +1006,13 @@ export function formatEventDetails(
   }
 
   // Stack Trace
-  const exceptionEntry = extractExceptionEntry(event);
+  const exceptionEntry = extractEntry(event, "exception");
   if (exceptionEntry) {
     lines.push(...formatStackTrace(exceptionEntry));
   }
 
   // Breadcrumbs
-  const breadcrumbsEntry = extractBreadcrumbsEntry(event);
+  const breadcrumbsEntry = extractEntry(event, "breadcrumbs");
   if (breadcrumbsEntry) {
     lines.push(...formatBreadcrumbs(breadcrumbsEntry));
   }
