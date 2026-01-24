@@ -7,10 +7,7 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  findCommonWordPrefix,
-  findShortestUniquePrefixes,
-} from "../../lib/alias.js";
+import { buildOrgAwareAliases } from "../../lib/alias.js";
 import { listIssues } from "../../lib/api-client.js";
 import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
@@ -60,11 +57,19 @@ function parseSort(value: string): SortValue {
 
 /**
  * Write the issue list header with column titles.
+ *
+ * @param stdout - Output writer
+ * @param title - Section title
+ * @param isMultiProject - Whether to show ALIAS column for multi-project mode
  */
-function writeListHeader(stdout: Writer, title: string): void {
+function writeListHeader(
+  stdout: Writer,
+  title: string,
+  isMultiProject = false
+): void {
   stdout.write(`${title}:\n\n`);
-  stdout.write(muted(`${formatIssueListHeader()}\n`));
-  stdout.write(`${divider(80)}\n`);
+  stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
+  stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
 }
 
 /** Issue with formatting options attached */
@@ -104,7 +109,7 @@ function writeListFooter(
       break;
     case "multi":
       stdout.write(
-        "\nTip: Use 'sentry issue get <alias-suffix>' to view details (e.g., 'f-g').\n"
+        "\nTip: Use 'sentry issue get <ALIAS>' to view details (see ALIAS column).\n"
       );
       break;
     default:
@@ -124,77 +129,67 @@ type IssueListResult = {
 type AliasMapResult = {
   aliasMap: Map<string, string>;
   entries: Record<string, ProjectAliasEntry>;
-  /** Common prefix that was stripped from project slugs */
-  strippedPrefix: string;
 };
 
 /**
  * Build project alias map using shortest unique prefix of project slug.
+ * Handles cross-org slug collisions by prefixing with org abbreviation.
  * Strips common word prefix before computing unique prefixes for cleaner aliases.
  *
- * Example: spotlight-electron, spotlight-website, spotlight → e, w, s
- * Example: frontend, functions, backend → fr, fu, b
+ * Single org examples:
+ *   spotlight-electron, spotlight-website, spotlight → e, w, s
+ *   frontend, functions, backend → fr, fu, b
+ *
+ * Cross-org collision example:
+ *   org1:dashboard, org2:dashboard → o1:d, o2:d
  */
 function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
-  const aliasMap = new Map<string, string>();
   const entries: Record<string, ProjectAliasEntry> = {};
 
-  // Get all project slugs
-  const projectSlugs = results.map((r) => r.target.project);
+  // Build org-aware aliases that handle cross-org collisions
+  const pairs = results.map((r) => ({
+    org: r.target.org,
+    project: r.target.project,
+  }));
+  const { aliasMap } = buildOrgAwareAliases(pairs);
 
-  // Strip common word prefix for cleaner aliases
-  const strippedPrefix = findCommonWordPrefix(projectSlugs);
-
-  // Create remainders after stripping common prefix
-  // If stripping leaves empty string, use the original slug
-  const slugToRemainder = new Map<string, string>();
-  for (const slug of projectSlugs) {
-    const remainder = slug.slice(strippedPrefix.length);
-    slugToRemainder.set(slug, remainder || slug);
-  }
-
-  // Find shortest unique prefix for each remainder
-  const remainders = [...slugToRemainder.values()];
-  const prefixes = findShortestUniquePrefixes(remainders);
-
+  // Build entries record for storage
   for (const result of results) {
-    const projectSlug = result.target.project;
-    const remainder = slugToRemainder.get(projectSlug) ?? projectSlug;
-    const alias = prefixes.get(remainder) ?? remainder.charAt(0).toLowerCase();
-
-    const key = `${result.target.org}:${projectSlug}`;
-    aliasMap.set(key, alias);
-    entries[alias] = {
-      orgSlug: result.target.org,
-      projectSlug,
-    };
+    const key = `${result.target.org}:${result.target.project}`;
+    const alias = aliasMap.get(key);
+    if (alias) {
+      entries[alias] = {
+        orgSlug: result.target.org,
+        projectSlug: result.target.project,
+      };
+    }
   }
 
-  return { aliasMap, entries, strippedPrefix };
+  return { aliasMap, entries };
 }
 
 /**
  * Attach formatting options to each issue based on alias map.
+ *
+ * @param results - Issue list results with targets
+ * @param aliasMap - Map from "org:project" to alias
+ * @param isMultiProject - Whether in multi-project mode (shows ALIAS column)
  */
 function attachFormatOptions(
   results: IssueListResult[],
   aliasMap: Map<string, string>,
-  strippedPrefix: string
+  isMultiProject: boolean
 ): IssueWithOptions[] {
   return results.flatMap((result) =>
     result.issues.map((issue) => {
       const key = `${result.target.org}:${result.target.project}`;
       const alias = aliasMap.get(key);
-      // Only pass strippedPrefix if this project actually has that prefix
-      // (e.g., "spotlight" doesn't have "spotlight-" prefix, but "spotlight-electron" does)
-      const hasPrefix =
-        strippedPrefix && result.target.project.startsWith(strippedPrefix);
       return {
         issue,
         formatOptions: {
           projectSlug: result.target.project,
           projectAlias: alias,
-          strippedPrefix: hasPrefix ? strippedPrefix : undefined,
+          isMultiProject,
         },
       };
     })
@@ -362,12 +357,11 @@ export const listCommand = buildCommand({
     const firstTarget = validResults[0]?.target;
 
     // Build project alias map and cache it for multi-project mode
-    const { aliasMap, entries, strippedPrefix } = isMultiProject
+    const { aliasMap, entries } = isMultiProject
       ? buildProjectAliasMap(validResults)
       : {
           aliasMap: new Map<string, string>(),
           entries: {},
-          strippedPrefix: "",
         };
 
     if (isMultiProject) {
@@ -381,7 +375,7 @@ export const listCommand = buildCommand({
     const issuesWithOptions = attachFormatOptions(
       validResults,
       aliasMap,
-      strippedPrefix
+      isMultiProject
     );
 
     // Sort by user preference
@@ -410,7 +404,7 @@ export const listCommand = buildCommand({
         ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
         : `Issues from ${validResults.length} projects`;
 
-    writeListHeader(stdout, title);
+    writeListHeader(stdout, title, isMultiProject);
 
     const termWidth = process.stdout.columns || 80;
     writeIssueRows(stdout, issuesWithOptions, termWidth);

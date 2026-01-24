@@ -3,7 +3,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatShortId } from "../../../src/lib/formatters/human.js";
+import {
+  formatIssueListHeader,
+  formatIssueRow,
+  formatShortId,
+} from "../../../src/lib/formatters/human.js";
+import type { SentryIssue } from "../../../src/types/index.js";
 
 // Helper to strip ANSI codes for content testing
 function stripAnsi(str: string): string {
@@ -78,29 +83,26 @@ describe("formatShortId", () => {
       expect(stripAnsi(result)).toBe("FRONTEND-G");
     });
 
-    test("formats spotlight-website with stripped prefix", () => {
+    test("formats spotlight-website in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-WEBSITE-2A", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
 
-    test("formats spotlight-electron with stripped prefix", () => {
+    test("formats spotlight-electron in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
     });
 
-    test("formats spotlight (no stripped prefix applies) correctly", () => {
+    test("formats spotlight in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-73", {
         projectSlug: "spotlight",
         projectAlias: "s",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
     });
@@ -117,7 +119,6 @@ describe("formatShortId", () => {
       const result = formatShortId("spotlight-website-2a", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
@@ -147,7 +148,6 @@ describe("formatShortId", () => {
       const result = formatShortId("spotlight-website-2a", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
@@ -191,7 +191,6 @@ describe("formatShortId", () => {
       const formatted = formatShortId(shortId, {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(formatted).length).toBe(shortId.length);
     });
@@ -216,7 +215,6 @@ describe("formatShortId", () => {
       const formatted = formatShortId(shortId, {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(formatted).length).toBe(shortId.length);
     });
@@ -227,7 +225,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
     });
@@ -236,7 +233,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-WEBSITE-2C", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2C");
     });
@@ -245,7 +241,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-73", {
         projectSlug: "spotlight",
         projectAlias: "s",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
     });
@@ -297,11 +292,10 @@ describe("formatShortId", () => {
       }
     });
 
-    test("multi-project mode applies formatting to alias and suffix", () => {
+    test("multi-project mode applies formatting to suffix", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
       if (colorsEnabled) {
@@ -315,5 +309,88 @@ describe("formatShortId", () => {
       expect(hasAnsiCodes(result)).toBe(false);
       expect(result).toBe("CRAFT-G");
     });
+  });
+});
+
+describe("formatIssueListHeader", () => {
+  test("single project mode does not include ALIAS column", () => {
+    const header = formatIssueListHeader(false);
+    expect(header).not.toContain("ALIAS");
+    expect(header).toContain("LEVEL");
+    expect(header).toContain("SHORT ID");
+    expect(header).toContain("COUNT");
+    expect(header).toContain("SEEN");
+    expect(header).toContain("TITLE");
+  });
+
+  test("multi-project mode includes ALIAS column", () => {
+    const header = formatIssueListHeader(true);
+    expect(header).toContain("ALIAS");
+    expect(header).toContain("LEVEL");
+    expect(header).toContain("SHORT ID");
+    expect(header).toContain("COUNT");
+    expect(header).toContain("SEEN");
+    expect(header).toContain("TITLE");
+  });
+
+  test("ALIAS column comes before SHORT ID in multi-project mode", () => {
+    const header = formatIssueListHeader(true);
+    const aliasIndex = header.indexOf("ALIAS");
+    const shortIdIndex = header.indexOf("SHORT ID");
+    expect(aliasIndex).toBeLessThan(shortIdIndex);
+  });
+});
+
+describe("formatIssueRow", () => {
+  const mockIssue: SentryIssue = {
+    id: "123",
+    shortId: "DASHBOARD-A3",
+    title: "Test issue",
+    level: "error",
+    status: "unresolved",
+    count: "42",
+    userCount: 10,
+    firstSeen: "2024-01-01T00:00:00Z",
+    lastSeen: "2024-01-02T00:00:00Z",
+    permalink: "https://sentry.io/issues/123",
+  };
+
+  test("single project mode does not include alias column", () => {
+    const row = formatIssueRow(mockIssue, 80, {
+      projectSlug: "dashboard",
+    });
+    // Should not have alias shorthand format
+    expect(stripAnsi(row)).not.toContain("o1:d-a3");
+  });
+
+  test("multi-project mode includes alias column", () => {
+    const row = formatIssueRow(mockIssue, 120, {
+      projectSlug: "dashboard",
+      projectAlias: "o1:d",
+      isMultiProject: true,
+    });
+    // Should contain the alias shorthand
+    expect(stripAnsi(row)).toContain("o1:d-a3");
+  });
+
+  test("alias shorthand is lowercase", () => {
+    const row = formatIssueRow(mockIssue, 120, {
+      projectSlug: "dashboard",
+      projectAlias: "o1:d",
+      isMultiProject: true,
+    });
+    // The alias shorthand should be lowercase
+    expect(stripAnsi(row)).toContain("o1:d-a3");
+    expect(stripAnsi(row)).not.toContain("O1:D-A3");
+  });
+
+  test("unique alias format works in multi-project mode", () => {
+    const row = formatIssueRow(mockIssue, 120, {
+      projectSlug: "dashboard",
+      projectAlias: "d",
+      isMultiProject: true,
+    });
+    // Should contain simple alias shorthand
+    expect(stripAnsi(row)).toContain("d-a3");
   });
 });

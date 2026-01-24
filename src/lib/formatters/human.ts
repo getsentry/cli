@@ -263,19 +263,50 @@ export function formatRelativeTime(dateString: string | undefined): string {
 
 /** Column widths for issue list table */
 const COL_LEVEL = 7;
+const COL_ALIAS = 15;
 const COL_SHORT_ID = 22;
 const COL_COUNT = 5;
 const COL_SEEN = 10;
 
-/** Column where title starts (sum of all previous columns + separators) */
+/** Column where title starts in single-project mode (no ALIAS column) */
 const TITLE_START_COL =
   COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2; // = 50
+
+/** Column where title starts in multi-project mode (with ALIAS column) */
+const TITLE_START_COL_MULTI =
+  COL_LEVEL +
+  1 +
+  COL_ALIAS +
+  1 +
+  COL_SHORT_ID +
+  1 +
+  COL_COUNT +
+  2 +
+  COL_SEEN +
+  2; // = 66
 
 /**
  * Format the header row for issue list table.
  * Uses same column widths as data rows to ensure alignment.
+ *
+ * @param isMultiProject - Whether to include ALIAS column for multi-project mode
  */
-export function formatIssueListHeader(): string {
+export function formatIssueListHeader(isMultiProject = false): string {
+  if (isMultiProject) {
+    return (
+      "LEVEL".padEnd(COL_LEVEL) +
+      " " +
+      "ALIAS".padEnd(COL_ALIAS) +
+      " " +
+      "SHORT ID".padEnd(COL_SHORT_ID) +
+      " " +
+      "COUNT".padStart(COL_COUNT) +
+      "  " +
+      "SEEN".padEnd(COL_SEEN) +
+      "  " +
+      "TITLE"
+    );
+  }
   return (
     "LEVEL".padEnd(COL_LEVEL) +
     " " +
@@ -336,21 +367,21 @@ function wrapTitle(text: string, startCol: number, termWidth: number): string {
 export type FormatShortIdOptions = {
   /** Project slug to determine the prefix for suffix highlighting */
   projectSlug?: string;
-  /** Project alias (e.g., "e", "w", "s") for multi-project display */
+  /** Project alias (e.g., "e", "w", "o1:d") for multi-project display */
   projectAlias?: string;
-  /** Common prefix that was stripped to compute the alias (e.g., "spotlight-") */
-  strippedPrefix?: string;
+  /** Whether in multi-project mode (shows ALIAS column) */
+  isMultiProject?: boolean;
 };
 
 /**
  * Format a short ID with the unique suffix highlighted with underline.
  *
  * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
- * Multi-project mode: "SPOTLIGHT-WEBSITE-2A" with alias "w" and strippedPrefix "spotlight-"
- *   → "SPOTLIGHT-_W_EBSITE-_2A_" (alias char in remainder and suffix underlined)
+ * Multi-project mode: "DASHBOARD-A3" → "DASHBOARD-_A3_" (just suffix underlined,
+ *   alias is shown in separate ALIAS column)
  *
  * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
- * @param options - Formatting options (projectSlug, projectAlias, strippedPrefix)
+ * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
  * @returns Formatted short ID with underline highlights
  */
 export function formatShortId(
@@ -361,7 +392,7 @@ export function formatShortId(
   const opts: FormatShortIdOptions =
     typeof options === "string" ? { projectSlug: options } : (options ?? {});
 
-  const { projectSlug, projectAlias, strippedPrefix } = opts;
+  const { projectSlug } = opts;
 
   // Extract suffix from shortId (the part after PROJECT-)
   const upperShortId = shortId.toUpperCase();
@@ -373,30 +404,7 @@ export function formatShortId(
     }
   }
 
-  // Multi-project mode: highlight alias position and suffix
-  if (projectAlias && projectSlug) {
-    const upperSlug = projectSlug.toUpperCase();
-    const aliasLen = projectAlias.length;
-
-    // Find where the alias corresponds to in the project slug
-    // If strippedPrefix exists, the alias is from the remainder after stripping
-    const strippedLen = strippedPrefix?.length ?? 0;
-    const aliasStartInSlug = Math.min(strippedLen, upperSlug.length);
-
-    // Build the formatted output: PROJECT-SLUG with alias part underlined, then -SUFFIX underlined
-    // e.g., "SPOTLIGHT-WEBSITE" with alias "w", strippedPrefix "spotlight-"
-    //   → aliasStartInSlug = 10, so we underline chars 10-11 (the "W")
-    const beforeAlias = upperSlug.slice(0, aliasStartInSlug);
-    const aliasChars = upperSlug.slice(
-      aliasStartInSlug,
-      aliasStartInSlug + aliasLen
-    );
-    const afterAlias = upperSlug.slice(aliasStartInSlug + aliasLen);
-
-    return `${beforeAlias}${boldUnderline(aliasChars)}${afterAlias}-${boldUnderline(suffix.toUpperCase())}`;
-  }
-
-  // Single project mode: show full shortId with suffix highlighted
+  // Show full shortId with suffix highlighted
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
@@ -416,6 +424,22 @@ function getShortIdDisplayLength(shortId: string): number {
 }
 
 /**
+ * Compute the alias shorthand for an issue (e.g., "o1:d-a3", "w-2a").
+ * This is what users type to reference the issue.
+ *
+ * @param shortId - Full short ID (e.g., "DASHBOARD-A3")
+ * @param projectAlias - Project alias (e.g., "o1:d", "w")
+ * @returns Alias shorthand (e.g., "o1:d-a3", "w-2a") or empty string if no alias
+ */
+function computeAliasShorthand(shortId: string, projectAlias?: string): string {
+  if (!projectAlias) {
+    return "";
+  }
+  const suffix = shortId.split("-").pop()?.toLowerCase() ?? "";
+  return `${projectAlias}-${suffix}`;
+}
+
+/**
  * Format a single issue for list display.
  * Wraps long titles with proper indentation.
  *
@@ -428,9 +452,17 @@ export function formatIssueRow(
   termWidth = 80,
   shortIdOptions?: FormatShortIdOptions | string
 ): string {
+  // Handle legacy string parameter (projectSlug only)
+  const opts: FormatShortIdOptions =
+    typeof shortIdOptions === "string"
+      ? { projectSlug: shortIdOptions }
+      : (shortIdOptions ?? {});
+
+  const { isMultiProject, projectAlias } = opts;
+
   const levelText = (issue.level ?? "unknown").toUpperCase().padEnd(COL_LEVEL);
   const level = levelColor(levelText, issue.level);
-  const formattedShortId = formatShortId(issue.shortId, shortIdOptions);
+  const formattedShortId = formatShortId(issue.shortId, opts);
 
   // Calculate raw display length (without ANSI codes) for padding
   const rawLen = getShortIdDisplayLength(issue.shortId);
@@ -438,8 +470,19 @@ export function formatIssueRow(
   const shortId = `${formattedShortId}${shortIdPadding}`;
   const count = `${issue.count}`.padStart(COL_COUNT);
   const seen = formatRelativeTime(issue.lastSeen);
-  const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
 
+  // Multi-project mode: include ALIAS column
+  if (isMultiProject) {
+    const aliasShorthand = computeAliasShorthand(issue.shortId, projectAlias);
+    const aliasPadding = " ".repeat(
+      Math.max(0, COL_ALIAS - aliasShorthand.length)
+    );
+    const alias = `${aliasShorthand}${aliasPadding}`;
+    const title = wrapTitle(issue.title, TITLE_START_COL_MULTI, termWidth);
+    return `${level} ${alias} ${shortId} ${count}  ${seen}  ${title}`;
+  }
+
+  const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
   return `${level} ${shortId} ${count}  ${seen}  ${title}`;
 }
 
