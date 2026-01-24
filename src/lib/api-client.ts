@@ -226,13 +226,29 @@ export async function rawApiRequest(
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
   const client = await createApiClient();
 
-  const response = await client(normalizePath(endpoint), {
+  // Handle body based on type:
+  // - Objects: use ky's json option (auto-stringifies and sets Content-Type)
+  // - Strings: send as raw body with explicit Content-Type (e.g., non-JSON --input content)
+  // - undefined: no body
+  const isStringBody = typeof body === "string";
+  const requestOptions: Parameters<typeof client>[1] = {
     method,
-    json: body,
     searchParams: buildSearchParams(params),
-    headers: customHeaders,
+    headers: isStringBody
+      ? { "Content-Type": "application/json", ...customHeaders }
+      : customHeaders,
     throwHttpErrors: false,
-  });
+  };
+
+  if (body !== undefined) {
+    if (isStringBody) {
+      requestOptions.body = body;
+    } else {
+      requestOptions.json = body;
+    }
+  }
+
+  const response = await client(normalizePath(endpoint), requestOptions);
 
   const text = await response.text();
   let responseBody: unknown;
