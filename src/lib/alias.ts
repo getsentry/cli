@@ -218,7 +218,7 @@ function processCollidingSlugs(
 
     for (const org of orgs) {
       const orgPrefix = orgPrefixes.get(org) ?? org.charAt(0).toLowerCase();
-      aliasMap.set(`${org}:${slug}`, `${orgPrefix}-${projectPrefix}`);
+      aliasMap.set(`${org}:${slug}`, `${orgPrefix}:${projectPrefix}`);
     }
   }
 }
