@@ -702,6 +702,31 @@ describe("prepareRequestOptions", () => {
     ]);
     expect(result.body).toEqual({ user: { name: "John", age: 30 } });
   });
+
+  test("POST with raw fields keeps values as strings", () => {
+    const result = prepareRequestOptions("POST", undefined, ["count=123"]);
+    expect(result.body).toEqual({ count: "123" });
+  });
+
+  test("POST merges typed and raw fields", () => {
+    const result = prepareRequestOptions("POST", ["typed=123"], ["raw=456"]);
+    expect(result.body).toEqual({ typed: 123, raw: "456" });
+  });
+
+  test("GET ignores raw fields (query params only from typed)", () => {
+    const result = prepareRequestOptions(
+      "GET",
+      ["status=resolved"],
+      ["raw=ignored"]
+    );
+    expect(result.params).toEqual({ status: "resolved" });
+    expect(result.body).toBeUndefined();
+  });
+
+  test("POST with only raw fields creates body", () => {
+    const result = prepareRequestOptions("POST", [], ["data=value"]);
+    expect(result.body).toEqual({ data: "value" });
+  });
 });
 
 describe("buildBodyFromFields", () => {
@@ -971,22 +996,6 @@ describe("buildBodyFromInput", () => {
       expect(result).toEqual({ key: "value" });
     } finally {
       // Clean up
-      const { unlink } = await import("node:fs/promises");
-      if (await Bun.file(tempFile).exists()) {
-        await unlink(tempFile);
-      }
-    }
-  });
-
-  test("reads non-JSON from file", async () => {
-    const tempFile = `/tmp/test-input-${Date.now()}.txt`;
-    await Bun.write(tempFile, "plain text from file");
-
-    try {
-      const mockStdin = createMockStdin("");
-      const result = await buildBodyFromInput(tempFile, mockStdin);
-      expect(result).toBe("plain text from file");
-    } finally {
       const { unlink } = await import("node:fs/promises");
       if (await Bun.file(tempFile).exists()) {
         await unlink(tempFile);

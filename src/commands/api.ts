@@ -387,28 +387,39 @@ export function buildQueryParams(
 }
 
 /**
- * Prepare request options from command flags.
- * Routes fields to either query params (GET) or request body (other methods).
+ * Prepare request options by routing fields to body or params based on HTTP method.
+ * GET requests send fields as query parameters, other methods send as JSON body.
  *
  * @param method - HTTP method
- * @param fields - Optional array of "key=value" field strings
- * @returns Object with body and params, one of which will be undefined
+ * @param typedFields - Array of "key=value" field strings (--field, values parsed as JSON)
+ * @param rawFields - Array of "key=value" field strings (--raw-field, values kept as strings)
+ * @returns Object with either body or params set (or neither if no fields)
  * @internal Exported for testing
  */
 export function prepareRequestOptions(
   method: HttpMethod,
-  fields?: string[]
+  typedFields?: string[],
+  rawFields?: string[]
 ): {
   body?: Record<string, unknown>;
   params?: Record<string, string | string[]>;
 } {
-  const hasFields = fields && fields.length > 0;
+  const hasTypedFields = typedFields && typedFields.length > 0;
+  const hasRawFields = rawFields && rawFields.length > 0;
+  const hasFields = hasTypedFields || hasRawFields;
   const isBodyMethod = method !== "GET";
 
-  return {
-    body: hasFields && isBodyMethod ? parseFields(fields) : undefined,
-    params: hasFields && !isBodyMethod ? buildQueryParams(fields) : undefined,
-  };
+  if (!hasFields) {
+    return {};
+  }
+
+  if (isBodyMethod) {
+    // For body methods (POST, PUT, etc.), merge typed and raw fields
+    return { body: buildBodyFromFields(typedFields, rawFields) };
+  }
+
+  // For GET requests, use query params (raw fields ignored for query params)
+  return { params: hasTypedFields ? buildQueryParams(typedFields) : undefined };
 }
 
 /**
@@ -482,16 +493,21 @@ export function buildBodyFromFields(
   typedFields: string[] | undefined,
   rawFields: string[] | undefined
 ): Record<string, unknown> | undefined {
-  const result: Record<string, unknown> = {};
+  const hasTypedFields = typedFields && typedFields.length > 0;
+  const hasRawFields = rawFields && rawFields.length > 0;
 
-  // Process typed fields first (with JSON parsing)
-  for (const field of typedFields ?? []) {
-    processField(result, field, false);
+  if (!(hasTypedFields || hasRawFields)) {
+    return;
   }
 
-  // Process raw fields second (no JSON parsing, can overwrite typed)
-  for (const field of rawFields ?? []) {
-    processField(result, field, true);
+  // Start with typed fields (JSON parsing enabled)
+  const result = hasTypedFields ? parseFields(typedFields, false) : {};
+
+  // Merge raw fields on top (no JSON parsing, can overwrite typed)
+  if (hasRawFields) {
+    for (const field of rawFields) {
+      processField(result, field, true);
+    }
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
@@ -707,23 +723,23 @@ export const apiCommand = buildCommand({
     // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
-    // Build request body from --input, --field, or --raw-field
-    // For GET requests, fields become query params instead of body
+    // Build request body/params from --input, --field, or --raw-field
+    // --input takes precedence; otherwise route fields based on HTTP method
     let body: Record<string, unknown> | string | undefined;
     let params: Record<string, string | string[]> | undefined;
 
     if (flags.input !== undefined) {
       // --input takes precedence for body content
       body = await buildBodyFromInput(flags.input, stdin);
-    } else if (flags.method === "GET") {
-      // GET requests use query params from --field (--raw-field ignored for GET)
-      params =
-        flags.field && flags.field.length > 0
-          ? buildQueryParams(flags.field)
-          : undefined;
     } else {
-      // Other methods use body from --field and --raw-field
-      body = buildBodyFromFields(flags.field, flags["raw-field"]);
+      // Route fields to body or params based on HTTP method
+      const options = prepareRequestOptions(
+        flags.method,
+        flags.field,
+        flags["raw-field"]
+      );
+      body = options.body;
+      params = options.params;
     }
 
     const headers =
