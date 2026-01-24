@@ -338,6 +338,79 @@ export function parseFields(
 }
 
 /**
+ * Convert a value to string, JSON-stringifying objects to avoid "[object Object]".
+ * @internal
+ */
+function stringifyValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+/**
+ * Build query parameters from field strings for GET requests.
+ * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
+ * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
+ *
+ * @param fields - Array of "key=value" strings
+ * @returns Record suitable for URLSearchParams
+ * @throws {Error} When field doesn't contain "="
+ * @internal Exported for testing
+ */
+export function buildQueryParams(
+  fields: string[]
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const eqIndex = field.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    }
+
+    const key = field.substring(0, eqIndex);
+    const rawValue = field.substring(eqIndex + 1);
+    const value = parseFieldValue(rawValue);
+
+    // Handle arrays by creating string[] for repeated keys
+    // Use stringifyValue to handle objects (avoid "[object Object]")
+    if (Array.isArray(value)) {
+      result[key] = value.map(stringifyValue);
+    } else {
+      result[key] = stringifyValue(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Prepare request options from command flags.
+ * Routes fields to either query params (GET) or request body (other methods).
+ *
+ * @param method - HTTP method
+ * @param fields - Optional array of "key=value" field strings
+ * @returns Object with body and params, one of which will be undefined
+ * @internal Exported for testing
+ */
+export function prepareRequestOptions(
+  method: HttpMethod,
+  fields?: string[]
+): {
+  body?: Record<string, unknown>;
+  params?: Record<string, string | string[]>;
+} {
+  const hasFields = fields && fields.length > 0;
+  const isBodyMethod = method !== "GET";
+
+  return {
+    body: hasFields && isBodyMethod ? parseFields(fields) : undefined,
+    params: hasFields && !isBodyMethod ? buildQueryParams(fields) : undefined,
+  };
+}
+
+/**
  * Parse header arguments into headers object.
  *
  * @param headers - Array of "Key: Value" strings
@@ -488,6 +561,40 @@ function writeVerboseResponse(
   stdout.write("<\n");
 }
 
+/**
+ * Handle response output based on flags
+ */
+function handleResponse(
+  stdout: Writer,
+  response: { status: number; headers: Headers; body: string },
+  flags: { silent: boolean; verbose: boolean; include: boolean }
+): void {
+  const isError = response.status >= 400;
+
+  // Silent mode - only set exit code
+  if (flags.silent) {
+    if (isError) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Output headers (verbose or include mode)
+  if (flags.verbose) {
+    writeVerboseResponse(stdout, response.status, response.headers);
+  } else if (flags.include) {
+    writeResponseHeaders(stdout, response.status, response.headers);
+  }
+
+  // Output body
+  writeResponseBody(stdout, response.body);
+
+  // Exit with error code for error responses
+  if (isError) {
+    process.exit(1);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Command Definition
 // ─────────────────────────────────────────────────────────────────────────────
@@ -593,10 +700,23 @@ export const apiCommand = buildCommand({
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
     // Build request body from --input, --field, or --raw-field
-    const body =
-      flags.input !== undefined
-        ? await buildBodyFromInput(flags.input, stdin)
-        : buildBodyFromFields(flags.field, flags["raw-field"]);
+    // For GET requests, fields become query params instead of body
+    let body: Record<string, unknown> | string | undefined;
+    let params: Record<string, string | string[]> | undefined;
+
+    if (flags.input !== undefined) {
+      // --input takes precedence for body content
+      body = await buildBodyFromInput(flags.input, stdin);
+    } else if (flags.method === "GET") {
+      // GET requests use query params from --field (--raw-field ignored for GET)
+      params =
+        flags.field && flags.field.length > 0
+          ? buildQueryParams(flags.field)
+          : undefined;
+    } else {
+      // Other methods use body from --field and --raw-field
+      body = buildBodyFromFields(flags.field, flags["raw-field"]);
+    }
 
     const headers =
       flags.header && flags.header.length > 0
@@ -611,32 +731,10 @@ export const apiCommand = buildCommand({
     const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
+      params,
       headers,
     });
 
-    const isError = response.status >= 400;
-
-    // Silent mode - only set exit code
-    if (flags.silent) {
-      if (isError) {
-        process.exit(1);
-      }
-      return;
-    }
-
-    // Output headers (verbose or include mode)
-    if (flags.verbose) {
-      writeVerboseResponse(stdout, response.status, response.headers);
-    } else if (flags.include) {
-      writeResponseHeaders(stdout, response.status, response.headers);
-    }
-
-    // Output body
-    writeResponseBody(stdout, response.body);
-
-    // Exit with error code for error responses
-    if (isError) {
-      process.exit(1);
-    }
+    handleResponse(stdout, response, flags);
   },
 });

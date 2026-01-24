@@ -7,12 +7,14 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  buildQueryParams,
   normalizeEndpoint,
   parseFieldKey,
   parseFields,
   parseFieldValue,
   parseHeaders,
   parseMethod,
+  prepareRequestOptions,
   setNestedValue,
 } from "../../src/commands/api.js";
 
@@ -525,5 +527,146 @@ describe("parseHeaders", () => {
 
   test("returns empty object for empty array", () => {
     expect(parseHeaders([])).toEqual({});
+  });
+});
+
+describe("buildQueryParams", () => {
+  test("builds simple key=value params", () => {
+    expect(buildQueryParams(["status=resolved", "limit=10"])).toEqual({
+      status: "resolved",
+      limit: "10",
+    });
+  });
+
+  test("handles arrays as repeated keys", () => {
+    expect(buildQueryParams(["tags=[1,2,3]"])).toEqual({
+      tags: ["1", "2", "3"],
+    });
+  });
+
+  test("handles arrays of strings", () => {
+    expect(buildQueryParams(['names=["alice","bob"]'])).toEqual({
+      names: ["alice", "bob"],
+    });
+  });
+
+  test("converts all values to strings", () => {
+    expect(buildQueryParams(["count=42", "active=true", "value=null"])).toEqual(
+      {
+        count: "42",
+        active: "true",
+        value: "null",
+      }
+    );
+  });
+
+  test("handles value with equals sign", () => {
+    expect(buildQueryParams(["query=a=b"])).toEqual({ query: "a=b" });
+  });
+
+  test("throws for invalid field format", () => {
+    expect(() => buildQueryParams(["invalid"])).toThrow(/Invalid field format/);
+    expect(() => buildQueryParams(["no-equals"])).toThrow(
+      /Invalid field format/
+    );
+  });
+
+  test("returns empty object for empty array", () => {
+    expect(buildQueryParams([])).toEqual({});
+  });
+
+  test("handles objects by JSON stringifying them", () => {
+    expect(buildQueryParams(['data={"key":"value"}'])).toEqual({
+      data: '{"key":"value"}',
+    });
+  });
+
+  test("handles nested objects by JSON stringifying them", () => {
+    expect(buildQueryParams(['filter={"user":{"name":"john"}}'])).toEqual({
+      filter: '{"user":{"name":"john"}}',
+    });
+  });
+
+  test("handles arrays of objects by JSON stringifying each element", () => {
+    expect(
+      buildQueryParams(['filters=[{"key":"value"},{"key2":"value2"}]'])
+    ).toEqual({
+      filters: ['{"key":"value"}', '{"key2":"value2"}'],
+    });
+  });
+
+  test("handles mixed arrays with objects and primitives", () => {
+    expect(buildQueryParams(['data=[1,{"obj":true},"string"]'])).toEqual({
+      data: ["1", '{"obj":true}', "string"],
+    });
+  });
+});
+
+describe("prepareRequestOptions", () => {
+  test("GET with no fields returns undefined for both body and params", () => {
+    const result = prepareRequestOptions("GET", undefined);
+    expect(result.body).toBeUndefined();
+    expect(result.params).toBeUndefined();
+  });
+
+  test("GET with empty fields returns undefined for both body and params", () => {
+    const result = prepareRequestOptions("GET", []);
+    expect(result.body).toBeUndefined();
+    expect(result.params).toBeUndefined();
+  });
+
+  test("GET with fields returns params (not body)", () => {
+    const result = prepareRequestOptions("GET", [
+      "status=resolved",
+      "limit=10",
+    ]);
+    expect(result.body).toBeUndefined();
+    expect(result.params).toEqual({
+      status: "resolved",
+      limit: "10",
+    });
+  });
+
+  test("POST with fields returns body (not params)", () => {
+    const result = prepareRequestOptions("POST", ["status=resolved"]);
+    expect(result.body).toEqual({ status: "resolved" });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("PUT with fields returns body (not params)", () => {
+    const result = prepareRequestOptions("PUT", ["name=test"]);
+    expect(result.body).toEqual({ name: "test" });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("PATCH with fields returns body (not params)", () => {
+    const result = prepareRequestOptions("PATCH", ["active=true"]);
+    expect(result.body).toEqual({ active: true });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("DELETE with fields returns body (not params)", () => {
+    const result = prepareRequestOptions("DELETE", ["force=true"]);
+    expect(result.body).toEqual({ force: true });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("POST with no fields returns undefined for both body and params", () => {
+    const result = prepareRequestOptions("POST", undefined);
+    expect(result.body).toBeUndefined();
+    expect(result.params).toBeUndefined();
+  });
+
+  test("GET with array field converts to string array in params", () => {
+    const result = prepareRequestOptions("GET", ["tags=[1,2,3]"]);
+    expect(result.params).toEqual({ tags: ["1", "2", "3"] });
+  });
+
+  test("POST with nested fields creates nested body object", () => {
+    const result = prepareRequestOptions("POST", [
+      "user[name]=John",
+      "user[age]=30",
+    ]);
+    expect(result.body).toEqual({ user: { name: "John", age: 30 } });
   });
 });

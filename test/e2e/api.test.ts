@@ -286,4 +286,54 @@ describe("sentry api", () => {
     },
     { timeout: 15_000 }
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GET/POST Field Routing Tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test(
+    "GET request with --field uses query parameters (not body)",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      // Use issues endpoint with query parameter - this tests that --field
+      // with GET request properly converts fields to query params instead of body
+      // (GET requests cannot have a body, so this would fail if fields went to body)
+      const result = await runCli(
+        ["api", "projects/", "--field", "query=platform:javascript"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+
+      // Should succeed (not throw "GET/HEAD method cannot have body" error)
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "POST request with --field uses request body",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      // POST to a read-only endpoint will return 405, but the important thing
+      // is that it doesn't fail with a client-side error about body/params
+      const result = await runCli(
+        ["api", "organizations/", "--method", "POST", "--field", "name=test"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+
+      // Should get a server error (405 Method Not Allowed or 400 Bad Request),
+      // not a client-side error about body handling
+      expect(result.exitCode).toBe(1);
+      // The error should be from the API, not a TypeError about body
+      expect(result.stdout + result.stderr).not.toMatch(/cannot have body/i);
+    },
+    { timeout: 15_000 }
+  );
 });
