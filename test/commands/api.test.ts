@@ -97,6 +97,21 @@ describe("parseFieldKey", () => {
       /Invalid field key format/
     );
   });
+
+  test("throws for key starting with bracket", () => {
+    expect(() => parseFieldKey("[name]")).toThrow(/Invalid field key format/);
+  });
+
+  test("throws for empty key", () => {
+    expect(() => parseFieldKey("")).toThrow(/Invalid field key format/);
+  });
+
+  test("parses key with multiple consecutive empty brackets", () => {
+    // This is valid syntax: creates path ["a", "", ""]
+    // But validatePathSegments will reject it for having [] not at end
+    // Testing that parsing itself works
+    expect(parseFieldKey("a[][]")).toEqual(["a", "", ""]);
+  });
 });
 
 describe("setNestedValue", () => {
@@ -243,6 +258,67 @@ describe("setNestedValue", () => {
     setNestedValue(obj, "a[b][]", "value2");
     expect(obj).toEqual({ a: { b: ["value1", "value2"] } });
   });
+
+  // Additional edge cases for internal function coverage
+  test("throws when traversing into boolean", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "flag", true);
+    expect(() => setNestedValue(obj, "flag[value]", "test")).toThrow(
+      /expected map type under "flag", got boolean/
+    );
+  });
+
+  test("throws when traversing into null", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "empty", null);
+    expect(() => setNestedValue(obj, "empty[value]", "test")).toThrow(
+      /expected map type under "empty", got/
+    );
+  });
+
+  test("throws when pushing to boolean", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "flag", false);
+    expect(() => setNestedValue(obj, "flag[]", "item")).toThrow(
+      /expected array type under "flag", got boolean/
+    );
+  });
+
+  test("throws when pushing to null", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "empty", null);
+    expect(() => setNestedValue(obj, "empty[]", "item")).toThrow(
+      /expected array type under "empty", got/
+    );
+  });
+
+  test("handles deeply nested type conflict with correct path in error", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "a[b][c]", "value");
+    expect(() => setNestedValue(obj, "a[b][c][d]", "nested")).toThrow(
+      /expected map type under "a\[b\]\[c\]", got string/
+    );
+  });
+
+  test("handles array type conflict at nested level with correct path", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "a[b][]", "item");
+    expect(() => setNestedValue(obj, "a[b][key]", "value")).toThrow(
+      /expected map type under "a\[b\]", got array/
+    );
+  });
+
+  test("handles simple key with undefined value", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "key", undefined);
+    expect(obj).toEqual({ key: undefined });
+  });
+
+  test("handles nested key with null value", () => {
+    const obj: Record<string, unknown> = {};
+    setNestedValue(obj, "a[b]", null);
+    expect(obj).toEqual({ a: { b: null } });
+  });
 });
 
 describe("parseFields", () => {
@@ -311,6 +387,31 @@ describe("parseFields", () => {
 
   test("returns empty object for empty array", () => {
     expect(parseFields([])).toEqual({});
+  });
+
+  test("handles field with empty key", () => {
+    // Empty string before = should throw
+    expect(() => parseFields(["=value"])).toThrow(/Invalid field key format/);
+  });
+
+  test("handles deeply nested array push", () => {
+    expect(parseFields(["a[b][c][]=item1", "a[b][c][]=item2"])).toEqual({
+      a: { b: { c: ["item1", "item2"] } },
+    });
+  });
+
+  test("handles overwriting array with object", () => {
+    // First create array, then try to treat it as object - should throw
+    expect(() => parseFields(["items[]=first", "items[key]=value"])).toThrow(
+      /expected map type/
+    );
+  });
+
+  test("handles overwriting object with array", () => {
+    // First create object, then try to treat it as array - should throw
+    expect(() => parseFields(["items[key]=value", "items[]=item"])).toThrow(
+      /expected array type/
+    );
   });
 });
 
