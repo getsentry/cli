@@ -566,7 +566,7 @@ function writeVerboseResponse(
  */
 function handleResponse(
   stdout: Writer,
-  response: { status: number; headers: Headers; body: string },
+  response: { status: number; headers: Headers; body: unknown },
   flags: { silent: boolean; verbose: boolean; include: boolean }
 ): void {
   const isError = response.status >= 400;
