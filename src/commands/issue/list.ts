@@ -7,10 +7,7 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  findCommonWordPrefix,
-  findShortestUniquePrefixes,
-} from "../../lib/alias.js";
+import { buildOrgAwareAliases } from "../../lib/alias.js";
 import { listIssues } from "../../lib/api-client.js";
 import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
@@ -130,44 +127,45 @@ type AliasMapResult = {
 
 /**
  * Build project alias map using shortest unique prefix of project slug.
+ * Handles cross-org slug collisions by prefixing with org abbreviation.
  * Strips common word prefix before computing unique prefixes for cleaner aliases.
  *
- * Example: spotlight-electron, spotlight-website, spotlight → e, w, s
- * Example: frontend, functions, backend → fr, fu, b
+ * Single org examples:
+ *   spotlight-electron, spotlight-website, spotlight → e, w, s
+ *   frontend, functions, backend → fr, fu, b
+ *
+ * Cross-org collision example:
+ *   org1:dashboard, org2:dashboard → o1-d, o2-d
  */
 function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
-  const aliasMap = new Map<string, string>();
   const entries: Record<string, ProjectAliasEntry> = {};
 
-  // Get all project slugs
-  const projectSlugs = results.map((r) => r.target.project);
+  // Build org-aware aliases that handle cross-org collisions
+  const pairs = results.map((r) => ({
+    org: r.target.org,
+    project: r.target.project,
+  }));
+  const { aliasMap, strippedPrefix } = buildOrgAwareAliases(pairs);
 
-  // Strip common word prefix for cleaner aliases
-  const strippedPrefix = findCommonWordPrefix(projectSlugs);
-
-  // Create remainders after stripping common prefix
-  // If stripping leaves empty string, use the original slug
-  const slugToRemainder = new Map<string, string>();
-  for (const slug of projectSlugs) {
-    const remainder = slug.slice(strippedPrefix.length);
-    slugToRemainder.set(slug, remainder || slug);
-  }
-
-  // Find shortest unique prefix for each remainder
-  const remainders = [...slugToRemainder.values()];
-  const prefixes = findShortestUniquePrefixes(remainders);
-
+  // Build entries record for storage
   for (const result of results) {
-    const projectSlug = result.target.project;
-    const remainder = slugToRemainder.get(projectSlug) ?? projectSlug;
-    const alias = prefixes.get(remainder) ?? remainder.charAt(0).toLowerCase();
+    const key = `${result.target.org}:${result.target.project}`;
+    const alias = aliasMap.get(key);
+    if (alias) {
+      const entry: ProjectAliasEntry = {
+        orgSlug: result.target.org,
+        projectSlug: result.target.project,
+      };
+      entries[alias] = entry;
 
-    const key = `${result.target.org}:${projectSlug}`;
-    aliasMap.set(key, alias);
-    entries[alias] = {
-      orgSlug: result.target.org,
-      projectSlug,
-    };
+      // For org-prefixed aliases (contain hyphen from collision handling),
+      // also store compact format without the last hyphen for ease of use.
+      // e.g., "o1-d" also stored as "o1d"
+      if (alias.includes("-")) {
+        const compactAlias = alias.replace("-", "");
+        entries[compactAlias] = entry;
+      }
+    }
   }
 
   return { aliasMap, entries, strippedPrefix };
