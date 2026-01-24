@@ -474,8 +474,9 @@ async function buildBodyFromInput(
  * merged into a single object, properly handling nested keys.
  *
  * @returns Merged object or undefined if no fields provided
+ * @internal Exported for testing
  */
-function buildBodyFromFields(
+export function buildBodyFromFields(
   typedFields: string[] | undefined,
   rawFields: string[] | undefined
 ): Record<string, unknown> | undefined {
@@ -500,8 +501,9 @@ function buildBodyFromFields(
 
 /**
  * Write response headers to stdout (standard format)
+ * @internal Exported for testing
  */
-function writeResponseHeaders(
+export function writeResponseHeaders(
   stdout: Writer,
   status: number,
   headers: Headers
@@ -515,8 +517,9 @@ function writeResponseHeaders(
 
 /**
  * Write response body to stdout
+ * @internal Exported for testing
  */
-function writeResponseBody(stdout: Writer, body: unknown): void {
+export function writeResponseBody(stdout: Writer, body: unknown): void {
   if (body === null || body === undefined) {
     return;
   }
@@ -530,8 +533,9 @@ function writeResponseBody(stdout: Writer, body: unknown): void {
 
 /**
  * Write verbose request output (curl-style format)
+ * @internal Exported for testing
  */
-function writeVerboseRequest(
+export function writeVerboseRequest(
   stdout: Writer,
   method: string,
   endpoint: string,
@@ -548,8 +552,9 @@ function writeVerboseRequest(
 
 /**
  * Write verbose response output (curl-style format)
+ * @internal Exported for testing
  */
-function writeVerboseResponse(
+export function writeVerboseResponse(
   stdout: Writer,
   status: number,
   headers: Headers

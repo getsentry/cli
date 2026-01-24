@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  buildBodyFromFields,
   buildQueryParams,
   normalizeEndpoint,
   parseFieldKey,
@@ -16,7 +17,26 @@ import {
   parseMethod,
   prepareRequestOptions,
   setNestedValue,
+  writeResponseBody,
+  writeResponseHeaders,
+  writeVerboseRequest,
+  writeVerboseResponse,
 } from "../../src/commands/api.js";
+import type { Writer } from "../../src/types/index.js";
+
+/**
+ * Create a mock Writer that collects output into a string
+ */
+function createMockWriter(): Writer & { output: string } {
+  const mock = {
+    output: "",
+    write(data: string): boolean {
+      mock.output += data;
+      return true;
+    },
+  };
+  return mock;
+}
 
 describe("normalizeEndpoint", () => {
   test("adds trailing slash when missing", () => {
@@ -668,5 +688,215 @@ describe("prepareRequestOptions", () => {
       "user[age]=30",
     ]);
     expect(result.body).toEqual({ user: { name: "John", age: 30 } });
+  });
+});
+
+describe("buildBodyFromFields", () => {
+  test("returns undefined for no fields", () => {
+    expect(buildBodyFromFields(undefined, undefined)).toBeUndefined();
+    expect(buildBodyFromFields([], [])).toBeUndefined();
+    expect(buildBodyFromFields([], undefined)).toBeUndefined();
+    expect(buildBodyFromFields(undefined, [])).toBeUndefined();
+  });
+
+  test("builds body from typed fields only", () => {
+    expect(buildBodyFromFields(["name=John", "age=30"], undefined)).toEqual({
+      name: "John",
+      age: 30,
+    });
+  });
+
+  test("builds body from raw fields only", () => {
+    expect(buildBodyFromFields(undefined, ["name=John", "age=30"])).toEqual({
+      name: "John",
+      age: "30",
+    });
+  });
+
+  test("merges typed and raw fields", () => {
+    expect(buildBodyFromFields(["typed=123"], ["raw=456"])).toEqual({
+      typed: 123,
+      raw: "456",
+    });
+  });
+
+  test("raw fields can overwrite typed fields", () => {
+    // Typed field first parses "123" as number
+    // Raw field then overwrites with string "456"
+    expect(buildBodyFromFields(["value=123"], ["value=456"])).toEqual({
+      value: "456",
+    });
+  });
+
+  test("handles nested fields from both typed and raw", () => {
+    expect(buildBodyFromFields(["user[name]=John"], ["user[age]=30"])).toEqual({
+      user: { name: "John", age: "30" },
+    });
+  });
+
+  test("handles array push from both typed and raw", () => {
+    expect(buildBodyFromFields(["tags[]=foo"], ["tags[]=bar"])).toEqual({
+      tags: ["foo", "bar"],
+    });
+  });
+});
+
+describe("writeResponseHeaders", () => {
+  test("writes status and headers", () => {
+    const writer = createMockWriter();
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      "X-Custom": "value",
+    });
+
+    writeResponseHeaders(writer, 200, headers);
+
+    expect(writer.output).toMatch(/^HTTP 200\n/);
+    expect(writer.output).toMatch(/content-type: application\/json/i);
+    expect(writer.output).toMatch(/x-custom: value/i);
+    expect(writer.output).toMatch(/\n$/);
+  });
+
+  test("handles different status codes", () => {
+    const writer = createMockWriter();
+    const headers = new Headers();
+
+    writeResponseHeaders(writer, 404, headers);
+
+    expect(writer.output).toMatch(/^HTTP 404\n/);
+  });
+
+  test("handles empty headers", () => {
+    const writer = createMockWriter();
+    const headers = new Headers();
+
+    writeResponseHeaders(writer, 200, headers);
+
+    expect(writer.output).toBe("HTTP 200\n\n");
+  });
+});
+
+describe("writeResponseBody", () => {
+  test("writes JSON object with formatting", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, { key: "value", num: 42 });
+
+    expect(writer.output).toBe('{\n  "key": "value",\n  "num": 42\n}\n');
+  });
+
+  test("writes JSON array with formatting", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, [1, 2, 3]);
+
+    expect(writer.output).toBe("[\n  1,\n  2,\n  3\n]\n");
+  });
+
+  test("writes string directly", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, "plain text response");
+
+    expect(writer.output).toBe("plain text response\n");
+  });
+
+  test("writes number as string", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, 42);
+
+    expect(writer.output).toBe("42\n");
+  });
+
+  test("writes boolean as string", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, true);
+
+    expect(writer.output).toBe("true\n");
+  });
+
+  test("does not write null", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, null);
+
+    expect(writer.output).toBe("");
+  });
+
+  test("does not write undefined", () => {
+    const writer = createMockWriter();
+
+    writeResponseBody(writer, undefined);
+
+    expect(writer.output).toBe("");
+  });
+});
+
+describe("writeVerboseRequest", () => {
+  test("writes method and endpoint", () => {
+    const writer = createMockWriter();
+
+    writeVerboseRequest(writer, "GET", "organizations/", undefined);
+
+    expect(writer.output).toBe("> GET /api/0/organizations/\n>\n");
+  });
+
+  test("writes headers when provided", () => {
+    const writer = createMockWriter();
+
+    writeVerboseRequest(writer, "POST", "issues/", {
+      "Content-Type": "application/json",
+      "X-Custom": "value",
+    });
+
+    expect(writer.output).toMatch(/^> POST \/api\/0\/issues\/\n/);
+    expect(writer.output).toMatch(/> Content-Type: application\/json\n/);
+    expect(writer.output).toMatch(/> X-Custom: value\n/);
+    expect(writer.output).toMatch(/>\n$/);
+  });
+
+  test("handles empty headers object", () => {
+    const writer = createMockWriter();
+
+    writeVerboseRequest(writer, "DELETE", "issues/123/", {});
+
+    expect(writer.output).toBe("> DELETE /api/0/issues/123/\n>\n");
+  });
+});
+
+describe("writeVerboseResponse", () => {
+  test("writes status and headers with < prefix", () => {
+    const writer = createMockWriter();
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      "X-Request-Id": "abc123",
+    });
+
+    writeVerboseResponse(writer, 200, headers);
+
+    expect(writer.output).toMatch(/^< HTTP 200\n/);
+    expect(writer.output).toMatch(/< content-type: application\/json/i);
+    expect(writer.output).toMatch(/< x-request-id: abc123/i);
+    expect(writer.output).toMatch(/<\n$/);
+  });
+
+  test("handles error status codes", () => {
+    const writer = createMockWriter();
+    const headers = new Headers();
+
+    writeVerboseResponse(writer, 500, headers);
+
+    expect(writer.output).toMatch(/^< HTTP 500\n/);
+  });
+
+  test("handles empty headers", () => {
+    const writer = createMockWriter();
+    const headers = new Headers();
+
+    writeVerboseResponse(writer, 204, headers);
+
+    expect(writer.output).toBe("< HTTP 204\n<\n");
   });
 });
