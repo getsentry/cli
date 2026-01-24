@@ -239,15 +239,21 @@ export async function rawApiRequest(
 
   // Handle body based on type:
   // - Objects: use ky's json option (auto-stringifies and sets Content-Type)
-  // - Strings: send as raw body with explicit Content-Type (e.g., non-JSON --input content)
+  // - Strings: send as raw body (user can set Content-Type via custom headers if needed)
   // - undefined: no body
   const isStringBody = typeof body === "string";
+
+  // For string bodies, remove the default Content-Type: application/json from createApiClient
+  // unless the user explicitly provides one. This allows sending non-JSON content.
+  const headers =
+    isStringBody && !("Content-Type" in customHeaders)
+      ? { ...customHeaders, "Content-Type": undefined }
+      : customHeaders;
+
   const requestOptions: Parameters<typeof client>[1] = {
     method,
     searchParams: buildSearchParams(params),
-    headers: isStringBody
-      ? { "Content-Type": "application/json", ...customHeaders }
-      : customHeaders,
+    headers,
     throwHttpErrors: false,
   };
 

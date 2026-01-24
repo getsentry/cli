@@ -82,6 +82,33 @@ describe("normalizeEndpoint", () => {
   test("handles just a slash", () => {
     expect(normalizeEndpoint("/")).toBe("/");
   });
+
+  test("preserves query string and adds trailing slash to path", () => {
+    expect(normalizeEndpoint("organizations?limit=10")).toBe(
+      "organizations/?limit=10"
+    );
+    expect(normalizeEndpoint("issues/123?status=resolved")).toBe(
+      "issues/123/?status=resolved"
+    );
+  });
+
+  test("preserves query string when path already has trailing slash", () => {
+    expect(normalizeEndpoint("organizations/?limit=10")).toBe(
+      "organizations/?limit=10"
+    );
+  });
+
+  test("handles query string with leading slash", () => {
+    expect(normalizeEndpoint("/organizations?limit=10")).toBe(
+      "organizations/?limit=10"
+    );
+  });
+
+  test("handles complex query strings", () => {
+    expect(
+      normalizeEndpoint("issues?status=resolved&limit=10&query=is:unresolved")
+    ).toBe("issues/?status=resolved&limit=10&query=is:unresolved");
+  });
 });
 
 describe("parseMethod", () => {

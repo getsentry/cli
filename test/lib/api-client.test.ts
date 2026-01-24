@@ -395,8 +395,32 @@ describe("rawApiRequest", () => {
     expect(requests[0].method).toBe("PUT");
     // String body should be sent as-is
     expect(capturedBody).toBe('{"status":"resolved"}');
-    // Should have Content-Type header set
-    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+    // No Content-Type header set by default for string bodies
+    // (user can provide via custom headers if needed)
+    expect(requests[0].headers.get("Content-Type")).toBeNull();
+  });
+
+  test("string body with explicit Content-Type header", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/123/", {
+      method: "PUT",
+      body: "plain text content",
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    // User-provided Content-Type should be used
+    expect(requests[0].headers.get("Content-Type")).toBe("text/plain");
   });
 
   test("sends request with query params", async () => {
@@ -441,7 +465,7 @@ describe("rawApiRequest", () => {
     expect(requests[0].headers.get("X-Custom-Header")).toBe("test-value");
   });
 
-  test("custom headers merged with string body Content-Type", async () => {
+  test("custom headers merged with string body (no default Content-Type)", async () => {
     const requests: Request[] = [];
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -460,9 +484,9 @@ describe("rawApiRequest", () => {
       headers: { "X-Custom": "value" },
     });
 
-    // Both headers should be present
-    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+    // Custom headers should be present, but no Content-Type for string bodies
     expect(requests[0].headers.get("X-Custom")).toBe("value");
+    expect(requests[0].headers.get("Content-Type")).toBeNull();
   });
 
   test("returns non-JSON response body as string", async () => {

@@ -65,18 +65,30 @@ export function parseMethod(value: string): HttpMethod {
 }
 
 /**
- * Normalize an API endpoint to ensure it has a trailing slash.
+ * Normalize an API endpoint to ensure the path has a trailing slash.
  * Sentry API requires trailing slashes on endpoints.
+ * Handles query strings correctly by only modifying the path portion.
  *
- * @param endpoint - API endpoint path
- * @returns Endpoint with trailing slash
+ * @param endpoint - API endpoint path (may include query string)
+ * @returns Endpoint with trailing slash on path, query string preserved
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
   // Remove leading slash if present (rawApiRequest handles the base URL)
   const trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-  // Ensure trailing slash
-  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+
+  // Split path and query string
+  const queryIndex = trimmed.indexOf("?");
+  if (queryIndex === -1) {
+    // No query string - just ensure trailing slash
+    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  }
+
+  // Has query string - add trailing slash to path only
+  const path = trimmed.substring(0, queryIndex);
+  const query = trimmed.substring(queryIndex);
+  const normalizedPath = path.endsWith("/") ? path : `${path}/`;
+  return `${normalizedPath}${query}`;
 }
 
 /**
