@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   buildSearchParams,
   listOrganizations,
+  rawApiRequest,
 } from "../../src/lib/api-client.js";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -318,5 +319,190 @@ describe("buildSearchParams", () => {
     const result = buildSearchParams({ tags: [] });
     // Empty array produces no entries, so result should be undefined
     expect(result).toBeUndefined();
+  });
+});
+
+describe("rawApiRequest", () => {
+  test("sends GET request without body", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify([{ id: 1 }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await rawApiRequest("organizations/");
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual([{ id: 1 }]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].method).toBe("GET");
+  });
+
+  test("sends POST request with JSON object body", async () => {
+    const requests: Request[] = [];
+    let capturedBody: string | undefined;
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+      capturedBody = await req.text();
+
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await rawApiRequest("issues/123/", {
+      method: "POST",
+      body: { status: "resolved" },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ success: true });
+    expect(requests[0].method).toBe("POST");
+    expect(capturedBody).toBe('{"status":"resolved"}');
+  });
+
+  test("sends PUT request with string body", async () => {
+    const requests: Request[] = [];
+    let capturedBody: string | undefined;
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+      capturedBody = await req.text();
+
+      return new Response(JSON.stringify({ updated: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await rawApiRequest("issues/123/", {
+      method: "PUT",
+      body: '{"status":"resolved"}',
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ updated: true });
+    expect(requests[0].method).toBe("PUT");
+    // String body should be sent as-is
+    expect(capturedBody).toBe('{"status":"resolved"}');
+    // Should have Content-Type header set
+    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+  });
+
+  test("sends request with query params", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/", {
+      params: { status: "resolved", limit: "10" },
+    });
+
+    const url = new URL(requests[0].url);
+    expect(url.searchParams.get("status")).toBe("resolved");
+    expect(url.searchParams.get("limit")).toBe("10");
+  });
+
+  test("sends request with custom headers", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/", {
+      headers: { "X-Custom-Header": "test-value" },
+    });
+
+    expect(requests[0].headers.get("X-Custom-Header")).toBe("test-value");
+  });
+
+  test("custom headers merged with string body Content-Type", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/123/", {
+      method: "PUT",
+      body: '{"status":"resolved"}',
+      headers: { "X-Custom": "value" },
+    });
+
+    // Both headers should be present
+    expect(requests[0].headers.get("Content-Type")).toBe("application/json");
+    expect(requests[0].headers.get("X-Custom")).toBe("value");
+  });
+
+  test("returns non-JSON response body as string", async () => {
+    globalThis.fetch = async () =>
+      new Response("Plain text response", {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+
+    const result = await rawApiRequest("some-endpoint/");
+
+    expect(result.status).toBe(200);
+    expect(result.body).toBe("Plain text response");
+  });
+
+  test("returns error status without throwing", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const result = await rawApiRequest("nonexistent/");
+
+    expect(result.status).toBe(404);
+    expect(result.body).toEqual({ detail: "Not found" });
+  });
+
+  test("includes response headers", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Id": "abc123",
+        },
+      });
+
+    const result = await rawApiRequest("test/");
+
+    expect(result.headers.get("X-Request-Id")).toBe("abc123");
   });
 });

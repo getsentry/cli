@@ -32,8 +32,9 @@ const VALID_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
 /**
  * Read all data from stdin as a string.
  * Uses Bun's native stream handling for efficiency.
+ * @internal Exported for testing
  */
-async function readStdin(
+export async function readStdin(
   stdin: NodeJS.ReadStream & { fd: 0 }
 ): Promise<string> {
   const chunks: Buffer[] = [];
@@ -442,8 +443,9 @@ export function parseHeaders(headers: string[]): Record<string, string> {
 /**
  * Build request body from --input flag (file or stdin).
  * Tries to parse the content as JSON, otherwise returns as string.
+ * @internal Exported for testing
  */
-async function buildBodyFromInput(
+export async function buildBodyFromInput(
   inputPath: string,
   stdin: NodeJS.ReadStream & { fd: 0 }
 ): Promise<Record<string, unknown> | string> {
@@ -568,8 +570,9 @@ export function writeVerboseResponse(
 
 /**
  * Handle response output based on flags
+ * @internal Exported for testing
  */
-function handleResponse(
+export function handleResponse(
   stdout: Writer,
   response: { status: number; headers: Headers; body: unknown },
   flags: { silent: boolean; verbose: boolean; include: boolean }

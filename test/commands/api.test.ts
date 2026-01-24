@@ -6,9 +6,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Readable } from "node:stream";
 import {
   buildBodyFromFields,
+  buildBodyFromInput,
   buildQueryParams,
+  handleResponse,
   normalizeEndpoint,
   parseFieldKey,
   parseFields,
@@ -16,6 +19,7 @@ import {
   parseHeaders,
   parseMethod,
   prepareRequestOptions,
+  readStdin,
   setNestedValue,
   writeResponseBody,
   writeResponseHeaders,
@@ -28,14 +32,23 @@ import type { Writer } from "../../src/types/index.js";
  * Create a mock Writer that collects output into a string
  */
 function createMockWriter(): Writer & { output: string } {
-  const mock = {
+  const mockWriter = {
     output: "",
     write(data: string): boolean {
-      mock.output += data;
+      mockWriter.output += data;
       return true;
     },
   };
-  return mock;
+  return mockWriter;
+}
+
+/**
+ * Create a mock stdin stream from a string
+ */
+function createMockStdin(content: string): NodeJS.ReadStream & { fd: 0 } {
+  const readable = Readable.from([content]);
+  // Cast to match expected stdin type
+  return readable as unknown as NodeJS.ReadStream & { fd: 0 };
 }
 
 describe("normalizeEndpoint", () => {
@@ -898,5 +911,261 @@ describe("writeVerboseResponse", () => {
     writeVerboseResponse(writer, 204, headers);
 
     expect(writer.output).toBe("< HTTP 204\n<\n");
+  });
+});
+
+describe("readStdin", () => {
+  test("reads content from stdin stream", async () => {
+    const mockStdin = createMockStdin("hello world");
+    const result = await readStdin(mockStdin);
+    expect(result).toBe("hello world");
+  });
+
+  test("handles empty stdin", async () => {
+    const mockStdin = createMockStdin("");
+    const result = await readStdin(mockStdin);
+    expect(result).toBe("");
+  });
+
+  test("handles multi-line content", async () => {
+    const content = "line 1\nline 2\nline 3";
+    const mockStdin = createMockStdin(content);
+    const result = await readStdin(mockStdin);
+    expect(result).toBe(content);
+  });
+
+  test("handles JSON content", async () => {
+    const json = JSON.stringify({ key: "value", num: 42 });
+    const mockStdin = createMockStdin(json);
+    const result = await readStdin(mockStdin);
+    expect(result).toBe(json);
+  });
+});
+
+describe("buildBodyFromInput", () => {
+  test("reads JSON from stdin when path is '-'", async () => {
+    const json = JSON.stringify({ status: "resolved" });
+    const mockStdin = createMockStdin(json);
+
+    const result = await buildBodyFromInput("-", mockStdin);
+
+    expect(result).toEqual({ status: "resolved" });
+  });
+
+  test("reads non-JSON from stdin when path is '-'", async () => {
+    const mockStdin = createMockStdin("plain text content");
+
+    const result = await buildBodyFromInput("-", mockStdin);
+
+    expect(result).toBe("plain text content");
+  });
+
+  test("reads JSON from file", async () => {
+    // Create a temp file
+    const tempFile = `/tmp/test-input-${Date.now()}.json`;
+    await Bun.write(tempFile, JSON.stringify({ key: "value" }));
+
+    try {
+      const mockStdin = createMockStdin("");
+      const result = await buildBodyFromInput(tempFile, mockStdin);
+      expect(result).toEqual({ key: "value" });
+    } finally {
+      // Clean up
+      const { unlink } = await import("node:fs/promises");
+      if (await Bun.file(tempFile).exists()) {
+        await unlink(tempFile);
+      }
+    }
+  });
+
+  test("reads non-JSON from file", async () => {
+    const tempFile = `/tmp/test-input-${Date.now()}.txt`;
+    await Bun.write(tempFile, "plain text from file");
+
+    try {
+      const mockStdin = createMockStdin("");
+      const result = await buildBodyFromInput(tempFile, mockStdin);
+      expect(result).toBe("plain text from file");
+    } finally {
+      const { unlink } = await import("node:fs/promises");
+      if (await Bun.file(tempFile).exists()) {
+        await unlink(tempFile);
+      }
+    }
+  });
+
+  test("reads non-JSON from file", async () => {
+    const tempFile = `/tmp/test-input-${Date.now()}.txt`;
+    await Bun.write(tempFile, "plain text from file");
+
+    try {
+      const mockStdin = createMockStdin("");
+      const result = await buildBodyFromInput(tempFile, mockStdin);
+      expect(result).toBe("plain text from file");
+    } finally {
+      const { unlink } = await import("node:fs/promises");
+      if (await Bun.file(tempFile).exists()) {
+        await unlink(tempFile);
+      }
+    }
+  });
+
+  test("throws for non-existent file", async () => {
+    const mockStdin = createMockStdin("");
+
+    await expect(
+      buildBodyFromInput("/nonexistent/path/file.json", mockStdin)
+    ).rejects.toThrow(/File not found/);
+  });
+});
+
+describe("handleResponse", () => {
+  // Mock process.exit for tests
+  const originalExit = process.exit;
+
+  test("outputs body for successful response", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      body: { success: true },
+    };
+
+    handleResponse(writer, response, {
+      silent: false,
+      verbose: false,
+      include: false,
+    });
+
+    expect(writer.output).toContain('"success": true');
+  });
+
+  test("outputs headers with --include flag", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: { data: "test" },
+    };
+
+    handleResponse(writer, response, {
+      silent: false,
+      verbose: false,
+      include: true,
+    });
+
+    expect(writer.output).toMatch(/^HTTP 200\n/);
+    expect(writer.output).toMatch(/content-type:/i);
+  });
+
+  test("outputs verbose format with --verbose flag", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: { data: "test" },
+    };
+
+    handleResponse(writer, response, {
+      silent: false,
+      verbose: true,
+      include: false,
+    });
+
+    expect(writer.output).toMatch(/^< HTTP 200\n/);
+    expect(writer.output).toMatch(/< content-type:/i);
+  });
+
+  test("verbose takes precedence over include", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      body: "test",
+    };
+
+    handleResponse(writer, response, {
+      silent: false,
+      verbose: true,
+      include: true,
+    });
+
+    // Should use verbose format (< prefix), not include format
+    expect(writer.output).toMatch(/^< HTTP/);
+  });
+
+  test("silent mode produces no output for success", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      body: { data: "test" },
+    };
+
+    handleResponse(writer, response, {
+      silent: true,
+      verbose: false,
+      include: false,
+    });
+
+    expect(writer.output).toBe("");
+  });
+
+  test("silent mode with error calls process.exit(1)", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 500,
+      headers: new Headers(),
+      body: { error: "Internal Server Error" },
+    };
+
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code;
+      throw new Error("process.exit called");
+    }) as typeof process.exit;
+
+    try {
+      expect(() =>
+        handleResponse(writer, response, {
+          silent: true,
+          verbose: false,
+          include: false,
+        })
+      ).toThrow("process.exit called");
+      expect(exitCode).toBe(1);
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
+  test("error response calls process.exit(1) after output", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 404,
+      headers: new Headers(),
+      body: { detail: "Not found" },
+    };
+
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code;
+      throw new Error("process.exit called");
+    }) as typeof process.exit;
+
+    try {
+      expect(() =>
+        handleResponse(writer, response, {
+          silent: false,
+          verbose: false,
+          include: false,
+        })
+      ).toThrow("process.exit called");
+      expect(exitCode).toBe(1);
+      // Should have output the body before exiting
+      expect(writer.output).toContain("Not found");
+    } finally {
+      process.exit = originalExit;
+    }
   });
 });
