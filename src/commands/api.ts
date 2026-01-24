@@ -362,13 +362,13 @@ function stringifyValue(value: unknown): string {
 }
 
 /**
- * Build query parameters from field strings for GET requests.
+ * Build query parameters from typed field strings (--field/-F) for GET requests.
  * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
  * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
  *
  * @param fields - Array of "key=value" strings
  * @returns Record suitable for URLSearchParams
- * @throws {Error} When field doesn't contain "="
+ * @throws {Error} When field doesn't contain "=" or key format is invalid
  * @internal Exported for testing
  */
 export function buildQueryParams(
@@ -383,6 +383,12 @@ export function buildQueryParams(
     }
 
     const key = field.substring(0, eqIndex);
+
+    // Validate key format (same validation as parseFieldKey for consistency)
+    if (!FIELD_KEY_REGEX.test(key)) {
+      throw new Error(`Invalid field key format: ${key}`);
+    }
+
     const rawValue = field.substring(eqIndex + 1);
     const value = parseFieldValue(rawValue);
 
@@ -396,6 +402,73 @@ export function buildQueryParams(
   }
 
   return result;
+}
+
+/**
+ * Build query parameters from raw field strings (--raw-field/-f) for GET requests.
+ * Raw fields are passed directly without any processing (no JSON parsing, no bracket
+ * notation, no URI encoding). Values are kept exactly as provided.
+ *
+ * @param fields - Array of "key=value" strings
+ * @returns Record suitable for URLSearchParams
+ * @throws {Error} When field doesn't contain "=" or key is empty
+ * @internal Exported for testing
+ */
+export function buildRawQueryParams(
+  fields: string[]
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const eqIndex = field.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    }
+
+    const key = field.substring(0, eqIndex);
+    if (key === "") {
+      throw new Error("Invalid field key format: key cannot be empty");
+    }
+
+    const value = field.substring(eqIndex + 1);
+
+    // For raw fields, handle repeated keys by creating string[]
+    const existing = result[key];
+    if (existing !== undefined) {
+      if (Array.isArray(existing)) {
+        existing.push(value);
+      } else {
+        result[key] = [existing, value];
+      }
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Build query parameters from both typed and raw field strings for GET requests.
+ * Typed fields (--field/-F) are parsed with JSON conversion and bracket notation.
+ * Raw fields (--raw-field/-f) are passed directly without any processing.
+ *
+ * @param typedFields - Array of typed "key=value" strings (JSON parsed)
+ * @param rawFields - Array of raw "key=value" strings (no processing)
+ * @returns Merged record suitable for URLSearchParams
+ * @internal Exported for testing
+ */
+export function buildQueryParamsFromFields(
+  typedFields?: string[],
+  rawFields?: string[]
+): Record<string, string | string[]> {
+  const typedParams =
+    typedFields && typedFields.length > 0 ? buildQueryParams(typedFields) : {};
+  const rawParams =
+    rawFields && rawFields.length > 0 ? buildRawQueryParams(rawFields) : {};
+
+  // Merge params: raw fields can override typed fields if same key
+  return { ...typedParams, ...rawParams };
 }
 
 /**
@@ -430,8 +503,8 @@ export function prepareRequestOptions(
     return { body: buildBodyFromFields(typedFields, rawFields) };
   }
 
-  // For GET requests, use query params (raw fields ignored for query params)
-  return { params: hasTypedFields ? buildQueryParams(typedFields) : undefined };
+  // For GET requests, build query params from both typed and raw fields
+  return { params: buildQueryParamsFromFields(typedFields, rawFields) };
 }
 
 /**

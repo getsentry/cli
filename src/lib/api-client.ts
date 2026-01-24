@@ -245,8 +245,12 @@ export async function rawApiRequest(
 
   // For string bodies, remove the default Content-Type: application/json from createApiClient
   // unless the user explicitly provides one. This allows sending non-JSON content.
+  // Check is case-insensitive since HTTP headers are case-insensitive.
+  const hasContentType = Object.keys(customHeaders).some(
+    (k) => k.toLowerCase() === "content-type"
+  );
   const headers =
-    isStringBody && !("Content-Type" in customHeaders)
+    isStringBody && !hasContentType
       ? { ...customHeaders, "Content-Type": undefined }
       : customHeaders;
 

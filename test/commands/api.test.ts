@@ -11,6 +11,8 @@ import {
   buildBodyFromFields,
   buildBodyFromInput,
   buildQueryParams,
+  buildQueryParamsFromFields,
+  buildRawQueryParams,
   handleResponse,
   normalizeEndpoint,
   parseFieldKey,
@@ -660,6 +662,129 @@ describe("buildQueryParams", () => {
       data: ["1", '{"obj":true}', "string"],
     });
   });
+
+  test("throws for empty key", () => {
+    expect(() => buildQueryParams(["=value"])).toThrow(
+      /Invalid field key format/
+    );
+  });
+
+  test("throws for invalid key format with unmatched brackets", () => {
+    expect(() => buildQueryParams(["key[=value"])).toThrow(
+      /Invalid field key format/
+    );
+    expect(() => buildQueryParams(["key]=value"])).toThrow(
+      /Invalid field key format/
+    );
+  });
+
+  test("accepts valid bracket notation keys", () => {
+    expect(buildQueryParams(["user[name]=John"])).toEqual({
+      "user[name]": "John",
+    });
+    expect(buildQueryParams(["tags[]=item"])).toEqual({ "tags[]": "item" });
+  });
+});
+
+describe("buildRawQueryParams", () => {
+  test("builds simple key=value params without processing", () => {
+    expect(buildRawQueryParams(["name=test", "value=123"])).toEqual({
+      name: "test",
+      value: "123",
+    });
+  });
+
+  test("keeps JSON-like values as raw strings (no parsing)", () => {
+    expect(
+      buildRawQueryParams(["data=[1,2,3]", 'obj={"key":"value"}'])
+    ).toEqual({
+      data: "[1,2,3]",
+      obj: '{"key":"value"}',
+    });
+  });
+
+  test("does not process bracket notation (kept as literal key)", () => {
+    expect(buildRawQueryParams(["user[name]=John"])).toEqual({
+      "user[name]": "John",
+    });
+  });
+
+  test("handles repeated keys by creating string array", () => {
+    expect(buildRawQueryParams(["tag=a", "tag=b", "tag=c"])).toEqual({
+      tag: ["a", "b", "c"],
+    });
+  });
+
+  test("handles value with equals sign", () => {
+    expect(buildRawQueryParams(["query=a=b=c"])).toEqual({ query: "a=b=c" });
+  });
+
+  test("throws for invalid field format without equals", () => {
+    expect(() => buildRawQueryParams(["invalid"])).toThrow(
+      /Invalid field format/
+    );
+  });
+
+  test("throws for empty key", () => {
+    expect(() => buildRawQueryParams(["=value"])).toThrow(
+      /key cannot be empty/
+    );
+  });
+
+  test("returns empty object for empty array", () => {
+    expect(buildRawQueryParams([])).toEqual({});
+  });
+
+  test("preserves empty values", () => {
+    expect(buildRawQueryParams(["empty="])).toEqual({ empty: "" });
+  });
+});
+
+describe("buildQueryParamsFromFields", () => {
+  test("returns empty object for no fields", () => {
+    expect(buildQueryParamsFromFields(undefined, undefined)).toEqual({});
+    expect(buildQueryParamsFromFields([], [])).toEqual({});
+  });
+
+  test("builds params from typed fields only", () => {
+    expect(
+      buildQueryParamsFromFields(["status=resolved", "count=10"], undefined)
+    ).toEqual({
+      status: "resolved",
+      count: "10",
+    });
+  });
+
+  test("builds params from raw fields only", () => {
+    expect(
+      buildQueryParamsFromFields(undefined, ["name=test", "value=raw"])
+    ).toEqual({
+      name: "test",
+      value: "raw",
+    });
+  });
+
+  test("merges typed and raw fields", () => {
+    expect(buildQueryParamsFromFields(["typed=1"], ["raw=2"])).toEqual({
+      typed: "1",
+      raw: "2",
+    });
+  });
+
+  test("raw fields override typed fields with same key", () => {
+    expect(buildQueryParamsFromFields(["key=typed"], ["key=raw"])).toEqual({
+      key: "raw",
+    });
+  });
+
+  test("typed fields parse JSON, raw fields do not", () => {
+    expect(
+      buildQueryParamsFromFields(["arr=[1,2,3]"], ["raw=[1,2,3]"])
+    ).toEqual({
+      arr: ["1", "2", "3"], // typed: parsed as JSON array, stringified
+      raw: "[1,2,3]", // raw: kept as literal string
+    });
+  });
 });
 
 describe("prepareRequestOptions", () => {
@@ -740,14 +865,29 @@ describe("prepareRequestOptions", () => {
     expect(result.body).toEqual({ typed: 123, raw: "456" });
   });
 
-  test("GET ignores raw fields (query params only from typed)", () => {
+  test("GET includes both typed and raw fields in query params", () => {
     const result = prepareRequestOptions(
       "GET",
       ["status=resolved"],
-      ["raw=ignored"]
+      ["raw=value"]
     );
-    expect(result.params).toEqual({ status: "resolved" });
+    expect(result.params).toEqual({ status: "resolved", raw: "value" });
     expect(result.body).toBeUndefined();
+  });
+
+  test("GET with only raw fields creates params", () => {
+    const result = prepareRequestOptions("GET", [], ["name=test", "limit=10"]);
+    expect(result.params).toEqual({ name: "test", limit: "10" });
+    expect(result.body).toBeUndefined();
+  });
+
+  test("GET raw fields override typed fields with same key", () => {
+    const result = prepareRequestOptions(
+      "GET",
+      ["value=123"], // typed: parsed as number, stringified back
+      ["value=raw-string"] // raw: kept as-is, overrides typed
+    );
+    expect(result.params).toEqual({ value: "raw-string" });
   });
 
   test("POST with only raw fields creates body", () => {

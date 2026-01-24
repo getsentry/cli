@@ -423,6 +423,54 @@ describe("rawApiRequest", () => {
     expect(requests[0].headers.get("Content-Type")).toBe("text/plain");
   });
 
+  test("string body with lowercase content-type header (case-insensitive)", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/123/", {
+      method: "PUT",
+      body: "<xml>content</xml>",
+      headers: { "content-type": "text/xml" },
+    });
+
+    // Lowercase content-type should be detected and preserved (case-insensitive check)
+    expect(requests[0].headers.get("Content-Type")).toBe("text/xml");
+  });
+
+  test("string body with mixed case Content-TYPE header", async () => {
+    const requests: Request[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    await rawApiRequest("issues/123/", {
+      method: "PUT",
+      body: "some data",
+      headers: { "CONTENT-TYPE": "application/octet-stream" },
+    });
+
+    // Mixed case Content-TYPE should be detected and preserved
+    expect(requests[0].headers.get("Content-Type")).toBe(
+      "application/octet-stream"
+    );
+  });
+
   test("sends request with query params", async () => {
     const requests: Request[] = [];
 
