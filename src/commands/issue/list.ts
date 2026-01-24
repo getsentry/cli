@@ -57,11 +57,19 @@ function parseSort(value: string): SortValue {
 
 /**
  * Write the issue list header with column titles.
+ *
+ * @param stdout - Output writer
+ * @param title - Section title
+ * @param isMultiProject - Whether to show ALIAS column for multi-project mode
  */
-function writeListHeader(stdout: Writer, title: string): void {
+function writeListHeader(
+  stdout: Writer,
+  title: string,
+  isMultiProject = false
+): void {
   stdout.write(`${title}:\n\n`);
-  stdout.write(muted(`${formatIssueListHeader()}\n`));
-  stdout.write(`${divider(80)}\n`);
+  stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
+  stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
 }
 
 /** Issue with formatting options attached */
@@ -101,7 +109,7 @@ function writeListFooter(
       break;
     case "multi":
       stdout.write(
-        "\nTip: Use 'sentry issue get <alias-suffix>' to view details (e.g., 'f-g').\n"
+        "\nTip: Use 'sentry issue get <ALIAS>' to view details (see ALIAS column).\n"
       );
       break;
     default:
@@ -164,11 +172,17 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
 
 /**
  * Attach formatting options to each issue based on alias map.
+ *
+ * @param results - Issue list results with targets
+ * @param aliasMap - Map from "org:project" to alias
+ * @param strippedPrefix - Common prefix stripped from project slugs
+ * @param isMultiProject - Whether in multi-project mode (shows ALIAS column)
  */
 function attachFormatOptions(
   results: IssueListResult[],
   aliasMap: Map<string, string>,
-  strippedPrefix: string
+  strippedPrefix: string,
+  isMultiProject: boolean
 ): IssueWithOptions[] {
   return results.flatMap((result) =>
     result.issues.map((issue) => {
@@ -184,6 +198,7 @@ function attachFormatOptions(
           projectSlug: result.target.project,
           projectAlias: alias,
           strippedPrefix: hasPrefix ? strippedPrefix : undefined,
+          isMultiProject,
         },
       };
     })
@@ -370,7 +385,8 @@ export const listCommand = buildCommand({
     const issuesWithOptions = attachFormatOptions(
       validResults,
       aliasMap,
-      strippedPrefix
+      strippedPrefix,
+      isMultiProject
     );
 
     // Sort by user preference
@@ -399,7 +415,7 @@ export const listCommand = buildCommand({
         ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
         : `Issues from ${validResults.length} projects`;
 
-    writeListHeader(stdout, title);
+    writeListHeader(stdout, title, isMultiProject);
 
     const termWidth = process.stdout.columns || 80;
     writeIssueRows(stdout, issuesWithOptions, termWidth);
