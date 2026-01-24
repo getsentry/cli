@@ -17,6 +17,7 @@ export interface SentryContext extends CommandContext {
   readonly configDir: string;
   readonly stdout: Writer;
   readonly stderr: Writer;
+  readonly stdin: NodeJS.ReadStream & { fd: 0 };
 }
 
 export function buildContext(process: NodeJS.Process): SentryContext {
@@ -28,5 +29,6 @@ export function buildContext(process: NodeJS.Process): SentryContext {
     configDir: getConfigDir(),
     stdout: process.stdout,
     stderr: process.stderr,
+    stdin: process.stdin,
   };
 }

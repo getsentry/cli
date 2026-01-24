@@ -15,9 +15,12 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 type ApiFlags = {
   readonly method: HttpMethod;
   readonly field?: string[];
+  readonly "raw-field"?: string[];
   readonly header?: string[];
+  readonly input?: string;
   readonly include: boolean;
   readonly silent: boolean;
+  readonly verbose: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,6 +28,23 @@ type ApiFlags = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const VALID_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
+
+/**
+ * Read all data from stdin as a string.
+ * Uses Bun's native stream handling for efficiency.
+ * @internal Exported for testing
+ */
+export async function readStdin(
+  stdin: NodeJS.ReadStream & { fd: 0 }
+): Promise<string> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of stdin) {
+    chunks.push(Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+}
 
 /**
  * Parse and validate HTTP method from string.
@@ -45,6 +65,33 @@ export function parseMethod(value: string): HttpMethod {
 }
 
 /**
+ * Normalize an API endpoint to ensure the path has a trailing slash.
+ * Sentry API requires trailing slashes on endpoints.
+ * Handles query strings correctly by only modifying the path portion.
+ *
+ * @param endpoint - API endpoint path (may include query string)
+ * @returns Endpoint with trailing slash on path, query string preserved
+ * @internal Exported for testing
+ */
+export function normalizeEndpoint(endpoint: string): string {
+  // Remove leading slash if present (rawApiRequest handles the base URL)
+  const trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+
+  // Split path and query string
+  const queryIndex = trimmed.indexOf("?");
+  if (queryIndex === -1) {
+    // No query string - just ensure trailing slash
+    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  }
+
+  // Has query string - add trailing slash to path only
+  const path = trimmed.substring(0, queryIndex);
+  const query = trimmed.substring(queryIndex);
+  const normalizedPath = path.endsWith("/") ? path : `${path}/`;
+  return `${normalizedPath}${query}`;
+}
+
+/**
  * Parse a field value, attempting JSON parse first.
  *
  * @param value - Raw string value to parse
@@ -62,13 +109,172 @@ export function parseFieldValue(value: string): unknown {
 /** Keys that could cause prototype pollution if used in nested object assignment */
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+/** Regex to match field key format: baseKey followed by zero or more [bracket] segments */
+const FIELD_KEY_REGEX = /^([^[\]]+)((?:\[[^[\]]*\])*)$/;
+
+/** Regex to extract bracket contents from a field key */
+const BRACKET_CONTENTS_REGEX = /\[([^[\]]*)\]/g;
+
 /**
- * Set a nested value in an object using dot notation key.
- * Creates intermediate objects as needed.
+ * Parse a field key into path segments.
+ * Supports bracket notation: "user[name]" -> ["user", "name"]
+ * Supports array syntax: "tags[]" -> ["tags", ""]
+ * Supports deep nesting: "a[b][c]" -> ["a", "b", "c"]
+ *
+ * @param key - Field key with optional bracket notation
+ * @returns Array of path segments
+ * @throws {Error} When key format is invalid
+ * @internal Exported for testing
+ */
+export function parseFieldKey(key: string): string[] {
+  const match = key.match(FIELD_KEY_REGEX);
+  if (!match?.[1]) {
+    throw new Error(`Invalid field key format: ${key}`);
+  }
+
+  const baseKey = match[1];
+  const brackets = match[2] ?? "";
+
+  // Extract bracket contents: "[name][age]" -> ["name", "age"]
+  // Empty brackets [] result in empty string "" for array push
+  const segments: string[] = brackets
+    ? [...brackets.matchAll(BRACKET_CONTENTS_REGEX)].map((m) => m[1] ?? "")
+    : [];
+
+  return [baseKey, ...segments];
+}
+
+/**
+ * Validate path segments for security and correctness.
+ * @throws {Error} When a segment is __proto__, constructor, or prototype
+ * @throws {Error} When empty brackets appear before the last segment (e.g., a[][b])
+ */
+function validatePathSegments(path: string[]): void {
+  for (let i = 0; i < path.length; i++) {
+    const segment = path[i] as string; // Safe: loop bounds guarantee index exists
+
+    // Check for prototype pollution
+    if (DANGEROUS_KEYS.has(segment)) {
+      throw new Error(`Invalid field key: "${segment}" is not allowed`);
+    }
+
+    // Empty brackets ("") are only valid at the end of the path (array push syntax)
+    // Reject patterns like a[][b] which would silently lose data
+    if (segment === "" && i < path.length - 1) {
+      throw new Error(
+        "Invalid field key: empty brackets [] can only appear at the end of a key"
+      );
+    }
+  }
+}
+
+/**
+ * Get a human-readable type name for error messages.
+ * Returns "array" for arrays, "map" for objects, and typeof for primitives.
+ */
+function getTypeName(value: unknown): string {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (value !== null && typeof value === "object") {
+    return "map";
+  }
+  return typeof value;
+}
+
+/**
+ * Format path segments into a bracket-notation string for error messages.
+ * E.g., ["user", "name"] at index 1 -> "user[name]"
+ */
+function formatPathForError(path: string[], endIndex: number): string {
+  const segments = path.slice(0, endIndex + 1);
+  if (segments.length === 1) {
+    return segments[0] ?? "";
+  }
+  return `${segments[0]}[${segments.slice(1).join("][")}]`;
+}
+
+/**
+ * Check if value can be traversed into (is a plain object, not array or primitive).
+ */
+function isTraversableObject(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Validate that existing value is compatible with expected traversal type.
+ * @throws {Error} When type conflict is detected
+ */
+function validateTypeCompatibility(
+  existing: unknown,
+  expectsArray: boolean,
+  path: string[],
+  index: number
+): void {
+  const pathStr = formatPathForError(path, index);
+
+  if (expectsArray && !Array.isArray(existing)) {
+    throw new Error(
+      `expected array type under "${pathStr}", got ${getTypeName(existing)}`
+    );
+  }
+
+  if (!(expectsArray || isTraversableObject(existing))) {
+    throw new Error(
+      `expected map type under "${pathStr}", got ${getTypeName(existing)}`
+    );
+  }
+}
+
+/**
+ * Navigate/create nested structure to the parent of the target key.
+ * @returns The object/array that will contain the final value
+ * @throws {Error} When attempting to traverse into a non-object (type conflict)
+ */
+function navigateToParent(
+  obj: Record<string, unknown>,
+  path: string[]
+): unknown {
+  let current: unknown = obj;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i] as string; // Safe: loop bounds guarantee index exists
+    const nextSegment = path[i + 1] as string;
+
+    // Empty segment only at end for arrays - skip if encountered mid-path
+    if (segment === "") {
+      continue;
+    }
+
+    const currentObj = current as Record<string, unknown>;
+    const expectsArray = nextSegment === "";
+
+    if (Object.hasOwn(currentObj, segment)) {
+      validateTypeCompatibility(currentObj[segment], expectsArray, path, i);
+    } else {
+      currentObj[segment] = expectsArray ? [] : {};
+    }
+
+    current = currentObj[segment];
+  }
+
+  return current;
+}
+
+/**
+ * Set a nested value in an object using bracket notation key.
+ * Creates intermediate objects or arrays as needed.
+ *
+ * Supports:
+ * - Simple keys: "name" -> { name: value }
+ * - Nested objects: "user[name]" -> { user: { name: value } }
+ * - Deep nesting: "a[b][c]" -> { a: { b: { c: value } } }
+ * - Array push: "tags[]" with value -> { tags: [value] }
+ * - Empty array: "tags[]" with undefined -> { tags: [] }
  *
  * @param obj - Target object to modify
- * @param key - Dot-notation key (e.g., "user.name")
- * @param value - Value to set
+ * @param key - Bracket-notation key (e.g., "user[name]", "tags[]")
+ * @param value - Value to set (undefined for empty array initialization)
  * @throws {Error} When key contains dangerous segments (__proto__, constructor, prototype)
  * @internal Exported for testing
  */
@@ -77,57 +283,68 @@ export function setNestedValue(
   key: string,
   value: unknown
 ): void {
-  const keys = key.split(".");
+  const path = parseFieldKey(key);
+  validatePathSegments(path);
 
-  // Validate all key segments to prevent prototype pollution
-  for (const k of keys) {
-    if (DANGEROUS_KEYS.has(k)) {
-      throw new Error(`Invalid field key: "${k}" is not allowed`);
-    }
-  }
+  const current = navigateToParent(obj, path);
+  const lastSegment = path.at(-1);
 
-  let current = obj;
-
-  for (let i = 0; i < keys.length - 1; i++) {
-    const k = keys[i];
-    if (!k) {
-      continue; // Skip empty segments from consecutive dots
-    }
-    if (!Object.hasOwn(current, k)) {
-      current[k] = {};
-    }
-    current = current[k] as Record<string, unknown>;
-  }
-
-  const lastKey = keys.at(-1);
-  if (lastKey) {
-    current[lastKey] = value;
+  // Array push syntax: key[]=value
+  if (lastSegment === "" && Array.isArray(current) && value !== undefined) {
+    current.push(value);
+  } else if (lastSegment !== undefined && lastSegment !== "") {
+    (current as Record<string, unknown>)[lastSegment] = value;
   }
 }
 
 /**
+ * Process a single field string and set its value in the result object.
+ * @param result - Target object to modify
+ * @param field - Field string in "key=value" or "key[]" format
+ * @param raw - If true, keep value as string (no JSON parsing)
+ * @throws {Error} When field format is invalid
+ */
+function processField(
+  result: Record<string, unknown>,
+  field: string,
+  raw: boolean
+): void {
+  const eqIndex = field.indexOf("=");
+
+  // Handle empty array syntax: "key[]" without "="
+  if (eqIndex === -1) {
+    if (field.endsWith("[]")) {
+      setNestedValue(result, field, undefined);
+      return;
+    }
+    throw new Error(`Invalid field format: ${field}. Expected key=value`);
+  }
+
+  const key = field.substring(0, eqIndex);
+  const rawValue = field.substring(eqIndex + 1);
+  const value = raw ? rawValue : parseFieldValue(rawValue);
+  setNestedValue(result, key, value);
+}
+
+/**
  * Parse field arguments into request body object.
- * Supports dot notation for nested keys and JSON values.
+ * Supports bracket notation for nested keys (e.g., "user[name]=value")
+ * and array syntax (e.g., "tags[]=value" or "tags[]" for empty array).
  *
- * @param fields - Array of "key=value" strings
+ * @param fields - Array of "key=value" strings (or "key[]" for empty arrays)
+ * @param raw - If true, treat all values as strings (no JSON parsing)
  * @returns Parsed object with nested structure
- * @throws {Error} When field doesn't contain "="
+ * @throws {Error} When field format is invalid
  * @internal Exported for testing
  */
-export function parseFields(fields: string[]): Record<string, unknown> {
+export function parseFields(
+  fields: string[],
+  raw = false
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
   for (const field of fields) {
-    const eqIndex = field.indexOf("=");
-    if (eqIndex === -1) {
-      throw new Error(`Invalid field format: ${field}. Expected key=value`);
-    }
-
-    const key = field.substring(0, eqIndex);
-    const rawValue = field.substring(eqIndex + 1);
-    const value = parseFieldValue(rawValue);
-
-    setNestedValue(result, key, value);
+    processField(result, field, raw);
   }
 
   return result;
@@ -145,13 +362,13 @@ function stringifyValue(value: unknown): string {
 }
 
 /**
- * Build query parameters from field strings for GET requests.
+ * Build query parameters from typed field strings (--field/-F) for GET requests.
  * Unlike parseFields(), this produces a flat structure suitable for URL query strings.
  * Arrays are represented as string[] for repeated keys (e.g., tags=1&tags=2&tags=3).
  *
  * @param fields - Array of "key=value" strings
  * @returns Record suitable for URLSearchParams
- * @throws {Error} When field doesn't contain "="
+ * @throws {Error} When field doesn't contain "=" or key format is invalid
  * @internal Exported for testing
  */
 export function buildQueryParams(
@@ -166,6 +383,12 @@ export function buildQueryParams(
     }
 
     const key = field.substring(0, eqIndex);
+
+    // Validate key format (same validation as parseFieldKey for consistency)
+    if (!FIELD_KEY_REGEX.test(key)) {
+      throw new Error(`Invalid field key format: ${key}`);
+    }
+
     const rawValue = field.substring(eqIndex + 1);
     const value = parseFieldValue(rawValue);
 
@@ -182,28 +405,106 @@ export function buildQueryParams(
 }
 
 /**
- * Prepare request options from command flags.
- * Routes fields to either query params (GET) or request body (other methods).
+ * Build query parameters from raw field strings (--raw-field/-f) for GET requests.
+ * Raw fields are passed directly without any processing (no JSON parsing, no bracket
+ * notation, no URI encoding). Values are kept exactly as provided.
+ *
+ * @param fields - Array of "key=value" strings
+ * @returns Record suitable for URLSearchParams
+ * @throws {Error} When field doesn't contain "=" or key is empty
+ * @internal Exported for testing
+ */
+export function buildRawQueryParams(
+  fields: string[]
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const eqIndex = field.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    }
+
+    const key = field.substring(0, eqIndex);
+    if (key === "") {
+      throw new Error("Invalid field key format: key cannot be empty");
+    }
+
+    const value = field.substring(eqIndex + 1);
+
+    // For raw fields, handle repeated keys by creating string[]
+    const existing = result[key];
+    if (existing !== undefined) {
+      if (Array.isArray(existing)) {
+        existing.push(value);
+      } else {
+        result[key] = [existing, value];
+      }
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Build query parameters from both typed and raw field strings for GET requests.
+ * Typed fields (--field/-F) are parsed with JSON conversion and bracket notation.
+ * Raw fields (--raw-field/-f) are passed directly without any processing.
+ *
+ * @param typedFields - Array of typed "key=value" strings (JSON parsed)
+ * @param rawFields - Array of raw "key=value" strings (no processing)
+ * @returns Merged record suitable for URLSearchParams
+ * @internal Exported for testing
+ */
+export function buildQueryParamsFromFields(
+  typedFields?: string[],
+  rawFields?: string[]
+): Record<string, string | string[]> {
+  const typedParams =
+    typedFields && typedFields.length > 0 ? buildQueryParams(typedFields) : {};
+  const rawParams =
+    rawFields && rawFields.length > 0 ? buildRawQueryParams(rawFields) : {};
+
+  // Merge params: raw fields can override typed fields if same key
+  return { ...typedParams, ...rawParams };
+}
+
+/**
+ * Prepare request options by routing fields to body or params based on HTTP method.
+ * GET requests send fields as query parameters, other methods send as JSON body.
  *
  * @param method - HTTP method
- * @param fields - Optional array of "key=value" field strings
- * @returns Object with body and params, one of which will be undefined
+ * @param typedFields - Array of "key=value" field strings (--field, values parsed as JSON)
+ * @param rawFields - Array of "key=value" field strings (--raw-field, values kept as strings)
+ * @returns Object with either body or params set (or neither if no fields)
  * @internal Exported for testing
  */
 export function prepareRequestOptions(
   method: HttpMethod,
-  fields?: string[]
+  typedFields?: string[],
+  rawFields?: string[]
 ): {
   body?: Record<string, unknown>;
   params?: Record<string, string | string[]>;
 } {
-  const hasFields = fields && fields.length > 0;
+  const hasTypedFields = typedFields && typedFields.length > 0;
+  const hasRawFields = rawFields && rawFields.length > 0;
+  const hasFields = hasTypedFields || hasRawFields;
   const isBodyMethod = method !== "GET";
 
-  return {
-    body: hasFields && isBodyMethod ? parseFields(fields) : undefined,
-    params: hasFields && !isBodyMethod ? buildQueryParams(fields) : undefined,
-  };
+  if (!hasFields) {
+    return {};
+  }
+
+  if (isBodyMethod) {
+    // For body methods (POST, PUT, etc.), merge typed and raw fields
+    return { body: buildBodyFromFields(typedFields, rawFields) };
+  }
+
+  // For GET requests, build query params from both typed and raw fields
+  return { params: buildQueryParamsFromFields(typedFields, rawFields) };
 }
 
 /**
@@ -232,13 +533,80 @@ export function parseHeaders(headers: string[]): Record<string, string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Request Body Building
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build request body from --input flag (file or stdin).
+ * Tries to parse the content as JSON, otherwise returns as string.
+ * @internal Exported for testing
+ */
+export async function buildBodyFromInput(
+  inputPath: string,
+  stdin: NodeJS.ReadStream & { fd: 0 }
+): Promise<Record<string, unknown> | string> {
+  let content: string;
+
+  if (inputPath === "-") {
+    content = await readStdin(stdin);
+  } else {
+    const file = Bun.file(inputPath);
+    if (!(await file.exists())) {
+      throw new Error(`File not found: ${inputPath}`);
+    }
+    content = await file.text();
+  }
+
+  // Try to parse as JSON for the API client
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return content;
+  }
+}
+
+/**
+ * Build request body from --field and --raw-field flags.
+ * Processes typed fields first, then raw fields, allowing raw fields
+ * to overwrite typed fields at the same path. Both field types are
+ * merged into a single object, properly handling nested keys.
+ *
+ * @returns Merged object or undefined if no fields provided
+ * @internal Exported for testing
+ */
+export function buildBodyFromFields(
+  typedFields: string[] | undefined,
+  rawFields: string[] | undefined
+): Record<string, unknown> | undefined {
+  const hasTypedFields = typedFields && typedFields.length > 0;
+  const hasRawFields = rawFields && rawFields.length > 0;
+
+  if (!(hasTypedFields || hasRawFields)) {
+    return;
+  }
+
+  // Start with typed fields (JSON parsing enabled)
+  const result = hasTypedFields ? parseFields(typedFields, false) : {};
+
+  // Merge raw fields on top (no JSON parsing, can overwrite typed)
+  if (hasRawFields) {
+    for (const field of rawFields) {
+      processField(result, field, true);
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Response Output
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Write response headers to stdout
+ * Write response headers to stdout (standard format)
+ * @internal Exported for testing
  */
-function writeResponseHeaders(
+export function writeResponseHeaders(
   stdout: Writer,
   status: number,
   headers: Headers
@@ -252,8 +620,9 @@ function writeResponseHeaders(
 
 /**
  * Write response body to stdout
+ * @internal Exported for testing
  */
-function writeResponseBody(stdout: Writer, body: unknown): void {
+export function writeResponseBody(stdout: Writer, body: unknown): void {
   if (body === null || body === undefined) {
     return;
   }
@@ -262,6 +631,76 @@ function writeResponseBody(stdout: Writer, body: unknown): void {
     stdout.write(`${JSON.stringify(body, null, 2)}\n`);
   } else {
     stdout.write(`${String(body)}\n`);
+  }
+}
+
+/**
+ * Write verbose request output (curl-style format)
+ * @internal Exported for testing
+ */
+export function writeVerboseRequest(
+  stdout: Writer,
+  method: string,
+  endpoint: string,
+  headers: Record<string, string> | undefined
+): void {
+  stdout.write(`> ${method} /api/0/${endpoint}\n`);
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      stdout.write(`> ${key}: ${value}\n`);
+    }
+  }
+  stdout.write(">\n");
+}
+
+/**
+ * Write verbose response output (curl-style format)
+ * @internal Exported for testing
+ */
+export function writeVerboseResponse(
+  stdout: Writer,
+  status: number,
+  headers: Headers
+): void {
+  stdout.write(`< HTTP ${status}\n`);
+  headers.forEach((value, key) => {
+    stdout.write(`< ${key}: ${value}\n`);
+  });
+  stdout.write("<\n");
+}
+
+/**
+ * Handle response output based on flags
+ * @internal Exported for testing
+ */
+export function handleResponse(
+  stdout: Writer,
+  response: { status: number; headers: Headers; body: unknown },
+  flags: { silent: boolean; verbose: boolean; include: boolean }
+): void {
+  const isError = response.status >= 400;
+
+  // Silent mode - only set exit code
+  if (flags.silent) {
+    if (isError) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Output headers (verbose or include mode)
+  if (flags.verbose) {
+    writeVerboseResponse(stdout, response.status, response.headers);
+  } else if (flags.include) {
+    writeResponseHeaders(stdout, response.status, response.headers);
+  }
+
+  // Output body
+  writeResponseBody(stdout, response.body);
+
+  // Exit with error code for error responses
+  if (isError) {
+    process.exit(1);
   }
 }
 
@@ -276,10 +715,17 @@ export const apiCommand = buildCommand({
       "Make a raw API request to the Sentry API. Similar to 'gh api' for GitHub. " +
       "The endpoint is relative to /api/0/ (do not include the prefix). " +
       "Authentication is handled automatically using your stored credentials.\n\n" +
+      "Field syntax (--field/-F):\n" +
+      "  key=value          Simple field (values parsed as JSON if valid)\n" +
+      "  key[sub]=value     Nested object: {key: {sub: value}}\n" +
+      "  key[]=value        Array append: {key: [value]}\n" +
+      "  key[]              Empty array: {key: []}\n\n" +
+      "Use --raw-field/-f to send values as strings without JSON parsing.\n\n" +
       "Examples:\n" +
       "  sentry api organizations/\n" +
-      "  sentry api issues/123/ --method PUT --field status=resolved\n" +
-      "  sentry api projects/my-org/my-project/issues/",
+      "  sentry api issues/123/ -X PUT -F status=resolved\n" +
+      "  sentry api projects/my-org/my-project/ -F options[sampleRate]=0.5\n" +
+      "  sentry api teams/my-org/my-team/members/ -F user[email]=user@example.com",
   },
   parameters: {
     positional: {
@@ -295,34 +741,61 @@ export const apiCommand = buildCommand({
       method: {
         kind: "parsed",
         parse: parseMethod,
-        brief: "HTTP method (GET, POST, PUT, DELETE, PATCH)",
+        brief: "The HTTP method for the request",
         default: "GET" as const,
-        placeholder: "METHOD",
+        placeholder: "method",
       },
       field: {
         kind: "parsed",
         parse: String,
-        brief: "Request body field (key=value). Can be repeated.",
+        brief: "Add a typed parameter (key=value, key[sub]=value, key[]=value)",
+        variadic: true,
+        optional: true,
+      },
+      "raw-field": {
+        kind: "parsed",
+        parse: String,
+        brief: "Add a string parameter without JSON parsing",
         variadic: true,
         optional: true,
       },
       header: {
         kind: "parsed",
         parse: String,
-        brief: "Additional header (Key: Value). Can be repeated.",
+        brief: "Add a HTTP request header in key:value format",
         variadic: true,
         optional: true,
       },
+      input: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          'The file to use as body for the HTTP request (use "-" to read from standard input)',
+        optional: true,
+        placeholder: "file",
+      },
       include: {
         kind: "boolean",
-        brief: "Include response headers in output",
+        brief: "Include HTTP response status line and headers in the output",
         default: false,
       },
       silent: {
         kind: "boolean",
-        brief: "Suppress output, only set exit code",
+        brief: "Do not print the response body",
         default: false,
       },
+      verbose: {
+        kind: "boolean",
+        brief: "Include full HTTP request and response in the output",
+        default: false,
+      },
+    },
+    aliases: {
+      X: "method",
+      F: "field",
+      f: "raw-field",
+      H: "header",
+      i: "include",
     },
   },
   async func(
@@ -330,42 +803,47 @@ export const apiCommand = buildCommand({
     flags: ApiFlags,
     endpoint: string
   ): Promise<void> {
-    const { stdout } = this;
+    const { stdout, stdin } = this;
 
-    const { body, params } = prepareRequestOptions(flags.method, flags.field);
+    // Normalize endpoint to ensure trailing slash (Sentry API requirement)
+    const normalizedEndpoint = normalizeEndpoint(endpoint);
+
+    // Build request body/params from --input, --field, or --raw-field
+    // --input takes precedence; otherwise route fields based on HTTP method
+    let body: Record<string, unknown> | string | undefined;
+    let params: Record<string, string | string[]> | undefined;
+
+    if (flags.input !== undefined) {
+      // --input takes precedence for body content
+      body = await buildBodyFromInput(flags.input, stdin);
+    } else {
+      // Route fields to body or params based on HTTP method
+      const options = prepareRequestOptions(
+        flags.method,
+        flags.field,
+        flags["raw-field"]
+      );
+      body = options.body;
+      params = options.params;
+    }
+
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
         : undefined;
 
-    const response = await rawApiRequest(endpoint, {
+    // Verbose mode: show request details (unless silent)
+    if (flags.verbose && !flags.silent) {
+      writeVerboseRequest(stdout, flags.method, normalizedEndpoint, headers);
+    }
+
+    const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
       params,
       headers,
     });
 
-    const isError = response.status >= 400;
-
-    // Silent mode - only set exit code
-    if (flags.silent) {
-      if (isError) {
-        process.exit(1);
-      }
-      return;
-    }
-
-    // Output headers if requested
-    if (flags.include) {
-      writeResponseHeaders(stdout, response.status, response.headers);
-    }
-
-    // Output body
-    writeResponseBody(stdout, response.body);
-
-    // Exit with error code for error responses
-    if (isError) {
-      process.exit(1);
-    }
+    handleResponse(stdout, response, flags);
   },
 });

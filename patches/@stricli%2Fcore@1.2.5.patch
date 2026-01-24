@@ -1,0 +1,22 @@
+diff --git a/dist/index.js b/dist/index.js
+index 2b52009d031f77dfd65057dd96146d2b961f55ab..6bb11bad5b4d5da6ad39e649c29edb41d00ded41 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1245,7 +1245,7 @@ function buildRouteScanner(root, config, startingPrefix) {
+           target = current;
+         }
+         return;
+-      } else if (input === "--helpAll" || input === "--help-all" || input === "-H") {
++      } else if (input === "--helpAll" || input === "--help-all") {
+         helpRequested = "all";
+         if (!target) {
+           target = current;
+@@ -1995,7 +1995,7 @@ function checkForInvalidVariadicSeparators(flags) {
+ function buildCommand(builderArgs) {
+   const { flags = {}, aliases = {} } = builderArgs.parameters;
+   checkForReservedFlags(flags, ["help", "helpAll", "help-all"]);
+-  checkForReservedAliases(aliases, ["h", "H"]);
++  checkForReservedAliases(aliases, ["h"]);
+   checkForNegationCollisions(flags);
+   checkForInvalidVariadicSeparators(flags);
+   let loader;

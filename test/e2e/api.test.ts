@@ -162,6 +162,135 @@ describe("sentry api", () => {
     { timeout: 15_000 }
   );
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Alias Tests (curl/gh api compatibility)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test(
+    "-X alias for --method works",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      // Use -X POST on organizations list (should fail with 405)
+      const result = await runCli(["api", "organizations/", "-X", "POST"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
+
+      // POST on list endpoint typically returns 405 or similar error
+      expect(result.exitCode).toBe(1);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "-i alias for --include works",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      const result = await runCli(["api", "organizations/", "-i"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/^HTTP \d{3}/);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "-H alias for --header works",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      // Add a custom header - the request should still succeed
+      const result = await runCli(
+        ["api", "organizations/", "-H", "X-Custom-Header: test-value"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+
+      expect(result.exitCode).toBe(0);
+      // Should return valid JSON
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+    },
+    { timeout: 15_000 }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Verbose Mode Tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test(
+    "--verbose flag shows request and response details",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      const result = await runCli(["api", "organizations/", "--verbose"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
+
+      expect(result.exitCode).toBe(0);
+      // Should show request line with > prefix
+      expect(result.stdout).toMatch(/^> GET \/api\/0\/organizations\//m);
+      // Should show response status with < prefix
+      expect(result.stdout).toMatch(/^< HTTP \d{3}/m);
+      // Should show response headers with < prefix
+      expect(result.stdout).toMatch(/^< content-type:/im);
+    },
+    { timeout: 15_000 }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Input From File Tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  test(
+    "--input reads body from file",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      // Create a temp file with JSON body
+      const tempFile = `${testConfigDir}/input.json`;
+      await Bun.write(tempFile, JSON.stringify({ status: "resolved" }));
+
+      // Try to update a non-existent issue - this will fail but tests the flow
+      const result = await runCli(
+        ["api", "issues/999999999/", "-X", "PUT", "--input", tempFile],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+
+      // Will fail with 404 or similar, but the flag should be processed
+      expect(result.exitCode).toBe(1);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "--input with non-existent file throws error",
+    async () => {
+      await setAuthToken(TEST_TOKEN);
+
+      const result = await runCli(
+        ["api", "organizations/", "--input", "/nonexistent/file.json"],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr + result.stdout).toMatch(/file not found/i);
+    },
+    { timeout: 15_000 }
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GET/POST Field Routing Tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
   test(
     "GET request with --field uses query parameters (not body)",
     async () => {
