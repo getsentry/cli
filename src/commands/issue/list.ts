@@ -152,19 +152,10 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
     const key = `${result.target.org}:${result.target.project}`;
     const alias = aliasMap.get(key);
     if (alias) {
-      const entry: ProjectAliasEntry = {
+      entries[alias] = {
         orgSlug: result.target.org,
         projectSlug: result.target.project,
       };
-      entries[alias] = entry;
-
-      // For org-prefixed aliases (contain hyphen from collision handling),
-      // also store compact format without the last hyphen for ease of use.
-      // e.g., "o1-d" also stored as "o1d"
-      if (alias.includes("-")) {
-        const compactAlias = alias.replace("-", "");
-        entries[compactAlias] = entry;
-      }
     }
   }
 

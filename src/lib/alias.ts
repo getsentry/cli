@@ -203,13 +203,18 @@ function processCollidingSlugs(
 
   const orgPrefixes = findShortestUniquePrefixes([...collidingOrgs]);
 
+  // Compute unique prefixes for colliding project slugs to handle
+  // cases like "api" and "app" both colliding across orgs
+  const projectPrefixes = findShortestUniquePrefixes([...collidingSlugs]);
+
   for (const slug of collidingSlugs) {
     const orgs = projectToOrgs.get(slug);
     if (!orgs) {
       continue;
     }
 
-    const projectPrefix = slug.charAt(0).toLowerCase();
+    const projectPrefix =
+      projectPrefixes.get(slug) ?? slug.charAt(0).toLowerCase();
 
     for (const org of orgs) {
       const orgPrefix = orgPrefixes.get(org) ?? org.charAt(0).toLowerCase();

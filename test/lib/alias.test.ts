@@ -287,4 +287,29 @@ describe("buildOrgAwareAliases", () => {
     const uniqueAliases = new Set(aliases);
     expect(uniqueAliases.size).toBe(aliases.length);
   });
+
+  test("collision with same-letter project slugs uses unique project prefixes", () => {
+    // Both "api" and "app" start with "a" - need unique project prefixes
+    const result = buildOrgAwareAliases([
+      { org: "org1", project: "api" },
+      { org: "org2", project: "api" },
+      { org: "org1", project: "app" },
+      { org: "org2", project: "app" },
+    ]);
+
+    // All four should be unique
+    const aliases = [...result.aliasMap.values()];
+    const uniqueAliases = new Set(aliases);
+    expect(uniqueAliases.size).toBe(4);
+
+    // api and app should have different project prefixes (not both "a")
+    const org1Api = result.aliasMap.get("org1:api");
+    const org1App = result.aliasMap.get("org1:app");
+    expect(org1Api).not.toBe(org1App);
+
+    // Project prefixes should distinguish api vs app
+    // e.g., "o1-api" vs "o1-app" or "o1-api" vs "o1-app"
+    expect(org1Api).toMatch(/^o.*-api$/);
+    expect(org1App).toMatch(/^o.*-app$/);
+  });
 });
