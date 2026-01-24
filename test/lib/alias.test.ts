@@ -160,7 +160,6 @@ describe("buildOrgAwareAliases", () => {
   test("returns empty map for empty input", () => {
     const result = buildOrgAwareAliases([]);
     expect(result.aliasMap.size).toBe(0);
-    expect(result.strippedPrefix).toBe("");
   });
 
   test("single org multiple projects - no collision", () => {
@@ -170,7 +169,6 @@ describe("buildOrgAwareAliases", () => {
     ]);
     expect(result.aliasMap.get("acme:frontend")).toBe("f");
     expect(result.aliasMap.get("acme:backend")).toBe("b");
-    expect(result.strippedPrefix).toBe("");
   });
 
   test("multiple orgs with unique project slugs - no collision", () => {
@@ -180,7 +178,6 @@ describe("buildOrgAwareAliases", () => {
     ]);
     expect(result.aliasMap.get("org1:frontend")).toBe("f");
     expect(result.aliasMap.get("org2:backend")).toBe("b");
-    expect(result.strippedPrefix).toBe("");
   });
 
   test("same project slug in different orgs - collision", () => {
@@ -242,9 +239,9 @@ describe("buildOrgAwareAliases", () => {
       { org: "acme", project: "spotlight-electron" },
       { org: "acme", project: "spotlight-website" },
     ]);
+    // Common prefix "spotlight-" is stripped internally, resulting in short aliases
     expect(result.aliasMap.get("acme:spotlight-electron")).toBe("e");
     expect(result.aliasMap.get("acme:spotlight-website")).toBe("w");
-    expect(result.strippedPrefix).toBe("spotlight-");
   });
 
   test("handles single project", () => {

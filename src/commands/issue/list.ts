@@ -129,8 +129,6 @@ type IssueListResult = {
 type AliasMapResult = {
   aliasMap: Map<string, string>;
   entries: Record<string, ProjectAliasEntry>;
-  /** Common prefix that was stripped from project slugs */
-  strippedPrefix: string;
 };
 
 /**
@@ -143,7 +141,7 @@ type AliasMapResult = {
  *   frontend, functions, backend → fr, fu, b
  *
  * Cross-org collision example:
- *   org1:dashboard, org2:dashboard → o1-d, o2-d
+ *   org1:dashboard, org2:dashboard → o1:d, o2:d
  */
 function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
   const entries: Record<string, ProjectAliasEntry> = {};
@@ -153,7 +151,7 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
     org: r.target.org,
     project: r.target.project,
   }));
-  const { aliasMap, strippedPrefix } = buildOrgAwareAliases(pairs);
+  const { aliasMap } = buildOrgAwareAliases(pairs);
 
   // Build entries record for storage
   for (const result of results) {
@@ -167,7 +165,7 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
     }
   }
 
-  return { aliasMap, entries, strippedPrefix };
+  return { aliasMap, entries };
 }
 
 /**
@@ -175,29 +173,22 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
  *
  * @param results - Issue list results with targets
  * @param aliasMap - Map from "org:project" to alias
- * @param strippedPrefix - Common prefix stripped from project slugs
  * @param isMultiProject - Whether in multi-project mode (shows ALIAS column)
  */
 function attachFormatOptions(
   results: IssueListResult[],
   aliasMap: Map<string, string>,
-  strippedPrefix: string,
   isMultiProject: boolean
 ): IssueWithOptions[] {
   return results.flatMap((result) =>
     result.issues.map((issue) => {
       const key = `${result.target.org}:${result.target.project}`;
       const alias = aliasMap.get(key);
-      // Only pass strippedPrefix if this project actually has that prefix
-      // (e.g., "spotlight" doesn't have "spotlight-" prefix, but "spotlight-electron" does)
-      const hasPrefix =
-        strippedPrefix && result.target.project.startsWith(strippedPrefix);
       return {
         issue,
         formatOptions: {
           projectSlug: result.target.project,
           projectAlias: alias,
-          strippedPrefix: hasPrefix ? strippedPrefix : undefined,
           isMultiProject,
         },
       };
@@ -366,12 +357,11 @@ export const listCommand = buildCommand({
     const firstTarget = validResults[0]?.target;
 
     // Build project alias map and cache it for multi-project mode
-    const { aliasMap, entries, strippedPrefix } = isMultiProject
+    const { aliasMap, entries } = isMultiProject
       ? buildProjectAliasMap(validResults)
       : {
           aliasMap: new Map<string, string>(),
           entries: {},
-          strippedPrefix: "",
         };
 
     if (isMultiProject) {
@@ -385,7 +375,6 @@ export const listCommand = buildCommand({
     const issuesWithOptions = attachFormatOptions(
       validResults,
       aliasMap,
-      strippedPrefix,
       isMultiProject
     );
 

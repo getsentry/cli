@@ -120,8 +120,6 @@ export type OrgProjectPair = {
 export type OrgAwareAliasResult = {
   /** Map from "org:project" key to alias string */
   aliasMap: Map<string, string>;
-  /** Common prefix stripped from project slugs (only for non-colliding projects) */
-  strippedPrefix: string;
 };
 
 /** Internal: Groups pairs by project slug and identifies collisions */
@@ -155,14 +153,16 @@ function processUniqueSlugs(
   pairs: OrgProjectPair[],
   uniqueSlugs: Set<string>,
   aliasMap: Map<string, string>
-): string {
+): void {
   const uniqueProjects = pairs.filter((p) => uniqueSlugs.has(p.project));
   const uniqueProjectSlugs = [...new Set(uniqueProjects.map((p) => p.project))];
 
   if (uniqueProjectSlugs.length === 0) {
-    return "";
+    return;
   }
 
+  // Strip common word prefix for cleaner aliases (e.g., "spotlight-" from
+  // "spotlight-electron", "spotlight-website")
   const strippedPrefix = findCommonWordPrefix(uniqueProjectSlugs);
   const slugToRemainder = new Map<string, string>();
 
@@ -180,8 +180,6 @@ function processUniqueSlugs(
       uniquePrefixes.get(remainder) ?? remainder.charAt(0).toLowerCase();
     aliasMap.set(`${org}:${project}`, alias);
   }
-
-  return strippedPrefix;
 }
 
 /** Internal: Processes colliding project slugs that need org prefixes */
@@ -227,13 +225,13 @@ function processCollidingSlugs(
  * Build aliases for org/project pairs, handling cross-org slug collisions.
  *
  * - Unique project slugs → shortest unique prefix of project slug
- * - Colliding slugs (same project in multiple orgs) → "{orgPrefix}-{projectPrefix}"
+ * - Colliding slugs (same project in multiple orgs) → "{orgPrefix}:{projectPrefix}"
  *
  * Common word prefixes (like "spotlight-" in "spotlight-electron") are stripped
  * before computing project prefixes to keep aliases short.
  *
  * @param pairs - Array of org/project pairs to generate aliases for
- * @returns Map from "org:project" key to alias string, plus any stripped prefix
+ * @returns Map from "org:project" key to alias string
  *
  * @example
  * // No collision - same as existing behavior
@@ -241,7 +239,7 @@ function processCollidingSlugs(
  *   { org: "acme", project: "frontend" },
  *   { org: "acme", project: "backend" }
  * ])
- * // { aliasMap: Map { "acme:frontend" => "f", "acme:backend" => "b" }, strippedPrefix: "" }
+ * // { aliasMap: Map { "acme:frontend" => "f", "acme:backend" => "b" } }
  *
  * @example
  * // Collision: same project slug in different orgs
@@ -249,7 +247,7 @@ function processCollidingSlugs(
  *   { org: "org1", project: "dashboard" },
  *   { org: "org2", project: "dashboard" }
  * ])
- * // { aliasMap: Map { "org1:dashboard" => "o1-d", "org2:dashboard" => "o2-d" }, strippedPrefix: "" }
+ * // { aliasMap: Map { "org1:dashboard" => "o1:d", "org2:dashboard" => "o2:d" } }
  */
 export function buildOrgAwareAliases(
   pairs: OrgProjectPair[]
@@ -257,17 +255,17 @@ export function buildOrgAwareAliases(
   const aliasMap = new Map<string, string>();
 
   if (pairs.length === 0) {
-    return { aliasMap, strippedPrefix: "" };
+    return { aliasMap };
   }
 
   const { projectToOrgs, collidingSlugs, uniqueSlugs } =
     groupByProjectSlug(pairs);
 
-  const strippedPrefix = processUniqueSlugs(pairs, uniqueSlugs, aliasMap);
+  processUniqueSlugs(pairs, uniqueSlugs, aliasMap);
 
   if (collidingSlugs.size > 0) {
     processCollidingSlugs(projectToOrgs, collidingSlugs, aliasMap);
   }
 
-  return { aliasMap, strippedPrefix };
+  return { aliasMap };
 }

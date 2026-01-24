@@ -369,8 +369,6 @@ export type FormatShortIdOptions = {
   projectSlug?: string;
   /** Project alias (e.g., "e", "w", "o1:d") for multi-project display */
   projectAlias?: string;
-  /** Common prefix that was stripped to compute the alias (e.g., "spotlight-") */
-  strippedPrefix?: string;
   /** Whether in multi-project mode (shows ALIAS column) */
   isMultiProject?: boolean;
 };
@@ -383,7 +381,7 @@ export type FormatShortIdOptions = {
  *   alias is shown in separate ALIAS column)
  *
  * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
- * @param options - Formatting options (projectSlug, projectAlias, strippedPrefix)
+ * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
  * @returns Formatted short ID with underline highlights
  */
 export function formatShortId(

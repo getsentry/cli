@@ -83,29 +83,26 @@ describe("formatShortId", () => {
       expect(stripAnsi(result)).toBe("FRONTEND-G");
     });
 
-    test("formats spotlight-website with stripped prefix", () => {
+    test("formats spotlight-website in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-WEBSITE-2A", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
 
-    test("formats spotlight-electron with stripped prefix", () => {
+    test("formats spotlight-electron in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
     });
 
-    test("formats spotlight (no stripped prefix applies) correctly", () => {
+    test("formats spotlight in multi-project mode", () => {
       const result = formatShortId("SPOTLIGHT-73", {
         projectSlug: "spotlight",
         projectAlias: "s",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
     });
@@ -122,7 +119,6 @@ describe("formatShortId", () => {
       const result = formatShortId("spotlight-website-2a", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
@@ -152,7 +148,6 @@ describe("formatShortId", () => {
       const result = formatShortId("spotlight-website-2a", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
     });
@@ -196,7 +191,6 @@ describe("formatShortId", () => {
       const formatted = formatShortId(shortId, {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(formatted).length).toBe(shortId.length);
     });
@@ -221,7 +215,6 @@ describe("formatShortId", () => {
       const formatted = formatShortId(shortId, {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(formatted).length).toBe(shortId.length);
     });
@@ -232,7 +225,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
     });
@@ -241,7 +233,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-WEBSITE-2C", {
         projectSlug: "spotlight-website",
         projectAlias: "w",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2C");
     });
@@ -250,7 +241,6 @@ describe("formatShortId", () => {
       const result = formatShortId("SPOTLIGHT-73", {
         projectSlug: "spotlight",
         projectAlias: "s",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
     });
@@ -302,11 +292,10 @@ describe("formatShortId", () => {
       }
     });
 
-    test("multi-project mode applies formatting to alias and suffix", () => {
+    test("multi-project mode applies formatting to suffix", () => {
       const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
         projectSlug: "spotlight-electron",
         projectAlias: "e",
-        strippedPrefix: "spotlight-",
       });
       expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
       if (colorsEnabled) {
