@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  normalizeEndpoint,
   parseFieldKey,
   parseFields,
   parseFieldValue,
@@ -14,6 +15,39 @@ import {
   parseMethod,
   setNestedValue,
 } from "../../src/commands/api.js";
+
+describe("normalizeEndpoint", () => {
+  test("adds trailing slash when missing", () => {
+    expect(normalizeEndpoint("organizations")).toBe("organizations/");
+    expect(normalizeEndpoint("issues/123")).toBe("issues/123/");
+    expect(normalizeEndpoint("projects/my-org/my-project")).toBe(
+      "projects/my-org/my-project/"
+    );
+  });
+
+  test("preserves existing trailing slash", () => {
+    expect(normalizeEndpoint("organizations/")).toBe("organizations/");
+    expect(normalizeEndpoint("issues/123/")).toBe("issues/123/");
+  });
+
+  test("removes leading slash", () => {
+    expect(normalizeEndpoint("/organizations")).toBe("organizations/");
+    expect(normalizeEndpoint("/organizations/")).toBe("organizations/");
+    expect(normalizeEndpoint("/issues/123")).toBe("issues/123/");
+  });
+
+  test("handles both leading and trailing slash", () => {
+    expect(normalizeEndpoint("/organizations/")).toBe("organizations/");
+  });
+
+  test("handles empty string", () => {
+    expect(normalizeEndpoint("")).toBe("/");
+  });
+
+  test("handles just a slash", () => {
+    expect(normalizeEndpoint("/")).toBe("/");
+  });
+});
 
 describe("parseMethod", () => {
   test("accepts valid uppercase methods", () => {

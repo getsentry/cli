@@ -64,6 +64,21 @@ export function parseMethod(value: string): HttpMethod {
 }
 
 /**
+ * Normalize an API endpoint to ensure it has a trailing slash.
+ * Sentry API requires trailing slashes on endpoints.
+ *
+ * @param endpoint - API endpoint path
+ * @returns Endpoint with trailing slash
+ * @internal Exported for testing
+ */
+export function normalizeEndpoint(endpoint: string): string {
+  // Remove leading slash if present (rawApiRequest handles the base URL)
+  const trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+  // Ensure trailing slash
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+/**
  * Parse a field value, attempting JSON parse first.
  *
  * @param value - Raw string value to parse
@@ -574,6 +589,9 @@ export const apiCommand = buildCommand({
   ): Promise<void> {
     const { stdout, stdin } = this;
 
+    // Normalize endpoint to ensure trailing slash (Sentry API requirement)
+    const normalizedEndpoint = normalizeEndpoint(endpoint);
+
     // Build request body from --input, --field, or --raw-field
     const body =
       flags.input !== undefined
@@ -587,10 +605,10 @@ export const apiCommand = buildCommand({
 
     // Verbose mode: show request details (unless silent)
     if (flags.verbose && !flags.silent) {
-      writeVerboseRequest(stdout, flags.method, endpoint, headers);
+      writeVerboseRequest(stdout, flags.method, normalizedEndpoint, headers);
     }
 
-    const response = await rawApiRequest(endpoint, {
+    const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
       headers,
