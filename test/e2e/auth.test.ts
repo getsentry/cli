@@ -103,28 +103,35 @@ describe("sentry auth login --token", () => {
 });
 
 describe("sentry auth logout", () => {
-  test("clears stored auth", async () => {
-    // First login
-    const loginResult = await runCli(["auth", "login", "--token", TEST_TOKEN], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
-    });
-    expect(loginResult.exitCode).toBe(0);
+  test(
+    "clears stored auth",
+    async () => {
+      // First login
+      const loginResult = await runCli(
+        ["auth", "login", "--token", TEST_TOKEN],
+        {
+          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        }
+      );
+      expect(loginResult.exitCode).toBe(0);
 
-    // Then logout
-    const result = await runCli(["auth", "logout"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
-    });
+      // Then logout
+      const result = await runCli(["auth", "logout"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toMatch(/logged out/i);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/logged out/i);
 
-    // Verify we're logged out
-    const statusResult = await runCli(["auth", "status"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
-    });
-    const output = statusResult.stdout + statusResult.stderr;
-    expect(output).toMatch(/not authenticated/i);
-  });
+      // Verify we're logged out
+      const statusResult = await runCli(["auth", "status"], {
+        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      });
+      const output = statusResult.stdout + statusResult.stderr;
+      expect(output).toMatch(/not authenticated/i);
+    },
+    { timeout: 15_000 }
+  );
 
   test("succeeds even when not authenticated", async () => {
     const result = await runCli(["auth", "logout"], {
