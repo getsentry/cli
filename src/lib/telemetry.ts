@@ -80,8 +80,10 @@ export async function withTelemetry<T>(
 /**
  * Safely get a build-time constant that may not be defined in development.
  * Build-time constants are injected by esbuild/bun during the build process.
+ *
+ * @internal Exported for testing
  */
-function getBuildConstant(name: string): string | undefined {
+export function getBuildConstant(name: string): string | undefined {
   try {
     // Use indirect eval to check if the constant exists at runtime
     // This avoids ReferenceError when running unbundled in development
@@ -97,8 +99,10 @@ function getBuildConstant(name: string): string | undefined {
  *
  * @param enabled - Whether telemetry is enabled
  * @returns The Sentry client, or undefined if disabled/unavailable
+ *
+ * @internal Exported for testing
  */
-function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
+export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
   const dsn = getBuildConstant("SENTRY_DSN_BUILD");
   const version = getBuildConstant("SENTRY_CLI_VERSION");
 

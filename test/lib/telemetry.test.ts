@@ -7,6 +7,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   extractCommand,
+  getBuildConstant,
+  initSentry,
   isTelemetryEnabled,
   TELEMETRY_ENV_VAR,
   TELEMETRY_FLAG,
@@ -51,6 +53,16 @@ describe("extractCommand", () => {
     // This is acceptable as it still captures the primary command
     expect(extractCommand(["--json", "project", "list"])).toBe("project.list");
   });
+
+  test("handles short flags", () => {
+    expect(extractCommand(["-v", "auth", "status"])).toBe("auth.status");
+  });
+
+  test("handles multiple flags between positional args", () => {
+    expect(extractCommand(["--json", "-v", "org", "--timeout", "30"])).toBe(
+      "org"
+    );
+  });
 });
 
 describe("isTelemetryEnabled", () => {
@@ -83,6 +95,50 @@ describe("isTelemetryEnabled", () => {
 
     process.env[TELEMETRY_ENV_VAR] = "";
     expect(isTelemetryEnabled()).toBe(true);
+  });
+
+  test("returns true when env var is set to 'true'", () => {
+    process.env[TELEMETRY_ENV_VAR] = "true";
+    expect(isTelemetryEnabled()).toBe(true);
+  });
+
+  test("returns true when env var is set to 'yes'", () => {
+    process.env[TELEMETRY_ENV_VAR] = "yes";
+    expect(isTelemetryEnabled()).toBe(true);
+  });
+});
+
+describe("getBuildConstant", () => {
+  test("returns undefined for undefined constant", () => {
+    expect(getBuildConstant("UNDEFINED_CONSTANT_XYZ")).toBeUndefined();
+  });
+
+  test("returns undefined for invalid JavaScript identifier", () => {
+    expect(getBuildConstant("not-a-valid-identifier")).toBeUndefined();
+  });
+
+  test("returns value for defined global constant", () => {
+    // process is a global that should be defined
+    expect(getBuildConstant("process.platform")).toBe(process.platform);
+  });
+
+  test("handles syntax errors gracefully", () => {
+    expect(getBuildConstant("{{invalid}}")).toBeUndefined();
+  });
+
+  test("handles runtime errors gracefully", () => {
+    expect(getBuildConstant("undefined.property")).toBeUndefined();
+  });
+});
+
+describe("initSentry", () => {
+  test("returns undefined when disabled", () => {
+    expect(initSentry(false)).toBeUndefined();
+  });
+
+  test("returns undefined when enabled but no DSN configured", () => {
+    // In test environment, SENTRY_DSN_BUILD is not defined
+    expect(initSentry(true)).toBeUndefined();
   });
 });
 
@@ -123,6 +179,15 @@ describe("withTelemetry", () => {
     ).rejects.toThrow("test error");
   });
 
+  test("propagates async errors when telemetry is disabled", async () => {
+    await expect(
+      withTelemetry({ enabled: false, command: "test" }, async () => {
+        await Bun.sleep(1);
+        throw new Error("async error");
+      })
+    ).rejects.toThrow("async error");
+  });
+
   // Note: We don't test with telemetry enabled since there's no DSN configured
   // in tests. The Sentry SDK won't initialize without a valid DSN.
   test("executes callback when telemetry is enabled but no DSN", async () => {
@@ -133,6 +198,38 @@ describe("withTelemetry", () => {
       executed = true;
     });
     expect(executed).toBe(true);
+  });
+
+  test("returns result when telemetry is enabled but no DSN", async () => {
+    const result = await withTelemetry(
+      { enabled: true, command: "auth.login" },
+      () => "success"
+    );
+    expect(result).toBe("success");
+  });
+
+  test("handles complex return types", async () => {
+    const result = await withTelemetry(
+      { enabled: false, command: "test" },
+      () => ({ status: "ok", count: 42, items: [1, 2, 3] })
+    );
+    expect(result).toEqual({ status: "ok", count: 42, items: [1, 2, 3] });
+  });
+
+  test("handles undefined return value", async () => {
+    const result = await withTelemetry(
+      { enabled: false, command: "test" },
+      () => {}
+    );
+    expect(result).toBeUndefined();
+  });
+
+  test("handles null return value", async () => {
+    const result = await withTelemetry(
+      { enabled: false, command: "test" },
+      () => null
+    );
+    expect(result).toBeNull();
   });
 });
 
