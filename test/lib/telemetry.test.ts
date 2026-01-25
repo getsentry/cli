@@ -223,12 +223,16 @@ describe("withTelemetry", () => {
     expect(result).toEqual({ status: "ok", count: 42, items: [1, 2, 3] });
   });
 
-  test("handles undefined return value", async () => {
+  test("handles void return value", async () => {
+    let sideEffect = false;
     const result = await withTelemetry(
       { enabled: false, command: "test" },
-      () => {}
+      () => {
+        sideEffect = true;
+      }
     );
     expect(result).toBeUndefined();
+    expect(sideEffect).toBe(true);
   });
 
   test("handles null return value", async () => {
