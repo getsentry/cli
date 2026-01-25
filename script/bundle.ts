@@ -17,6 +17,10 @@ import pkg from "../package.json";
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
+// TODO: Set SENTRY_DSN in CI environment for production builds
+// This DSN is for the CLI's own telemetry, not user projects
+const SENTRY_DSN = process.env.SENTRY_DSN ?? "";
+
 console.log(`\nBundling sentry v${VERSION} for npm`);
 console.log("=".repeat(40));
 
@@ -39,6 +43,7 @@ const result = await build({
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+    SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
   },
   // Only externalize Node.js built-ins - bundle all npm packages
   external: ["node:*"],

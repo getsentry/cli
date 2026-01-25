@@ -27,6 +27,10 @@ const VERSION = pkg.version;
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
+// TODO: Set SENTRY_DSN in CI environment for production builds
+// This DSN is for the CLI's own telemetry, not user projects
+const SENTRY_DSN = process.env.SENTRY_DSN ?? "";
+
 /** Build targets configuration */
 type BuildTarget = {
   os: "darwin" | "linux" | "win32";
@@ -78,6 +82,7 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
     define: {
       SENTRY_CLI_VERSION: JSON.stringify(VERSION),
       SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+      SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
     },
     sourcemap: "none",
   });
