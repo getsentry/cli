@@ -142,12 +142,17 @@ async function installViaClaude(ctx: SentryContext): Promise<void> {
     }
   }
   stdout.write(`${success("✓")} Plugin installed\n`);
+
+  stdout.write(
+    `\n${success("✓")} All Sentry skills are now available in Claude Code.\n`
+  );
+  stdout.write("  Restart Claude Code to activate the skills.\n");
 }
 
 /**
  * Install skill locally by creating directory structure.
  *
- * Creates: ./<skill-name>/SKILL.md
+ * Creates: .claude/skills/<skill-name>/SKILL.md
  */
 async function installLocally(
   ctx: SentryContext,
@@ -159,8 +164,8 @@ async function installLocally(
   stdout.write(`${muted("→")} Fetching skill: ${skillName}...\n`);
   const content = await fetchSkillContent(skillName);
 
-  // Create directory structure: ./<skill-name>/SKILL.md
-  const skillDir = join(cwd, skillName);
+  // Create directory structure: .claude/skills/<skill-name>/SKILL.md
+  const skillDir = join(cwd, ".claude", "skills", skillName);
   const skillPath = join(skillDir, "SKILL.md");
 
   // Check if directory or file already exists
@@ -186,6 +191,11 @@ async function installLocally(
   }
 
   stdout.write(`${success("✓")} Created ${skillDir}/SKILL.md\n`);
+
+  stdout.write(`\n${success("✓")} Skill '${skillName}' is ready to use.\n`);
+  stdout.write(
+    `  ${muted("This skill will be discovered by agents that support the Agent Skills format.")}\n`
+  );
 }
 
 export const addCommand = buildCommand({
@@ -198,7 +208,7 @@ export const addCommand = buildCommand({
       "  local - Create skill directory in current working directory\n\n" +
       "Examples:\n" +
       "  sentry skills add find-bugs          # Install to Claude Code\n" +
-      "  sentry skills add commit --target local  # Create ./commit/SKILL.md",
+      "  sentry skills add commit --target local  # Create .claude/skills/commit/SKILL.md",
   },
   parameters: {
     positional: {
@@ -226,24 +236,13 @@ export const addCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
-    // Validate skill exists
     stdout.write(`Validating skill '${skillName}'...\n`);
     await validateSkillExists(skillName);
 
     if (flags.target === "claude") {
       await installViaClaude(this);
-
-      stdout.write(
-        `\n${success("✓")} Skill '${skillName}' is now available in Claude Code.\n`
-      );
-      stdout.write("  Restart Claude Code to activate the skills.\n");
     } else {
       await installLocally(this, skillName);
-
-      stdout.write(`\n${success("✓")} Skill '${skillName}' is ready to use.\n`);
-      stdout.write(
-        `  ${muted("This skill will be discovered by agents that support the Agent Skills format.")}\n`
-      );
     }
   },
 });
