@@ -5,6 +5,7 @@ import { eventRoute } from "./commands/event/index.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
+import { skillsRoute } from "./commands/skills/index.js";
 
 const routes = buildRouteMap({
   routes: {
@@ -14,6 +15,7 @@ const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     api: apiCommand,
+    skills: skillsRoute,
   },
   docs: {
     brief: "A gh-like CLI for Sentry",
