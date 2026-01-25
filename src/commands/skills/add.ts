@@ -4,13 +4,16 @@
  * Add a Sentry agent skill from getsentry/skills repository.
  */
 
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { CliError, ValidationError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
 import { fetchAvailableSkills } from "./list.js";
+
+/** Timeout for fetch requests in milliseconds */
+const FETCH_TIMEOUT_MS = 30_000;
 
 /** Base URL for fetching raw SKILL.md content */
 const SKILLS_RAW_BASE_URL =
@@ -50,19 +53,32 @@ async function validateSkillExists(skillName: string): Promise<void> {
  *
  * @param skillName - Name of the skill
  * @returns Raw SKILL.md content
- * @throws {CliError} If fetch fails
+ * @throws {CliError} If fetch fails or times out
  */
 async function fetchSkillContent(skillName: string): Promise<string> {
   const url = `${SKILLS_RAW_BASE_URL}/${skillName}/SKILL.md`;
-  const response = await fetch(url);
 
-  if (!response.ok) {
-    throw new CliError(
-      `Failed to fetch skill '${skillName}': ${response.status} ${response.statusText}`
-    );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+
+    if (!response.ok) {
+      throw new CliError(
+        `Failed to fetch skill '${skillName}': ${response.status} ${response.statusText}`
+      );
+    }
+
+    return response.text();
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new CliError(`Request timed out fetching skill '${skillName}'`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.text();
 }
 
 /**
@@ -147,20 +163,27 @@ async function installLocally(
   const skillDir = join(cwd, skillName);
   const skillPath = join(skillDir, "SKILL.md");
 
-  // Check if directory already exists
-  const dirFile = Bun.file(skillDir);
-  if (await dirFile.exists()) {
+  // Check if directory or file already exists
+  if (existsSync(skillDir)) {
     throw new CliError(
       `Directory already exists: ${skillDir}\n\n` +
         "Remove it first or choose a different location."
     );
   }
 
-  // Create directory
-  mkdirSync(skillDir, { recursive: true });
-
-  // Write SKILL.md
-  await Bun.write(skillPath, content);
+  // Create directory and write file with cleanup on failure
+  try {
+    mkdirSync(skillDir, { recursive: true });
+    await Bun.write(skillPath, content);
+  } catch (error) {
+    // Clean up partial state on failure
+    try {
+      rmSync(skillDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
 
   stdout.write(`${success("✓")} Created ${skillDir}/SKILL.md\n`);
 }

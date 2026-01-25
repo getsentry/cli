@@ -17,6 +17,9 @@ const SKILLS_API_URL =
 const SKILLS_RAW_BASE_URL =
   "https://raw.githubusercontent.com/getsentry/skills/main/plugins/sentry-skills/skills";
 
+/** Timeout for fetch requests in milliseconds */
+const FETCH_TIMEOUT_MS = 30_000;
+
 /** Skill metadata parsed from SKILL.md frontmatter */
 export type SkillInfo = {
   name: string;
@@ -69,19 +72,49 @@ function parseDescriptionFromFrontmatter(markdown: string): string {
 }
 
 /**
+ * Fetch with timeout support.
+ *
+ * @param url - URL to fetch
+ * @param options - Fetch options
+ * @returns Response object
+ * @throws {Error} If request times out
+ */
+async function fetchWithTimeout(
+  url: string,
+  options?: RequestInit
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
  * Fetch the list of available skills from GitHub.
  *
  * @returns Array of skill info with name and description
- * @throws {CliError} If network request fails
+ * @throws {CliError} If network request fails or times out
  */
 export async function fetchAvailableSkills(): Promise<SkillInfo[]> {
   // Fetch directory listing
-  const response = await fetch(SKILLS_API_URL, {
-    headers: {
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "sentry-cli",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(SKILLS_API_URL, {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "sentry-cli",
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new CliError("Request timed out fetching skills list");
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     throw new CliError(
@@ -100,7 +133,7 @@ export async function fetchAvailableSkills(): Promise<SkillInfo[]> {
       const skillMdUrl = `${SKILLS_RAW_BASE_URL}/${dir.name}/SKILL.md`;
 
       try {
-        const mdResponse = await fetch(skillMdUrl);
+        const mdResponse = await fetchWithTimeout(skillMdUrl);
         if (!mdResponse.ok) {
           return { name: dir.name, description: "No description available" };
         }
