@@ -45,8 +45,8 @@ const result = await build({
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
     SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
   },
-  // Only externalize Node.js built-ins - bundle all npm packages
-  external: ["node:*"],
+  // Externalize Node.js built-ins and @sentry/node (has native dependencies)
+  external: ["node:*", "@sentry/node", "@opentelemetry/*"],
   metafile: true,
 });
 
