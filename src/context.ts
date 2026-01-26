@@ -8,6 +8,7 @@
 import { homedir } from "node:os";
 import type { CommandContext } from "@stricli/core";
 import { getConfigDir } from "./lib/config.js";
+import { setCommandName } from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
