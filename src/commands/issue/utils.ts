@@ -1,15 +1,22 @@
 /**
  * Shared utilities for issue commands
  *
- * Common functionality used by explain, plan, and other issue commands.
+ * Common functionality used by explain, plan, view, and other issue commands.
  */
 
 import { getAutofixState, getIssueByShortId } from "../../lib/api-client.js";
+import { getProjectByAlias } from "../../lib/config.js";
+import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
-import { isShortId } from "../../lib/issue-id.js";
+import {
+  expandToFullShortId,
+  isShortId,
+  isShortSuffix,
+  parseAliasSuffix,
+} from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
+import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
 
@@ -24,12 +31,44 @@ type ResolvedIssue = {
 };
 
 /**
+ * Try to resolve an alias-suffix format issue ID (e.g., "f-g").
+ * Returns null if the alias is not found in cache or fingerprint doesn't match.
+ *
+ * @param alias - The project alias from the alias-suffix format
+ * @param suffix - The issue suffix
+ * @param cwd - Current working directory for DSN detection
+ */
+async function resolveAliasSuffixId(
+  alias: string,
+  suffix: string,
+  cwd: string
+): Promise<ResolvedIssue | null> {
+  // Detect DSNs to create fingerprint for validation
+  const detection = await detectAllDsns(cwd);
+  const fingerprint = createDsnFingerprint(detection.all);
+  const projectEntry = await getProjectByAlias(alias, fingerprint);
+  if (!projectEntry) {
+    return null;
+  }
+
+  const resolvedShortId = expandToFullShortId(suffix, projectEntry.projectSlug);
+  const issue = await getIssueByShortId(projectEntry.orgSlug, resolvedShortId);
+  return { org: projectEntry.orgSlug, issueId: issue.id };
+}
+
+/**
  * Resolve both organization slug and numeric issue ID.
  * Required for autofix endpoints that need both org and issue ID.
  *
- * @param issueId - User-provided issue ID (numeric or short)
- * @param org - Optional org slug
- * @param cwd - Current working directory for org resolution
+ * Supports all issue ID formats:
+ * - Alias-suffix format (e.g., "f-g" where "f" is a cached project alias)
+ * - Short suffix format (e.g., "G", "4Y" - requires project context)
+ * - Full short ID format (e.g., "CRAFT-G", "PROJECT-ABC")
+ * - Numeric ID format (e.g., "123456789")
+ *
+ * @param issueId - User-provided issue ID in any supported format
+ * @param org - Optional org slug from CLI flag
+ * @param cwd - Current working directory for context resolution
  * @param commandHint - Command example for error messages
  * @returns Object with org slug and numeric issue ID
  * @throws {ContextError} When organization cannot be resolved
@@ -40,18 +79,54 @@ export async function resolveOrgAndIssueId(
   cwd: string,
   commandHint: string
 ): Promise<ResolvedIssue> {
-  // Always need org for endpoints like /autofix/
+  // Try alias-suffix format (e.g., "f-g")
+  const aliasSuffix = parseAliasSuffix(issueId);
+  if (aliasSuffix) {
+    try {
+      const aliasResult = await resolveAliasSuffixId(
+        aliasSuffix.alias,
+        aliasSuffix.suffix,
+        cwd
+      );
+      if (aliasResult) {
+        return aliasResult;
+      }
+    } catch {
+      // Fall through to treat as full short ID
+    }
+  }
+
+  // Try short suffix format (e.g., "G", "4Y") - requires project context.
+  // isShortSuffix matches numeric IDs too, so also check isShortId (has letters).
+  if (isShortSuffix(issueId) && isShortId(issueId)) {
+    try {
+      const target = await resolveOrgAndProject({ org, cwd });
+      if (target) {
+        const resolvedShortId = expandToFullShortId(issueId, target.project);
+        const issue = await getIssueByShortId(target.org, resolvedShortId);
+        return { org: target.org, issueId: issue.id };
+      }
+    } catch {
+      // Fall through to full short ID
+    }
+  }
+
+  // Full short ID format (e.g., "CRAFT-G") - requires org context
+  if (isShortId(issueId)) {
+    const resolved = await resolveOrg({ org, cwd });
+    if (!resolved) {
+      throw new ContextError("Organization", commandHint);
+    }
+    const normalizedId = issueId.toUpperCase();
+    const issue = await getIssueByShortId(resolved.org, normalizedId);
+    return { org: resolved.org, issueId: issue.id };
+  }
+
+  // Numeric ID - only need org for API routing
   const resolved = await resolveOrg({ org, cwd });
   if (!resolved) {
     throw new ContextError("Organization", commandHint);
   }
-
-  // If it's a short ID, resolve to numeric ID
-  if (isShortId(issueId)) {
-    const issue = await getIssueByShortId(resolved.org, issueId);
-    return { org: resolved.org, issueId: issue.id };
-  }
-
   return { org: resolved.org, issueId };
 }
 
