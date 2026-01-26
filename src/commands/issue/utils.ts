@@ -56,6 +56,58 @@ async function resolveAliasSuffixId(
   return { org: projectEntry.orgSlug, issueId: issue.id };
 }
 
+type ResolveContext = {
+  issueId: string;
+  org: string | undefined;
+  cwd: string;
+  commandHint: string;
+};
+
+/**
+ * Try to resolve a short suffix format (e.g., "G", "4Y").
+ * Requires project context to expand to full short ID.
+ */
+async function resolveShortSuffixId(
+  ctx: ResolveContext
+): Promise<ResolvedIssue> {
+  const target = await resolveOrgAndProject({ org: ctx.org, cwd: ctx.cwd });
+  if (!target) {
+    throw new ContextError(
+      "Organization and project",
+      ctx.commandHint.replace("--org <org>", "--org <org> --project <project>")
+    );
+  }
+  const resolvedShortId = expandToFullShortId(ctx.issueId, target.project);
+  const issue = await getIssueByShortId(target.org, resolvedShortId);
+  return { org: target.org, issueId: issue.id };
+}
+
+/**
+ * Try to resolve a full short ID format (e.g., "CRAFT-G").
+ * Project is embedded in the ID, only needs org context.
+ */
+async function resolveFullShortId(ctx: ResolveContext): Promise<ResolvedIssue> {
+  const resolved = await resolveOrg({ org: ctx.org, cwd: ctx.cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", ctx.commandHint);
+  }
+  const normalizedId = ctx.issueId.toUpperCase();
+  const issue = await getIssueByShortId(resolved.org, normalizedId);
+  return { org: resolved.org, issueId: issue.id };
+}
+
+/**
+ * Try to resolve a numeric issue ID.
+ * Only needs org for API routing.
+ */
+async function resolveNumericId(ctx: ResolveContext): Promise<ResolvedIssue> {
+  const resolved = await resolveOrg({ org: ctx.org, cwd: ctx.cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", ctx.commandHint);
+  }
+  return { org: resolved.org, issueId: ctx.issueId };
+}
+
 /**
  * Resolve both organization slug and numeric issue ID.
  * Required for autofix endpoints that need both org and issue ID.
@@ -79,66 +131,34 @@ export async function resolveOrgAndIssueId(
   cwd: string,
   commandHint: string
 ): Promise<ResolvedIssue> {
+  const ctx: ResolveContext = { issueId, org, cwd, commandHint };
+
   // Try alias-suffix format (e.g., "f-g")
   const aliasSuffix = parseAliasSuffix(issueId);
   if (aliasSuffix) {
-    try {
-      const aliasResult = await resolveAliasSuffixId(
-        aliasSuffix.alias,
-        aliasSuffix.suffix,
-        cwd
-      );
-      if (aliasResult) {
-        return aliasResult;
-      }
-    } catch {
-      // Fall through to treat as full short ID
-    }
+    const result = await resolveAliasSuffixId(
+      aliasSuffix.alias,
+      aliasSuffix.suffix,
+      cwd
+    ).catch(() => null);
+    if (result) return result;
+    // Fall through to treat as full short ID
   }
 
-  // Try short suffix format (e.g., "G", "4Y") - requires project context.
+  // Short suffix format (e.g., "G", "4Y") - requires project context.
   // isShortSuffix matches numeric IDs too, so also check isShortId (has letters).
   const looksLikeShortSuffix = isShortSuffix(issueId) && isShortId(issueId);
   if (looksLikeShortSuffix) {
-    try {
-      const target = await resolveOrgAndProject({ org, cwd });
-      if (target) {
-        const resolvedShortId = expandToFullShortId(issueId, target.project);
-        const issue = await getIssueByShortId(target.org, resolvedShortId);
-        return { org: target.org, issueId: issue.id };
-      }
-      // No project context available - short suffix requires it
-      throw new ContextError(
-        "Organization and project",
-        commandHint.replace("--org <org>", "--org <org> --project <project>")
-      );
-    } catch (error) {
-      // Re-throw ContextError, but let API errors fall through
-      // (e.g., if getIssueByShortId returned 404, maybe it's a full short ID)
-      if (error instanceof ContextError) {
-        throw error;
-      }
-    }
+    return resolveShortSuffixId(ctx);
   }
 
   // Full short ID format (e.g., "CRAFT-G") - requires org context
-  // Skip this block if input looks like a short suffix (no hyphen)
-  if (isShortId(issueId) && !looksLikeShortSuffix) {
-    const resolved = await resolveOrg({ org, cwd });
-    if (!resolved) {
-      throw new ContextError("Organization", commandHint);
-    }
-    const normalizedId = issueId.toUpperCase();
-    const issue = await getIssueByShortId(resolved.org, normalizedId);
-    return { org: resolved.org, issueId: issue.id };
+  if (isShortId(issueId)) {
+    return resolveFullShortId(ctx);
   }
 
   // Numeric ID - only need org for API routing
-  const resolved = await resolveOrg({ org, cwd });
-  if (!resolved) {
-    throw new ContextError("Organization", commandHint);
-  }
-  return { org: resolved.org, issueId };
+  return resolveNumericId(ctx);
 }
 
 type PollAutofixOptions = {
