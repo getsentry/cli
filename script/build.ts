@@ -27,9 +27,9 @@ const VERSION = pkg.version;
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
-// TODO: Set SENTRY_DSN in CI environment for production builds
-// This DSN is for the CLI's own telemetry, not user projects
-const SENTRY_DSN = process.env.SENTRY_DSN ?? "";
+// DSN for CLI telemetry (not user projects) - safe to hardcode as it's public
+const SENTRY_DSN =
+  "https://1188a86f3f8168f089450587b00bca66@o1.ingest.us.sentry.io/4510776311808000";
 
 /** Build targets configuration */
 type BuildTarget = {

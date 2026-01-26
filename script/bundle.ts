@@ -17,9 +17,9 @@ import pkg from "../package.json";
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
-// TODO: Set SENTRY_DSN in CI environment for production builds
-// This DSN is for the CLI's own telemetry, not user projects
-const SENTRY_DSN = process.env.SENTRY_DSN ?? "";
+// DSN for CLI telemetry (not user projects) - safe to hardcode as it's public
+const SENTRY_DSN =
+  "https://1188a86f3f8168f089450587b00bca66@o1.ingest.us.sentry.io/4510776311808000";
 
 console.log(`\nBundling sentry v${VERSION} for npm`);
 console.log("=".repeat(40));
@@ -45,8 +45,8 @@ const result = await build({
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
     SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
   },
-  // Externalize Node.js built-ins and @sentry/node (has native dependencies)
-  external: ["node:*", "@sentry/node", "@opentelemetry/*"],
+  // Only externalize Node.js built-ins - bundle all npm packages
+  external: ["node:*"],
   metafile: true,
 });
 
