@@ -2,6 +2,33 @@
 
 A gh-like CLI for Sentry.
 
+## Installation
+
+Install globally with your preferred package manager:
+
+```bash
+# npm
+npm install -g sentry
+
+# pnpm
+pnpm add -g sentry
+
+# yarn
+yarn global add sentry
+
+# bun
+bun add -g sentry
+```
+
+Or run directly without installing:
+
+```bash
+npx sentry --help
+pnpm dlx sentry --help
+yarn dlx sentry --help
+bunx sentry --help
+```
+
 ## Setup
 
 ```bash
