@@ -6,9 +6,7 @@
  * - Error tracking (unhandled exceptions)
  * - Performance (command duration)
  *
- * No PII is collected. Opt-out via:
- * - SENTRY_CLI_NO_TELEMETRY=1 environment variable
- * - --no-telemetry flag
+ * No PII is collected. Opt-out via SENTRY_CLI_NO_TELEMETRY=1 environment variable.
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
@@ -24,9 +22,6 @@ declare const NODE_ENV_BUILD: string | undefined;
 
 /** Environment variable to disable telemetry */
 export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
-
-/** CLI flag to disable telemetry */
-export const TELEMETRY_FLAG = "--no-telemetry";
 
 /**
  * Wrap CLI execution with telemetry tracking.
