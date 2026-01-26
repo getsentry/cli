@@ -100,9 +100,9 @@ export const explainCommand = buildCommand({
       // 2. Trigger new analysis if none exists or forced
       if (!state) {
         if (!flags.json) {
-          const message = flags.force
-            ? "Forcing fresh root cause analysis...\n"
-            : "Starting root cause analysis...\n";
+          let message = flags.force ? "Forcing fresh" : "Starting";
+
+          message += " root cause analysis, it can take several minutes...\n";
           stderr.write(message);
         }
         await triggerRootCauseAnalysis(org, numericId);
