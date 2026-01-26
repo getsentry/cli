@@ -11,9 +11,6 @@
  * - --no-telemetry flag
  */
 
-// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/node";
-
 /** Environment variable to disable telemetry */
 export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
 
@@ -26,6 +23,28 @@ export type TelemetryOptions = {
   /** Command being executed (e.g., "auth.login", "issue.list") */
   command: string;
 };
+
+/** Cached Sentry module - loaded dynamically to handle bundling issues */
+let SentryModule: typeof import("@sentry/node") | null = null;
+
+/**
+ * Dynamically import the Sentry SDK.
+ * This handles the case where @sentry/node can't be bundled (npm package).
+ */
+async function getSentry(): Promise<typeof import("@sentry/node") | null> {
+  if (SentryModule !== null) {
+    return SentryModule;
+  }
+
+  try {
+    SentryModule = await import("@sentry/node");
+    return SentryModule;
+  } catch {
+    // @sentry/node couldn't be loaded (e.g., in npm bundle with esbuild)
+    // Telemetry will be silently disabled
+    return null;
+  }
+}
 
 /**
  * Wrap CLI execution with telemetry tracking.
@@ -41,10 +60,15 @@ export async function withTelemetry<T>(
   options: TelemetryOptions,
   callback: () => T | Promise<T>
 ): Promise<T> {
-  const client = initSentry(options.enabled);
+  const client = await initSentry(options.enabled);
 
   // If telemetry is disabled or initialization failed, just run the callback
   if (!client) {
+    return callback();
+  }
+
+  const Sentry = SentryModule;
+  if (!Sentry) {
     return callback();
   }
 
@@ -102,12 +126,19 @@ export function getBuildConstant(name: string): string | undefined {
  *
  * @internal Exported for testing
  */
-export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
+export async function initSentry(
+  enabled: boolean
+): Promise<{ flush: (timeout: number) => PromiseLike<boolean> } | undefined> {
   const dsn = getBuildConstant("SENTRY_DSN_BUILD");
   const version = getBuildConstant("SENTRY_CLI_VERSION");
 
   // Don't initialize if disabled or no DSN configured
   if (!(enabled && dsn)) {
+    return;
+  }
+
+  const Sentry = await getSentry();
+  if (!Sentry) {
     return;
   }
 

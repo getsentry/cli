@@ -139,13 +139,13 @@ describe("getBuildConstant", () => {
 });
 
 describe("initSentry", () => {
-  test("returns undefined when disabled", () => {
-    expect(initSentry(false)).toBeUndefined();
+  test("returns undefined when disabled", async () => {
+    expect(await initSentry(false)).toBeUndefined();
   });
 
-  test("returns undefined when enabled but no DSN configured", () => {
+  test("returns undefined when enabled but no DSN configured", async () => {
     // In test environment, SENTRY_DSN_BUILD is not defined
-    expect(initSentry(true)).toBeUndefined();
+    expect(await initSentry(true)).toBeUndefined();
   });
 });
 
