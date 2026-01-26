@@ -241,8 +241,8 @@ export const viewCommand = buildCommand({
         aliasSuffix.suffix,
         cwd
       );
-      resolved =
-        aliasResult ?? (await resolveShortSuffixId(issueId, flags, cwd));
+      // If alias not found, treat as full short ID (e.g., "CRAFT-G" where "craft" isn't a known alias)
+      resolved = aliasResult ?? (await resolveFullShortId(issueId, flags, cwd));
     } else if (isShortSuffix(issueId)) {
       resolved = await resolveShortSuffixId(issueId, flags, cwd);
     } else if (isShortId(issueId)) {
