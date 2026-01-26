@@ -13,12 +13,12 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node";
+import { SENTRY_CLI_DSN } from "./constants.js";
 
 /**
- * Build-time constants injected by esbuild/bun.
- * These are undefined when running unbundled in development.
+ * Build-time constant injected by esbuild/bun.
+ * This is undefined when running unbundled in development.
  */
-declare const SENTRY_DSN_BUILD: string | undefined;
 declare const SENTRY_CLI_VERSION: string | undefined;
 
 /** Environment variable to disable telemetry */
@@ -83,14 +83,12 @@ export async function withTelemetry<T>(
  * @internal Exported for testing
  */
 export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
-  // Build-time constants are undefined when running unbundled in development
-  const dsn =
-    typeof SENTRY_DSN_BUILD !== "undefined" ? SENTRY_DSN_BUILD : undefined;
+  // Version is injected at build time, undefined in development
   const version =
     typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : undefined;
 
   const client = Sentry.init({
-    dsn,
+    dsn: SENTRY_CLI_DSN,
     enabled,
     // Minimal integrations for CLI - we don't need most Node.js integrations
     defaultIntegrations: false,
@@ -110,9 +108,15 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
     },
 
     beforeSend: (event) => {
-      // Remove stack traces which may contain local file paths (PII)
+      // Replace home directory with ~ in stack traces to remove PII
+      const homeDir = process.env.HOME || process.env.USERPROFILE;
       for (const exception of event.exception?.values ?? []) {
-        exception.stacktrace = undefined;
+        if (!exception.stacktrace?.frames) continue;
+        for (const frame of exception.stacktrace.frames) {
+          if (frame.filename && homeDir) {
+            frame.filename = frame.filename.replace(homeDir, "~");
+          }
+        }
       }
       // Remove server_name which may contain hostname (PII)
       event.server_name = undefined;

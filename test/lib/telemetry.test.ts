@@ -62,11 +62,10 @@ describe("initSentry", () => {
     expect(client?.getOptions().enabled).toBe(false);
   });
 
-  test("returns client with enabled=false when no DSN configured", () => {
-    // In test environment, SENTRY_DSN_BUILD is not defined so SDK disables itself
+  test("returns client with DSN when enabled", () => {
     const client = initSentry(true);
-    // SDK returns a client but it won't be enabled without a DSN
-    expect(client?.getOptions().dsn).toBeUndefined();
+    expect(client?.getOptions().dsn).toBeDefined();
+    expect(client?.getOptions().enabled).toBe(true);
   });
 });
 

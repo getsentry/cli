@@ -1,7 +1,5 @@
 /**
- * Build-time constants shared across build scripts.
- *
- * These values are injected at build time via esbuild's `define` option.
+ * Runtime constants for the CLI.
  */
 
 /**

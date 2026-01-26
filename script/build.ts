@@ -21,7 +21,6 @@
 
 import { $ } from "bun";
 import pkg from "../package.json";
-import { SENTRY_CLI_DSN } from "./constants.js";
 
 const VERSION = pkg.version;
 
@@ -79,7 +78,6 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
     define: {
       SENTRY_CLI_VERSION: JSON.stringify(VERSION),
       SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-      SENTRY_DSN_BUILD: JSON.stringify(SENTRY_CLI_DSN),
     },
     sourcemap: "none",
   });

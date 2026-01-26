@@ -13,7 +13,6 @@
  */
 import { build } from "esbuild";
 import pkg from "../package.json";
-import { SENTRY_CLI_DSN } from "./constants.js";
 
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -41,7 +40,6 @@ const result = await build({
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-    SENTRY_DSN_BUILD: JSON.stringify(SENTRY_CLI_DSN),
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
