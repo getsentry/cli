@@ -39,11 +39,14 @@ const result = await build({
   target: "node22",
   format: "cjs",
   outfile: "./dist/bin.cjs",
-  inject: ["./script/node-polyfills.ts"],
+  // Inject Bun polyfills and import.meta.url shim for CJS compatibility
+  inject: ["./script/node-polyfills.ts", "./src/lib/import-meta-url.js"],
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
     SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
+    // Replace import.meta.url with the injected shim variable for CJS
+    "import.meta.url": "import_meta_url",
   },
   // Only externalize Node.js built-ins - bundle all npm packages
   external: ["node:*"],
