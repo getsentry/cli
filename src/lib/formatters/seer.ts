@@ -168,16 +168,12 @@ export function formatRootCauseHeader(): string[] {
 }
 
 /**
- * Format all root causes with a footer hint.
+ * Format all root causes for display.
  *
  * @param causes - Array of root causes
- * @param issueId - Issue ID for the hint
  * @returns Array of formatted lines
  */
-export function formatRootCauseList(
-  causes: RootCause[],
-  issueId: string
-): string[] {
+export function formatRootCauseList(causes: RootCause[]): string[] {
   const lines: string[] = [];
 
   lines.push(...formatRootCauseHeader());
@@ -196,10 +192,6 @@ export function formatRootCauseList(
       lines.push(...formatRootCause(cause, i));
     }
   }
-
-  // Add hint for next steps
-  lines.push("");
-  lines.push(muted(`To create a plan, run: sentry issue plan ${issueId}`));
 
   return lines;
 }

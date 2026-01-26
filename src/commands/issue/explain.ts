@@ -11,7 +11,7 @@ import {
   triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
 import { ApiError } from "../../lib/errors.js";
-import { writeJson } from "../../lib/formatters/index.js";
+import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {
   formatAutofixError,
   formatRootCauseList,
@@ -135,8 +135,12 @@ export const explainCommand = buildCommand({
       }
 
       // Human-readable output
-      const lines = formatRootCauseList(causes, issueId);
+      const lines = formatRootCauseList(causes);
       stdout.write(`${lines.join("\n")}\n`);
+      writeFooter(
+        stdout,
+        `To create a plan, run: sentry issue plan ${issueId}`
+      );
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -12,6 +12,7 @@ import { AuthError } from "../../lib/errors.js";
 import {
   calculateProjectSlugWidth,
   formatProjectRow,
+  writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import { resolveAllTargets } from "../../lib/resolve-target.js";
@@ -282,5 +283,7 @@ export const listCommand = buildCommand({
           "Use --org to specify organization explicitly.\n"
       );
     }
+
+    writeFooter(stdout, "Tip: Use 'sentry project view <slug>' for details");
   },
 });
