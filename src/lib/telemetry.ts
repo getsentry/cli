@@ -147,3 +147,15 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
 export function isTelemetryEnabled(): boolean {
   return process.env[TELEMETRY_ENV_VAR] !== "1";
 }
+
+/**
+ * Set the command tag for telemetry.
+ *
+ * Called by stricli's forCommand context builder with the resolved
+ * command path (e.g., "auth.login", "issue.list").
+ *
+ * @param command - The command name (dot-separated path)
+ */
+export function setCommandTag(command: string): void {
+  Sentry.setTag("command", command);
+}

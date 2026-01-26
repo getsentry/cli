@@ -8,6 +8,7 @@
 import { homedir } from "node:os";
 import type { CommandContext } from "@stricli/core";
 import { getConfigDir } from "./lib/config.js";
+import { setCommandTag } from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
@@ -20,8 +21,14 @@ export interface SentryContext extends CommandContext {
   readonly stdin: NodeJS.ReadStream & { fd: 0 };
 }
 
-export function buildContext(process: NodeJS.Process): SentryContext {
-  return {
+/**
+ * Build a dynamic context that uses forCommand to set telemetry tags.
+ *
+ * The forCommand method is called by stricli with the command prefix
+ * (e.g., ["auth", "login"]) before running the command.
+ */
+export function buildContext(process: NodeJS.Process) {
+  const baseContext = {
     process,
     env: process.env,
     cwd: process.cwd(),
@@ -30,5 +37,14 @@ export function buildContext(process: NodeJS.Process): SentryContext {
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
+  };
+
+  return {
+    ...baseContext,
+    forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
+      // Set the command tag for telemetry (e.g., "auth.login")
+      setCommandTag(prefix.join("."));
+      return baseContext;
+    },
   };
 }
