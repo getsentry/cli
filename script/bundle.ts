@@ -33,12 +33,16 @@ const result = await build({
   minify: true,
   platform: "node",
   target: "node22",
-  format: "esm",
-  outfile: "./dist/bin.mjs",
-  inject: ["./script/node-polyfills.ts"],
+  format: "cjs",
+  outfile: "./dist/bin.cjs",
+  // Inject Bun polyfills and import.meta.url shim for CJS compatibility
+  inject: ["./script/node-polyfills.ts", "./script/import-meta-url.js"],
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+    "process.env.NODE_ENV": JSON.stringify("production"),
+    // Replace import.meta.url with the injected shim variable for CJS
+    "import.meta.url": "import_meta_url",
   },
   // Only externalize Node.js built-ins - bundle all npm packages
   external: ["node:*"],
@@ -50,6 +54,6 @@ const outputs = Object.values(result.metafile?.outputs || {});
 const bundleSize = outputs.reduce((sum, out) => sum + out.bytes, 0);
 const bundleSizeKB = (bundleSize / 1024).toFixed(1);
 
-console.log(`\n  -> dist/bin.mjs (${bundleSizeKB} KB)`);
+console.log(`\n  -> dist/bin.cjs (${bundleSizeKB} KB)`);
 console.log(`\n${"=".repeat(40)}`);
 console.log("Bundle complete!");

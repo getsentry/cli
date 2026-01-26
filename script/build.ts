@@ -78,6 +78,7 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
     define: {
       SENTRY_CLI_VERSION: JSON.stringify(VERSION),
       SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+      "process.env.NODE_ENV": JSON.stringify("production"),
     },
     sourcemap: "none",
   });
