@@ -305,9 +305,12 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves short suffix with explicit --org and --project flags", async () => {
-    // Clear any defaults to ensure we're testing explicit flags
-    const { writeConfig } = await import("../../../src/lib/config.js");
+    // Clear defaults but keep auth token to ensure we're testing explicit flags
+    const { writeConfig, setAuthToken: setToken } = await import(
+      "../../../src/lib/config.js"
+    );
     await writeConfig({});
+    await setToken("test-token");
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
