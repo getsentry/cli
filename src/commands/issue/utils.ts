@@ -141,7 +141,9 @@ export async function resolveOrgAndIssueId(
       aliasSuffix.suffix,
       cwd
     ).catch(() => null);
-    if (result) return result;
+    if (result) {
+      return result;
+    }
     // Fall through to treat as full short ID
   }
 
