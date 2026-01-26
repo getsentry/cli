@@ -33,7 +33,7 @@ describe("resolveOrgAndIssueId", () => {
       "123456789",
       "my-org",
       "/tmp",
-      "sentry issue explain 123456789 --org <org>"
+      "sentry issue explain 123456789 --org <org-slug>"
     );
 
     expect(result.org).toBe("my-org");
@@ -73,7 +73,7 @@ describe("resolveOrgAndIssueId", () => {
       "PROJECT-ABC",
       "my-org",
       "/tmp",
-      "sentry issue explain PROJECT-ABC --org <org>"
+      "sentry issue explain PROJECT-ABC --org <org-slug>"
     );
 
     expect(result.org).toBe("my-org");
@@ -88,7 +88,7 @@ describe("resolveOrgAndIssueId", () => {
         "123456789",
         undefined,
         "/nonexistent/path",
-        "sentry issue explain 123456789 --org <org>"
+        "sentry issue explain 123456789 --org <org-slug>"
       )
     ).rejects.toThrow("Organization");
   });
@@ -136,7 +136,7 @@ describe("resolveOrgAndIssueId", () => {
       "f-g",
       undefined,
       testConfigDir,
-      "sentry issue explain f-g --org <org>"
+      "sentry issue explain f-g --org <org-slug>"
     );
 
     expect(result.org).toBe("cached-org");
@@ -228,7 +228,7 @@ describe("resolveOrgAndIssueId", () => {
       "G",
       undefined,
       testConfigDir,
-      "sentry issue explain G --org <org>"
+      "sentry issue explain G --org <org-slug>"
     );
 
     expect(result.org).toBe("my-org");
@@ -246,7 +246,7 @@ describe("resolveOrgAndIssueId", () => {
         "G",
         undefined,
         testConfigDir,
-        "sentry issue explain G --org <org>"
+        "sentry issue explain G --org <org-slug>"
       )
     ).rejects.toThrow("Organization and project");
   });
@@ -287,7 +287,7 @@ describe("resolveOrgAndIssueId", () => {
       "craft-g",
       "my-org",
       testConfigDir,
-      "sentry issue explain craft-g --org <org>"
+      "sentry issue explain craft-g --org <org-slug>"
     );
 
     expect(result.org).toBe("my-org");
