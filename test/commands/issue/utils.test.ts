@@ -185,7 +185,7 @@ describe("resolveOrgAndIssueId", () => {
       "o1:d-4y",
       undefined,
       testConfigDir,
-      "sentry issue explain o1:d-4y --org <org>"
+      "sentry issue explain o1:d-4y"
     );
 
     expect(result.org).toBe("org1");
