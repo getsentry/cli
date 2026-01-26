@@ -4,57 +4,13 @@
  * Tests for telemetry helper functions and opt-out behavior.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   initSentry,
-  isTelemetryEnabled,
   TELEMETRY_ENV_VAR,
   TELEMETRY_FLAG,
   withTelemetry,
 } from "../../src/lib/telemetry.js";
-
-describe("isTelemetryEnabled", () => {
-  const originalEnv = process.env[TELEMETRY_ENV_VAR];
-
-  afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env[TELEMETRY_ENV_VAR];
-    } else {
-      process.env[TELEMETRY_ENV_VAR] = originalEnv;
-    }
-  });
-
-  test("returns true when env var is not set", () => {
-    delete process.env[TELEMETRY_ENV_VAR];
-    expect(isTelemetryEnabled()).toBe(true);
-  });
-
-  test("returns false when env var is set to '1'", () => {
-    process.env[TELEMETRY_ENV_VAR] = "1";
-    expect(isTelemetryEnabled()).toBe(false);
-  });
-
-  test("returns true when env var is set to other values", () => {
-    process.env[TELEMETRY_ENV_VAR] = "0";
-    expect(isTelemetryEnabled()).toBe(true);
-
-    process.env[TELEMETRY_ENV_VAR] = "false";
-    expect(isTelemetryEnabled()).toBe(true);
-
-    process.env[TELEMETRY_ENV_VAR] = "";
-    expect(isTelemetryEnabled()).toBe(true);
-  });
-
-  test("returns true when env var is set to 'true'", () => {
-    process.env[TELEMETRY_ENV_VAR] = "true";
-    expect(isTelemetryEnabled()).toBe(true);
-  });
-
-  test("returns true when env var is set to 'yes'", () => {
-    process.env[TELEMETRY_ENV_VAR] = "yes";
-    expect(isTelemetryEnabled()).toBe(true);
-  });
-});
 
 describe("initSentry", () => {
   test("returns client with enabled=false when disabled", () => {
@@ -66,6 +22,16 @@ describe("initSentry", () => {
     const client = initSentry(true);
     expect(client?.getOptions().dsn).toBeDefined();
     expect(client?.getOptions().enabled).toBe(true);
+  });
+
+  test("uses development environment when NODE_ENV_BUILD is not defined", () => {
+    const client = initSentry(true);
+    expect(client?.getOptions().environment).toBe("development");
+  });
+
+  test("uses 0.0.0-dev version when SENTRY_CLI_VERSION is not defined", () => {
+    const client = initSentry(true);
+    expect(client?.getOptions().release).toBe("0.0.0-dev");
   });
 });
 
@@ -109,10 +75,7 @@ describe("withTelemetry", () => {
     ).rejects.toThrow("async error");
   });
 
-  // Note: We don't test with telemetry enabled since there's no DSN configured
-  // in tests. The Sentry SDK won't send events without a valid DSN.
-  test("executes callback when telemetry is enabled but no DSN", async () => {
-    // With no SENTRY_DSN_BUILD, SDK is not enabled and callback still executes
+  test("executes callback when telemetry is enabled", async () => {
     let executed = false;
     await withTelemetry(true, () => {
       executed = true;
@@ -120,7 +83,7 @@ describe("withTelemetry", () => {
     expect(executed).toBe(true);
   });
 
-  test("returns result when telemetry is enabled but no DSN", async () => {
+  test("returns result when telemetry is enabled", async () => {
     const result = await withTelemetry(true, () => "success");
     expect(result).toBe("success");
   });

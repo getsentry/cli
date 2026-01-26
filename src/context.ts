@@ -8,7 +8,6 @@
 import { homedir } from "node:os";
 import type { CommandContext } from "@stricli/core";
 import { getConfigDir } from "./lib/config.js";
-import { setCommandTag } from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
@@ -42,8 +41,8 @@ export function buildContext(process: NodeJS.Process) {
   return {
     ...baseContext,
     forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
-      // Set the command tag for telemetry (e.g., "auth.login")
-      setCommandTag(prefix.join("."));
+      // Set the command name for telemetry (e.g., "auth.login")
+      setCommandName(prefix.join("."));
       return baseContext;
     },
   };

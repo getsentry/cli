@@ -16,10 +16,11 @@ import * as Sentry from "@sentry/node";
 import { SENTRY_CLI_DSN } from "./constants.js";
 
 /**
- * Build-time constant injected by esbuild/bun.
- * This is undefined when running unbundled in development.
+ * Build-time constants injected by esbuild/bun.
+ * These are undefined when running unbundled in development.
  */
 declare const SENTRY_CLI_VERSION: string | undefined;
+declare const NODE_ENV_BUILD: string | undefined;
 
 /** Environment variable to disable telemetry */
 export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
@@ -83,17 +84,22 @@ export async function withTelemetry<T>(
  * @internal Exported for testing
  */
 export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
-  // Version is injected at build time, undefined in development
+  // Build-time constants, with dev defaults
   const version =
-    typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : undefined;
+    typeof SENTRY_CLI_VERSION !== "undefined"
+      ? SENTRY_CLI_VERSION
+      : "0.0.0-dev";
+  const environment =
+    typeof NODE_ENV_BUILD !== "undefined" ? NODE_ENV_BUILD : "development";
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
-    // Minimal integrations for CLI - we don't need most Node.js integrations
+    // CLI is short-lived - disable integrations that add overhead with no benefit
+    // (console, context, modules, etc). Only keep http to capture API requests.
     defaultIntegrations: false,
     integrations: [Sentry.httpIntegration()],
-    environment: "production",
+    environment,
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -130,32 +136,32 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
     // Set global tags for all events
     Sentry.setTag("platform", process.platform);
     Sentry.setTag("arch", process.arch);
-    Sentry.setTag("node", process.version);
+    // Detect runtime: bun binary vs node (npm package)
+    const runtime =
+      typeof process.versions.bun !== "undefined" ? "bun" : "node";
+    Sentry.setTag("runtime", runtime);
+    Sentry.setTag("runtime.version", process.version);
   }
 
   return client;
 }
 
 /**
- * Check if telemetry is enabled based on environment variable.
- *
- * Note: The --no-telemetry flag is handled separately in bin.ts before
- * arguments are passed to stricli.
- *
- * @returns true if telemetry is enabled, false if disabled via env var
- */
-export function isTelemetryEnabled(): boolean {
-  return process.env[TELEMETRY_ENV_VAR] !== "1";
-}
-
-/**
- * Set the command tag for telemetry.
+ * Set the command name for telemetry.
  *
  * Called by stricli's forCommand context builder with the resolved
  * command path (e.g., "auth.login", "issue.list").
  *
+ * Updates both the active span name and sets a tag for filtering.
+ *
  * @param command - The command name (dot-separated path)
  */
-export function setCommandTag(command: string): void {
+export function setCommandName(command: string): void {
+  // Update the span name to the actual command
+  const span = Sentry.getActiveSpan();
+  if (span) {
+    span.updateName(command);
+  }
+  // Also set as tag for easier filtering in Sentry UI
   Sentry.setTag("command", command);
 }

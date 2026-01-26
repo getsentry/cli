@@ -40,6 +40,7 @@ const result = await build({
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+    NODE_ENV_BUILD: JSON.stringify("production"),
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
