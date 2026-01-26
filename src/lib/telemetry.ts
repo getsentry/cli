@@ -14,11 +14,10 @@ import * as Sentry from "@sentry/node";
 import { SENTRY_CLI_DSN } from "./constants.js";
 
 /**
- * Build-time constants injected by esbuild/bun.
- * These are undefined when running unbundled in development.
+ * Build-time constant injected by esbuild/bun.
+ * This is undefined when running unbundled in development.
  */
 declare const SENTRY_CLI_VERSION: string | undefined;
-declare const NODE_ENV_BUILD: string | undefined;
 
 /** Environment variable to disable telemetry */
 export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
@@ -84,8 +83,7 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
     typeof SENTRY_CLI_VERSION !== "undefined"
       ? SENTRY_CLI_VERSION
       : "0.0.0-dev";
-  const environment =
-    typeof NODE_ENV_BUILD !== "undefined" ? NODE_ENV_BUILD : "development";
+  const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,

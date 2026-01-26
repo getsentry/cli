@@ -23,9 +23,13 @@ describe("initSentry", () => {
     expect(client?.getOptions().enabled).toBe(true);
   });
 
-  test("uses development environment when NODE_ENV_BUILD is not defined", () => {
+  test("uses process.env.NODE_ENV for environment", () => {
     const client = initSentry(true);
-    expect(client?.getOptions().environment).toBe("development");
+    // In test environment, NODE_ENV is "test"
+    // In production builds, esbuild replaces process.env.NODE_ENV with "production"
+    expect(client?.getOptions().environment).toBe(
+      process.env.NODE_ENV ?? "development"
+    );
   });
 
   test("uses 0.0.0-dev version when SENTRY_CLI_VERSION is not defined", () => {
