@@ -17,6 +17,7 @@ import {
   type SentryProject,
   SentryProjectSchema,
 } from "../types/index.js";
+import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { refreshToken } from "./config.js";
 import { ApiError } from "./errors.js";
 
@@ -456,5 +457,71 @@ export function updateIssueStatus(
     method: "PUT",
     body: { status },
     schema: SentryIssueSchema,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Autofix (Seer) API Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Trigger root cause analysis for an issue using Seer AI.
+ *
+ * @param orgSlug - The organization slug
+ * @param issueId - The numeric Sentry issue ID
+ * @returns The trigger response with run_id
+ * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
+ */
+export function triggerRootCauseAnalysis(
+  orgSlug: string,
+  issueId: string
+): Promise<{ run_id: number }> {
+  return apiRequest<{ run_id: number }>(
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    {
+      method: "POST",
+      body: { step: "root_cause" },
+    }
+  );
+}
+
+/**
+ * Get the current autofix state for an issue.
+ *
+ * @param orgSlug - The organization slug
+ * @param issueId - The numeric Sentry issue ID
+ * @returns The autofix state, or null if no autofix has been run
+ */
+export async function getAutofixState(
+  orgSlug: string,
+  issueId: string
+): Promise<AutofixState | null> {
+  const response = await apiRequest<AutofixResponse>(
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`
+  );
+
+  return response.autofix;
+}
+
+/**
+ * Trigger solution planning for an existing autofix run.
+ * Continues from root cause analysis to generate a solution.
+ *
+ * @param orgSlug - The organization slug
+ * @param issueId - The numeric Sentry issue ID
+ * @param runId - The autofix run ID
+ * @returns The response from the API
+ */
+export function triggerSolutionPlanning(
+  orgSlug: string,
+  issueId: string,
+  runId: number
+): Promise<unknown> {
+  return apiRequest(`/organizations/${orgSlug}/issues/${issueId}/autofix/`, {
+    method: "POST",
+    body: {
+      run_id: runId,
+      step: "solution",
+    },
   });
 }

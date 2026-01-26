@@ -19,20 +19,32 @@ export {
   ProjectAliasesSchema,
   SentryConfigSchema,
 } from "./config.js";
-
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,
   TokenErrorResponse,
   TokenResponse,
 } from "./oauth.js";
+// OAuth types and schemas
 export {
   DeviceCodeResponseSchema,
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "./oauth.js";
-
-// Sentry API types and schemas
+export type {
+  AutofixResponse,
+  AutofixState,
+  RootCause,
+  SolutionArtifact,
+} from "./seer.js";
+// Seer types
+export {
+  extractRootCauses,
+  extractSolution,
+  isTerminalStatus,
+  SolutionArtifactSchema,
+  TERMINAL_STATUSES,
+} from "./seer.js";
 export type {
   // Breadcrumb types
   Breadcrumb,
@@ -64,6 +76,7 @@ export type {
   TraceContext,
   UserGeo,
 } from "./sentry.js";
+// Sentry API types and schemas
 export {
   // Schemas
   BreadcrumbSchema,
