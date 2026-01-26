@@ -1,0 +1,324 @@
+---
+interface Props {
+  title?: string;
+  background?: 'custom';
+}
+
+const { title = "Terminal", background } = Astro.props;
+const bgClass = background ? `bg-${background}` : '';
+---
+
+<div class={`terminal-wrapper ${bgClass}`}>
+  <div class="terminal">
+    <div class="terminal-header">
+      <div class="terminal-dots">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </div>
+      <span class="terminal-title">{title}</span>
+      <div class="terminal-dots-placeholder"></div>
+    </div>
+    <div class="terminal-body">
+      <div class="line">
+        <span class="prompt">$</span>
+        <span class="command">sentry auth login</span>
+      </div>
+      <div class="line output">
+        <span class="icon blue">●</span>
+        <span>Opening browser for authentication...</span>
+      </div>
+      <div class="line output">
+        <span class="icon green">✓</span>
+        <span>Authenticated as <span class="highlight">john@example.com</span></span>
+      </div>
+      
+      <div class="line spacer"></div>
+      
+      <div class="line">
+        <span class="prompt">$</span>
+        <span class="command">sentry issue list</span>
+      </div>
+      <div class="line output dimmed small">Issues from 3 projects:</div>
+      <div class="line spacer-sm"></div>
+      <div class="line output table-header">
+        <span class="col-shortid">SHORT ID</span>
+        <span class="col-alias">ALIAS</span>
+        <span class="col-title">TITLE</span>
+        <span class="col-count">COUNT</span>
+        <span class="col-fix">FIX</span>
+      </div>
+      <div class="line output table-row">
+        <span class="col-shortid dimmed">FRONTEND-79</span>
+        <span class="col-alias accent">f-79</span>
+        <span class="col-title">TypeError: Cannot read property 'map'...</span>
+        <span class="col-count">2.4k</span>
+        <span class="col-fix green-text">92%</span>
+      </div>
+      <div class="line output table-row">
+        <span class="col-shortid dimmed">API-2F</span>
+        <span class="col-alias accent">a-2f</span>
+        <span class="col-title">ReferenceError: user is not defined</span>
+        <span class="col-count">891</span>
+        <span class="col-fix yellow-text">67%</span>
+      </div>
+      <div class="line output table-row">
+        <span class="col-shortid dimmed">MOBILE-4D</span>
+        <span class="col-alias accent">m-4d</span>
+        <span class="col-title">NetworkError: Failed to fetch</span>
+        <span class="col-count">456</span>
+        <span class="col-fix red-text">23%</span>
+      </div>
+      
+      <div class="line spacer"></div>
+      
+      <div class="line">
+        <span class="prompt">$</span>
+        <span class="command">sentry issue explain f-79</span>
+      </div>
+      <div class="line spacer-sm"></div>
+      <div class="line output header-line">Root Cause Analysis Complete</div>
+      <div class="line output header-border">══════════════════════════════</div>
+      <div class="line spacer-sm"></div>
+      <div class="line output">
+        <span class="cause-label">Cause:</span>
+        <span>The <span class="code">userData</span> response from <span class="code">/api/users</span> returns</span>
+      </div>
+      <div class="line output indent">
+        <span><span class="code">null</span> when user session expires, but the component</span>
+      </div>
+      <div class="line output indent">
+        <span>assumes it's always an array and calls <span class="code">.map()</span> directly.</span>
+      </div>
+      <div class="line spacer-sm"></div>
+      <div class="line output dimmed small">
+        <span class="icon yellow">→</span>
+        <span>Add null check before mapping: <span class="code">userData?.map()</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .terminal-wrapper {
+    position: relative;
+    margin: 0 0 4rem 0;
+    padding: 2rem;
+    background: linear-gradient(135deg, 
+      rgba(88, 28, 135, 0.3) 0%, 
+      rgba(15, 23, 42, 0.8) 50%,
+      rgba(30, 58, 138, 0.3) 100%
+    );
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .terminal-wrapper::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: 
+      radial-gradient(ellipse at 20% 20%, rgba(139, 92, 246, 0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(59, 130, 246, 0.15) 0%, transparent 50%);
+    pointer-events: none;
+  }
+
+  /* Background image variant */
+  .terminal-wrapper.bg-custom {
+    background: url('/cli/bg.png') center / cover;
+  }
+
+  .terminal-wrapper.bg-custom::before {
+    background: none;
+  }
+
+  .terminal {
+    position: relative;
+    background: rgba(10, 10, 15, 0.95);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    box-shadow: 
+      0 25px 50px -12px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  .terminal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+  }
+
+  .terminal-dots {
+    display: flex;
+    gap: 8px;
+  }
+
+  .terminal-dots-placeholder {
+    width: 52px;
+  }
+
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .terminal-title {
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .terminal-body {
+    padding: 0 1.5rem 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+
+  .line {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+  }
+
+  .line.spacer {
+    height: 1rem;
+  }
+
+  .line.spacer-sm {
+    height: 0.35rem;
+  }
+
+  .line.output {
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .line.indent {
+    padding-left: 3.5rem;
+  }
+
+  .prompt {
+    color: rgba(255, 255, 255, 0.4);
+    user-select: none;
+  }
+
+  .command {
+    color: #fff;
+  }
+
+  .icon {
+    font-size: 0.7rem;
+  }
+
+  .icon.blue { color: #3b82f6; }
+  .icon.green { color: #22c55e; }
+  .icon.yellow { color: #eab308; }
+
+  .highlight {
+    color: #22d3ee;
+  }
+
+  .accent {
+    color: #a78bfa;
+  }
+
+  .dimmed {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .small {
+    font-size: 0.75rem;
+  }
+
+  .green-text { color: #22c55e; }
+  .yellow-text { color: #eab308; }
+  .red-text { color: #ef4444; }
+
+  .header-line {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .header-border {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .cause-label {
+    color: #f472b6;
+    font-weight: 500;
+    margin-right: 0.25rem;
+  }
+
+  .code {
+    color: #22d3ee;
+    background: rgba(34, 211, 238, 0.1);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+  }
+
+  .table-header {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .table-row {
+    font-size: 0.72rem;
+  }
+
+  .col-shortid {
+    min-width: 95px;
+  }
+
+  .col-alias {
+    min-width: 45px;
+  }
+
+  .col-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .col-count {
+    min-width: 40px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .col-fix {
+    min-width: 35px;
+    text-align: right;
+    font-weight: 500;
+  }
+
+  @media (max-width: 640px) {
+    .terminal-wrapper {
+      margin: 0 -1rem 3rem;
+      padding: 1rem;
+      border-radius: 0;
+    }
+
+    .terminal-body {
+      padding: 0 1rem 1rem;
+      font-size: 0.7rem;
+    }
+
+    .col-shortid {
+      display: none;
+    }
+
+    .col-alias {
+      min-width: 40px;
+    }
+  }
+</style>

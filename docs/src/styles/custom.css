@@ -1,0 +1,431 @@
+/* ==========================================================================
+   Sentry CLI Documentation - Dark Theme
+   ========================================================================== */
+
+/* Force dark mode */
+:root {
+  color-scheme: dark;
+}
+
+:root,
+[data-theme="light"],
+[data-theme="dark"] {
+  /* Background colors */
+  --sl-color-bg: #0a0a0f;
+  --sl-color-bg-nav: rgba(10, 10, 15, 0.95);
+  --sl-color-bg-sidebar: rgba(10, 10, 15, 0.98);
+  --sl-color-bg-inline-code: rgba(255, 255, 255, 0.08);
+
+  /* Accent colors - Purple theme */
+  --sl-color-accent: #8b5cf6;
+  --sl-color-accent-high: #a78bfa;
+  --sl-color-accent-low: rgba(139, 92, 246, 0.2);
+
+  /* Text colors */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #f1f5f9;
+  --sl-color-gray-2: #e2e8f0;
+  --sl-color-gray-3: #cbd5e1;
+  --sl-color-gray-4: #94a3b8;
+  --sl-color-gray-5: #64748b;
+  --sl-color-gray-6: #475569;
+  --sl-color-black: #0a0a0f;
+
+  /* Border colors */
+  --sl-color-hairline: rgba(255, 255, 255, 0.08);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.05);
+
+  /* Typography */
+  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Sizing - Smaller sidebar */
+  --sl-content-width: 65rem;
+  --sl-sidebar-width: 14rem;
+}
+
+/* ==========================================================================
+   Global Styles
+   ========================================================================== */
+
+body {
+  background: var(--sl-color-bg);
+}
+
+/* Subtle background gradient */
+.sl-layout::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  background:
+    radial-gradient(
+      ellipse 80% 50% at 50% -20%,
+      rgba(139, 92, 246, 0.12) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 100% 0%,
+      rgba(59, 130, 246, 0.08) 0%,
+      transparent 40%
+    );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ==========================================================================
+   Header / Navigation
+   ========================================================================== */
+
+header.header {
+  background: rgba(10, 10, 15, 0.8);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Logo size - larger */
+.site-title img {
+  height: 2rem !important;
+  width: auto !important;
+}
+
+/* GitHub icon - white */
+.social-icons a {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.social-icons a:hover {
+  color: #fff !important;
+}
+
+/* ==========================================================================
+   Splash / Landing Page Styles
+   ========================================================================== */
+
+/* Hero section */
+.hero {
+  padding: 4rem 0 0.5rem !important;
+  text-align: left !important;
+  max-width: none !important;
+}
+
+.hero > img,
+.hero > .hero-image {
+  display: none !important;
+}
+
+/* Hero title - make it bold and impactful */
+.hero h1 {
+  font-size: clamp(2.5rem, 8vw, 4rem) !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.03em !important;
+  margin-bottom: 1.5rem !important;
+  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hero tagline */
+.hero .tagline {
+  font-size: 1.125rem !important;
+  line-height: 1.7 !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+  max-width: 540px !important;
+  margin: 0 !important;
+}
+
+/* Hide default hero actions */
+.hero .action,
+.hero .sl-flex.actions {
+  display: none !important;
+}
+
+/* Command box in hero - tight to tagline, space below */
+.hero-command {
+  margin-top: 0.5rem;
+  margin-bottom: 4rem;
+}
+
+/* Stack container - page layout for splash */
+[data-page-type="splash"] .sl-container {
+  max-width: var(--sl-content-width);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+[data-page-type="splash"] main {
+  padding-top: 0;
+}
+
+/* ==========================================================================
+   Install Section
+   ========================================================================== */
+
+.install-section {
+  margin: 3rem 0;
+  text-align: left;
+}
+
+.install-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--sl-color-white);
+}
+
+/* Tab styling for install section */
+starlight-tabs {
+  --sl-color-bg-nav: transparent;
+}
+
+starlight-tabs [role="tablist"] {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 0;
+}
+
+starlight-tabs [role="tab"] {
+  padding: 0.75rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+starlight-tabs [role="tab"]:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+starlight-tabs [role="tab"][aria-selected="true"] {
+  color: var(--sl-color-white);
+  border-bottom-color: var(--sl-color-accent);
+}
+
+starlight-tabs [role="tabpanel"] {
+  padding: 1rem 0;
+}
+
+/* Code blocks in tabs */
+starlight-tabs pre {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+/* ==========================================================================
+   Quick Start Section
+   ========================================================================== */
+
+.quick-start {
+  margin: 4rem 0;
+}
+
+.quick-start h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Features Section
+   ========================================================================== */
+
+.features-section {
+  margin: 5rem 0;
+}
+
+.features-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  color: var(--sl-color-white);
+}
+
+/* Feature cards */
+.sl-card-grid {
+  --sl-card-grid-cols: 3;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  transform: translateY(-2px);
+}
+
+.card .title {
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.card .body {
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.6 !important;
+}
+
+/* ==========================================================================
+   Why Section
+   ========================================================================== */
+
+.why-section {
+  margin: 5rem 0;
+  padding: 3rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+}
+
+.why-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--sl-color-white);
+}
+
+.why-section p {
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 1.5rem;
+  max-width: 600px;
+}
+
+.why-section ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.why-section li {
+  color: rgba(255, 255, 255, 0.8);
+  padding-left: 0;
+}
+
+.why-section li strong {
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Code Blocks
+   ========================================================================== */
+
+pre {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.9em;
+}
+
+/* ==========================================================================
+   Links
+   ========================================================================== */
+
+a {
+  color: var(--sl-color-accent-high);
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Sidebar (for docs pages)
+   ========================================================================== */
+
+.sidebar-content {
+  background: transparent;
+  font-size: 0.875rem;
+}
+
+nav.sidebar a {
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.2s ease;
+  padding: 0.4rem 0.75rem;
+}
+
+nav.sidebar a:hover,
+nav.sidebar a[aria-current="page"] {
+  color: var(--sl-color-white);
+}
+
+nav.sidebar a[aria-current="page"] {
+  background: rgba(139, 92, 246, 0.15);
+  border-left: 2px solid var(--sl-color-accent);
+}
+
+/* Sidebar group labels */
+.sidebar-content .top-level > li > details > summary,
+.sidebar-content .top-level > li > a {
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* ==========================================================================
+   Mobile Responsive
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .hero h1 {
+    font-size: 2rem !important;
+  }
+
+  .hero .tagline {
+    font-size: 1rem !important;
+  }
+
+  .sl-card-grid {
+    --sl-card-grid-cols: 1;
+  }
+
+  .why-section {
+    padding: 1.5rem;
+  }
+
+  .why-section ul {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Scrollbar
+   ========================================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

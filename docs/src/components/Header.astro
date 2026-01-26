@@ -1,0 +1,58 @@
+---
+import type { Props } from "@astrojs/starlight/props";
+import Search from "@astrojs/starlight/components/Search.astro";
+import SiteTitle from "@astrojs/starlight/components/SiteTitle.astro";
+import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
+
+// Check if we're on the homepage (splash page)
+const isHomepage = Astro.props.slug === "";
+---
+
+<div class="header sl-flex">
+  <div class="sl-flex header-left">
+    <SiteTitle {...Astro.props} />
+  </div>
+  
+  <div class="sl-flex header-right">
+    {!isHomepage && <Search {...Astro.props} />}
+    <a href="/cli/getting-started/" class="header-nav-link">Docs</a>
+    <SocialIcons {...Astro.props} />
+  </div>
+</div>
+
+<style>
+  .header {
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+    padding: 0 1rem;
+  }
+
+  .header-left {
+    flex: 0 0 auto;
+  }
+
+  .header-right {
+    flex: 0 0 auto;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  .header-nav-link {
+    color: #fff !important;
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    opacity: 0.9;
+  }
+
+  .header-nav-link:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+  }
+</style>

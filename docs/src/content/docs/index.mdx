@@ -1,0 +1,96 @@
+---
+title: The CLI for developers and agents
+description: A CLI for developers and agents
+template: splash
+hero:
+  title: |
+    The CLI for
+    developers and agents
+  tagline: No more flags. No more guessing. Just type what you mean and let the CLI figure out the rest. Built by humans and agents, for humans and agents.
+---
+
+import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import CommandBox from '../../components/CommandBox.astro';
+import Terminal from '../../components/Terminal.astro';
+
+<div class="hero-command">
+<CommandBox command="npx sentry@latest" docsLink="./getting-started/" docsText="Read the docs" />
+</div>
+
+<Terminal background="custom" />
+
+<div class="features-section">
+
+## What makes it different
+
+<CardGrid>
+  <Card title="Zero Configuration" icon="setting">
+    Auto-detects your Sentry project from .env files or Sentry.init() in your code. No more --org and --project flags. Works with monorepos too.
+  </Card>
+  <Card title="OAuth Like gh" icon="approve-check">
+    Run sentry auth login and you're done. Opens your browser, shows a QR code as fallback, handles token refresh automatically.
+  </Card>
+  <Card title="Short IDs" icon="rocket">
+    Just type sentry issue view WQ instead of the full CRAFT-WQ. The CLI figures out the rest.
+  </Card>
+  <Card title="AI-Powered Debugging" icon="star">
+    Run sentry issue explain for root cause analysis. Run sentry issue plan and get a solution. Powered by Seer.
+  </Card>
+  <Card title="Built for Agents" icon="external">
+    Designed to work with AI coding agents. Structured outputs, predictable behavior, complements the MCP.
+  </Card>
+  <Card title="Great DX" icon="heart">
+    JSON output for scripting, -w flags to open in browser, smart defaults everywhere. Developer experience first.
+  </Card>
+</CardGrid>
+
+</div>
+
+<div class="install-section">
+
+## Install
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install -g sentry
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add -g sentry
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn global add sentry
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun add -g sentry
+    ```
+  </TabItem>
+</Tabs>
+
+</div>
+
+<div class="quick-start">
+
+## Quick Start
+
+```bash
+# Authenticate (opens browser, handles everything)
+sentry auth login
+
+# View an issue — short IDs just work
+sentry issue view WQ
+
+# Get AI-powered root cause analysis
+sentry issue explain WQ
+
+# List issues — project auto-detected from your code
+sentry issue list
+```
+
+</div>

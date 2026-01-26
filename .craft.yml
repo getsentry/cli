@@ -19,3 +19,4 @@ requireNames:
 targets:
   - name: npm
   - name: github
+  - name: gh-pages

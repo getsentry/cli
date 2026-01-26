@@ -1,0 +1,83 @@
+---
+title: Installation
+description: How to install and set up the Sentry CLI
+---
+
+## Installation
+
+Install globally with your preferred package manager:
+
+```bash
+# npm
+npm install -g sentry
+
+# pnpm
+pnpm add -g sentry
+
+# yarn
+yarn global add sentry
+
+# bun
+bun add -g sentry
+```
+
+Or run directly without installing:
+
+```bash
+npx sentry --help
+pnpm dlx sentry --help
+yarn dlx sentry --help
+bunx sentry --help
+```
+
+## Authentication
+
+### OAuth Device Flow (Recommended)
+
+The easiest way to authenticate is via OAuth device flow:
+
+```bash
+sentry auth login
+```
+
+You'll be given a URL and a code to enter. Once you authorize the application in your browser, the CLI will automatically receive your token.
+
+### API Token
+
+Alternatively, you can use an API token directly:
+
+```bash
+sentry auth login --token YOUR_SENTRY_API_TOKEN
+```
+
+You can create API tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/).
+
+### Check Auth Status
+
+Verify your authentication status:
+
+```bash
+sentry auth status
+```
+
+### Logout
+
+To remove stored credentials:
+
+```bash
+sentry auth logout
+```
+
+## Configuration
+
+Credentials are stored in `~/.sentry/config.json` with restricted file permissions (mode 600) for security.
+
+## Next Steps
+
+Once authenticated, you can start using the CLI:
+
+- [Organization commands](./commands/org/) - List and view organizations
+- [Project commands](./commands/project/) - Manage projects
+- [Issue commands](./commands/issue/) - Track and manage issues
+- [Event commands](./commands/event/) - Inspect events
+- [API commands](./commands/api/) - Direct API access
