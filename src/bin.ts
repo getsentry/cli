@@ -5,7 +5,6 @@ import { buildContext } from "./context.js";
 import { formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import {
-  extractCommand,
   isTelemetryEnabled,
   TELEMETRY_FLAG,
   withTelemetry,
@@ -22,10 +21,9 @@ async function main(): Promise<void> {
 
   // Telemetry is enabled unless explicitly disabled via flag or env var
   const telemetryEnabled = !noTelemetryFlag && isTelemetryEnabled();
-  const command = extractCommand(filteredArgs);
 
   try {
-    await withTelemetry({ enabled: telemetryEnabled, command }, () =>
+    await withTelemetry(telemetryEnabled, () =>
       run(app, filteredArgs, buildContext(process))
     );
   } catch (err) {

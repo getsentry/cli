@@ -27,31 +27,24 @@ export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
 /** CLI flag to disable telemetry */
 export const TELEMETRY_FLAG = "--no-telemetry";
 
-export type TelemetryOptions = {
-  /** Whether telemetry is enabled */
-  enabled: boolean;
-  /** Command being executed (e.g., "auth.login", "issue.list") */
-  command: string;
-};
-
 /**
  * Wrap CLI execution with telemetry tracking.
  *
  * Creates a Sentry session and span for the command execution.
  * Captures any unhandled exceptions and reports them.
  *
- * @param options - Telemetry configuration
+ * @param enabled - Whether telemetry is enabled
  * @param callback - The CLI execution function to wrap
  * @returns The result of the callback
  */
 export async function withTelemetry<T>(
-  options: TelemetryOptions,
+  enabled: boolean,
   callback: () => T | Promise<T>
 ): Promise<T> {
-  const client = initSentry(options.enabled);
+  const client = initSentry(enabled);
 
-  // If telemetry is disabled or initialization failed, just run the callback
-  if (!client) {
+  // If Sentry is not enabled, just run the callback
+  if (!client?.getOptions().enabled) {
     return callback();
   }
 
@@ -61,10 +54,7 @@ export async function withTelemetry<T>(
   try {
     return await Sentry.startSpan(
       { name: "cli-execution", op: "cli.command" },
-      async () => {
-        Sentry.setTag("command", options.command);
-        return await callback();
-      }
+      async () => callback()
     );
   } catch (e) {
     Sentry.captureException(e);
@@ -88,7 +78,7 @@ export async function withTelemetry<T>(
  * Initialize Sentry for telemetry.
  *
  * @param enabled - Whether telemetry is enabled
- * @returns The Sentry client, or undefined if disabled/unavailable
+ * @returns The Sentry client, or undefined if initialization failed
  *
  * @internal Exported for testing
  */
@@ -130,18 +120,11 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
     },
   });
 
-  // Set global tags for all events
-  Sentry.setTag("platform", process.platform);
-  Sentry.setTag("arch", process.arch);
-  Sentry.setTag("node", process.version);
-
-  // Detect if running as compiled binary (Single Executable Application)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sea = require("node:sea") as { isSea: () => boolean };
-    Sentry.setTag("is_binary", sea.isSea());
-  } catch {
-    Sentry.setTag("is_binary", false);
+  if (client?.getOptions().enabled) {
+    // Set global tags for all events
+    Sentry.setTag("platform", process.platform);
+    Sentry.setTag("arch", process.arch);
+    Sentry.setTag("node", process.version);
   }
 
   return client;
@@ -150,29 +133,11 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
 /**
  * Check if telemetry is enabled based on environment variable.
  *
+ * Note: The --no-telemetry flag is handled separately in bin.ts before
+ * arguments are passed to stricli.
+ *
  * @returns true if telemetry is enabled, false if disabled via env var
  */
 export function isTelemetryEnabled(): boolean {
   return process.env[TELEMETRY_ENV_VAR] !== "1";
-}
-
-/**
- * Extract command name from CLI arguments.
- *
- * Takes the first 1-2 positional arguments (non-flag arguments)
- * and joins them with a dot to form the command name.
- *
- * @param args - CLI arguments (without the node/bun executable and script path)
- * @returns Command name (e.g., "auth.login", "issue.list", "org")
- *
- * @example
- * extractCommand(["auth", "login", "--timeout", "60"]) // "auth.login"
- * extractCommand(["issue", "list"]) // "issue.list"
- * extractCommand(["org"]) // "org"
- * extractCommand(["--help"]) // "unknown"
- */
-export function extractCommand(args: string[]): string {
-  const positional = args.filter((a) => !a.startsWith("-"));
-  const command = positional.slice(0, 2).join(".");
-  return command || "unknown";
 }
