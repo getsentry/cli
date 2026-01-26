@@ -1,7 +1,7 @@
 /**
- * Autofix Type Helper Tests
+ * Seer Type Helper Tests
  *
- * Tests for pure functions in src/types/autofix.ts
+ * Tests for pure functions in src/types/seer.ts
  */
 
 import { describe, expect, test } from "bun:test";
@@ -10,7 +10,7 @@ import {
   extractRootCauses,
   isTerminalStatus,
   TERMINAL_STATUSES,
-} from "../../src/types/autofix.js";
+} from "../../src/types/seer.js";
 
 describe("isTerminalStatus", () => {
   test("returns true for COMPLETED status", () => {

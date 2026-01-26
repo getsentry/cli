@@ -6,24 +6,15 @@
 
 import { getAutofixState, getIssueByShortId } from "../../lib/api-client.js";
 import { ContextError } from "../../lib/errors.js";
-import {
-  formatProgressLine,
-  getProgressMessage,
-  truncateProgressMessage,
-} from "../../lib/formatters/autofix.js";
+import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { isShortId } from "../../lib/issue-id.js";
+import { poll } from "../../lib/polling.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { type AutofixState, isTerminalStatus } from "../../types/autofix.js";
 import type { Writer } from "../../types/index.js";
+import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
 
-/** Default polling interval in milliseconds */
-const DEFAULT_POLL_INTERVAL_MS = 1000;
-
-/** Animation interval for spinner updates (independent of polling) */
-const ANIMATION_INTERVAL_MS = 80;
-
-/** Default timeout in milliseconds (10 minutes) */
-const DEFAULT_TIMEOUT_MS = 600_000;
+/** Default timeout in milliseconds (3 minutes) */
+const DEFAULT_TIMEOUT_MS = 180_000;
 
 type ResolvedIssue = {
   /** Resolved organization slug */
@@ -75,7 +66,7 @@ type PollAutofixOptions = {
   json: boolean;
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
-  /** Maximum time to wait in milliseconds (default: 600000 = 10 minutes) */
+  /** Maximum time to wait in milliseconds (default: 180000 = 3 minutes) */
   timeoutMs?: number;
   /** Custom timeout error message */
   timeoutMessage?: string;
@@ -85,6 +76,10 @@ type PollAutofixOptions = {
 
 /**
  * Check if polling should stop based on current state.
+ *
+ * @param state - Current autofix state
+ * @param stopOnWaitingForUser - Whether to stop on WAITING_FOR_USER_RESPONSE status
+ * @returns True if polling should stop
  */
 function shouldStopPolling(
   state: AutofixState,
@@ -101,8 +96,7 @@ function shouldStopPolling(
 
 /**
  * Poll autofix state until completion or timeout.
- * Displays progress spinner and messages to stderr when not in JSON mode.
- * Animation runs at 80ms intervals independently of polling frequency.
+ * Uses the generic poll utility with autofix-specific configuration.
  *
  * @param options - Polling configuration
  * @returns Final autofix state
@@ -116,48 +110,21 @@ export async function pollAutofixState(
     issueId,
     stderr,
     json,
-    pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+    pollIntervalMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    timeoutMessage = "Operation timed out after 10 minutes. Check the issue in Sentry web UI.",
+    timeoutMessage = "Operation timed out after 3 minutes. Try again or check the issue in Sentry web UI.",
     stopOnWaitingForUser = false,
   } = options;
 
-  const startTime = Date.now();
-  let tick = 0;
-  let currentMessage = "Waiting for analysis to start...";
-
-  // Animation timer runs independently of polling for smooth spinner
-  let animationTimer: Timer | undefined;
-  if (!json) {
-    animationTimer = setInterval(() => {
-      const display = truncateProgressMessage(currentMessage);
-      stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
-      tick += 1;
-    }, ANIMATION_INTERVAL_MS);
-  }
-
-  try {
-    while (Date.now() - startTime < timeoutMs) {
-      const state = await getAutofixState(orgSlug, issueId);
-
-      if (state) {
-        // Update message for animation loop to display
-        currentMessage = getProgressMessage(state);
-
-        if (shouldStopPolling(state, stopOnWaitingForUser)) {
-          return state;
-        }
-      }
-
-      await Bun.sleep(pollIntervalMs);
-    }
-
-    throw new Error(timeoutMessage);
-  } finally {
-    // Clean up animation timer
-    if (animationTimer) {
-      clearInterval(animationTimer);
-      stderr.write("\n");
-    }
-  }
+  return await poll<AutofixState>({
+    fetchState: () => getAutofixState(orgSlug, issueId),
+    shouldStop: (state) => shouldStopPolling(state, stopOnWaitingForUser),
+    getProgressMessage,
+    stderr,
+    json,
+    pollIntervalMs,
+    timeoutMs,
+    timeoutMessage,
+    initialMessage: "Waiting for analysis to start...",
+  });
 }

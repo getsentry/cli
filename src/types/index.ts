@@ -7,20 +7,6 @@
 
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
-export type {
-  AutofixResponse,
-  AutofixState,
-  RootCause,
-  SolutionArtifact,
-} from "./autofix.js";
-// Autofix types
-export {
-  extractRootCauses,
-  extractSolution,
-  isTerminalStatus,
-  SolutionArtifactSchema,
-  TERMINAL_STATUSES,
-} from "./autofix.js";
 // Configuration types
 export type {
   CachedProject,
@@ -33,7 +19,6 @@ export {
   ProjectAliasesSchema,
   SentryConfigSchema,
 } from "./config.js";
-
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,
@@ -46,6 +31,20 @@ export {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "./oauth.js";
+export type {
+  AutofixResponse,
+  AutofixState,
+  RootCause,
+  SolutionArtifact,
+} from "./seer.js";
+// Seer types
+export {
+  extractRootCauses,
+  extractSolution,
+  isTerminalStatus,
+  SolutionArtifactSchema,
+  TERMINAL_STATUSES,
+} from "./seer.js";
 export type {
   // Breadcrumb types
   Breadcrumb,

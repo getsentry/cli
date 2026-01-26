@@ -1,5 +1,5 @@
 /**
- * Autofix Output Formatters
+ * Seer Output Formatters
  *
  * Formatting utilities for Seer Autofix command output.
  */
@@ -9,7 +9,7 @@ import type {
   AutofixState,
   RootCause,
   SolutionArtifact,
-} from "../../types/autofix.js";
+} from "../../types/seer.js";
 import { cyan, green, muted, yellow } from "./colors.js";
 
 const bold = (text: string): string => chalk.bold(text);
@@ -22,6 +22,9 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 
 /**
  * Get a spinner frame for the given tick count.
+ *
+ * @param tick - Current animation tick (cycles through frames)
+ * @returns Single spinner character for display
  */
 export function getSpinnerFrame(tick: number): string {
   const index = tick % SPINNER_FRAMES.length;
@@ -157,6 +160,8 @@ export function formatRootCause(cause: RootCause, index: number): string[] {
 
 /**
  * Format the root cause analysis header.
+ *
+ * @returns Array of formatted header lines
  */
 export function formatRootCauseHeader(): string[] {
   return ["", green("Root Cause Analysis Complete"), muted("═".repeat(30)), ""];

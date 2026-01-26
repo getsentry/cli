@@ -7,7 +7,6 @@
 
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
-import type { AutofixResponse, AutofixState } from "../types/autofix.js";
 import {
   type SentryEvent,
   SentryEventSchema,
@@ -18,6 +17,7 @@ import {
   type SentryProject,
   SentryProjectSchema,
 } from "../types/index.js";
+import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { refreshToken } from "./config.js";
 import { ApiError } from "./errors.js";
 

@@ -1,7 +1,7 @@
 /**
- * Autofix Formatter Tests
+ * Seer Formatter Tests
  *
- * Tests for formatting functions in src/lib/formatters/autofix.ts
+ * Tests for formatting functions in src/lib/formatters/seer.ts
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,8 +13,8 @@ import {
   getProgressMessage,
   getSpinnerFrame,
   truncateProgressMessage,
-} from "../../../src/lib/formatters/autofix.js";
-import type { AutofixState, RootCause } from "../../../src/types/autofix.js";
+} from "../../../src/lib/formatters/seer.js";
+import type { AutofixState, RootCause } from "../../../src/types/seer.js";
 
 describe("getSpinnerFrame", () => {
   test("returns a spinner character", () => {

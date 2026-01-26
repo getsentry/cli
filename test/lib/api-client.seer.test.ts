@@ -1,7 +1,7 @@
 /**
- * Autofix API Client Tests
+ * Seer API Client Tests
  *
- * Tests for the autofix-related API functions by mocking fetch.
+ * Tests for the seer-related API functions by mocking fetch.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -21,7 +21,7 @@ let originalFetch: typeof globalThis.fetch;
 beforeEach(async () => {
   testConfigDir = join(
     process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
-    `test-autofix-api-${Math.random().toString(36).slice(2)}`
+    `test-seer-api-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
   process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;

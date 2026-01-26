@@ -1,5 +1,5 @@
 /**
- * Autofix API Types
+ * Seer API Types
  *
  * Zod schemas and TypeScript types for Sentry's Seer Autofix API.
  */
@@ -162,7 +162,7 @@ export const PullRequestInfoSchema = z.object({
 export type PullRequestInfo = z.infer<typeof PullRequestInfoSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Solution Artifact (from fix command)
+// Solution Artifact (from plan command)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A single step in the solution plan */
@@ -263,14 +263,20 @@ export type AutofixUpdatePayload =
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Check if an autofix status is terminal (no more updates expected)
+ * Check if an autofix status is terminal (no more updates expected).
+ *
+ * @param status - The status string to check
+ * @returns True if the status indicates completion (COMPLETED, ERROR, CANCELLED)
  */
 export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
 /**
- * Extract root causes from autofix steps
+ * Extract root causes from autofix state steps.
+ *
+ * @param state - The autofix state containing analysis steps
+ * @returns Array of root causes, or empty array if none found
  */
 export function extractRootCauses(state: AutofixState): RootCause[] {
   if (!state.steps) {

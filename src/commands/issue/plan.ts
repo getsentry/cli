@@ -12,18 +12,18 @@ import {
   triggerSolutionPlanning,
 } from "../../lib/api-client.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
+import { muted } from "../../lib/formatters/colors.js";
+import { writeJson } from "../../lib/formatters/index.js";
 import {
   formatAutofixError,
   formatSolution,
-} from "../../lib/formatters/autofix.js";
-import { muted } from "../../lib/formatters/colors.js";
-import { writeJson } from "../../lib/formatters/index.js";
+} from "../../lib/formatters/seer.js";
 import {
   type AutofixState,
   extractRootCauses,
   extractSolution,
   type RootCause,
-} from "../../types/autofix.js";
+} from "../../types/seer.js";
 import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
 type PlanFlags = {
@@ -79,7 +79,13 @@ function validateAutofixState(
 }
 
 /**
- * Validate the cause selection.
+ * Validate and resolve the cause selection for solution planning.
+ *
+ * @param causes - Array of available root causes
+ * @param selectedCause - User-specified cause index, or undefined for auto-select
+ * @param issueId - Issue ID for error message hints
+ * @returns Validated cause index (0-based)
+ * @throws {ValidationError} If multiple causes exist without selection, or if selection is out of range
  */
 function validateCauseSelection(
   causes: RootCause[],
@@ -210,7 +216,7 @@ export const planCommand = buildCommand({
         stderr,
         json: flags.json,
         timeoutMessage:
-          "PR creation timed out after 10 minutes. Check the issue in Sentry web UI.",
+          "Plan creation timed out after 3 minutes. Try again or check the issue in Sentry web UI.",
       });
 
       // Handle errors
