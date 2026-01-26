@@ -150,7 +150,7 @@ jobs:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
         run: bun run bundle
       - name: Smoke test (Node.js)
-        run: node dist/bin.mjs --help
+        run: node dist/bin.cjs --help
       - run: npm pack
       - name: Upload artifact
         if: matrix.node == '22'

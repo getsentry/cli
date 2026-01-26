@@ -37,8 +37,8 @@ const result = await build({
   minify: true,
   platform: "node",
   target: "node22",
-  format: "esm",
-  outfile: "./dist/bin.mjs",
+  format: "cjs",
+  outfile: "./dist/bin.cjs",
   inject: ["./script/node-polyfills.ts"],
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
@@ -55,6 +55,6 @@ const outputs = Object.values(result.metafile?.outputs || {});
 const bundleSize = outputs.reduce((sum, out) => sum + out.bytes, 0);
 const bundleSizeKB = (bundleSize / 1024).toFixed(1);
 
-console.log(`\n  -> dist/bin.mjs (${bundleSizeKB} KB)`);
+console.log(`\n  -> dist/bin.cjs (${bundleSizeKB} KB)`);
 console.log(`\n${"=".repeat(40)}`);
 console.log("Bundle complete!");
