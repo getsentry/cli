@@ -98,7 +98,8 @@ export async function resolveOrgAndIssueId(
 
   // Try short suffix format (e.g., "G", "4Y") - requires project context.
   // isShortSuffix matches numeric IDs too, so also check isShortId (has letters).
-  if (isShortSuffix(issueId) && isShortId(issueId)) {
+  const looksLikeShortSuffix = isShortSuffix(issueId) && isShortId(issueId);
+  if (looksLikeShortSuffix) {
     try {
       const target = await resolveOrgAndProject({ org, cwd });
       if (target) {
@@ -106,13 +107,23 @@ export async function resolveOrgAndIssueId(
         const issue = await getIssueByShortId(target.org, resolvedShortId);
         return { org: target.org, issueId: issue.id };
       }
-    } catch {
-      // Fall through to full short ID
+      // No project context available - short suffix requires it
+      throw new ContextError(
+        "Organization and project",
+        commandHint.replace("--org <org>", "--org <org> --project <project>")
+      );
+    } catch (error) {
+      // Re-throw ContextError, but let API errors fall through
+      // (e.g., if getIssueByShortId returned 404, maybe it's a full short ID)
+      if (error instanceof ContextError) {
+        throw error;
+      }
     }
   }
 
   // Full short ID format (e.g., "CRAFT-G") - requires org context
-  if (isShortId(issueId)) {
+  // Skip this block if input looks like a short suffix (no hyphen)
+  if (isShortId(issueId) && !looksLikeShortSuffix) {
     const resolved = await resolveOrg({ org, cwd });
     if (!resolved) {
       throw new ContextError("Organization", commandHint);

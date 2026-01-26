@@ -235,6 +235,22 @@ describe("resolveOrgAndIssueId", () => {
     expect(result.issueId).toBe("444555666");
   });
 
+  test("throws ContextError for short suffix without project context", async () => {
+    // Clear any defaults to ensure no project context
+    const { writeConfig } = await import("../../../src/lib/config.js");
+    await writeConfig({});
+
+    // Short suffix "G" requires project context - should throw, not fall through
+    await expect(
+      resolveOrgAndIssueId(
+        "G",
+        undefined,
+        testConfigDir,
+        "sentry issue explain G --org <org>"
+      )
+    ).rejects.toThrow("Organization and project");
+  });
+
   test("falls back to full short ID when alias is not found in cache", async () => {
     const { clearProjectAliases } = await import("../../../src/lib/config.js");
     await clearProjectAliases();
