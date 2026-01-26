@@ -4,14 +4,16 @@
  *
  * Creates a single-file Node.js bundle using esbuild.
  * Injects Bun polyfills for Node.js compatibility.
+ * Uploads source maps to Sentry when SENTRY_AUTH_TOKEN is available.
  *
  * Usage:
  *   bun run script/bundle.ts
  *
  * Output:
- *   dist/bin.mjs - Minified, single-file bundle for npm
+ *   dist/bin.cjs - Minified, single-file bundle for npm
  */
-import { build } from "esbuild";
+import { sentryEsbuildPlugin } from "@sentry/esbuild-plugin";
+import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 
 const VERSION = pkg.version;
@@ -27,10 +29,37 @@ if (!SENTRY_CLIENT_ID) {
   process.exit(1);
 }
 
+// Configure Sentry plugin for source map uploads (production builds only)
+const plugins: Plugin[] = [];
+
+if (process.env.SENTRY_AUTH_TOKEN) {
+  console.log("  Sentry auth token found, source maps will be uploaded");
+  plugins.push(
+    sentryEsbuildPlugin({
+      org: "sentry",
+      project: "cli",
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      release: {
+        name: VERSION,
+      },
+      sourcemaps: {
+        filesToDeleteAfterUpload: ["dist/**/*.map"],
+      },
+      // Don't fail the build if source map upload fails
+      errorHandler: (err) => {
+        console.warn("  Warning: Source map upload failed:", err.message);
+      },
+    })
+  );
+} else {
+  console.log("  No SENTRY_AUTH_TOKEN, skipping source map upload");
+}
+
 const result = await build({
   entryPoints: ["./src/bin.ts"],
   bundle: true,
   minify: true,
+  sourcemap: true,
   platform: "node",
   target: "node22",
   format: "cjs",
@@ -47,11 +76,12 @@ const result = await build({
   // Only externalize Node.js built-ins - bundle all npm packages
   external: ["node:*"],
   metafile: true,
+  plugins,
 });
 
-// Calculate bundle size
-const outputs = Object.values(result.metafile?.outputs || {});
-const bundleSize = outputs.reduce((sum, out) => sum + out.bytes, 0);
+// Calculate bundle size (only the main bundle, not source maps)
+const bundleOutput = result.metafile?.outputs["dist/bin.cjs"];
+const bundleSize = bundleOutput?.bytes ?? 0;
 const bundleSizeKB = (bundleSize / 1024).toFixed(1);
 
 console.log(`\n  -> dist/bin.cjs (${bundleSizeKB} KB)`);

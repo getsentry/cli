@@ -128,6 +128,7 @@ jobs:
     name: Build npm Package (Node ${{ matrix.node }})
     needs: [lint, test]
     runs-on: ubuntu-latest
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -148,6 +149,7 @@ jobs:
       - name: Bundle
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: bun run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
