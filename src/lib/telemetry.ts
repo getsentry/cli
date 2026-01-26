@@ -20,23 +20,26 @@ import { SENTRY_CLI_DSN } from "./constants.js";
 declare const SENTRY_CLI_VERSION: string | undefined;
 
 /** Environment variable to disable telemetry */
-export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
+const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
+
+function isTelemetryEnabled(): boolean {
+  return process.env[TELEMETRY_ENV_VAR] !== "1";
+}
 
 /**
  * Wrap CLI execution with telemetry tracking.
  *
  * Creates a Sentry session and span for the command execution.
  * Captures any unhandled exceptions and reports them.
+ * Telemetry can be disabled via SENTRY_CLI_NO_TELEMETRY=1 env var.
  *
- * @param enabled - Whether telemetry is enabled
  * @param callback - The CLI execution function to wrap
  * @returns The result of the callback
  */
 export async function withTelemetry<T>(
-  enabled: boolean,
   callback: () => T | Promise<T>
 ): Promise<T> {
-  const client = initSentry(enabled);
+  const client = initSentry(isTelemetryEnabled());
   if (!client?.getOptions().enabled) {
     return callback();
   }

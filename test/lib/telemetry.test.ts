@@ -1,15 +1,11 @@
 /**
  * Telemetry Module Tests
  *
- * Tests for telemetry helper functions and opt-out behavior.
+ * Tests for withTelemetry wrapper and opt-out behavior.
  */
 
-import { describe, expect, test } from "bun:test";
-import {
-  initSentry,
-  TELEMETRY_ENV_VAR,
-  withTelemetry,
-} from "../../src/lib/telemetry.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { initSentry, withTelemetry } from "../../src/lib/telemetry.js";
 
 describe("initSentry", () => {
   test("returns client with enabled=false when disabled", () => {
@@ -37,60 +33,53 @@ describe("initSentry", () => {
 });
 
 describe("withTelemetry", () => {
-  test("executes callback when telemetry is disabled", async () => {
-    let executed = false;
-    await withTelemetry(false, () => {
-      executed = true;
-    });
-    expect(executed).toBe(true);
+  const ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
+  let originalEnvValue: string | undefined;
+
+  beforeEach(() => {
+    originalEnvValue = process.env[ENV_VAR];
   });
 
-  test("returns callback result when telemetry is disabled", async () => {
-    const result = await withTelemetry(false, () => 42);
+  afterEach(() => {
+    if (originalEnvValue === undefined) {
+      delete process.env[ENV_VAR];
+    } else {
+      process.env[ENV_VAR] = originalEnvValue;
+    }
+  });
+
+  test("executes callback and returns result", async () => {
+    const result = await withTelemetry(() => 42);
     expect(result).toBe(42);
   });
 
-  test("handles async callbacks when telemetry is disabled", async () => {
-    const result = await withTelemetry(false, async () => {
+  test("handles async callbacks", async () => {
+    const result = await withTelemetry(async () => {
       await Bun.sleep(1);
       return "async result";
     });
     expect(result).toBe("async result");
   });
 
-  test("propagates errors from callback when telemetry is disabled", async () => {
-    const testError = new Error("test error");
+  test("propagates errors from callback", async () => {
     await expect(
-      withTelemetry(false, () => {
-        throw testError;
+      withTelemetry(() => {
+        throw new Error("test error");
       })
     ).rejects.toThrow("test error");
   });
 
-  test("propagates async errors when telemetry is disabled", async () => {
+  test("propagates async errors", async () => {
     await expect(
-      withTelemetry(false, async () => {
+      withTelemetry(async () => {
         await Bun.sleep(1);
         throw new Error("async error");
       })
     ).rejects.toThrow("async error");
   });
 
-  test("executes callback when telemetry is enabled", async () => {
-    let executed = false;
-    await withTelemetry(true, () => {
-      executed = true;
-    });
-    expect(executed).toBe(true);
-  });
-
-  test("returns result when telemetry is enabled", async () => {
-    const result = await withTelemetry(true, () => "success");
-    expect(result).toBe("success");
-  });
-
   test("handles complex return types", async () => {
-    const result = await withTelemetry(false, () => ({
+    const result = await withTelemetry(() => ({
       status: "ok",
       count: 42,
       items: [1, 2, 3],
@@ -100,7 +89,7 @@ describe("withTelemetry", () => {
 
   test("handles void return value", async () => {
     let sideEffect = false;
-    const result = await withTelemetry(false, () => {
+    const result = await withTelemetry(() => {
       sideEffect = true;
     });
     expect(result).toBeUndefined();
@@ -108,13 +97,16 @@ describe("withTelemetry", () => {
   });
 
   test("handles null return value", async () => {
-    const result = await withTelemetry(false, () => null);
+    const result = await withTelemetry(() => null);
     expect(result).toBeNull();
   });
-});
 
-describe("constants", () => {
-  test("TELEMETRY_ENV_VAR is correct", () => {
-    expect(TELEMETRY_ENV_VAR).toBe("SENTRY_CLI_NO_TELEMETRY");
+  test("respects SENTRY_CLI_NO_TELEMETRY=1 env var", async () => {
+    process.env[ENV_VAR] = "1";
+    let executed = false;
+    await withTelemetry(() => {
+      executed = true;
+    });
+    expect(executed).toBe(true);
   });
 });
