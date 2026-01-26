@@ -111,7 +111,9 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
       // Replace home directory with ~ in stack traces to remove PII
       const homeDir = process.env.HOME || process.env.USERPROFILE;
       for (const exception of event.exception?.values ?? []) {
-        if (!exception.stacktrace?.frames) continue;
+        if (!exception.stacktrace?.frames) {
+          continue;
+        }
         for (const frame of exception.stacktrace.frames) {
           if (frame.filename && homeDir) {
             frame.filename = frame.filename.replace(homeDir, "~");
