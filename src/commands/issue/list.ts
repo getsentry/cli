@@ -104,17 +104,17 @@ function writeListFooter(
   switch (mode) {
     case "single":
       stdout.write(
-        "\nTip: Use 'sentry issue get <ID>' to view details (bold part works as shorthand).\n"
+        "\nTip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).\n"
       );
       break;
     case "multi":
       stdout.write(
-        "\nTip: Use 'sentry issue get <ALIAS>' to view details (see ALIAS column).\n"
+        "\nTip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).\n"
       );
       break;
     default:
       stdout.write(
-        "\nTip: Use 'sentry issue get <SHORT_ID>' to view issue details.\n"
+        "\nTip: Use 'sentry issue view <SHORT_ID>' to view issue details.\n"
       );
   }
 }
