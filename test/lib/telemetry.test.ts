@@ -8,7 +8,6 @@ import { describe, expect, test } from "bun:test";
 import {
   initSentry,
   TELEMETRY_ENV_VAR,
-  TELEMETRY_FLAG,
   withTelemetry,
 } from "../../src/lib/telemetry.js";
 
@@ -115,9 +114,5 @@ describe("withTelemetry", () => {
 describe("constants", () => {
   test("TELEMETRY_ENV_VAR is correct", () => {
     expect(TELEMETRY_ENV_VAR).toBe("SENTRY_CLI_NO_TELEMETRY");
-  });
-
-  test("TELEMETRY_FLAG is correct", () => {
-    expect(TELEMETRY_FLAG).toBe("--no-telemetry");
   });
 });
