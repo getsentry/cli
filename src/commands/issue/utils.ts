@@ -140,7 +140,8 @@ export async function resolveOrgAndIssueId(
       aliasSuffix.alias,
       aliasSuffix.suffix,
       cwd
-    ).catch(() => null);
+    );
+    // Only fall through if alias not found (null). Let real errors propagate.
     if (result) {
       return result;
     }
