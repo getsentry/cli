@@ -14,6 +14,13 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node";
 
+/**
+ * Build-time constants injected by esbuild/bun.
+ * These are undefined when running unbundled in development.
+ */
+declare const SENTRY_DSN_BUILD: string | undefined;
+declare const SENTRY_CLI_VERSION: string | undefined;
+
 /** Environment variable to disable telemetry */
 export const TELEMETRY_ENV_VAR = "SENTRY_CLI_NO_TELEMETRY";
 
@@ -78,23 +85,6 @@ export async function withTelemetry<T>(
 }
 
 /**
- * Safely get a build-time constant that may not be defined in development.
- * Build-time constants are injected by esbuild/bun during the build process.
- *
- * @internal Exported for testing
- */
-export function getBuildConstant(name: string): string | undefined {
-  try {
-    // Use indirect eval to check if the constant exists at runtime
-    // This avoids ReferenceError when running unbundled in development
-    // biome-ignore lint/security/noGlobalEval: required for build-time constant detection
-    return eval(name) as string | undefined;
-  } catch {
-    return;
-  }
-}
-
-/**
  * Initialize Sentry for telemetry.
  *
  * @param enabled - Whether telemetry is enabled
@@ -103,17 +93,15 @@ export function getBuildConstant(name: string): string | undefined {
  * @internal Exported for testing
  */
 export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
-  const dsn = getBuildConstant("SENTRY_DSN_BUILD");
-  const version = getBuildConstant("SENTRY_CLI_VERSION");
-
-  // Don't initialize if disabled or no DSN configured
-  if (!(enabled && dsn)) {
-    return;
-  }
+  // Build-time constants are undefined when running unbundled in development
+  const dsn =
+    typeof SENTRY_DSN_BUILD !== "undefined" ? SENTRY_DSN_BUILD : undefined;
+  const version =
+    typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : undefined;
 
   const client = Sentry.init({
     dsn,
-    enabled: true,
+    enabled,
     // Minimal integrations for CLI - we don't need most Node.js integrations
     defaultIntegrations: false,
     integrations: [Sentry.httpIntegration()],

@@ -7,7 +7,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   extractCommand,
-  getBuildConstant,
   initSentry,
   isTelemetryEnabled,
   TELEMETRY_ENV_VAR,
@@ -112,29 +111,6 @@ describe("isTelemetryEnabled", () => {
   test("returns true when env var is set to 'yes'", () => {
     process.env[TELEMETRY_ENV_VAR] = "yes";
     expect(isTelemetryEnabled()).toBe(true);
-  });
-});
-
-describe("getBuildConstant", () => {
-  test("returns undefined for undefined constant", () => {
-    expect(getBuildConstant("UNDEFINED_CONSTANT_XYZ")).toBeUndefined();
-  });
-
-  test("returns undefined for invalid JavaScript identifier", () => {
-    expect(getBuildConstant("not-a-valid-identifier")).toBeUndefined();
-  });
-
-  test("returns value for defined global constant", () => {
-    // process is a global that should be defined
-    expect(getBuildConstant("process.platform")).toBe(process.platform);
-  });
-
-  test("handles syntax errors gracefully", () => {
-    expect(getBuildConstant("{{invalid}}")).toBeUndefined();
-  });
-
-  test("handles runtime errors gracefully", () => {
-    expect(getBuildConstant("undefined.property")).toBeUndefined();
   });
 });
 
