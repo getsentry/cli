@@ -32,7 +32,7 @@ describe("resolveOrgAndIssueId", () => {
     const result = await resolveOrgAndIssueId(
       "123456789",
       "my-org",
-      "/tmp",
+      testConfigDir,
       "sentry issue explain 123456789 --org <org-slug>"
     );
 
@@ -72,7 +72,7 @@ describe("resolveOrgAndIssueId", () => {
     const result = await resolveOrgAndIssueId(
       "PROJECT-ABC",
       "my-org",
-      "/tmp",
+      testConfigDir,
       "sentry issue explain PROJECT-ABC --org <org-slug>"
     );
 
