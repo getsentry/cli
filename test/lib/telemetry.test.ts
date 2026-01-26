@@ -25,8 +25,6 @@ describe("initSentry", () => {
 
   test("uses process.env.NODE_ENV for environment", () => {
     const client = initSentry(true);
-    // In test environment, NODE_ENV is "test"
-    // In production builds, esbuild replaces process.env.NODE_ENV with "production"
     expect(client?.getOptions().environment).toBe(
       process.env.NODE_ENV ?? "development"
     );

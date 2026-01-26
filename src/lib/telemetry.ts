@@ -37,8 +37,6 @@ export async function withTelemetry<T>(
   callback: () => T | Promise<T>
 ): Promise<T> {
   const client = initSentry(enabled);
-
-  // If Sentry is not enabled, just run the callback
   if (!client?.getOptions().enabled) {
     return callback();
   }

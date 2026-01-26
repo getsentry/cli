@@ -7,7 +7,6 @@ import { error } from "./lib/formatters/colors.js";
 import { TELEMETRY_ENV_VAR, withTelemetry } from "./lib/telemetry.js";
 
 async function main(): Promise<void> {
-  // Telemetry is enabled unless explicitly disabled via env var
   const telemetryEnabled = process.env[TELEMETRY_ENV_VAR] !== "1";
 
   try {

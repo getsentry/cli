@@ -42,7 +42,6 @@ export function buildContext(process: NodeJS.Process) {
   return {
     ...baseContext,
     forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
-      // Set the command name for telemetry (e.g., "auth.login")
       setCommandName(prefix.join("."));
       return baseContext;
     },
