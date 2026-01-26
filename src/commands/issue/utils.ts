@@ -74,7 +74,10 @@ async function resolveShortSuffixId(
   if (!target) {
     throw new ContextError(
       "Organization and project",
-      ctx.commandHint.replace("--org <org-slug>", "--org <org-slug> --project <project-slug>")
+      ctx.commandHint.replace(
+        "--org <org-slug>",
+        "--org <org-slug> --project <project-slug>"
+      )
     );
   }
   const resolvedShortId = expandToFullShortId(ctx.issueId, target.project);
