@@ -21,15 +21,12 @@
 
 import { $ } from "bun";
 import pkg from "../package.json";
+import { SENTRY_CLI_DSN } from "./constants.js";
 
 const VERSION = pkg.version;
 
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
-
-// DSN for CLI telemetry (not user projects) - safe to hardcode as it's public
-const SENTRY_DSN =
-  "https://1188a86f3f8168f089450587b00bca66@o1.ingest.us.sentry.io/4510776311808000";
 
 /** Build targets configuration */
 type BuildTarget = {
@@ -82,7 +79,7 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
     define: {
       SENTRY_CLI_VERSION: JSON.stringify(VERSION),
       SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-      SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
+      SENTRY_DSN_BUILD: JSON.stringify(SENTRY_CLI_DSN),
     },
     sourcemap: "none",
   });

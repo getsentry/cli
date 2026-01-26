@@ -13,13 +13,10 @@
  */
 import { build } from "esbuild";
 import pkg from "../package.json";
+import { SENTRY_CLI_DSN } from "./constants.js";
 
 const VERSION = pkg.version;
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
-
-// DSN for CLI telemetry (not user projects) - safe to hardcode as it's public
-const SENTRY_DSN =
-  "https://1188a86f3f8168f089450587b00bca66@o1.ingest.us.sentry.io/4510776311808000";
 
 console.log(`\nBundling sentry v${VERSION} for npm`);
 console.log("=".repeat(40));
@@ -40,11 +37,11 @@ const result = await build({
   format: "cjs",
   outfile: "./dist/bin.cjs",
   // Inject Bun polyfills and import.meta.url shim for CJS compatibility
-  inject: ["./script/node-polyfills.ts", "./src/lib/import-meta-url.js"],
+  inject: ["./script/node-polyfills.ts", "./script/import-meta-url.js"],
   define: {
     SENTRY_CLI_VERSION: JSON.stringify(VERSION),
     SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-    SENTRY_DSN_BUILD: JSON.stringify(SENTRY_DSN),
+    SENTRY_DSN_BUILD: JSON.stringify(SENTRY_CLI_DSN),
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
