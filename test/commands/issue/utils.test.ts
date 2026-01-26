@@ -29,12 +29,41 @@ afterEach(async () => {
 
 describe("resolveOrgAndIssueId", () => {
   test("returns org and numeric issue ID when org is provided", async () => {
-    const result = await resolveOrgAndIssueId(
-      "123456789",
-      "my-org",
-      testConfigDir,
-      "sentry issue explain 123456789 --org <org-slug>"
-    );
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Numeric ID is fetched directly
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "123456789",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain 123456789 --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("123456789");
@@ -69,12 +98,12 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "PROJECT-ABC",
-      "my-org",
-      testConfigDir,
-      "sentry issue explain PROJECT-ABC --org <org-slug>"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "PROJECT-ABC",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain PROJECT-ABC --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("987654321");
@@ -83,13 +112,41 @@ describe("resolveOrgAndIssueId", () => {
   test("throws ContextError when org cannot be resolved", async () => {
     delete process.env.SENTRY_DSN;
 
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Numeric ID is fetched directly - this succeeds
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
     await expect(
-      resolveOrgAndIssueId(
-        "123456789",
-        undefined,
-        "/nonexistent/path",
-        "sentry issue explain 123456789 --org <org-slug>"
-      )
+      resolveOrgAndIssueId({
+        issueId: "123456789",
+        cwd: "/nonexistent/path",
+        commandHint: "sentry issue explain 123456789 --org <org-slug>",
+      })
     ).rejects.toThrow("Organization");
   });
 
@@ -132,12 +189,11 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "f-g",
-      undefined,
-      testConfigDir,
-      "sentry issue explain f-g --org <org-slug>"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "f-g",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain f-g --org <org-slug>",
+    });
 
     expect(result.org).toBe("cached-org");
     expect(result.issueId).toBe("111222333");
@@ -181,12 +237,11 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "o1:d-4y",
-      undefined,
-      testConfigDir,
-      "sentry issue explain o1:d-4y"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "o1:d-4y",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain o1:d-4y",
+    });
 
     expect(result.org).toBe("org1");
     expect(result.issueId).toBe("999888777");
@@ -224,12 +279,11 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "G",
-      undefined,
-      testConfigDir,
-      "sentry issue explain G --org <org-slug>"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "G",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain G --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("444555666");
@@ -242,13 +296,58 @@ describe("resolveOrgAndIssueId", () => {
 
     // Short suffix "G" requires project context - should throw, not fall through
     await expect(
-      resolveOrgAndIssueId(
-        "G",
-        undefined,
-        testConfigDir,
-        "sentry issue explain G --org <org-slug>"
-      )
+      resolveOrgAndIssueId({
+        issueId: "G",
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G --org <org-slug>",
+      })
     ).rejects.toThrow("Organization and project");
+  });
+
+  test("resolves short suffix with explicit --org and --project flags", async () => {
+    // Clear any defaults to ensure we're testing explicit flags
+    const { writeConfig } = await import("../../../src/lib/config.js");
+    await writeConfig({});
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/my-org/issues/MY-PROJECT-G")) {
+        return new Response(
+          JSON.stringify({
+            id: "555666777",
+            shortId: "MY-PROJECT-G",
+            title: "Test Issue with explicit flags",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "3",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "G",
+      org: "my-org",
+      project: "my-project",
+      cwd: testConfigDir,
+      commandHint:
+        "sentry issue explain G --org <org-slug> --project <project-slug>",
+    });
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("555666777");
   });
 
   test("falls back to full short ID when alias is not found in cache", async () => {
@@ -283,12 +382,12 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "craft-g",
-      "my-org",
-      testConfigDir,
-      "sentry issue explain craft-g --org <org-slug>"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "craft-g",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain craft-g --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("777888999");
