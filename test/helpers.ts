@@ -4,13 +4,16 @@
  * Shared utilities for test setup and teardown.
  */
 
+import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+
+const TEST_TMP_DIR = resolve(import.meta.dir, "../.test-tmp");
+mkdirSync(TEST_TMP_DIR, { recursive: true });
 
 /**
  * Creates a unique temporary directory for test isolation.
- * Uses the system temp directory for cross-platform compatibility.
+ * Uses a project-local temp directory to avoid read-only system /tmp issues.
  *
  * @param prefix - Directory name prefix (default: "sentry-test-")
  * @returns Full path to the created temporary directory
@@ -18,7 +21,7 @@ import { join } from "node:path";
 export async function createTestConfigDir(
   prefix = "sentry-test-"
 ): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
+  return mkdtemp(join(TEST_TMP_DIR, prefix));
 }
 
 /**
