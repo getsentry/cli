@@ -17,14 +17,19 @@ import {
   formatRootCauseList,
 } from "../../lib/formatters/seer.js";
 import { extractRootCauses } from "../../types/seer.js";
-import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
+import {
+  buildCommandHint,
+  type IssueIdFlags,
+  issueIdFlags,
+  issueIdPositional,
+  pollAutofixState,
+  resolveOrgAndIssueId,
+} from "./utils.js";
 
-type ExplainFlags = {
-  readonly org?: string;
-  readonly project?: string;
+interface ExplainFlags extends IssueIdFlags {
   readonly json: boolean;
   readonly force: boolean;
-};
+}
 
 export const explainCommand = buildCommand({
   docs: {
@@ -45,30 +50,9 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --force",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Issue ID or short ID (e.g., MYPROJECT-ABC or 123456789)",
-          parse: String,
-        },
-      ],
-    },
+    positional: issueIdPositional,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Organization slug (required for short IDs if not auto-detected)",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Project slug (required for short suffixes if not auto-detected)",
-        optional: true,
-      },
+      ...issueIdFlags,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -95,7 +79,7 @@ export const explainCommand = buildCommand({
         org: flags.org,
         project: flags.project,
         cwd,
-        commandHint: `sentry issue explain ${issueId} --org <org-slug> --project <project-slug>`,
+        commandHint: buildCommandHint("explain", issueId),
       });
 
       // 1. Check for existing analysis (skip if --force)

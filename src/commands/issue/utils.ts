@@ -4,6 +4,7 @@
  * Common functionality used by explain, plan, view, and other issue commands.
  */
 
+import type { FlagParametersForType } from "@stricli/core";
 import {
   getAutofixState,
   getIssue,
@@ -23,6 +24,45 @@ import { poll } from "../../lib/polling.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
+
+/** Base flags for issue commands that accept an issue ID */
+export type IssueIdFlags = {
+  readonly org?: string;
+  readonly project?: string;
+};
+
+/** Shared --org and --project flag definitions for issue ID commands */
+export const issueIdFlags: FlagParametersForType<IssueIdFlags> = {
+  org: {
+    kind: "parsed",
+    parse: String,
+    brief: "Organization slug (required for short IDs if not auto-detected)",
+    optional: true,
+  },
+  project: {
+    kind: "parsed",
+    parse: String,
+    brief: "Project slug (required for short suffixes if not auto-detected)",
+    optional: true,
+  },
+};
+
+/** Shared positional parameter for issue ID (numeric, short ID, suffix, or alias-suffix) */
+export const issueIdPositional = {
+  kind: "tuple",
+  parameters: [
+    {
+      brief:
+        "Issue ID, short ID, suffix, or alias-suffix (e.g., 123456, CRAFT-G, G, or f-g)",
+      parse: String,
+    },
+  ],
+} as const;
+
+/** Build a command hint string for error messages */
+export function buildCommandHint(command: string, issueId: string): string {
+  return `sentry issue ${command} ${issueId} --org <org-slug> --project <project-slug>`;
+}
 
 /** Default timeout in milliseconds (3 minutes) */
 const DEFAULT_TIMEOUT_MS = 180_000;

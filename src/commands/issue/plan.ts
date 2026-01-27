@@ -24,14 +24,19 @@ import {
   extractSolution,
   type RootCause,
 } from "../../types/seer.js";
-import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
+import {
+  buildCommandHint,
+  type IssueIdFlags,
+  issueIdFlags,
+  issueIdPositional,
+  pollAutofixState,
+  resolveOrgAndIssueId,
+} from "./utils.js";
 
-type PlanFlags = {
-  readonly org?: string;
-  readonly project?: string;
+interface PlanFlags extends IssueIdFlags {
   readonly cause?: number;
   readonly json: boolean;
-};
+}
 
 /**
  * Validate that an autofix run exists and has completed root cause analysis.
@@ -145,30 +150,9 @@ export const planCommand = buildCommand({
       "  sentry issue plan G --org my-org --project my-project --cause 0",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Issue ID or short ID (e.g., MYPROJECT-ABC or 123456789)",
-          parse: String,
-        },
-      ],
-    },
+    positional: issueIdPositional,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Organization slug (required for short IDs if not auto-detected)",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Project slug (required for short suffixes if not auto-detected)",
-        optional: true,
-      },
+      ...issueIdFlags,
       cause: {
         kind: "parsed",
         parse: numberParser,
@@ -196,7 +180,7 @@ export const planCommand = buildCommand({
         org: flags.org,
         project: flags.project,
         cwd,
-        commandHint: `sentry issue plan ${issueId} --org <org-slug> --project <project-slug>`,
+        commandHint: buildCommandHint("plan", issueId),
       });
 
       // Get current autofix state
