@@ -96,7 +96,7 @@ export type CliResult = {
  * Uses SENTRY_CLI_BINARY env var if set (for CI with pre-built binary),
  * otherwise falls back to running source via bun.
  */
-function getCliCommand(): string[] {
+export function getCliCommand(): string[] {
   const binaryPath = process.env.SENTRY_CLI_BINARY;
   if (binaryPath) {
     return [binaryPath];

@@ -1,0 +1,70 @@
+diff --git a/build/esm/client.js b/build/esm/client.js
+index 1111111111111111111111111111111111111111..2222222222222222222222222222222222222222 100644
+--- a/build/esm/client.js
++++ b/build/esm/client.js
+@@ -643,11 +643,16 @@ class Client {
+    * `false` otherwise
+    */
+    async _isClientDoneProcessing(timeout) {
++    // Check immediately first - no need to wait if nothing is processing
++    if (!this._numProcessing) {
++      return true;
++    }
++
+     let ticked = 0;
+ 
+     // if no timeout is provided, we wait "forever" until everything is processed
+     while (!timeout || ticked < timeout) {
+-      await new Promise(resolve => setTimeout(resolve, 1));
++      await new Promise(resolve => { const t = setTimeout(resolve, 1); if (typeof t !== 'number' && t.unref) t.unref(); });
+ 
+       if (!this._numProcessing) {
+         return true;
+diff --git a/build/cjs/client.js b/build/cjs/client.js
+index 3333333333333333333333333333333333333333..4444444444444444444444444444444444444444 100644
+--- a/build/cjs/client.js
++++ b/build/cjs/client.js
+@@ -645,11 +645,16 @@ class Client {
+    * `false` otherwise
+    */
+    async _isClientDoneProcessing(timeout) {
++    // Check immediately first - no need to wait if nothing is processing
++    if (!this._numProcessing) {
++      return true;
++    }
++
+     let ticked = 0;
+ 
+     // if no timeout is provided, we wait "forever" until everything is processed
+     while (!timeout || ticked < timeout) {
+-      await new Promise(resolve => setTimeout(resolve, 1));
++      await new Promise(resolve => { const t = setTimeout(resolve, 1); if (typeof t !== 'number' && t.unref) t.unref(); });
+ 
+       if (!this._numProcessing) {
+         return true;
+diff --git a/build/esm/utils/promisebuffer.js b/build/esm/utils/promisebuffer.js
+index 5555555555555555555555555555555555555555..6666666666666666666666666666666666666666 100644
+--- a/build/esm/utils/promisebuffer.js
++++ b/build/esm/utils/promisebuffer.js
+@@ -69,7 +69,7 @@ function makePromiseBuffer(limit = 100) {
+       return drainPromise;
+     }
+ 
+-    const promises = [drainPromise, new Promise(resolve => setTimeout(() => resolve(false), timeout))];
++    const promises = [drainPromise, new Promise(resolve => { const t = setTimeout(() => resolve(false), timeout); if (typeof t !== 'number' && t.unref) t.unref(); })];
+ 
+     // Promise.race will resolve to the first promise that resolves or rejects
+     // So if the drainPromise resolves, the timeout promise will be ignored
+diff --git a/build/cjs/utils/promisebuffer.js b/build/cjs/utils/promisebuffer.js
+index 7777777777777777777777777777777777777777..8888888888888888888888888888888888888888 100644
+--- a/build/cjs/utils/promisebuffer.js
++++ b/build/cjs/utils/promisebuffer.js
+@@ -71,7 +71,7 @@ function makePromiseBuffer(limit = 100) {
+       return drainPromise;
+     }
+ 
+-    const promises = [drainPromise, new Promise(resolve => setTimeout(() => resolve(false), timeout))];
++    const promises = [drainPromise, new Promise(resolve => { const t = setTimeout(() => resolve(false), timeout); if (typeof t !== 'number' && t.unref) t.unref(); })];
+ 
+     // Promise.race will resolve to the first promise that resolves or rejects
+     // So if the drainPromise resolves, the timeout promise will be ignored

@@ -49,6 +49,7 @@
   },
   "packageManager": "bun@1.3.3",
   "patchedDependencies": {
-    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
+    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
+    "@sentry/core@10.36.0": "patches/@sentry%2Fcore@10.36.0.patch"
   }
 }
