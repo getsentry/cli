@@ -356,16 +356,15 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-section {
   margin: 2rem 0;
-  padding: 3rem;
   background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
+  overflow: hidden;
 }
 
 .feature-section-inner {
   display: flex;
-  align-items: center;
-  gap: 3rem;
+  align-items: stretch;
+  min-height: 360px;
 }
 
 .feature-section-inner.reverse {
@@ -375,6 +374,10 @@ starlight-tabs [role="tabpanel"] {
 .feature-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem;
 }
 
 .feature-text h3 {
@@ -400,11 +403,9 @@ starlight-tabs [role="tabpanel"] {
 }
 
 .feature-visual {
-  flex: 0 0 480px;
-  height: 320px;
+  flex: 0 0 55%;
   background-size: cover;
   background-position: center;
-  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -413,35 +414,35 @@ starlight-tabs [role="tabpanel"] {
 
 /* Responsive for feature sections */
 @media (max-width: 1000px) {
-  .feature-section {
-    padding: 2rem;
-  }
-
   .feature-section-inner,
   .feature-section-inner.reverse {
     flex-direction: column;
-    gap: 2rem;
+    min-height: auto;
+  }
+
+  .feature-text {
+    padding: 2rem;
+    text-align: center;
   }
 
   .feature-visual {
     flex: none;
     width: 100%;
-    height: 280px;
-  }
-
-  .feature-text {
-    text-align: center;
+    min-height: 300px;
   }
 }
 
 @media (max-width: 600px) {
   .feature-section {
-    padding: 1.5rem;
     margin: 1.5rem 0;
   }
 
+  .feature-text {
+    padding: 1.5rem;
+  }
+
   .feature-visual {
-    height: 240px;
+    min-height: 260px;
   }
 
   .feature-text h3 {
