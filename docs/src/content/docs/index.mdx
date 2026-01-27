@@ -16,7 +16,7 @@ import CommandBox from '../../components/CommandBox.astro';
 import Terminal from '../../components/Terminal.astro';
 import FeatureTerminal from '../../components/FeatureTerminal.astro';
 
-export const base = import.meta.env.BASE_URL;
+export const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : import.meta.env.BASE_URL + '/';
 
 <div class="hero-command">
 <CommandBox command="npx sentry@latest" docsLink="./getting-started/" docsText="Read the docs" />
