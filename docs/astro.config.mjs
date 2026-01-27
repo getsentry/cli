@@ -47,6 +47,88 @@ export default defineConfig({
           tag: "script",
           content: `document.documentElement.dataset.theme = 'dark';`,
         },
+        // Overscroll easter egg - bottom of page, only on /cli route
+        {
+          tag: "script",
+          content: `
+            (function() {
+              let overscrollEl;
+              let pullDistance = 0;
+              let touchStartY = 0;
+              let isAtBottom = false;
+              
+              function isLandingPage() {
+                const path = window.location.pathname;
+                return path === '/cli' || path === '/cli/';
+              }
+              
+              function checkAtBottom() {
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = document.documentElement.clientHeight;
+                return scrollTop + clientHeight >= scrollHeight - 5;
+              }
+              
+              function createOverscrollMessage() {
+                if (!isLandingPage()) return;
+                overscrollEl = document.createElement('div');
+                overscrollEl.className = 'overscroll-message';
+                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code>npx sentry@latest</code></span>';
+                document.body.appendChild(overscrollEl);
+              }
+              
+              function updateOverscroll(distance) {
+                if (!overscrollEl) return;
+                const clampedDistance = Math.min(Math.max(distance, 0), 50);
+                const opacity = Math.min(clampedDistance / 15, 1);
+                const translateY = Math.min(clampedDistance * 2.5, 120);
+                overscrollEl.style.opacity = opacity;
+                overscrollEl.style.transform = 'translateX(-50%) translateY(-' + translateY + 'px)';
+              }
+              
+              function handleTouchStart(e) {
+                if (!isLandingPage()) return;
+                touchStartY = e.touches[0].clientY;
+                isAtBottom = checkAtBottom();
+              }
+              
+              function handleTouchMove(e) {
+                if (!isLandingPage() || !isAtBottom) return;
+                const touchY = e.touches[0].clientY;
+                pullDistance = touchStartY - touchY;
+                if (pullDistance > 0 && checkAtBottom()) {
+                  updateOverscroll(pullDistance);
+                }
+              }
+              
+              function handleTouchEnd() {
+                pullDistance = 0;
+                updateOverscroll(0);
+              }
+              
+              function handleWheel(e) {
+                if (!isLandingPage()) return;
+                if (checkAtBottom() && e.deltaY > 0) {
+                  pullDistance = Math.min(pullDistance + e.deltaY * 0.8, 50);
+                  updateOverscroll(pullDistance);
+                  clearTimeout(window.overscrollTimeout);
+                  window.overscrollTimeout = setTimeout(function() {
+                    pullDistance = 0;
+                    updateOverscroll(0);
+                  }, 300);
+                }
+              }
+              
+              document.addEventListener('DOMContentLoaded', function() {
+                createOverscrollMessage();
+                document.addEventListener('touchstart', handleTouchStart, { passive: true });
+                document.addEventListener('touchmove', handleTouchMove, { passive: true });
+                document.addEventListener('touchend', handleTouchEnd, { passive: true });
+                document.addEventListener('wheel', handleWheel, { passive: true });
+              });
+            })();
+          `,
+        },
         // Add fonts
         {
           tag: "link",

@@ -1568,3 +1568,71 @@ nav.sidebar a[aria-current="page"] {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* ==========================================================================
+   Overscroll Easter Egg
+   ========================================================================== */
+
+.overscroll-message {
+  position: fixed;
+  bottom: -60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.6rem 1.5rem;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 24px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+}
+
+.overscroll-message code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+  color: #a78bfa;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
