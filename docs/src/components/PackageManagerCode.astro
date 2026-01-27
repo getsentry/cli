@@ -103,17 +103,16 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   .pm-copied {
-    display: none;
     font-size: 0.75rem;
     color: #22c55e;
-  }
-
-  .pm-copy.copied svg {
-    display: none;
+    opacity: 0;
+    transform: translateY(0.25rem);
+    transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
   }
 
   .pm-copy.copied .pm-copied {
-    display: inline;
+    opacity: 1;
+    transform: translateY(0);
   }
 
   .pm-content {
