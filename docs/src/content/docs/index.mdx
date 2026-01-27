@@ -21,32 +21,108 @@ import Terminal from '../../components/Terminal.astro';
 
 <Terminal background="custom" />
 
-<div class="features-section">
+{/* ============================================
+    VARIATION 1: Cards with Gradient Image Headers
+    ============================================ */}
 
-## What makes it different
+<section class="features-v1">
+  <h2>Variation 1: Image Header Cards</h2>
+  <div class="v1-grid">
+    <div class="v1-card">
+      <div class="v1-image" style="background-image: url('/cli/section-bg-1.png'); background-position: 0% 30%;"></div>
+      <div class="v1-content">
+        <h3>Zero Configuration</h3>
+        <p>Auto-detects your Sentry project from .env files or Sentry.init() in your code. No more --org and --project flags.</p>
+      </div>
+    </div>
+    <div class="v1-card">
+      <div class="v1-image" style="background-image: url('/cli/section-bg-2.png'); background-position: 20% 50%;"></div>
+      <div class="v1-content">
+        <h3>OAuth Like gh</h3>
+        <p>Run sentry auth login and you're done. Opens your browser, shows a QR code as fallback, handles token refresh automatically.</p>
+      </div>
+    </div>
+    <div class="v1-card">
+      <div class="v1-image" style="background-image: url('/cli/section-bg-1.png'); background-position: 50% 70%;"></div>
+      <div class="v1-content">
+        <h3>Short IDs</h3>
+        <p>Just type sentry issue view WQ instead of the full CRAFT-WQ. The CLI figures out the rest.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-<CardGrid>
-  <Card title="Zero Configuration" icon="setting">
-    Auto-detects your Sentry project from .env files or Sentry.init() in your code. No more --org and --project flags. Works with monorepos too.
-  </Card>
-  <Card title="OAuth Like gh" icon="approve-check">
-    Run sentry auth login and you're done. Opens your browser, shows a QR code as fallback, handles token refresh automatically.
-  </Card>
-  <Card title="Short IDs" icon="rocket">
-    Just type sentry issue view WQ instead of the full CRAFT-WQ. The CLI figures out the rest.
-  </Card>
-  <Card title="AI-Powered Debugging" icon="star">
-    Run sentry issue explain for root cause analysis. Run sentry issue plan and get a solution. Powered by Seer.
-  </Card>
-  <Card title="Built for Agents" icon="external">
-    Designed to work with AI coding agents. Structured outputs, predictable behavior, complements the MCP.
-  </Card>
-  <Card title="Great DX" icon="heart">
-    JSON output for scripting, -w flags to open in browser, smart defaults everywhere. Developer experience first.
-  </Card>
-</CardGrid>
+{/* ============================================
+    VARIATION 2: Horizontal Feature Rows
+    ============================================ */}
 
-</div>
+<section class="features-v2">
+  <h2>Variation 2: Horizontal Rows</h2>
+  
+  <div class="v2-row">
+    <div class="v2-image" style="background-image: url('/cli/section-bg-1.png'); background-position: center;"></div>
+    <div class="v2-content">
+      <h3>Zero Configuration</h3>
+      <p>Auto-detects your Sentry project from .env files or Sentry.init() in your code. No more --org and --project flags. Works with monorepos too.</p>
+    </div>
+  </div>
+  
+  <div class="v2-row reverse">
+    <div class="v2-image" style="background-image: url('/cli/section-bg-2.png'); background-position: center;"></div>
+    <div class="v2-content">
+      <h3>OAuth Like gh</h3>
+      <p>Run sentry auth login and you're done. Opens your browser, shows a QR code as fallback, handles token refresh automatically.</p>
+    </div>
+  </div>
+  
+  <div class="v2-row">
+    <div class="v2-image" style="background-image: url('/cli/section-bg-1.png'); background-position: 30% 60%;"></div>
+    <div class="v2-content">
+      <h3>AI-Powered Debugging</h3>
+      <p>Run sentry issue explain for root cause analysis. Run sentry issue plan and get a solution. Powered by Seer.</p>
+    </div>
+  </div>
+</section>
+
+{/* ============================================
+    VARIATION 3: Minimal Cards with Accent Bars
+    ============================================ */}
+
+<section class="features-v3">
+  <h2>Variation 3: Accent Bar Cards</h2>
+  <div class="v3-grid">
+    <div class="v3-card">
+      <div class="v3-accent purple"></div>
+      <h3>Zero Configuration</h3>
+      <p>Auto-detects your Sentry project from .env files or Sentry.init() in your code.</p>
+    </div>
+    <div class="v3-card">
+      <div class="v3-accent blue"></div>
+      <h3>OAuth Like gh</h3>
+      <p>Run sentry auth login and you're done. Opens your browser, handles token refresh.</p>
+    </div>
+    <div class="v3-card">
+      <div class="v3-accent pink"></div>
+      <h3>Short IDs</h3>
+      <p>Just type sentry issue view WQ instead of the full CRAFT-WQ.</p>
+    </div>
+    <div class="v3-card">
+      <div class="v3-accent green"></div>
+      <h3>AI-Powered Debugging</h3>
+      <p>Run sentry issue explain for root cause analysis. Powered by Seer.</p>
+    </div>
+    <div class="v3-card">
+      <div class="v3-accent orange"></div>
+      <h3>Built for Agents</h3>
+      <p>Designed to work with AI coding agents. Structured outputs, predictable behavior.</p>
+    </div>
+    <div class="v3-card">
+      <div class="v3-accent cyan"></div>
+      <h3>Great DX</h3>
+      <p>JSON output for scripting, -w flags to open in browser, smart defaults everywhere.</p>
+    </div>
+  </div>
+</section>
 
 <div class="install-section">
 
