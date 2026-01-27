@@ -1,0 +1,105 @@
+---
+interface Props {
+  title?: string;
+}
+
+const { title = "Terminal" } = Astro.props;
+---
+
+<div class="feature-terminal">
+  <div class="feature-terminal-header">
+    <div class="feature-terminal-dots">
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+    <span class="feature-terminal-title">{title}</span>
+    <div class="feature-terminal-spacer"></div>
+  </div>
+  <div class="feature-terminal-body">
+    <slot />
+  </div>
+</div>
+
+<style>
+  .feature-terminal {
+    background: rgba(10, 10, 15, 0.95);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-width: 420px;
+    font-size: 0.8rem;
+  }
+
+  .feature-terminal-header {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .feature-terminal-dots {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .feature-terminal-title {
+    flex: 1;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .feature-terminal-spacer {
+    width: 52px;
+  }
+
+  .feature-terminal-body {
+    padding: 1rem 1.25rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .feature-terminal-body :global(.prompt) {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .feature-terminal-body :global(.command) {
+    color: #fff;
+  }
+
+  .feature-terminal-body :global(.dimmed) {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .feature-terminal-body :global(.success) {
+    color: #22c55e;
+  }
+
+  .feature-terminal-body :global(.highlight) {
+    color: #a78bfa;
+  }
+
+  .feature-terminal-body :global(.line) {
+    margin-bottom: 0.25rem;
+  }
+
+  .feature-terminal-body :global(.line:last-child) {
+    margin-bottom: 0;
+  }
+
+  .feature-terminal-body :global(.spacer) {
+    height: 0.75rem;
+  }
+</style>

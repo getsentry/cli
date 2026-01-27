@@ -14,6 +14,7 @@ hero:
 import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
 import CommandBox from '../../components/CommandBox.astro';
 import Terminal from '../../components/Terminal.astro';
+import FeatureTerminal from '../../components/FeatureTerminal.astro';
 
 <div class="hero-command">
 <CommandBox command="npx sentry@latest" docsLink="./getting-started/" docsText="Read the docs" />
@@ -22,45 +23,65 @@ import Terminal from '../../components/Terminal.astro';
 <Terminal background="custom" />
 
 {/* ============================================
-    Features Section - Horizontal Rows with Commands
+    Features Section - Horizontal Rows with Terminals
     ============================================ */}
 
-<section class="features-section-new">
-  <h2>What makes it different</h2>
-  
-  <div class="feature-row">
-    <div class="feature-image" style="background-image: url('/cli/section-bg-1.png');">
-      <div class="feature-command">
-        <span class="prompt">$</span> sentry issue list
-      </div>
-    </div>
-    <div class="feature-content">
+<section class="feature-section">
+  <div class="feature-section-inner">
+    <div class="feature-text">
       <h3>It Knows Your Project</h3>
       <p>No config. No flags. We read your .env and figure it out. Monorepos included.</p>
     </div>
-  </div>
-  
-  <div class="feature-row reverse">
-    <div class="feature-image" style="background-image: url('/cli/section-bg-2.png');">
-      <div class="feature-command">
-        <span class="prompt">$</span> sentry issue explain
-      </div>
+    <div class="feature-visual" style="background-image: url('/cli/section-bg-1.png');">
+      <FeatureTerminal title="Terminal">
+        <div class="line"><span class="prompt">$</span> <span class="command">sentry issue list</span></div>
+        <div class="line dimmed">Detected project: my-app (from .env)</div>
+        <div class="spacer"></div>
+        <div class="line dimmed">SHORT ID   TITLE                      COUNT</div>
+        <div class="line"><span class="highlight">WQ</span>         TypeError: undefined...      142</div>
+        <div class="line"><span class="highlight">X3</span>         Failed to fetch user...       89</div>
+      </FeatureTerminal>
     </div>
-    <div class="feature-content">
+  </div>
+</section>
+
+<section class="feature-section">
+  <div class="feature-section-inner reverse">
+    <div class="feature-text">
       <h3>Ask Seer Why</h3>
       <p>Root cause analysis in your terminal. Then <code>sentry issue plan</code> for the fix.</p>
     </div>
-  </div>
-  
-  <div class="feature-row">
-    <div class="feature-image" style="background-image: url('/cli/section-bg-3.png');">
-      <div class="feature-command">
-        <span class="prompt">$</span> sentry org list --json | jq
-      </div>
+    <div class="feature-visual" style="background-image: url('/cli/section-bg-2.png');">
+      <FeatureTerminal title="Terminal">
+        <div class="line"><span class="prompt">$</span> <span class="command">sentry issue explain WQ</span></div>
+        <div class="line dimmed">Analyzing MYAPP-WQ...</div>
+        <div class="spacer"></div>
+        <div class="line"><span class="success">Root Cause:</span> The user object is</div>
+        <div class="line">undefined when accessed before the</div>
+        <div class="line">auth check completes.</div>
+        <div class="spacer"></div>
+        <div class="line dimmed">Run `sentry issue plan` for a fix.</div>
+      </FeatureTerminal>
     </div>
-    <div class="feature-content">
+  </div>
+</section>
+
+<section class="feature-section">
+  <div class="feature-section-inner">
+    <div class="feature-text">
       <h3>Works With Everything</h3>
       <p>JSON output for scripts. Browser shortcuts. Agent-friendly. Plays nice with your existing workflow.</p>
+    </div>
+    <div class="feature-visual" style="background-image: url('/cli/section-bg-3.png');">
+      <FeatureTerminal title="Terminal">
+        <div class="line"><span class="prompt">$</span> <span class="command">sentry org list --json | jq '.[0]'</span></div>
+        <div class="spacer"></div>
+        <div class="line">{"{"}</div>
+        <div class="line">  <span class="highlight">"slug"</span>: "my-org",</div>
+        <div class="line">  <span class="highlight">"name"</span>: "My Organization",</div>
+        <div class="line">  <span class="highlight">"projects"</span>: 12</div>
+        <div class="line">{"}"}</div>
+      </FeatureTerminal>
     </div>
   </div>
 </section>
