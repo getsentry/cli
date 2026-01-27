@@ -356,15 +356,14 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-section {
   margin: 2rem 0;
-  padding: 1rem;
+  padding: 0.75rem;
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 20px;
+  border-radius: 16px;
 }
 
 .feature-section-inner {
   display: flex;
   align-items: stretch;
-  min-height: 340px;
 }
 
 .feature-section-inner.reverse {
@@ -404,6 +403,7 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-visual {
   flex: 0 0 55%;
+  min-height: 320px;
   background-size: cover;
   background-position: center;
   border-radius: 12px;
