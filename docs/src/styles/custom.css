@@ -38,6 +38,7 @@ html,
 
   /* Border colors */
   --sl-color-hairline: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-shade: rgba(255, 255, 255, 0.1);
   --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
 
   /* Inline code - accent-tinted */
@@ -934,6 +935,11 @@ a:hover {
 /* ==========================================================================
    Table of Contents (Right Sidebar)
    ========================================================================== */
+
+/* Remove left border from right sidebar */
+.right-sidebar {
+  border-inline-start: none !important;
+}
 
 starlight-toc a {
   color: rgba(255, 255, 255, 0.6);
