@@ -6,9 +6,10 @@ interface Props {
 
 const { title = "Terminal", background } = Astro.props;
 const bgClass = background ? `bg-${background}` : '';
+const base = import.meta.env.BASE_URL;
 ---
 
-<div class={`terminal-wrapper ${bgClass}`}>
+<div class={`terminal-wrapper ${bgClass}`} style={background ? `--bg-image: url('${base}bg.png');` : ''}>
   <div class="terminal">
     <div class="terminal-header">
       <div class="terminal-dots">
@@ -125,7 +126,7 @@ const bgClass = background ? `bg-${background}` : '';
 
   /* Background image variant */
   .terminal-wrapper.bg-custom {
-    background: url('/cli/bg.png') center / cover;
+    background: var(--bg-image) center / cover;
   }
 
   .terminal-wrapper.bg-custom::before {

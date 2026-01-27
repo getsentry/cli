@@ -16,6 +16,8 @@ import CommandBox from '../../components/CommandBox.astro';
 import Terminal from '../../components/Terminal.astro';
 import FeatureTerminal from '../../components/FeatureTerminal.astro';
 
+export const base = import.meta.env.BASE_URL;
+
 <div class="hero-command">
 <CommandBox command="npx sentry@latest" docsLink="./getting-started/" docsText="Read the docs" />
 </div>
@@ -33,7 +35,7 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
       <p>No config files. No flags. The CLI reads your <code>.env</code>, detects your project from the codebase, and just works. Monorepos, multiple orgs, complex setups — all handled automatically.</p>
       <p>Stop memorizing project slugs and DSNs. Start typing commands that make sense.</p>
     </div>
-    <div class="feature-visual" style="background-image: url('/cli/section-bg-1.png');">
+    <div class="feature-visual" style={`background-image: url('${base}section-bg-1.png');`}>
       <FeatureTerminal title="Terminal">
         <div class="line"><span class="prompt">$</span> <span class="command">sentry issue list</span></div>
         <div class="line dimmed">Detected project: my-app (from .env)</div>
@@ -70,7 +72,7 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
       <p>Get AI-powered root cause analysis right in your terminal. Seer analyzes stack traces, related events, and your codebase to explain exactly what went wrong and why.</p>
       <p>Then run <code>sentry issue plan</code> to get a step-by-step fix you can apply immediately.</p>
     </div>
-    <div class="feature-visual" style="background-image: url('/cli/section-bg-2.png');">
+    <div class="feature-visual" style={`background-image: url('${base}section-bg-2.png');`}>
       <FeatureTerminal title="Terminal">
         <div class="line"><span class="prompt">$</span> <span class="command">sentry issue explain WQ</span></div>
         <div class="line dimmed">Analyzing MYAPP-WQ...</div>
@@ -92,7 +94,7 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
       <p>Structured JSON output for scripts and pipelines. Open issues directly in your browser. Pipe to <code>jq</code>, <code>fzf</code>, or your favorite tools.</p>
       <p>Built for humans and AI agents alike — every command is predictable, composable, and automation-ready.</p>
     </div>
-    <div class="feature-visual" style="background-image: url('/cli/section-bg-3.png');">
+    <div class="feature-visual" style={`background-image: url('${base}section-bg-3.png');`}>
       <FeatureTerminal title="Terminal">
         <div class="line"><span class="prompt">$</span> <span class="command">sentry org list --json | jq '.[0]'</span></div>
         <div class="spacer"></div>
