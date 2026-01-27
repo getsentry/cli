@@ -7,6 +7,7 @@
 
 import chalk from "chalk";
 import type { Writer } from "../types/index.js";
+import { isAuthenticated } from "./config.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 
 /** ASCII art banner rows for gradient coloring */
@@ -34,9 +35,10 @@ const BANNER_GRADIENT = [
  * Each row gets progressively darker purple.
  */
 function formatBanner(): string {
-  return BANNER_ROWS.map((row, i) => chalk.hex(BANNER_GRADIENT[i])(row)).join(
-    "\n"
-  );
+  return BANNER_ROWS.map((row, i) => {
+    const color = BANNER_GRADIENT[i] ?? "#B4A4DE";
+    return chalk.hex(color)(row);
+  }).join("\n");
 }
 
 const TAGLINE = "The command-line interface for Sentry";
@@ -49,20 +51,21 @@ type HelpCommand = {
 /** Available commands with their usage patterns and descriptions */
 const COMMANDS: HelpCommand[] = [
   {
-    usage: "sentry auth login|logout|status",
+    usage: "sentry auth login | logout | status",
     description: "Authenticate with Sentry",
   },
-  { usage: "sentry org list|view", description: "Work with organizations" },
-  { usage: "sentry project list|view", description: "Work with projects" },
+  { usage: "sentry org list | view", description: "Work with organizations" },
+  { usage: "sentry project list | view", description: "Work with projects" },
   {
-    usage: "sentry issue list|view|explain|plan",
+    usage: "sentry issue list | view | explain | plan",
     description: "Manage Sentry issues",
   },
   { usage: "sentry event view", description: "View Sentry events" },
   { usage: "sentry api <endpoint>", description: "Make API requests" },
 ];
 
-const EXAMPLE = "sentry auth login";
+const EXAMPLE_LOGGED_OUT = "sentry auth login";
+const EXAMPLE_LOGGED_IN = "sentry issue list";
 const DOCS_URL = "https://docs.sentry.io/cli/";
 
 /**
@@ -85,15 +88,20 @@ function formatCommands(commands: HelpCommand[]): string {
 
 /**
  * Print the custom branded help output.
+ * Shows a contextual example based on authentication status.
  *
  * @param stdout - Writer to output help text
  */
-export function printCustomHelp(stdout: Writer): void {
+export async function printCustomHelp(stdout: Writer): Promise<void> {
+  const loggedIn = await isAuthenticated();
+  const example = loggedIn ? EXAMPLE_LOGGED_IN : EXAMPLE_LOGGED_OUT;
+
   const lines: string[] = [];
 
   // Banner with gradient
   lines.push("");
   lines.push(formatBanner());
+  lines.push("");
 
   // Tagline
   lines.push(`  ${TAGLINE}`);
@@ -104,11 +112,12 @@ export function printCustomHelp(stdout: Writer): void {
   lines.push("");
 
   // Example
-  lines.push(`  ${muted("try:")} ${magenta(EXAMPLE)}`);
+  lines.push(`  ${muted("try:")} ${magenta(example)}`);
   lines.push("");
 
   // Footer
   lines.push(`  ${muted(`Learn more at ${DOCS_URL}`)}`);
+  lines.push("");
   lines.push("");
 
   stdout.write(lines.join("\n"));

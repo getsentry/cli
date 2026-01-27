@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 
   // Intercept top-level help before Stricli
   if (shouldShowCustomHelp(args)) {
-    printCustomHelp(process.stdout);
+    await printCustomHelp(process.stdout);
     return;
   }
 
