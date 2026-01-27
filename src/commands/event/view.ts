@@ -6,10 +6,15 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getEvent } from "../../lib/api-client.js";
+import { getEvent, getTrace } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
-import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatEventDetails,
+  formatSpanTree,
+  muted,
+  writeJson,
+} from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
@@ -19,25 +24,34 @@ type ViewFlags = {
   readonly project?: string;
   readonly json: boolean;
   readonly web: boolean;
+  readonly spans: boolean;
+};
+
+type HumanOutputOptions = {
+  event: SentryEvent;
+  detectedFrom?: string;
+  spanTreeLines?: string[];
 };
 
 /**
  * Write human-readable event output to stdout.
  *
  * @param stdout - Output stream
- * @param event - The event to display
- * @param detectedFrom - Optional source description for auto-detection
+ * @param options - Output options including event, detectedFrom, and spanTreeLines
  */
-function writeHumanOutput(
-  stdout: Writer,
-  event: SentryEvent,
-  detectedFrom?: string
-): void {
+function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
+  const { event, detectedFrom, spanTreeLines } = options;
+
   const lines = formatEventDetails(event, `Event ${event.eventID}`);
 
   // Skip leading empty line for standalone display
   const output = lines.slice(1);
   stdout.write(`${output.join("\n")}\n`);
+
+  // Display span tree if available
+  if (spanTreeLines && spanTreeLines.length > 0) {
+    stdout.write(`${spanTreeLines.join("\n")}\n`);
+  }
 
   if (detectedFrom) {
     stdout.write(`\nDetected from ${detectedFrom}\n`);
@@ -88,8 +102,13 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
+      spans: {
+        kind: "boolean",
+        brief: "Show span tree from the event's trace",
+        default: false,
+      },
     },
-    aliases: { w: "web" },
+    aliases: { w: "web", s: "spans" },
   },
   async func(
     this: SentryContext,
@@ -123,11 +142,32 @@ export const viewCommand = buildCommand({
 
     const event = await getEvent(target.org, target.project, eventId);
 
+    // Fetch span tree if requested and trace ID is available
+    let spanTreeLines: string[] | undefined;
+    if (flags.spans && event.contexts?.trace?.trace_id) {
+      try {
+        const traceEvents = await getTrace(
+          target.org,
+          event.contexts.trace.trace_id
+        );
+        spanTreeLines = formatSpanTree(traceEvents);
+      } catch {
+        // Non-fatal: trace data may not be available for all events
+        spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
+      }
+    } else if (flags.spans && !event.contexts?.trace?.trace_id) {
+      spanTreeLines = [muted("\nNo trace data available for this event.")];
+    }
+
     if (flags.json) {
       writeJson(stdout, event);
       return;
     }
 
-    writeHumanOutput(stdout, event, target.detectedFrom);
+    writeHumanOutput(stdout, {
+      event,
+      detectedFrom: target.detectedFrom,
+      spanTreeLines,
+    });
   },
 });

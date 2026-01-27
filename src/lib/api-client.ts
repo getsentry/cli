@@ -16,6 +16,8 @@ import {
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
+  type TraceEvent,
+  TraceEventSchema,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { refreshToken } from "./config.js";
@@ -442,6 +444,26 @@ export function getEvent(
     `/projects/${orgSlug}/${projectSlug}/events/${eventId}/`,
     {
       schema: SentryEventSchema,
+    }
+  );
+}
+
+/**
+ * Get trace data including all transactions and spans.
+ * Returns the full trace tree for visualization.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The trace ID (from event.contexts.trace.trace_id)
+ * @returns Array of trace events (transactions) with their spans
+ */
+export function getTrace(
+  orgSlug: string,
+  traceId: string
+): Promise<TraceEvent[]> {
+  return apiRequest<TraceEvent[]>(
+    `/organizations/${orgSlug}/events-trace/${traceId}/`,
+    {
+      schema: z.array(TraceEventSchema),
     }
   );
 }

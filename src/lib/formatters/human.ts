@@ -16,7 +16,9 @@ import type {
   SentryIssue,
   SentryOrganization,
   SentryProject,
+  Span,
   StackFrame,
+  TraceEvent,
 } from "../../types/index.js";
 import {
   boldUnderline,
@@ -793,6 +795,203 @@ function formatRequest(requestEntry: RequestEntry): string[] {
         break;
       }
     }
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Span Tree Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Node in the span tree structure */
+type SpanNode = {
+  /** The span data */
+  span: Span;
+  /** Child spans */
+  children: SpanNode[];
+};
+
+/**
+ * Format duration in milliseconds to human-readable format.
+ *
+ * @param startTs - Start timestamp (seconds with fractional ms)
+ * @param endTs - End timestamp (seconds with fractional ms)
+ * @returns Formatted duration (e.g., "120ms", "1.50s")
+ */
+function formatSpanDuration(startTs: number, endTs: number): string {
+  const durationMs = Math.round((endTs - startTs) * 1000);
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(2)}s`;
+}
+
+/**
+ * Build a tree structure from flat spans using parent_span_id.
+ * Sorts children by start_timestamp for chronological display.
+ *
+ * @param spans - Flat array of spans
+ * @param rootSpanId - Optional root span ID to start the tree from
+ * @returns Array of root-level span nodes with nested children
+ */
+function buildSpanTree(spans: Span[], rootSpanId?: string): SpanNode[] {
+  const spanMap = new Map<string, SpanNode>();
+  const roots: SpanNode[] = [];
+
+  // Create nodes for all spans
+  for (const span of spans) {
+    spanMap.set(span.span_id, { span, children: [] });
+  }
+
+  // Link children to parents
+  for (const span of spans) {
+    const node = spanMap.get(span.span_id);
+    if (!node) {
+      continue;
+    }
+
+    const parentId = span.parent_span_id;
+    const parentNode = parentId ? spanMap.get(parentId) : undefined;
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else if (!rootSpanId || span.span_id === rootSpanId) {
+      // This is a root span (no parent or matches specified root)
+      roots.push(node);
+    }
+  }
+
+  // Sort children by start_timestamp for chronological order
+  const sortChildren = (node: SpanNode): void => {
+    node.children.sort(
+      (a, b) => a.span.start_timestamp - b.span.start_timestamp
+    );
+    for (const child of node.children) {
+      sortChildren(child);
+    }
+  };
+  for (const root of roots) {
+    sortChildren(root);
+  }
+
+  // Sort roots as well
+  roots.sort((a, b) => a.span.start_timestamp - b.span.start_timestamp);
+
+  return roots;
+}
+
+/**
+ * Recursively format a span node and its children as tree lines.
+ *
+ * @param node - The span node to format
+ * @param prefix - Current line prefix (for tree structure)
+ * @param isLast - Whether this is the last sibling
+ * @returns Array of formatted lines
+ */
+function formatSpanNode(
+  node: SpanNode,
+  prefix: string,
+  isLast: boolean
+): string[] {
+  const lines: string[] = [];
+  const { span } = node;
+
+  const duration = formatSpanDuration(span.start_timestamp, span.timestamp);
+  const op = span.op || "unknown";
+  const description = span.description || "(no description)";
+
+  // Truncate long descriptions
+  const maxDescLen = 50;
+  const truncatedDesc =
+    description.length > maxDescLen
+      ? `${description.slice(0, maxDescLen - 3)}...`
+      : description;
+
+  // Tree branch characters
+  const branch = isLast ? "└─" : "├─";
+  const childPrefix = prefix + (isLast ? "   " : "│  ");
+
+  // Color duration based on severity (slow = yellow/red)
+  const durationMs = (span.timestamp - span.start_timestamp) * 1000;
+  let durationText = duration;
+  if (durationMs > 1000) {
+    durationText = yellow(duration);
+  } else if (durationMs > 5000) {
+    durationText = red(duration);
+  }
+
+  lines.push(
+    `${prefix}${branch} [${durationText}] ${truncatedDesc} ${muted(`(${op})`)}`
+  );
+
+  // Format children
+  const childCount = node.children.length;
+  node.children.forEach((child, i) => {
+    const childIsLast = i === childCount - 1;
+    lines.push(...formatSpanNode(child, childPrefix, childIsLast));
+  });
+
+  return lines;
+}
+
+/**
+ * Format a trace event (transaction) as a span tree root.
+ *
+ * @param traceEvent - The trace event containing transaction info and spans
+ * @returns Array of formatted lines
+ */
+function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
+  const lines: string[] = [];
+
+  // Transaction header
+  const txName = traceEvent.transaction || "(unnamed transaction)";
+  const op = traceEvent["transaction.op"] || "unknown";
+  const durationMs = traceEvent["transaction.duration"];
+  const duration = durationMs !== undefined ? `${durationMs}ms` : "?";
+
+  lines.push(`[${duration}] ${txName} ${muted(`(${op})`)}`);
+
+  // Build span tree from the transaction's spans
+  const spans = traceEvent.spans ?? [];
+  if (spans.length > 0) {
+    const tree = buildSpanTree(spans, traceEvent.span_id);
+    const treeLength = tree.length;
+    tree.forEach((root, i) => {
+      const isLast = i === treeLength - 1;
+      lines.push(...formatSpanNode(root, "  ", isLast));
+    });
+  }
+
+  return lines;
+}
+
+/**
+ * Format trace data as a visual span tree structure.
+ * Shows the hierarchy of transactions and spans with durations.
+ *
+ * @param traceEvents - Array of trace events from the events-trace API
+ * @returns Array of formatted lines ready for display
+ */
+export function formatSpanTree(traceEvents: TraceEvent[]): string[] {
+  if (traceEvents.length === 0) {
+    return [muted("\nNo span data available.")];
+  }
+
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(muted("─── Span Tree ───"));
+  lines.push("");
+
+  // Sort trace events by start_timestamp for chronological order
+  const sorted = [...traceEvents].sort((a, b) => {
+    const aStart = a.start_timestamp ?? 0;
+    const bStart = b.start_timestamp ?? 0;
+    return aStart - bStart;
+  });
+
+  for (const traceEvent of sorted) {
+    lines.push(...formatTraceEventAsTree(traceEvent));
+    lines.push(""); // Blank line between transactions
   }
 
   return lines;
