@@ -59,7 +59,9 @@ export default defineConfig({
               
               function isLandingPage() {
                 const path = window.location.pathname;
-                return path === '/cli' || path === '/cli/';
+                // Works with both /cli (prod) and /pr-preview/pr-XX (preview)
+                return path === '/cli' || path === '/cli/' || 
+                       /^\\/pr-preview\\/pr-\\d+\\/?$/.test(path);
               }
               
               function checkAtBottom() {
