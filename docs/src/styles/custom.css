@@ -1,13 +1,18 @@
 /* ==========================================================================
-   Sentry CLI Documentation - Dark Theme
+   Sentry CLI Documentation - Dark Theme Only
    ========================================================================== */
 
-/* Force dark mode */
-:root {
-  color-scheme: dark;
+/* Force dark mode regardless of system preference */
+:root,
+html,
+html[data-theme="light"],
+html[data-theme="dark"] {
+  color-scheme: dark !important;
 }
 
+/* Override all theme states with dark mode values */
 :root,
+html,
 [data-theme="light"],
 [data-theme="dark"] {
   /* Background colors */
@@ -21,19 +26,22 @@
   --sl-color-accent-high: #a78bfa;
   --sl-color-accent-low: rgba(139, 92, 246, 0.2);
 
-  /* Text colors */
+  /* Text colors - BOOSTED CONTRAST */
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #f1f5f9;
-  --sl-color-gray-2: #e2e8f0;
-  --sl-color-gray-3: #cbd5e1;
-  --sl-color-gray-4: #94a3b8;
-  --sl-color-gray-5: #64748b;
-  --sl-color-gray-6: #475569;
+  --sl-color-gray-1: #ffffff;
+  --sl-color-gray-2: #f1f5f9;
+  --sl-color-gray-3: #e2e8f0;
+  --sl-color-gray-4: #cbd5e1;
+  --sl-color-gray-5: #94a3b8;
+  --sl-color-gray-6: #64748b;
   --sl-color-black: #0a0a0f;
 
   /* Border colors */
-  --sl-color-hairline: rgba(255, 255, 255, 0.08);
-  --sl-color-hairline-light: rgba(255, 255, 255, 0.05);
+  --sl-color-hairline: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
+
+  /* Inline code - accent-tinted */
+  --sl-color-bg-inline-code: rgba(139, 92, 246, 0.15);
 
   /* Typography */
   --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -92,12 +100,43 @@ header.header {
 }
 
 /* GitHub icon - white */
-.social-icons a {
-  color: rgba(255, 255, 255, 0.7) !important;
+.social-icons a,
+.social-icons a svg,
+a[href*="github.com"],
+a[href*="github.com"] svg,
+[class*="astro-wy4te6ga"],
+[class*="astro-wy4te6ga"] svg {
+  color: #fff !important;
+  fill: #fff !important;
 }
 
-.social-icons a:hover {
-  color: #fff !important;
+.social-icons a:hover,
+.social-icons a:hover svg,
+a[href*="github.com"]:hover,
+a[href*="github.com"]:hover svg {
+  color: rgba(255, 255, 255, 0.8) !important;
+  fill: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Search bar - wider and smaller */
+site-search {
+  --sl-search-width: 14rem;
+}
+
+site-search button {
+  font-size: 0.8rem !important;
+  padding: 0.4rem 0.75rem !important;
+  height: auto !important;
+  min-height: unset !important;
+}
+
+site-search button svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+site-search button span {
+  font-size: 0.8rem !important;
 }
 
 /* ==========================================================================
@@ -324,8 +363,8 @@ starlight-tabs pre {
    ========================================================================== */
 
 pre {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 8px !important;
 }
 
@@ -335,16 +374,214 @@ code {
 }
 
 /* ==========================================================================
+   Doc Content Pages
+   ========================================================================== */
+
+/* Main content area */
+.sl-markdown-content {
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
+/* Headings - crisp white, clear hierarchy */
+.sl-markdown-content h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 2.5rem 0 1rem;
+  letter-spacing: -0.02em;
+}
+
+.sl-markdown-content h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 2rem 0 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sl-markdown-content h2:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 1.5rem 0 0.5rem;
+}
+
+.sl-markdown-content h4 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 1.25rem 0 0.5rem;
+}
+
+/* Paragraphs */
+.sl-markdown-content p {
+  margin-bottom: 1.25rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Lists */
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+  margin: 1rem 0 1.5rem;
+  padding-left: 1.5rem;
+}
+
+.sl-markdown-content li {
+  margin-bottom: 0.5rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.sl-markdown-content li::marker {
+  color: var(--sl-color-accent);
+}
+
+/* Inline code - accent-tinted, visible */
+.sl-markdown-content code:not(pre code) {
+  background: rgba(139, 92, 246, 0.15);
+  color: #e0d4ff;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+/* Code blocks in content */
+.sl-markdown-content pre {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+}
+
+.sl-markdown-content pre code {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Links in content */
+.sl-markdown-content a {
+  color: #c4b5fd;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 181, 253, 0.4);
+  text-underline-offset: 2px;
+  transition: all 0.15s ease;
+}
+
+.sl-markdown-content a:hover {
+  color: #fff;
+  text-decoration-color: #fff;
+}
+
+/* Blockquotes */
+.sl-markdown-content blockquote {
+  border-left: 3px solid var(--sl-color-accent);
+  padding-left: 1rem;
+  margin: 1.5rem 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-style: italic;
+}
+
+.sl-markdown-content blockquote p {
+  color: inherit;
+}
+
+/* Tables */
+.sl-markdown-content table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.925rem;
+}
+
+.sl-markdown-content th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.sl-markdown-content td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.sl-markdown-content tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Horizontal rules */
+.sl-markdown-content hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 2rem 0;
+}
+
+/* Strong/bold text */
+.sl-markdown-content strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Page title */
+.content-panel h1#_top {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 1rem;
+  letter-spacing: -0.02em;
+}
+
+/* ==========================================================================
    Links
    ========================================================================== */
 
 a {
   color: var(--sl-color-accent-high);
-  transition: color 0.2s ease;
+  transition: color 0.15s ease;
 }
 
 a:hover {
   color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Table of Contents (Right Sidebar)
+   ========================================================================== */
+
+starlight-toc a {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  transition: all 0.15s ease;
+}
+
+starlight-toc a:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+starlight-toc a[aria-current="true"] {
+  color: #fff;
+  font-weight: 500;
+}
+
+starlight-toc h2,
+#starlight__on-this-page,
+#starlight__on-this-page--mobile,
+.right-sidebar h2,
+starlight-toc nav h2 {
+  color: #fff !important;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
 }
 
 /* ==========================================================================
@@ -357,29 +594,41 @@ a:hover {
 }
 
 nav.sidebar a {
-  color: rgba(255, 255, 255, 0.6);
-  transition: color 0.2s ease;
-  padding: 0.4rem 0.75rem;
+  color: rgba(255, 255, 255, 0.75);
+  transition: all 0.15s ease;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin: 1px 0;
 }
 
-nav.sidebar a:hover,
-nav.sidebar a[aria-current="page"] {
-  color: var(--sl-color-white);
+nav.sidebar a:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 nav.sidebar a[aria-current="page"] {
-  background: rgba(139, 92, 246, 0.15);
+  color: #fff;
+  background: rgba(139, 92, 246, 0.2);
   border-left: 2px solid var(--sl-color-accent);
 }
 
-/* Sidebar group labels */
+/* Sidebar group labels - "GETTING STARTED", "COMMANDS", etc. */
+.group-label,
+.group-label .large,
+.group-label span,
 .sidebar-content .top-level > li > details > summary,
-.sidebar-content .top-level > li > a {
+.sidebar-content .top-level > li > details > summary .group-label,
+.sidebar-content .top-level > li > details > summary .large {
+  color: #fff !important;
   font-weight: 600;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.4);
+}
+
+.sidebar-content .top-level > li > details > summary:hover .group-label,
+.sidebar-content .top-level > li > details > summary:hover .large {
+  color: #fff !important;
 }
 
 /* ==========================================================================

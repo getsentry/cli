@@ -19,14 +19,19 @@ export default defineConfig({
         github: "https://github.com/getsentry/cli",
       },
       expressiveCode: {
-        themes: ["github-dark", "github-light"],
+        themes: ["github-dark"],
       },
       components: {
         Header: "./src/components/Header.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
       },
       head: [
-        // Add Geist font
+        // Force dark mode - runs before page renders
+        {
+          tag: "script",
+          content: `document.documentElement.dataset.theme = 'dark';`,
+        },
+        // Add fonts
         {
           tag: "link",
           attrs: {
