@@ -92,7 +92,7 @@ body {
 header.header {
   background: rgba(10, 10, 15, 0.8);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: none;
   position: relative;
 }
 
@@ -1505,12 +1505,21 @@ nav.sidebar a[aria-current="page"] {
    ========================================================================== */
 
 @media (max-width: 768px) {
+  .hero {
+    text-align: center !important;
+  }
+
   .hero h1 {
     font-size: 2rem !important;
   }
 
   .hero .tagline {
     font-size: 1rem !important;
+    margin: 0 auto !important;
+  }
+
+  .hero-command .command-box-wrapper {
+    justify-content: center;
   }
 
   .sl-card-grid {
