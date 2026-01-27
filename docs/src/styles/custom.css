@@ -859,11 +859,12 @@ code {
 
 /* Tables */
 .sl-markdown-content table {
-  width: 100%;
+  width: auto;
   margin: 1.5rem 0;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.9rem;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 12px;
   overflow: hidden;
 }
