@@ -678,8 +678,8 @@ code {
 /* Copy button - positioned in header area, matching PackageManagerCode style */
 .expressive-code .copy {
   position: absolute !important;
-  top: 0.5rem !important;
-  right: 0.5rem !important;
+  top: 1rem !important;
+  right: 1rem !important;
   z-index: 10 !important;
   flex-direction: row !important;
   gap: 0.25rem !important;
