@@ -24,13 +24,19 @@ import {
   extractSolution,
   type RootCause,
 } from "../../types/seer.js";
-import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
+import {
+  buildCommandHint,
+  type IssueIdFlags,
+  issueIdFlags,
+  issueIdPositional,
+  pollAutofixState,
+  resolveOrgAndIssueId,
+} from "./utils.js";
 
-type PlanFlags = {
-  readonly org?: string;
+interface PlanFlags extends IssueIdFlags {
   readonly cause?: number;
   readonly json: boolean;
-};
+}
 
 /**
  * Validate that an autofix run exists and has completed root cause analysis.
@@ -140,26 +146,13 @@ export const planCommand = buildCommand({
       "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
       "  sentry issue plan 123456789 --cause 0\n" +
-      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1",
+      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1\n" +
+      "  sentry issue plan G --org my-org --project my-project --cause 0",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Issue ID or short ID (e.g., MYPROJECT-ABC or 123456789)",
-          parse: String,
-        },
-      ],
-    },
+    positional: issueIdPositional,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Organization slug (required for short IDs if not auto-detected)",
-        optional: true,
-      },
+      ...issueIdFlags,
       cause: {
         kind: "parsed",
         parse: numberParser,
@@ -182,12 +175,13 @@ export const planCommand = buildCommand({
 
     try {
       // Resolve org and issue ID
-      const { org, issueId: numericId } = await resolveOrgAndIssueId(
+      const { org, issueId: numericId } = await resolveOrgAndIssueId({
         issueId,
-        flags.org,
+        org: flags.org,
+        project: flags.project,
         cwd,
-        `sentry issue plan ${issueId} --org <org-slug>`
-      );
+        commandHint: buildCommandHint("plan", issueId),
+      });
 
       // Get current autofix state
       const currentState = await getAutofixState(org, numericId);

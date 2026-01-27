@@ -85,10 +85,6 @@ export function mockProcess() {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CLI Runner
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type CliResult = {
   stdout: string;
   stderr: string;
@@ -96,15 +92,20 @@ export type CliResult = {
 };
 
 /**
- * Run CLI command and capture output
- *
- * @param args - CLI arguments (e.g., ["auth", "status"])
- * @param options - Optional cwd and env overrides
- * @returns Captured stdout, stderr, and exit code
- *
- * @example
- * const result = await runCli(["auth", "status"]);
- * expect(result.exitCode).toBe(0);
+ * Get the CLI command to execute.
+ * Uses SENTRY_CLI_BINARY env var if set (for CI with pre-built binary),
+ * otherwise falls back to running source via bun.
+ */
+export function getCliCommand(): string[] {
+  const binaryPath = process.env.SENTRY_CLI_BINARY;
+  if (binaryPath) {
+    return [binaryPath];
+  }
+  return [process.execPath, "run", "src/bin.ts"];
+}
+
+/**
+ * Run CLI command and capture output.
  */
 export async function runCli(
   args: string[],
@@ -114,8 +115,9 @@ export async function runCli(
   }
 ): Promise<CliResult> {
   const cliDir = join(import.meta.dir, "..");
+  const cmd = getCliCommand();
 
-  const proc = Bun.spawn(["bun", "run", "src/bin.ts", ...args], {
+  const proc = Bun.spawn([...cmd, ...args], {
     cwd: options?.cwd ?? cliDir,
     env: { ...process.env, ...options?.env },
     stdout: "pipe",
@@ -131,5 +133,51 @@ export async function runCli(
     stdout,
     stderr,
     exitCode: await proc.exited,
+  };
+}
+
+export type E2EContext = {
+  run: (args: string[]) => Promise<CliResult>;
+  /** Write auth token directly to this context's config directory (race-safe) */
+  setAuthToken: (token: string) => Promise<void>;
+  configDir: string;
+  serverUrl: string;
+};
+
+/**
+ * Create an E2E test context with mock server environment pre-configured.
+ * Call this in beforeEach to get a `run` function that includes the mock server URL
+ * and config directory in the environment automatically.
+ *
+ * IMPORTANT: Use ctx.setAuthToken() instead of the global setAuthToken() to avoid
+ * race conditions when test files run in parallel.
+ */
+export function createE2EContext(
+  configDir: string,
+  serverUrl: string
+): E2EContext {
+  const { CONFIG_DIR_ENV_VAR } = require("../src/lib/config.js");
+  return {
+    configDir,
+    serverUrl,
+    run: (args: string[]) =>
+      runCli(args, {
+        env: {
+          [CONFIG_DIR_ENV_VAR]: configDir,
+          SENTRY_URL: serverUrl,
+          SENTRY_CLI_NO_TELEMETRY: "1",
+        },
+      }),
+    /**
+     * Write auth token directly to this context's config file.
+     * This bypasses the global process.env to avoid race conditions
+     * when multiple test files run in parallel.
+     */
+    async setAuthToken(token: string): Promise<void> {
+      const configFile = join(configDir, "config.json");
+      const config = { auth: { token } };
+      mkdirSync(configDir, { recursive: true, mode: 0o700 });
+      await Bun.write(configFile, JSON.stringify(config, null, 2));
+    },
   };
 }

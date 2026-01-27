@@ -122,7 +122,7 @@ describe("isShortId", () => {
 });
 
 describe("short ID resolution flow", () => {
-  // Simulate the resolution logic from issue get command
+  // Simulate the resolution logic from issue view command
 
   const mockAliasCache: Record<
     string,

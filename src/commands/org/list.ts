@@ -10,6 +10,7 @@ import { listOrganizations } from "../../lib/api-client.js";
 import {
   calculateOrgSlugWidth,
   formatOrgRow,
+  writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 
@@ -75,5 +76,7 @@ export const listCommand = buildCommand({
         `\nShowing ${flags.limit} of ${orgs.length} organizations\n`
       );
     }
+
+    writeFooter(stdout, "Tip: Use 'sentry org view <slug>' for details");
   },
 });

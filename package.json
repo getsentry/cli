@@ -18,6 +18,7 @@
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun test",
+    "test:unit": "bun test test/lib test/commands test/types",
     "test:e2e": "bun test test/e2e"
   },
   "devDependencies": {
@@ -48,6 +49,7 @@
   },
   "packageManager": "bun@1.3.3",
   "patchedDependencies": {
-    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
+    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
+    "@sentry/core@10.36.0": "patches/@sentry%2Fcore@10.36.0.patch"
   }
 }

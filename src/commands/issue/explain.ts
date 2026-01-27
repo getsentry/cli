@@ -11,19 +11,25 @@ import {
   triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
 import { ApiError } from "../../lib/errors.js";
-import { writeJson } from "../../lib/formatters/index.js";
+import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {
   formatAutofixError,
   formatRootCauseList,
 } from "../../lib/formatters/seer.js";
 import { extractRootCauses } from "../../types/seer.js";
-import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
+import {
+  buildCommandHint,
+  type IssueIdFlags,
+  issueIdFlags,
+  issueIdPositional,
+  pollAutofixState,
+  resolveOrgAndIssueId,
+} from "./utils.js";
 
-type ExplainFlags = {
-  readonly org?: string;
+interface ExplainFlags extends IssueIdFlags {
   readonly json: boolean;
   readonly force: boolean;
-};
+}
 
 export const explainCommand = buildCommand({
   docs: {
@@ -39,27 +45,14 @@ export const explainCommand = buildCommand({
       "Examples:\n" +
       "  sentry issue explain 123456789\n" +
       "  sentry issue explain MYPROJECT-ABC --org my-org\n" +
+      "  sentry issue explain G --org my-org --project my-project\n" +
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Issue ID or short ID (e.g., MYPROJECT-ABC or 123456789)",
-          parse: String,
-        },
-      ],
-    },
+    positional: issueIdPositional,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Organization slug (required for short IDs if not auto-detected)",
-        optional: true,
-      },
+      ...issueIdFlags,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -81,12 +74,13 @@ export const explainCommand = buildCommand({
 
     try {
       // Resolve org and issue ID
-      const { org, issueId: numericId } = await resolveOrgAndIssueId(
+      const { org, issueId: numericId } = await resolveOrgAndIssueId({
         issueId,
-        flags.org,
+        org: flags.org,
+        project: flags.project,
         cwd,
-        `sentry issue explain ${issueId} --org <org-slug>`
-      );
+        commandHint: buildCommandHint("explain", issueId),
+      });
 
       // 1. Check for existing analysis (skip if --force)
       let state = flags.force ? null : await getAutofixState(org, numericId);
@@ -135,8 +129,12 @@ export const explainCommand = buildCommand({
       }
 
       // Human-readable output
-      const lines = formatRootCauseList(causes, issueId);
+      const lines = formatRootCauseList(causes);
       stdout.write(`${lines.join("\n")}\n`);
+      writeFooter(
+        stdout,
+        `To create a plan, run: sentry issue plan ${issueId}`
+      );
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
