@@ -85,10 +85,6 @@ export function mockProcess() {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CLI Runner
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type CliResult = {
   stdout: string;
   stderr: string;
@@ -100,15 +96,7 @@ function getBunPath(): string {
 }
 
 /**
- * Run CLI command and capture output
- *
- * @param args - CLI arguments (e.g., ["auth", "status"])
- * @param options - Optional cwd and env overrides
- * @returns Captured stdout, stderr, and exit code
- *
- * @example
- * const result = await runCli(["auth", "status"]);
- * expect(result.exitCode).toBe(0);
+ * Run CLI command and capture output.
  */
 export async function runCli(
   args: string[],
@@ -136,5 +124,34 @@ export async function runCli(
     stdout,
     stderr,
     exitCode: await proc.exited,
+  };
+}
+
+export type E2EContext = {
+  run: (args: string[]) => Promise<CliResult>;
+  configDir: string;
+  serverUrl: string;
+};
+
+/**
+ * Create an E2E test context with mock server environment pre-configured.
+ * Call this in beforeEach to get a `run` function that includes the mock server URL
+ * and config directory in the environment automatically.
+ */
+export function createE2EContext(
+  configDir: string,
+  serverUrl: string
+): E2EContext {
+  const { CONFIG_DIR_ENV_VAR } = require("../src/lib/config.js");
+  return {
+    configDir,
+    serverUrl,
+    run: (args: string[]) =>
+      runCli(args, {
+        env: {
+          [CONFIG_DIR_ENV_VAR]: configDir,
+          SENTRY_URL: serverUrl,
+        },
+      }),
   };
 }

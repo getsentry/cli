@@ -14,14 +14,14 @@ import {
   test,
 } from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
-import { runCli } from "../fixture.js";
+import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
 import type { MockServer } from "../mocks/server.js";
 
-// Each test gets its own config directory
 let testConfigDir: string;
 let mockServer: MockServer;
+let ctx: E2EContext;
 
 beforeAll(async () => {
   mockServer = createSentryMockServer();
@@ -35,6 +35,7 @@ afterAll(() => {
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-api-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+  ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
 afterEach(async () => {
@@ -46,12 +47,7 @@ describe("sentry api", () => {
   // should NOT include that prefix (e.g., use "organizations/" not "/api/0/organizations/")
 
   test("requires authentication", async () => {
-    const result = await runCli(["api", "organizations/"], {
-      env: {
-        [CONFIG_DIR_ENV_VAR]: testConfigDir,
-        SENTRY_URL: mockServer.url,
-      },
-    });
+    const result = await ctx.run(["api", "organizations/"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
@@ -62,12 +58,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "organizations/"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/"]);
 
       expect(result.exitCode).toBe(0);
       // Should return JSON array of organizations
@@ -82,12 +73,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "organizations/", "--include"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/", "--include"]);
 
       expect(result.exitCode).toBe(0);
       // Should include HTTP status and headers before JSON body
@@ -102,12 +88,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "nonexistent-endpoint-12345/"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "nonexistent-endpoint-12345/"]);
 
       expect(result.exitCode).toBe(1);
     },
@@ -119,12 +100,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "organizations/", "--silent"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/", "--silent"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("");
@@ -137,15 +113,11 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(
-        ["api", "nonexistent-endpoint-12345/", "--silent"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "nonexistent-endpoint-12345/",
+        "--silent",
+      ]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toBe("");
@@ -159,15 +131,12 @@ describe("sentry api", () => {
       await setAuthToken(TEST_TOKEN);
 
       // DELETE on organizations list should return 405 Method Not Allowed
-      const result = await runCli(
-        ["api", "organizations/", "--method", "DELETE"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "DELETE",
+      ]);
 
       // Method not allowed or similar error - just checking it processes the flag
       expect(result.exitCode).toBe(1);
@@ -180,15 +149,12 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(
-        ["api", "organizations/", "--method", "INVALID"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "INVALID",
+      ]);
 
       // Exit code 252 is stricli's parse error code, 1 is a general error
       expect(result.exitCode).toBeGreaterThan(0);
@@ -207,12 +173,7 @@ describe("sentry api", () => {
       await setAuthToken(TEST_TOKEN);
 
       // Use -X POST on organizations list (should fail with 405)
-      const result = await runCli(["api", "organizations/", "-X", "POST"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
 
       // POST on list endpoint typically returns 405 or similar error
       expect(result.exitCode).toBe(1);
@@ -225,12 +186,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "organizations/", "-i"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/", "-i"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toMatch(/^HTTP \d{3}/);
@@ -244,15 +200,12 @@ describe("sentry api", () => {
       await setAuthToken(TEST_TOKEN);
 
       // Add a custom header - the request should still succeed
-      const result = await runCli(
-        ["api", "organizations/", "-H", "X-Custom-Header: test-value"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "-H",
+        "X-Custom-Header: test-value",
+      ]);
 
       expect(result.exitCode).toBe(0);
       // Should return valid JSON
@@ -271,12 +224,7 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(["api", "organizations/", "--verbose"], {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      });
+      const result = await ctx.run(["api", "organizations/", "--verbose"]);
 
       expect(result.exitCode).toBe(0);
       // Should show request line with > prefix
@@ -303,15 +251,14 @@ describe("sentry api", () => {
       await Bun.write(tempFile, JSON.stringify({ status: "resolved" }));
 
       // Try to update a non-existent issue - this will fail but tests the flow
-      const result = await runCli(
-        ["api", "issues/999999999/", "-X", "PUT", "--input", tempFile],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "issues/999999999/",
+        "-X",
+        "PUT",
+        "--input",
+        tempFile,
+      ]);
 
       // Will fail with 404 or similar, but the flag should be processed
       expect(result.exitCode).toBe(1);
@@ -324,15 +271,12 @@ describe("sentry api", () => {
     async () => {
       await setAuthToken(TEST_TOKEN);
 
-      const result = await runCli(
-        ["api", "organizations/", "--input", "/nonexistent/file.json"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--input",
+        "/nonexistent/file.json",
+      ]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr + result.stdout).toMatch(/file not found/i);
@@ -352,15 +296,12 @@ describe("sentry api", () => {
       // Use issues endpoint with query parameter - this tests that --field
       // with GET request properly converts fields to query params instead of body
       // (GET requests cannot have a body, so this would fail if fields went to body)
-      const result = await runCli(
-        ["api", "projects/", "--field", "query=platform:javascript"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "projects/",
+        "--field",
+        "query=platform:javascript",
+      ]);
 
       // Should succeed (not throw "GET/HEAD method cannot have body" error)
       expect(result.exitCode).toBe(0);
@@ -377,15 +318,14 @@ describe("sentry api", () => {
 
       // POST to a read-only endpoint will return 405, but the important thing
       // is that it doesn't fail with a client-side error about body/params
-      const result = await runCli(
-        ["api", "organizations/", "--method", "POST", "--field", "name=test"],
-        {
-          env: {
-            [CONFIG_DIR_ENV_VAR]: testConfigDir,
-            SENTRY_URL: mockServer.url,
-          },
-        }
-      );
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "POST",
+        "--field",
+        "name=test",
+      ]);
 
       // Should get a server error (405 Method Not Allowed or 400 Bad Request),
       // not a client-side error about body handling

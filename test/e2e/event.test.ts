@@ -14,7 +14,7 @@ import {
   test,
 } from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
-import { runCli } from "../fixture.js";
+import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
   createSentryMockServer,
@@ -26,6 +26,7 @@ import type { MockServer } from "../mocks/server.js";
 
 let testConfigDir: string;
 let mockServer: MockServer;
+let ctx: E2EContext;
 
 beforeAll(async () => {
   mockServer = createSentryMockServer();
@@ -39,6 +40,7 @@ afterAll(() => {
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-event-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+  ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
 afterEach(async () => {
@@ -47,15 +49,15 @@ afterEach(async () => {
 
 describe("sentry event view", () => {
   test("requires authentication", async () => {
-    const result = await runCli(
-      ["event", "view", "abc123", "--org", TEST_ORG, "--project", TEST_PROJECT],
-      {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      }
-    );
+    const result = await ctx.run([
+      "event",
+      "view",
+      "abc123",
+      "--org",
+      TEST_ORG,
+      "--project",
+      TEST_PROJECT,
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
@@ -64,12 +66,7 @@ describe("sentry event view", () => {
   test("requires org and project without DSN", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["event", "view", "abc123"], {
-      env: {
-        [CONFIG_DIR_ENV_VAR]: testConfigDir,
-        SENTRY_URL: mockServer.url,
-      },
-    });
+    const result = await ctx.run(["event", "view", "abc123"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
@@ -78,23 +75,15 @@ describe("sentry event view", () => {
   test("handles non-existent event", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      [
-        "event",
-        "view",
-        "nonexistent123",
-        "--org",
-        TEST_ORG,
-        "--project",
-        TEST_PROJECT,
-      ],
-      {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      }
-    );
+    const result = await ctx.run([
+      "event",
+      "view",
+      "nonexistent123",
+      "--org",
+      TEST_ORG,
+      "--project",
+      TEST_PROJECT,
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);

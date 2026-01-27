@@ -14,7 +14,7 @@ import {
   test,
 } from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
-import { runCli } from "../fixture.js";
+import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
   createSentryMockServer,
@@ -24,9 +24,9 @@ import {
 } from "../mocks/routes.js";
 import type { MockServer } from "../mocks/server.js";
 
-// Each test gets its own config directory
 let testConfigDir: string;
 let mockServer: MockServer;
+let ctx: E2EContext;
 
 beforeAll(async () => {
   mockServer = createSentryMockServer();
@@ -40,6 +40,7 @@ afterAll(() => {
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-issue-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+  ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
 afterEach(async () => {
@@ -48,15 +49,14 @@ afterEach(async () => {
 
 describe("sentry issue list", () => {
   test("requires authentication", async () => {
-    const result = await runCli(
-      ["issue", "list", "--org", "test-org", "--project", "test-project"],
-      {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      }
-    );
+    const result = await ctx.run([
+      "issue",
+      "list",
+      "--org",
+      "test-org",
+      "--project",
+      "test-project",
+    ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
@@ -65,15 +65,14 @@ describe("sentry issue list", () => {
   test("lists issues with valid auth", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["issue", "list", "--org", TEST_ORG, "--project", TEST_PROJECT],
-      {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      }
-    );
+    const result = await ctx.run([
+      "issue",
+      "list",
+      "--org",
+      TEST_ORG,
+      "--project",
+      TEST_PROJECT,
+    ]);
 
     // Should succeed (may have 0 issues, that's fine)
     expect(result.exitCode).toBe(0);
@@ -82,15 +81,15 @@ describe("sentry issue list", () => {
   test("supports --json output", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(
-      ["issue", "list", "--org", TEST_ORG, "--project", TEST_PROJECT, "--json"],
-      {
-        env: {
-          [CONFIG_DIR_ENV_VAR]: testConfigDir,
-          SENTRY_URL: mockServer.url,
-        },
-      }
-    );
+    const result = await ctx.run([
+      "issue",
+      "list",
+      "--org",
+      TEST_ORG,
+      "--project",
+      TEST_PROJECT,
+      "--json",
+    ]);
 
     expect(result.exitCode).toBe(0);
     // Should be valid JSON array
@@ -101,12 +100,7 @@ describe("sentry issue list", () => {
 
 describe("sentry issue view", () => {
   test("requires authentication", async () => {
-    const result = await runCli(["issue", "view", "12345"], {
-      env: {
-        [CONFIG_DIR_ENV_VAR]: testConfigDir,
-        SENTRY_URL: mockServer.url,
-      },
-    });
+    const result = await ctx.run(["issue", "view", "12345"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
@@ -115,12 +109,7 @@ describe("sentry issue view", () => {
   test("handles non-existent issue", async () => {
     await setAuthToken(TEST_TOKEN);
 
-    const result = await runCli(["issue", "view", "99999999999"], {
-      env: {
-        [CONFIG_DIR_ENV_VAR]: testConfigDir,
-        SENTRY_URL: mockServer.url,
-      },
-    });
+    const result = await ctx.run(["issue", "view", "99999999999"]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not found|error/i);
