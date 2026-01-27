@@ -59,9 +59,8 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
         <div class="line"><span class="prompt">$</span> <span class="command">sentry issue explain WQ</span></div>
         <div class="line dimmed">Analyzing MYAPP-WQ...</div>
         <div class="spacer"></div>
-        <div class="line"><span class="success">Root Cause:</span> The user object is</div>
-        <div class="line">undefined when accessed before the</div>
-        <div class="line">auth check completes in useEffect.</div>
+        <div class="line"><span class="success">Root Cause:</span> The user object is undefined when</div>
+        <div class="line">accessed before the auth check completes in useEffect.</div>
         <div class="spacer"></div>
         <div class="line dimmed">Affected: src/hooks/useUser.ts:42</div>
         <div class="line dimmed">Run `sentry issue plan` for a fix.</div>
