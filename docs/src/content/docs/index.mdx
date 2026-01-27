@@ -38,10 +38,26 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
         <div class="line"><span class="prompt">$</span> <span class="command">sentry issue list</span></div>
         <div class="line dimmed">Detected project: my-app (from .env)</div>
         <div class="spacer"></div>
-        <div class="line dimmed">SHORT ID   TITLE                      COUNT</div>
-        <div class="line"><span class="highlight">WQ</span>         TypeError: undefined...      142</div>
-        <div class="line"><span class="highlight">X3</span>         Failed to fetch user...       89</div>
-        <div class="line"><span class="highlight">R7</span>         Connection timeout...         34</div>
+        <div class="line table-header">
+          <span class="col-id">SHORT ID</span>
+          <span class="col-title">TITLE</span>
+          <span class="col-count">COUNT</span>
+        </div>
+        <div class="line table-row">
+          <span class="col-id highlight">WQ</span>
+          <span class="col-title">TypeError: Cannot read property 'map'...</span>
+          <span class="col-count">142</span>
+        </div>
+        <div class="line table-row">
+          <span class="col-id highlight">X3</span>
+          <span class="col-title">Failed to fetch user data from API</span>
+          <span class="col-count">89</span>
+        </div>
+        <div class="line table-row">
+          <span class="col-id highlight">R7</span>
+          <span class="col-title">Connection timeout after 30s</span>
+          <span class="col-count">34</span>
+        </div>
       </FeatureTerminal>
     </div>
   </div>

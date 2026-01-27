@@ -106,4 +106,33 @@ const { title = "Terminal" } = Astro.props;
   .feature-terminal-body :global(.spacer) {
     height: 0.75rem;
   }
+
+  /* Table styles */
+  .feature-terminal-body :global(.table-header) {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .feature-terminal-body :global(.table-row) {
+    font-size: 0.78rem;
+  }
+
+  .feature-terminal-body :global(.col-id) {
+    min-width: 70px;
+  }
+
+  .feature-terminal-body :global(.col-title) {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .feature-terminal-body :global(.col-count) {
+    min-width: 45px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.5);
+  }
 </style>
