@@ -863,9 +863,10 @@ code {
   margin: 1.5rem 0;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.9rem;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 12px;
+  font-size: 0.875rem;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -874,14 +875,15 @@ code {
   color: #fff;
   font-weight: 600;
   text-align: left;
-  padding: 0.875rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .sl-markdown-content td {
-  padding: 0.875rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.75);
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  background: transparent;
 }
 
 .sl-markdown-content tr:last-child td {
@@ -889,7 +891,7 @@ code {
 }
 
 .sl-markdown-content tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Horizontal rules */
