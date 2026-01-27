@@ -91,6 +91,7 @@ header.header {
   background: rgba(10, 10, 15, 0.8);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  position: relative;
 }
 
 /* Logo size - larger */
@@ -118,25 +119,55 @@ a[href*="github.com"]:hover svg {
   fill: rgba(255, 255, 255, 0.8) !important;
 }
 
-/* Search bar - wider and smaller */
+/* Search bar - centered in page */
 site-search {
-  --sl-search-width: 14rem;
+  --sl-search-width: 22rem;
 }
 
 site-search button {
+  background: var(--sl-color-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 6px !important;
+  padding: 0.35rem 0.75rem !important;
   font-size: 0.8rem !important;
-  padding: 0.4rem 0.75rem !important;
   height: auto !important;
   min-height: unset !important;
+  gap: 0.5rem !important;
+  width: 22rem !important;
+  min-width: 22rem !important;
+  justify-content: space-between !important;
+  position: fixed !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  top: 0.75rem !important;
+  z-index: 1000 !important;
 }
 
+site-search button:hover {
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* Search icon */
 site-search button svg {
   width: 14px !important;
   height: 14px !important;
+  color: rgba(255, 255, 255, 0.5) !important;
 }
 
+/* Search text */
 site-search button span {
   font-size: 0.8rem !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Command+K indicator */
+site-search button kbd {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-size: 0.75rem !important;
+  padding: 0 !important;
+  box-shadow: none !important;
 }
 
 /* ==========================================================================
@@ -216,23 +247,31 @@ site-search button span {
   color: var(--sl-color-white);
 }
 
-/* Tab styling for install section */
+/* ==========================================================================
+   Tabs Component
+   ========================================================================== */
+
 starlight-tabs {
   --sl-color-bg-nav: transparent;
+  margin: 1.5rem 0;
 }
 
 starlight-tabs [role="tablist"] {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   gap: 0;
+  background: transparent;
 }
 
 starlight-tabs [role="tab"] {
-  padding: 0.75rem 1.25rem;
-  font-size: 0.875rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.5);
+  border: none;
   border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
+  background: transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
 }
 
 starlight-tabs [role="tab"]:hover {
@@ -240,19 +279,12 @@ starlight-tabs [role="tab"]:hover {
 }
 
 starlight-tabs [role="tab"][aria-selected="true"] {
-  color: var(--sl-color-white);
-  border-bottom-color: var(--sl-color-accent);
+  color: #fff;
+  border-bottom-color: #fff;
 }
 
 starlight-tabs [role="tabpanel"] {
-  padding: 1rem 0;
-}
-
-/* Code blocks in tabs */
-starlight-tabs pre {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 8px !important;
+  padding: 1rem 0 0;
 }
 
 /* ==========================================================================
@@ -362,10 +394,20 @@ starlight-tabs pre {
    Code Blocks
    ========================================================================== */
 
-pre {
-  background: rgba(0, 0, 0, 0.4) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 8px !important;
+pre:not(.pm-pre) {
+  background: rgba(20, 20, 25, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+/* Package Manager Code - no border */
+pre.pm-pre,
+.pm-pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 code {
@@ -379,111 +421,387 @@ code {
 
 /* Main content area */
 .sl-markdown-content {
-  color: rgba(255, 255, 255, 0.9);
-  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.8;
   font-size: 1rem;
 }
 
-/* Headings - crisp white, clear hierarchy */
+/* Headings - clean hierarchy like reference */
 .sl-markdown-content h1 {
   font-size: 2.25rem;
   font-weight: 700;
   color: #fff;
-  margin: 2.5rem 0 1rem;
+  margin: 3rem 0 1rem;
   letter-spacing: -0.02em;
 }
 
 .sl-markdown-content h2 {
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.75rem;
+  font-weight: 700;
   color: #fff;
-  margin: 2rem 0 0.75rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 3rem 0 1rem;
+  letter-spacing: -0.01em;
 }
 
 .sl-markdown-content h2:first-child {
-  border-top: none;
-  padding-top: 0;
   margin-top: 0;
 }
 
 .sl-markdown-content h3 {
   font-size: 1.25rem;
   font-weight: 600;
+  color: #fff;
+  margin: 2rem 0 0.75rem;
+}
+
+.sl-markdown-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
   margin: 1.5rem 0 0.5rem;
 }
 
-.sl-markdown-content h4 {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  margin: 1.25rem 0 0.5rem;
-}
-
 /* Paragraphs */
 .sl-markdown-content p {
-  margin-bottom: 1.25rem;
-  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 1.5rem;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 /* Lists */
 .sl-markdown-content ul,
 .sl-markdown-content ol {
   margin: 1rem 0 1.5rem;
-  padding-left: 1.5rem;
+  padding-left: 1.25rem;
 }
 
 .sl-markdown-content li {
-  margin-bottom: 0.5rem;
-  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 0.625rem;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .sl-markdown-content li::marker {
-  color: var(--sl-color-accent);
+  color: rgba(255, 255, 255, 0.4);
 }
 
-/* Inline code - accent-tinted, visible */
+/* Inline code - subtle dark pill */
 .sl-markdown-content code:not(pre code) {
-  background: rgba(139, 92, 246, 0.15);
-  color: #e0d4ff;
-  padding: 0.2em 0.4em;
-  border-radius: 4px;
-  font-size: 0.875em;
-  border: 1px solid rgba(139, 92, 246, 0.25);
-}
-
-/* Code blocks in content */
-.sl-markdown-content pre {
-  margin: 1.5rem 0;
-  padding: 1rem 1.25rem;
-}
-
-.sl-markdown-content pre code {
+  background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.9);
+  padding: 0.2em 0.5em;
+  border-radius: 5px;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Code Blocks
+   ========================================================================== */
+
+/* Container */
+.expressive-code {
+  margin: 1.5rem 0 !important;
+}
+
+/* Frame - the outer container */
+.expressive-code figure.frame {
+  background: #0d0d12 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  box-shadow: none !important;
+}
+
+/* Header */
+.expressive-code .header {
+  background: rgba(255, 255, 255, 0.03) !important;
+  padding: 0.7rem 1rem !important;
+  border: none !important;
+}
+
+/* Add "Terminal" text via CSS */
+.expressive-code .header .title:empty::before,
+.expressive-code.is-terminal .header::before {
+  content: "Terminal";
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* Hide sr-only and empty spans */
+.expressive-code .header .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+}
+
+/* Code area */
+.expressive-code pre {
+  background: #0a0a0f !important;
+  margin: 0 !important;
+  padding: 1rem 1.25rem !important;
+  border: none !important;
+  border-radius: 0 0 11px 11px !important;
+}
+
+.expressive-code code {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+}
+
+/* Copy button */
+.expressive-code .copy {
+  position: absolute !important;
+  top: 0.55rem !important;
+  right: 0.75rem !important;
+}
+
+.expressive-code .copy button {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  cursor: pointer !important;
+}
+
+.expressive-code .copy button:hover {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Standalone pre */
+.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre) {
+  background: #0a0a0f !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  padding: 1rem 1.25rem !important;
+  margin: 1.5rem 0 !important;
+}
+
+.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre) code {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+}
+
+/* Main container */
+.expressive-code {
+  margin: 1.5rem 0 !important;
+  display: block !important;
+}
+
+/* The figure/frame */
+.expressive-code figure,
+.expressive-code figure.frame,
+.expressive-code figure.frame.is-terminal {
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #0d0d12 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  position: relative !important;
+  display: block !important;
+}
+
+/* Header area */
+.expressive-code figcaption,
+.expressive-code figcaption.header,
+.expressive-code figure.frame figcaption.header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 0.75rem 1rem !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: none !important;
+  border-bottom: none !important;
+  margin: 0 !important;
+}
+
+/* Terminal label */
+.expressive-code figcaption::before,
+.expressive-code figure.frame figcaption.header::before {
+  content: "Terminal" !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  font-family: var(--sl-font) !important;
+  display: block !important;
+}
+
+/* Hide original title elements */
+.expressive-code figcaption .title,
+.expressive-code figcaption .sr-only,
+.expressive-code figcaption span {
+  display: none !important;
+}
+
+/* Pre/code area */
+.expressive-code pre {
+  margin: 0 !important;
+  padding: 1rem 1.25rem !important;
+  background: #0a0a0f !important;
+  border: none !important;
+  border-radius: 0 !important;
+  overflow-x: auto !important;
+}
+
+.expressive-code pre code,
+.expressive-code code {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  display: block !important;
+}
+
+/* Code lines */
+.expressive-code .ec-line {
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.expressive-code .ec-line .code {
+  display: inline !important;
+}
+
+/* Copy button */
+.expressive-code .copy {
+  position: absolute !important;
+  top: 0.65rem !important;
+  right: 0.75rem !important;
+  z-index: 10 !important;
+}
+
+.expressive-code .copy button {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  padding: 0.25rem !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: color 0.15s ease !important;
+}
+
+.expressive-code .copy button:hover {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.expressive-code .copy button div {
+  width: 16px !important;
+  height: 16px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
+  background-size: contain !important;
+  background-repeat: no-repeat !important;
+}
+
+/* Syntax highlighting colors - keep them */
+.expressive-code span[style*="--0"] {
+  color: var(--0) !important;
 }
 
 /* Links in content */
 .sl-markdown-content a {
-  color: #c4b5fd;
-  text-decoration: underline;
-  text-decoration-color: rgba(196, 181, 253, 0.4);
-  text-underline-offset: 2px;
+  color: #93c5fd;
+  text-decoration: none;
   transition: all 0.15s ease;
 }
 
 .sl-markdown-content a:hover {
-  color: #fff;
-  text-decoration-color: #fff;
+  color: #bfdbfe;
+  text-decoration: underline;
+}
+
+/* Callouts/Asides - blue accent like reference */
+.sl-markdown-content aside,
+.starlight-aside {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: none !important;
+  border-left: 3px solid #3b82f6 !important;
+  border-radius: 0 12px 12px 0 !important;
+  padding: 1rem 1.25rem !important;
+  margin: 1.5rem 0 !important;
+}
+
+.starlight-aside__title {
+  color: #60a5fa !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.starlight-aside__content,
+.starlight-aside p {
+  color: rgba(255, 255, 255, 0.75) !important;
+  font-size: 0.95rem !important;
+  margin: 0 !important;
+}
+
+.starlight-aside__icon {
+  color: #3b82f6 !important;
+}
+
+/* Note variant */
+.starlight-aside--note {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-left-color: #3b82f6 !important;
+}
+
+/* Tip variant */
+.starlight-aside--tip {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border-left-color: #22c55e !important;
+}
+
+.starlight-aside--tip .starlight-aside__icon {
+  color: #22c55e !important;
+}
+
+.starlight-aside--tip .starlight-aside__title {
+  color: #4ade80 !important;
+}
+
+/* Caution variant */
+.starlight-aside--caution {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-left-color: #f59e0b !important;
+}
+
+.starlight-aside--caution .starlight-aside__icon {
+  color: #f59e0b !important;
+}
+
+.starlight-aside--caution .starlight-aside__title {
+  color: #fbbf24 !important;
+}
+
+/* Danger variant */
+.starlight-aside--danger {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-left-color: #ef4444 !important;
+}
+
+.starlight-aside--danger .starlight-aside__icon {
+  color: #ef4444 !important;
+}
+
+.starlight-aside--danger .starlight-aside__title {
+  color: #f87171 !important;
 }
 
 /* Blockquotes */
 .sl-markdown-content blockquote {
-  border-left: 3px solid var(--sl-color-accent);
-  padding-left: 1rem;
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  padding-left: 1.25rem;
   margin: 1.5rem 0;
-  color: rgba(255, 255, 255, 0.75);
+  color: rgba(255, 255, 255, 0.6);
   font-style: italic;
 }
 
@@ -496,7 +814,10 @@ code {
   width: 100%;
   margin: 1.5rem 0;
   border-collapse: collapse;
-  font-size: 0.925rem;
+  font-size: 0.9rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .sl-markdown-content th {
@@ -504,14 +825,18 @@ code {
   color: #fff;
   font-weight: 600;
   text-align: left;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sl-markdown-content td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.85);
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.sl-markdown-content tr:last-child td {
+  border-bottom: none;
 }
 
 .sl-markdown-content tr:hover td {
@@ -521,8 +846,8 @@ code {
 /* Horizontal rules */
 .sl-markdown-content hr {
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  margin: 2rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 2.5rem 0;
 }
 
 /* Strong/bold text */
@@ -531,13 +856,20 @@ code {
   font-weight: 600;
 }
 
-/* Page title */
+/* Page title area */
 .content-panel h1#_top {
-  font-size: 2.5rem;
+  font-size: 2.75rem;
   font-weight: 700;
   color: #fff;
-  margin-bottom: 1rem;
-  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.025em;
+}
+
+/* Page description if present */
+.content-panel .meta {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
 }
 
 /* ==========================================================================

@@ -3,32 +3,27 @@ title: Installation
 description: How to install and set up the Sentry CLI
 ---
 
+import PackageManagerCode from '../../components/PackageManagerCode.astro';
+
 ## Installation
 
 Install globally with your preferred package manager:
 
-```bash
-# npm
-npm install -g sentry
-
-# pnpm
-pnpm add -g sentry
-
-# yarn
-yarn global add sentry
-
-# bun
-bun add -g sentry
-```
+<PackageManagerCode
+  npm="npm install -g sentry"
+  pnpm="pnpm add -g sentry"
+  yarn="yarn global add sentry"
+  bun="bun add -g sentry"
+/>
 
 Or run directly without installing:
 
-```bash
-npx sentry --help
-pnpm dlx sentry --help
-yarn dlx sentry --help
-bunx sentry --help
-```
+<PackageManagerCode
+  npm="npx sentry --help"
+  pnpm="pnpm dlx sentry --help"
+  yarn="yarn dlx sentry --help"
+  bun="bunx sentry --help"
+/>
 
 ## Authentication
 

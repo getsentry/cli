@@ -20,6 +20,21 @@ export default defineConfig({
       },
       expressiveCode: {
         themes: ["github-dark"],
+        styleOverrides: {
+          frames: {
+            frameBoxShadowCssValue: "none",
+            editorActiveTabIndicatorTopColor: "transparent",
+            editorActiveTabIndicatorBottomColor: "transparent",
+            editorTabBarBorderBottomColor: "transparent",
+            editorTabBarBackground: "transparent",
+            terminalTitlebarBorderBottomColor: "transparent",
+            terminalTitlebarBackground: "rgba(255, 255, 255, 0.03)",
+            terminalBackground: "#0a0a0f",
+          },
+          borderRadius: "12px",
+          borderColor: "rgba(255, 255, 255, 0.1)",
+          codeBackground: "#0a0a0f",
+        },
       },
       components: {
         Header: "./src/components/Header.astro",
