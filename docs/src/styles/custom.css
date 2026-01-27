@@ -351,13 +351,117 @@ starlight-tabs [role="tabpanel"] {
 }
 
 /* ==========================================================================
-   VARIATION 1: Cards with Gradient Image Headers
+   Features Section - Horizontal Rows with Commands
    ========================================================================== */
 
-.features-v1 {
-  margin: 6rem 0;
-  padding: 4rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+.features-section-new {
+  margin: 5rem 0;
+}
+
+.features-section-new h2 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 3rem;
+  text-align: center;
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+  margin-bottom: 4rem;
+}
+
+.feature-row.reverse {
+  flex-direction: row-reverse;
+}
+
+.feature-row:last-child {
+  margin-bottom: 0;
+}
+
+.feature-image {
+  flex: 0 0 400px;
+  height: 280px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 16px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.feature-image::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(1px);
+}
+
+.feature-command {
+  position: relative;
+  z-index: 1;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 0.875rem 1.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 1rem;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.feature-command .prompt {
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 0.5rem;
+}
+
+.feature-content {
+  flex: 1;
+}
+
+.feature-content h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+.feature-content p {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  max-width: 450px;
+}
+
+/* Responsive for feature rows */
+@media (max-width: 900px) {
+  .feature-row,
+  .feature-row.reverse {
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .feature-image {
+    flex: none;
+    width: 100%;
+    height: 220px;
+  }
+
+  .feature-content {
+    text-align: center;
+  }
+
+  .feature-content p {
+    max-width: none;
+  }
 }
 
 .features-v1 h2 {
