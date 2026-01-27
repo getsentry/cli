@@ -4,24 +4,38 @@
  * Tests for sentry project and org commands (list, get).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
-
-// Test credentials from environment - these MUST be set
-const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
-const TEST_ORG = process.env.SENTRY_TEST_ORG;
-const TEST_PROJECT = process.env.SENTRY_TEST_PROJECT;
-
-if (!(TEST_TOKEN && TEST_ORG && TEST_PROJECT)) {
-  throw new Error(
-    "SENTRY_TEST_AUTH_TOKEN, SENTRY_TEST_ORG, and SENTRY_TEST_PROJECT environment variables are required for E2E tests"
-  );
-}
+import {
+  createSentryMockServer,
+  TEST_ORG,
+  TEST_PROJECT,
+  TEST_TOKEN,
+} from "../mocks/routes.js";
+import type { MockServer } from "../mocks/server.js";
 
 // Each test gets its own config directory
 let testConfigDir: string;
+let mockServer: MockServer;
+
+beforeAll(async () => {
+  mockServer = createSentryMockServer();
+  await mockServer.start();
+});
+
+afterAll(() => {
+  mockServer.stop();
+});
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-project-");
@@ -35,7 +49,10 @@ afterEach(async () => {
 describe("sentry org list", () => {
   test("requires authentication", async () => {
     const result = await runCli(["org", "list"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -48,7 +65,10 @@ describe("sentry org list", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(["org", "list"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -64,7 +84,10 @@ describe("sentry org list", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(["org", "list", "--json"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -79,7 +102,10 @@ describe("sentry org list", () => {
 describe("sentry project list", () => {
   test("requires authentication", async () => {
     const result = await runCli(["project", "list"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -95,7 +121,10 @@ describe("sentry project list", () => {
       const result = await runCli(
         ["project", "list", "--org", TEST_ORG, "--limit", "5"],
         {
-          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
         }
       );
 
@@ -113,7 +142,10 @@ describe("sentry project list", () => {
       const result = await runCli(
         ["project", "list", "--org", TEST_ORG, "--json", "--limit", "5"],
         {
-          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
         }
       );
 
@@ -128,7 +160,10 @@ describe("sentry project list", () => {
 describe("sentry org view", () => {
   test("requires authentication", async () => {
     const result = await runCli(["org", "view", TEST_ORG], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -141,7 +176,10 @@ describe("sentry org view", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(["org", "view", TEST_ORG], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -157,7 +195,10 @@ describe("sentry org view", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(["org", "view", TEST_ORG, "--json"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -173,7 +214,10 @@ describe("sentry org view", () => {
       await setAuthToken(TEST_TOKEN);
 
       const result = await runCli(["org", "view", "nonexistent-org-12345"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(1);
@@ -187,7 +231,12 @@ describe("sentry project view", () => {
   test("requires authentication", async () => {
     const result = await runCli(
       ["project", "view", TEST_PROJECT, "--org", TEST_ORG],
-      { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+      {
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
+      }
     );
 
     expect(result.exitCode).toBe(1);
@@ -198,7 +247,10 @@ describe("sentry project view", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["project", "view"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -209,7 +261,10 @@ describe("sentry project view", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["project", "view", "--org", TEST_ORG], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -228,7 +283,12 @@ describe("sentry project view", () => {
 
       const result = await runCli(
         ["project", "view", TEST_PROJECT, "--org", TEST_ORG],
-        { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+        {
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
+        }
       );
 
       expect(result.exitCode).toBe(0);
@@ -245,7 +305,12 @@ describe("sentry project view", () => {
 
       const result = await runCli(
         ["project", "view", TEST_PROJECT, "--org", TEST_ORG, "--json"],
-        { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+        {
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
+        }
       );
 
       expect(result.exitCode).toBe(0);
@@ -262,7 +327,12 @@ describe("sentry project view", () => {
 
       const result = await runCli(
         ["project", "view", "nonexistent-project-12345", "--org", TEST_ORG],
-        { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+        {
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
+        }
       );
 
       expect(result.exitCode).toBe(1);

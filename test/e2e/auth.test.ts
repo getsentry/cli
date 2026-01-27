@@ -4,22 +4,33 @@
  * Tests for sentry auth login, logout, and status commands.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
-
-// Test credentials from environment - these MUST be set
-const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
-
-if (!TEST_TOKEN) {
-  throw new Error(
-    "SENTRY_TEST_AUTH_TOKEN environment variable is required for E2E tests"
-  );
-}
+import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
+import type { MockServer } from "../mocks/server.js";
 
 // Each test gets its own config directory
 let testConfigDir: string;
+let mockServer: MockServer;
+
+beforeAll(async () => {
+  mockServer = createSentryMockServer();
+  await mockServer.start();
+});
+
+afterAll(() => {
+  mockServer.stop();
+});
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-auth-");
@@ -33,7 +44,10 @@ afterEach(async () => {
 describe("sentry auth status", () => {
   test("shows not authenticated when no token", async () => {
     const result = await runCli(["auth", "status"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     // Error message may be in stdout or stderr depending on CLI framework
@@ -47,7 +61,10 @@ describe("sentry auth status", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["auth", "status"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.stdout).toContain("Authenticated");
@@ -58,7 +75,10 @@ describe("sentry auth status", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["auth", "status"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(0);
@@ -72,7 +92,10 @@ describe("sentry auth login --token", () => {
     "stores valid API token",
     async () => {
       const result = await runCli(["auth", "login", "--token", TEST_TOKEN], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.stdout).toContain("Authenticated");
@@ -80,18 +103,24 @@ describe("sentry auth login --token", () => {
 
       // Verify token was stored
       const statusResult = await runCli(["auth", "status"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
       expect(statusResult.stdout).toContain("Authenticated");
     },
-    { timeout: 15_000 }
+    { timeout: 10_000 }
   );
 
   test("rejects invalid token", async () => {
     const result = await runCli(
       ["auth", "login", "--token", "invalid-token-12345"],
       {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       }
     );
 
@@ -110,14 +139,20 @@ describe("sentry auth logout", () => {
       const loginResult = await runCli(
         ["auth", "login", "--token", TEST_TOKEN],
         {
-          env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+          env: {
+            [CONFIG_DIR_ENV_VAR]: testConfigDir,
+            SENTRY_URL: mockServer.url,
+          },
         }
       );
       expect(loginResult.exitCode).toBe(0);
 
       // Then logout
       const result = await runCli(["auth", "logout"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -125,7 +160,10 @@ describe("sentry auth logout", () => {
 
       // Verify we're logged out
       const statusResult = await runCli(["auth", "status"], {
-        env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
       });
       const output = statusResult.stdout + statusResult.stderr;
       expect(output).toMatch(/not authenticated/i);
@@ -135,7 +173,10 @@ describe("sentry auth logout", () => {
 
   test("succeeds even when not authenticated", async () => {
     const result = await runCli(["auth", "logout"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     // Should not error, just inform user

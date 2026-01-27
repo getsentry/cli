@@ -95,6 +95,10 @@ export type CliResult = {
   exitCode: number;
 };
 
+function getBunPath(): string {
+  return process.execPath;
+}
+
 /**
  * Run CLI command and capture output
  *
@@ -114,8 +118,9 @@ export async function runCli(
   }
 ): Promise<CliResult> {
   const cliDir = join(import.meta.dir, "..");
+  const bunPath = getBunPath();
 
-  const proc = Bun.spawn(["bun", "run", "src/bin.ts", ...args], {
+  const proc = Bun.spawn([bunPath, "run", "src/bin.ts", ...args], {
     cwd: options?.cwd ?? cliDir,
     env: { ...process.env, ...options?.env },
     stdout: "pipe",

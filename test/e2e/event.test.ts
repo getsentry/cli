@@ -4,22 +4,37 @@
  * Tests for sentry event get command.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { runCli } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
-
-const TEST_TOKEN = process.env.SENTRY_TEST_AUTH_TOKEN;
-const TEST_ORG = process.env.SENTRY_TEST_ORG;
-const TEST_PROJECT = process.env.SENTRY_TEST_PROJECT;
-
-if (!(TEST_TOKEN && TEST_ORG && TEST_PROJECT)) {
-  throw new Error(
-    "SENTRY_TEST_AUTH_TOKEN, SENTRY_TEST_ORG, and SENTRY_TEST_PROJECT environment variables are required for E2E tests"
-  );
-}
+import {
+  createSentryMockServer,
+  TEST_ORG,
+  TEST_PROJECT,
+  TEST_TOKEN,
+} from "../mocks/routes.js";
+import type { MockServer } from "../mocks/server.js";
 
 let testConfigDir: string;
+let mockServer: MockServer;
+
+beforeAll(async () => {
+  mockServer = createSentryMockServer();
+  await mockServer.start();
+});
+
+afterAll(() => {
+  mockServer.stop();
+});
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-event-");
@@ -34,7 +49,12 @@ describe("sentry event view", () => {
   test("requires authentication", async () => {
     const result = await runCli(
       ["event", "view", "abc123", "--org", TEST_ORG, "--project", TEST_PROJECT],
-      { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+      {
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
+      }
     );
 
     expect(result.exitCode).toBe(1);
@@ -45,7 +65,10 @@ describe("sentry event view", () => {
     await setAuthToken(TEST_TOKEN);
 
     const result = await runCli(["event", "view", "abc123"], {
-      env: { [CONFIG_DIR_ENV_VAR]: testConfigDir },
+      env: {
+        [CONFIG_DIR_ENV_VAR]: testConfigDir,
+        SENTRY_URL: mockServer.url,
+      },
     });
 
     expect(result.exitCode).toBe(1);
@@ -65,7 +88,12 @@ describe("sentry event view", () => {
         "--project",
         TEST_PROJECT,
       ],
-      { env: { [CONFIG_DIR_ENV_VAR]: testConfigDir } }
+      {
+        env: {
+          [CONFIG_DIR_ENV_VAR]: testConfigDir,
+          SENTRY_URL: mockServer.url,
+        },
+      }
     );
 
     expect(result.exitCode).toBe(1);
