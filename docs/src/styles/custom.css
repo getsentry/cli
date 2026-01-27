@@ -903,6 +903,11 @@ code {
   font-weight: 600;
 }
 
+/* Remove border between header and content */
+.content-panel + .content-panel {
+  border-top: none !important;
+}
+
 /* Page title area */
 .content-panel h1#_top {
   font-size: 2.75rem;
