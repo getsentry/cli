@@ -859,39 +859,29 @@ code {
 
 /* Tables */
 .sl-markdown-content table {
-  width: auto;
   margin: 1.5rem 0;
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
   font-size: 0.875rem;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  overflow: hidden;
 }
 
-.sl-markdown-content th {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
-  font-weight: 600;
+.sl-markdown-content th,
+.sl-markdown-content td {
+  padding: 0.75rem 1rem;
   text-align: left;
-  padding: 0.625rem 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.sl-markdown-content th {
+  color: #fff;
+  font-weight: 600;
+}
+
 .sl-markdown-content td {
-  padding: 0.625rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.8);
-  background: transparent;
 }
 
 .sl-markdown-content tr:last-child td {
   border-bottom: none;
-}
-
-.sl-markdown-content tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Horizontal rules */
