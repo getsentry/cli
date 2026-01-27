@@ -7,12 +7,102 @@
  */
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 
 import { glob } from "tinyglobby";
 
 declare global {
   var Bun: typeof BunPolyfill;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// bun:sqlite Polyfill using node:sqlite
+// ─────────────────────────────────────────────────────────────────────────────
+
+type SqliteValue = string | number | bigint | null | Uint8Array;
+
+/**
+ * Polyfill for bun:sqlite Statement using node:sqlite StatementSync.
+ * Wraps node:sqlite's prepare() result to match bun:sqlite's query() API.
+ */
+class NodeStatementPolyfill {
+  private stmt: ReturnType<DatabaseSync["prepare"]>;
+
+  constructor(stmt: ReturnType<DatabaseSync["prepare"]>) {
+    this.stmt = stmt;
+  }
+
+  /**
+   * Get a single row.
+   */
+  get(...params: SqliteValue[]): Record<string, SqliteValue> | undefined {
+    return this.stmt.get(...params) as Record<string, SqliteValue> | undefined;
+  }
+
+  /**
+   * Get all rows.
+   */
+  all(...params: SqliteValue[]): Record<string, SqliteValue>[] {
+    return this.stmt.all(...params) as Record<string, SqliteValue>[];
+  }
+
+  /**
+   * Run a statement (INSERT, UPDATE, DELETE).
+   */
+  run(...params: SqliteValue[]): void {
+    this.stmt.run(...params);
+  }
+}
+
+/**
+ * Polyfill for bun:sqlite Database using node:sqlite DatabaseSync.
+ * Provides the same API surface as Bun's Database class.
+ */
+class NodeDatabasePolyfill {
+  private db: DatabaseSync;
+
+  constructor(path: string) {
+    this.db = new DatabaseSync(path, {
+      timeout: 100, // 100ms - fast fail for CLI responsiveness
+      enableForeignKeyConstraints: true,
+    });
+  }
+
+  /**
+   * Execute raw SQL (for DDL statements, PRAGMA, etc.).
+   */
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  /**
+   * Prepare a statement for execution.
+   * In bun:sqlite this is called `query()`, but we expose it as both
+   * `query()` and `prepare()` for compatibility.
+   */
+  query(sql: string): NodeStatementPolyfill {
+    return new NodeStatementPolyfill(this.db.prepare(sql));
+  }
+
+  /**
+   * Close the database connection.
+   */
+  close(): void {
+    this.db.close();
+  }
+}
+
+// Export as a module-like object that can be required
+const bunSqlitePolyfill = {
+  Database: NodeDatabasePolyfill,
+};
+
+// Make it available globally for the bundle
+(globalThis as Record<string, unknown>).__bun_sqlite_polyfill = bunSqlitePolyfill;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bun Global Polyfill
+// ─────────────────────────────────────────────────────────────────────────────
 
 const BunPolyfill = {
   file(path: string) {

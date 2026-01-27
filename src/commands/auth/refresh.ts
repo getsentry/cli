@@ -6,7 +6,7 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { readConfig, refreshToken } from "../../lib/config.js";
+import { getAuthConfig, refreshToken } from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
@@ -63,8 +63,8 @@ Examples:
     const { stdout } = this;
 
     // Pre-check for refresh token availability (better error message)
-    const config = await readConfig();
-    if (!config.auth?.refreshToken && config.auth?.token) {
+    const auth = await getAuthConfig();
+    if (!auth?.refreshToken && auth?.token) {
       throw new AuthError(
         "invalid",
         "No refresh token available. You may be using a manual API token.\n" +

@@ -291,8 +291,9 @@ describe("resolveOrgAndIssueId", () => {
 
   test("throws ContextError for short suffix without project context", async () => {
     // Clear any defaults to ensure no project context
-    const { writeConfig } = await import("../../../src/lib/config.js");
-    await writeConfig({});
+    const { clearAuth, setDefaults } = await import("../../../src/lib/config.js");
+    await clearAuth();
+    await setDefaults(undefined, undefined);
 
     // Short suffix "G" requires project context - should throw, not fall through
     await expect(
@@ -306,10 +307,11 @@ describe("resolveOrgAndIssueId", () => {
 
   test("resolves short suffix with explicit --org and --project flags", async () => {
     // Clear defaults but keep auth token to ensure we're testing explicit flags
-    const { writeConfig, setAuthToken: setToken } = await import(
+    const { clearAuth, setDefaults, setAuthToken: setToken } = await import(
       "../../../src/lib/config.js"
     );
-    await writeConfig({});
+    await clearAuth();
+    await setDefaults(undefined, undefined);
     await setToken("test-token");
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -8,16 +8,17 @@ import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
 import {
+  getAuthConfig,
   getConfigPath,
   getDefaultOrganization,
   getDefaultProject,
   isAuthenticated,
-  readConfig,
+  type AuthConfig,
 } from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { error, success } from "../../lib/formatters/colors.js";
 import { formatExpiration, maskToken } from "../../lib/formatters/human.js";
-import type { SentryConfig, Writer } from "../../types/index.js";
+import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
   readonly showToken: boolean;
@@ -28,24 +29,22 @@ type StatusFlags = {
  */
 function writeTokenInfo(
   stdout: Writer,
-  config: SentryConfig,
+  auth: AuthConfig | undefined,
   showToken: boolean
 ): void {
-  if (!config.auth?.token) {
+  if (!auth?.token) {
     return;
   }
 
-  const tokenDisplay = showToken
-    ? config.auth.token
-    : maskToken(config.auth.token);
+  const tokenDisplay = showToken ? auth.token : maskToken(auth.token);
   stdout.write(`Token: ${tokenDisplay}\n`);
 
-  if (config.auth.expiresAt) {
-    stdout.write(`Expires: ${formatExpiration(config.auth.expiresAt)}\n`);
+  if (auth.expiresAt) {
+    stdout.write(`Expires: ${formatExpiration(auth.expiresAt)}\n`);
   }
 
   // Show refresh token status
-  if (config.auth.refreshToken) {
+  if (auth.refreshToken) {
     stdout.write(`Auto-refresh: ${success("enabled")}\n`);
   } else {
     stdout.write("Auto-refresh: disabled (no refresh token)\n");
@@ -119,7 +118,7 @@ export const statusCommand = buildCommand({
   async func(this: SentryContext, flags: StatusFlags): Promise<void> {
     const { stdout, stderr } = this;
 
-    const config = await readConfig();
+    const auth = await getAuthConfig();
     const authenticated = await isAuthenticated();
 
     stdout.write(`Config file: ${getConfigPath()}\n\n`);
@@ -130,7 +129,7 @@ export const statusCommand = buildCommand({
 
     stdout.write(`Status: Authenticated ${success("✓")}\n\n`);
 
-    writeTokenInfo(stdout, config, flags.showToken);
+    writeTokenInfo(stdout, auth, flags.showToken);
     await writeDefaults(stdout);
     await verifyCredentials(stdout, stderr);
   },
