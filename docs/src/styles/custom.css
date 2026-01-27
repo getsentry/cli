@@ -356,15 +356,15 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-section {
   margin: 2rem 0;
+  padding: 1rem;
   background: rgba(255, 255, 255, 0.02);
-  border-radius: 16px;
-  overflow: hidden;
+  border-radius: 20px;
 }
 
 .feature-section-inner {
   display: flex;
   align-items: stretch;
-  min-height: 360px;
+  min-height: 340px;
 }
 
 .feature-section-inner.reverse {
@@ -377,7 +377,7 @@ starlight-tabs [role="tabpanel"] {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 3rem;
+  padding: 2rem;
 }
 
 .feature-text h3 {
@@ -406,6 +406,7 @@ starlight-tabs [role="tabpanel"] {
   flex: 0 0 55%;
   background-size: cover;
   background-position: center;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
