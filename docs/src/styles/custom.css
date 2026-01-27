@@ -675,36 +675,77 @@ code {
   display: inline !important;
 }
 
-/* Copy button - positioned in header area */
+/* Copy button - positioned in header area, matching PackageManagerCode style */
 .expressive-code .copy {
   position: absolute !important;
   top: 0.5rem !important;
   right: 0.5rem !important;
   z-index: 10 !important;
+  flex-direction: row !important;
+  gap: 0.25rem !important;
 }
 
 .expressive-code .copy button {
-  background: transparent !important;
-  border: none !important;
-  color: rgba(255, 255, 255, 0.4) !important;
-  padding: 0.5rem !important;
-  cursor: pointer !important;
+  all: unset !important;
   display: flex !important;
   align-items: center !important;
-  justify-content: center !important;
+  gap: 0.25rem !important;
+  background: none !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  cursor: pointer !important;
+  padding: 0.5rem !important;
   transition: color 0.15s ease !important;
+  width: auto !important;
+  height: auto !important;
+  opacity: 1 !important;
 }
 
 .expressive-code .copy button:hover {
   color: rgba(255, 255, 255, 0.8) !important;
 }
 
+/* Hide the default div background effect */
 .expressive-code .copy button div {
+  display: none !important;
+}
+
+/* Hide default border pseudo-element */
+.expressive-code .copy button::before {
+  display: none !important;
+}
+
+/* Icon via ::after - matching PackageManagerCode SVG */
+.expressive-code .copy button::after {
+  content: "" !important;
+  display: block !important;
   width: 16px !important;
   height: 16px !important;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
-  background-size: contain !important;
-  background-repeat: no-repeat !important;
+  background-color: currentColor !important;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
+  -webkit-mask-repeat: no-repeat !important;
+  -webkit-mask-size: contain !important;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
+  mask-repeat: no-repeat !important;
+  mask-size: contain !important;
+  margin: 0 !important;
+  position: static !important;
+  inset: auto !important;
+}
+
+/* Feedback tooltip - style like PackageManagerCode "Copied!" */
+.expressive-code .copy .feedback {
+  background: transparent !important;
+  color: #22c55e !important;
+  font-size: 0.75rem !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  position: static !important;
+  align-self: center !important;
+}
+
+.expressive-code .copy .feedback::after {
+  display: none !important;
 }
 
 /* Syntax highlighting colors - keep them */
