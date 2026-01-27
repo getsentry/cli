@@ -169,7 +169,7 @@ function buildContextMessage(
  * Provides consistent error formatting with usage hints and alternatives.
  *
  * @param resource - What is required (e.g., "Organization", "Organization and project")
- * @param command - Primary usage example (e.g., "sentry org get <org-slug>")
+ * @param command - Primary usage example (e.g., "sentry org view <org-slug>")
  * @param alternatives - Alternative ways to resolve (defaults to DSN/project detection hints)
  */
 export class ContextError extends CliError {

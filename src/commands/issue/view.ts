@@ -11,6 +11,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import {
   formatEventDetails,
   formatIssueDetails,
+  writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
@@ -132,5 +133,9 @@ export const viewCommand = buildCommand({
     }
 
     writeHumanOutput(stdout, issue, event);
+    writeFooter(
+      stdout,
+      `Tip: Use 'sentry issue explain ${issue.shortId}' for AI root cause analysis`
+    );
   },
 });
