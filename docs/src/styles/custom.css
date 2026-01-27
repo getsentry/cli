@@ -412,7 +412,7 @@ starlight-tabs [role="tabpanel"] {
   margin: 0.5rem 0.75rem 0.75rem 0;
   background-size: cover;
   background-position: center;
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
