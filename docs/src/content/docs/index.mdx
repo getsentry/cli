@@ -11,7 +11,7 @@ hero:
   tagline: No more flags. No more guessing. Just type what you mean and let the CLI figure out the rest. Built by humans and agents, for humans and agents.
 ---
 
-import { Card, CardGrid, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
 import CommandBox from '../../components/CommandBox.astro';
 import Terminal from '../../components/Terminal.astro';
 import FeatureTerminal from '../../components/FeatureTerminal.astro';
@@ -91,52 +91,3 @@ import FeatureTerminal from '../../components/FeatureTerminal.astro';
     </div>
   </div>
 </section>
-
-<div class="install-section">
-
-## Install
-
-<Tabs>
-  <TabItem label="npm">
-    ```bash
-    npm install -g sentry
-    ```
-  </TabItem>
-  <TabItem label="pnpm">
-    ```bash
-    pnpm add -g sentry
-    ```
-  </TabItem>
-  <TabItem label="yarn">
-    ```bash
-    yarn global add sentry
-    ```
-  </TabItem>
-  <TabItem label="bun">
-    ```bash
-    bun add -g sentry
-    ```
-  </TabItem>
-</Tabs>
-
-</div>
-
-<div class="quick-start">
-
-## Quick Start
-
-```bash
-# Authenticate (opens browser, handles everything)
-sentry auth login
-
-# View an issue — short IDs just work
-sentry issue view WQ
-
-# Get AI-powered root cause analysis
-sentry issue explain WQ
-
-# List issues — project auto-detected from your code
-sentry issue list
-```
-
-</div>
