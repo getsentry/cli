@@ -18,6 +18,7 @@
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun test",
+    "test:unit": "bun test test/lib test/commands test/types",
     "test:e2e": "bun test test/e2e"
   },
   "devDependencies": {

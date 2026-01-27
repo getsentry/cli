@@ -41,8 +41,8 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
 
-  test:
-    name: Test
+  test-unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,12 +58,8 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
-      - name: Test
-        env:
-          SENTRY_TEST_AUTH_TOKEN: ${{ secrets.SENTRY_TEST_AUTH_TOKEN }}
-          SENTRY_TEST_ORG: ${{ secrets.SENTRY_TEST_ORG }}
-          SENTRY_TEST_PROJECT: ${{ secrets.SENTRY_TEST_PROJECT }}
-        run: bun test --coverage --coverage-reporter=lcov
+      - name: Unit Tests
+        run: bun run test:unit --coverage --coverage-reporter=lcov
       - name: Upload Coverage
         uses: getsentry/codecov-action@main
         with:
@@ -72,7 +68,7 @@ jobs:
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
-    needs: [lint, test]
+    needs: [lint, test-unit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -124,9 +120,35 @@ jobs:
           name: sentry-${{ matrix.target }}
           path: dist-bin/sentry-*
 
+  test-e2e:
+    name: E2E Tests
+    needs: [build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sentry-linux-x64
+          path: dist-bin
+      - name: Make binary executable
+        run: chmod +x dist-bin/sentry-linux-x64
+      - name: E2E Tests
+        env:
+          SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
+        run: bun run test:e2e
+
   build-npm:
     name: Build npm Package (Node ${{ matrix.node }})
-    needs: [lint, test]
+    needs: [lint, test-unit]
     runs-on: ubuntu-latest
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     strategy:
@@ -163,7 +185,7 @@ jobs:
 
   merge-artifacts:
     name: Merge Artifacts
-    needs: [build-binary, build-npm]
+    needs: [build-binary, build-npm, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
