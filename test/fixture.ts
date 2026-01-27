@@ -91,8 +91,17 @@ export type CliResult = {
   exitCode: number;
 };
 
-function getBunPath(): string {
-  return process.execPath;
+/**
+ * Get the CLI command to execute.
+ * Uses SENTRY_CLI_BINARY env var if set (for CI with pre-built binary),
+ * otherwise falls back to running source via bun.
+ */
+function getCliCommand(): string[] {
+  const binaryPath = process.env.SENTRY_CLI_BINARY;
+  if (binaryPath) {
+    return [binaryPath];
+  }
+  return [process.execPath, "run", "src/bin.ts"];
 }
 
 /**
@@ -106,9 +115,9 @@ export async function runCli(
   }
 ): Promise<CliResult> {
   const cliDir = join(import.meta.dir, "..");
-  const bunPath = getBunPath();
+  const cmd = getCliCommand();
 
-  const proc = Bun.spawn([bunPath, "run", "src/bin.ts", ...args], {
+  const proc = Bun.spawn([...cmd, ...args], {
     cwd: options?.cwd ?? cliDir,
     env: { ...process.env, ...options?.env },
     stdout: "pipe",
@@ -156,6 +165,7 @@ export function createE2EContext(
         env: {
           [CONFIG_DIR_ENV_VAR]: configDir,
           SENTRY_URL: serverUrl,
+          SENTRY_CLI_NO_TELEMETRY: "1",
         },
       }),
     /**
