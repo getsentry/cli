@@ -23,40 +23,40 @@ const { title = "Terminal" } = Astro.props;
 
 <style>
   .feature-terminal {
-    background: rgba(10, 10, 15, 0.95);
+    background: rgba(10, 10, 15, 0.99);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    box-shadow: 
+      0 25px 50px -12px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    max-width: 420px;
+    max-width: 520px;
+    width: 90%;
     font-size: 0.8rem;
   }
 
   .feature-terminal-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.03);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .feature-terminal-dots {
     display: flex;
-    gap: 6px;
+    gap: 8px;
   }
 
   .dot {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.15);
   }
 
   .feature-terminal-title {
-    flex: 1;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
     font-weight: 500;
   }
 
@@ -65,14 +65,15 @@ const { title = "Terminal" } = Astro.props;
   }
 
   .feature-terminal-body {
-    padding: 1rem 1.25rem;
+    padding: 0 1.5rem 1.25rem;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
     line-height: 1.6;
     color: rgba(255, 255, 255, 0.85);
   }
 
   .feature-terminal-body :global(.prompt) {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.4);
+    user-select: none;
   }
 
   .feature-terminal-body :global(.command) {
@@ -88,10 +89,13 @@ const { title = "Terminal" } = Astro.props;
   }
 
   .feature-terminal-body :global(.highlight) {
-    color: #a78bfa;
+    color: #22d3ee;
   }
 
   .feature-terminal-body :global(.line) {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
     margin-bottom: 0.25rem;
   }
 

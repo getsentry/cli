@@ -356,15 +356,14 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-section {
   margin: 2rem 0;
-  padding: 0.75rem;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 16px;
+  overflow: hidden;
 }
 
 .feature-section-inner {
   display: flex;
   align-items: stretch;
-  gap: 0.75rem;
 }
 
 .feature-section-inner.reverse {
@@ -377,7 +376,7 @@ starlight-tabs [role="tabpanel"] {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 1.5rem 2rem;
+  padding: 2.5rem;
 }
 
 .feature-text h3 {
@@ -392,7 +391,12 @@ starlight-tabs [role="tabpanel"] {
   font-size: 1.05rem;
   line-height: 1.7;
   color: rgba(255, 255, 255, 0.55);
-  margin: 0;
+  margin: 0 0 1rem 0;
+}
+
+.feature-text p:last-child {
+  margin-bottom: 0;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .feature-text code {
@@ -404,7 +408,8 @@ starlight-tabs [role="tabpanel"] {
 
 .feature-visual {
   flex: 0 0 55%;
-  min-height: 300px;
+  min-height: 420px;
+  margin: 0.5rem 0.75rem 0.75rem 0;
   background-size: cover;
   background-position: center;
   border-radius: 12px;
@@ -413,12 +418,15 @@ starlight-tabs [role="tabpanel"] {
   justify-content: center;
 }
 
+.feature-section-inner.reverse .feature-visual {
+  margin: 0.75rem 0 0.75rem 0.75rem;
+}
+
 /* Responsive for feature sections */
 @media (max-width: 1000px) {
   .feature-section-inner,
   .feature-section-inner.reverse {
     flex-direction: column;
-    min-height: auto;
   }
 
   .feature-text {
@@ -426,10 +434,12 @@ starlight-tabs [role="tabpanel"] {
     text-align: center;
   }
 
-  .feature-visual {
+  .feature-visual,
+  .feature-section-inner.reverse .feature-visual {
     flex: none;
-    width: 100%;
-    min-height: 300px;
+    width: calc(100% - 1.5rem);
+    min-height: 380px;
+    margin: 0 0.75rem 0.75rem 0.75rem;
   }
 }
 
@@ -443,7 +453,7 @@ starlight-tabs [role="tabpanel"] {
   }
 
   .feature-visual {
-    min-height: 260px;
+    min-height: 340px;
   }
 
   .feature-text h3 {
