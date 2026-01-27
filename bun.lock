@@ -25,6 +25,7 @@
     },
   },
   "patchedDependencies": {
+    "@sentry/core@10.36.0": "patches/@sentry%2Fcore@10.36.0.patch",
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
   },
   "packages": {
