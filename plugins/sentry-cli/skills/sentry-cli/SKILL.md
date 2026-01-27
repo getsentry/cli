@@ -77,9 +77,12 @@ sentry issue view 123456789 -w              # Open in browser
 ```
 
 **Issue ID formats supported:**
+
 - Numeric ID: `123456789`
 - Full short ID: `PROJ-ABC`
 - Short suffix: `ABC` (when project is auto-detected)
+
+> **Note on aliases:** In multi-project contexts, issues may display with short aliases (e.g., `f-G`) in the **Alias** column. These aliases are shortcuts for referencing issues without typing the full ID. Bold text in command examples indicates the command prefix, while _underscores_ denote variable placeholders you should replace with actual values.
 
 ### Events
 
@@ -113,6 +116,7 @@ sentry api organizations/ --verbose
 ```
 
 **API command flags:**
+
 - `-X, --method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
 - `-F, --field`: Add typed field (supports JSON parsing, arrays, nested objects)
 - `-f, --raw-field`: Add string field without JSON parsing
@@ -131,6 +135,7 @@ The CLI automatically detects organization and project context from:
 3. **Source code scanning**: Finds DSNs in your codebase
 
 This means in most projects, you can simply run:
+
 ```bash
 sentry issue list    # Uses auto-detected org/project
 sentry project view  # Shows detected project(s)
@@ -149,6 +154,8 @@ sentry project view
 ```
 
 In multi-project mode, issues are displayed with aliases (e.g., `f-G`) for disambiguation.
+
+> **Understanding aliases:** When listing issues across multiple projects, the output includes an **Alias** column with short identifiers like `f-G`. These aliases let you quickly reference issues in subsequent commands (e.g., `sentry issue view f-G`) without typing the full issue ID. The alias format uses a project prefix followed by a short hash. Bold text in examples shows literal command names; _italicized_ or underscored text indicates placeholders for your own values.
 
 ## Common Workflows
 

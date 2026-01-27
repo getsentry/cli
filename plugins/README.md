@@ -4,16 +4,6 @@ Agent skills for using the Sentry CLI, following the [Agent Skills](https://gith
 
 ## Installation
 
-### Claude Code (via Marketplace)
-
-```bash
-# Add the marketplace from local clone
-claude plugin marketplace add /path/to/sentry-cli
-
-# Install the plugin
-claude plugin install sentry-cli
-```
-
 ### Claude Code (from GitHub)
 
 ```bash
@@ -21,7 +11,17 @@ claude plugin install sentry-cli
 claude plugin marketplace add getsentry/cli
 
 # Install the plugin
-claude plugin install sentry-cli@sentry-cli
+claude plugin install sentry/cli
+```
+
+### Claude Code (from local clone)
+
+```bash
+# Add the marketplace from local clone
+claude plugin marketplace add /path/to/sentry-cli
+
+# Install the plugin
+claude plugin install sentry/cli
 ```
 
 After installation, restart Claude Code. The skills will be automatically invoked when relevant to your task.
