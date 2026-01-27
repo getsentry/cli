@@ -859,10 +859,12 @@ code {
 
 /* Tables */
 .sl-markdown-content table {
-  width: 100%;
+  width: 100% !important;
+  max-width: 100% !important;
   margin: 1.5rem 0;
   border-collapse: collapse;
   font-size: 0.875rem;
+  display: table !important;
 }
 
 .sl-markdown-content th,
