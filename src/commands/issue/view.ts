@@ -156,6 +156,8 @@ export const viewCommand = buildCommand({
         // Non-fatal: trace data may not be available for all events
         spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
       }
+    } else if (flags.spans && !event) {
+      spanTreeLines = [muted("\nCould not fetch event to display span tree.")];
     } else if (flags.spans && !event?.contexts?.trace?.trace_id) {
       spanTreeLines = [muted("\nNo trace data available for this event.")];
     }

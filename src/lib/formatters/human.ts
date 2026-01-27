@@ -820,7 +820,7 @@ type SpanNode = {
  * @returns Formatted duration (e.g., "120ms", "1.50s")
  */
 function formatSpanDuration(startTs: number, endTs: number): string {
-  const durationMs = Math.round((endTs - startTs) * 1000);
+  const durationMs = Math.max(0, Math.round((endTs - startTs) * 1000));
   if (durationMs < 1000) {
     return `${durationMs}ms`;
   }
@@ -830,12 +830,12 @@ function formatSpanDuration(startTs: number, endTs: number): string {
 /**
  * Build a tree structure from flat spans using parent_span_id.
  * Sorts children by start_timestamp for chronological display.
+ * Spans without a found parent are treated as roots (handles orphans gracefully).
  *
  * @param spans - Flat array of spans
- * @param rootSpanId - Optional root span ID to start the tree from
  * @returns Array of root-level span nodes with nested children
  */
-function buildSpanTree(spans: Span[], rootSpanId?: string): SpanNode[] {
+function buildSpanTree(spans: Span[]): SpanNode[] {
   const spanMap = new Map<string, SpanNode>();
   const roots: SpanNode[] = [];
 
@@ -855,8 +855,8 @@ function buildSpanTree(spans: Span[], rootSpanId?: string): SpanNode[] {
     const parentNode = parentId ? spanMap.get(parentId) : undefined;
     if (parentNode) {
       parentNode.children.push(node);
-    } else if (!rootSpanId || span.span_id === rootSpanId) {
-      // This is a root span (no parent or matches specified root)
+    } else {
+      // No parent found in response - treat as root (true root or orphan)
       roots.push(node);
     }
   }
@@ -914,10 +914,10 @@ function formatSpanNode(
   // Color duration based on severity (slow = yellow/red)
   const durationMs = (span.timestamp - span.start_timestamp) * 1000;
   let durationText = duration;
-  if (durationMs > 1000) {
-    durationText = yellow(duration);
-  } else if (durationMs > 5000) {
+  if (durationMs > 5000) {
     durationText = red(duration);
+  } else if (durationMs > 1000) {
+    durationText = yellow(duration);
   }
 
   lines.push(
@@ -954,7 +954,7 @@ function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
   // Build span tree from the transaction's spans
   const spans = traceEvent.spans ?? [];
   if (spans.length > 0) {
-    const tree = buildSpanTree(spans, traceEvent.span_id);
+    const tree = buildSpanTree(spans);
     const treeLength = tree.length;
     tree.forEach((root, i) => {
       const isLast = i === treeLength - 1;
