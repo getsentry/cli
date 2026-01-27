@@ -6,6 +6,10 @@ import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
 
 // Check if we're on the homepage (splash page)
 const isHomepage = Astro.props.slug === "";
+
+// Get base path for links
+const baseUrl = import.meta.env.BASE_URL;
+const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
 ---
 
 <div class="header sl-flex">
@@ -15,7 +19,7 @@ const isHomepage = Astro.props.slug === "";
   
   <div class="sl-flex header-right">
     {!isHomepage && <Search {...Astro.props} />}
-    <a href="/cli/getting-started/" class="header-nav-link">Docs</a>
+    <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
     <SocialIcons {...Astro.props} />
   </div>
 </div>
