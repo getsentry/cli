@@ -1,0 +1,138 @@
+---
+interface Props {
+  title?: string;
+}
+
+const { title = "Terminal" } = Astro.props;
+---
+
+<div class="feature-terminal">
+  <div class="feature-terminal-header">
+    <div class="feature-terminal-dots">
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+    <span class="feature-terminal-title">{title}</span>
+    <div class="feature-terminal-spacer"></div>
+  </div>
+  <div class="feature-terminal-body">
+    <slot />
+  </div>
+</div>
+
+<style>
+  .feature-terminal {
+    background: rgba(10, 10, 15, 0.99);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 
+      0 25px 50px -12px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    max-width: 640px;
+    width: 94%;
+    font-size: 0.8rem;
+  }
+
+  .feature-terminal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+  }
+
+  .feature-terminal-dots {
+    display: flex;
+    gap: 8px;
+  }
+
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .feature-terminal-title {
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .feature-terminal-spacer {
+    width: 52px;
+  }
+
+  .feature-terminal-body {
+    padding: 0 1.5rem 1.25rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .feature-terminal-body :global(.prompt) {
+    color: rgba(255, 255, 255, 0.4);
+    user-select: none;
+  }
+
+  .feature-terminal-body :global(.command) {
+    color: #fff;
+  }
+
+  .feature-terminal-body :global(.dimmed) {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .feature-terminal-body :global(.success) {
+    color: #22c55e;
+  }
+
+  .feature-terminal-body :global(.highlight) {
+    color: #22d3ee;
+  }
+
+  .feature-terminal-body :global(.line) {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    margin-bottom: 0.25rem;
+  }
+
+  .feature-terminal-body :global(.line:last-child) {
+    margin-bottom: 0;
+  }
+
+  .feature-terminal-body :global(.spacer) {
+    height: 0.75rem;
+  }
+
+  /* Table styles */
+  .feature-terminal-body :global(.table-header) {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .feature-terminal-body :global(.table-row) {
+    font-size: 0.78rem;
+  }
+
+  .feature-terminal-body :global(.col-id) {
+    min-width: 70px;
+  }
+
+  .feature-terminal-body :global(.col-title) {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .feature-terminal-body :global(.col-count) {
+    min-width: 45px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.5);
+  }
+</style>
