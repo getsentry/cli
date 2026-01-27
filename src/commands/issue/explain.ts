@@ -21,6 +21,7 @@ import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
 type ExplainFlags = {
   readonly org?: string;
+  readonly project?: string;
   readonly json: boolean;
   readonly force: boolean;
 };
@@ -39,6 +40,7 @@ export const explainCommand = buildCommand({
       "Examples:\n" +
       "  sentry issue explain 123456789\n" +
       "  sentry issue explain MYPROJECT-ABC --org my-org\n" +
+      "  sentry issue explain G --org my-org --project my-project\n" +
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
@@ -58,6 +60,13 @@ export const explainCommand = buildCommand({
         parse: String,
         brief:
           "Organization slug (required for short IDs if not auto-detected)",
+        optional: true,
+      },
+      project: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Project slug (required for short suffixes if not auto-detected)",
         optional: true,
       },
       json: {
@@ -81,12 +90,13 @@ export const explainCommand = buildCommand({
 
     try {
       // Resolve org and issue ID
-      const { org, issueId: numericId } = await resolveOrgAndIssueId(
+      const { org, issueId: numericId } = await resolveOrgAndIssueId({
         issueId,
-        flags.org,
+        org: flags.org,
+        project: flags.project,
         cwd,
-        `sentry issue explain ${issueId} --org <org-slug>`
-      );
+        commandHint: `sentry issue explain ${issueId} --org <org-slug> --project <project-slug>`,
+      });
 
       // 1. Check for existing analysis (skip if --force)
       let state = flags.force ? null : await getAutofixState(org, numericId);

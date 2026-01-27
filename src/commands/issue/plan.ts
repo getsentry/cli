@@ -28,6 +28,7 @@ import { pollAutofixState, resolveOrgAndIssueId } from "./utils.js";
 
 type PlanFlags = {
   readonly org?: string;
+  readonly project?: string;
   readonly cause?: number;
   readonly json: boolean;
 };
@@ -140,7 +141,8 @@ export const planCommand = buildCommand({
       "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
       "  sentry issue plan 123456789 --cause 0\n" +
-      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1",
+      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1\n" +
+      "  sentry issue plan G --org my-org --project my-project --cause 0",
   },
   parameters: {
     positional: {
@@ -158,6 +160,13 @@ export const planCommand = buildCommand({
         parse: String,
         brief:
           "Organization slug (required for short IDs if not auto-detected)",
+        optional: true,
+      },
+      project: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Project slug (required for short suffixes if not auto-detected)",
         optional: true,
       },
       cause: {
@@ -182,12 +191,13 @@ export const planCommand = buildCommand({
 
     try {
       // Resolve org and issue ID
-      const { org, issueId: numericId } = await resolveOrgAndIssueId(
+      const { org, issueId: numericId } = await resolveOrgAndIssueId({
         issueId,
-        flags.org,
+        org: flags.org,
+        project: flags.project,
         cwd,
-        `sentry issue plan ${issueId} --org <org-slug>`
-      );
+        commandHint: `sentry issue plan ${issueId} --org <org-slug> --project <project-slug>`,
+      });
 
       // Get current autofix state
       const currentState = await getAutofixState(org, numericId);

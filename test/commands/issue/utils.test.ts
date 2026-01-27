@@ -5,52 +5,65 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import {
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
-import { setAuthToken } from "../../../src/lib/config.js";
+import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../../src/lib/config.js";
+import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
-// Test config directory
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
-    `test-issue-utils-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
-
-  // Save original fetch
+  testConfigDir = await createTestConfigDir("test-issue-utils-");
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
-
-  // Set up auth token
   await setAuthToken("test-token");
 });
 
-afterEach(() => {
-  // Restore original fetch
+afterEach(async () => {
   globalThis.fetch = originalFetch;
-
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("resolveOrgAndIssueId", () => {
   test("returns org and numeric issue ID when org is provided", async () => {
-    const result = await resolveOrgAndIssueId(
-      "123456789",
-      "my-org",
-      "/tmp",
-      "sentry issue explain 123456789 --org <org>"
-    );
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Numeric ID is fetched directly
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "123456789",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain 123456789 --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("123456789");
@@ -85,12 +98,12 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId(
-      "PROJECT-ABC",
-      "my-org",
-      "/tmp",
-      "sentry issue explain PROJECT-ABC --org <org>"
-    );
+    const result = await resolveOrgAndIssueId({
+      issueId: "PROJECT-ABC",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain PROJECT-ABC --org <org-slug>",
+    });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("987654321");
@@ -99,14 +112,288 @@ describe("resolveOrgAndIssueId", () => {
   test("throws ContextError when org cannot be resolved", async () => {
     delete process.env.SENTRY_DSN;
 
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Numeric ID is fetched directly - this succeeds
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
     await expect(
-      resolveOrgAndIssueId(
-        "123456789",
-        undefined,
-        "/nonexistent/path",
-        "sentry issue explain 123456789 --org <org>"
-      )
+      resolveOrgAndIssueId({
+        issueId: "123456789",
+        cwd: "/nonexistent/path",
+        commandHint: "sentry issue explain 123456789 --org <org-slug>",
+      })
     ).rejects.toThrow("Organization");
+  });
+
+  test("resolves alias-suffix format (e.g., 'f-g') using cached aliases", async () => {
+    // Empty fingerprint matches detectAllDsns on empty dir
+    const { setProjectAliases } = await import("../../../src/lib/config.js");
+    await setProjectAliases(
+      {
+        f: { orgSlug: "cached-org", projectSlug: "frontend" },
+        b: { orgSlug: "cached-org", projectSlug: "backend" },
+      },
+      ""
+    );
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/cached-org/issues/FRONTEND-G")) {
+        return new Response(
+          JSON.stringify({
+            id: "111222333",
+            shortId: "FRONTEND-G",
+            title: "Test Issue from alias",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "5",
+            userCount: 2,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "f-g",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain f-g --org <org-slug>",
+    });
+
+    expect(result.org).toBe("cached-org");
+    expect(result.issueId).toBe("111222333");
+  });
+
+  test("resolves org-aware alias format (e.g., 'o1:d-4y') for cross-org collisions", async () => {
+    const { setProjectAliases } = await import("../../../src/lib/config.js");
+    await setProjectAliases(
+      {
+        "o1:d": { orgSlug: "org1", projectSlug: "dashboard" },
+        "o2:d": { orgSlug: "org2", projectSlug: "dashboard" },
+      },
+      ""
+    );
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/org1/issues/DASHBOARD-4Y")) {
+        return new Response(
+          JSON.stringify({
+            id: "999888777",
+            shortId: "DASHBOARD-4Y",
+            title: "Test Issue from org-aware alias",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "1",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "o1:d-4y",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain o1:d-4y",
+    });
+
+    expect(result.org).toBe("org1");
+    expect(result.issueId).toBe("999888777");
+  });
+
+  test("resolves short suffix format (e.g., 'G') using project context", async () => {
+    const { setDefaults } = await import("../../../src/lib/config.js");
+    await setDefaults("my-org", "my-project");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/my-org/issues/MY-PROJECT-G")) {
+        return new Response(
+          JSON.stringify({
+            id: "444555666",
+            shortId: "MY-PROJECT-G",
+            title: "Test Issue from short suffix",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "3",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "G",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain G --org <org-slug>",
+    });
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("444555666");
+  });
+
+  test("throws ContextError for short suffix without project context", async () => {
+    // Clear any defaults to ensure no project context
+    const { writeConfig } = await import("../../../src/lib/config.js");
+    await writeConfig({});
+
+    // Short suffix "G" requires project context - should throw, not fall through
+    await expect(
+      resolveOrgAndIssueId({
+        issueId: "G",
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G --org <org-slug>",
+      })
+    ).rejects.toThrow("Organization and project");
+  });
+
+  test("resolves short suffix with explicit --org and --project flags", async () => {
+    // Clear defaults but keep auth token to ensure we're testing explicit flags
+    const { writeConfig, setAuthToken: setToken } = await import(
+      "../../../src/lib/config.js"
+    );
+    await writeConfig({});
+    await setToken("test-token");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/my-org/issues/MY-PROJECT-G")) {
+        return new Response(
+          JSON.stringify({
+            id: "555666777",
+            shortId: "MY-PROJECT-G",
+            title: "Test Issue with explicit flags",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "3",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "G",
+      org: "my-org",
+      project: "my-project",
+      cwd: testConfigDir,
+      commandHint:
+        "sentry issue explain G --org <org-slug> --project <project-slug>",
+    });
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("555666777");
+  });
+
+  test("falls back to full short ID when alias is not found in cache", async () => {
+    const { clearProjectAliases } = await import("../../../src/lib/config.js");
+    await clearProjectAliases();
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("organizations/my-org/issues/CRAFT-G")) {
+        return new Response(
+          JSON.stringify({
+            id: "777888999",
+            shortId: "CRAFT-G",
+            title: "Test Issue fallback",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "1",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "craft-g",
+      org: "my-org",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain craft-g --org <org-slug>",
+    });
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("777888999");
   });
 });
 
