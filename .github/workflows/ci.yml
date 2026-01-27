@@ -187,7 +187,7 @@ jobs:
 
   build-docs:
     name: Build Docs
-    needs: [lint, test-unit]
+    needs: [lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
