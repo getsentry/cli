@@ -14,8 +14,8 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { initSchema, runMigrations } from "./schema.js";
 import { migrateFromJson } from "./migration.js";
+import { initSchema, runMigrations } from "./schema.js";
 
 /** Environment variable to override the config directory path */
 export const CONFIG_DIR_ENV_VAR = "SENTRY_CONFIG_DIR";
@@ -156,9 +156,15 @@ export function cleanupExpiredCaches(): void {
   const expiryTime = Date.now() - CACHE_TTL_MS;
 
   // Clean up all cache tables
-  database.query("DELETE FROM project_cache WHERE last_accessed < ?").run(expiryTime);
-  database.query("DELETE FROM dsn_cache WHERE last_accessed < ?").run(expiryTime);
-  database.query("DELETE FROM project_aliases WHERE last_accessed < ?").run(expiryTime);
+  database
+    .query("DELETE FROM project_cache WHERE last_accessed < ?")
+    .run(expiryTime);
+  database
+    .query("DELETE FROM dsn_cache WHERE last_accessed < ?")
+    .run(expiryTime);
+  database
+    .query("DELETE FROM project_aliases WHERE last_accessed < ?")
+    .run(expiryTime);
 }
 
 /**
@@ -174,6 +180,6 @@ export function maybeCleanupCaches(): void {
 // Re-export all public APIs from submodules
 export * from "./auth.js";
 export * from "./defaults.js";
-export * from "./project-cache.js";
 export * from "./dsn-cache.js";
 export * from "./project-aliases.js";
+export * from "./project-cache.js";

@@ -29,21 +29,24 @@ if (!SENTRY_CLIENT_ID) {
   process.exit(1);
 }
 
+// Regex patterns for esbuild plugin (must be top-level for performance)
+const BUN_SQLITE_FILTER = /^bun:sqlite$/;
+const ANY_FILTER = /.*/;
+
 // Plugin to replace bun:sqlite with our node:sqlite polyfill
 const bunSqlitePlugin: Plugin = {
   name: "bun-sqlite-polyfill",
-  setup(build) {
+  setup(pluginBuild) {
     // Intercept imports of "bun:sqlite" and redirect to our polyfill
-    build.onResolve({ filter: /^bun:sqlite$/ }, () => {
-      return {
-        path: "bun:sqlite",
-        namespace: "bun-sqlite-polyfill",
-      };
-    });
+    pluginBuild.onResolve({ filter: BUN_SQLITE_FILTER }, () => ({
+      path: "bun:sqlite",
+      namespace: "bun-sqlite-polyfill",
+    }));
 
     // Provide the polyfill content
-    build.onLoad({ filter: /.*/, namespace: "bun-sqlite-polyfill" }, () => {
-      return {
+    pluginBuild.onLoad(
+      { filter: ANY_FILTER, namespace: "bun-sqlite-polyfill" },
+      () => ({
         contents: `
           // Use the polyfill injected by node-polyfills.ts
           const polyfill = globalThis.__bun_sqlite_polyfill;
@@ -51,8 +54,8 @@ const bunSqlitePlugin: Plugin = {
           export default polyfill;
         `,
         loader: "js",
-      };
-    });
+      })
+    );
   },
 };
 

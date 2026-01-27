@@ -93,7 +93,9 @@ export async function getProjectAliases(): Promise<
 > {
   const db = getDatabase();
 
-  const rows = db.query("SELECT * FROM project_aliases").all() as ProjectAliasRow[];
+  const rows = db
+    .query("SELECT * FROM project_aliases")
+    .all() as ProjectAliasRow[];
 
   if (rows.length === 0) {
     return;

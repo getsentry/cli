@@ -106,6 +106,7 @@ type OldConfig = {
  * database operations. This is a one-time migration so performance
  * is not critical.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One-time migration with straightforward logic
 export function migrateFromJson(db: Database): void {
   // Check if migration is needed
   if (!oldConfigExists()) {
@@ -117,7 +118,9 @@ export function migrateFromJson(db: Database): void {
     return;
   }
 
-  console.error("Migrating config from JSON to SQLite for better concurrency support...");
+  console.error(
+    "Migrating config from JSON to SQLite for better concurrency support..."
+  );
 
   // Use a transaction for atomic migration
   db.exec("BEGIN TRANSACTION");
@@ -209,7 +212,9 @@ export function migrateFromJson(db: Database): void {
       const fingerprint = oldConfig.projectAliases.dsnFingerprint ?? null;
       const cachedAt = oldConfig.projectAliases.cachedAt;
 
-      for (const [alias, entry] of Object.entries(oldConfig.projectAliases.aliases)) {
+      for (const [alias, entry] of Object.entries(
+        oldConfig.projectAliases.aliases
+      )) {
         insertStmt.run(
           alias,
           entry.orgSlug,

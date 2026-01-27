@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CONFIG_DIR_ENV_VAR,
@@ -580,7 +580,7 @@ describe("JSON to SQLite migration", () => {
         auth: {
           token: "migrated-token",
           refreshToken: "migrated-refresh",
-          expiresAt: Date.now() + 3600000,
+          expiresAt: Date.now() + 3_600_000,
           issuedAt: Date.now(),
         },
         defaults: {

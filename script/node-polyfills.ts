@@ -26,7 +26,7 @@ type SqliteValue = string | number | bigint | null | Uint8Array;
  * Wraps node:sqlite's prepare() result to match bun:sqlite's query() API.
  */
 class NodeStatementPolyfill {
-  private stmt: ReturnType<DatabaseSync["prepare"]>;
+  private readonly stmt: ReturnType<DatabaseSync["prepare"]>;
 
   constructor(stmt: ReturnType<DatabaseSync["prepare"]>) {
     this.stmt = stmt;
@@ -59,7 +59,7 @@ class NodeStatementPolyfill {
  * Provides the same API surface as Bun's Database class.
  */
 class NodeDatabasePolyfill {
-  private db: DatabaseSync;
+  private readonly db: DatabaseSync;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path, {
@@ -98,7 +98,8 @@ const bunSqlitePolyfill = {
 };
 
 // Make it available globally for the bundle
-(globalThis as Record<string, unknown>).__bun_sqlite_polyfill = bunSqlitePolyfill;
+(globalThis as Record<string, unknown>).__bun_sqlite_polyfill =
+  bunSqlitePolyfill;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bun Global Polyfill

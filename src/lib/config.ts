@@ -12,56 +12,52 @@
 // Re-exports from db modules
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Connection management
-export {
-  CONFIG_DIR_ENV_VAR,
-  DEFAULT_CONFIG_DIR_NAME,
-  DB_FILENAME,
-  CACHE_TTL_MS,
-  getConfigDir,
-  getDbPath,
-  getDatabase,
-  closeDatabase,
-} from "./db/index.js";
-
 // Auth
 export {
-  REFRESH_THRESHOLD,
-  DEFAULT_TOKEN_LIFETIME_MS,
-  getAuthToken,
-  getAuthConfig,
-  setAuthToken,
-  clearAuth,
-  isAuthenticated,
-  refreshToken,
   type AuthConfig,
+  clearAuth,
+  DEFAULT_TOKEN_LIFETIME_MS,
+  getAuthConfig,
+  getAuthToken,
+  isAuthenticated,
+  REFRESH_THRESHOLD,
   type RefreshTokenOptions,
   type RefreshTokenResult,
+  refreshToken,
+  setAuthToken,
 } from "./db/auth.js";
-
 // Defaults
 export {
   getDefaultOrganization,
   getDefaultProject,
   setDefaults,
 } from "./db/defaults.js";
-
-// Project cache
+// Connection management
 export {
-  getCachedProject,
-  setCachedProject,
-  getCachedProjectByDsnKey,
-  setCachedProjectByDsnKey,
-  clearProjectCache,
-} from "./db/project-cache.js";
-
+  CACHE_TTL_MS,
+  CONFIG_DIR_ENV_VAR,
+  closeDatabase,
+  DB_FILENAME,
+  DEFAULT_CONFIG_DIR_NAME,
+  getConfigDir,
+  getDatabase,
+  getDbPath,
+} from "./db/index.js";
 // Project aliases
 export {
-  setProjectAliases,
+  clearProjectAliases,
   getProjectAliases,
   getProjectByAlias,
-  clearProjectAliases,
+  setProjectAliases,
 } from "./db/project-aliases.js";
+// Project cache
+export {
+  clearProjectCache,
+  getCachedProject,
+  getCachedProjectByDsnKey,
+  setCachedProject,
+  setCachedProjectByDsnKey,
+} from "./db/project-cache.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Legacy compatibility

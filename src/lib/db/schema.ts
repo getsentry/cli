@@ -79,9 +79,9 @@ export function initSchema(db: Database): void {
   `);
 
   // Initialize schema version if not set
-  const versionRow = db.query("SELECT version FROM schema_version LIMIT 1").get() as
-    | { version: number }
-    | null;
+  const versionRow = db
+    .query("SELECT version FROM schema_version LIMIT 1")
+    .get() as { version: number } | null;
 
   if (!versionRow) {
     db.query("INSERT INTO schema_version (version) VALUES (?)").run(
@@ -94,9 +94,9 @@ export function initSchema(db: Database): void {
  * Get the current schema version from the database.
  */
 export function getSchemaVersion(db: Database): number {
-  const row = db.query("SELECT version FROM schema_version LIMIT 1").get() as
-    | { version: number }
-    | null;
+  const row = db.query("SELECT version FROM schema_version LIMIT 1").get() as {
+    version: number;
+  } | null;
   return row?.version ?? 0;
 }
 
@@ -115,6 +115,8 @@ export function runMigrations(db: Database): void {
 
   // Placeholder for future migrations
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
-    db.query("UPDATE schema_version SET version = ?").run(CURRENT_SCHEMA_VERSION);
+    db.query("UPDATE schema_version SET version = ?").run(
+      CURRENT_SCHEMA_VERSION
+    );
   }
 }

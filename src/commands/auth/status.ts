@@ -8,12 +8,12 @@ import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
 import {
+  type AuthConfig,
   getAuthConfig,
   getConfigPath,
   getDefaultOrganization,
   getDefaultProject,
   isAuthenticated,
-  type AuthConfig,
 } from "../../lib/config.js";
 import { AuthError } from "../../lib/errors.js";
 import { error, success } from "../../lib/formatters/colors.js";

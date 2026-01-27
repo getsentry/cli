@@ -40,7 +40,9 @@ export type AuthConfig = {
  */
 export async function getAuthConfig(): Promise<AuthConfig | undefined> {
   const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as AuthRow | undefined;
+  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
 
   if (!row?.token) {
     return;
@@ -62,7 +64,9 @@ export async function getAuthConfig(): Promise<AuthConfig | undefined> {
  */
 export async function getAuthToken(): Promise<string | undefined> {
   const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as AuthRow | undefined;
+  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
 
   if (!row?.token) {
     return;
@@ -81,12 +85,12 @@ export async function getAuthToken(): Promise<string | undefined> {
  *
  * @param token - The access token
  * @param expiresIn - Token lifetime in seconds (optional)
- * @param refreshToken - The refresh token (optional)
+ * @param newRefreshToken - The refresh token (optional)
  */
 export async function setAuthToken(
   token: string,
   expiresIn?: number,
-  refreshToken?: string
+  newRefreshToken?: string
 ): Promise<void> {
   const db = getDatabase();
   const now = Date.now();
@@ -102,7 +106,7 @@ export async function setAuthToken(
       expires_at = excluded.expires_at,
       issued_at = excluded.issued_at,
       updated_at = excluded.updated_at
-  `).run(token, refreshToken ?? null, expiresAt, issuedAt, now);
+  `).run(token, newRefreshToken ?? null, expiresAt, issuedAt, now);
 }
 
 /**
@@ -187,7 +191,9 @@ export async function refreshToken(
   const { AuthError } = await import("../errors.js");
 
   const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as AuthRow | undefined;
+  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
 
   if (!row?.token) {
     throw new AuthError("not_authenticated");

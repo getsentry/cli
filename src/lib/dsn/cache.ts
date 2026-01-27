@@ -10,9 +10,9 @@
  */
 
 export {
+  clearDsnCache,
   getCachedDsn,
+  isCacheValid,
   setCachedDsn,
   updateCachedResolution,
-  clearDsnCache,
-  isCacheValid,
 } from "../db/dsn-cache.js";

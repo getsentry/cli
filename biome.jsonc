@@ -22,6 +22,32 @@
           }
         }
       }
+    },
+    {
+      // SQLite operations are sync but we keep async signatures for API compatibility
+      "includes": ["src/lib/db/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "useAwait": "off"
+          }
+        }
+      }
+    },
+    {
+      // These are intentional re-export modules for backward compatibility
+      "includes": [
+        "src/lib/config.ts",
+        "src/lib/dsn/cache.ts",
+        "src/lib/db/index.ts"
+      ],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
     }
   ]
 }

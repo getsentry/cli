@@ -21,9 +21,9 @@ type DefaultsRow = {
  */
 export async function getDefaultOrganization(): Promise<string | undefined> {
   const db = getDatabase();
-  const row = db.query("SELECT organization FROM defaults WHERE id = 1").get() as
-    | Pick<DefaultsRow, "organization">
-    | undefined;
+  const row = db
+    .query("SELECT organization FROM defaults WHERE id = 1")
+    .get() as Pick<DefaultsRow, "organization"> | undefined;
 
   return row?.organization ?? undefined;
 }
@@ -54,9 +54,9 @@ export async function setDefaults(
   const now = Date.now();
 
   // Get current values
-  const current = db.query("SELECT organization, project FROM defaults WHERE id = 1").get() as
-    | Pick<DefaultsRow, "organization" | "project">
-    | undefined;
+  const current = db
+    .query("SELECT organization, project FROM defaults WHERE id = 1")
+    .get() as Pick<DefaultsRow, "organization" | "project"> | undefined;
 
   // Merge with existing values (only update what's provided)
   const newOrg = organization ?? current?.organization ?? null;

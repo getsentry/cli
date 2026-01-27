@@ -55,10 +55,9 @@ function rowToCachedProject(row: ProjectCacheRow): CachedProject {
  */
 function touchCacheEntry(cacheKey: string): void {
   const db = getDatabase();
-  db.query("UPDATE project_cache SET last_accessed = ? WHERE cache_key = ?").run(
-    Date.now(),
-    cacheKey
-  );
+  db.query(
+    "UPDATE project_cache SET last_accessed = ? WHERE cache_key = ?"
+  ).run(Date.now(), cacheKey);
 }
 
 /**
@@ -75,9 +74,9 @@ export async function getCachedProject(
   const db = getDatabase();
   const key = projectCacheKey(orgId, projectId);
 
-  const row = db.query("SELECT * FROM project_cache WHERE cache_key = ?").get(key) as
-    | ProjectCacheRow
-    | undefined;
+  const row = db
+    .query("SELECT * FROM project_cache WHERE cache_key = ?")
+    .get(key) as ProjectCacheRow | undefined;
 
   if (!row) {
     return;
@@ -116,7 +115,15 @@ export async function setCachedProject(
       project_name = excluded.project_name,
       cached_at = excluded.cached_at,
       last_accessed = excluded.last_accessed
-  `).run(key, info.orgSlug, info.orgName, info.projectSlug, info.projectName, now, now);
+  `).run(
+    key,
+    info.orgSlug,
+    info.orgName,
+    info.projectSlug,
+    info.projectName,
+    now,
+    now
+  );
 
   // Probabilistic cleanup
   maybeCleanupCaches();
@@ -135,9 +142,9 @@ export async function getCachedProjectByDsnKey(
   const db = getDatabase();
   const key = dsnCacheKey(publicKey);
 
-  const row = db.query("SELECT * FROM project_cache WHERE cache_key = ?").get(key) as
-    | ProjectCacheRow
-    | undefined;
+  const row = db
+    .query("SELECT * FROM project_cache WHERE cache_key = ?")
+    .get(key) as ProjectCacheRow | undefined;
 
   if (!row) {
     return;
@@ -175,7 +182,15 @@ export async function setCachedProjectByDsnKey(
       project_name = excluded.project_name,
       cached_at = excluded.cached_at,
       last_accessed = excluded.last_accessed
-  `).run(key, info.orgSlug, info.orgName, info.projectSlug, info.projectName, now, now);
+  `).run(
+    key,
+    info.orgSlug,
+    info.orgName,
+    info.projectSlug,
+    info.projectName,
+    now,
+    now
+  );
 
   // Probabilistic cleanup
   maybeCleanupCaches();

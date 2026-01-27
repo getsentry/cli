@@ -76,9 +76,9 @@ export async function getCachedDsn(
 ): Promise<CachedDsnEntry | undefined> {
   const db = getDatabase();
 
-  const row = db.query("SELECT * FROM dsn_cache WHERE directory = ?").get(directory) as
-    | DsnCacheRow
-    | undefined;
+  const row = db
+    .query("SELECT * FROM dsn_cache WHERE directory = ?")
+    .get(directory) as DsnCacheRow | undefined;
 
   if (!row) {
     return;
@@ -156,7 +156,9 @@ export async function updateCachedResolution(
   const db = getDatabase();
 
   // Check if entry exists
-  const exists = db.query("SELECT 1 FROM dsn_cache WHERE directory = ?").get(directory);
+  const exists = db
+    .query("SELECT 1 FROM dsn_cache WHERE directory = ?")
+    .get(directory);
   if (!exists) {
     return; // No cache entry to update
   }
