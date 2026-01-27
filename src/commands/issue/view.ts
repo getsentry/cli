@@ -14,14 +14,18 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
-import { resolveIssue } from "./utils.js";
+import {
+  buildCommandHint,
+  type IssueIdFlags,
+  issueIdFlags,
+  issueIdPositional,
+  resolveIssue,
+} from "./utils.js";
 
-type ViewFlags = {
-  readonly org?: string;
-  readonly project?: string;
+interface ViewFlags extends IssueIdFlags {
   readonly json: boolean;
   readonly web: boolean;
-};
+}
 
 /**
  * Try to fetch the latest event for an issue.
@@ -79,31 +83,9 @@ export const viewCommand = buildCommand({
       "  3. SENTRY_DSN environment variable",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief:
-            "Issue ID, short ID, suffix, or alias-suffix (e.g., 123456, CRAFT-G, G, or f-g)",
-          parse: String,
-        },
-      ],
-    },
+    positional: issueIdPositional,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Organization slug (required for short IDs if not auto-detected)",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief:
-          "Project slug (required for short suffixes if not auto-detected)",
-        optional: true,
-      },
+      ...issueIdFlags,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -130,7 +112,7 @@ export const viewCommand = buildCommand({
       org: flags.org,
       project: flags.project,
       cwd,
-      commandHint: `sentry issue view ${issueId} --org <org-slug> --project <project-slug>`,
+      commandHint: buildCommandHint("view", issueId),
     });
 
     if (flags.web) {
