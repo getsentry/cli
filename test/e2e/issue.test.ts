@@ -13,7 +13,6 @@ import {
   expect,
   test,
 } from "bun:test";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -39,7 +38,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-issue-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
@@ -63,7 +61,7 @@ describe("sentry issue list", () => {
   });
 
   test("lists issues with valid auth", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "issue",
@@ -79,7 +77,7 @@ describe("sentry issue list", () => {
   });
 
   test("supports --json output", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "issue",
@@ -107,7 +105,7 @@ describe("sentry issue view", () => {
   });
 
   test("handles non-existent issue", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["issue", "view", "99999999999"]);
 

@@ -129,6 +129,8 @@ export async function runCli(
 
 export type E2EContext = {
   run: (args: string[]) => Promise<CliResult>;
+  /** Write auth token directly to this context's config directory (race-safe) */
+  setAuthToken: (token: string) => Promise<void>;
   configDir: string;
   serverUrl: string;
 };
@@ -137,6 +139,9 @@ export type E2EContext = {
  * Create an E2E test context with mock server environment pre-configured.
  * Call this in beforeEach to get a `run` function that includes the mock server URL
  * and config directory in the environment automatically.
+ *
+ * IMPORTANT: Use ctx.setAuthToken() instead of the global setAuthToken() to avoid
+ * race conditions when test files run in parallel.
  */
 export function createE2EContext(
   configDir: string,
@@ -153,5 +158,16 @@ export function createE2EContext(
           SENTRY_URL: serverUrl,
         },
       }),
+    /**
+     * Write auth token directly to this context's config file.
+     * This bypasses the global process.env to avoid race conditions
+     * when multiple test files run in parallel.
+     */
+    async setAuthToken(token: string): Promise<void> {
+      const configFile = join(configDir, "config.json");
+      const config = { auth: { token } };
+      mkdirSync(configDir, { recursive: true, mode: 0o700 });
+      await Bun.write(configFile, JSON.stringify(config, null, 2));
+    },
   };
 }

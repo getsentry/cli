@@ -13,7 +13,6 @@ import {
   expect,
   test,
 } from "bun:test";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -39,7 +38,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-event-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
@@ -64,7 +62,7 @@ describe("sentry event view", () => {
   });
 
   test("requires org and project without DSN", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["event", "view", "abc123"]);
 
@@ -73,7 +71,7 @@ describe("sentry event view", () => {
   });
 
   test("handles non-existent event", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "event",

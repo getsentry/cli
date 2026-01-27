@@ -13,7 +13,6 @@ import {
   expect,
   test,
 } from "bun:test";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
@@ -34,7 +33,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-api-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
@@ -56,7 +54,7 @@ describe("sentry api", () => {
   test(
     "GET request works with valid auth",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "organizations/"]);
 
@@ -71,7 +69,7 @@ describe("sentry api", () => {
   test(
     "--include flag shows response headers",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "organizations/", "--include"]);
 
@@ -86,7 +84,7 @@ describe("sentry api", () => {
   test(
     "invalid endpoint returns non-zero exit code",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "nonexistent-endpoint-12345/"]);
 
@@ -98,7 +96,7 @@ describe("sentry api", () => {
   test(
     "--silent flag suppresses output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "organizations/", "--silent"]);
 
@@ -111,7 +109,7 @@ describe("sentry api", () => {
   test(
     "--silent with error sets exit code but no output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "api",
@@ -128,7 +126,7 @@ describe("sentry api", () => {
   test(
     "supports custom HTTP method",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // DELETE on organizations list should return 405 Method Not Allowed
       const result = await ctx.run([
@@ -147,7 +145,7 @@ describe("sentry api", () => {
   test(
     "rejects invalid HTTP method",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "api",
@@ -170,7 +168,7 @@ describe("sentry api", () => {
   test(
     "-X alias for --method works",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Use -X POST on organizations list (should fail with 405)
       const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
@@ -184,7 +182,7 @@ describe("sentry api", () => {
   test(
     "-i alias for --include works",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "organizations/", "-i"]);
 
@@ -197,7 +195,7 @@ describe("sentry api", () => {
   test(
     "-H alias for --header works",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Add a custom header - the request should still succeed
       const result = await ctx.run([
@@ -222,7 +220,7 @@ describe("sentry api", () => {
   test(
     "--verbose flag shows request and response details",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "organizations/", "--verbose"]);
 
@@ -244,7 +242,7 @@ describe("sentry api", () => {
   test(
     "--input reads body from file",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Create a temp file with JSON body
       const tempFile = `${testConfigDir}/input.json`;
@@ -269,7 +267,7 @@ describe("sentry api", () => {
   test(
     "--input with non-existent file throws error",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "api",
@@ -291,7 +289,7 @@ describe("sentry api", () => {
   test(
     "GET request with --field uses query parameters (not body)",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Use issues endpoint with query parameter - this tests that --field
       // with GET request properly converts fields to query params instead of body
@@ -314,7 +312,7 @@ describe("sentry api", () => {
   test(
     "POST request with --field uses request body",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // POST to a read-only endpoint will return 405, but the important thing
       // is that it doesn't fail with a client-side error about body/params

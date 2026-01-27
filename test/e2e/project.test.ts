@@ -13,7 +13,6 @@ import {
   expect,
   test,
 } from "bun:test";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -39,7 +38,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-project-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
@@ -58,7 +56,7 @@ describe("sentry org list", () => {
   test(
     "lists organizations with valid auth",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["org", "list"]);
 
@@ -72,7 +70,7 @@ describe("sentry org list", () => {
   test(
     "supports --json output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["org", "list", "--json"]);
 
@@ -96,7 +94,7 @@ describe("sentry project list", () => {
   test(
     "lists projects with valid auth and org filter",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Use --org flag to filter by organization
       const result = await ctx.run([
@@ -116,7 +114,7 @@ describe("sentry project list", () => {
   test(
     "supports --json output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       // Use --org flag to filter by organization
       const result = await ctx.run([
@@ -148,7 +146,7 @@ describe("sentry org view", () => {
   test(
     "gets organization details",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["org", "view", TEST_ORG]);
 
@@ -162,7 +160,7 @@ describe("sentry org view", () => {
   test(
     "supports --json output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["org", "view", TEST_ORG, "--json"]);
 
@@ -176,7 +174,7 @@ describe("sentry org view", () => {
   test(
     "handles non-existent org",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["org", "view", "nonexistent-org-12345"]);
 
@@ -202,7 +200,7 @@ describe("sentry project view", () => {
   });
 
   test("requires org and project", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["project", "view"]);
 
@@ -211,7 +209,7 @@ describe("sentry project view", () => {
   });
 
   test("rejects partial flags (--org without project)", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["project", "view", "--org", TEST_ORG]);
 
@@ -227,7 +225,7 @@ describe("sentry project view", () => {
   test(
     "gets project details",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "project",
@@ -247,7 +245,7 @@ describe("sentry project view", () => {
   test(
     "supports --json output",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "project",
@@ -268,7 +266,7 @@ describe("sentry project view", () => {
   test(
     "handles non-existent project",
     async () => {
-      await setAuthToken(TEST_TOKEN);
+      await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run([
         "project",

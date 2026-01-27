@@ -13,7 +13,6 @@ import {
   expect,
   test,
 } from "bun:test";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
@@ -34,7 +33,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("e2e-auth-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   ctx = createE2EContext(testConfigDir, mockServer.url);
 });
 
@@ -54,7 +52,7 @@ describe("sentry auth status", () => {
 
   test("shows authenticated with valid token", async () => {
     // Set up auth token in config
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["auth", "status"]);
 
@@ -63,7 +61,7 @@ describe("sentry auth status", () => {
   });
 
   test("verifies credentials with valid token", async () => {
-    await setAuthToken(TEST_TOKEN);
+    await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run(["auth", "status"]);
 
