@@ -1464,9 +1464,9 @@ starlight-toc nav h2 {
    Sidebar (for docs pages)
    ========================================================================== */
 
-/* Left sidebar border - match content panel border color */
+/* Left sidebar border removed */
 .sidebar-pane {
-  border-inline-end: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-inline-end: none !important;
 }
 
 .sidebar-content {
