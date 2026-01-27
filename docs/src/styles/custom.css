@@ -587,20 +587,20 @@ code {
 
 /* Main container */
 .expressive-code {
-  margin: 1.5rem 0 !important;
+  margin: 1rem 0 !important;
   display: block !important;
 }
 
-/* The figure/frame */
+/* The figure/frame - two-tone look like PackageManagerCode */
 .expressive-code figure,
 .expressive-code figure.frame,
 .expressive-code figure.frame.is-terminal {
   margin: 0 !important;
-  padding: 0 !important;
-  background: #0d0d12 !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 0.5rem !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: none !important;
   border-radius: 12px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   position: relative !important;
   display: block !important;
 }
@@ -612,10 +612,9 @@ code {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 0.75rem 1rem !important;
-  background: rgba(255, 255, 255, 0.03) !important;
+  padding: 0.5rem 0.75rem !important;
+  background: transparent !important;
   border: none !important;
-  border-bottom: none !important;
   margin: 0 !important;
 }
 
@@ -624,7 +623,7 @@ code {
 .expressive-code figure.frame figcaption.header::before {
   content: "Terminal" !important;
   color: rgba(255, 255, 255, 0.5) !important;
-  font-size: 0.85rem !important;
+  font-size: 0.8rem !important;
   font-weight: 500 !important;
   font-family: var(--sl-font) !important;
   display: block !important;
@@ -637,13 +636,13 @@ code {
   display: none !important;
 }
 
-/* Pre/code area */
+/* Pre/code area - rounded corners */
 .expressive-code pre {
   margin: 0 !important;
-  padding: 1rem 1.25rem !important;
+  padding: 0.75rem 1rem !important;
   background: #0a0a0f !important;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 8px !important;
   overflow-x: auto !important;
 }
 
@@ -670,11 +669,11 @@ code {
   display: inline !important;
 }
 
-/* Copy button */
+/* Copy button - in header area */
 .expressive-code .copy {
   position: absolute !important;
-  top: 0.65rem !important;
-  right: 0.75rem !important;
+  top: 1rem !important;
+  right: 1rem !important;
   z-index: 10 !important;
 }
 
