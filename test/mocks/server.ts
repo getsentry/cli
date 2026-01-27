@@ -1,3 +1,5 @@
+import unauthorizedFixture from "../fixtures/errors/unauthorized.json";
+
 export type RouteHandler = (
   req: Request,
   params: Record<string, string>
@@ -120,15 +122,10 @@ export function createMockServer(
           const method = req.method;
 
           if (validTokens && !isAuthorized(req, validTokens)) {
-            return new Response(
-              JSON.stringify({
-                detail: "Authentication credentials were not provided.",
-              }),
-              {
-                status: 401,
-                headers: { "Content-Type": "application/json" },
-              }
-            );
+            return new Response(JSON.stringify(unauthorizedFixture), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
           }
 
           const match = matchRoute(method, pathname, compiledRoutes);
