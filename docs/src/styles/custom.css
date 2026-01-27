@@ -48,9 +48,10 @@ html,
   --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Sizing - Smaller sidebar */
-  --sl-content-width: 65rem;
-  --sl-sidebar-width: 14rem;
+  /* Sizing */
+  --sl-content-width: 50rem;
+  --sl-sidebar-width: 17rem;
+  --sl-content-pad-x: 2rem;
 }
 
 /* ==========================================================================

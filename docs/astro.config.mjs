@@ -39,6 +39,7 @@ export default defineConfig({
       components: {
         Header: "./src/components/Header.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
+        PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
         // Force dark mode - runs before page renders
