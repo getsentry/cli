@@ -39,12 +39,9 @@ class NodeDatabasePolyfill {
   private readonly db: DatabaseSync;
 
   constructor(path: string) {
-    this.db = new DatabaseSync(path, {
-      // 5000ms timeout matches busy_timeout in src/lib/db/index.ts
-      // Prevents SQLITE_BUSY errors during concurrent CLI access
-      timeout: 5000,
-      enableForeignKeyConstraints: true,
-    });
+    // SQLite configuration (busy_timeout, foreign_keys, WAL mode) is applied
+    // via PRAGMA statements in src/lib/db/index.ts after construction
+    this.db = new DatabaseSync(path);
   }
 
   exec(sql: string): void {

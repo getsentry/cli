@@ -169,6 +169,19 @@ export function migrateFromJson(db: Database): void {
       `);
 
       for (const [key, entry] of Object.entries(oldConfig.projectCache)) {
+        // Skip malformed entries missing required fields
+        if (
+          !(
+            entry?.orgSlug &&
+            entry?.orgName &&
+            entry?.projectSlug &&
+            entry?.projectName
+          ) ||
+          entry?.cachedAt === null ||
+          entry?.cachedAt === undefined
+        ) {
+          continue;
+        }
         insertStmt.run(
           key,
           entry.orgSlug,
@@ -191,6 +204,14 @@ export function migrateFromJson(db: Database): void {
       `);
 
       for (const [directory, entry] of Object.entries(oldConfig.dsnCache)) {
+        // Skip malformed entries missing required fields
+        if (
+          !(entry?.dsn && entry?.projectId && entry?.source) ||
+          entry?.cachedAt === null ||
+          entry?.cachedAt === undefined
+        ) {
+          continue;
+        }
         insertStmt.run(
           directory,
           entry.dsn,
@@ -218,17 +239,26 @@ export function migrateFromJson(db: Database): void {
       const fingerprint = oldConfig.projectAliases.dsnFingerprint ?? null;
       const cachedAt = oldConfig.projectAliases.cachedAt;
 
-      for (const [alias, entry] of Object.entries(
-        oldConfig.projectAliases.aliases
-      )) {
-        insertStmt.run(
-          alias.toLowerCase(),
-          entry.orgSlug,
-          entry.projectSlug,
-          fingerprint,
-          cachedAt,
-          cachedAt
-        );
+      // Skip if cachedAt is missing (required for NOT NULL column)
+      if (cachedAt === null || cachedAt === undefined) {
+        // Skip all aliases if timestamp is missing
+      } else {
+        for (const [alias, entry] of Object.entries(
+          oldConfig.projectAliases.aliases
+        )) {
+          // Skip malformed entries missing required fields
+          if (!(entry?.orgSlug && entry?.projectSlug)) {
+            continue;
+          }
+          insertStmt.run(
+            alias.toLowerCase(),
+            entry.orgSlug,
+            entry.projectSlug,
+            fingerprint,
+            cachedAt,
+            cachedAt
+          );
+        }
       }
     }
 

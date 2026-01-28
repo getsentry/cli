@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-export const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 1;
 
 export function initSchema(db: Database): void {
   db.exec(`
@@ -89,7 +89,7 @@ export function initSchema(db: Database): void {
   }
 }
 
-export function getSchemaVersion(db: Database): number {
+function getSchemaVersion(db: Database): number {
   const row = db.query("SELECT version FROM schema_version LIMIT 1").get() as {
     version: number;
   } | null;
