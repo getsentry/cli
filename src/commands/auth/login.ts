@@ -3,12 +3,8 @@ import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
 import { openBrowser } from "../../lib/browser.js";
 import { setupCopyKeyListener } from "../../lib/clipboard.js";
-import {
-  clearAuth,
-  getConfigPath,
-  isAuthenticated,
-  setAuthToken,
-} from "../../lib/config.js";
+import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
+import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
@@ -74,7 +70,7 @@ export const loginCommand = buildCommand({
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
-      stdout.write(`  Config saved to: ${getConfigPath()}\n`);
+      stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
 
@@ -138,7 +134,7 @@ export const loginCommand = buildCommand({
       await completeOAuthFlow(tokenResponse);
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
-      stdout.write(`  Config saved to: ${getConfigPath()}\n`);
+      stdout.write(`  Config saved to: ${getDbPath()}\n`);
 
       if (tokenResponse.expires_in) {
         stdout.write(

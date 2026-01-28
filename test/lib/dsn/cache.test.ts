@@ -8,13 +8,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/config.js";
 import {
   clearDsnCache,
   getCachedDsn,
   setCachedDsn,
   updateCachedResolution,
-} from "../../../src/lib/dsn/cache.js";
+} from "../../../src/lib/db/dsn-cache.js";
+import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 
 // Use a unique test config directory
 const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-cache");

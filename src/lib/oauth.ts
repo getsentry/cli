@@ -11,7 +11,7 @@ import {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "../types/index.js";
-import { setAuthToken } from "./config.js";
+import { setAuthToken } from "./db/auth.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

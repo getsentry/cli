@@ -66,8 +66,9 @@ export function getDatabase(): Database {
 
   db = new Database(dbPath);
 
+  // Set busy_timeout FIRST to handle concurrent access during initialization
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA busy_timeout = 100");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA synchronous = NORMAL");
 

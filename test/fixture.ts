@@ -156,7 +156,7 @@ export function createE2EContext(
   configDir: string,
   serverUrl: string
 ): E2EContext {
-  const { CONFIG_DIR_ENV_VAR } = require("../src/lib/config.js");
+  const { CONFIG_DIR_ENV_VAR } = require("../src/lib/db/index.js");
   return {
     configDir,
     serverUrl,
@@ -169,15 +169,27 @@ export function createE2EContext(
         },
       }),
     /**
-     * Write auth token directly to this context's config file.
+     * Write auth token directly to this context's database.
      * This bypasses the global process.env to avoid race conditions
      * when multiple test files run in parallel.
      */
     async setAuthToken(token: string): Promise<void> {
-      const configFile = join(configDir, "config.json");
-      const config = { auth: { token } };
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
-      await Bun.write(configFile, JSON.stringify(config, null, 2));
+      const prevDir = process.env[CONFIG_DIR_ENV_VAR];
+      process.env[CONFIG_DIR_ENV_VAR] = configDir;
+      try {
+        const { setAuthToken: dbSetAuthToken } =
+          require("../src/lib/db/auth.js");
+        const { closeDatabase } = require("../src/lib/db/index.js");
+        await dbSetAuthToken(token);
+        closeDatabase();
+      } finally {
+        if (prevDir !== undefined) {
+          process.env[CONFIG_DIR_ENV_VAR] = prevDir;
+        } else {
+          delete process.env[CONFIG_DIR_ENV_VAR];
+        }
+      }
     },
   };
 }

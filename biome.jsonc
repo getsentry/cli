@@ -35,12 +35,8 @@
       }
     },
     {
-      // These are intentional re-export modules for backward compatibility
-      "includes": [
-        "src/lib/config.ts",
-        "src/lib/dsn/cache.ts",
-        "src/lib/db/index.ts"
-      ],
+      // db/index.ts re-exports from submodules for convenience
+      "includes": ["src/lib/db/index.ts"],
       "linter": {
         "rules": {
           "performance": {

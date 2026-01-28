@@ -10,11 +10,13 @@ import { listOrganizations } from "../../lib/api-client.js";
 import {
   type AuthConfig,
   getAuthConfig,
-  getConfigPath,
+  isAuthenticated,
+} from "../../lib/db/auth.js";
+import {
   getDefaultOrganization,
   getDefaultProject,
-  isAuthenticated,
-} from "../../lib/config.js";
+} from "../../lib/db/defaults.js";
+import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
 import { error, success } from "../../lib/formatters/colors.js";
 import { formatExpiration, maskToken } from "../../lib/formatters/human.js";
@@ -121,7 +123,7 @@ export const statusCommand = buildCommand({
     const auth = await getAuthConfig();
     const authenticated = await isAuthenticated();
 
-    stdout.write(`Config file: ${getConfigPath()}\n\n`);
+    stdout.write(`Config: ${getDbPath()}\n\n`);
 
     if (!authenticated) {
       throw new AuthError("not_authenticated");

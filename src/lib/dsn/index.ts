@@ -53,7 +53,7 @@ export {
   getCachedDsn,
   setCachedDsn,
   updateCachedResolution,
-} from "./cache.js";
+} from "../db/dsn-cache.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

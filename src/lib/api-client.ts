@@ -18,7 +18,7 @@ import {
   SentryProjectSchema,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { refreshToken } from "./config.js";
+import { refreshToken } from "./db/auth.js";
 import { ApiError } from "./errors.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";

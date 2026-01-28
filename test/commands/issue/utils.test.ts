@@ -9,7 +9,8 @@ import {
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../../src/lib/config.js";
+import { setAuthToken } from "../../../src/lib/db/auth.js";
+import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
 let testConfigDir: string;
@@ -152,7 +153,9 @@ describe("resolveOrgAndIssueId", () => {
 
   test("resolves alias-suffix format (e.g., 'f-g') using cached aliases", async () => {
     // Empty fingerprint matches detectAllDsns on empty dir
-    const { setProjectAliases } = await import("../../../src/lib/config.js");
+    const { setProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
     await setProjectAliases(
       {
         f: { orgSlug: "cached-org", projectSlug: "frontend" },
@@ -200,7 +203,9 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves org-aware alias format (e.g., 'o1:d-4y') for cross-org collisions", async () => {
-    const { setProjectAliases } = await import("../../../src/lib/config.js");
+    const { setProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
     await setProjectAliases(
       {
         "o1:d": { orgSlug: "org1", projectSlug: "dashboard" },
@@ -248,7 +253,7 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves short suffix format (e.g., 'G') using project context", async () => {
-    const { setDefaults } = await import("../../../src/lib/config.js");
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -291,9 +296,8 @@ describe("resolveOrgAndIssueId", () => {
 
   test("throws ContextError for short suffix without project context", async () => {
     // Clear any defaults to ensure no project context
-    const { clearAuth, setDefaults } = await import(
-      "../../../src/lib/config.js"
-    );
+    const { clearAuth } = await import("../../../src/lib/db/auth.js");
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
     await setDefaults(undefined, undefined);
 
@@ -309,11 +313,10 @@ describe("resolveOrgAndIssueId", () => {
 
   test("resolves short suffix with explicit --org and --project flags", async () => {
     // Clear defaults but keep auth token to ensure we're testing explicit flags
-    const {
-      clearAuth,
-      setDefaults,
-      setAuthToken: setToken,
-    } = await import("../../../src/lib/config.js");
+    const { clearAuth, setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await clearAuth();
     await setDefaults(undefined, undefined);
     await setToken("test-token");
@@ -360,7 +363,9 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("falls back to full short ID when alias is not found in cache", async () => {
-    const { clearProjectAliases } = await import("../../../src/lib/config.js");
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
+    );
     await clearProjectAliases();
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {

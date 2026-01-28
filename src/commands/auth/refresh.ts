@@ -6,7 +6,7 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getAuthConfig, refreshToken } from "../../lib/config.js";
+import { getAuthConfig, refreshToken } from "../../lib/db/auth.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";

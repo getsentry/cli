@@ -8,27 +8,36 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CONFIG_DIR_ENV_VAR,
   clearAuth,
-  clearProjectAliases,
-  clearProjectCache,
-  closeDatabase,
   getAuthConfig,
   getAuthToken,
-  getCachedProject,
-  getCachedProjectByDsnKey,
-  getConfigPath,
+  isAuthenticated,
+  refreshToken,
+  setAuthToken,
+} from "../../src/lib/db/auth.js";
+import {
   getDefaultOrganization,
   getDefaultProject,
+  setDefaults,
+} from "../../src/lib/db/defaults.js";
+import {
+  CONFIG_DIR_ENV_VAR,
+  closeDatabase,
+  getDbPath,
+} from "../../src/lib/db/index.js";
+import {
+  clearProjectAliases,
   getProjectAliases,
   getProjectByAlias,
-  isAuthenticated,
-  setAuthToken,
+  setProjectAliases,
+} from "../../src/lib/db/project-aliases.js";
+import {
+  clearProjectCache,
+  getCachedProject,
+  getCachedProjectByDsnKey,
   setCachedProject,
   setCachedProjectByDsnKey,
-  setDefaults,
-  setProjectAliases,
-} from "../../src/lib/config.js";
+} from "../../src/lib/db/project-cache.js";
 
 /**
  * Test isolation: Each test gets its own config directory within
@@ -180,7 +189,6 @@ describe("refreshToken error handling", () => {
     };
 
     try {
-      const { refreshToken } = await import("../../src/lib/config.js");
       await refreshToken();
       // Should not reach here
       expect(true).toBe(false);
@@ -215,7 +223,6 @@ describe("refreshToken error handling", () => {
       );
 
     try {
-      const { refreshToken } = await import("../../src/lib/config.js");
       await refreshToken();
       expect(true).toBe(false);
     } catch (error) {
@@ -554,9 +561,9 @@ describe("getCachedProject / setCachedProject / clearProjectCache", () => {
 // Config Path
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("getConfigPath", () => {
+describe("getDbPath", () => {
   test("returns the database file path", () => {
-    const path = getConfigPath();
+    const path = getDbPath();
     expect(path).toContain("cli.db");
     expect(path).toContain(testBaseDir);
   });

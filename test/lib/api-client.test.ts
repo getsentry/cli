@@ -11,7 +11,8 @@ import {
   listOrganizations,
   rawApiRequest,
 } from "../../src/lib/api-client.js";
-import { CONFIG_DIR_ENV_VAR, setAuthToken } from "../../src/lib/config.js";
+import { setAuthToken } from "../../src/lib/db/auth.js";
+import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test config directory

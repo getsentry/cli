@@ -12,7 +12,7 @@ import {
   triggerRootCauseAnalysis,
   triggerSolutionPlanning,
 } from "../../src/lib/api-client.js";
-import { setAuthToken } from "../../src/lib/config.js";
+import { setAuthToken } from "../../src/lib/db/auth.js";
 
 // Test config directory
 let testConfigDir: string;
