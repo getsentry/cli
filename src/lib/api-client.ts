@@ -424,10 +424,7 @@ export function getLatestEvent(
   issueId: string
 ): Promise<SentryEvent> {
   return apiRequest<SentryEvent>(
-    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
-    {
-      // schema: SentryEventSchema,
-    }
+    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`
   );
 }
 
@@ -461,10 +458,7 @@ export function getTrace(
   traceId: string
 ): Promise<TraceResponse> {
   return apiRequest<TraceResponse>(
-    `/organizations/${orgSlug}/events-trace/${traceId}/`,
-    {
-      // schema: TraceResponseSchema,
-    }
+    `/organizations/${orgSlug}/events-trace/${traceId}/`
   );
 }
 
@@ -487,7 +481,10 @@ export function getDetailedTrace(
     {
       params: {
         timestamp,
+        // Maximum spans to fetch - 10k is sufficient for most traces while
+        // preventing excessive response sizes for very large traces
         limit: 10_000,
+        // -1 means "all projects" - required since trace can span multiple projects
         project: -1,
       },
     }

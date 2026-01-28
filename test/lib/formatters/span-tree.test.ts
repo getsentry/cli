@@ -14,21 +14,35 @@ import type {
   TraceSpan,
 } from "../../../src/types/index.js";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Test Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+// Factory functions for creating test fixtures. These provide sensible defaults
+// while allowing customization via options parameters.
+
 /**
- * Helper to create a TraceResponse from trace events
+ * Create a TraceResponse wrapper from an array of trace events.
+ * Used to match the API response structure.
  */
 function makeTraceResponse(transactions: TraceEvent[]): TraceResponse {
   return { transactions, orphan_errors: [] };
 }
 
-// Helper to strip ANSI codes for content testing
+/**
+ * Strip ANSI escape codes from a string for content assertions.
+ * Allows tests to verify text content without color interference.
+ */
 function stripAnsi(str: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 /**
- * Create a minimal span for testing
+ * Create a minimal Span for testing tree building and formatting.
+ *
+ * @param id - Unique span identifier
+ * @param parentId - Parent span ID (null for root spans)
+ * @param options - Override defaults for duration, timestamps, op, description
  */
 function makeSpan(
   id: string,
@@ -57,7 +71,11 @@ function makeSpan(
 }
 
 /**
- * Create a minimal trace event for testing
+ * Create a minimal TraceEvent (transaction) for testing.
+ *
+ * @param id - Event ID
+ * @param spans - Child spans within this transaction
+ * @param options - Override defaults for timestamps, transaction name, op, duration
  */
 function makeTraceEvent(
   id: string,
@@ -458,7 +476,12 @@ describe("formatSpanTree", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Create a minimal TraceSpan for testing (with nested children support)
+ * Create a minimal TraceSpan for testing the simple span tree format.
+ * TraceSpan differs from Span in that it has nested children (hierarchical structure).
+ *
+ * @param op - Operation name (e.g., "http.server", "db.query")
+ * @param description - Human-readable description of the span
+ * @param children - Nested child spans (already in tree form)
  */
 function makeTraceSpan(
   op: string,

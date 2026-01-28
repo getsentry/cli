@@ -806,6 +806,9 @@ function formatRequest(requestEntry: RequestEntry): string[] {
 // Span Tree Formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Maximum length for span descriptions before truncation */
+const SPAN_DESCRIPTION_MAX_LENGTH = 50;
+
 /** Node in the span tree structure */
 type SpanNode = {
   /** The span data */
@@ -819,9 +822,13 @@ type SpanNode = {
  *
  * @param startTs - Start timestamp (seconds with fractional ms)
  * @param endTs - End timestamp (seconds with fractional ms)
- * @returns Formatted duration (e.g., "120ms", "1.50s")
+ * @returns Formatted duration (e.g., "120ms", "1.50s"), or "?" if timestamps are invalid
  */
 function formatSpanDuration(startTs: number, endTs: number): string {
+  // Guard against invalid timestamps (NaN, undefined coerced to NaN, etc.)
+  if (!(Number.isFinite(startTs) && Number.isFinite(endTs))) {
+    return "?";
+  }
   const durationMs = Math.max(0, Math.round((endTs - startTs) * 1000));
   if (durationMs < 1000) {
     return `${durationMs}ms`;
@@ -903,10 +910,9 @@ function formatSpanNode(
   const description = span.description || "(no description)";
 
   // Truncate long descriptions
-  const maxDescLen = 50;
   const truncatedDesc =
-    description.length > maxDescLen
-      ? `${description.slice(0, maxDescLen - 3)}...`
+    description.length > SPAN_DESCRIPTION_MAX_LENGTH
+      ? `${description.slice(0, SPAN_DESCRIPTION_MAX_LENGTH - 3)}...`
       : description;
 
   // Tree branch characters
@@ -1050,7 +1056,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  *
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
- * @param maxDepth - Maximum nesting depth to display (default: unlimited)
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited). Values <= 0 show unlimited depth.
  * @returns Array of formatted lines ready for display
  */
 export function formatSimpleSpanTree(
@@ -1062,6 +1068,9 @@ export function formatSimpleSpanTree(
     return [muted("No span data available.")];
   }
 
+  // Normalize maxDepth: treat non-positive values as unlimited
+  const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
+
   const lines: string[] = [];
   lines.push(`${muted("Trace —")} ${traceId}`);
 
@@ -1072,7 +1081,7 @@ export function formatSimpleSpanTree(
       prefix: "",
       isLast: i === spanCount - 1,
       currentDepth: 1,
-      maxDepth,
+      maxDepth: effectiveMaxDepth,
     });
   });
 

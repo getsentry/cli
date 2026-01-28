@@ -38,11 +38,16 @@ interface ViewFlags extends IssueIdFlags {
  * @param orgSlug - Organization slug for API routing
  * @param issueId - Issue ID (numeric)
  */
-function tryGetLatestEvent(
+async function tryGetLatestEvent(
   orgSlug: string,
   issueId: string
 ): Promise<SentryEvent | undefined> {
-  return getLatestEvent(orgSlug, issueId);
+  try {
+    return await getLatestEvent(orgSlug, issueId);
+  } catch {
+    // Non-blocking: event fetch failures shouldn't prevent issue display
+    return;
+  }
 }
 
 type HumanOutputOptions = {
