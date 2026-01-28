@@ -75,7 +75,9 @@ export function initSchema(db: Database): void {
     .get() as { version: number } | null;
 
   if (!versionRow) {
-    db.query("INSERT INTO schema_version (version) VALUES (?)").run(
+    // Use INSERT OR IGNORE to handle race condition when multiple CLI processes
+    // start simultaneously on fresh install - both may see no rows and try to insert
+    db.query("INSERT OR IGNORE INTO schema_version (version) VALUES (?)").run(
       CURRENT_SCHEMA_VERSION
     );
   }

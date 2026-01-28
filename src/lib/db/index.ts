@@ -95,11 +95,11 @@ export function closeDatabase(): void {
   }
 }
 
-export function shouldRunCleanup(): boolean {
+function shouldRunCleanup(): boolean {
   return Math.random() < CLEANUP_PROBABILITY;
 }
 
-export function cleanupExpiredCaches(): void {
+function cleanupExpiredCaches(): void {
   const database = getDatabase();
   const expiryTime = Date.now() - CACHE_TTL_MS;
 
@@ -119,10 +119,3 @@ export function maybeCleanupCaches(): void {
     cleanupExpiredCaches();
   }
 }
-
-// Re-export all public APIs from submodules
-export * from "./auth.js";
-export * from "./defaults.js";
-export * from "./dsn-cache.js";
-export * from "./project-aliases.js";
-export * from "./project-cache.js";
