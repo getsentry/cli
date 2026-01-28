@@ -75,10 +75,10 @@ else
   version="$requested_version"
 fi
 
-# Strip leading 'v' if present for display, ensure URL has 'v' prefix
+# Strip leading 'v' if present (releases use version without 'v' prefix)
 version="${version#v}"
 filename="sentry-${os}-${arch}${suffix}"
-url="https://github.com/getsentry/cli/releases/download/v${version}/${filename}"
+url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
 
 # Install
 install_dir="$HOME/.sentry/bin"
