@@ -16,6 +16,8 @@ import {
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
+  type TraceResponse,
+  type TraceSpan,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { refreshToken } from "./config.js";
@@ -422,10 +424,7 @@ export function getLatestEvent(
   issueId: string
 ): Promise<SentryEvent> {
   return apiRequest<SentryEvent>(
-    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
-    {
-      schema: SentryEventSchema,
-    }
+    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`
   );
 }
 
@@ -442,6 +441,52 @@ export function getEvent(
     `/projects/${orgSlug}/${projectSlug}/events/${eventId}/`,
     {
       schema: SentryEventSchema,
+    }
+  );
+}
+
+/**
+ * Get trace data including all transactions and spans.
+ * Returns the full trace tree for visualization.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The trace ID (from event.contexts.trace.trace_id)
+ * @returns Trace response with transactions array and orphan_errors
+ */
+export function getTrace(
+  orgSlug: string,
+  traceId: string
+): Promise<TraceResponse> {
+  return apiRequest<TraceResponse>(
+    `/organizations/${orgSlug}/events-trace/${traceId}/`
+  );
+}
+
+/**
+ * Get detailed trace with nested children structure.
+ * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The trace ID (from event.contexts.trace.trace_id)
+ * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
+ * @returns Array of root spans with nested children
+ */
+export function getDetailedTrace(
+  orgSlug: string,
+  traceId: string,
+  timestamp: number
+): Promise<TraceSpan[]> {
+  return apiRequest<TraceSpan[]>(
+    `/organizations/${orgSlug}/trace/${traceId}/`,
+    {
+      params: {
+        timestamp,
+        // Maximum spans to fetch - 10k is sufficient for most traces while
+        // preventing excessive response sizes for very large traces
+        limit: 10_000,
+        // -1 means "all projects" - required since trace can span multiple projects
+        project: -1,
+      },
     }
   );
 }

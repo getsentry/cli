@@ -240,6 +240,84 @@ export const TraceContextSchema = z
 export type TraceContext = z.infer<typeof TraceContextSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Span (for trace tree display)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A single span in a trace */
+export const SpanSchema = z
+  .object({
+    span_id: z.string(),
+    parent_span_id: z.string().nullable().optional(),
+    trace_id: z.string().optional(),
+    op: z.string().optional(),
+    description: z.string().nullable().optional(),
+    /** Start time as Unix timestamp (seconds with fractional ms) */
+    start_timestamp: z.number(),
+    /** End time as Unix timestamp (seconds with fractional ms) */
+    timestamp: z.number(),
+    status: z.string().optional(),
+    data: z.record(z.unknown()).optional(),
+    tags: z.record(z.string()).optional(),
+  })
+  .passthrough();
+
+export type Span = z.infer<typeof SpanSchema>;
+
+/** A transaction/event in a trace (from events-trace endpoint) */
+export const TraceEventSchema = z
+  .object({
+    event_id: z.string(),
+    span_id: z.string().optional(),
+    transaction: z.string().optional(),
+    "transaction.duration": z.number().optional(),
+    "transaction.op": z.string().optional(),
+    project_slug: z.string().optional(),
+    project_id: z.union([z.string(), z.number()]).optional(),
+    /** Child spans within this transaction */
+    spans: z.array(SpanSchema).optional(),
+    /** Start time */
+    start_timestamp: z.number().optional(),
+    /** End time */
+    timestamp: z.number().optional(),
+    /** Errors associated with this transaction */
+    errors: z.array(z.unknown()).optional(),
+    /** Performance issues */
+    performance_issues: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+export type TraceEvent = z.infer<typeof TraceEventSchema>;
+
+/** Response from /events-trace/{traceId}/ endpoint */
+export const TraceResponseSchema = z.object({
+  /** Transactions with their nested children (span trees) */
+  transactions: z.array(TraceEventSchema),
+  /** Errors not associated with any transaction */
+  orphan_errors: z.array(z.unknown()).optional(),
+});
+
+export type TraceResponse = z.infer<typeof TraceResponseSchema>;
+
+/**
+ * Span from /trace/{traceId}/ endpoint with nested children.
+ * This endpoint returns a hierarchical structure unlike /events-trace/.
+ */
+export type TraceSpan = {
+  span_id: string;
+  parent_span_id?: string | null;
+  op?: string;
+  description?: string | null;
+  start_timestamp: number;
+  timestamp: number;
+  transaction?: string;
+  "transaction.op"?: string;
+  project_slug?: string;
+  event_id?: string;
+  /** Nested child spans */
+  children?: TraceSpan[];
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Stack Frame & Exception Entry
 // ─────────────────────────────────────────────────────────────────────────────
 

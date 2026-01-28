@@ -6,11 +6,13 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getLatestEvent } from "../../lib/api-client.js";
+import { getDetailedTrace, getLatestEvent } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
   formatEventDetails,
   formatIssueDetails,
+  formatSimpleSpanTree,
+  muted,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -26,6 +28,7 @@ import {
 interface ViewFlags extends IssueIdFlags {
   readonly json: boolean;
   readonly web: boolean;
+  readonly spans?: number;
 }
 
 /**
@@ -42,18 +45,22 @@ async function tryGetLatestEvent(
   try {
     return await getLatestEvent(orgSlug, issueId);
   } catch {
+    // Non-blocking: event fetch failures shouldn't prevent issue display
     return;
   }
 }
 
+type HumanOutputOptions = {
+  issue: SentryIssue;
+  event?: SentryEvent;
+};
+
 /**
  * Write human-readable issue output
  */
-function writeHumanOutput(
-  stdout: Writer,
-  issue: SentryIssue,
-  event?: SentryEvent
-): void {
+function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
+  const { issue, event } = options;
+
   const issueLines = formatIssueDetails(issue);
   stdout.write(`${issueLines.join("\n")}\n`);
 
@@ -65,6 +72,44 @@ function writeHumanOutput(
       issue.permalink
     );
     stdout.write(`${eventLines.join("\n")}\n`);
+  }
+}
+
+/**
+ * Display the span tree for an event.
+ * Shows ONLY the tree structure, no issue/event details.
+ *
+ * @param stdout - Output writer
+ * @param orgSlug - Organization slug
+ * @param event - The event to get trace from
+ * @param maxDepth - Maximum nesting depth to display
+ * @returns true if successfully displayed, false if missing data
+ */
+async function displaySpanTree(
+  stdout: Writer,
+  orgSlug: string,
+  event: SentryEvent,
+  maxDepth: number
+): Promise<boolean> {
+  const traceId = event.contexts?.trace?.trace_id;
+  const dateCreated = (event as { dateCreated?: string }).dateCreated;
+  const timestamp = dateCreated
+    ? new Date(dateCreated).getTime() / 1000
+    : undefined;
+
+  if (!(traceId && timestamp)) {
+    stdout.write(muted("No trace data available for this event.\n"));
+    return false;
+  }
+
+  try {
+    const spans = await getDetailedTrace(orgSlug, traceId, timestamp);
+    const lines = formatSimpleSpanTree(traceId, spans, maxDepth);
+    stdout.write(`${lines.join("\n")}\n`);
+    return true;
+  } catch {
+    stdout.write(muted("Unable to fetch span tree for this event.\n"));
+    return false;
   }
 }
 
@@ -96,6 +141,13 @@ export const viewCommand = buildCommand({
         kind: "boolean",
         brief: "Open in browser",
         default: false,
+      },
+      spans: {
+        kind: "parsed",
+        parse: (input: string) => Number(input === "" ? 1 : input),
+        brief: "Show span tree with N levels of nesting depth",
+        optional: true,
+        inferEmpty: true,
       },
     },
     aliases: { w: "web" },
@@ -132,7 +184,20 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    writeHumanOutput(stdout, issue, event);
+    writeHumanOutput(stdout, { issue, event });
+
+    if (flags.spans !== undefined && orgSlug && event) {
+      const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
+      stdout.write("\n");
+      await displaySpanTree(stdout, orgSlug, event, depth);
+    } else if (flags.spans !== undefined && !orgSlug) {
+      stdout.write(
+        muted("\nOrganization context required to fetch span tree.\n")
+      );
+    } else if (flags.spans !== undefined && !event) {
+      stdout.write(muted("\nCould not fetch event to display span tree.\n"));
+    }
+
     writeFooter(
       stdout,
       `Tip: Use 'sentry issue explain ${issue.shortId}' for AI root cause analysis`
