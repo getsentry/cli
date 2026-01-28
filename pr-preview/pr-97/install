@@ -1,0 +1,102 @@
+#!/bin/bash
+set -euo pipefail
+
+RED='\033[0;31m'
+MUTED='\033[0;2m'
+NC='\033[0m'
+
+usage() {
+  cat <<EOF
+Sentry CLI Installer
+
+Usage: install [options]
+
+Options:
+    -h, --help              Display this help message
+    -v, --version <version> Install a specific version (e.g., 0.2.0)
+
+Examples:
+    curl -fsSL https://cli.sentry.dev/install | bash
+    curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
+EOF
+}
+
+requested_version=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -v|--version)
+      if [[ -n "${2:-}" ]]; then
+        requested_version="$2"
+        shift 2
+      else
+        echo -e "${RED}Error: --version requires a version argument${NC}"
+        exit 1
+      fi
+      ;;
+    *) shift ;;
+  esac
+done
+
+# Detect OS
+case "$(uname -s)" in
+  Darwin*) os="darwin" ;;
+  Linux*) os="linux" ;;
+  MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+  *) echo -e "${RED}Unsupported OS: $(uname -s)${NC}"; exit 1 ;;
+esac
+
+# Detect architecture
+arch=$(uname -m)
+case "$arch" in
+  x86_64) arch="x64" ;;
+  aarch64|arm64) arch="arm64" ;;
+  *) echo -e "${RED}Unsupported architecture: $arch${NC}"; exit 1 ;;
+esac
+
+# Validate supported combinations
+suffix=""
+if [[ "$os" == "windows" ]]; then
+  suffix=".exe"
+  if [[ "$arch" != "x64" ]]; then
+    echo -e "${RED}Unsupported: windows-$arch (only windows-x64 is supported)${NC}"
+    exit 1
+  fi
+fi
+
+# Resolve version
+if [[ -z "$requested_version" ]]; then
+  version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+  if [[ -z "$version" ]]; then
+    echo -e "${RED}Failed to fetch latest version${NC}"
+    exit 1
+  fi
+else
+  version="$requested_version"
+fi
+
+# Strip leading 'v' if present (releases use version without 'v' prefix)
+version="${version#v}"
+filename="sentry-${os}-${arch}${suffix}"
+url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
+
+# Install
+install_dir="$HOME/.sentry/bin"
+install_path="${install_dir}/sentry${suffix}"
+
+mkdir -p "$install_dir"
+echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+curl -fsSL --progress-bar "$url" -o "$install_path"
+chmod +x "$install_path"
+
+# Success message
+echo ""
+echo -e "Installed ${NC}sentry v${version}${MUTED} to ${NC}${install_path}"
+echo ""
+echo -e "${MUTED}Add to PATH (add to ~/.zshrc or ~/.bashrc):${NC}"
+echo "  export PATH=\"\$HOME/.sentry/bin:\$PATH\""
+echo ""
+echo -e "${MUTED}Get started:${NC}"
+echo "  sentry --help"
+echo ""
+echo -e "${MUTED}https://cli.sentry.dev${NC}"
