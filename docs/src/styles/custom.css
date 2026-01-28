@@ -1,0 +1,1638 @@
+/* ==========================================================================
+   Sentry CLI Documentation - Dark Theme Only
+   ========================================================================== */
+
+/* Force dark mode regardless of system preference */
+:root,
+html,
+html[data-theme="light"],
+html[data-theme="dark"] {
+  color-scheme: dark !important;
+}
+
+/* Override all theme states with dark mode values */
+:root,
+html,
+[data-theme="light"],
+[data-theme="dark"] {
+  /* Background colors */
+  --sl-color-bg: #0a0a0f;
+  --sl-color-bg-nav: rgba(10, 10, 15, 0.95);
+  --sl-color-bg-sidebar: rgba(10, 10, 15, 0.98);
+  --sl-color-bg-inline-code: rgba(255, 255, 255, 0.08);
+
+  /* Accent colors - Purple theme */
+  --sl-color-accent: #8b5cf6;
+  --sl-color-accent-high: #a78bfa;
+  --sl-color-accent-low: rgba(139, 92, 246, 0.2);
+
+  /* Text colors - BOOSTED CONTRAST */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #ffffff;
+  --sl-color-gray-2: #f1f5f9;
+  --sl-color-gray-3: #e2e8f0;
+  --sl-color-gray-4: #cbd5e1;
+  --sl-color-gray-5: #94a3b8;
+  --sl-color-gray-6: #64748b;
+  --sl-color-black: #0a0a0f;
+
+  /* Border colors */
+  --sl-color-hairline: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-shade: rgba(255, 255, 255, 0.1);
+  --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
+
+  /* Inline code - accent-tinted */
+  --sl-color-bg-inline-code: rgba(139, 92, 246, 0.15);
+
+  /* Typography */
+  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Sizing */
+  --sl-content-width: 50rem;
+  --sl-sidebar-width: 17rem;
+  --sl-content-pad-x: 2rem;
+}
+
+/* ==========================================================================
+   Global Styles
+   ========================================================================== */
+
+body {
+  background: var(--sl-color-bg);
+}
+
+/* Subtle background gradient */
+.sl-layout::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  background:
+    radial-gradient(
+      ellipse 80% 50% at 50% -20%,
+      rgba(139, 92, 246, 0.12) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 100% 0%,
+      rgba(59, 130, 246, 0.08) 0%,
+      transparent 40%
+    );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ==========================================================================
+   Header / Navigation
+   ========================================================================== */
+
+header.header {
+  background: rgba(10, 10, 15, 0.8);
+  backdrop-filter: blur(12px);
+  border-bottom: none;
+  position: relative;
+}
+
+/* Logo size - larger */
+.site-title img {
+  height: 2rem !important;
+  width: auto !important;
+}
+
+/* GitHub icon - white */
+.social-icons a,
+.social-icons a svg,
+a[href*="github.com"],
+a[href*="github.com"] svg,
+[class*="astro-wy4te6ga"],
+[class*="astro-wy4te6ga"] svg {
+  color: #fff !important;
+  fill: #fff !important;
+}
+
+.social-icons a:hover,
+.social-icons a:hover svg,
+a[href*="github.com"]:hover,
+a[href*="github.com"]:hover svg {
+  color: rgba(255, 255, 255, 0.8) !important;
+  fill: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Search bar - centered in page */
+site-search {
+  --sl-search-width: 22rem;
+}
+
+site-search button {
+  background: var(--sl-color-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 6px !important;
+  padding: 0.35rem 0.75rem !important;
+  font-size: 0.8rem !important;
+  height: auto !important;
+  min-height: unset !important;
+  gap: 0.5rem !important;
+  width: 22rem !important;
+  min-width: 22rem !important;
+  justify-content: space-between !important;
+  position: fixed !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  top: 0.75rem !important;
+  z-index: 1000 !important;
+}
+
+site-search button:hover {
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* Search icon */
+site-search button svg {
+  width: 14px !important;
+  height: 14px !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Search text */
+site-search button span {
+  font-size: 0.8rem !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Command+K indicator */
+site-search button kbd {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-size: 0.75rem !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ==========================================================================
+   Splash / Landing Page Styles
+   ========================================================================== */
+
+/* Hero section */
+.hero {
+  padding: 4rem 0 0.5rem !important;
+  text-align: left !important;
+  max-width: none !important;
+}
+
+.hero > img,
+.hero > .hero-image {
+  display: none !important;
+}
+
+/* Hero title - make it bold and impactful */
+.hero h1 {
+  font-size: clamp(2.5rem, 8vw, 4rem) !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.03em !important;
+  margin-bottom: 1.5rem !important;
+  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hero tagline */
+.hero .tagline {
+  font-size: 1.125rem !important;
+  line-height: 1.7 !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+  max-width: 540px !important;
+  margin: 0 !important;
+}
+
+/* Hide default hero actions */
+.hero .action,
+.hero .sl-flex.actions {
+  display: none !important;
+}
+
+/* Command box in hero - tight to tagline, space below */
+.hero-command {
+  margin-top: 0.5rem;
+  margin-bottom: 4rem;
+}
+
+/* Stack container - page layout for splash */
+[data-page-type="splash"] .sl-container {
+  max-width: var(--sl-content-width);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+[data-page-type="splash"] main {
+  padding-top: 0;
+}
+
+/* ==========================================================================
+   Install Section
+   ========================================================================== */
+
+.install-section {
+  margin: 3rem 0;
+  text-align: left;
+}
+
+.install-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Tabs Component
+   ========================================================================== */
+
+starlight-tabs {
+  --sl-color-bg-nav: transparent;
+  margin: 1.5rem 0;
+}
+
+starlight-tabs [role="tablist"] {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 0;
+  background: transparent;
+}
+
+starlight-tabs [role="tab"] {
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+starlight-tabs [role="tab"]:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+starlight-tabs [role="tab"][aria-selected="true"] {
+  color: #fff;
+  border-bottom-color: #fff;
+}
+
+starlight-tabs [role="tabpanel"] {
+  padding: 1rem 0 0;
+}
+
+/* ==========================================================================
+   Quick Start Section
+   ========================================================================== */
+
+.quick-start {
+  margin: 4rem 0;
+}
+
+.quick-start h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Features Section
+   ========================================================================== */
+
+.features-section {
+  margin: 5rem 0;
+}
+
+.features-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  color: var(--sl-color-white);
+}
+
+/* Feature cards */
+.sl-card-grid {
+  --sl-card-grid-cols: 3;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 12px !important;
+  padding: 1.5rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  transform: translateY(-2px);
+}
+
+.card .title {
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.card .body {
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.6 !important;
+}
+
+/* ==========================================================================
+   Features Section - Horizontal Rows with Terminals
+   ========================================================================== */
+
+.feature-section {
+  margin: 2rem 0;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.feature-section-inner {
+  display: flex;
+  align-items: stretch;
+}
+
+.feature-section-inner.reverse {
+  flex-direction: row-reverse;
+}
+
+.feature-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2.5rem;
+}
+
+.feature-text h3 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.2;
+}
+
+.feature-text p {
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0 0 1rem 0;
+}
+
+.feature-text p:last-child {
+  margin-bottom: 0;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.feature-text code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.feature-visual {
+  flex: 0 0 55%;
+  min-height: 420px;
+  margin: 0.5rem 0.75rem 0.75rem 0;
+  background-size: cover;
+  background-position: center;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feature-section-inner.reverse .feature-visual {
+  margin: 0.75rem 0 0.75rem 0.75rem;
+}
+
+/* Responsive for feature sections */
+@media (max-width: 1000px) {
+  .feature-section-inner,
+  .feature-section-inner.reverse {
+    flex-direction: column;
+  }
+
+  .feature-text {
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .feature-visual,
+  .feature-section-inner.reverse .feature-visual {
+    flex: none;
+    width: calc(100% - 1.5rem);
+    min-height: 380px;
+    margin: 0 0.75rem 0.75rem 0.75rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .feature-section {
+    margin: 1.5rem 0;
+  }
+
+  .feature-text {
+    padding: 1.5rem;
+  }
+
+  .feature-visual {
+    min-height: 340px;
+  }
+
+  .feature-text h3 {
+    font-size: 1.4rem;
+  }
+}
+
+.features-section-new h2 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 3rem;
+  text-align: center;
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+  margin-bottom: 4rem;
+}
+
+.feature-row.reverse {
+  flex-direction: row-reverse;
+}
+
+.feature-row:last-child {
+  margin-bottom: 0;
+}
+
+.feature-image {
+  flex: 0 0 400px;
+  height: 280px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 16px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.feature-image::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(1px);
+}
+
+.feature-command {
+  position: relative;
+  z-index: 1;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 0.875rem 1.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 1rem;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.feature-command .prompt {
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 0.5rem;
+}
+
+.feature-content {
+  flex: 1;
+}
+
+.feature-content h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+.feature-content p {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  max-width: 450px;
+}
+
+/* Responsive for feature rows */
+@media (max-width: 900px) {
+  .feature-row,
+  .feature-row.reverse {
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  .feature-image {
+    flex: none;
+    width: 100%;
+    height: 220px;
+  }
+
+  .feature-content {
+    text-align: center;
+  }
+
+  .feature-content p {
+    max-width: none;
+  }
+}
+
+.features-v1 h2 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 2rem;
+}
+
+.v1-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.v1-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.v1-card:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.v1-image {
+  height: 180px;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+}
+
+.v1-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 50%,
+    rgba(10, 10, 15, 0.8) 100%
+  );
+}
+
+.v1-content {
+  padding: 1.5rem;
+}
+
+.v1-content h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.v1-content p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+}
+
+/* ==========================================================================
+   VARIATION 2: Horizontal Feature Rows
+   ========================================================================== */
+
+.features-v2 {
+  margin: 6rem 0;
+  padding: 4rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.features-v2 h2 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 3rem;
+}
+
+.v2-row {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+  margin-bottom: 3rem;
+}
+
+.v2-row.reverse {
+  flex-direction: row-reverse;
+}
+
+.v2-image {
+  flex: 0 0 280px;
+  height: 200px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.v2-content {
+  flex: 1;
+}
+
+.v2-content h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+.v2-content p {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  max-width: 500px;
+}
+
+/* ==========================================================================
+   VARIATION 3: Minimal Cards with Accent Bars
+   ========================================================================== */
+
+.features-v3 {
+  margin: 6rem 0;
+  padding: 4rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.features-v3 h2 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 2rem;
+}
+
+.v3-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+
+.v3-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.v3-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.v3-accent {
+  height: 4px;
+  border-radius: 2px;
+  margin-bottom: 1.25rem;
+}
+
+.v3-accent.purple {
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+}
+
+.v3-accent.blue {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.v3-accent.pink {
+  background: linear-gradient(90deg, #ec4899, #f472b6);
+}
+
+.v3-accent.green {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.v3-accent.orange {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.v3-accent.cyan {
+  background: linear-gradient(90deg, #06b6d4, #22d3ee);
+}
+
+.v3-card h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+
+.v3-card p {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+/* Responsive for all variations */
+@media (max-width: 900px) {
+  .v1-grid,
+  .v3-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .v2-row,
+  .v2-row.reverse {
+    flex-direction: column;
+  }
+
+  .v2-image {
+    flex: none;
+    width: 100%;
+    height: 180px;
+  }
+}
+
+@media (max-width: 600px) {
+  .v1-grid,
+  .v3-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Why Section
+   ========================================================================== */
+
+.why-section {
+  margin: 5rem 0;
+  padding: 3rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+}
+
+.why-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--sl-color-white);
+}
+
+.why-section p {
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 1.5rem;
+  max-width: 600px;
+}
+
+.why-section ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.why-section li {
+  color: rgba(255, 255, 255, 0.8);
+  padding-left: 0;
+}
+
+.why-section li strong {
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Code Blocks
+   ========================================================================== */
+
+pre:not(.pm-pre) {
+  background: rgba(20, 20, 25, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+/* Package Manager Code - no border */
+pre.pm-pre,
+.pm-pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+code {
+  font-family: var(--sl-font-mono);
+  font-size: 0.9em;
+}
+
+/* ==========================================================================
+   Doc Content Pages
+   ========================================================================== */
+
+/* Main content area */
+.sl-markdown-content {
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.8;
+  font-size: 1rem;
+}
+
+/* Headings - clean hierarchy like reference */
+.sl-markdown-content h1 {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 3rem 0 1rem;
+  letter-spacing: -0.02em;
+}
+
+.sl-markdown-content h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 3rem 0 1rem;
+  letter-spacing: -0.01em;
+}
+
+.sl-markdown-content h2:first-child {
+  margin-top: 0;
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 2rem 0 0.75rem;
+}
+
+.sl-markdown-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 1.5rem 0 0.5rem;
+}
+
+/* Paragraphs */
+.sl-markdown-content p {
+  margin-bottom: 1.5rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* Lists */
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+  margin: 1rem 0 1.5rem;
+  padding-left: 1.25rem;
+}
+
+.sl-markdown-content li {
+  margin-bottom: 0.625rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.sl-markdown-content li::marker {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Inline code - subtle dark pill */
+.sl-markdown-content code:not(pre code) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  padding: 0.2em 0.5em;
+  border-radius: 5px;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   Code Blocks
+   ========================================================================== */
+
+/* Container */
+.expressive-code {
+  margin: 1.5rem 0 !important;
+}
+
+/* Frame - the outer container */
+.expressive-code figure.frame {
+  background: #0d0d12 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  box-shadow: none !important;
+}
+
+/* Header */
+.expressive-code .header {
+  background: rgba(255, 255, 255, 0.03) !important;
+  padding: 0.7rem 1rem !important;
+  border: none !important;
+}
+
+/* Add "Terminal" text via CSS */
+.expressive-code .header .title:empty::before,
+.expressive-code.is-terminal .header::before {
+  content: "Terminal";
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* Hide sr-only and empty spans */
+.expressive-code .header .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+}
+
+/* Code area */
+.expressive-code pre {
+  background: #0a0a0f !important;
+  margin: 0 !important;
+  padding: 1rem 1.25rem !important;
+  border: none !important;
+  border-radius: 0 0 11px 11px !important;
+}
+
+.expressive-code code {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+}
+
+/* Copy button */
+.expressive-code .copy {
+  position: absolute !important;
+  top: 0.55rem !important;
+  right: 0.75rem !important;
+}
+
+.expressive-code .copy button {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  cursor: pointer !important;
+}
+
+.expressive-code .copy button:hover {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Standalone pre */
+.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre) {
+  background: #0a0a0f !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+  padding: 1rem 1.25rem !important;
+  margin: 1.5rem 0 !important;
+}
+
+.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre) code {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+}
+
+/* Main container */
+.expressive-code {
+  margin: 1rem 0 !important;
+  display: block !important;
+}
+
+/* The figure/frame - two-tone look like PackageManagerCode */
+.expressive-code figure,
+.expressive-code figure.frame,
+.expressive-code figure.frame.is-terminal {
+  margin: 0 !important;
+  padding: 0.5rem !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: none !important;
+  border-radius: 12px !important;
+  overflow: visible !important;
+  position: relative !important;
+  display: block !important;
+}
+
+/* Header area - flex container for label and copy button */
+.expressive-code figcaption,
+.expressive-code figcaption.header,
+.expressive-code figure.frame figcaption.header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 0.5rem 0.5rem !important;
+  background: transparent !important;
+  border: none !important;
+  margin: 0 !important;
+}
+
+/* Hide the 3 dots from expressive-code terminal styling */
+.expressive-code .frame.is-terminal .header::before {
+  display: none !important;
+}
+
+/* Terminal label - replaces the dots */
+.expressive-code figcaption .title {
+  display: block !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  font-family: var(--sl-font) !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+.expressive-code figcaption .title::before {
+  content: "Terminal" !important;
+}
+
+/* Hide sr-only text */
+.expressive-code figcaption .sr-only {
+  display: none !important;
+}
+
+/* Pre/code area - rounded corners */
+.expressive-code pre {
+  margin: 0 !important;
+  padding: 0.75rem 1rem !important;
+  background: #0a0a0f !important;
+  border: none !important;
+  border-radius: 8px !important;
+  overflow-x: auto !important;
+}
+
+.expressive-code pre code,
+.expressive-code code {
+  font-family: "JetBrains Mono", ui-monospace, monospace !important;
+  font-size: 0.875rem !important;
+  line-height: 1.7 !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  background: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  display: block !important;
+}
+
+/* Code lines */
+.expressive-code .ec-line {
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.expressive-code .ec-line .code {
+  display: inline !important;
+}
+
+/* Copy button - positioned in header area, matching PackageManagerCode style */
+.expressive-code .copy {
+  position: absolute !important;
+  top: 1rem !important;
+  right: 1rem !important;
+  z-index: 10 !important;
+  flex-direction: row !important;
+  gap: 0.25rem !important;
+}
+
+.expressive-code .copy button {
+  all: unset !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  background: none !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  cursor: pointer !important;
+  padding: 0.5rem !important;
+  transition: color 0.15s ease !important;
+  width: auto !important;
+  height: auto !important;
+  opacity: 1 !important;
+}
+
+.expressive-code .copy button:hover {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Hide the default div background effect */
+.expressive-code .copy button div {
+  display: none !important;
+}
+
+/* Hide default border pseudo-element */
+.expressive-code .copy button::before {
+  display: none !important;
+}
+
+/* Icon via ::after - matching PackageManagerCode SVG */
+.expressive-code .copy button::after {
+  content: "" !important;
+  display: block !important;
+  width: 16px !important;
+  height: 16px !important;
+  background-color: currentColor !important;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
+  -webkit-mask-repeat: no-repeat !important;
+  -webkit-mask-size: contain !important;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='14' height='14' x='8' y='8' rx='2' ry='2'/%3E%3Cpath d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/%3E%3C/svg%3E") !important;
+  mask-repeat: no-repeat !important;
+  mask-size: contain !important;
+  margin: 0 !important;
+  position: static !important;
+  inset: auto !important;
+}
+
+/* Feedback tooltip - style like PackageManagerCode "Copied!" */
+.expressive-code .copy .feedback {
+  background: transparent !important;
+  color: #22c55e !important;
+  font-size: 0.75rem !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  position: static !important;
+  align-self: center !important;
+}
+
+.expressive-code .copy .feedback::after {
+  display: none !important;
+}
+
+/* Syntax highlighting colors - keep them */
+.expressive-code span[style*="--0"] {
+  color: var(--0) !important;
+}
+
+/* Links in content */
+.sl-markdown-content a {
+  color: #93c5fd;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.sl-markdown-content a:hover {
+  color: #bfdbfe;
+  text-decoration: underline;
+}
+
+/* Callouts/Asides - blue accent like reference */
+.sl-markdown-content aside,
+.starlight-aside {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: none !important;
+  border-left: 3px solid #3b82f6 !important;
+  border-radius: 0 12px 12px 0 !important;
+  padding: 1rem 1.25rem !important;
+  margin: 1.5rem 0 !important;
+}
+
+.starlight-aside__title {
+  color: #60a5fa !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.starlight-aside__content,
+.starlight-aside p {
+  color: rgba(255, 255, 255, 0.75) !important;
+  font-size: 0.95rem !important;
+  margin: 0 !important;
+}
+
+.starlight-aside__icon {
+  color: #3b82f6 !important;
+}
+
+/* Note variant */
+.starlight-aside--note {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-left-color: #3b82f6 !important;
+}
+
+/* Tip variant */
+.starlight-aside--tip {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border-left-color: #22c55e !important;
+}
+
+.starlight-aside--tip .starlight-aside__icon {
+  color: #22c55e !important;
+}
+
+.starlight-aside--tip .starlight-aside__title {
+  color: #4ade80 !important;
+}
+
+/* Caution variant */
+.starlight-aside--caution {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-left-color: #f59e0b !important;
+}
+
+.starlight-aside--caution .starlight-aside__icon {
+  color: #f59e0b !important;
+}
+
+.starlight-aside--caution .starlight-aside__title {
+  color: #fbbf24 !important;
+}
+
+/* Danger variant */
+.starlight-aside--danger {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-left-color: #ef4444 !important;
+}
+
+.starlight-aside--danger .starlight-aside__icon {
+  color: #ef4444 !important;
+}
+
+.starlight-aside--danger .starlight-aside__title {
+  color: #f87171 !important;
+}
+
+/* Blockquotes */
+.sl-markdown-content blockquote {
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  padding-left: 1.25rem;
+  margin: 1.5rem 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+}
+
+.sl-markdown-content blockquote p {
+  color: inherit;
+}
+
+/* Tables */
+.sl-markdown-content table {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  display: table !important;
+}
+
+.sl-markdown-content th,
+.sl-markdown-content td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sl-markdown-content th {
+  color: #fff;
+  font-weight: 600;
+}
+
+.sl-markdown-content td {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sl-markdown-content tr:last-child td {
+  border-bottom: none;
+}
+
+/* Horizontal rules */
+.sl-markdown-content hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 2.5rem 0;
+}
+
+/* Strong/bold text */
+.sl-markdown-content strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Remove border between header and content */
+.content-panel + .content-panel {
+  border-top: none !important;
+}
+
+/* Page title area */
+.content-panel h1#_top {
+  font-size: 2.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.025em;
+}
+
+/* Page description if present */
+.content-panel .meta {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+}
+
+/* ==========================================================================
+   Pagination (Previous/Next links)
+   ========================================================================== */
+
+.pagination-links {
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.pagination-links a {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  padding: 0.625rem 0.875rem !important;
+  font-size: 0.8rem !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.pagination-links a:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.pagination-links .link-title {
+  font-size: 0.875rem !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.pagination-links a:hover .link-title {
+  color: #fff !important;
+}
+
+.pagination-links svg {
+  width: 1rem !important;
+  height: 1rem !important;
+  opacity: 0.5;
+}
+
+/* ==========================================================================
+   Links
+   ========================================================================== */
+
+a {
+  color: var(--sl-color-accent-high);
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--sl-color-white);
+}
+
+/* ==========================================================================
+   Table of Contents (Right Sidebar)
+   ========================================================================== */
+
+/* Remove left border from right sidebar */
+.right-sidebar {
+  border-inline-start: none !important;
+}
+
+starlight-toc a {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  transition: all 0.15s ease;
+}
+
+starlight-toc a:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+starlight-toc a[aria-current="true"] {
+  color: #fff;
+  font-weight: 500;
+}
+
+starlight-toc h2,
+#starlight__on-this-page,
+#starlight__on-this-page--mobile,
+.right-sidebar h2,
+starlight-toc nav h2 {
+  color: #fff !important;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   Sidebar (for docs pages)
+   ========================================================================== */
+
+/* Left sidebar border removed */
+.sidebar-pane {
+  border-inline-end: none !important;
+}
+
+.sidebar-content {
+  background: transparent;
+  font-size: 0.875rem;
+}
+
+nav.sidebar a {
+  color: rgba(255, 255, 255, 0.75);
+  transition: all 0.15s ease;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin: 1px 0;
+}
+
+nav.sidebar a:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+nav.sidebar a[aria-current="page"] {
+  color: #fff;
+  background: rgba(139, 92, 246, 0.2);
+  border-left: 2px solid var(--sl-color-accent);
+}
+
+/* Sidebar group labels - "GETTING STARTED", "COMMANDS", etc. */
+.group-label,
+.group-label .large,
+.group-label span,
+.sidebar-content .top-level > li > details > summary,
+.sidebar-content .top-level > li > details > summary .group-label,
+.sidebar-content .top-level > li > details > summary .large {
+  color: #fff !important;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sidebar-content .top-level > li > details > summary:hover .group-label,
+.sidebar-content .top-level > li > details > summary:hover .large {
+  color: #fff !important;
+}
+
+/* ==========================================================================
+   Mobile Responsive
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .hero {
+    text-align: center !important;
+  }
+
+  .hero h1 {
+    font-size: 2rem !important;
+  }
+
+  .hero .tagline {
+    font-size: 1rem !important;
+    margin: 0 auto !important;
+  }
+
+  .hero-command .command-box-wrapper {
+    justify-content: center;
+  }
+
+  .sl-card-grid {
+    --sl-card-grid-cols: 1;
+  }
+
+  .why-section {
+    padding: 1.5rem;
+  }
+
+  .why-section ul {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Scrollbar
+   ========================================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ==========================================================================
+   Overscroll Easter Egg
+   ========================================================================== */
+
+.overscroll-message {
+  position: fixed;
+  bottom: -60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.6rem 1.5rem;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 24px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+}
+
+.overscroll-message code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+  color: #a78bfa;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}

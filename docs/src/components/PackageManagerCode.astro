@@ -1,0 +1,190 @@
+---
+interface Props {
+  npm: string;
+  pnpm: string;
+  yarn: string;
+  bun: string;
+}
+
+const { npm, pnpm, yarn, bun } = Astro.props;
+const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
+---
+
+<div class="pm-code" data-id={id}>
+  <div class="pm-header">
+    <div class="pm-tabs">
+      <button class="pm-tab active" data-pm="npm">npm</button>
+      <button class="pm-tab" data-pm="pnpm">pnpm</button>
+      <button class="pm-tab" data-pm="yarn">yarn</button>
+      <button class="pm-tab" data-pm="bun">bun</button>
+    </div>
+    <button class="pm-copy" aria-label="Copy to clipboard">
+      <span class="pm-copied">Copied!</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+      </svg>
+    </button>
+  </div>
+  <div class="pm-content">
+    <pre class="pm-pre" data-pm="npm"><code>{npm}</code></pre>
+    <pre class="pm-pre" data-pm="pnpm" hidden><code>{pnpm}</code></pre>
+    <pre class="pm-pre" data-pm="yarn" hidden><code>{yarn}</code></pre>
+    <pre class="pm-pre" data-pm="bun" hidden><code>{bun}</code></pre>
+  </div>
+</div>
+
+<style>
+  .pm-code {
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 1rem 0;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.5rem;
+  }
+
+  .pm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 0.5rem;
+  }
+
+  .pm-tabs {
+    display: flex;
+    align-items: baseline;
+  }
+
+  .pm-tab {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.4);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    font-family: inherit;
+    position: relative;
+  }
+
+  .pm-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .pm-tab.active {
+    color: #fff;
+  }
+
+  .pm-tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0;
+    height: 2px;
+    background: #fff;
+  }
+
+  .pm-copy {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 0.5rem;
+    transition: color 0.15s ease;
+  }
+
+  .pm-copy:hover {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .pm-copied {
+    font-size: 0.75rem;
+    color: #22c55e;
+    opacity: 0;
+    transform: translateY(0.25rem);
+    transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+  }
+
+  .pm-copy.copied .pm-copied {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .pm-content {
+    padding: 0.75rem 1rem;
+    background: #0a0a0f;
+    border-radius: 8px;
+  }
+
+  .pm-pre {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  .pm-pre code {
+    border: none !important;
+    background: transparent !important;
+  }
+
+  .pm-pre {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+  }
+
+  .pm-pre[hidden] {
+    display: none;
+  }
+
+  .pm-pre code {
+    color: rgba(255, 255, 255, 0.85);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.875rem;
+    line-height: 1.7;
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.pm-code').forEach(block => {
+    const tabs = block.querySelectorAll('.pm-tab');
+    const pres = block.querySelectorAll('.pm-pre');
+    const copyBtn = block.querySelector('.pm-copy');
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const pm = tab.getAttribute('data-pm');
+        
+        // Update tabs
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // Update code blocks
+        pres.forEach(pre => {
+          if (pre.getAttribute('data-pm') === pm) {
+            pre.removeAttribute('hidden');
+          } else {
+            pre.setAttribute('hidden', '');
+          }
+        });
+      });
+    });
+
+    copyBtn?.addEventListener('click', async () => {
+      const activePre = block.querySelector('.pm-pre:not([hidden])');
+      const code = activePre?.querySelector('code')?.textContent || '';
+      
+      await navigator.clipboard.writeText(code);
+      copyBtn.classList.add('copied');
+      setTimeout(() => copyBtn.classList.remove('copied'), 2000);
+    });
+  });
+</script>

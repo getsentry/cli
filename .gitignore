@@ -35,6 +35,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 *.tsbuildinfo
 .turbo
 
+# docs
+docs/dist
+docs/node_modules
+docs/.astro
+
 # IntelliJ based IDEs
 .idea
 

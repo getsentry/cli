@@ -185,9 +185,31 @@ jobs:
           name: npm-package
           path: '*.tgz'
 
+  build-docs:
+    name: Build Docs
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Build Docs
+        working-directory: docs
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - name: Package Docs
+        run: |
+          cp .nojekyll docs/dist/
+          zip -r gh-pages.zip docs/dist/
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-pages
+          path: gh-pages.zip
+
   merge-artifacts:
     name: Merge Artifacts
-    needs: [build-binary, build-npm, test-e2e]
+    needs: [build-binary, build-npm, build-docs, test-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -197,3 +219,4 @@ jobs:
           path: |
             sentry-*/
             npm-package/*.tgz
+            gh-pages/gh-pages.zip
