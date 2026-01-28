@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    {
+      "name": "sentry/cli",
+      "path": "plugins/sentry-cli"
+    }
+  ]
+}
