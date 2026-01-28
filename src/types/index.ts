@@ -71,9 +71,14 @@ export type {
   // Organization & Project
   SentryOrganization,
   SentryProject,
+  // Span/Trace types
+  Span,
   StackFrame,
   Stacktrace,
   TraceContext,
+  TraceEvent,
+  TraceResponse,
+  TraceSpan,
   UserGeo,
 } from "./sentry.js";
 // Sentry API types and schemas
@@ -97,9 +102,12 @@ export {
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  SpanSchema,
   StackFrameSchema,
   StacktraceSchema,
   TraceContextSchema,
+  TraceEventSchema,
+  TraceResponseSchema,
   UserGeoSchema,
 } from "./sentry.js";
 

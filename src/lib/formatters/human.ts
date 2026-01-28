@@ -16,7 +16,11 @@ import type {
   SentryIssue,
   SentryOrganization,
   SentryProject,
+  Span,
   StackFrame,
+  TraceEvent,
+  TraceResponse,
+  TraceSpan,
 } from "../../types/index.js";
 import {
   boldUnderline,
@@ -794,6 +798,276 @@ function formatRequest(requestEntry: RequestEntry): string[] {
       }
     }
   }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Span Tree Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Maximum length for span descriptions before truncation */
+const SPAN_DESCRIPTION_MAX_LENGTH = 50;
+
+/** Node in the span tree structure */
+type SpanNode = {
+  /** The span data */
+  span: Span;
+  /** Child spans */
+  children: SpanNode[];
+};
+
+/**
+ * Format duration in milliseconds to human-readable format.
+ *
+ * @param startTs - Start timestamp (seconds with fractional ms)
+ * @param endTs - End timestamp (seconds with fractional ms)
+ * @returns Formatted duration (e.g., "120ms", "1.50s"), or "?" if timestamps are invalid
+ */
+function formatSpanDuration(startTs: number, endTs: number): string {
+  if (!(Number.isFinite(startTs) && Number.isFinite(endTs))) {
+    return "?";
+  }
+  const durationMs = Math.max(0, Math.round((endTs - startTs) * 1000));
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(2)}s`;
+}
+
+/**
+ * Build a tree structure from flat spans using parent_span_id.
+ * Sorts children by start_timestamp for chronological display.
+ * Spans without a found parent are treated as roots (handles orphans gracefully).
+ *
+ * @param spans - Flat array of spans
+ * @returns Array of root-level span nodes with nested children
+ */
+function buildSpanTree(spans: Span[]): SpanNode[] {
+  const spanMap = new Map<string, SpanNode>();
+  const roots: SpanNode[] = [];
+
+  for (const span of spans) {
+    spanMap.set(span.span_id, { span, children: [] });
+  }
+
+  for (const span of spans) {
+    const node = spanMap.get(span.span_id);
+    if (!node) {
+      continue;
+    }
+
+    const parentId = span.parent_span_id;
+    const parentNode = parentId ? spanMap.get(parentId) : undefined;
+    if (parentNode) {
+      parentNode.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  const sortChildren = (node: SpanNode): void => {
+    node.children.sort(
+      (a, b) => a.span.start_timestamp - b.span.start_timestamp
+    );
+    for (const child of node.children) {
+      sortChildren(child);
+    }
+  };
+  for (const root of roots) {
+    sortChildren(root);
+  }
+
+  roots.sort((a, b) => a.span.start_timestamp - b.span.start_timestamp);
+
+  return roots;
+}
+
+/**
+ * Recursively format a span node and its children as tree lines.
+ *
+ * @param node - The span node to format
+ * @param prefix - Current line prefix (for tree structure)
+ * @param isLast - Whether this is the last sibling
+ * @returns Array of formatted lines
+ */
+function formatSpanNode(
+  node: SpanNode,
+  prefix: string,
+  isLast: boolean
+): string[] {
+  const lines: string[] = [];
+  const { span } = node;
+
+  const duration = formatSpanDuration(span.start_timestamp, span.timestamp);
+  const op = span.op || "unknown";
+  const description = span.description || "(no description)";
+
+  const truncatedDesc =
+    description.length > SPAN_DESCRIPTION_MAX_LENGTH
+      ? `${description.slice(0, SPAN_DESCRIPTION_MAX_LENGTH - 3)}...`
+      : description;
+
+  const branch = isLast ? "└─" : "├─";
+  const childPrefix = prefix + (isLast ? "   " : "│  ");
+
+  const durationMs = (span.timestamp - span.start_timestamp) * 1000;
+  let durationText = duration;
+  if (durationMs > 5000) {
+    durationText = red(duration);
+  } else if (durationMs > 1000) {
+    durationText = yellow(duration);
+  }
+
+  lines.push(
+    `${prefix}${branch} [${durationText}] ${truncatedDesc} ${muted(`(${op})`)}`
+  );
+
+  const childCount = node.children.length;
+  node.children.forEach((child, i) => {
+    const childIsLast = i === childCount - 1;
+    lines.push(...formatSpanNode(child, childPrefix, childIsLast));
+  });
+
+  return lines;
+}
+
+/**
+ * Format a trace event (transaction) as a span tree root.
+ *
+ * @param traceEvent - The trace event containing transaction info and spans
+ * @returns Array of formatted lines
+ */
+function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
+  const lines: string[] = [];
+
+  const txName = traceEvent.transaction || "(unnamed transaction)";
+  const op = traceEvent["transaction.op"] || "unknown";
+  const durationMs = traceEvent["transaction.duration"];
+  const duration = durationMs !== undefined ? `${durationMs}ms` : "?";
+
+  lines.push(`[${duration}] ${txName} ${muted(`(${op})`)}`);
+
+  const spans = traceEvent.spans ?? [];
+  if (spans.length > 0) {
+    const tree = buildSpanTree(spans);
+    const treeLength = tree.length;
+    tree.forEach((root, i) => {
+      const isLast = i === treeLength - 1;
+      lines.push(...formatSpanNode(root, "  ", isLast));
+    });
+  }
+
+  return lines;
+}
+
+/**
+ * Format trace data as a visual span tree structure.
+ * Shows the hierarchy of transactions and spans with durations.
+ *
+ * @param traceResponse - Response from the events-trace API containing transactions
+ * @returns Array of formatted lines ready for display
+ */
+export function formatSpanTree(traceResponse: TraceResponse): string[] {
+  const traceEvents = traceResponse.transactions;
+
+  if (traceEvents.length === 0) {
+    return [muted("\nNo span data available.")];
+  }
+
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(muted("─── Span Tree ───"));
+  lines.push("");
+
+  const sorted = [...traceEvents].sort((a, b) => {
+    const aStart = a.start_timestamp ?? 0;
+    const bStart = b.start_timestamp ?? 0;
+    return aStart - bStart;
+  });
+
+  for (const traceEvent of sorted) {
+    lines.push(...formatTraceEventAsTree(traceEvent));
+    lines.push("");
+  }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simple Span Tree Formatting (for --spans flag)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type FormatSpanOptions = {
+  lines: string[];
+  prefix: string;
+  isLast: boolean;
+  currentDepth: number;
+  maxDepth: number;
+};
+
+/**
+ * Recursively format a span and its children as simple tree lines.
+ * Uses "op — description" format without durations.
+ */
+function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
+  const { lines, prefix, isLast, currentDepth, maxDepth } = opts;
+  const op = span.op || span["transaction.op"] || "unknown";
+  const desc = span.description || span.transaction || "(no description)";
+
+  const branch = isLast ? "└─" : "├─";
+  const childPrefix = prefix + (isLast ? "   " : "│  ");
+
+  lines.push(`${prefix}${branch} ${muted(op)} — ${desc}`);
+
+  if (currentDepth < maxDepth) {
+    const children = span.children ?? [];
+    const childCount = children.length;
+    children.forEach((child, i) => {
+      formatSpanSimple(child, {
+        lines,
+        prefix: childPrefix,
+        isLast: i === childCount - 1,
+        currentDepth: currentDepth + 1,
+        maxDepth,
+      });
+    });
+  }
+}
+
+/**
+ * Format trace as simple tree (op — description).
+ * No durations, just hierarchy like Sentry's dashboard.
+ *
+ * @param traceId - The trace ID for the header
+ * @param spans - Root-level spans from the /trace/ API
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited). Values <= 0 show unlimited depth.
+ * @returns Array of formatted lines ready for display
+ */
+export function formatSimpleSpanTree(
+  traceId: string,
+  spans: TraceSpan[],
+  maxDepth = Number.MAX_SAFE_INTEGER
+): string[] {
+  if (spans.length === 0) {
+    return [muted("No span data available.")];
+  }
+
+  const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
+
+  const lines: string[] = [];
+  lines.push(`${muted("Trace —")} ${traceId}`);
+
+  const spanCount = spans.length;
+  spans.forEach((span, i) => {
+    formatSpanSimple(span, {
+      lines,
+      prefix: "",
+      isLast: i === spanCount - 1,
+      currentDepth: 1,
+      maxDepth: effectiveMaxDepth,
+    });
+  });
 
   return lines;
 }

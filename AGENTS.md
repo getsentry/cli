@@ -35,6 +35,8 @@ bun test                                 # Run all tests
 bun test path/to/file.test.ts            # Run single test file
 bun test --watch                         # Watch mode
 bun test --filter "test name"            # Run tests matching pattern
+bun run test:unit                        # Run unit tests only
+bun run test:e2e                         # Run e2e tests only
 ```
 
 ## Rules: Use Bun APIs
@@ -68,18 +70,23 @@ mkdirSync(dir, { recursive: true, mode: 0o700 });
 ## Architecture
 
 ```
-sentry-cli/
-├── src/
-│   ├── bin.ts          # Entry point
-│   ├── app.ts          # Stricli application setup
-│   ├── context.ts      # Dependency injection context
-│   ├── commands/       # CLI commands (auth/, issue/, org/, project/)
-│   ├── lib/            # Shared utilities (api-client, config, oauth)
-│   └── types/          # TypeScript types and Zod schemas
-├── test/               # Test files (mirrors src/ structure)
-├── script/             # Build scripts
-├── .cursor/rules/      # Cursor AI rules (read these!)
-└── biome.jsonc         # Linting config (extends ultracite)
+src/
+├── bin.ts              # Entry point
+├── app.ts              # Stricli application setup
+├── context.ts          # Dependency injection context
+├── commands/           # CLI commands (auth/, event/, issue/, org/, project/)
+├── lib/                # Shared utilities
+│   ├── api-client.ts   # Sentry API client
+│   ├── config.ts       # Configuration management
+│   ├── oauth.ts        # OAuth device flow
+│   ├── dsn/            # Multi-language DSN detection
+│   └── formatters/     # Output formatting (human, json)
+└── types/              # TypeScript types and Zod schemas
+test/                   # Test files (mirrors src/ structure)
+docs/                   # Documentation site (Astro)
+script/                 # Build scripts
+.cursor/rules/          # Cursor AI rules (read these!)
+biome.jsonc             # Linting config (extends ultracite)
 ```
 
 ## Key Patterns
@@ -138,6 +145,7 @@ if (result.success) {
 ### Type Organization
 
 - Define Zod schemas alongside types in `src/types/*.ts`
+- Key type files: `sentry.ts` (API types), `config.ts` (configuration), `oauth.ts` (auth flow), `seer.ts` (Seer AI)
 - Re-export from `src/types/index.ts`
 - Use `type` imports: `import type { MyType } from "../types/index.js"`
 
@@ -151,6 +159,7 @@ CliError (base)
 ├── ApiError (HTTP/API failures - status, detail, endpoint)
 ├── AuthError (authentication - reason: 'not_authenticated' | 'expired' | 'invalid')
 ├── ConfigError (configuration - suggestion?)
+├── ContextError (missing context - resource, command, alternatives)
 ├── ValidationError (input validation - field?)
 └── DeviceFlowError (OAuth flow - code)
 
@@ -258,3 +267,4 @@ mock.module("./some-module", () => ({
 | Add utility | `src/lib/` |
 | Build scripts | `script/` |
 | Add tests | `test/` (mirror `src/` structure) |
+| Add documentation | `docs/src/content/docs/` |
