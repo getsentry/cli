@@ -1,19 +1,11 @@
 /**
- * Database Schema
- *
- * DDL statements and schema version management for the SQLite database.
- * Schema changes should be added as migrations with incrementing version numbers.
+ * Database schema DDL and version management.
  */
 
 import type { Database } from "bun:sqlite";
 
-/** Current schema version - increment when adding migrations */
 export const CURRENT_SCHEMA_VERSION = 1;
 
-/**
- * Initialize the database schema.
- * Creates all tables if they don't exist.
- */
 export function initSchema(db: Database): void {
   db.exec(`
     -- Schema version for future migrations
@@ -78,7 +70,6 @@ export function initSchema(db: Database): void {
     );
   `);
 
-  // Initialize schema version if not set
   const versionRow = db
     .query("SELECT version FROM schema_version LIMIT 1")
     .get() as { version: number } | null;
@@ -90,9 +81,6 @@ export function initSchema(db: Database): void {
   }
 }
 
-/**
- * Get the current schema version from the database.
- */
 export function getSchemaVersion(db: Database): number {
   const row = db.query("SELECT version FROM schema_version LIMIT 1").get() as {
     version: number;
@@ -100,20 +88,10 @@ export function getSchemaVersion(db: Database): number {
   return row?.version ?? 0;
 }
 
-/**
- * Run any pending migrations.
- * Each migration should be idempotent and increment the version.
- */
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
-  // Future migrations go here, e.g.:
-  // if (currentVersion < 2) {
-  //   db.exec("ALTER TABLE auth ADD COLUMN new_field TEXT");
-  //   db.query("UPDATE schema_version SET version = ?").run(2);
-  // }
-
-  // Placeholder for future migrations
+  // Add migrations here as schema evolves
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
     db.query("UPDATE schema_version SET version = ?").run(
       CURRENT_SCHEMA_VERSION

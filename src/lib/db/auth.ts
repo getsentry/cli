@@ -1,10 +1,5 @@
 /**
- * Authentication Storage
- *
- * CRUD operations for authentication credentials in SQLite.
- * Uses a single-row table pattern (id = 1) for the auth entry.
- *
- * No TTL - auth persists indefinitely until explicitly cleared.
+ * Authentication credential storage (single-row table pattern).
  */
 
 import { getDatabase } from "./index.js";
@@ -12,10 +7,9 @@ import { getDatabase } from "./index.js";
 /** Refresh when less than 10% of token lifetime remains */
 export const REFRESH_THRESHOLD = 0.1;
 
-/** Default token lifetime assumption (1 hour) for tokens without issuedAt */
+/** Default token lifetime (1 hour) for tokens without issuedAt */
 export const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
 
-/** Auth row shape from database */
 type AuthRow = {
   token: string | null;
   refresh_token: string | null;
@@ -24,9 +18,6 @@ type AuthRow = {
   updated_at: number;
 };
 
-/**
- * Auth config shape (for compatibility with code that needs raw auth data).
- */
 export type AuthConfig = {
   token?: string;
   refreshToken?: string;
@@ -34,10 +25,6 @@ export type AuthConfig = {
   issuedAt?: number;
 };
 
-/**
- * Get raw auth configuration.
- * Used by commands that need to display auth details.
- */
 export async function getAuthConfig(): Promise<AuthConfig | undefined> {
   const db = getDatabase();
   const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
@@ -56,12 +43,7 @@ export async function getAuthConfig(): Promise<AuthConfig | undefined> {
   };
 }
 
-/**
- * Get the stored authentication token.
- *
- * Returns undefined if the token has expired. For automatic token refresh,
- * use `refreshToken()` instead.
- */
+/** Get the stored token, or undefined if expired. Use refreshToken() for auto-refresh. */
 export async function getAuthToken(): Promise<string | undefined> {
   const db = getDatabase();
   const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
@@ -72,7 +54,6 @@ export async function getAuthToken(): Promise<string | undefined> {
     return;
   }
 
-  // Check if token has expired
   if (row.expires_at && Date.now() > row.expires_at) {
     return;
   }
@@ -80,13 +61,6 @@ export async function getAuthToken(): Promise<string | undefined> {
   return row.token;
 }
 
-/**
- * Store authentication credentials.
- *
- * @param token - The access token
- * @param expiresIn - Token lifetime in seconds (optional)
- * @param newRefreshToken - The refresh token (optional)
- */
 export async function setAuthToken(
   token: string,
   expiresIn?: number,
@@ -109,25 +83,15 @@ export async function setAuthToken(
   `).run(token, newRefreshToken ?? null, expiresAt, issuedAt, now);
 }
 
-/**
- * Clear authentication credentials.
- */
 export async function clearAuth(): Promise<void> {
   const db = getDatabase();
   db.query("DELETE FROM auth WHERE id = 1").run();
 }
 
-/**
- * Check if user is authenticated (has a valid, non-expired token).
- */
 export async function isAuthenticated(): Promise<boolean> {
   const token = await getAuthToken();
   return !!token;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Token Refresh
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type RefreshTokenOptions = {
   /** Bypass threshold check and always refresh */
@@ -137,13 +101,10 @@ export type RefreshTokenOptions = {
 export type RefreshTokenResult = {
   token: string;
   refreshed: boolean;
-  /** Unix timestamp (ms) when token expires */
   expiresAt?: number;
-  /** Seconds until token expires */
   expiresIn?: number;
 };
 
-/** Shared promise for concurrent refresh requests */
 let refreshPromise: Promise<RefreshTokenResult> | null = null;
 
 async function performTokenRefresh(
@@ -170,8 +131,7 @@ async function performTokenRefresh(
       expiresIn: tokenResponse.expires_in,
     };
   } catch (error) {
-    // Only clear auth if the server explicitly rejected the refresh token.
-    // Don't clear on network errors - the existing token may still be valid.
+    // Only clear auth on explicit rejection, not network errors
     if (error instanceof AuthError) {
       await clearAuth();
     }
@@ -179,11 +139,7 @@ async function performTokenRefresh(
   }
 }
 
-/**
- * Get a valid authentication token, refreshing if needed or forced.
- *
- * @param options.force - Bypass threshold check and always refresh (e.g., after 401)
- */
+/** Get a valid token, refreshing if needed. Use force=true after 401 responses. */
 export async function refreshToken(
   options: RefreshTokenOptions = {}
 ): Promise<RefreshTokenResult> {
@@ -202,7 +158,6 @@ export async function refreshToken(
   const now = Date.now();
   const expiresAt = row.expires_at;
 
-  // Token without expiry - return as-is (can't refresh)
   if (!expiresAt) {
     return { token: row.token, refreshed: false };
   }
@@ -213,7 +168,6 @@ export async function refreshToken(
   const remainingRatio = remainingLifetime / totalLifetime;
   const expiresIn = Math.max(0, Math.floor(remainingLifetime / 1000));
 
-  // Return existing token if still valid and not forcing refresh
   if (!force && remainingRatio > REFRESH_THRESHOLD && now < expiresAt) {
     return {
       token: row.token,
@@ -231,7 +185,6 @@ export async function refreshToken(
     );
   }
 
-  // Deduplicate concurrent refresh requests
   if (refreshPromise) {
     return refreshPromise;
   }

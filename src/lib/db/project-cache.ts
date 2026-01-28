@@ -1,18 +1,10 @@
 /**
- * Project Cache Storage
- *
- * CRUD operations for cached project information in SQLite.
- * Supports caching by orgId:projectId and by DSN public key.
- *
- * Features:
- * - 7-day TTL with touch-on-read
- * - Lazy cleanup of expired entries
+ * Cached project information storage (by orgId:projectId or DSN public key).
  */
 
 import type { CachedProject } from "../../types/index.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 
-/** Project cache row shape from database */
 type ProjectCacheRow = {
   cache_key: string;
   org_slug: string;
@@ -23,23 +15,14 @@ type ProjectCacheRow = {
   last_accessed: number;
 };
 
-/**
- * Generate cache key for a project by orgId and projectId.
- */
 function projectCacheKey(orgId: string, projectId: string): string {
   return `${orgId}:${projectId}`;
 }
 
-/**
- * Generate cache key for a project by DSN public key.
- */
 function dsnCacheKey(publicKey: string): string {
   return `dsn:${publicKey}`;
 }
 
-/**
- * Convert database row to CachedProject type.
- */
 function rowToCachedProject(row: ProjectCacheRow): CachedProject {
   return {
     orgSlug: row.org_slug,
@@ -50,9 +33,6 @@ function rowToCachedProject(row: ProjectCacheRow): CachedProject {
   };
 }
 
-/**
- * Touch a cache entry to update its last_accessed timestamp.
- */
 function touchCacheEntry(cacheKey: string): void {
   const db = getDatabase();
   db.query(
@@ -60,13 +40,6 @@ function touchCacheEntry(cacheKey: string): void {
   ).run(Date.now(), cacheKey);
 }
 
-/**
- * Get cached project information by orgId and projectId.
- *
- * @param orgId - Organization ID (numeric)
- * @param projectId - Project ID (numeric)
- * @returns Cached project info or undefined if not cached
- */
 export async function getCachedProject(
   orgId: string,
   projectId: string
@@ -82,19 +55,10 @@ export async function getCachedProject(
     return;
   }
 
-  // Touch on read to extend TTL
   touchCacheEntry(key);
-
   return rowToCachedProject(row);
 }
 
-/**
- * Cache project information by orgId and projectId.
- *
- * @param orgId - Organization ID (numeric)
- * @param projectId - Project ID (numeric)
- * @param info - Project information to cache
- */
 export async function setCachedProject(
   orgId: string,
   projectId: string,
@@ -125,17 +89,10 @@ export async function setCachedProject(
     now
   );
 
-  // Probabilistic cleanup
   maybeCleanupCaches();
 }
 
-/**
- * Get cached project information by DSN public key.
- * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
- *
- * @param publicKey - The DSN public key
- * @returns Cached project info or undefined if not cached
- */
+/** Get cached project by DSN public key (for self-hosted or SaaS DSNs without org ID). */
 export async function getCachedProjectByDsnKey(
   publicKey: string
 ): Promise<CachedProject | undefined> {
@@ -150,19 +107,11 @@ export async function getCachedProjectByDsnKey(
     return;
   }
 
-  // Touch on read to extend TTL
   touchCacheEntry(key);
-
   return rowToCachedProject(row);
 }
 
-/**
- * Cache project information by DSN public key.
- * Used for DSNs without an embedded org ID (self-hosted or some SaaS patterns).
- *
- * @param publicKey - The DSN public key
- * @param info - Project information to cache
- */
+/** Cache project by DSN public key (for self-hosted or SaaS DSNs without org ID). */
 export async function setCachedProjectByDsnKey(
   publicKey: string,
   info: Omit<CachedProject, "cachedAt">
@@ -192,13 +141,9 @@ export async function setCachedProjectByDsnKey(
     now
   );
 
-  // Probabilistic cleanup
   maybeCleanupCaches();
 }
 
-/**
- * Clear the project cache.
- */
 export async function clearProjectCache(): Promise<void> {
   const db = getDatabase();
   db.query("DELETE FROM project_cache").run();

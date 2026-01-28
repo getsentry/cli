@@ -1,9 +1,5 @@
 /**
- * Node.js polyfills for Bun APIs
- *
- * Injected at esbuild bundle time to provide Node.js-compatible
- * implementations of Bun globals. This allows the same source code
- * to run on both Bun (native) and Node.js (polyfilled).
+ * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
@@ -15,16 +11,9 @@ declare global {
   var Bun: typeof BunPolyfill;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// bun:sqlite Polyfill using node:sqlite
-// ─────────────────────────────────────────────────────────────────────────────
-
 type SqliteValue = string | number | bigint | null | Uint8Array;
 
-/**
- * Polyfill for bun:sqlite Statement using node:sqlite StatementSync.
- * Wraps node:sqlite's prepare() result to match bun:sqlite's query() API.
- */
+/** Wraps node:sqlite StatementSync to match bun:sqlite query() API. */
 class NodeStatementPolyfill {
   private readonly stmt: ReturnType<DatabaseSync["prepare"]>;
 
@@ -32,78 +21,46 @@ class NodeStatementPolyfill {
     this.stmt = stmt;
   }
 
-  /**
-   * Get a single row.
-   */
   get(...params: SqliteValue[]): Record<string, SqliteValue> | undefined {
     return this.stmt.get(...params) as Record<string, SqliteValue> | undefined;
   }
 
-  /**
-   * Get all rows.
-   */
   all(...params: SqliteValue[]): Record<string, SqliteValue>[] {
     return this.stmt.all(...params) as Record<string, SqliteValue>[];
   }
 
-  /**
-   * Run a statement (INSERT, UPDATE, DELETE).
-   */
   run(...params: SqliteValue[]): void {
     this.stmt.run(...params);
   }
 }
 
-/**
- * Polyfill for bun:sqlite Database using node:sqlite DatabaseSync.
- * Provides the same API surface as Bun's Database class.
- */
+/** Wraps node:sqlite DatabaseSync to match bun:sqlite Database API. */
 class NodeDatabasePolyfill {
   private readonly db: DatabaseSync;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path, {
-      timeout: 100, // 100ms - fast fail for CLI responsiveness
+      timeout: 100,
       enableForeignKeyConstraints: true,
     });
   }
 
-  /**
-   * Execute raw SQL (for DDL statements, PRAGMA, etc.).
-   */
   exec(sql: string): void {
     this.db.exec(sql);
   }
 
-  /**
-   * Prepare a statement for execution.
-   * In bun:sqlite this is called `query()`, but we expose it as both
-   * `query()` and `prepare()` for compatibility.
-   */
   query(sql: string): NodeStatementPolyfill {
     return new NodeStatementPolyfill(this.db.prepare(sql));
   }
 
-  /**
-   * Close the database connection.
-   */
   close(): void {
     this.db.close();
   }
 }
 
-// Export as a module-like object that can be required
-const bunSqlitePolyfill = {
-  Database: NodeDatabasePolyfill,
-};
-
-// Make it available globally for the bundle
+const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
 (globalThis as Record<string, unknown>).__bun_sqlite_polyfill =
   bunSqlitePolyfill;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Bun Global Polyfill
-// ─────────────────────────────────────────────────────────────────────────────
 
 const BunPolyfill = {
   file(path: string) {
@@ -149,8 +106,6 @@ const BunPolyfill = {
     opts?: { stdout?: "pipe" | "ignore"; stderr?: "pipe" | "ignore" }
   ) {
     const [command, ...args] = cmd;
-    // Map Bun's stdout/stderr options to Node's stdio array format
-    // Currently only supports "ignore" - "pipe" would require returning streams
     const stdio: ("pipe" | "ignore")[] = [
       "ignore", // stdin
       opts?.stdout ?? "ignore",

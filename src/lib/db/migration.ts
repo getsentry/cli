@@ -1,8 +1,5 @@
 /**
- * JSON to SQLite Migration
- *
- * One-time migration from the old config.json format to SQLite.
- * This runs automatically on first database access if config.json exists.
+ * One-time migration from config.json to SQLite.
  */
 
 import type { Database } from "bun:sqlite";
@@ -10,21 +7,14 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { getConfigDir } from "./index.js";
 
-/** Old config.json filename */
 const OLD_CONFIG_FILENAME = "config.json";
 
-/**
- * Check if the old config.json exists.
- */
 function oldConfigExists(): boolean {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
   const { existsSync } = require("node:fs");
   return existsSync(configPath);
 }
 
-/**
- * Read and parse the old config.json.
- */
 function readOldConfig(): OldConfig | null {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
   try {
@@ -36,21 +26,15 @@ function readOldConfig(): OldConfig | null {
   }
 }
 
-/**
- * Delete the old config.json after successful migration.
- */
 function deleteOldConfig(): void {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
   try {
     rmSync(configPath);
   } catch {
-    // Ignore errors - file may already be deleted
+    // File may already be deleted
   }
 }
 
-/**
- * Shape of the old JSON config (for migration purposes).
- */
 type OldConfig = {
   auth?: {
     token?: string;
@@ -96,19 +80,8 @@ type OldConfig = {
   };
 };
 
-/**
- * Migrate data from config.json to SQLite.
- *
- * This function is idempotent - it only runs if config.json exists
- * and deletes it after successful migration.
- *
- * Note: This is synchronous to ensure migration completes before any
- * database operations. This is a one-time migration so performance
- * is not critical.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One-time migration with straightforward logic
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one-time migration
 export function migrateFromJson(db: Database): void {
-  // Check if migration is needed
   if (!oldConfigExists()) {
     return;
   }
@@ -118,15 +91,11 @@ export function migrateFromJson(db: Database): void {
     return;
   }
 
-  console.error(
-    "Migrating config from JSON to SQLite for better concurrency support..."
-  );
+  console.error("Migrating config to SQLite...");
 
-  // Use a transaction for atomic migration
   db.exec("BEGIN TRANSACTION");
 
   try {
-    // Migrate auth
     if (oldConfig.auth?.token) {
       db.query(`
         INSERT OR REPLACE INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
@@ -140,7 +109,6 @@ export function migrateFromJson(db: Database): void {
       );
     }
 
-    // Migrate defaults
     if (oldConfig.defaults?.organization || oldConfig.defaults?.project) {
       db.query(`
         INSERT OR REPLACE INTO defaults (id, organization, project, updated_at)
@@ -152,7 +120,6 @@ export function migrateFromJson(db: Database): void {
       );
     }
 
-    // Migrate project cache
     if (oldConfig.projectCache) {
       const insertStmt = db.query(`
         INSERT OR REPLACE INTO project_cache 
@@ -173,7 +140,6 @@ export function migrateFromJson(db: Database): void {
       }
     }
 
-    // Migrate DSN cache
     if (oldConfig.dsnCache) {
       const insertStmt = db.query(`
         INSERT OR REPLACE INTO dsn_cache 
@@ -201,7 +167,6 @@ export function migrateFromJson(db: Database): void {
       }
     }
 
-    // Migrate project aliases
     if (oldConfig.projectAliases?.aliases) {
       const insertStmt = db.query(`
         INSERT OR REPLACE INTO project_aliases 
@@ -227,10 +192,7 @@ export function migrateFromJson(db: Database): void {
     }
 
     db.exec("COMMIT");
-
-    // Delete old config after successful migration
     deleteOldConfig();
-
     console.error("Migration complete.");
   } catch (error) {
     db.exec("ROLLBACK");

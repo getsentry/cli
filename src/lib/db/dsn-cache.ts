@@ -1,18 +1,10 @@
 /**
- * DSN Cache Storage
- *
- * CRUD operations for cached DSN detection results in SQLite.
- * Caches detected DSNs per directory for instant verification on subsequent runs.
- *
- * Features:
- * - 7-day TTL with touch-on-read
- * - Lazy cleanup of expired entries
+ * Cached DSN detection results storage (per directory).
  */
 
 import type { CachedDsnEntry, ResolvedProjectInfo } from "../dsn/types.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 
-/** DSN cache row shape from database */
 type DsnCacheRow = {
   directory: string;
   dsn: string;
@@ -28,9 +20,6 @@ type DsnCacheRow = {
   last_accessed: number;
 };
 
-/**
- * Convert database row to CachedDsnEntry type.
- */
 function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
   const entry: CachedDsnEntry = {
     dsn: row.dsn,
@@ -41,7 +30,6 @@ function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
     cachedAt: row.cached_at,
   };
 
-  // Add resolved info if present
   if (row.resolved_org_slug && row.resolved_project_slug) {
     entry.resolved = {
       orgSlug: row.resolved_org_slug,
@@ -54,9 +42,6 @@ function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
   return entry;
 }
 
-/**
- * Touch a cache entry to update its last_accessed timestamp.
- */
 function touchCacheEntry(directory: string): void {
   const db = getDatabase();
   db.query("UPDATE dsn_cache SET last_accessed = ? WHERE directory = ?").run(
@@ -65,12 +50,6 @@ function touchCacheEntry(directory: string): void {
   );
 }
 
-/**
- * Get cached DSN entry for a directory.
- *
- * @param directory - Absolute path to the directory
- * @returns Cached entry or undefined if not cached
- */
 export async function getCachedDsn(
   directory: string
 ): Promise<CachedDsnEntry | undefined> {
@@ -84,18 +63,10 @@ export async function getCachedDsn(
     return;
   }
 
-  // Touch on read to extend TTL
   touchCacheEntry(directory);
-
   return rowToCachedDsnEntry(row);
 }
 
-/**
- * Set cached DSN entry for a directory.
- *
- * @param directory - Absolute path to the directory
- * @param entry - DSN entry to cache (cachedAt will be added automatically)
- */
 export async function setCachedDsn(
   directory: string,
   entry: Omit<CachedDsnEntry, "cachedAt">
@@ -136,31 +107,21 @@ export async function setCachedDsn(
     now
   );
 
-  // Probabilistic cleanup
   maybeCleanupCaches();
 }
 
-/**
- * Update resolved project info in cache.
- *
- * Used after resolving DSN to org/project via API.
- * This allows skipping the API call on subsequent runs.
- *
- * @param directory - Absolute path to the directory
- * @param resolved - Resolved project information
- */
+/** Update resolved org/project info after API resolution. */
 export async function updateCachedResolution(
   directory: string,
   resolved: ResolvedProjectInfo
 ): Promise<void> {
   const db = getDatabase();
 
-  // Check if entry exists
   const exists = db
     .query("SELECT 1 FROM dsn_cache WHERE directory = ?")
     .get(directory);
   if (!exists) {
-    return; // No cache entry to update
+    return;
   }
 
   db.query(`
@@ -181,11 +142,6 @@ export async function updateCachedResolution(
   );
 }
 
-/**
- * Clear DSN cache.
- *
- * @param directory - If provided, clear only this directory. Otherwise clear all.
- */
 export async function clearDsnCache(directory?: string): Promise<void> {
   const db = getDatabase();
 
@@ -196,15 +152,6 @@ export async function clearDsnCache(directory?: string): Promise<void> {
   }
 }
 
-/**
- * Check if cache entry is still valid.
- *
- * Currently just checks if entry exists. TTL is handled by
- * the touch-on-read mechanism and lazy cleanup.
- *
- * @param entry - Cache entry to validate
- * @returns True if entry is valid
- */
 export function isCacheValid(entry: CachedDsnEntry | undefined): boolean {
   return !!entry;
 }
