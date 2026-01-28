@@ -104,9 +104,10 @@ export const viewCommand = buildCommand({
       },
       spans: {
         kind: "parsed",
-        parse: Number,
+        parse: (input: string) => Number(input === "" ? 1 : input),
         brief: "Show span tree from the event's trace",
         optional: true,
+        inferEmpty: true,
       },
     },
     aliases: { w: "web" },

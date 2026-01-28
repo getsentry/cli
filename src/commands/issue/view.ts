@@ -139,9 +139,10 @@ export const viewCommand = buildCommand({
       },
       spans: {
         kind: "parsed",
-        parse: Number,
+        parse: (input: string) => Number(input === "" ? 1 : input),
         brief: "Show span tree with N levels of nesting depth",
         optional: true,
+        inferEmpty: true,
       },
     },
     aliases: { w: "web" },
