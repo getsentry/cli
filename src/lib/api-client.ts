@@ -16,8 +16,8 @@ import {
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
-  type TraceEvent,
-  TraceEventSchema,
+  type TraceResponse,
+  type TraceSpan,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { refreshToken } from "./config.js";
@@ -426,7 +426,7 @@ export function getLatestEvent(
   return apiRequest<SentryEvent>(
     `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
     {
-      schema: SentryEventSchema,
+      // schema: SentryEventSchema,
     }
   );
 }
@@ -454,16 +454,42 @@ export function getEvent(
  *
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
- * @returns Array of trace events (transactions) with their spans
+ * @returns Trace response with transactions array and orphan_errors
  */
 export function getTrace(
   orgSlug: string,
   traceId: string
-): Promise<TraceEvent[]> {
-  return apiRequest<TraceEvent[]>(
+): Promise<TraceResponse> {
+  return apiRequest<TraceResponse>(
     `/organizations/${orgSlug}/events-trace/${traceId}/`,
     {
-      schema: z.array(TraceEventSchema),
+      // schema: TraceResponseSchema,
+    }
+  );
+}
+
+/**
+ * Get detailed trace with nested children structure.
+ * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The trace ID (from event.contexts.trace.trace_id)
+ * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
+ * @returns Array of root spans with nested children
+ */
+export function getDetailedTrace(
+  orgSlug: string,
+  traceId: string,
+  timestamp: number
+): Promise<TraceSpan[]> {
+  return apiRequest<TraceSpan[]>(
+    `/organizations/${orgSlug}/trace/${traceId}/`,
+    {
+      params: {
+        timestamp,
+        limit: 10_000,
+        project: -1,
+      },
     }
   );
 }

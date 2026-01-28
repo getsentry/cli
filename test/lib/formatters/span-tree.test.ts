@@ -3,8 +3,23 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatSpanTree } from "../../../src/lib/formatters/human.js";
-import type { Span, TraceEvent } from "../../../src/types/index.js";
+import {
+  formatSimpleSpanTree,
+  formatSpanTree,
+} from "../../../src/lib/formatters/human.js";
+import type {
+  Span,
+  TraceEvent,
+  TraceResponse,
+  TraceSpan,
+} from "../../../src/types/index.js";
+
+/**
+ * Helper to create a TraceResponse from trace events
+ */
+function makeTraceResponse(transactions: TraceEvent[]): TraceResponse {
+  return { transactions, orphan_errors: [] };
+}
 
 // Helper to strip ANSI codes for content testing
 function stripAnsi(str: string): string {
@@ -73,13 +88,13 @@ function makeTraceEvent(
 describe("formatSpanTree", () => {
   describe("empty and edge cases", () => {
     test("returns message for empty trace events array", () => {
-      const result = formatSpanTree([]);
+      const result = formatSpanTree(makeTraceResponse([]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("No span data available");
     });
 
     test("handles trace event with no spans", () => {
-      const result = formatSpanTree([makeTraceEvent("1")]);
+      const result = formatSpanTree(makeTraceResponse([makeTraceEvent("1")]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("Transaction 1");
       expect(output).toContain("100ms");
@@ -91,7 +106,7 @@ describe("formatSpanTree", () => {
         event_id: "1",
         "transaction.duration": 50,
       };
-      const result = formatSpanTree([event]);
+      const result = formatSpanTree(makeTraceResponse([event]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("(unnamed transaction)");
     });
@@ -101,7 +116,7 @@ describe("formatSpanTree", () => {
         event_id: "1",
         transaction: "Test",
       };
-      const result = formatSpanTree([event]);
+      const result = formatSpanTree(makeTraceResponse([event]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("(unknown)");
     });
@@ -111,7 +126,7 @@ describe("formatSpanTree", () => {
         event_id: "1",
         transaction: "Test",
       };
-      const result = formatSpanTree([event]);
+      const result = formatSpanTree(makeTraceResponse([event]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("[?]");
     });
@@ -120,14 +135,18 @@ describe("formatSpanTree", () => {
   describe("duration formatting", () => {
     test("formats milliseconds under 1 second as Xms", () => {
       const spans = [makeSpan("1", null, { durationSec: 0.5 })]; // 500ms
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("500ms");
     });
 
     test("formats seconds with 2 decimal places as X.XXs", () => {
       const spans = [makeSpan("1", null, { durationSec: 1.234 })]; // 1234ms
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("1.23s");
     });
@@ -142,14 +161,18 @@ describe("formatSpanTree", () => {
           description: "Bad span",
         },
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("[0ms]");
     });
 
     test("handles zero duration", () => {
       const spans = [makeSpan("1", null, { durationSec: 0 })];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("[0ms]");
     });
@@ -162,7 +185,9 @@ describe("formatSpanTree", () => {
         makeSpan("b", null, { startTs: 1001.0 }),
         makeSpan("c", null, { startTs: 1002.0 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("Span a");
       expect(output).toContain("Span b");
@@ -174,7 +199,9 @@ describe("formatSpanTree", () => {
         makeSpan("root", null, { startTs: 1000.0 }),
         makeSpan("child", "root", { startTs: 1000.1 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const lines = result.map(stripAnsi);
 
       // Find the lines containing our spans
@@ -196,7 +223,9 @@ describe("formatSpanTree", () => {
         makeSpan("level2", "level1", { startTs: 1000.1 }),
         makeSpan("level3", "level2", { startTs: 1000.2 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const lines = result.map(stripAnsi);
 
       const level1Line = lines.find((l) => l.includes("Span level1"));
@@ -218,7 +247,9 @@ describe("formatSpanTree", () => {
 
     test("treats orphaned spans as roots", () => {
       const spans = [makeSpan("orphan", "non-existent-parent")];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       // Orphan should appear as a root (not dropped)
       expect(output).toContain("Span orphan");
@@ -230,7 +261,9 @@ describe("formatSpanTree", () => {
         makeSpan("child1", "root1", { startTs: 1000.1 }),
         makeSpan("root2", null, { startTs: 1001.0 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("Span root1");
       expect(output).toContain("Span child1");
@@ -244,7 +277,7 @@ describe("formatSpanTree", () => {
         makeTraceEvent("second", [], { startTs: 2000.0 }),
         makeTraceEvent("first", [], { startTs: 1000.0 }),
       ];
-      const result = formatSpanTree(events);
+      const result = formatSpanTree(makeTraceResponse(events));
       const output = stripAnsi(result.join("\n"));
 
       const firstIdx = output.indexOf("Transaction first");
@@ -258,7 +291,9 @@ describe("formatSpanTree", () => {
         makeSpan("a", null, { startTs: 1001.0 }),
         makeSpan("b", null, { startTs: 1002.0 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
 
       const aIdx = output.indexOf("Span a");
@@ -274,7 +309,7 @@ describe("formatSpanTree", () => {
         { event_id: "2", transaction: "Second" },
         { event_id: "1", transaction: "First", start_timestamp: 500.0 },
       ];
-      const result = formatSpanTree(events);
+      const result = formatSpanTree(makeTraceResponse(events));
       const output = stripAnsi(result.join("\n"));
 
       // Event without timestamp (defaults to 0) should come first
@@ -289,7 +324,9 @@ describe("formatSpanTree", () => {
       const longDesc =
         "This is a very long description that exceeds the maximum length allowed";
       const spans = [makeSpan("1", null, { description: longDesc })];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
 
       // Should be truncated with ...
@@ -301,7 +338,9 @@ describe("formatSpanTree", () => {
 
     test("shows (no description) when description is null", () => {
       const spans = [makeSpan("1", null, { description: null })];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("(no description)");
     });
@@ -315,7 +354,9 @@ describe("formatSpanTree", () => {
           description: "Test",
         },
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("(unknown)");
     });
@@ -325,7 +366,9 @@ describe("formatSpanTree", () => {
         makeSpan("first", null, { startTs: 1000.0 }),
         makeSpan("last", null, { startTs: 1001.0 }),
       ];
-      const result = formatSpanTree([makeTraceEvent("1", spans)]);
+      const result = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", spans)])
+      );
       const output = result.join("\n");
 
       // First sibling uses ├─, last sibling uses └─
@@ -334,7 +377,7 @@ describe("formatSpanTree", () => {
     });
 
     test("includes Span Tree header", () => {
-      const result = formatSpanTree([makeTraceEvent("1")]);
+      const result = formatSpanTree(makeTraceResponse([makeTraceEvent("1")]));
       const output = stripAnsi(result.join("\n"));
       expect(output).toContain("Span Tree");
     });
@@ -350,21 +393,25 @@ describe("formatSpanTree", () => {
     test("applies color styling for slow spans", () => {
       // Fast span (under 1s) - duration formatted but may not have color
       const fastSpans = [makeSpan("fast", null, { durationSec: 0.5 })];
-      const fastResult = formatSpanTree([makeTraceEvent("1", fastSpans)]);
+      const fastResult = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", fastSpans)])
+      );
       const fastOutput = fastResult.join("\n");
       expect(stripAnsi(fastOutput)).toContain("500ms");
 
       // Slow span (over 1s) - should have yellow color applied
       const slowSpans = [makeSpan("slow", null, { durationSec: 2.0 })];
-      const slowResult = formatSpanTree([makeTraceEvent("1", slowSpans)]);
+      const slowResult = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", slowSpans)])
+      );
       const slowOutput = slowResult.join("\n");
       expect(stripAnsi(slowOutput)).toContain("2.00s");
 
       // Very slow span (over 5s) - should have red color applied
       const verySlowSpans = [makeSpan("very-slow", null, { durationSec: 6.0 })];
-      const verySlowResult = formatSpanTree([
-        makeTraceEvent("1", verySlowSpans),
-      ]);
+      const verySlowResult = formatSpanTree(
+        makeTraceResponse([makeTraceEvent("1", verySlowSpans)])
+      );
       const verySlowOutput = verySlowResult.join("\n");
       expect(stripAnsi(verySlowOutput)).toContain("6.00s");
 
@@ -383,7 +430,7 @@ describe("formatSpanTree", () => {
         makeTraceEvent("1", [], { startTs: 1000.0 }),
         makeTraceEvent("2", [], { startTs: 2000.0 }),
       ];
-      const result = formatSpanTree(events);
+      const result = formatSpanTree(makeTraceResponse(events));
 
       // Should have blank lines between transactions
       const blankLineCount = result.filter((line) => line === "").length;
@@ -395,13 +442,203 @@ describe("formatSpanTree", () => {
         makeTraceEvent("1", [makeSpan("span-1")], { startTs: 1000.0 }),
         makeTraceEvent("2", [makeSpan("span-2")], { startTs: 2000.0 }),
       ];
-      const result = formatSpanTree(events);
+      const result = formatSpanTree(makeTraceResponse(events));
       const output = stripAnsi(result.join("\n"));
 
       expect(output).toContain("Transaction 1");
       expect(output).toContain("Span span-1");
       expect(output).toContain("Transaction 2");
       expect(output).toContain("Span span-2");
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests for formatSimpleSpanTree (new simple tree format)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a minimal TraceSpan for testing (with nested children support)
+ */
+function makeTraceSpan(
+  op: string,
+  description: string,
+  children: TraceSpan[] = []
+): TraceSpan {
+  return {
+    span_id: `span-${op}`,
+    op,
+    description,
+    start_timestamp: 1000.0,
+    timestamp: 1001.0,
+    children,
+  };
+}
+
+describe("formatSimpleSpanTree", () => {
+  describe("empty and edge cases", () => {
+    test("returns message for empty spans array", () => {
+      const result = formatSimpleSpanTree("trace-123", []);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("No span data available");
+    });
+
+    test("includes trace ID in header", () => {
+      const spans = [makeTraceSpan("http.server", "GET /api")];
+      const result = formatSimpleSpanTree("abc123def456", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("Trace —");
+      expect(output).toContain("abc123def456");
+    });
+  });
+
+  describe("simple tree format", () => {
+    test("shows op — description format", () => {
+      const spans = [makeTraceSpan("http.server", "GET /api/users")];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("http.server");
+      expect(output).toContain("—");
+      expect(output).toContain("GET /api/users");
+    });
+
+    test("does not show durations", () => {
+      const spans = [makeTraceSpan("db.query", "SELECT * FROM users")];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      // Should not contain any duration patterns like "100ms" or "1.00s"
+      expect(output).not.toMatch(/\d+ms/);
+      expect(output).not.toMatch(/\d+\.\d+s/);
+    });
+
+    test("handles missing op gracefully", () => {
+      const spans: TraceSpan[] = [
+        {
+          span_id: "1",
+          description: "Some operation",
+          start_timestamp: 1000.0,
+          timestamp: 1001.0,
+        },
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("unknown");
+      expect(output).toContain("Some operation");
+    });
+
+    test("handles missing description gracefully", () => {
+      const spans: TraceSpan[] = [
+        {
+          span_id: "1",
+          op: "http.client",
+          start_timestamp: 1000.0,
+          timestamp: 1001.0,
+        },
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("http.client");
+      expect(output).toContain("(no description)");
+    });
+
+    test("uses transaction as fallback for description", () => {
+      const spans: TraceSpan[] = [
+        {
+          span_id: "1",
+          op: "cli",
+          transaction: "My CLI Command",
+          start_timestamp: 1000.0,
+          timestamp: 1001.0,
+        },
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("My CLI Command");
+    });
+  });
+
+  describe("nested children", () => {
+    test("renders nested children with indentation", () => {
+      const spans = [
+        makeTraceSpan("cli", "Spotlight CLI", [
+          makeTraceSpan("cli.setup", "Setup Spotlight", [
+            makeTraceSpan("cli.setup.assets", "Setup Server Assets"),
+          ]),
+        ]),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const lines = result.map(stripAnsi);
+
+      // Check that all spans are present
+      const output = lines.join("\n");
+      expect(output).toContain("cli — Spotlight CLI");
+      expect(output).toContain("cli.setup — Setup Spotlight");
+      expect(output).toContain("cli.setup.assets — Setup Server Assets");
+
+      // Check indentation increases for nested children
+      const cliLine = lines.find((l) => l.includes("Spotlight CLI"));
+      const setupLine = lines.find((l) => l.includes("Setup Spotlight"));
+      const assetsLine = lines.find((l) => l.includes("Setup Server Assets"));
+
+      expect(cliLine).toBeDefined();
+      expect(setupLine).toBeDefined();
+      expect(assetsLine).toBeDefined();
+
+      // Nested lines should have more leading whitespace
+      const cliIndent = cliLine?.match(/^\s*/)?.[0].length ?? 0;
+      const setupIndent = setupLine?.match(/^\s*/)?.[0].length ?? 0;
+      const assetsIndent = assetsLine?.match(/^\s*/)?.[0].length ?? 0;
+
+      expect(setupIndent).toBeGreaterThan(cliIndent);
+      expect(assetsIndent).toBeGreaterThan(setupIndent);
+    });
+
+    test("handles multiple root spans", () => {
+      const spans = [
+        makeTraceSpan("http.server", "POST /api"),
+        makeTraceSpan("db.query", "SELECT *"),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+
+      expect(output).toContain("http.server — POST /api");
+      expect(output).toContain("db.query — SELECT *");
+    });
+
+    test("handles deeply nested spans (3+ levels)", () => {
+      const spans = [
+        makeTraceSpan("level1", "First", [
+          makeTraceSpan("level2", "Second", [
+            makeTraceSpan("level3", "Third", [
+              makeTraceSpan("level4", "Fourth"),
+            ]),
+          ]),
+        ]),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+
+      expect(output).toContain("level1 — First");
+      expect(output).toContain("level2 — Second");
+      expect(output).toContain("level3 — Third");
+      expect(output).toContain("level4 — Fourth");
+    });
+  });
+
+  describe("tree branch characters", () => {
+    test("uses tree branch characters", () => {
+      const spans = [
+        makeTraceSpan("root", "Root Span", [
+          makeTraceSpan("child1", "First Child"),
+          makeTraceSpan("child2", "Second Child"),
+        ]),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = result.join("\n");
+
+      // Should use tree branch characters
+      expect(output).toContain("└─");
+      expect(output).toContain("├─");
     });
   });
 });

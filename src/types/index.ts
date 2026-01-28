@@ -77,6 +77,8 @@ export type {
   Stacktrace,
   TraceContext,
   TraceEvent,
+  TraceResponse,
+  TraceSpan,
   UserGeo,
 } from "./sentry.js";
 // Sentry API types and schemas
@@ -105,6 +107,7 @@ export {
   StacktraceSchema,
   TraceContextSchema,
   TraceEventSchema,
+  TraceResponseSchema,
   UserGeoSchema,
 } from "./sentry.js";
 

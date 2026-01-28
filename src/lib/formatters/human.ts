@@ -19,6 +19,8 @@ import type {
   Span,
   StackFrame,
   TraceEvent,
+  TraceResponse,
+  TraceSpan,
 } from "../../types/index.js";
 import {
   boldUnderline,
@@ -969,10 +971,12 @@ function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
  * Format trace data as a visual span tree structure.
  * Shows the hierarchy of transactions and spans with durations.
  *
- * @param traceEvents - Array of trace events from the events-trace API
+ * @param traceResponse - Response from the events-trace API containing transactions
  * @returns Array of formatted lines ready for display
  */
-export function formatSpanTree(traceEvents: TraceEvent[]): string[] {
+export function formatSpanTree(traceResponse: TraceResponse): string[] {
+  const traceEvents = traceResponse.transactions;
+
   if (traceEvents.length === 0) {
     return [muted("\nNo span data available.")];
   }
@@ -993,6 +997,84 @@ export function formatSpanTree(traceEvents: TraceEvent[]): string[] {
     lines.push(...formatTraceEventAsTree(traceEvent));
     lines.push(""); // Blank line between transactions
   }
+
+  return lines;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simple Span Tree Formatting (for --spans flag)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type FormatSpanOptions = {
+  lines: string[];
+  prefix: string;
+  isLast: boolean;
+  currentDepth: number;
+  maxDepth: number;
+};
+
+/**
+ * Recursively format a span and its children as simple tree lines.
+ * Uses "op — description" format without durations.
+ */
+function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
+  const { lines, prefix, isLast, currentDepth, maxDepth } = opts;
+  const op = span.op || span["transaction.op"] || "unknown";
+  const desc = span.description || span.transaction || "(no description)";
+
+  // Tree branch characters
+  const branch = isLast ? "└─" : "├─";
+  const childPrefix = prefix + (isLast ? "   " : "│  ");
+
+  lines.push(`${prefix}${branch} ${muted(op)} — ${desc}`);
+
+  // Only recurse into children if we haven't reached maxDepth
+  if (currentDepth < maxDepth) {
+    const children = span.children ?? [];
+    const childCount = children.length;
+    children.forEach((child, i) => {
+      formatSpanSimple(child, {
+        lines,
+        prefix: childPrefix,
+        isLast: i === childCount - 1,
+        currentDepth: currentDepth + 1,
+        maxDepth,
+      });
+    });
+  }
+}
+
+/**
+ * Format trace as simple tree (op — description).
+ * No durations, just hierarchy like Sentry's dashboard.
+ *
+ * @param traceId - The trace ID for the header
+ * @param spans - Root-level spans from the /trace/ API
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited)
+ * @returns Array of formatted lines ready for display
+ */
+export function formatSimpleSpanTree(
+  traceId: string,
+  spans: TraceSpan[],
+  maxDepth = Number.MAX_SAFE_INTEGER
+): string[] {
+  if (spans.length === 0) {
+    return [muted("No span data available.")];
+  }
+
+  const lines: string[] = [];
+  lines.push(`${muted("Trace —")} ${traceId}`);
+
+  const spanCount = spans.length;
+  spans.forEach((span, i) => {
+    formatSpanSimple(span, {
+      lines,
+      prefix: "",
+      isLast: i === spanCount - 1,
+      currentDepth: 1,
+      maxDepth,
+    });
+  });
 
   return lines;
 }

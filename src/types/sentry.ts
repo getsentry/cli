@@ -288,6 +288,35 @@ export const TraceEventSchema = z
 
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
+/** Response from /events-trace/{traceId}/ endpoint */
+export const TraceResponseSchema = z.object({
+  /** Transactions with their nested children (span trees) */
+  transactions: z.array(TraceEventSchema),
+  /** Errors not associated with any transaction */
+  orphan_errors: z.array(z.unknown()).optional(),
+});
+
+export type TraceResponse = z.infer<typeof TraceResponseSchema>;
+
+/**
+ * Span from /trace/{traceId}/ endpoint with nested children.
+ * This endpoint returns a hierarchical structure unlike /events-trace/.
+ */
+export type TraceSpan = {
+  span_id: string;
+  parent_span_id?: string | null;
+  op?: string;
+  description?: string | null;
+  start_timestamp: number;
+  timestamp: number;
+  transaction?: string;
+  "transaction.op"?: string;
+  project_slug?: string;
+  event_id?: string;
+  /** Nested child spans */
+  children?: TraceSpan[];
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stack Frame & Exception Entry
 // ─────────────────────────────────────────────────────────────────────────────
