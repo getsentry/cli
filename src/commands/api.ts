@@ -734,6 +734,7 @@ export const apiCommand = buildCommand({
         {
           brief: "API endpoint relative to /api/0/ (e.g., organizations/)",
           parse: String,
+          placeholder: "endpoint",
         },
       ],
     },
