@@ -66,7 +66,11 @@ export function getDatabase(): Database {
 
   db = new Database(dbPath);
 
-  // Set busy_timeout FIRST to handle concurrent access during initialization
+  // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
+  // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
+  // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
+  // must wait. Without sufficient timeout, concurrent processes fail immediately.
+  // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
