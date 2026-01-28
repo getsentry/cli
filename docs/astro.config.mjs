@@ -2,10 +2,10 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
 // Allow base path override via environment variable for PR previews
-const base = process.env.DOCS_BASE_PATH || "/cli";
+const base = process.env.DOCS_BASE_PATH || "/";
 
 export default defineConfig({
-  site: "https://getsentry.github.io",
+  site: "https://cli.sentry.dev",
   base,
   integrations: [
     starlight({
@@ -59,8 +59,8 @@ export default defineConfig({
               
               function isLandingPage() {
                 const path = window.location.pathname;
-                // Works with both /cli (prod) and /pr-preview/pr-XX (preview)
-                return path === '/cli' || path === '/cli/' || 
+                // Works with both / (prod) and /pr-preview/pr-XX (preview)
+                return path === '/' || 
                        /^\\/pr-preview\\/pr-\\d+\\/?$/.test(path);
               }
               

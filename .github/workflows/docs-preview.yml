@@ -64,4 +64,5 @@ jobs:
           source-dir: docs/dist/
           preview-branch: gh-pages
           umbrella-dir: pr-preview
+          pages-base-url: cli.sentry.dev
           action: auto
