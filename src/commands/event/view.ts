@@ -24,7 +24,7 @@ type ViewFlags = {
   readonly project?: string;
   readonly json: boolean;
   readonly web: boolean;
-  readonly spans: boolean;
+  readonly spans?: number;
 };
 
 type HumanOutputOptions = {
@@ -103,12 +103,13 @@ export const viewCommand = buildCommand({
         default: false,
       },
       spans: {
-        kind: "boolean",
+        kind: "parsed",
+        parse: Number,
         brief: "Show span tree from the event's trace",
-        default: false,
+        optional: true,
       },
     },
-    aliases: { w: "web", s: "spans" },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
@@ -144,7 +145,7 @@ export const viewCommand = buildCommand({
 
     // Fetch span tree if requested and trace ID is available
     let spanTreeLines: string[] | undefined;
-    if (flags.spans && event.contexts?.trace?.trace_id) {
+    if (flags.spans !== undefined && event.contexts?.trace?.trace_id) {
       try {
         const traceEvents = await getTrace(
           target.org,
@@ -155,7 +156,7 @@ export const viewCommand = buildCommand({
         // Non-fatal: trace data may not be available for all events
         spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
       }
-    } else if (flags.spans && !event.contexts?.trace?.trace_id) {
+    } else if (flags.spans !== undefined && !event.contexts?.trace?.trace_id) {
       spanTreeLines = [muted("\nNo trace data available for this event.")];
     }
 

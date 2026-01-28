@@ -28,7 +28,7 @@ import {
 interface ViewFlags extends IssueIdFlags {
   readonly json: boolean;
   readonly web: boolean;
-  readonly spans: number;
+  readonly spans?: number;
 }
 
 /**
@@ -138,11 +138,13 @@ export const viewCommand = buildCommand({
         default: false,
       },
       spans: {
-        kind: "counter",
-        brief: "Show span tree (repeat for more depth: -s, -ss, -sss)",
+        kind: "parsed",
+        parse: Number,
+        brief: "Show span tree with N levels of nesting depth",
+        optional: true,
       },
     },
-    aliases: { w: "web", s: "spans" },
+    aliases: { w: "web" },
   },
   async func(
     this: SentryContext,
@@ -180,15 +182,16 @@ export const viewCommand = buildCommand({
     // Normal human-readable output (issue + event details)
     writeHumanOutput(stdout, { issue, event });
 
-    // If --spans flag is passed, show span tree (counter value = depth)
-    if (flags.spans > 0 && orgSlug && event) {
+    // If --spans flag is passed, show span tree with specified depth
+    if (flags.spans !== undefined && orgSlug && event) {
+      const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
       stdout.write("\n");
-      await displaySpanTree(stdout, orgSlug, event, flags.spans);
-    } else if (flags.spans > 0 && !orgSlug) {
+      await displaySpanTree(stdout, orgSlug, event, depth);
+    } else if (flags.spans !== undefined && !orgSlug) {
       stdout.write(
         muted("\nOrganization context required to fetch span tree.\n")
       );
-    } else if (flags.spans > 0 && !event) {
+    } else if (flags.spans !== undefined && !event) {
       stdout.write(muted("\nCould not fetch event to display span tree.\n"));
     }
 
