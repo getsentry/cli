@@ -181,7 +181,7 @@ export function migrateFromJson(db: Database): void {
         oldConfig.projectAliases.aliases
       )) {
         insertStmt.run(
-          alias,
+          alias.toLowerCase(),
           entry.orgSlug,
           entry.projectSlug,
           fingerprint,

@@ -151,7 +151,3 @@ export async function clearDsnCache(directory?: string): Promise<void> {
     db.query("DELETE FROM dsn_cache").run();
   }
 }
-
-export function isCacheValid(entry: CachedDsnEntry | undefined): boolean {
-  return !!entry;
-}
