@@ -68,6 +68,12 @@ export function initSchema(db: Database): void {
       cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       last_accessed INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
+
+    -- Key-value metadata for internal tracking (e.g., migration status)
+    CREATE TABLE IF NOT EXISTS metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   const versionRow = db

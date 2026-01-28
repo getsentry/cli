@@ -8,6 +8,26 @@ import { join } from "node:path";
 import { getConfigDir } from "./index.js";
 
 const OLD_CONFIG_FILENAME = "config.json";
+const MIGRATION_COMPLETED_KEY = "json_migration_completed";
+
+/**
+ * Check if migration was already completed by looking at SQLite metadata.
+ * This is the authoritative source - not the presence of config.json.
+ */
+function isMigrationCompleted(db: Database): boolean {
+  const row = db
+    .query("SELECT value FROM metadata WHERE key = ?")
+    .get(MIGRATION_COMPLETED_KEY) as { value: string } | null;
+  return row?.value === "true";
+}
+
+/** Mark migration as completed in SQLite metadata. */
+function markMigrationCompleted(db: Database): void {
+  db.query("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)").run(
+    MIGRATION_COMPLETED_KEY,
+    "true"
+  );
+}
 
 function oldConfigExists(): boolean {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
@@ -26,12 +46,23 @@ function readOldConfig(): OldConfig | null {
   }
 }
 
-function deleteOldConfig(): void {
+/**
+ * Attempt to delete the old config.json file.
+ * Returns true if deletion succeeded (or file was already gone), false otherwise.
+ */
+function deleteOldConfig(): boolean {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
   try {
     rmSync(configPath);
-  } catch {
-    // File may already be deleted
+    return true;
+  } catch (error) {
+    // ENOENT means file already deleted - that's fine
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return true;
+    }
+    // Other errors (permissions, locked file) - deletion failed
+    console.error("Warning: Could not delete old config.json:", error);
+    return false;
   }
 }
 
@@ -82,12 +113,22 @@ type OldConfig = {
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one-time migration
 export function migrateFromJson(db: Database): void {
+  // Check SQLite metadata first - this is the authoritative source
+  if (isMigrationCompleted(db)) {
+    return;
+  }
+
+  // No old config file means nothing to migrate
   if (!oldConfigExists()) {
+    // Mark as completed so we don't check every time
+    markMigrationCompleted(db);
     return;
   }
 
   const oldConfig = readOldConfig();
   if (!oldConfig) {
+    // Config exists but couldn't be read (corrupted?) - mark complete to avoid retry loops
+    markMigrationCompleted(db);
     return;
   }
 
@@ -191,7 +232,13 @@ export function migrateFromJson(db: Database): void {
       }
     }
 
+    // Mark migration as completed in SQLite BEFORE attempting file deletion.
+    // This ensures we never re-run migration even if file deletion fails.
+    markMigrationCompleted(db);
     db.exec("COMMIT");
+
+    // Best-effort cleanup of old file - if it fails, we're still safe
+    // because SQLite metadata is the authoritative source
     deleteOldConfig();
     console.error("Migration complete.");
   } catch (error) {

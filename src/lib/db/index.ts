@@ -11,15 +11,15 @@ import { initSchema, runMigrations } from "./schema.js";
 
 export const CONFIG_DIR_ENV_VAR = "SENTRY_CONFIG_DIR";
 
-export const DEFAULT_CONFIG_DIR_NAME = ".sentry";
+const DEFAULT_CONFIG_DIR_NAME = ".sentry";
 
-export const DB_FILENAME = "cli.db";
+const DB_FILENAME = "cli.db";
 
 /** 7-day TTL for cache entries (milliseconds) */
-export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Probability of running cleanup on write operations */
-export const CLEANUP_PROBABILITY = 0.1;
+const CLEANUP_PROBABILITY = 0.1;
 
 let db: Database | null = null;
 let dbOpenedPath: string | null = null;

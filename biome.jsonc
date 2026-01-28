@@ -38,7 +38,7 @@
       }
     },
     {
-      // db/index.ts re-exports from submodules for convenience
+      // db/index.ts exports db connection utilities - not a barrel file but triggers the rule
       "includes": ["src/lib/db/index.ts"],
       "linter": {
         "rules": {

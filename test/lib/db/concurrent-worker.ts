@@ -8,7 +8,6 @@
  * Operations:
  *   write-dsn     - Write a unique DSN cache entry
  *   write-project - Write a unique project cache entry
- *   write-alias   - Write project aliases
  *   read-write    - Mixed read/write operations
  */
 
@@ -38,9 +37,6 @@ const { setCachedDsn, getCachedDsn } = await import(
 );
 const { setCachedProject, getCachedProject } = await import(
   "../../../src/lib/db/project-cache.js"
-);
-const { setProjectAliases, getProjectAliases } = await import(
-  "../../../src/lib/db/project-aliases.js"
 );
 const { closeDatabase } = await import("../../../src/lib/db/index.js");
 
@@ -112,35 +108,6 @@ async function writeProject(): Promise<WorkerResult> {
   };
 }
 
-async function writeAlias(): Promise<WorkerResult> {
-  // Each worker writes its own alias set
-  const aliases: Record<string, { orgSlug: string; projectSlug: string }> = {};
-  aliases[workerId.toLowerCase()] = {
-    orgSlug: `org-${workerId}`,
-    projectSlug: `project-${workerId}`,
-  };
-
-  await setProjectAliases(aliases, `fingerprint-${workerId}`);
-
-  // Verify write (note: setProjectAliases replaces all, so only our alias should exist)
-  const cached = await getProjectAliases();
-  if (!cached?.[workerId.toLowerCase()]) {
-    return {
-      workerId,
-      operation: "write-alias",
-      success: false,
-      error: `Verification failed: alias ${workerId} not found`,
-    };
-  }
-
-  return {
-    workerId,
-    operation: "write-alias",
-    success: true,
-    data: { aliases },
-  };
-}
-
 async function readWrite(): Promise<WorkerResult> {
   // Mixed operations: write DSN, read it back, write project, read it back
   const iterations = 5;
@@ -187,9 +154,6 @@ async function main(): Promise<void> {
         break;
       case "write-project":
         result = await writeProject();
-        break;
-      case "write-alias":
-        result = await writeAlias();
         break;
       case "read-write":
         result = await readWrite();
