@@ -18,14 +18,16 @@ function shouldShowCustomHelp(args: string[]): boolean {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // Intercept top-level help before Stricli
-  if (shouldShowCustomHelp(args)) {
-    await printCustomHelp(process.stdout);
-    return;
-  }
-
   try {
-    await withTelemetry(() => run(app, args, buildContext(process)));
+    await withTelemetry(async () => {
+      // Intercept top-level help before Stricli
+      if (shouldShowCustomHelp(args)) {
+        await printCustomHelp(process.stdout);
+        return;
+      }
+
+      run(app, args, buildContext(process));
+    });
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exit(getExitCode(err));
