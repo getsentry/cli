@@ -239,10 +239,8 @@ export function migrateFromJson(db: Database): void {
       const fingerprint = oldConfig.projectAliases.dsnFingerprint ?? null;
       const cachedAt = oldConfig.projectAliases.cachedAt;
 
-      // Skip if cachedAt is missing (required for NOT NULL column)
-      if (cachedAt === null || cachedAt === undefined) {
-        // Skip all aliases if timestamp is missing
-      } else {
+      // Skip all aliases if cachedAt is missing (required for NOT NULL column)
+      if (cachedAt !== null && cachedAt !== undefined) {
         for (const [alias, entry] of Object.entries(
           oldConfig.projectAliases.aliases
         )) {
