@@ -825,7 +825,6 @@ type SpanNode = {
  * @returns Formatted duration (e.g., "120ms", "1.50s"), or "?" if timestamps are invalid
  */
 function formatSpanDuration(startTs: number, endTs: number): string {
-  // Guard against invalid timestamps (NaN, undefined coerced to NaN, etc.)
   if (!(Number.isFinite(startTs) && Number.isFinite(endTs))) {
     return "?";
   }
@@ -848,12 +847,10 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
   const spanMap = new Map<string, SpanNode>();
   const roots: SpanNode[] = [];
 
-  // Create nodes for all spans
   for (const span of spans) {
     spanMap.set(span.span_id, { span, children: [] });
   }
 
-  // Link children to parents
   for (const span of spans) {
     const node = spanMap.get(span.span_id);
     if (!node) {
@@ -865,12 +862,10 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
     if (parentNode) {
       parentNode.children.push(node);
     } else {
-      // No parent found in response - treat as root (true root or orphan)
       roots.push(node);
     }
   }
 
-  // Sort children by start_timestamp for chronological order
   const sortChildren = (node: SpanNode): void => {
     node.children.sort(
       (a, b) => a.span.start_timestamp - b.span.start_timestamp
@@ -883,7 +878,6 @@ function buildSpanTree(spans: Span[]): SpanNode[] {
     sortChildren(root);
   }
 
-  // Sort roots as well
   roots.sort((a, b) => a.span.start_timestamp - b.span.start_timestamp);
 
   return roots;
@@ -909,17 +903,14 @@ function formatSpanNode(
   const op = span.op || "unknown";
   const description = span.description || "(no description)";
 
-  // Truncate long descriptions
   const truncatedDesc =
     description.length > SPAN_DESCRIPTION_MAX_LENGTH
       ? `${description.slice(0, SPAN_DESCRIPTION_MAX_LENGTH - 3)}...`
       : description;
 
-  // Tree branch characters
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  // Color duration based on severity (slow = yellow/red)
   const durationMs = (span.timestamp - span.start_timestamp) * 1000;
   let durationText = duration;
   if (durationMs > 5000) {
@@ -932,7 +923,6 @@ function formatSpanNode(
     `${prefix}${branch} [${durationText}] ${truncatedDesc} ${muted(`(${op})`)}`
   );
 
-  // Format children
   const childCount = node.children.length;
   node.children.forEach((child, i) => {
     const childIsLast = i === childCount - 1;
@@ -951,7 +941,6 @@ function formatSpanNode(
 function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
   const lines: string[] = [];
 
-  // Transaction header
   const txName = traceEvent.transaction || "(unnamed transaction)";
   const op = traceEvent["transaction.op"] || "unknown";
   const durationMs = traceEvent["transaction.duration"];
@@ -959,7 +948,6 @@ function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
 
   lines.push(`[${duration}] ${txName} ${muted(`(${op})`)}`);
 
-  // Build span tree from the transaction's spans
   const spans = traceEvent.spans ?? [];
   if (spans.length > 0) {
     const tree = buildSpanTree(spans);
@@ -992,7 +980,6 @@ export function formatSpanTree(traceResponse: TraceResponse): string[] {
   lines.push(muted("─── Span Tree ───"));
   lines.push("");
 
-  // Sort trace events by start_timestamp for chronological order
   const sorted = [...traceEvents].sort((a, b) => {
     const aStart = a.start_timestamp ?? 0;
     const bStart = b.start_timestamp ?? 0;
@@ -1001,7 +988,7 @@ export function formatSpanTree(traceResponse: TraceResponse): string[] {
 
   for (const traceEvent of sorted) {
     lines.push(...formatTraceEventAsTree(traceEvent));
-    lines.push(""); // Blank line between transactions
+    lines.push("");
   }
 
   return lines;
@@ -1028,13 +1015,11 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const op = span.op || span["transaction.op"] || "unknown";
   const desc = span.description || span.transaction || "(no description)";
 
-  // Tree branch characters
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
   lines.push(`${prefix}${branch} ${muted(op)} — ${desc}`);
 
-  // Only recurse into children if we haven't reached maxDepth
   if (currentDepth < maxDepth) {
     const children = span.children ?? [];
     const childCount = children.length;
@@ -1068,7 +1053,6 @@ export function formatSimpleSpanTree(
     return [muted("No span data available.")];
   }
 
-  // Normalize maxDepth: treat non-positive values as unlimited
   const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
 
   const lines: string[] = [];

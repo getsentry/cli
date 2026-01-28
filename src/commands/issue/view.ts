@@ -178,17 +178,14 @@ export const viewCommand = buildCommand({
       ? await tryGetLatestEvent(orgSlug, issue.id)
       : undefined;
 
-    // JSON output
     if (flags.json) {
       const output = event ? { issue, event } : { issue };
       writeJson(stdout, output);
       return;
     }
 
-    // Normal human-readable output (issue + event details)
     writeHumanOutput(stdout, { issue, event });
 
-    // If --spans flag is passed, show span tree with specified depth
     if (flags.spans !== undefined && orgSlug && event) {
       const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
       stdout.write("\n");

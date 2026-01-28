@@ -48,7 +48,6 @@ function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
   const output = lines.slice(1);
   stdout.write(`${output.join("\n")}\n`);
 
-  // Display span tree if available
   if (spanTreeLines && spanTreeLines.length > 0) {
     stdout.write(`${spanTreeLines.join("\n")}\n`);
   }
@@ -144,7 +143,6 @@ export const viewCommand = buildCommand({
 
     const event = await getEvent(target.org, target.project, eventId);
 
-    // Fetch span tree if requested and trace ID is available
     let spanTreeLines: string[] | undefined;
     if (flags.spans !== undefined && event.contexts?.trace?.trace_id) {
       try {
