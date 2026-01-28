@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.3.1
+
+### Bug Fixes 🐛
+
+- (ci) Correct gh-pages.zip structure for Craft publishing by @BYK in [#99](https://github.com/getsentry/cli/pull/99)
+
 ## 0.3.0
 
 ### New Features ✨
