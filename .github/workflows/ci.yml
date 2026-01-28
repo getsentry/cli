@@ -200,7 +200,7 @@ jobs:
       - name: Package Docs
         run: |
           cp .nojekyll docs/dist/
-          zip -r gh-pages.zip docs/dist/
+          cd docs/dist && zip -r ../../gh-pages.zip .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
