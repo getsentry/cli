@@ -5,10 +5,10 @@
 import { getDatabase } from "./index.js";
 
 /** Refresh when less than 10% of token lifetime remains */
-export const REFRESH_THRESHOLD = 0.1;
+const REFRESH_THRESHOLD = 0.1;
 
 /** Default token lifetime (1 hour) for tokens without issuedAt */
-export const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
+const DEFAULT_TOKEN_LIFETIME_MS = 3600 * 1000;
 
 type AuthRow = {
   token: string | null;
