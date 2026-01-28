@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.3.2
+
+### Documentation 📚
+
+- Update base path for cli.sentry.dev domain by @BYK in [#100](https://github.com/getsentry/cli/pull/100)
+
 ## 0.3.1
 
 ### Bug Fixes 🐛
