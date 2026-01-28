@@ -9,7 +9,7 @@
 import chalk from "chalk";
 import { routes } from "../app.js";
 import type { Writer } from "../types/index.js";
-import { isAuthenticated } from "./config.js";
+import { isAuthenticated } from "./db/auth.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 
 /** ASCII art banner rows for gradient coloring */

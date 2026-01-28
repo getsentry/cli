@@ -28,9 +28,15 @@ export async function getDefaultProject(): Promise<string | undefined> {
   return row?.project ?? undefined;
 }
 
+/**
+ * Set default organization and/or project.
+ *
+ * @param organization - undefined = keep existing, null = clear, string = set new value
+ * @param project - undefined = keep existing, null = clear, string = set new value
+ */
 export async function setDefaults(
-  organization?: string,
-  project?: string
+  organization?: string | null,
+  project?: string | null
 ): Promise<void> {
   const db = getDatabase();
   const now = Date.now();
@@ -39,8 +45,11 @@ export async function setDefaults(
     .query("SELECT organization, project FROM defaults WHERE id = 1")
     .get() as Pick<DefaultsRow, "organization" | "project"> | undefined;
 
-  const newOrg = organization ?? current?.organization ?? null;
-  const newProject = project ?? current?.project ?? null;
+  // undefined = keep existing value, null = explicitly clear, string = set new value
+  const newOrg =
+    organization === undefined ? (current?.organization ?? null) : organization;
+  const newProject =
+    project === undefined ? (current?.project ?? null) : project;
 
   db.query(`
     INSERT INTO defaults (id, organization, project, updated_at)

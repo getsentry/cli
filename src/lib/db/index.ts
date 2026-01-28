@@ -40,8 +40,21 @@ function ensureConfigDir(): void {
 }
 
 function setDbPermissions(): void {
+  const dbPath = getDbPath();
   try {
-    chmodSync(getDbPath(), 0o600);
+    chmodSync(dbPath, 0o600);
+    // WAL mode creates -wal and -shm files that may contain sensitive data
+    // Chmod them too if they exist (they may not exist on first run)
+    try {
+      chmodSync(`${dbPath}-wal`, 0o600);
+    } catch {
+      // File may not exist yet
+    }
+    try {
+      chmodSync(`${dbPath}-shm`, 0o600);
+    } catch {
+      // File may not exist yet
+    }
   } catch {
     // Windows doesn't support chmod
   }
