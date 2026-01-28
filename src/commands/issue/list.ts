@@ -9,7 +9,10 @@ import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import { listIssues } from "../../lib/api-client.js";
-import { clearProjectAliases, setProjectAliases } from "../../lib/config.js";
+import {
+  clearProjectAliases,
+  setProjectAliases,
+} from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {

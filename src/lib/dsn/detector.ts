@@ -13,7 +13,7 @@
  */
 
 import { join } from "node:path";
-import { getCachedDsn, setCachedDsn } from "./cache.js";
+import { getCachedDsn, setCachedDsn } from "../db/dsn-cache.js";
 import { detectFromEnv, SENTRY_DSN_ENV } from "./env.js";
 import {
   detectFromAllEnvFiles,

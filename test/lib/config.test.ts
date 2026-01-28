@@ -1,41 +1,62 @@
 /**
  * Configuration Management Tests
  *
- * Integration tests for config file read/write operations.
+ * Integration tests for SQLite-based config storage.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CONFIG_DIR_ENV_VAR,
   clearAuth,
-  clearProjectAliases,
-  clearProjectCache,
+  getAuthConfig,
   getAuthToken,
-  getCachedProject,
-  getCachedProjectByDsnKey,
-  getConfigPath,
+  isAuthenticated,
+  refreshToken,
+  setAuthToken,
+} from "../../src/lib/db/auth.js";
+import {
   getDefaultOrganization,
   getDefaultProject,
+  setDefaults,
+} from "../../src/lib/db/defaults.js";
+import {
+  CONFIG_DIR_ENV_VAR,
+  closeDatabase,
+  getDbPath,
+} from "../../src/lib/db/index.js";
+import {
+  clearProjectAliases,
   getProjectAliases,
   getProjectByAlias,
-  isAuthenticated,
-  readConfig,
-  setAuthToken,
+  setProjectAliases,
+} from "../../src/lib/db/project-aliases.js";
+import {
+  clearProjectCache,
+  getCachedProject,
+  getCachedProjectByDsnKey,
   setCachedProject,
   setCachedProjectByDsnKey,
-  setDefaults,
-  setProjectAliases,
-  writeConfig,
-} from "../../src/lib/config.js";
+} from "../../src/lib/db/project-cache.js";
 
-// Each test gets its own config directory
-let testConfigDir: string;
+/**
+ * Test isolation: Each test gets its own config directory within
+ * the main test directory created by preload.ts.
+ *
+ * We don't delete test subdirectories in afterEach because tests
+ * run in parallel and the deletion can race with other tests that
+ * are still running. The parent test directory is cleaned up on
+ * process exit by preload.ts.
+ */
+const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
 
 beforeEach(() => {
-  testConfigDir = join(
-    process.env[CONFIG_DIR_ENV_VAR]!,
+  // Close any previous database connection
+  closeDatabase();
+
+  // Create a unique subdirectory for this test
+  const testConfigDir = join(
+    testBaseDir,
     `test-${Math.random().toString(36).slice(2)}`
   );
   mkdirSync(testConfigDir, { recursive: true });
@@ -43,73 +64,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
-
-describe("readConfig", () => {
-  test("returns empty object when no config file exists", async () => {
-    const config = await readConfig();
-    expect(config).toEqual({});
-  });
-
-  test("reads existing config file", async () => {
-    const configPath = join(testConfigDir, "config.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        auth: { token: "test-token" },
-        defaults: { organization: "test-org" },
-      })
-    );
-
-    const config = await readConfig();
-    expect(config.auth?.token).toBe("test-token");
-    expect(config.defaults?.organization).toBe("test-org");
-  });
-
-  test("returns empty object for invalid JSON", async () => {
-    const configPath = join(testConfigDir, "config.json");
-    writeFileSync(configPath, "not valid json {{{");
-
-    const config = await readConfig();
-    expect(config).toEqual({});
-  });
-
-  test("returns empty object for invalid schema", async () => {
-    const configPath = join(testConfigDir, "config.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        auth: { token: 12_345 }, // token should be string
-      })
-    );
-
-    const config = await readConfig();
-    expect(config).toEqual({});
-  });
-});
-
-describe("writeConfig", () => {
-  test("writes config file", async () => {
-    await writeConfig({
-      auth: { token: "my-token" },
-    });
-
-    const config = await readConfig();
-    expect(config.auth?.token).toBe("my-token");
-  });
-
-  test("overwrites existing config", async () => {
-    await writeConfig({ auth: { token: "first" } });
-    await writeConfig({ auth: { token: "second" } });
-
-    const config = await readConfig();
-    expect(config.auth?.token).toBe("second");
-  });
+  // Close database to release file handles
+  closeDatabase();
+  // Note: We don't delete the test directory here because tests run in parallel.
+  // The parent test directory is cleaned up on process exit by preload.ts.
 });
 
 describe("auth token management", () => {
@@ -125,39 +83,28 @@ describe("auth token management", () => {
     await setAuthToken("expiring-token", 3600); // 1 hour
     const after = Date.now();
 
-    const config = await readConfig();
-    expect(config.auth?.expiresAt).toBeGreaterThanOrEqual(before + 3600 * 1000);
-    expect(config.auth?.expiresAt).toBeLessThanOrEqual(after + 3600 * 1000);
+    const auth = await getAuthConfig();
+    expect(auth?.expiresAt).toBeGreaterThanOrEqual(before + 3600 * 1000);
+    expect(auth?.expiresAt).toBeLessThanOrEqual(after + 3600 * 1000);
   });
 
   test("setAuthToken stores refresh token", async () => {
     await setAuthToken("access-token", 3600, "refresh-token");
 
-    const config = await readConfig();
-    expect(config.auth?.refreshToken).toBe("refresh-token");
+    const auth = await getAuthConfig();
+    expect(auth?.refreshToken).toBe("refresh-token");
   });
 
   test("getAuthToken returns undefined for expired token", async () => {
-    // Set a token that expired 1 second ago
-    await writeConfig({
-      auth: {
-        token: "expired-token",
-        expiresAt: Date.now() - 1000,
-      },
-    });
+    // Set a token that expires in the future, then we'll manipulate it
+    await setAuthToken("expired-token", -1); // Negative expires immediately
 
     const token = await getAuthToken();
     expect(token).toBeUndefined();
   });
 
   test("getAuthToken returns token if not expired", async () => {
-    // Set a token that expires in 1 hour
-    await writeConfig({
-      auth: {
-        token: "valid-token",
-        expiresAt: Date.now() + 3600 * 1000,
-      },
-    });
+    await setAuthToken("valid-token", 3600); // 1 hour
 
     const token = await getAuthToken();
     expect(token).toBe("valid-token");
@@ -181,13 +128,7 @@ describe("auth token management", () => {
   });
 
   test("isAuthenticated returns false with expired token", async () => {
-    await writeConfig({
-      auth: {
-        token: "expired",
-        expiresAt: Date.now() - 1000,
-      },
-    });
-
+    await setAuthToken("expired", -1); // Negative expires immediately
     expect(await isAuthenticated()).toBe(false);
   });
 });
@@ -236,15 +177,7 @@ describe("defaults management", () => {
 describe("refreshToken error handling", () => {
   test("network error during refresh does not clear auth", async () => {
     // Set up a token that needs refresh (expired but has refresh token)
-    const now = Date.now();
-    await writeConfig({
-      auth: {
-        token: "still-valid-token",
-        issuedAt: now - 7200 * 1000,
-        expiresAt: now - 100, // Expired
-        refreshToken: "my-refresh-token",
-      },
-    });
+    await setAuthToken("still-valid-token", -1, "my-refresh-token"); // Expired
 
     // Set required env var for OAuth
     process.env.SENTRY_CLIENT_ID = "test-client-id";
@@ -256,7 +189,6 @@ describe("refreshToken error handling", () => {
     };
 
     try {
-      const { refreshToken } = await import("../../src/lib/config.js");
       await refreshToken();
       // Should not reach here
       expect(true).toBe(false);
@@ -268,22 +200,14 @@ describe("refreshToken error handling", () => {
     }
 
     // Auth should NOT be cleared on network error
-    const config = await readConfig();
-    expect(config.auth?.token).toBe("still-valid-token");
-    expect(config.auth?.refreshToken).toBe("my-refresh-token");
+    const auth = await getAuthConfig();
+    expect(auth?.token).toBe("still-valid-token");
+    expect(auth?.refreshToken).toBe("my-refresh-token");
   });
 
   test("auth error during refresh clears auth", async () => {
     // Set up a token that needs refresh
-    const now = Date.now();
-    await writeConfig({
-      auth: {
-        token: "revoked-token",
-        issuedAt: now - 7200 * 1000,
-        expiresAt: now - 100, // Expired
-        refreshToken: "invalid-refresh-token",
-      },
-    });
+    await setAuthToken("revoked-token", -1, "invalid-refresh-token"); // Expired
 
     process.env.SENTRY_CLIENT_ID = "test-client-id";
 
@@ -299,7 +223,6 @@ describe("refreshToken error handling", () => {
       );
 
     try {
-      const { refreshToken } = await import("../../src/lib/config.js");
       await refreshToken();
       expect(true).toBe(false);
     } catch (error) {
@@ -309,24 +232,23 @@ describe("refreshToken error handling", () => {
     }
 
     // Auth SHOULD be cleared when server rejects refresh token
-    const config = await readConfig();
-    expect(config.auth).toBeUndefined();
+    const auth = await getAuthConfig();
+    expect(auth).toBeUndefined();
   });
 });
 
 describe("project aliases", () => {
-  test("setProjectAliases stores aliases in config", async () => {
+  test("setProjectAliases stores aliases", async () => {
     await setProjectAliases({
       e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
     });
 
-    const config = await readConfig();
-    expect(config.projectAliases?.aliases).toEqual({
+    const aliases = await getProjectAliases();
+    expect(aliases).toEqual({
       e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
       w: { orgSlug: "sentry", projectSlug: "spotlight-website" },
     });
-    expect(config.projectAliases?.cachedAt).toBeGreaterThan(0);
   });
 
   test("getProjectAliases returns stored aliases", async () => {
@@ -419,18 +341,6 @@ describe("project aliases", () => {
 });
 
 describe("DSN-fingerprinted project aliases", () => {
-  test("setProjectAliases stores dsnFingerprint", async () => {
-    await setProjectAliases(
-      {
-        e: { orgSlug: "sentry", projectSlug: "spotlight-electron" },
-      },
-      "123:456,123:789"
-    );
-
-    const config = await readConfig();
-    expect(config.projectAliases?.dsnFingerprint).toBe("123:456,123:789");
-  });
-
   test("getProjectByAlias returns alias when fingerprint matches", async () => {
     await setProjectAliases(
       {
@@ -578,21 +488,6 @@ describe("getCachedProjectByDsnKey / setCachedProjectByDsnKey", () => {
     const cached = await getCachedProjectByDsnKey("nonexistent-key");
     expect(cached).toBeUndefined();
   });
-
-  test("stores with dsn: prefix to avoid collisions with orgId:projectId keys", async () => {
-    // Set by DSN key
-    await setCachedProjectByDsnKey("mykey", {
-      orgSlug: "dsn-org",
-      orgName: "DSN Org",
-      projectSlug: "dsn-project",
-      projectName: "DSN Project",
-    });
-
-    const config = await readConfig();
-    // Should be stored with "dsn:" prefix
-    expect(config.projectCache?.["dsn:mykey"]).toBeDefined();
-    expect(config.projectCache?.["dsn:mykey"]?.orgSlug).toBe("dsn-org");
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -620,19 +515,6 @@ describe("getCachedProject / setCachedProject / clearProjectCache", () => {
     expect(cached).toBeUndefined();
   });
 
-  test("stores with orgId:projectId key format", async () => {
-    await setCachedProject("123", "456", {
-      orgSlug: "my-org",
-      orgName: "My Organization",
-      projectSlug: "my-project",
-      projectName: "My Project",
-    });
-
-    const config = await readConfig();
-    expect(config.projectCache?.["123:456"]).toBeDefined();
-    expect(config.projectCache?.["123:456"]?.orgSlug).toBe("my-org");
-  });
-
   test("clearProjectCache removes all cached projects", async () => {
     await setCachedProject("123", "456", {
       orgSlug: "org1",
@@ -649,8 +531,8 @@ describe("getCachedProject / setCachedProject / clearProjectCache", () => {
 
     await clearProjectCache();
 
-    const config = await readConfig();
-    expect(config.projectCache).toBeUndefined();
+    expect(await getCachedProject("123", "456")).toBeUndefined();
+    expect(await getCachedProjectByDsnKey("key1")).toBeUndefined();
   });
 
   test("multiple projects can be cached independently", async () => {
@@ -679,10 +561,57 @@ describe("getCachedProject / setCachedProject / clearProjectCache", () => {
 // Config Path
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("getConfigPath", () => {
-  test("returns the config file path", () => {
-    const path = getConfigPath();
-    expect(path).toContain("config.json");
-    expect(path).toContain(testConfigDir);
+describe("getDbPath", () => {
+  test("returns the database file path", () => {
+    const path = getDbPath();
+    expect(path).toContain("cli.db");
+    expect(path).toContain(testBaseDir);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON Migration
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("JSON to SQLite migration", () => {
+  test("migrates existing config.json on first access", async () => {
+    // Close any existing database
+    closeDatabase();
+
+    // Create a config.json file in the test directory
+    const testConfigDir = process.env[CONFIG_DIR_ENV_VAR]!;
+    const configPath = join(testConfigDir, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        auth: {
+          token: "migrated-token",
+          refreshToken: "migrated-refresh",
+          expiresAt: Date.now() + 3_600_000,
+          issuedAt: Date.now(),
+        },
+        defaults: {
+          organization: "migrated-org",
+          project: "migrated-project",
+        },
+      })
+    );
+
+    // Access the database (triggers migration)
+    const token = await getAuthToken();
+    expect(token).toBe("migrated-token");
+
+    const auth = await getAuthConfig();
+    expect(auth?.refreshToken).toBe("migrated-refresh");
+
+    const org = await getDefaultOrganization();
+    expect(org).toBe("migrated-org");
+
+    const project = await getDefaultProject();
+    expect(project).toBe("migrated-project");
+
+    // config.json should be deleted after migration
+    const configExists = await Bun.file(configPath).exists();
+    expect(configExists).toBe(false);
   });
 });

@@ -25,6 +25,28 @@
           }
         }
       }
+    },
+    {
+      // SQLite operations are sync but we keep async signatures for API compatibility
+      "includes": ["src/lib/db/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "useAwait": "off"
+          }
+        }
+      }
+    },
+    {
+      // db/index.ts exports db connection utilities - not a barrel file but triggers the rule
+      "includes": ["src/lib/db/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noBarrelFile": "off"
+          }
+        }
+      }
     }
   ]
 }

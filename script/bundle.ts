@@ -29,8 +29,38 @@ if (!SENTRY_CLIENT_ID) {
   process.exit(1);
 }
 
+// Regex patterns for esbuild plugin (must be top-level for performance)
+const BUN_SQLITE_FILTER = /^bun:sqlite$/;
+const ANY_FILTER = /.*/;
+
+// Plugin to replace bun:sqlite with our node:sqlite polyfill
+const bunSqlitePlugin: Plugin = {
+  name: "bun-sqlite-polyfill",
+  setup(pluginBuild) {
+    // Intercept imports of "bun:sqlite" and redirect to our polyfill
+    pluginBuild.onResolve({ filter: BUN_SQLITE_FILTER }, () => ({
+      path: "bun:sqlite",
+      namespace: "bun-sqlite-polyfill",
+    }));
+
+    // Provide the polyfill content
+    pluginBuild.onLoad(
+      { filter: ANY_FILTER, namespace: "bun-sqlite-polyfill" },
+      () => ({
+        contents: `
+          // Use the polyfill injected by node-polyfills.ts
+          const polyfill = globalThis.__bun_sqlite_polyfill;
+          export const Database = polyfill.Database;
+          export default polyfill;
+        `,
+        loader: "js",
+      })
+    );
+  },
+};
+
 // Configure Sentry plugin for source map uploads (production builds only)
-const plugins: Plugin[] = [];
+const plugins: Plugin[] = [bunSqlitePlugin];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");

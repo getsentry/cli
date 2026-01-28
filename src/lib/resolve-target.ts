@@ -11,14 +11,13 @@
  */
 
 import { findProjectByDsnKey, getProject } from "./api-client.js";
+import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
 import {
   getCachedProject,
   getCachedProjectByDsnKey,
-  getDefaultOrganization,
-  getDefaultProject,
   setCachedProject,
   setCachedProjectByDsnKey,
-} from "./config.js";
+} from "./db/project-cache.js";
 import type { DetectedDsn } from "./dsn/index.js";
 import {
   detectAllDsns,

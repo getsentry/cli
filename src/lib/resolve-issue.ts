@@ -11,7 +11,7 @@
  * endpoints, so we don't need to fetch the issue just to resolve the ID.
  */
 
-import { getProjectByAlias } from "./config.js";
+import { getProjectByAlias } from "./db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "./dsn/index.js";
 import { ContextError } from "./errors.js";
 import {

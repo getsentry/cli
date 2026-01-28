@@ -10,7 +10,7 @@ import {
   listOrganizations,
   listProjects,
 } from "../api-client.js";
-import { getCachedDsn, updateCachedResolution } from "./cache.js";
+import { getCachedDsn, updateCachedResolution } from "../db/dsn-cache.js";
 import { getDsnSourceDescription } from "./detector.js";
 import type {
   DetectedDsn,

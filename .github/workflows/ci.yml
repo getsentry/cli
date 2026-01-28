@@ -37,7 +37,7 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock') }}
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - run: bun run lint
@@ -57,7 +57,7 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock') }}
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Unit Tests
@@ -100,7 +100,7 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ matrix.os }}-${{ hashFiles('bun.lock') }}
+          key: node-modules-${{ matrix.os }}-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Build
@@ -133,7 +133,7 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock') }}
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Download Linux binary
@@ -167,7 +167,7 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock') }}
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Bundle

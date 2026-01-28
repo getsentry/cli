@@ -1,18 +1,65 @@
 /**
- * Node.js polyfills for Bun APIs
- *
- * Injected at esbuild bundle time to provide Node.js-compatible
- * implementations of Bun globals. This allows the same source code
- * to run on both Bun (native) and Node.js (polyfilled).
+ * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 
 import { glob } from "tinyglobby";
 
 declare global {
   var Bun: typeof BunPolyfill;
 }
+
+type SqliteValue = string | number | bigint | null | Uint8Array;
+
+/** Wraps node:sqlite StatementSync to match bun:sqlite query() API. */
+class NodeStatementPolyfill {
+  private readonly stmt: ReturnType<DatabaseSync["prepare"]>;
+
+  constructor(stmt: ReturnType<DatabaseSync["prepare"]>) {
+    this.stmt = stmt;
+  }
+
+  get(...params: SqliteValue[]): Record<string, SqliteValue> | undefined {
+    return this.stmt.get(...params) as Record<string, SqliteValue> | undefined;
+  }
+
+  all(...params: SqliteValue[]): Record<string, SqliteValue>[] {
+    return this.stmt.all(...params) as Record<string, SqliteValue>[];
+  }
+
+  run(...params: SqliteValue[]): void {
+    this.stmt.run(...params);
+  }
+}
+
+/** Wraps node:sqlite DatabaseSync to match bun:sqlite Database API. */
+class NodeDatabasePolyfill {
+  private readonly db: DatabaseSync;
+
+  constructor(path: string) {
+    // SQLite configuration (busy_timeout, foreign_keys, WAL mode) is applied
+    // via PRAGMA statements in src/lib/db/index.ts after construction
+    this.db = new DatabaseSync(path);
+  }
+
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  query(sql: string): NodeStatementPolyfill {
+    return new NodeStatementPolyfill(this.db.prepare(sql));
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}
+
+const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
+(globalThis as Record<string, unknown>).__bun_sqlite_polyfill =
+  bunSqlitePolyfill;
 
 const BunPolyfill = {
   file(path: string) {
@@ -58,8 +105,6 @@ const BunPolyfill = {
     opts?: { stdout?: "pipe" | "ignore"; stderr?: "pipe" | "ignore" }
   ) {
     const [command, ...args] = cmd;
-    // Map Bun's stdout/stderr options to Node's stdio array format
-    // Currently only supports "ignore" - "pipe" would require returning streams
     const stdio: ("pipe" | "ignore")[] = [
       "ignore", // stdin
       opts?.stdout ?? "ignore",

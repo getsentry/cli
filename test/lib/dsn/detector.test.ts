@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/config.js";
-import { clearDsnCache, getCachedDsn } from "../../../src/lib/dsn/cache.js";
+import { clearDsnCache, getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
+import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   detectAllDsns,
   detectDsn,

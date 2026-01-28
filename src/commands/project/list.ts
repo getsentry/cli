@@ -7,7 +7,7 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations, listProjects } from "../../lib/api-client.js";
-import { getDefaultOrganization } from "../../lib/config.js";
+import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import { AuthError } from "../../lib/errors.js";
 import {
   calculateProjectSlugWidth,

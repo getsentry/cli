@@ -10,7 +10,7 @@ import {
   getIssue,
   getIssueByShortId,
 } from "../../lib/api-client.js";
-import { getProjectByAlias } from "../../lib/config.js";
+import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
