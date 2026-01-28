@@ -2,10 +2,12 @@
  * Custom Help Output
  *
  * Provides a branded, styled help output for the CLI.
- * Intercepts --help/-h before Stricli to display custom formatting.
+ * Shows custom formatting when running `sentry` with no arguments.
+ * Commands are auto-generated from Stricli's route structure.
  */
 
 import chalk from "chalk";
+import { routes } from "../app.js";
 import type { Writer } from "../types/index.js";
 import { isAuthenticated } from "./config.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
@@ -48,21 +50,117 @@ type HelpCommand = {
   description: string;
 };
 
-/** Available commands with their usage patterns and descriptions */
-const COMMANDS: HelpCommand[] = [
-  {
-    usage: "sentry auth login | logout | status",
-    description: "Authenticate with Sentry",
-  },
-  { usage: "sentry org list | view", description: "Work with organizations" },
-  { usage: "sentry project list | view", description: "Work with projects" },
-  {
-    usage: "sentry issue list | view | explain | plan",
-    description: "Manage Sentry issues",
-  },
-  { usage: "sentry event view", description: "View Sentry events" },
-  { usage: "sentry api <endpoint>", description: "Make API requests" },
-];
+/**
+ * Type guard to check if a routing target is a RouteMap (has subcommands).
+ * RouteMap has getAllEntries(), Command does not.
+ */
+function isRouteMap(
+  target: unknown
+): target is { getAllEntries: () => RouteMapEntry[]; brief: string } {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    "getAllEntries" in target &&
+    typeof (target as { getAllEntries: unknown }).getAllEntries === "function"
+  );
+}
+
+/** Minimal type for route map entries returned by getAllEntries() */
+type RouteMapEntry = {
+  name: { original: string };
+  target: { brief: string };
+  hidden: boolean;
+};
+
+/** Minimal type for positional parameter with optional placeholder */
+type PositionalParam = { placeholder?: string };
+
+/** Stricli positional parameters structure */
+type PositionalParams =
+  | { kind: "tuple"; parameters: PositionalParam[] }
+  | { kind: "array"; parameter: PositionalParam };
+
+/**
+ * Type guard to check if a target is a Command (has parameters).
+ */
+function isCommand(target: unknown): target is {
+  brief: string;
+  parameters: { positional?: PositionalParams };
+} {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    "parameters" in target &&
+    !("getAllEntries" in target)
+  );
+}
+
+/**
+ * Extract placeholder text from a command's positional parameters.
+ * Returns placeholders like "<endpoint>" or defaults to "<...>".
+ */
+function getPositionalPlaceholder(target: unknown): string {
+  if (!isCommand(target)) {
+    return "<...>";
+  }
+
+  const positional = target.parameters.positional;
+  if (!positional) {
+    return "";
+  }
+
+  if (positional.kind === "tuple" && positional.parameters.length > 0) {
+    // Get placeholders from tuple parameters, default to "arg" if not specified
+    const placeholders = positional.parameters.map(
+      (p, i) => `<${p.placeholder ?? `arg${i}`}>`
+    );
+    return placeholders.join(" ");
+  }
+
+  if (positional.kind === "array") {
+    const placeholder = positional.parameter.placeholder ?? "args";
+    return `<${placeholder}...>`;
+  }
+
+  return "<...>";
+}
+
+/**
+ * Generate the commands list dynamically from Stricli's route structure.
+ * This ensures help text stays in sync with actual registered commands.
+ */
+function generateCommands(): HelpCommand[] {
+  const entries = routes.getAllEntries();
+
+  return entries
+    .filter((entry: RouteMapEntry) => !entry.hidden)
+    .map((entry: RouteMapEntry) => {
+      const routeName = entry.name.original;
+      const brief = entry.target.brief;
+
+      if (isRouteMap(entry.target)) {
+        // Get visible subcommand names and join with pipes
+        const subEntries = entry.target
+          .getAllEntries()
+          .filter((sub: RouteMapEntry) => !sub.hidden);
+        const subNames = subEntries
+          .map((sub: RouteMapEntry) => sub.name.original)
+          .join(" | ");
+        return {
+          usage: `sentry ${routeName} ${subNames}`,
+          description: brief,
+        };
+      }
+
+      // Direct command - extract placeholder from positional parameters
+      const placeholder = getPositionalPlaceholder(entry.target);
+      const usageSuffix = placeholder ? ` ${placeholder}` : "";
+      return {
+        usage: `sentry ${routeName}${usageSuffix}`,
+        description: brief,
+      };
+    });
+}
 
 const EXAMPLE_LOGGED_OUT = "sentry auth login";
 const EXAMPLE_LOGGED_IN = "sentry issue list";
@@ -107,8 +205,8 @@ export async function printCustomHelp(stdout: Writer): Promise<void> {
   lines.push(`  ${TAGLINE}`);
   lines.push("");
 
-  // Commands
-  lines.push(formatCommands(COMMANDS));
+  // Commands (auto-generated from Stricli routes)
+  lines.push(formatCommands(generateCommands()));
   lines.push("");
 
   // Example

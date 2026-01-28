@@ -6,7 +6,8 @@ import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
 
-const routes = buildRouteMap({
+/** Top-level route map containing all CLI commands */
+export const routes = buildRouteMap({
   routes: {
     auth: authRoute,
     org: orgRoute,
