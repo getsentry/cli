@@ -5,7 +5,7 @@ versioning:
   policy: auto
 preReleaseCommand: >-
   node -p "
-    const {execSync, writeFileSync, readFileSync} = require('child_process');
+    const {execSync} = require('child_process');
     const fs = require('fs');
     execSync('npm --no-git-tag-version version ' + process.env.CRAFT_NEW_VERSION).toString();
     const pluginPath = 'plugins/sentry-cli/.claude-plugin/plugin.json';
