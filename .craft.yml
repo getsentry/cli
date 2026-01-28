@@ -5,13 +5,24 @@ versioning:
   policy: auto
 preReleaseCommand: >-
   node -p "
-    const {execSync} = require('child_process');
+    const {execSync, writeFileSync, readFileSync} = require('child_process');
+    const fs = require('fs');
     execSync('npm --no-git-tag-version version ' + process.env.CRAFT_NEW_VERSION).toString();
+    const pluginPath = 'plugins/sentry-cli/.claude-plugin/plugin.json';
+    const plugin = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+    plugin.version = process.env.CRAFT_NEW_VERSION.replace(/-.*$/, '');
+    fs.writeFileSync(pluginPath, JSON.stringify(plugin, null, 2) + '\\n');
   "
 postReleaseCommand: >-
   node -p "
     const {execSync} = require('child_process');
+    const fs = require('fs');
     execSync('npm --no-git-tag-version version preminor --preid=dev');
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    const pluginPath = 'plugins/sentry-cli/.claude-plugin/plugin.json';
+    const plugin = JSON.parse(fs.readFileSync(pluginPath, 'utf8'));
+    plugin.version = pkg.version.replace(/-.*$/, '');
+    fs.writeFileSync(pluginPath, JSON.stringify(plugin, null, 2) + '\\n');
     execSync('git diff --quiet || (git commit -anm \'meta: Bump new development version\\n\\n#skip-changelog\' && git pull --rebase && git push)').toString();"
 requireNames:
   - /^sentry-.+$/
