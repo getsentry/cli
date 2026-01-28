@@ -18,7 +18,7 @@ claude plugin install sentry/cli
 
 ```bash
 # Add the marketplace from local clone
-claude plugin marketplace add /path/to/sentry-cli
+claude plugin marketplace add /path/to/sentry/cli
 
 # Install the plugin
 claude plugin install sentry/cli
