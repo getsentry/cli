@@ -89,6 +89,9 @@ const result = await build({
   entryPoints: ["./src/bin.ts"],
   bundle: true,
   minify: true,
+  banner: {
+    js: "#!/usr/bin/env node",
+  },
   sourcemap: true,
   platform: "node",
   target: "node22",

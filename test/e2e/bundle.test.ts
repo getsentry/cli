@@ -1,0 +1,112 @@
+/**
+ * Bundle Smoke Tests
+ *
+ * Verifies the npm bundle is correctly built and can be executed by Node.js.
+ * These tests ensure the bundle has proper shebang and runs without syntax errors.
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+
+const ROOT_DIR = join(import.meta.dir, "../..");
+const BUNDLE_PATH = join(ROOT_DIR, "dist/bin.cjs");
+
+describe("npm bundle", () => {
+  beforeAll(async () => {
+    // Clean dist directory before building
+    const distDir = join(ROOT_DIR, "dist");
+    if (existsSync(distDir)) {
+      rmSync(distDir, { recursive: true, force: true });
+    }
+
+    // Build the bundle (requires SENTRY_CLIENT_ID)
+    // Run the bundle script directly to avoid PATH issues in test environments
+    const proc = Bun.spawn([process.execPath, "run", "script/bundle.ts"], {
+      cwd: ROOT_DIR,
+      env: {
+        ...process.env,
+        SENTRY_CLIENT_ID: process.env.SENTRY_CLIENT_ID || "test-client-id",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      const stderr = await new Response(proc.stderr).text();
+      throw new Error(`Bundle failed with exit code ${exitCode}: ${stderr}`);
+    }
+  }, 60_000); // Bundle can take a while
+
+  afterAll(() => {
+    // Clean up bundle after tests
+    const distDir = join(ROOT_DIR, "dist");
+    if (existsSync(distDir)) {
+      rmSync(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test("bundle file exists", () => {
+    expect(existsSync(BUNDLE_PATH)).toBe(true);
+  });
+
+  test("bundle starts with node shebang", async () => {
+    const file = Bun.file(BUNDLE_PATH);
+    const content = await file.text();
+
+    // The bundle MUST start with the Node.js shebang for npm global installs to work
+    // Without this, Unix shells try to execute the JavaScript as shell commands
+    expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
+  });
+
+  test("bundle executes without syntax errors", async () => {
+    // Run the bundle with --help to verify it executes correctly
+    // This catches the exact error from the bug report where the shell
+    // tried to interpret JavaScript as shell commands
+    const proc = Bun.spawn(["node", BUNDLE_PATH, "--help"], {
+      cwd: ROOT_DIR,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+
+    // Should not have shell syntax errors
+    expect(stderr).not.toContain("syntax error");
+    expect(stderr).not.toContain("unexpected token");
+
+    // Should execute and show help
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("sentry");
+  });
+
+  test("bundle can be executed directly on Unix", async () => {
+    // Skip on Windows where shebang doesn't apply
+    if (process.platform === "win32") {
+      return;
+    }
+
+    // Make the bundle executable
+    const { chmod } = await import("node:fs/promises");
+    await chmod(BUNDLE_PATH, 0o755);
+
+    // Execute it directly (like npm global install would)
+    const proc = Bun.spawn([BUNDLE_PATH, "--help"], {
+      cwd: ROOT_DIR,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    // This is the exact error from the bug report - shell interpreting JS as bash
+    expect(stderr).not.toContain("syntax error near unexpected token");
+    expect(exitCode).toBe(0);
+  });
+});
