@@ -26,7 +26,7 @@ async function main(): Promise<void> {
         return;
       }
 
-      run(app, args, buildContext(process));
+      return run(app, args, buildContext(process));
     });
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
