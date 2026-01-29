@@ -14,208 +14,337 @@ The CLI must be installed and authenticated before use.
 ### Installation
 
 ```bash
-# npm
+curl https://cli.sentry.dev/install -fsS | bash
+
+# Or install via npm/pnpm/bun
 npm install -g sentry
-
-# pnpm
-pnpm add -g sentry
-
-# bun
-bun add -g sentry
-
-# Or run without installing
-npx sentry --help
 ```
 
 ### Authentication
 
 ```bash
-# OAuth login (recommended)
 sentry auth login
-
-# Or use an API token
 sentry auth login --token YOUR_SENTRY_API_TOKEN
-
-# Check auth status
 sentry auth status
+sentry auth logout
 ```
 
 ## Available Commands
 
-### Organizations
+### Auth
+
+Authenticate with Sentry
+
+#### `sentry auth login`
+
+Authenticate with Sentry
+
+**Flags:**
+- `--token <value> - Authenticate using an API token instead of OAuth`
+- `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
+
+**Examples:**
 
 ```bash
-sentry org list                 # List all accessible organizations
-sentry org list --json          # Output as JSON
-sentry org view my-org          # View organization details
-sentry org view my-org -w       # Open in browser
+# OAuth device flow (recommended)
+sentry auth login
+
+# Using an API token
+sentry auth login --token YOUR_TOKEN
 ```
 
-### Projects
+#### `sentry auth logout`
+
+Log out of Sentry
+
+**Examples:**
 
 ```bash
-sentry project list                        # List all projects
-sentry project list --org my-org           # List projects in specific org
-sentry project list --platform javascript  # Filter by platform
-sentry project view my-project             # View project details
-sentry project view my-project -w          # Open in browser
+sentry auth logout
 ```
 
-### Issues
+#### `sentry auth refresh`
+
+Refresh your authentication token
+
+**Flags:**
+- `--json - Output result as JSON`
+- `--force - Force refresh even if token is still valid`
+
+**Examples:**
 
 ```bash
-# List issues
-sentry issue list --org my-org --project my-project
-sentry issue list --query "is:unresolved"
-sentry issue list --sort freq --limit 20
-sentry issue list --json
-
-# View issue details
-sentry issue view 123456789                 # By numeric ID
-sentry issue view PROJ-ABC                  # By short ID
-sentry issue view 123456789 -w              # Open in browser
+sentry auth refresh
 ```
 
-**Issue ID formats supported:**
+#### `sentry auth status`
 
-- Numeric ID: `123456789`
-- Full short ID: `PROJ-ABC`
-- Short suffix: `ABC` (when project is auto-detected)
+View authentication status
 
-> **Note on aliases:** In multi-project contexts, issues may display with short aliases (e.g., `f-G`) in the **Alias** column. These aliases are shortcuts for referencing issues without typing the full ID. Bold text in command examples indicates the command prefix, while _underscores_ denote variable placeholders you should replace with actual values.
+**Flags:**
+- `--showToken - Show the stored token (masked by default)`
 
-### Events
+**Examples:**
 
 ```bash
-sentry event view abc123def456              # View event by ID
-sentry event view abc123def456 -w           # Open in browser
-sentry event view abc123def456 --json       # Output as JSON
+sentry auth status
 ```
 
-### API (Raw Requests)
+### Org
 
-Make direct API calls to Sentry's API (similar to `gh api`):
+Work with Sentry organizations
+
+#### `sentry org list`
+
+List organizations
+
+**Flags:**
+- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `--json - Output JSON`
+
+**Examples:**
 
 ```bash
-# GET requests
-sentry api organizations/
-sentry api projects/my-org/my-project/
+sentry org list
 
-# POST/PUT with fields
-sentry api issues/123/ -X PUT -F status=resolved
-sentry api teams/my-org/my-team/members/ -F user[email]=user@example.com
-
-# Nested fields
-sentry api projects/my-org/my-project/ -F options[sampleRate]=0.5
-
-# Show response headers
-sentry api organizations/ --include
-
-# Verbose output (full request/response)
-sentry api organizations/ --verbose
+sentry org list --json
 ```
 
-**API command flags:**
+#### `sentry org view <arg0>`
 
-- `-X, --method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
-- `-F, --field`: Add typed field (supports JSON parsing, arrays, nested objects)
-- `-f, --raw-field`: Add string field without JSON parsing
-- `-H, --header`: Add HTTP header
-- `--input`: Read body from file (use `-` for stdin)
-- `-i, --include`: Include response headers
-- `--silent`: Don't print response body
-- `--verbose`: Show full request/response
+View details of an organization
 
-## Context Auto-Detection
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
 
-The CLI automatically detects organization and project context from:
-
-1. **CLI flags**: `--org` and `--project`
-2. **Environment variables**: `SENTRY_DSN`
-3. **Source code scanning**: Finds DSNs in your codebase
-
-This means in most projects, you can simply run:
+**Examples:**
 
 ```bash
-sentry issue list    # Uses auto-detected org/project
-sentry project view  # Shows detected project(s)
+sentry org view <org-slug>
+
+sentry org view my-org
+
+sentry org view my-org -w
 ```
 
-## Monorepo Support
+### Project
 
-The CLI detects multiple Sentry projects in monorepos:
+Work with Sentry projects
+
+#### `sentry project list`
+
+List projects
+
+**Flags:**
+- `--org <value> - Organization slug`
+- `--limit <value> - Maximum number of projects to list - (default: "30")`
+- `--json - Output JSON`
+- `--platform <value> - Filter by platform (e.g., javascript, python)`
+
+**Examples:**
 
 ```bash
-# Lists issues from all detected projects
-sentry issue list
+# List all projects
+sentry project list
 
-# Shows details for all detected projects
-sentry project view
+# List projects in a specific organization
+sentry project list <org-slug>
+
+# Filter by platform
+sentry project list --platform javascript
 ```
 
-In multi-project mode, issues are displayed with aliases (e.g., `f-G`) for disambiguation.
+#### `sentry project view <arg0>`
 
-> **Understanding aliases:** When listing issues across multiple projects, the output includes an **Alias** column with short identifiers like `f-G`. These aliases let you quickly reference issues in subsequent commands (e.g., `sentry issue view f-G`) without typing the full issue ID. The alias format uses a project prefix followed by a short hash. Bold text in examples shows literal command names; _italicized_ or underscored text indicates placeholders for your own values.
+View details of a project
 
-## Common Workflows
+**Flags:**
+- `--org <value> - Organization slug`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
 
-### Investigate an Issue
+**Examples:**
 
 ```bash
-# List recent unresolved issues
-sentry issue list --query "is:unresolved" --sort date
+sentry project view <project-slug>
 
-# View issue details
-sentry issue view PROJ-ABC
+sentry project view frontend --org my-org
 
-# Open in browser for full context
-sentry issue view PROJ-ABC -w
+sentry project view frontend -w
 ```
 
-### Check Project Health
+### Issue
+
+Manage Sentry issues
+
+#### `sentry issue list`
+
+List issues in a project
+
+**Flags:**
+- `--org <value> - Organization slug`
+- `--project <value> - Project slug`
+- `--query <value> - Search query (Sentry search syntax)`
+- `--limit <value> - Maximum number of issues to return - (default: "10")`
+- `--sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `--json - Output as JSON`
+
+**Examples:**
 
 ```bash
-# View project configuration
-sentry project view my-project --json
+sentry issue list --org <org-slug> --project <project-slug>
 
-# List recent issues sorted by frequency
-sentry issue list --sort freq --limit 10
+sentry issue list --org my-org --project frontend
+
+sentry issue list --org my-org --project frontend --query "TypeError"
 ```
 
-### Resolve Issues via API
+#### `sentry issue explain <arg0>`
+
+Analyze an issue's root cause using Seer AI
+
+**Flags:**
+- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
+- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
+- `--json - Output as JSON`
+- `--force - Force new analysis even if one exists`
+
+#### `sentry issue plan <arg0>`
+
+Generate a solution plan using Seer AI
+
+**Flags:**
+- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
+- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
+- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
+- `--json - Output as JSON`
+
+#### `sentry issue view <arg0>`
+
+View details of a specific issue
+
+**Flags:**
+- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
+- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+- `--spans <value> - Show span tree with N levels of nesting depth`
+
+**Examples:**
 
 ```bash
-# Resolve a single issue
-sentry api issues/123/ -X PUT -F status=resolved
+# By issue ID
+sentry issue view <issue-id>
 
-# Ignore an issue
-sentry api issues/123/ -X PUT -F status=ignored -F statusDetails[ignoreDuration]=10080
+# By short ID
+sentry issue view <short-id>
+
+sentry issue view FRONT-ABC
+
+sentry issue view FRONT-ABC -w
 ```
 
-### Export Data
+### Event
+
+View Sentry events
+
+#### `sentry event view <arg0>`
+
+View details of a specific event
+
+**Flags:**
+- `--org <value> - Organization slug`
+- `--project <value> - Project slug`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+- `--spans <value> - Show span tree from the event's trace`
+
+**Examples:**
 
 ```bash
-# Export issues to JSON
-sentry issue list --json > issues.json
+sentry event view <event-id>
 
-# Export organization data
-sentry org view my-org --json > org.json
+sentry event view abc123def456
+
+sentry event view abc123def456 -w
+```
+
+### Api
+
+Make an authenticated API request
+
+#### `sentry api <endpoint>`
+
+Make an authenticated API request
+
+**Flags:**
+- `-X, --method <value> - The HTTP method for the request - (default: "GET")`
+- `-F, --field <value>... - Add a typed parameter (key=value, key[sub]=value, key[]=value)`
+- `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
+- `-H, --header <value>... - Add a HTTP request header in key:value format`
+- `--input <value> - The file to use as body for the HTTP request (use "-" to read from standard input)`
+- `-i, --include - Include HTTP response status line and headers in the output`
+- `--silent - Do not print the response body`
+- `--verbose - Include full HTTP request and response in the output`
+
+**Examples:**
+
+```bash
+sentry api <endpoint> [options]
+
+# List organizations
+sentry api /organizations/
+
+# Get a specific organization
+sentry api /organizations/my-org/
+
+# Get project details
+sentry api /projects/my-org/my-project/
+
+# Create a new project
+sentry api /teams/my-org/my-team/projects/ \
+  --method POST \
+  --field name="New Project" \
+  --field platform=javascript
+
+# Update an issue status
+sentry api /issues/123456789/ \
+  --method PUT \
+  --field status=resolved
+
+# Assign an issue
+sentry api /issues/123456789/ \
+  --method PUT \
+  --field assignedTo="user@example.com"
+
+# Delete a project
+sentry api /projects/my-org/my-project/ \
+  --method DELETE
+
+sentry api /organizations/ \
+  --header "X-Custom-Header:value"
+
+sentry api /organizations/ --include
+
+# Get all issues (automatically follows pagination)
+sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
 ## Output Formats
 
-All commands support multiple output formats:
+### JSON Output
 
-- **Default**: Human-readable formatted output
-- **`--json`**: JSON output for scripting/automation
-- **`-w, --web`**: Open in browser (where supported)
+Most list and view commands support `--json` flag for JSON output, making it easy to integrate with other tools:
 
-## Error Resolution
+```bash
+sentry org list --json | jq '.[] | .slug'
+```
 
-**"Not authenticated"**: Run `sentry auth login`
+### Opening in Browser
 
-**"Organization not found"**: Specify with `--org` flag or check `sentry org list`
+View commands support `-w` or `--web` flag to open the resource in your browser:
 
-**"Project not found"**: Specify with `--project` flag or check `sentry project list`
-
-**"No project detected"**: The CLI couldn't find a Sentry DSN in your codebase. Use explicit flags: `--org my-org --project my-project`
+```bash
+sentry issue view PROJ-123 -w
+```

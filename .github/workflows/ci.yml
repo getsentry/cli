@@ -9,6 +9,7 @@ on:
       - 'script/**'
       - 'patches/**'
       - 'docs/**'
+      - 'plugins/**'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/ci.yml'
@@ -19,6 +20,7 @@ on:
       - 'script/**'
       - 'patches/**'
       - 'docs/**'
+      - 'plugins/**'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/ci.yml'
@@ -29,6 +31,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-skill:
+    name: Check SKILL.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+      - name: Check SKILL.md
+        id: check
+        run: bun run check:skill
+        continue-on-error: true
+      - name: Output regeneration instructions
+        if: steps.check.outcome == 'failure'
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          echo "## SKILL.md is out of date" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The CLI commands have changed but \`plugins/sentry-cli/skills/sentry-cli/SKILL.md\` hasn't been updated." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### To fix, run locally and commit:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "bun run generate:skill" >> $GITHUB_STEP_SUMMARY
+          echo "git add plugins/sentry-cli/skills/sentry-cli/SKILL.md" >> $GITHUB_STEP_SUMMARY
+          echo "git commit -m 'chore: Regenerate SKILL.md'" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$IS_FORK" != "true" ]; then
+            WORKFLOW_URL="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/generate-skill.yml/dispatch?ref=main&inputs%5Bbranch%5D=${BRANCH_NAME}"
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Or [trigger the Generate SKILL.md workflow](${WORKFLOW_URL}) to auto-commit the fix." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "::error::SKILL.md is out of date. See job summary for fix options."
+          exit 1
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest

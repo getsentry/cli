@@ -1,0 +1,55 @@
+name: Generate SKILL.md
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to regenerate SKILL.md on'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    name: Generate and Commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Generate SKILL.md
+        run: bun run generate:skill
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/SKILL.md; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "SKILL.md is already up to date"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "SKILL.md has changes"
+          fi
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add plugins/sentry-cli/skills/sentry-cli/SKILL.md
+          git commit -m "chore: Regenerate SKILL.md"
+          git push

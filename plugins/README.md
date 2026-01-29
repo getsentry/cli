@@ -55,22 +55,36 @@ The skill will guide the assistant to provide accurate CLI commands.
 ## Repository Structure
 
 ```
-sentry-cli/
+cli/                              # Repository root
 ├── .claude-plugin/
-│   └── marketplace.json      # Marketplace manifest
-├── plugins/
-│   └── sentry-cli/
-│       ├── .claude-plugin/
-│       │   └── plugin.json   # Plugin manifest
-│       └── skills/
-│           └── sentry-cli/
-│               └── SKILL.md  # CLI usage skill
+│   └── marketplace.json          # Marketplace manifest
 ├── .cursor/
 │   └── skills/
 │       └── sentry-cli/
-│           └── SKILL.md      # Same skill for Cursor
-└── README.md
+│           └── SKILL.md          # Symlink to plugins location
+├── plugins/
+│   ├── README.md                 # This file
+│   └── sentry-cli/
+│       ├── .claude-plugin/
+│       │   └── plugin.json       # Plugin manifest
+│       └── skills/
+│           └── sentry-cli/
+│               └── SKILL.md      # CLI usage skill (auto-generated)
+└── script/
+    └── generate-skill.ts         # Generates SKILL.md from CLI commands
 ```
+
+## Updating SKILL.md
+
+The SKILL.md file is **auto-generated** from the CLI's command definitions. Do not edit it manually.
+
+To regenerate after modifying commands:
+
+```bash
+bun run generate:skill
+```
+
+CI will fail if SKILL.md is out of date and post a comment with the required changes.
 
 ## License
 
