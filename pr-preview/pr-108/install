@@ -157,7 +157,7 @@ if [[ "$no_modify_path" != "true" ]]; then
   fi
 fi
 
-if [[ -n "${GITHUB_ACTIONS:-}" ]] && [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+if [[ -n "${GITHUB_ACTIONS:-}" ]] && [[ "${GITHUB_ACTIONS}" == "true" ]] && [[ -n "${GITHUB_PATH:-}" ]]; then
   echo "$install_dir" >> "$GITHUB_PATH"
   echo -e "${MUTED}Added to \$GITHUB_PATH${NC}"
 fi
