@@ -42,159 +42,89 @@ sentry auth status
 
 ## Available Commands
 
-### Auth
+### Organizations
 
-Authenticate with Sentry
+```bash
+sentry org list                 # List all accessible organizations
+sentry org list --json          # Output as JSON
+sentry org view my-org          # View organization details
+sentry org view my-org -w       # Open in browser
+```
 
-#### `sentry auth login`
+### Projects
 
-Authenticate with Sentry
+```bash
+sentry project list                        # List all projects
+sentry project list --org my-org           # List projects in specific org
+sentry project list --platform javascript  # Filter by platform
+sentry project view my-project             # View project details
+sentry project view my-project -w          # Open in browser
+```
 
-**Flags:**
-- `--token <value> - Authenticate using an API token instead of OAuth`
-- `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
+### Issues
 
-#### `sentry auth logout`
+```bash
+# List issues
+sentry issue list --org my-org --project my-project
+sentry issue list --query "is:unresolved"
+sentry issue list --sort freq --limit 20
+sentry issue list --json
 
-Log out of Sentry
+# View issue details
+sentry issue view 123456789                 # By numeric ID
+sentry issue view PROJ-ABC                  # By short ID
+sentry issue view 123456789 -w              # Open in browser
+```
 
-#### `sentry auth refresh`
+**Issue ID formats supported:**
 
-Refresh your authentication token
+- Numeric ID: `123456789`
+- Full short ID: `PROJ-ABC`
+- Short suffix: `ABC` (when project is auto-detected)
 
-**Flags:**
-- `--json - Output result as JSON`
-- `--force - Force refresh even if token is still valid`
+> **Note on aliases:** In multi-project contexts, issues may display with short aliases (e.g., `f-G`) in the **Alias** column. These aliases are shortcuts for referencing issues without typing the full ID. Bold text in command examples indicates the command prefix, while _underscores_ denote variable placeholders you should replace with actual values.
 
-#### `sentry auth status`
+### Events
 
-View authentication status
+```bash
+sentry event view abc123def456              # View event by ID
+sentry event view abc123def456 -w           # Open in browser
+sentry event view abc123def456 --json       # Output as JSON
+```
 
-**Flags:**
-- `--showToken - Show the stored token (masked by default)`
+### API (Raw Requests)
 
-### Org
+Make direct API calls to Sentry's API (similar to `gh api`):
 
-Work with Sentry organizations
+```bash
+# GET requests
+sentry api organizations/
+sentry api projects/my-org/my-project/
 
-#### `sentry org list`
+# POST/PUT with fields
+sentry api issues/123/ -X PUT -F status=resolved
+sentry api teams/my-org/my-team/members/ -F user[email]=user@example.com
 
-List organizations
+# Nested fields
+sentry api projects/my-org/my-project/ -F options[sampleRate]=0.5
 
-**Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
-- `--json - Output JSON`
+# Show response headers
+sentry api organizations/ --include
 
-#### `sentry org view <arg0>`
+# Verbose output (full request/response)
+sentry api organizations/ --verbose
+```
 
-View details of an organization
+**API command flags:**
 
-**Flags:**
-- `--json - Output as JSON`
-- `-w, --web - Open in browser`
-
-### Project
-
-Work with Sentry projects
-
-#### `sentry project list`
-
-List projects
-
-**Flags:**
-- `--org <value> - Organization slug`
-- `--limit <value> - Maximum number of projects to list - (default: "30")`
-- `--json - Output JSON`
-- `--platform <value> - Filter by platform (e.g., javascript, python)`
-
-#### `sentry project view <arg0>`
-
-View details of a project
-
-**Flags:**
-- `--org <value> - Organization slug`
-- `--json - Output as JSON`
-- `-w, --web - Open in browser`
-
-### Issue
-
-Manage Sentry issues
-
-#### `sentry issue list`
-
-List issues in a project
-
-**Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
-- `--query <value> - Search query (Sentry search syntax)`
-- `--limit <value> - Maximum number of issues to return - (default: "10")`
-- `--sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `--json - Output as JSON`
-
-#### `sentry issue explain <arg0>`
-
-Analyze an issue's root cause using Seer AI
-
-**Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
-- `--json - Output as JSON`
-- `--force - Force new analysis even if one exists`
-
-#### `sentry issue plan <arg0>`
-
-Generate a solution plan using Seer AI
-
-**Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
-- `--json - Output as JSON`
-
-#### `sentry issue view <arg0>`
-
-View details of a specific issue
-
-**Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
-- `--json - Output as JSON`
-- `-w, --web - Open in browser`
-- `--spans <value> - Show span tree with N levels of nesting depth`
-
-### Event
-
-View Sentry events
-
-#### `sentry event view <arg0>`
-
-View details of a specific event
-
-**Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
-- `--json - Output as JSON`
-- `-w, --web - Open in browser`
-- `--spans <value> - Show span tree from the event's trace`
-
-### Api
-
-Make an authenticated API request
-
-#### `sentry api <endpoint>`
-
-Make an authenticated API request
-
-**Flags:**
-- `-X, --method <value> - The HTTP method for the request - (default: "GET")`
-- `-F, --field <value>... - Add a typed parameter (key=value, key[sub]=value, key[]=value)`
-- `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
-- `-H, --header <value>... - Add a HTTP request header in key:value format`
-- `--input <value> - The file to use as body for the HTTP request (use "-" to read from standard input)`
-- `-i, --include - Include HTTP response status line and headers in the output`
-- `--silent - Do not print the response body`
-- `--verbose - Include full HTTP request and response in the output`
+- `-X, --method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
+- `-F, --field`: Add typed field (supports JSON parsing, arrays, nested objects)
+- `-f, --raw-field`: Add string field without JSON parsing
+- `-H, --header`: Add HTTP header
+- `--input`: Read body from file (use `-` for stdin)
+- `-i, --include`: Include response headers
+- `--silent`: Don't print response body
+- `--verbose`: Show full request/response
 
 ## Context Auto-Detection
 
@@ -224,7 +154,8 @@ sentry project view
 ```
 
 In multi-project mode, issues are displayed with aliases (e.g., `f-G`) for disambiguation.
-Use these aliases with commands like `sentry issue view f-G`.
+
+> **Understanding aliases:** When listing issues across multiple projects, the output includes an **Alias** column with short identifiers like `f-G`. These aliases let you quickly reference issues in subsequent commands (e.g., `sentry issue view f-G`) without typing the full issue ID. The alias format uses a project prefix followed by a short hash. Bold text in examples shows literal command names; _italicized_ or underscored text indicates placeholders for your own values.
 
 ## Common Workflows
 
@@ -236,9 +167,6 @@ sentry issue list --query "is:unresolved" --sort date
 
 # View issue details
 sentry issue view PROJ-ABC
-
-# Get AI root cause analysis
-sentry issue explain PROJ-ABC
 
 # Open in browser for full context
 sentry issue view PROJ-ABC -w
