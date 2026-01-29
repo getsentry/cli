@@ -145,7 +145,7 @@ if [[ "$no_modify_path" != "true" ]]; then
   if [[ -z $config_file ]]; then
     echo -e "${MUTED}No config file found. Manually add to PATH:${NC}"
     echo "  export PATH=$install_dir:\$PATH"
-  elif [[ ":$PATH:" != *":$install_dir:"* ]]; then
+  else
     case $current_shell in
       fish)
         add_to_path "$config_file" "fish_add_path $install_dir"
