@@ -105,7 +105,7 @@ starlight-menu-button button {
 
 /* Logo size - larger */
 .site-title img {
-  height: 2rem !important;
+  height: 2.3rem !important;
   width: auto !important;
 }
 
@@ -185,7 +185,7 @@ site-search button kbd {
 
 /* Hero section */
 .hero {
-  padding: 4rem 0 0.5rem !important;
+  padding: 10rem 0 0.5rem !important;
   text-align: left !important;
   max-width: none !important;
 }
