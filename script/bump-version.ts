@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Version Bump Script
  *
@@ -6,8 +6,8 @@
  * Extracted from .craft.yml inline scripts for maintainability.
  *
  * Usage:
- *   bun run script/bump-version.ts --pre   # Pre-release: set CRAFT_NEW_VERSION
- *   bun run script/bump-version.ts --post  # Post-release: bump to next dev version
+ *   node --experimental-strip-types script/bump-version.ts --pre   # Pre-release: set CRAFT_NEW_VERSION
+ *   node --experimental-strip-types script/bump-version.ts --post  # Post-release: bump to next dev version
  *
  * Pre-release (--pre):
  *   - Sets package.json version to CRAFT_NEW_VERSION
@@ -19,7 +19,8 @@
  *   - Commits and pushes if there are changes
  */
 
-import { $ } from "bun";
+import { execSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const PLUGIN_PATH = "plugins/sentry-cli/.claude-plugin/plugin.json";
 
@@ -34,16 +35,15 @@ type PluginJson = {
 /**
  * Read and parse plugin.json
  */
-async function readPluginJson(): Promise<PluginJson> {
-  const file = Bun.file(PLUGIN_PATH);
-  return (await file.json()) as PluginJson;
+function readPluginJson(): PluginJson {
+  return JSON.parse(readFileSync(PLUGIN_PATH, "utf-8")) as PluginJson;
 }
 
 /**
  * Write plugin.json with consistent formatting
  */
-async function writePluginJson(plugin: PluginJson): Promise<void> {
-  await Bun.write(PLUGIN_PATH, `${JSON.stringify(plugin, null, 2)}\n`);
+function writePluginJson(plugin: PluginJson): void {
+  writeFileSync(PLUGIN_PATH, `${JSON.stringify(plugin, null, 2)}\n`);
 }
 
 /**
@@ -56,9 +56,16 @@ function stripPrerelease(version: string): string {
 }
 
 /**
+ * Execute a shell command with output inherited to stdout/stderr
+ */
+function exec(command: string): void {
+  execSync(command, { stdio: "inherit" });
+}
+
+/**
  * Pre-release: Set version from CRAFT_NEW_VERSION environment variable
  */
-async function preRelease(): Promise<void> {
+function preRelease(): void {
   const version = process.env.CRAFT_NEW_VERSION;
   if (!version) {
     console.error("Error: CRAFT_NEW_VERSION environment variable is required");
@@ -68,12 +75,12 @@ async function preRelease(): Promise<void> {
   console.log(`Setting version to ${version}`);
 
   // Update package.json via npm (handles formatting consistently)
-  await $`npm --no-git-tag-version version ${version}`;
+  exec(`npm --no-git-tag-version version ${version}`);
 
   // Update plugin.json (strip prerelease suffix for cleaner version)
-  const plugin = await readPluginJson();
+  const plugin = readPluginJson();
   plugin.version = stripPrerelease(version);
-  await writePluginJson(plugin);
+  writePluginJson(plugin);
 
   console.log(`Updated plugin.json to ${plugin.version}`);
 }
@@ -81,29 +88,36 @@ async function preRelease(): Promise<void> {
 /**
  * Post-release: Bump to next dev version, commit and push
  */
-async function postRelease(): Promise<void> {
+function postRelease(): void {
   console.log("Bumping to next development version");
 
   // Bump package.json to next preminor with -dev prerelease
-  await $`npm --no-git-tag-version version preminor --preid=dev`;
+  exec("npm --no-git-tag-version version preminor --preid=dev");
 
   // Read the new version from package.json
-  const pkg = (await Bun.file("package.json").json()) as { version: string };
+  const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as {
+    version: string;
+  };
   console.log(`package.json bumped to ${pkg.version}`);
 
   // Update plugin.json
-  const plugin = await readPluginJson();
+  const plugin = readPluginJson();
   plugin.version = stripPrerelease(pkg.version);
-  await writePluginJson(plugin);
+  writePluginJson(plugin);
   console.log(`Updated plugin.json to ${plugin.version}`);
 
   // Commit and push if there are changes
-  const diffResult = await $`git diff --quiet`.nothrow();
-  if (diffResult.exitCode !== 0) {
+  // Use spawnSync to check exit code without throwing
+  const diffResult = spawnSync("git", ["diff", "--quiet"], {
+    stdio: "inherit",
+  });
+  if (diffResult.status !== 0) {
     console.log("Committing version bump");
-    await $`git commit -anm ${"meta: Bump new development version\n\n#skip-changelog"}`;
-    await $`git pull --rebase`;
-    await $`git push`;
+    exec(
+      'git commit -anm "meta: Bump new development version\n\n#skip-changelog"'
+    );
+    exec("git pull --rebase");
+    exec("git push");
     console.log("Pushed version bump");
   } else {
     console.log("No changes to commit");
@@ -115,15 +129,15 @@ async function postRelease(): Promise<void> {
  */
 function printUsage(): void {
   console.log(`
-Usage: bun run script/bump-version.ts <mode>
+Usage: node --experimental-strip-types script/bump-version.ts <mode>
 
 Modes:
   --pre   Pre-release: set version from CRAFT_NEW_VERSION env var
   --post  Post-release: bump to next dev version, commit and push
 
 Examples:
-  CRAFT_NEW_VERSION=1.0.0 bun run script/bump-version.ts --pre
-  bun run script/bump-version.ts --post
+  CRAFT_NEW_VERSION=1.0.0 node --experimental-strip-types script/bump-version.ts --pre
+  node --experimental-strip-types script/bump-version.ts --post
 `);
 }
 
@@ -148,7 +162,7 @@ if (!mode) {
 }
 
 if (mode === "pre") {
-  await preRelease();
+  preRelease();
 } else {
-  await postRelease();
+  postRelease();
 }
