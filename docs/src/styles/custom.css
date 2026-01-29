@@ -90,10 +90,17 @@ body {
    ========================================================================== */
 
 header.header {
-  background: rgba(10, 10, 15, 0.8);
+  background: rgba(10, 10, 15, 0.95);
   backdrop-filter: blur(12px);
   border-bottom: none;
-  position: relative;
+}
+
+/* Ensure hamburger menu button is visible and properly styled */
+starlight-menu-button button {
+  background-color: #1a1a1f !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: none !important;
 }
 
 /* Logo size - larger */
@@ -1598,6 +1605,21 @@ nav.sidebar a[aria-current="page"] {
 
   .why-section ul {
     grid-template-columns: 1fr;
+  }
+
+  /* Reset search bar to flow naturally in header */
+  site-search button {
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+    min-width: auto !important;
+    padding: 0.5rem !important;
+  }
+
+  /* Hide search text and kbd shortcut on mobile */
+  site-search button span,
+  site-search button kbd {
+    display: none !important;
   }
 }
 
