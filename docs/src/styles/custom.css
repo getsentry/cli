@@ -227,28 +227,21 @@ site-search button kbd {
 }
 
 .hero-docs-link {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #fff !important;
+  color: rgba(255, 255, 255, 0.7) !important;
   text-decoration: none;
-  font-weight: 500;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
-  margin-top: 0.5rem;
+  font-weight: 400;
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+  margin-top: 0.75rem;
 }
 
 .hero-docs-link:hover {
-  opacity: 0.8;
-  gap: 0.75rem;
+  color: #fff !important;
 }
 
-.hero-docs-link svg {
-  transition: transform 0.2s ease;
-}
-
-.hero-docs-link:hover svg {
-  transform: translateX(2px);
+.hero-docs-link .underline {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* Stack container - page layout for splash */
@@ -1565,6 +1558,20 @@ nav.sidebar a[aria-current="page"] {
 
   .hero-command .command-box-wrapper {
     justify-content: center;
+  }
+
+  .hero-command .install-selector {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .hero-command .install-box {
+    flex-shrink: 0;
+  }
+
+  .hero-command .command-area {
+    font-size: 0.7rem;
+    padding: 0.5rem 0.75rem;
   }
 
   .sl-card-grid {

@@ -172,6 +172,10 @@ export default defineConfig({
           items: [{ label: "Contributing", slug: "contributing" }],
         },
       ],
+      expressiveCode: {
+        themes: ["starlight-dark"],
+        useStarlightUiThemeColors: true,
+      },
       customCss: ["./src/styles/custom.css"],
     }),
   ],
