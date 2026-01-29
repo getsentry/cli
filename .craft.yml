@@ -3,8 +3,8 @@ changelog:
   policy: auto
 versioning:
   policy: auto
-preReleaseCommand: bun run script/bump-version.ts --pre
-postReleaseCommand: bun run script/bump-version.ts --post
+preReleaseCommand: node --experimental-strip-types script/bump-version.ts --pre
+postReleaseCommand: node --experimental-strip-types script/bump-version.ts --post
 requireNames:
   - /^sentry-.+$/
   - /^sentry-.*\.tgz$/

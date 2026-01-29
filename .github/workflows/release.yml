@@ -30,8 +30,6 @@ jobs:
       with:
         token: ${{ steps.token.outputs.token }}
         fetch-depth: 0
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v2
     - name: Prepare release
       uses: getsentry/craft@v2
       env:
