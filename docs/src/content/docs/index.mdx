@@ -22,9 +22,12 @@ export const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BAS
 <div class="hero-command">
 <InstallSelector options={[
   { label: "curl", command: "curl https://cli.sentry.dev/install -fsS | bash" },
-  { label: "npm", command: "npm install -g sentry" }
+  { label: "npx", command: "npx sentry@latest" },
+  { label: "npm", command: "npm install -g sentry" },
+  { label: "pnpm", command: "pnpm add -g sentry" },
+  { label: "bun", command: "bun add -g sentry" }
 ]} />
-<a href="./getting-started/" class="hero-docs-link">Or read the <span class="underline">documentation</span></a>
+<a href="./getting-started/" class="hero-docs-link">Or read the <span class="underline">documentation.</span></a>
 </div>
 
 <Terminal background="custom" />
