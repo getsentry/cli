@@ -90,10 +90,17 @@ body {
    ========================================================================== */
 
 header.header {
-  background: rgba(10, 10, 15, 0.8);
+  background: rgba(10, 10, 15, 0.95);
   backdrop-filter: blur(12px);
   border-bottom: none;
-  position: relative;
+}
+
+/* Ensure hamburger menu button is visible and properly styled */
+starlight-menu-button button {
+  background-color: #1a1a1f !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: none !important;
 }
 
 /* Logo size - larger */
@@ -432,12 +439,15 @@ starlight-tabs [role="tabpanel"] {
   flex: 0 0 55%;
   min-height: 420px;
   margin: 0.5rem 0.75rem 0.75rem 0;
+  padding: 10%;
   background-size: cover;
   background-position: center;
   border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .feature-section-inner.reverse .feature-visual {
@@ -476,10 +486,28 @@ starlight-tabs [role="tabpanel"] {
 
   .feature-visual {
     min-height: 340px;
+    margin: 0 0.5rem 0.5rem 0.5rem;
+    padding: 8%;
   }
 
   .feature-text h3 {
     font-size: 1.4rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .feature-visual {
+    margin: 0 0.5rem 0.5rem 0.5rem;
+    min-height: 300px;
+    padding: 6%;
+  }
+
+  .feature-text {
+    padding: 1.25rem;
+  }
+
+  .feature-text h3 {
+    font-size: 1.25rem;
   }
 }
 
@@ -1585,6 +1613,114 @@ nav.sidebar a[aria-current="page"] {
   .why-section ul {
     grid-template-columns: 1fr;
   }
+
+  /* Reset search bar to flow naturally in header */
+  site-search button {
+    position: static !important;
+    transform: none !important;
+    width: auto !important;
+    min-width: auto !important;
+    padding: 0.5rem !important;
+  }
+
+  /* Hide search text and kbd shortcut on mobile */
+  site-search button span,
+  site-search button kbd {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   Force Dark Mode Globally
+   Ensures dark theme even if JS fails or system preference leaks through
+   ========================================================================== */
+
+:root {
+  color-scheme: dark !important;
+}
+
+:root,
+:root[data-theme="light"] {
+  --sl-color-bg: #0a0a0f !important;
+  --sl-color-bg-nav: #0a0a0f !important;
+  --sl-color-bg-sidebar: #0a0a0f !important;
+  --sl-color-black: #0a0a0f !important;
+  --sl-color-white: #ffffff !important;
+  --sl-color-text: rgba(255, 255, 255, 0.9) !important;
+  --sl-color-text-accent: #ffffff !important;
+  --sl-color-gray-1: #e0e0e0 !important;
+  --sl-color-gray-2: #c0c0c0 !important;
+  --sl-color-gray-3: #888888 !important;
+  --sl-color-gray-4: #555555 !important;
+  --sl-color-gray-5: #333333 !important;
+  --sl-color-gray-6: #1a1a1a !important;
+}
+
+/* Mobile Table of Contents - Force Dark Theme */
+mobile-starlight-toc {
+  --sl-color-black: #0a0a0f !important;
+  --sl-color-white: #ffffff !important;
+}
+
+mobile-starlight-toc nav,
+mobile-starlight-toc summary,
+mobile-starlight-toc .toggle {
+  background-color: #0a0a0f !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+mobile-starlight-toc .toggle {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+mobile-starlight-toc .toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+mobile-starlight-toc .display-current {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+mobile-starlight-toc .dropdown {
+  background-color: #0a0a0f !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+mobile-starlight-toc a {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+mobile-starlight-toc a:hover {
+  color: #ffffff !important;
+}
+
+/* Mobile TOC Summary - Direct targeting for light mode override */
+summary#starlight__on-this-page--mobile,
+summary[id="starlight__on-this-page--mobile"] {
+  background-color: #0a0a0f !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  color: #ffffff !important;
+}
+
+summary#starlight__on-this-page--mobile .toggle,
+summary[id="starlight__on-this-page--mobile"] .toggle {
+  background-color: transparent !important;
+  color: #ffffff !important;
+}
+
+summary#starlight__on-this-page--mobile .display-current,
+summary[id="starlight__on-this-page--mobile"] .display-current {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+summary#starlight__on-this-page--mobile svg,
+summary[id="starlight__on-this-page--mobile"] svg,
+summary#starlight__on-this-page--mobile .caret,
+summary[id="starlight__on-this-page--mobile"] .caret {
+  color: rgba(255, 255, 255, 0.5) !important;
+  fill: rgba(255, 255, 255, 0.5) !important;
 }
 
 /* ==========================================================================

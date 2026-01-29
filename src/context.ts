@@ -12,6 +12,7 @@ import { setCommandName } from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
+  readonly process: NodeJS.Process;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
   readonly homeDir: string;
