@@ -113,7 +113,11 @@ export default defineConfig({
                   window.overscrollTimeout = setTimeout(function() {
                     pullDistance = 0;
                     updateOverscroll(0);
-                  }, 300);
+                  }, 5000);
+                } else if (e.deltaY < 0) {
+                  clearTimeout(window.overscrollTimeout);
+                  pullDistance = 0;
+                  updateOverscroll(0);
                 }
               }
               
