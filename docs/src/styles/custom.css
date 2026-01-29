@@ -235,20 +235,37 @@ site-search button kbd {
 
 .hero-docs-link {
   color: rgba(255, 255, 255, 0.7) !important;
-  text-decoration: none;
+  text-decoration: none !important;
   font-weight: 400;
   font-size: 0.9rem;
   transition: color 0.2s ease;
   margin-top: 0.75rem;
+  position: relative;
+  display: inline-block;
+}
+
+.hero-docs-link::after {
+  content: "";
+  position: absolute;
+  bottom: -3px;
+  right: 0;
+  width: 7.5em; /* Width of "documentation." */
+  height: 1px;
+  background: currentColor;
+  transition: width 0.3s ease;
 }
 
 .hero-docs-link:hover {
   color: #fff !important;
 }
 
+.hero-docs-link:hover::after {
+  width: 100%;
+}
+
+/* Remove the static underline from the span since pseudo-element handles it */
 .hero-docs-link .underline {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  text-decoration: none;
 }
 
 /* Stack container - page layout for splash */
