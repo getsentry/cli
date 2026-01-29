@@ -114,7 +114,7 @@ add_to_path() {
 
 XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
 
-current_shell=$(basename "$SHELL")
+current_shell=$(basename "${SHELL:-sh}")
 case $current_shell in
   fish)
     config_files=("$HOME/.config/fish/config.fish")
