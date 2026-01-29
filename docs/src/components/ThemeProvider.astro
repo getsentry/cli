@@ -1,0 +1,23 @@
+---
+// Force dark mode only - completely overrides Starlight's theme system
+---
+
+{/* Matches Starlight's inline pattern to prevent FOUC */}
+<script is:inline>
+	window.StarlightThemeProvider = (() => {
+		// Always force dark mode, ignore localStorage and system preference
+		document.documentElement.dataset.theme = 'dark';
+		// Clear any stored theme preference to prevent future interference
+		if (typeof localStorage !== 'undefined') {
+			localStorage.removeItem('starlight-theme');
+		}
+		return {
+			updatePickers() {
+				// No-op: theme picker is hidden, no updates needed
+			},
+		};
+	})();
+</script>
+
+{/* Empty template to satisfy any code expecting theme icons */}
+<template id="theme-icons"></template>
