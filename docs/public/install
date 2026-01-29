@@ -117,25 +117,25 @@ XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
 current_shell=$(basename "$SHELL")
 case $current_shell in
   fish)
-    config_files="$HOME/.config/fish/config.fish"
+    config_files=("$HOME/.config/fish/config.fish")
     ;;
   zsh)
-    config_files="$HOME/.zshrc $HOME/.zshenv $XDG_CONFIG_HOME/zsh/.zshrc $XDG_CONFIG_HOME/zsh/.zshenv"
+    config_files=("$HOME/.zshrc" "$HOME/.zshenv" "$XDG_CONFIG_HOME/zsh/.zshrc" "$XDG_CONFIG_HOME/zsh/.zshenv")
     ;;
   bash)
-    config_files="$HOME/.bashrc $HOME/.bash_profile $HOME/.profile $XDG_CONFIG_HOME/bash/.bashrc $XDG_CONFIG_HOME/bash/.bash_profile"
+    config_files=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$XDG_CONFIG_HOME/bash/.bashrc" "$XDG_CONFIG_HOME/bash/.bash_profile")
     ;;
   ash|sh)
-    config_files="$HOME/.ashrc $HOME/.profile /etc/profile"
+    config_files=("$HOME/.ashrc" "$HOME/.profile" "/etc/profile")
     ;;
   *)
-    config_files="$HOME/.bashrc $HOME/.bash_profile $HOME/.profile"
+    config_files=("$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile")
     ;;
 esac
 
 if [[ "$no_modify_path" != "true" ]]; then
   config_file=""
-  for file in $config_files; do
+  for file in "${config_files[@]}"; do
     if [[ -f $file ]]; then
       config_file=$file
       break
