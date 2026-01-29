@@ -1,6 +1,16 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.3.3
+
+### Bug Fixes 🐛
+
+- Add shebang to npm bundle for global installs by @BYK in [#101](https://github.com/getsentry/cli/pull/101)
+
+### Documentation 📚
+
+- Add CNAME file for custom domain in build artifact by @BYK in [#102](https://github.com/getsentry/cli/pull/102)
+
 ## 0.3.2
 
 ### Documentation 📚
