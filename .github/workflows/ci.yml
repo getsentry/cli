@@ -9,6 +9,7 @@ on:
       - 'script/**'
       - 'patches/**'
       - 'docs/**'
+      - 'plugins/**'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/ci.yml'
@@ -19,6 +20,7 @@ on:
       - 'script/**'
       - 'patches/**'
       - 'docs/**'
+      - 'plugins/**'
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/ci.yml'
@@ -29,6 +31,102 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-skill:
+    name: Check SKILL.md
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bun install --frozen-lockfile
+      - name: Check SKILL.md
+        id: check
+        run: bun run check:skill
+        continue-on-error: true
+      - name: Post PR comment with suggestion
+        if: steps.check.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the generated content
+            const newContent = fs.readFileSync('plugins/sentry-cli/skills/sentry-cli/SKILL.md', 'utf8');
+            const lines = newContent.split('\n');
+            const lineCount = lines.length;
+
+            // GitHub suggestions have a limit, so we may need to split
+            const MAX_LINES_PER_SUGGESTION = 200;
+
+            const prNumber = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Get the PR's head SHA for the comment
+            const headSha = context.payload.pull_request.head.sha;
+
+            // First, find any existing comments from this bot about SKILL.md
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('SKILL.md needs regeneration')
+            );
+
+            // Build comment body
+            let body = '## 🔄 SKILL.md needs regeneration\n\n';
+            body += 'The CLI commands have changed but `plugins/sentry-cli/skills/sentry-cli/SKILL.md` hasn\'t been updated.\n\n';
+            body += '**To fix:** Run `bun run generate:skill` locally and commit the changes.\n\n';
+
+            // For large files, we can't use suggestion blocks effectively
+            // Instead, provide a collapsible section with the full content
+            if (lineCount > MAX_LINES_PER_SUGGESTION) {
+              body += '<details>\n<summary>Click to see the expected content</summary>\n\n';
+              body += '```markdown\n';
+              body += newContent;
+              body += '\n```\n\n</details>\n';
+            } else {
+              body += 'Or apply this suggestion:\n\n';
+              body += '```suggestion\n';
+              body += newContent;
+              body += '\n```\n';
+            }
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+      - name: Fail if stale
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::SKILL.md is out of date. Run 'bun run generate:skill' locally and commit the changes."
+          exit 1
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
