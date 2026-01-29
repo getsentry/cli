@@ -1,6 +1,23 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.4.1
+
+### Bug Fixes 🐛
+
+#### Release
+
+- Add Node.js 22 setup for type stripping support by @BYK in [#114](https://github.com/getsentry/cli/pull/114)
+- Use Node.js instead of Bun for release scripts by @BYK in [#113](https://github.com/getsentry/cli/pull/113)
+
+#### Other
+
+- Updated the skills plugin details by @MathurAditya724 in [#111](https://github.com/getsentry/cli/pull/111)
+
+### Documentation 📚
+
+- Fix some broken stuff by @MathurAditya724 in [#112](https://github.com/getsentry/cli/pull/112)
+
 ## 0.4.0
 
 ### New Features ✨
