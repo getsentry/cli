@@ -146,19 +146,19 @@ if [[ "$no_modify_path" != "true" ]]; then
     echo -e "${MUTED}No config file found. Manually add to PATH:${NC}"
     case $current_shell in
       fish)
-        echo "  fish_add_path $install_dir"
+        echo "  fish_add_path \"$install_dir\""
         ;;
       *)
-        echo "  export PATH=$install_dir:\$PATH"
+        echo "  export PATH=\"$install_dir\":\$PATH"
         ;;
     esac
   else
     case $current_shell in
       fish)
-        add_to_path "$config_file" "fish_add_path $install_dir"
+        add_to_path "$config_file" "fish_add_path \"$install_dir\""
         ;;
       *)
-        add_to_path "$config_file" "export PATH=$install_dir:\$PATH"
+        add_to_path "$config_file" "export PATH=\"$install_dir\":\$PATH"
         ;;
     esac
   fi
