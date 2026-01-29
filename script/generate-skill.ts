@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Generate SKILL.md from Stricli Command Metadata
+ * Generate SKILL.md from Stricli Command Metadata and Docs
  *
- * Introspects the CLI's route tree and generates structured documentation
- * for AI agents (Claude Code, Cursor, etc.)
+ * Introspects the CLI's route tree and merges with documentation
+ * to generate structured documentation for AI agents.
  *
  * Usage:
  *   bun run script/generate-skill.ts
@@ -15,9 +15,21 @@
 import { routes } from "../src/app.js";
 
 const OUTPUT_PATH = "plugins/sentry-cli/skills/sentry-cli/SKILL.md";
+const DOCS_PATH = "docs/src/content/docs";
+
+/** Regex to match YAML frontmatter at the start of a file */
+const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---\n/;
+
+/** Regex to match code blocks with optional language specifier */
+const CODE_BLOCK_REGEX = /```(\w*)\n([\s\S]*?)```/g;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for Stricli Route Introspection
+//
+// Note: While @stricli/core exports RouteMap and Command types, they require
+// complex generic parameters (CommandContext) and don't export internal types
+// like RouteMapEntry or FlagParameter. These simplified types are purpose-built
+// for introspection and documentation generation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type RouteMapEntry = {
@@ -63,6 +75,273 @@ type FlagDef = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Markdown Parsing Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Strip YAML frontmatter from markdown content
+ */
+function stripFrontmatter(markdown: string): string {
+  const match = markdown.match(FRONTMATTER_REGEX);
+  return match ? markdown.slice(match[0].length) : markdown;
+}
+
+/**
+ * Strip MDX/Astro import statements and JSX components
+ */
+function stripMdxComponents(markdown: string): string {
+  // Remove import statements
+  let result = markdown.replace(/^import\s+.*?;\s*$/gm, "");
+
+  // Remove export statements
+  result = result.replace(/^export\s+.*?;\s*$/gm, "");
+
+  // Remove JSX-style components (both self-closing and with children)
+  // This handles <Component ... /> and <Component>...</Component>
+  result = result.replace(/<[A-Z][a-zA-Z]*[^>]*\/>/g, "");
+  result = result.replace(
+    /<[A-Z][a-zA-Z]*[^>]*>[\s\S]*?<\/[A-Z][a-zA-Z]*>/g,
+    ""
+  );
+
+  // Clean up excessive blank lines
+  result = result.replace(/\n{3,}/g, "\n\n");
+
+  return result.trim();
+}
+
+/**
+ * Extract a specific section from markdown by heading
+ */
+function extractSection(markdown: string, heading: string): string | null {
+  // Match heading at any level (##, ###, etc.)
+  const headingPattern = new RegExp(
+    `^(#{1,6})\\s+${escapeRegex(heading)}\\s*$`,
+    "m"
+  );
+  const match = markdown.match(headingPattern);
+
+  if (!match || match.index === undefined) {
+    return null;
+  }
+
+  const headingLevel = match[1].length;
+  const startIndex = match.index + match[0].length;
+
+  // Find the next heading of same or higher level
+  const nextHeadingPattern = new RegExp(`^#{1,${headingLevel}}\\s+`, "m");
+  const remainingContent = markdown.slice(startIndex);
+  const nextMatch = remainingContent.match(nextHeadingPattern);
+
+  const endIndex = nextMatch?.index
+    ? startIndex + nextMatch.index
+    : markdown.length;
+
+  return markdown.slice(startIndex, endIndex).trim();
+}
+
+/**
+ * Extract all code blocks from markdown
+ */
+function extractCodeBlocks(
+  markdown: string,
+  language?: string
+): { code: string; lang: string }[] {
+  const blocks: { code: string; lang: string }[] = [];
+  // Create a new regex instance for each call to reset lastIndex
+  const pattern = new RegExp(CODE_BLOCK_REGEX.source, CODE_BLOCK_REGEX.flags);
+
+  let match = pattern.exec(markdown);
+  while (match !== null) {
+    const lang = match[1] || "";
+    const code = match[2].trim();
+    if (!language || lang === language) {
+      blocks.push({ code, lang });
+    }
+    match = pattern.exec(markdown);
+  }
+
+  return blocks;
+}
+
+/**
+ * Escape special regex characters in a string
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Documentation Loading
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Load and parse a documentation file
+ */
+async function loadDoc(relativePath: string): Promise<string | null> {
+  const fullPath = `${DOCS_PATH}/${relativePath}`;
+  const file = Bun.file(fullPath);
+
+  if (!(await file.exists())) {
+    return null;
+  }
+
+  const content = await file.text();
+  return stripMdxComponents(stripFrontmatter(content));
+}
+
+/**
+ * Load prerequisites (installation + authentication) from getting-started.mdx
+ */
+async function loadPrerequisites(): Promise<string> {
+  const content = await loadDoc("getting-started.mdx");
+
+  if (!content) {
+    return getDefaultPrerequisites();
+  }
+
+  const lines: string[] = [];
+  lines.push("## Prerequisites");
+  lines.push("");
+  lines.push("The CLI must be installed and authenticated before use.");
+  lines.push("");
+
+  // Extract Installation section
+  const installSection = extractSection(content, "Installation");
+  if (installSection) {
+    lines.push("### Installation");
+    lines.push("");
+    // Get the bash code blocks from install section
+    const codeBlocks = extractCodeBlocks(installSection, "bash");
+    if (codeBlocks.length > 0) {
+      lines.push("```bash");
+      // Include install script and npm as primary options
+      lines.push("# Install script");
+      lines.push("curl https://cli.sentry.dev/install -fsS | bash");
+      lines.push("");
+      lines.push("# Or use npm/pnpm/bun");
+      lines.push("npm install -g sentry");
+      lines.push("```");
+    }
+  }
+
+  lines.push("");
+
+  // Extract Authentication section
+  const authSection = extractSection(content, "Authentication");
+  if (authSection) {
+    lines.push("### Authentication");
+    lines.push("");
+    const codeBlocks = extractCodeBlocks(authSection, "bash");
+    if (codeBlocks.length > 0) {
+      lines.push("```bash");
+      for (const block of codeBlocks) {
+        lines.push(block.code);
+      }
+      lines.push("```");
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Default prerequisites if docs aren't available
+ */
+function getDefaultPrerequisites(): string {
+  return `## Prerequisites
+
+The CLI must be installed and authenticated before use.
+
+### Installation
+
+\`\`\`bash
+# Install script
+curl https://cli.sentry.dev/install -fsS | bash
+
+# Or use npm/pnpm/bun
+npm install -g sentry
+\`\`\`
+
+### Authentication
+
+\`\`\`bash
+# OAuth login (recommended)
+sentry auth login
+
+# Or use an API token
+sentry auth login --token YOUR_SENTRY_API_TOKEN
+
+# Check auth status
+sentry auth status
+\`\`\``;
+}
+
+/** Regex to match command sections in docs (### `sentry ...`) */
+const COMMAND_SECTION_REGEX =
+  /###\s+`(sentry\s+\S+(?:\s+\S+)?)`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
+
+/**
+ * Load examples for a specific command from docs
+ */
+async function loadCommandExamples(
+  commandGroup: string
+): Promise<Map<string, string[]>> {
+  const docContent = await loadDoc(`commands/${commandGroup}.md`);
+  const examples = new Map<string, string[]>();
+
+  if (!docContent) {
+    return examples;
+  }
+
+  // Find all command sections (### `sentry ...`)
+  const commandPattern = new RegExp(
+    COMMAND_SECTION_REGEX.source,
+    COMMAND_SECTION_REGEX.flags
+  );
+  let match = commandPattern.exec(docContent);
+
+  while (match !== null) {
+    const commandPath = match[1];
+    const sectionContent = match[2];
+
+    // Extract bash code blocks from this section
+    const codeBlocks = extractCodeBlocks(sectionContent, "bash");
+    if (codeBlocks.length > 0) {
+      examples.set(
+        commandPath,
+        codeBlocks.map((b) => b.code)
+      );
+    }
+    match = commandPattern.exec(docContent);
+  }
+
+  return examples;
+}
+
+/**
+ * Load supplementary content from commands/index.md
+ */
+async function loadCommandsOverview(): Promise<{
+  jsonOutput: string;
+  webFlag: string;
+} | null> {
+  const content = await loadDoc("commands/index.md");
+
+  if (!content) {
+    return null;
+  }
+
+  const jsonSection = extractSection(content, "JSON Output");
+  const webSection = extractSection(content, "Opening in Browser");
+
+  return {
+    jsonOutput: jsonSection || "",
+    webFlag: webSection || "",
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Route Introspection
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -81,6 +360,7 @@ type CommandInfo = {
   flags: FlagInfo[];
   positional: string;
   aliases: Record<string, string>;
+  examples: string[];
 };
 
 type FlagInfo = {
@@ -141,7 +421,11 @@ function extractFlags(flags: Record<string, FlagDef> | undefined): FlagInfo[] {
 /**
  * Build a CommandInfo from a Command
  */
-function buildCommandInfo(cmd: Command, path: string): CommandInfo {
+function buildCommandInfo(
+  cmd: Command,
+  path: string,
+  examples: string[] = []
+): CommandInfo {
   return {
     path,
     brief: cmd.brief,
@@ -149,6 +433,7 @@ function buildCommandInfo(cmd: Command, path: string): CommandInfo {
     flags: extractFlags(cmd.parameters.flags),
     positional: getPositionalString(cmd.parameters.positional),
     aliases: cmd.parameters.aliases ?? {},
+    examples,
   };
 }
 
@@ -157,7 +442,8 @@ function buildCommandInfo(cmd: Command, path: string): CommandInfo {
  */
 function extractRouteGroupCommands(
   routeMap: RouteMap,
-  routeName: string
+  routeName: string,
+  docExamples: Map<string, string[]>
 ): CommandInfo[] {
   const commands: CommandInfo[] = [];
 
@@ -169,7 +455,8 @@ function extractRouteGroupCommands(
     const subTarget = subEntry.target;
     if (isCommand(subTarget)) {
       const path = `sentry ${routeName} ${subEntry.name.original}`;
-      commands.push(buildCommandInfo(subTarget, path));
+      const examples = docExamples.get(path) ?? [];
+      commands.push(buildCommandInfo(subTarget, path, examples));
     }
   }
 
@@ -179,7 +466,7 @@ function extractRouteGroupCommands(
 /**
  * Walk the route tree and extract command information
  */
-function extractRoutes(routeMap: RouteMap): RouteInfo[] {
+async function extractRoutes(routeMap: RouteMap): Promise<RouteInfo[]> {
   const result: RouteInfo[] = [];
 
   for (const entry of routeMap.getAllEntries()) {
@@ -190,17 +477,22 @@ function extractRoutes(routeMap: RouteMap): RouteInfo[] {
     const routeName = entry.name.original;
     const target = entry.target;
 
+    // Load examples from docs for this route
+    const docExamples = await loadCommandExamples(routeName);
+
     if (isRouteMap(target)) {
       result.push({
         name: routeName,
         brief: target.brief,
-        commands: extractRouteGroupCommands(target, routeName),
+        commands: extractRouteGroupCommands(target, routeName, docExamples),
       });
     } else if (isCommand(target)) {
+      const path = `sentry ${routeName}`;
+      const examples = docExamples.get(path) ?? [];
       result.push({
         name: routeName,
         brief: target.brief,
-        commands: [buildCommandInfo(target, `sentry ${routeName}`)],
+        commands: [buildCommandInfo(target, path, examples)],
       });
     }
   }
@@ -220,44 +512,6 @@ function generateFrontMatter(): string {
 name: sentry-cli
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 ---`;
-}
-
-/**
- * Generate the prerequisites section
- */
-function generatePrerequisites(): string {
-  return `## Prerequisites
-
-The CLI must be installed and authenticated before use.
-
-### Installation
-
-\`\`\`bash
-# npm
-npm install -g sentry
-
-# pnpm
-pnpm add -g sentry
-
-# bun
-bun add -g sentry
-
-# Or run without installing
-npx sentry --help
-\`\`\`
-
-### Authentication
-
-\`\`\`bash
-# OAuth login (recommended)
-sentry auth login
-
-# Or use an API token
-sentry auth login --token YOUR_SENTRY_API_TOKEN
-
-# Check auth status
-sentry auth status
-\`\`\``;
 }
 
 /**
@@ -320,6 +574,17 @@ function generateCommandDoc(cmd: CommandInfo): string {
     for (const flag of visibleFlags) {
       lines.push(`- \`${formatFlag(flag, cmd.aliases)}\``);
     }
+  }
+
+  // Examples section (from docs)
+  if (cmd.examples.length > 0) {
+    lines.push("");
+    lines.push("**Examples:**");
+    lines.push("");
+    lines.push("```bash");
+    // Join examples with blank lines between them
+    lines.push(cmd.examples.join("\n\n"));
+    lines.push("```");
   }
 
   return lines.join("\n");
@@ -389,131 +654,47 @@ function generateCommandsSection(routeInfos: RouteInfo[]): string {
 }
 
 /**
- * Generate the Context Auto-Detection section
+ * Generate the Output Formats section from docs
  */
-function generateContextSection(): string {
-  return `## Context Auto-Detection
+async function generateOutputFormatsSection(): Promise<string> {
+  const overview = await loadCommandsOverview();
 
-The CLI automatically detects organization and project context from:
+  const lines: string[] = [];
+  lines.push("## Output Formats");
+  lines.push("");
 
-1. **CLI flags**: \`--org\` and \`--project\`
-2. **Environment variables**: \`SENTRY_DSN\`
-3. **Source code scanning**: Finds DSNs in your codebase
+  if (overview?.jsonOutput) {
+    lines.push("### JSON Output");
+    lines.push("");
+    lines.push(overview.jsonOutput);
+    lines.push("");
+  } else {
+    lines.push(
+      "Most commands support `--json` flag for JSON output, making it easy to integrate with other tools."
+    );
+    lines.push("");
+  }
 
-This means in most projects, you can simply run:
+  if (overview?.webFlag) {
+    lines.push("### Opening in Browser");
+    lines.push("");
+    lines.push(overview.webFlag);
+  } else {
+    lines.push(
+      "View commands support `-w` or `--web` flag to open the resource in your browser."
+    );
+  }
 
-\`\`\`bash
-sentry issue list    # Uses auto-detected org/project
-sentry project view  # Shows detected project(s)
-\`\`\``;
-}
-
-/**
- * Generate the Monorepo Support section
- */
-function generateMonorepoSection(): string {
-  return `## Monorepo Support
-
-The CLI detects multiple Sentry projects in monorepos:
-
-\`\`\`bash
-# Lists issues from all detected projects
-sentry issue list
-
-# Shows details for all detected projects
-sentry project view
-\`\`\`
-
-In multi-project mode, issues are displayed with aliases (e.g., \`f-G\`) for disambiguation.
-Use these aliases with commands like \`sentry issue view f-G\`.`;
-}
-
-/**
- * Generate the Common Workflows section
- */
-function generateWorkflowsSection(): string {
-  return `## Common Workflows
-
-### Investigate an Issue
-
-\`\`\`bash
-# List recent unresolved issues
-sentry issue list --query "is:unresolved" --sort date
-
-# View issue details
-sentry issue view PROJ-ABC
-
-# Get AI root cause analysis
-sentry issue explain PROJ-ABC
-
-# Open in browser for full context
-sentry issue view PROJ-ABC -w
-\`\`\`
-
-### Check Project Health
-
-\`\`\`bash
-# View project configuration
-sentry project view my-project --json
-
-# List recent issues sorted by frequency
-sentry issue list --sort freq --limit 10
-\`\`\`
-
-### Resolve Issues via API
-
-\`\`\`bash
-# Resolve a single issue
-sentry api issues/123/ -X PUT -F status=resolved
-
-# Ignore an issue
-sentry api issues/123/ -X PUT -F status=ignored -F statusDetails[ignoreDuration]=10080
-\`\`\`
-
-### Export Data
-
-\`\`\`bash
-# Export issues to JSON
-sentry issue list --json > issues.json
-
-# Export organization data
-sentry org view my-org --json > org.json
-\`\`\``;
-}
-
-/**
- * Generate the Output Formats section
- */
-function generateOutputFormatsSection(): string {
-  return `## Output Formats
-
-All commands support multiple output formats:
-
-- **Default**: Human-readable formatted output
-- **\`--json\`**: JSON output for scripting/automation
-- **\`-w, --web\`**: Open in browser (where supported)`;
-}
-
-/**
- * Generate the Error Resolution section
- */
-function generateErrorResolutionSection(): string {
-  return `## Error Resolution
-
-**"Not authenticated"**: Run \`sentry auth login\`
-
-**"Organization not found"**: Specify with \`--org\` flag or check \`sentry org list\`
-
-**"Project not found"**: Specify with \`--project\` flag or check \`sentry project list\`
-
-**"No project detected"**: The CLI couldn't find a Sentry DSN in your codebase. Use explicit flags: \`--org my-org --project my-project\``;
+  return lines.join("\n");
 }
 
 /**
  * Generate the complete SKILL.md content
  */
-function generateSkillMarkdown(routeMap: RouteMap): string {
-  const routeInfos = extractRoutes(routeMap);
+async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
+  const routeInfos = await extractRoutes(routeMap);
+  const prerequisites = await loadPrerequisites();
+  const outputFormats = await generateOutputFormatsSection();
 
   const sections = [
     generateFrontMatter(),
@@ -522,18 +703,10 @@ function generateSkillMarkdown(routeMap: RouteMap): string {
     "",
     "Help users interact with Sentry from the command line using the `sentry` CLI.",
     "",
-    generatePrerequisites(),
+    prerequisites,
     "",
     generateCommandsSection(routeInfos),
-    generateContextSection(),
-    "",
-    generateMonorepoSection(),
-    "",
-    generateWorkflowsSection(),
-    "",
-    generateOutputFormatsSection(),
-    "",
-    generateErrorResolutionSection(),
+    outputFormats,
     "",
   ];
 
@@ -544,7 +717,7 @@ function generateSkillMarkdown(routeMap: RouteMap): string {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-const content = generateSkillMarkdown(routes as unknown as RouteMap);
+const content = await generateSkillMarkdown(routes as unknown as RouteMap);
 await Bun.write(OUTPUT_PATH, content);
 
 console.log(`Generated ${OUTPUT_PATH}`);

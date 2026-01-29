@@ -14,30 +14,20 @@ The CLI must be installed and authenticated before use.
 ### Installation
 
 ```bash
-# npm
+# Install script
+curl https://cli.sentry.dev/install -fsS | bash
+
+# Or use npm/pnpm/bun
 npm install -g sentry
-
-# pnpm
-pnpm add -g sentry
-
-# bun
-bun add -g sentry
-
-# Or run without installing
-npx sentry --help
 ```
 
 ### Authentication
 
 ```bash
-# OAuth login (recommended)
 sentry auth login
-
-# Or use an API token
 sentry auth login --token YOUR_SENTRY_API_TOKEN
-
-# Check auth status
 sentry auth status
+sentry auth logout
 ```
 
 ## Available Commands
@@ -54,9 +44,25 @@ Authenticate with Sentry
 - `--token <value> - Authenticate using an API token instead of OAuth`
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
 
+**Examples:**
+
+```bash
+# OAuth device flow (recommended)
+sentry auth login
+
+# Using an API token
+sentry auth login --token YOUR_TOKEN
+```
+
 #### `sentry auth logout`
 
 Log out of Sentry
+
+**Examples:**
+
+```bash
+sentry auth logout
+```
 
 #### `sentry auth refresh`
 
@@ -66,12 +72,24 @@ Refresh your authentication token
 - `--json - Output result as JSON`
 - `--force - Force refresh even if token is still valid`
 
+**Examples:**
+
+```bash
+sentry auth refresh
+```
+
 #### `sentry auth status`
 
 View authentication status
 
 **Flags:**
 - `--showToken - Show the stored token (masked by default)`
+
+**Examples:**
+
+```bash
+sentry auth status
+```
 
 ### Org
 
@@ -85,6 +103,14 @@ List organizations
 - `--limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
+**Examples:**
+
+```bash
+sentry org list
+
+sentry org list --json
+```
+
 #### `sentry org view <arg0>`
 
 View details of an organization
@@ -92,6 +118,16 @@ View details of an organization
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+sentry org view <org-slug>
+
+sentry org view my-org
+
+sentry org view my-org -w
+```
 
 ### Project
 
@@ -107,6 +143,19 @@ List projects
 - `--json - Output JSON`
 - `--platform <value> - Filter by platform (e.g., javascript, python)`
 
+**Examples:**
+
+```bash
+# List all projects
+sentry project list
+
+# List projects in a specific organization
+sentry project list <org-slug>
+
+# Filter by platform
+sentry project list --platform javascript
+```
+
 #### `sentry project view <arg0>`
 
 View details of a project
@@ -115,6 +164,16 @@ View details of a project
 - `--org <value> - Organization slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+sentry project view <project-slug>
+
+sentry project view frontend --org my-org
+
+sentry project view frontend -w
+```
 
 ### Issue
 
@@ -131,6 +190,16 @@ List issues in a project
 - `--limit <value> - Maximum number of issues to return - (default: "10")`
 - `--sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output as JSON`
+
+**Examples:**
+
+```bash
+sentry issue list --org <org-slug> --project <project-slug>
+
+sentry issue list --org my-org --project frontend
+
+sentry issue list --org my-org --project frontend --query "TypeError"
+```
 
 #### `sentry issue explain <arg0>`
 
@@ -163,6 +232,20 @@ View details of a specific issue
 - `-w, --web - Open in browser`
 - `--spans <value> - Show span tree with N levels of nesting depth`
 
+**Examples:**
+
+```bash
+# By issue ID
+sentry issue view <issue-id>
+
+# By short ID
+sentry issue view <short-id>
+
+sentry issue view FRONT-ABC
+
+sentry issue view FRONT-ABC -w
+```
+
 ### Event
 
 View Sentry events
@@ -177,6 +260,16 @@ View details of a specific event
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Show span tree from the event's trace`
+
+**Examples:**
+
+```bash
+sentry event view <event-id>
+
+sentry event view abc123def456
+
+sentry event view abc123def456 -w
+```
 
 ### Api
 
@@ -196,98 +289,63 @@ Make an authenticated API request
 - `--silent - Do not print the response body`
 - `--verbose - Include full HTTP request and response in the output`
 
-## Context Auto-Detection
-
-The CLI automatically detects organization and project context from:
-
-1. **CLI flags**: `--org` and `--project`
-2. **Environment variables**: `SENTRY_DSN`
-3. **Source code scanning**: Finds DSNs in your codebase
-
-This means in most projects, you can simply run:
+**Examples:**
 
 ```bash
-sentry issue list    # Uses auto-detected org/project
-sentry project view  # Shows detected project(s)
-```
+sentry api <endpoint> [options]
 
-## Monorepo Support
+# List organizations
+sentry api /organizations/
 
-The CLI detects multiple Sentry projects in monorepos:
+# Get a specific organization
+sentry api /organizations/my-org/
 
-```bash
-# Lists issues from all detected projects
-sentry issue list
+# Get project details
+sentry api /projects/my-org/my-project/
 
-# Shows details for all detected projects
-sentry project view
-```
+# Create a new project
+sentry api /teams/my-org/my-team/projects/ \
+  --method POST \
+  --field name="New Project" \
+  --field platform=javascript
 
-In multi-project mode, issues are displayed with aliases (e.g., `f-G`) for disambiguation.
-Use these aliases with commands like `sentry issue view f-G`.
+# Update an issue status
+sentry api /issues/123456789/ \
+  --method PUT \
+  --field status=resolved
 
-## Common Workflows
+# Assign an issue
+sentry api /issues/123456789/ \
+  --method PUT \
+  --field assignedTo="user@example.com"
 
-### Investigate an Issue
+# Delete a project
+sentry api /projects/my-org/my-project/ \
+  --method DELETE
 
-```bash
-# List recent unresolved issues
-sentry issue list --query "is:unresolved" --sort date
+sentry api /organizations/ \
+  --header "X-Custom-Header:value"
 
-# View issue details
-sentry issue view PROJ-ABC
+sentry api /organizations/ --include
 
-# Get AI root cause analysis
-sentry issue explain PROJ-ABC
-
-# Open in browser for full context
-sentry issue view PROJ-ABC -w
-```
-
-### Check Project Health
-
-```bash
-# View project configuration
-sentry project view my-project --json
-
-# List recent issues sorted by frequency
-sentry issue list --sort freq --limit 10
-```
-
-### Resolve Issues via API
-
-```bash
-# Resolve a single issue
-sentry api issues/123/ -X PUT -F status=resolved
-
-# Ignore an issue
-sentry api issues/123/ -X PUT -F status=ignored -F statusDetails[ignoreDuration]=10080
-```
-
-### Export Data
-
-```bash
-# Export issues to JSON
-sentry issue list --json > issues.json
-
-# Export organization data
-sentry org view my-org --json > org.json
+# Get all issues (automatically follows pagination)
+sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
 ## Output Formats
 
-All commands support multiple output formats:
+### JSON Output
 
-- **Default**: Human-readable formatted output
-- **`--json`**: JSON output for scripting/automation
-- **`-w, --web`**: Open in browser (where supported)
+Most list and view commands support `--json` flag for JSON output, making it easy to integrate with other tools:
 
-## Error Resolution
+```bash
+sentry org list --json | jq '.[] | .slug'
+```
 
-**"Not authenticated"**: Run `sentry auth login`
+### Opening in Browser
 
-**"Organization not found"**: Specify with `--org` flag or check `sentry org list`
+View commands support `-w` or `--web` flag to open the resource in your browser:
 
-**"Project not found"**: Specify with `--project` flag or check `sentry project list`
-
-**"No project detected"**: The CLI couldn't find a Sentry DSN in your codebase. Use explicit flags: `--org my-org --project my-project`
+```bash
+sentry issue view PROJ-123 -w
+```
