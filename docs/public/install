@@ -14,6 +14,7 @@ Usage: install [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.2.0)
+        --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
@@ -22,6 +23,7 @@ EOF
 }
 
 requested_version=""
+no_modify_path=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
         echo -e "${RED}Error: --version requires a version argument${NC}"
         exit 1
       fi
+      ;;
+    --no-modify-path)
+      no_modify_path=true
+      shift
       ;;
     *) shift ;;
   esac
@@ -89,14 +95,95 @@ echo -e "${MUTED}Downloading sentry v${version}...${NC}"
 curl -fsSL --progress-bar "$url" -o "$install_path"
 chmod +x "$install_path"
 
+# Add to PATH
+add_to_path() {
+  local config_file=$1
+  local command=$2
+
+  if grep -Fxq "$command" "$config_file"; then
+    echo -e "${MUTED}PATH already configured in ${NC}$config_file"
+  elif [[ -w $config_file ]]; then
+    echo -e "\n# sentry" >> "$config_file"
+    echo "$command" >> "$config_file"
+    echo -e "${MUTED}Added ${NC}sentry ${MUTED}to PATH in ${NC}$config_file"
+  else
+    echo -e "${MUTED}Manually add the directory to $config_file (or similar):${NC}"
+    echo "  $command"
+  fi
+}
+
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+
+current_shell=$(basename "${SHELL:-sh}")
+case $current_shell in
+  fish)
+    config_files=("$XDG_CONFIG_HOME/fish/config.fish")
+    ;;
+  zsh)
+    config_files=("$HOME/.zshrc" "$HOME/.zshenv" "$XDG_CONFIG_HOME/zsh/.zshrc" "$XDG_CONFIG_HOME/zsh/.zshenv")
+    ;;
+  bash)
+    config_files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile" "$XDG_CONFIG_HOME/bash/.bash_profile" "$XDG_CONFIG_HOME/bash/.bashrc")
+    ;;
+  ash|sh)
+    config_files=("$HOME/.profile" "/etc/profile")
+    ;;
+  *)
+    config_files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile")
+    ;;
+esac
+
+if [[ "$no_modify_path" != "true" ]]; then
+  config_file=""
+  for file in "${config_files[@]}"; do
+    if [[ -f $file ]]; then
+      config_file=$file
+      break
+    fi
+  done
+
+  if [[ -z $config_file ]]; then
+    echo -e "${MUTED}No config file found. Manually add to PATH:${NC}"
+    case $current_shell in
+      fish)
+        echo "  fish_add_path \"$install_dir\""
+        ;;
+      *)
+        echo "  export PATH=\"$install_dir\":\$PATH"
+        ;;
+    esac
+  else
+    case $current_shell in
+      fish)
+        add_to_path "$config_file" "fish_add_path \"$install_dir\""
+        ;;
+      *)
+        add_to_path "$config_file" "export PATH=\"$install_dir\":\$PATH"
+        ;;
+    esac
+  fi
+else
+  echo -e "${MUTED}Skipping PATH modification. Manually add to your shell config:${NC}"
+  case $current_shell in
+    fish)
+      echo "  fish_add_path \"$install_dir\""
+      ;;
+    *)
+      echo "  export PATH=\"$install_dir\":\$PATH"
+      ;;
+  esac
+fi
+
+if [[ -n "${GITHUB_ACTIONS:-}" ]] && [[ "${GITHUB_ACTIONS}" == "true" ]] && [[ -n "${GITHUB_PATH:-}" ]]; then
+  echo "$install_dir" >> "$GITHUB_PATH"
+  echo -e "${MUTED}Added to \$GITHUB_PATH${NC}"
+fi
+
 # Success message
 echo ""
 echo -e "Installed ${NC}sentry v${version}${MUTED} to ${NC}${install_path}"
 echo ""
-echo -e "${MUTED}Add to PATH (add to ~/.zshrc or ~/.bashrc):${NC}"
-echo "  export PATH=\"\$HOME/.sentry/bin:\$PATH\""
-echo ""
-echo -e "${MUTED}Get started:${NC}"
+echo -e "${MUTED}Get started (restart your shell or open a new terminal):${NC}"
 echo "  sentry --help"
 echo ""
 echo -e "${MUTED}https://cli.sentry.dev${NC}"
