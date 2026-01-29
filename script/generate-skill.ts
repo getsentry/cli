@@ -23,6 +23,9 @@ const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---\n/;
 /** Regex to match code blocks with optional language specifier */
 const CODE_BLOCK_REGEX = /```(\w*)\n([\s\S]*?)```/g;
 
+/** Regex to extract npm command from PackageManagerCode Astro component (handles multi-line) */
+const PACKAGE_MANAGER_REGEX = /<PackageManagerCode[\s\S]*?npm="([^"]+)"/;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for Stricli Route Introspection
 //
@@ -191,14 +194,86 @@ async function loadDoc(relativePath: string): Promise<string | null> {
 }
 
 /**
+ * Extract npm command from PackageManagerCode Astro component
+ */
+function extractPackageManagerCommand(rawContent: string): string | null {
+  const match = rawContent.match(PACKAGE_MANAGER_REGEX);
+  return match ? match[1] : null;
+}
+
+/**
+ * Generate installation section from docs content
+ */
+function generateInstallSection(
+  installSection: string,
+  rawContent: string
+): string[] {
+  const lines: string[] = [];
+  lines.push("### Installation");
+  lines.push("");
+
+  // Get bash code blocks (install script)
+  const codeBlocks = extractCodeBlocks(installSection, "bash");
+
+  // Also extract npm command from PackageManagerCode component in raw content
+  const npmCommand = extractPackageManagerCommand(rawContent);
+
+  if (codeBlocks.length > 0 || npmCommand) {
+    lines.push("```bash");
+
+    // Add install script from code blocks
+    for (const block of codeBlocks) {
+      lines.push(block.code);
+    }
+
+    // Add package manager command if found
+    if (npmCommand) {
+      if (codeBlocks.length > 0) {
+        lines.push("");
+        lines.push("# Or install via npm/pnpm/bun");
+      }
+      lines.push(npmCommand);
+    }
+
+    lines.push("```");
+  }
+
+  return lines;
+}
+
+/**
+ * Generate authentication section from docs content
+ */
+function generateAuthSection(authSection: string): string[] {
+  const lines: string[] = [];
+  lines.push("### Authentication");
+  lines.push("");
+
+  const codeBlocks = extractCodeBlocks(authSection, "bash");
+  if (codeBlocks.length > 0) {
+    lines.push("```bash");
+    for (const block of codeBlocks) {
+      lines.push(block.code);
+    }
+    lines.push("```");
+  }
+
+  return lines;
+}
+
+/**
  * Load prerequisites (installation + authentication) from getting-started.mdx
  */
 async function loadPrerequisites(): Promise<string> {
-  const content = await loadDoc("getting-started.mdx");
+  const fullPath = `${DOCS_PATH}/getting-started.mdx`;
+  const file = Bun.file(fullPath);
 
-  if (!content) {
+  if (!(await file.exists())) {
     return getDefaultPrerequisites();
   }
+
+  const rawContent = await file.text();
+  const content = stripMdxComponents(stripFrontmatter(rawContent));
 
   const lines: string[] = [];
   lines.push("## Prerequisites");
@@ -206,40 +281,18 @@ async function loadPrerequisites(): Promise<string> {
   lines.push("The CLI must be installed and authenticated before use.");
   lines.push("");
 
-  // Extract Installation section
+  // Extract and add Installation section
   const installSection = extractSection(content, "Installation");
   if (installSection) {
-    lines.push("### Installation");
-    lines.push("");
-    // Get the bash code blocks from install section
-    const codeBlocks = extractCodeBlocks(installSection, "bash");
-    if (codeBlocks.length > 0) {
-      lines.push("```bash");
-      // Include install script and npm as primary options
-      lines.push("# Install script");
-      lines.push("curl https://cli.sentry.dev/install -fsS | bash");
-      lines.push("");
-      lines.push("# Or use npm/pnpm/bun");
-      lines.push("npm install -g sentry");
-      lines.push("```");
-    }
+    lines.push(...generateInstallSection(installSection, rawContent));
   }
 
   lines.push("");
 
-  // Extract Authentication section
+  // Extract and add Authentication section
   const authSection = extractSection(content, "Authentication");
   if (authSection) {
-    lines.push("### Authentication");
-    lines.push("");
-    const codeBlocks = extractCodeBlocks(authSection, "bash");
-    if (codeBlocks.length > 0) {
-      lines.push("```bash");
-      for (const block of codeBlocks) {
-        lines.push(block.code);
-      }
-      lines.push("```");
-    }
+    lines.push(...generateAuthSection(authSection));
   }
 
   return lines.join("\n");

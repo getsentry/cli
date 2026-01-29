@@ -14,10 +14,9 @@ The CLI must be installed and authenticated before use.
 ### Installation
 
 ```bash
-# Install script
 curl https://cli.sentry.dev/install -fsS | bash
 
-# Or use npm/pnpm/bun
+# Or install via npm/pnpm/bun
 npm install -g sentry
 ```
 
