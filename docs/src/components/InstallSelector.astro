@@ -251,6 +251,16 @@ const defaultOption = highlightedOptions[defaultIndex];
     background: rgba(255, 255, 255, 0.1);
     font-weight: 500;
   }
+
+  .dropdown-option:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .dropdown-option:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.4);
+    outline-offset: -2px;
+  }
 </style>
 
 <script is:inline>
@@ -263,52 +273,157 @@ const defaultOption = highlightedOptions[defaultIndex];
         const commandText = selector.querySelector('.command-text');
         const copyBtn = selector.querySelector('.copy-btn');
         const options = selector.querySelectorAll('.dropdown-option');
+        const optionsArray = Array.from(options);
 
         if (!trigger || !installBox) return;
 
-        // Toggle dropdown
-        trigger.addEventListener('click', function(e) {
-          e.stopPropagation();
-          const isOpen = installBox.classList.contains('open');
+        /**
+         * Selects an option: updates UI, closes dropdown, returns focus to trigger.
+         */
+        function selectOption(option) {
+          const newLabel = option.getAttribute('data-label');
+          const newCommand = option.getAttribute('data-command');
+          const newHighlighted = option.getAttribute('data-highlighted');
           
-          // Close all other dropdowns
+          if (label && newLabel) label.textContent = newLabel;
+          if (commandText && newHighlighted) {
+            commandText.innerHTML = newHighlighted;
+          }
+          if (commandText && newCommand) {
+            commandText.setAttribute('data-command', newCommand);
+          }
+          if (copyBtn && newCommand) {
+            copyBtn.setAttribute('data-command', newCommand);
+          }
+          
+          // Update selected state
+          options.forEach(function(opt) {
+            opt.classList.remove('selected');
+            opt.setAttribute('aria-selected', 'false');
+          });
+          option.classList.add('selected');
+          option.setAttribute('aria-selected', 'true');
+          
+          // Close dropdown and return focus
+          installBox.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        }
+
+        /**
+         * Opens the dropdown and focuses the selected or first option.
+         */
+        function openDropdown() {
+          // Close all other dropdowns first
           document.querySelectorAll('.install-box.open').forEach(function(box) {
             if (box !== installBox) box.classList.remove('open');
           });
           
-          installBox.classList.toggle('open', !isOpen);
-          trigger.setAttribute('aria-expanded', (!isOpen).toString());
+          installBox.classList.add('open');
+          trigger.setAttribute('aria-expanded', 'true');
+          
+          // Focus the currently selected option, or first option
+          const selectedOption = selector.querySelector('.dropdown-option.selected') || options[0];
+          if (selectedOption) selectedOption.focus();
+        }
+
+        /**
+         * Closes the dropdown and returns focus to trigger.
+         */
+        function closeDropdown() {
+          installBox.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        }
+
+        // Toggle dropdown on click
+        trigger.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const isOpen = installBox.classList.contains('open');
+          
+          if (isOpen) {
+            closeDropdown();
+          } else {
+            openDropdown();
+          }
         });
 
-        // Handle option selection
-        options.forEach(function(option) {
+        // Keyboard navigation on trigger
+        trigger.addEventListener('keydown', function(e) {
+          const isOpen = installBox.classList.contains('open');
+          
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!isOpen) {
+              openDropdown();
+            } else {
+              // Focus first or last option based on direction
+              const targetOption = e.key === 'ArrowDown' ? options[0] : options[options.length - 1];
+              if (targetOption) targetOption.focus();
+            }
+          }
+          
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (!isOpen) {
+              openDropdown();
+            }
+          }
+          
+          if (e.key === 'Home' && isOpen) {
+            e.preventDefault();
+            if (options[0]) options[0].focus();
+          }
+          
+          if (e.key === 'End' && isOpen) {
+            e.preventDefault();
+            if (options[options.length - 1]) options[options.length - 1].focus();
+          }
+        });
+
+        // Handle option click and keyboard navigation
+        options.forEach(function(option, index) {
           option.addEventListener('click', function() {
-            const newLabel = option.getAttribute('data-label');
-            const newCommand = option.getAttribute('data-command');
-            const newHighlighted = option.getAttribute('data-highlighted');
-            
-            if (label && newLabel) label.textContent = newLabel;
-            if (commandText && newHighlighted) {
-              commandText.innerHTML = newHighlighted;
-            }
-            if (commandText && newCommand) {
-              commandText.setAttribute('data-command', newCommand);
-            }
-            if (copyBtn && newCommand) {
-              copyBtn.setAttribute('data-command', newCommand);
+            selectOption(option);
+          });
+          
+          option.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const nextIndex = index < optionsArray.length - 1 ? index + 1 : 0;
+              optionsArray[nextIndex].focus();
             }
             
-            // Update selected state
-            options.forEach(function(opt) {
-              opt.classList.remove('selected');
-              opt.setAttribute('aria-selected', 'false');
-            });
-            option.classList.add('selected');
-            option.setAttribute('aria-selected', 'true');
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              const prevIndex = index > 0 ? index - 1 : optionsArray.length - 1;
+              optionsArray[prevIndex].focus();
+            }
             
-            // Close dropdown
-            installBox.classList.remove('open');
-            trigger.setAttribute('aria-expanded', 'false');
+            if (e.key === 'Home') {
+              e.preventDefault();
+              options[0].focus();
+            }
+            
+            if (e.key === 'End') {
+              e.preventDefault();
+              options[options.length - 1].focus();
+            }
+            
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              selectOption(option);
+            }
+            
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              closeDropdown();
+            }
+            
+            if (e.key === 'Tab') {
+              // Close dropdown when tabbing away
+              closeDropdown();
+            }
           });
         });
 
@@ -336,13 +451,16 @@ const defaultOption = highlightedOptions[defaultIndex];
         }
       });
 
-      // Close on escape
+      // Close on escape (global handler for when focus is elsewhere)
       document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
           document.querySelectorAll('.install-box.open').forEach(function(box) {
             box.classList.remove('open');
             const trigger = box.querySelector('.dropdown-trigger');
-            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            if (trigger) {
+              trigger.setAttribute('aria-expanded', 'false');
+              trigger.focus();
+            }
           });
         }
       });
