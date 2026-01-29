@@ -37,16 +37,12 @@ export default defineConfig({
         },
       },
       components: {
+        ThemeProvider: "./src/components/ThemeProvider.astro",
         Header: "./src/components/Header.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
-        // Force dark mode - runs before page renders
-        {
-          tag: "script",
-          content: `document.documentElement.dataset.theme = 'dark';`,
-        },
         // Overscroll easter egg - bottom of page, only on /cli route
         {
           tag: "script",

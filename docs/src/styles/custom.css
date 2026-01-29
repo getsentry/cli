@@ -1602,6 +1602,99 @@ nav.sidebar a[aria-current="page"] {
 }
 
 /* ==========================================================================
+   Force Dark Mode Globally
+   Ensures dark theme even if JS fails or system preference leaks through
+   ========================================================================== */
+
+:root {
+  color-scheme: dark !important;
+}
+
+:root,
+:root[data-theme="light"] {
+  --sl-color-bg: #0a0a0f !important;
+  --sl-color-bg-nav: #0a0a0f !important;
+  --sl-color-bg-sidebar: #0a0a0f !important;
+  --sl-color-black: #0a0a0f !important;
+  --sl-color-white: #ffffff !important;
+  --sl-color-text: rgba(255, 255, 255, 0.9) !important;
+  --sl-color-text-accent: #ffffff !important;
+  --sl-color-gray-1: #e0e0e0 !important;
+  --sl-color-gray-2: #c0c0c0 !important;
+  --sl-color-gray-3: #888888 !important;
+  --sl-color-gray-4: #555555 !important;
+  --sl-color-gray-5: #333333 !important;
+  --sl-color-gray-6: #1a1a1a !important;
+}
+
+/* Mobile Table of Contents - Force Dark Theme */
+mobile-starlight-toc {
+  --sl-color-black: #0a0a0f !important;
+  --sl-color-white: #ffffff !important;
+}
+
+mobile-starlight-toc nav,
+mobile-starlight-toc summary,
+mobile-starlight-toc .toggle {
+  background-color: #0a0a0f !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+mobile-starlight-toc .toggle {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+mobile-starlight-toc .toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+mobile-starlight-toc .display-current {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+mobile-starlight-toc .dropdown {
+  background-color: #0a0a0f !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+mobile-starlight-toc a {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+mobile-starlight-toc a:hover {
+  color: #ffffff !important;
+}
+
+/* Mobile TOC Summary - Direct targeting for light mode override */
+summary#starlight__on-this-page--mobile,
+summary[id="starlight__on-this-page--mobile"] {
+  background-color: #0a0a0f !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  color: #ffffff !important;
+}
+
+summary#starlight__on-this-page--mobile .toggle,
+summary[id="starlight__on-this-page--mobile"] .toggle {
+  background-color: transparent !important;
+  color: #ffffff !important;
+}
+
+summary#starlight__on-this-page--mobile .display-current,
+summary[id="starlight__on-this-page--mobile"] .display-current {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+summary#starlight__on-this-page--mobile svg,
+summary[id="starlight__on-this-page--mobile"] svg,
+summary#starlight__on-this-page--mobile .caret,
+summary[id="starlight__on-this-page--mobile"] .caret {
+  color: rgba(255, 255, 255, 0.5) !important;
+  fill: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ==========================================================================
    Scrollbar
    ========================================================================== */
 
