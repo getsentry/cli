@@ -1,4 +1,5 @@
 import { buildApplication, buildRouteMap } from "@stricli/core";
+import pkg from "../package.json";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { eventRoute } from "./commands/event/index.js";
@@ -31,7 +32,7 @@ declare const SENTRY_CLI_VERSION: string;
 
 /** CLI version string, available for help output and other uses */
 export const CLI_VERSION =
-  typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0";
+  typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : pkg.version;
 
 export const app = buildApplication(routes, {
   name: "sentry",
