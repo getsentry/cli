@@ -1,6 +1,21 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.4.0
+
+### New Features ✨
+
+- (docs) Add Open Graph images for social sharing by @betegon in [#109](https://github.com/getsentry/cli/pull/109)
+- (install) Auto-add sentry to PATH on install by @betegon in [#108](https://github.com/getsentry/cli/pull/108)
+- Auto-generate SKILL.md and extract version bump script by @BYK in [#105](https://github.com/getsentry/cli/pull/105)
+- Updated the install button by @MathurAditya724 in [#103](https://github.com/getsentry/cli/pull/103)
+- Add global help command using Stricli's defaultCommand by @BYK in [#104](https://github.com/getsentry/cli/pull/104)
+
+### Bug Fixes 🐛
+
+- (ci) Install bun in release workflow by @betegon in [#110](https://github.com/getsentry/cli/pull/110)
+- (docs) Mobile styling improvements for landing page by @betegon in [#106](https://github.com/getsentry/cli/pull/106)
+
 ## 0.3.3
 
 ### Bug Fixes 🐛
