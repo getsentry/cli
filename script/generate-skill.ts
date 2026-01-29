@@ -102,7 +102,9 @@ type RouteInfo = {
  * Extract positional parameter placeholder string
  */
 function getPositionalString(params?: PositionalParams): string {
-  if (!params) return "";
+  if (!params) {
+    return "";
+  }
 
   if (params.kind === "tuple") {
     return params.parameters
@@ -122,7 +124,9 @@ function getPositionalString(params?: PositionalParams): string {
  * Extract flag information from a command
  */
 function extractFlags(flags: Record<string, FlagDef> | undefined): FlagInfo[] {
-  if (!flags) return [];
+  if (!flags) {
+    return [];
+  }
 
   return Object.entries(flags).map(([name, def]) => ({
     name,
@@ -135,57 +139,68 @@ function extractFlags(flags: Record<string, FlagDef> | undefined): FlagInfo[] {
 }
 
 /**
+ * Build a CommandInfo from a Command
+ */
+function buildCommandInfo(cmd: Command, path: string): CommandInfo {
+  return {
+    path,
+    brief: cmd.brief,
+    fullDescription: cmd.fullDescription,
+    flags: extractFlags(cmd.parameters.flags),
+    positional: getPositionalString(cmd.parameters.positional),
+    aliases: cmd.parameters.aliases ?? {},
+  };
+}
+
+/**
+ * Extract commands from a route group
+ */
+function extractRouteGroupCommands(
+  routeMap: RouteMap,
+  routeName: string
+): CommandInfo[] {
+  const commands: CommandInfo[] = [];
+
+  for (const subEntry of routeMap.getAllEntries()) {
+    if (subEntry.hidden) {
+      continue;
+    }
+
+    const subTarget = subEntry.target;
+    if (isCommand(subTarget)) {
+      const path = `sentry ${routeName} ${subEntry.name.original}`;
+      commands.push(buildCommandInfo(subTarget, path));
+    }
+  }
+
+  return commands;
+}
+
+/**
  * Walk the route tree and extract command information
  */
 function extractRoutes(routeMap: RouteMap): RouteInfo[] {
   const result: RouteInfo[] = [];
 
   for (const entry of routeMap.getAllEntries()) {
-    if (entry.hidden) continue;
+    if (entry.hidden) {
+      continue;
+    }
 
     const routeName = entry.name.original;
     const target = entry.target;
 
     if (isRouteMap(target)) {
-      // This is a route group (e.g., "auth", "issue")
-      const commands: CommandInfo[] = [];
-
-      for (const subEntry of target.getAllEntries()) {
-        if (subEntry.hidden) continue;
-
-        const subTarget = subEntry.target;
-        if (isCommand(subTarget)) {
-          commands.push({
-            path: `sentry ${routeName} ${subEntry.name.original}`,
-            brief: subTarget.brief,
-            fullDescription: subTarget.fullDescription,
-            flags: extractFlags(subTarget.parameters.flags),
-            positional: getPositionalString(subTarget.parameters.positional),
-            aliases: subTarget.parameters.aliases ?? {},
-          });
-        }
-      }
-
       result.push({
         name: routeName,
         brief: target.brief,
-        commands,
+        commands: extractRouteGroupCommands(target, routeName),
       });
     } else if (isCommand(target)) {
-      // Top-level command (e.g., "api", "help")
       result.push({
         name: routeName,
         brief: target.brief,
-        commands: [
-          {
-            path: `sentry ${routeName}`,
-            brief: target.brief,
-            fullDescription: target.fullDescription,
-            flags: extractFlags(target.parameters.flags),
-            positional: getPositionalString(target.parameters.positional),
-            aliases: target.parameters.aliases ?? {},
-          },
-        ],
+        commands: [buildCommandInfo(target, `sentry ${routeName}`)],
       });
     }
   }
@@ -363,7 +378,9 @@ function generateCommandsSection(routeInfos: RouteInfo[]): string {
 
   for (const route of sortedRoutes) {
     // Skip help command from detailed docs (it's self-explanatory)
-    if (route.name === "help") continue;
+    if (route.name === "help") {
+      continue;
+    }
 
     lines.push(generateRouteDoc(route));
   }

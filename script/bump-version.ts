@@ -23,6 +23,9 @@ import { $ } from "bun";
 
 const PLUGIN_PATH = "plugins/sentry-cli/.claude-plugin/plugin.json";
 
+/** Regex to match prerelease suffix (e.g., -dev.0, -alpha.1) */
+const PRERELEASE_SUFFIX_REGEX = /-.*$/;
+
 type PluginJson = {
   version: string;
   [key: string]: unknown;
@@ -49,7 +52,7 @@ async function writePluginJson(plugin: PluginJson): Promise<void> {
  * "1.0.0" → "1.0.0"
  */
 function stripPrerelease(version: string): string {
-  return version.replace(/-.*$/, "");
+  return version.replace(PRERELEASE_SUFFIX_REGEX, "");
 }
 
 /**
@@ -126,11 +129,18 @@ Examples:
 
 // Main
 const args = process.argv.slice(2);
-const mode = args.includes("--pre")
-  ? "pre"
-  : args.includes("--post")
-    ? "post"
-    : null;
+
+function parseMode(): "pre" | "post" | null {
+  if (args.includes("--pre")) {
+    return "pre";
+  }
+  if (args.includes("--post")) {
+    return "post";
+  }
+  return null;
+}
+
+const mode = parseMode();
 
 if (!mode) {
   printUsage();
