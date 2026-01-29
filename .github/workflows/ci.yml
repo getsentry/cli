@@ -51,76 +51,73 @@ jobs:
         id: check
         run: bun run check:skill
         continue-on-error: true
-      - name: Post PR comment with suggestion
+      - name: Post PR review with suggestion
         if: steps.check.outcome == 'failure' && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
 
-            // Read the generated content
-            const newContent = fs.readFileSync('plugins/sentry-cli/skills/sentry-cli/SKILL.md', 'utf8');
-            const lines = newContent.split('\n');
-            const lineCount = lines.length;
-
-            // GitHub suggestions have a limit, so we may need to split
-            const MAX_LINES_PER_SUGGESTION = 200;
-
+            const filePath = 'plugins/sentry-cli/skills/sentry-cli/SKILL.md';
+            const newContent = fs.readFileSync(filePath, 'utf8');
             const prNumber = context.payload.pull_request.number;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-
-            // Get the PR's head SHA for the comment
             const headSha = context.payload.pull_request.head.sha;
 
-            // First, find any existing comments from this bot about SKILL.md
-            const { data: comments } = await github.rest.issues.listComments({
+            // Get the current file content to find line count
+            let oldLineCount = 1;
+            try {
+              const { data: fileData } = await github.rest.repos.getContent({
+                owner,
+                repo,
+                path: filePath,
+                ref: headSha,
+              });
+              const oldContent = Buffer.from(fileData.content, 'base64').toString('utf8');
+              oldLineCount = oldContent.split('\n').length;
+            } catch (e) {
+              // File might not exist yet
+              oldLineCount = 1;
+            }
+
+            // Build suggestion body - replace entire file content
+            let body = '## 🔄 SKILL.md needs regeneration\n\n';
+            body += 'The CLI commands have changed. Apply this suggestion or run `bun run generate:skill` locally.\n\n';
+            body += '```suggestion\n';
+            body += newContent.trimEnd();
+            body += '\n```';
+
+            // Delete any existing review comments from this bot on this file
+            const { data: reviews } = await github.rest.pulls.listReviewComments({
               owner,
               repo,
-              issue_number: prNumber,
+              pull_number: prNumber,
             });
 
-            const botComment = comments.find(c =>
-              c.user.type === 'Bot' &&
-              c.body.includes('SKILL.md needs regeneration')
-            );
-
-            // Build comment body
-            let body = '## 🔄 SKILL.md needs regeneration\n\n';
-            body += 'The CLI commands have changed but `plugins/sentry-cli/skills/sentry-cli/SKILL.md` hasn\'t been updated.\n\n';
-            body += '**To fix:** Run `bun run generate:skill` locally and commit the changes.\n\n';
-
-            // For large files, we can't use suggestion blocks effectively
-            // Instead, provide a collapsible section with the full content
-            if (lineCount > MAX_LINES_PER_SUGGESTION) {
-              body += '<details>\n<summary>Click to see the expected content</summary>\n\n';
-              body += '```markdown\n';
-              body += newContent;
-              body += '\n```\n\n</details>\n';
-            } else {
-              body += 'Or apply this suggestion:\n\n';
-              body += '```suggestion\n';
-              body += newContent;
-              body += '\n```\n';
+            for (const review of reviews) {
+              if (review.path === filePath && review.user.type === 'Bot' && review.body.includes('SKILL.md needs regeneration')) {
+                await github.rest.pulls.deleteReviewComment({
+                  owner,
+                  repo,
+                  comment_id: review.id,
+                });
+              }
             }
 
-            if (botComment) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: botComment.id,
-                body,
-              });
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: prNumber,
-                body,
-              });
-            }
+            // Create a review comment with suggestion on the file
+            // We use start_line and line to cover the entire file
+            await github.rest.pulls.createReviewComment({
+              owner,
+              repo,
+              pull_number: prNumber,
+              commit_id: headSha,
+              path: filePath,
+              start_line: 1,
+              line: oldLineCount,
+              side: 'RIGHT',
+              body,
+            });
       - name: Fail if stale
         if: steps.check.outcome == 'failure'
         run: |
