@@ -13,6 +13,7 @@ import { muted, success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
+import type { SentryUser } from "../../types/index.js";
 
 type LoginFlags = {
   readonly token?: string;
@@ -61,8 +62,9 @@ export const loginCommand = buildCommand({
       await setAuthToken(flags.token);
 
       // Validate token and fetch user info in one call
+      let user: SentryUser;
       try {
-        const user = await getCurrentUser();
+        user = await getCurrentUser();
         setUserInfo({
           userId: user.id,
           email: user.email,
@@ -78,6 +80,9 @@ export const loginCommand = buildCommand({
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
+      stdout.write(
+        `  Logged in as ${muted(`${user.username} <${user.email}>`)}\n`
+      );
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
@@ -141,9 +146,10 @@ export const loginCommand = buildCommand({
       // Store the token
       await completeOAuthFlow(tokenResponse);
 
-      // Fetch and store user info for telemetry (best-effort)
+      // Fetch and store user info for telemetry
+      let user: SentryUser | undefined;
       try {
-        const user = await getCurrentUser();
+        user = await getCurrentUser();
         setUserInfo({
           userId: user.id,
           email: user.email,
@@ -155,6 +161,11 @@ export const loginCommand = buildCommand({
       }
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
+      if (user) {
+        stdout.write(
+          `  Logged in as ${muted(`${user.username} <${user.email}>`)}\n`
+        );
+      }
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
 
       if (tokenResponse.expires_in) {
