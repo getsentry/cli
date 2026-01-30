@@ -37,7 +37,7 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/SKILL.md; then
+          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/SKILL.md docs/public/.well-known/skills/sentry-cli/SKILL.md; then
             echo "changed=false" >> $GITHUB_OUTPUT
             echo "SKILL.md is already up to date"
           else
@@ -50,6 +50,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/SKILL.md
+          git add plugins/sentry-cli/skills/sentry-cli/SKILL.md docs/public/.well-known/skills/sentry-cli/SKILL.md
           git commit -m "chore: Regenerate SKILL.md"
           git push
