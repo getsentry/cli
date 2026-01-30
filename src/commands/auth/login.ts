@@ -81,15 +81,10 @@ export const loginCommand = buildCommand({
       // Save token first, then validate by fetching user info
       await setAuthToken(flags.token);
 
-      // Validate token and fetch user info in one call
+      // Validate token by fetching user info
       let user: SentryUser;
       try {
         user = await getCurrentUser();
-        setUserInfo({
-          userId: user.id,
-          email: user.email,
-          username: user.username,
-        });
       } catch {
         // Token is invalid - clear it and throw
         await clearAuth();
@@ -97,6 +92,18 @@ export const loginCommand = buildCommand({
           "invalid",
           "Invalid API token. Please check your token and try again."
         );
+      }
+
+      // Store user info for telemetry (non-critical, don't block auth)
+      try {
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+        });
+      } catch (error) {
+        // Report to Sentry but don't block auth - user info is not critical
+        Sentry.captureException(error);
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
