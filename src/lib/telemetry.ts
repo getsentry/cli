@@ -43,8 +43,10 @@ function initTelemetryContext(): void {
     if (instanceId) {
       Sentry.setTag("instance_id", instanceId);
     }
-  } catch {
+  } catch (error) {
     // Context initialization is not critical - continue without it
+    // But capture the error for debugging
+    Sentry.captureException(error);
   }
 }
 

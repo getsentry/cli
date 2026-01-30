@@ -15,10 +15,6 @@ import { setAuthToken } from "./db/auth.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration
-// ─────────────────────────────────────────────────────────────────────────────
-
 // Sentry instance URL (supports self-hosted via env override)
 const SENTRY_URL = process.env.SENTRY_URL ?? "https://sentry.io";
 
@@ -46,10 +42,6 @@ const SCOPES = [
   "team:read",
 ].join(" ");
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 type DeviceFlowCallbacks = {
   onUserCode: (
     userCode: string,
@@ -59,21 +51,39 @@ type DeviceFlowCallbacks = {
   onPolling?: () => void;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Device Flow Implementation (RFC 8628)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Request a device code from Sentry's device authorization endpoint
+ * Wrap a fetch call with connection error handling.
+ * Converts network errors into user-friendly ApiError messages.
  */
+async function fetchWithConnectionError(
+  url: string,
+  init: RequestInit
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    const isConnectionError =
+      error instanceof Error &&
+      (error.message.includes("ECONNREFUSED") ||
+        error.message.includes("fetch failed") ||
+        error.message.includes("network"));
+
+    if (isConnectionError) {
+      throw new ApiError(
+        `Cannot connect to Sentry at ${SENTRY_URL}`,
+        0,
+        "Check your network connection and SENTRY_URL configuration"
+      );
+    }
+    throw error;
+  }
+}
+
+/** Request a device code from Sentry's device authorization endpoint */
 function requestDeviceCode() {
   if (!SENTRY_CLIENT_ID) {
     throw new ConfigError(
@@ -83,33 +93,17 @@ function requestDeviceCode() {
   }
 
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
-    let response: Response;
-
-    try {
-      response = await fetch(`${SENTRY_URL}/oauth/device/code/`, {
+    const response = await fetchWithConnectionError(
+      `${SENTRY_URL}/oauth/device/code/`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           client_id: SENTRY_CLIENT_ID,
           scope: SCOPES,
         }),
-      });
-    } catch (error) {
-      const isConnectionError =
-        error instanceof Error &&
-        (error.message.includes("ECONNREFUSED") ||
-          error.message.includes("fetch failed") ||
-          error.message.includes("network"));
-
-      if (isConnectionError) {
-        throw new ApiError(
-          `Cannot connect to Sentry at ${SENTRY_URL}`,
-          0,
-          "Check your network connection and SENTRY_URL configuration"
-        );
       }
-      throw error;
-    }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -286,10 +280,6 @@ export async function performDeviceFlow(
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Complete the OAuth flow by storing the token in the config file.
  *
@@ -316,13 +306,7 @@ export async function setApiToken(token: string): Promise<void> {
   await setAuthToken(token);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Token Refresh (RFC 6749 Section 6)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Refresh an access token using a refresh token.
- */
+/** Refresh an access token using a refresh token. */
 export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
@@ -333,12 +317,10 @@ export function refreshAccessToken(
     );
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: OAuth error handling requires branching
   return withHttpSpan("POST", "/oauth/token/", async () => {
-    let response: Response;
-
-    try {
-      response = await fetch(`${SENTRY_URL}/oauth/token/`, {
+    const response = await fetchWithConnectionError(
+      `${SENTRY_URL}/oauth/token/`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -346,23 +328,8 @@ export function refreshAccessToken(
           grant_type: "refresh_token",
           refresh_token: refreshToken,
         }),
-      });
-    } catch (error) {
-      const isConnectionError =
-        error instanceof Error &&
-        (error.message.includes("ECONNREFUSED") ||
-          error.message.includes("fetch failed") ||
-          error.message.includes("network"));
-
-      if (isConnectionError) {
-        throw new ApiError(
-          `Cannot connect to Sentry at ${SENTRY_URL}`,
-          0,
-          "Check your network connection and SENTRY_URL configuration"
-        );
       }
-      throw error;
-    }
+    );
 
     if (!response.ok) {
       let errorDetail = "Token refresh failed";

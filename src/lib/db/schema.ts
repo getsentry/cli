@@ -6,10 +6,6 @@ import type { Database } from "bun:sqlite";
 
 const CURRENT_SCHEMA_VERSION = 2;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Table Definitions (single source of truth)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /** User identity for telemetry (single row, id=1) */
 const USER_INFO_TABLE = `
   CREATE TABLE IF NOT EXISTS user_info (
@@ -29,10 +25,6 @@ const INSTANCE_INFO_TABLE = `
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )
 `;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Schema Initialization
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function initSchema(db: Database): void {
   db.exec(`
@@ -119,10 +111,6 @@ export function initSchema(db: Database): void {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Migrations
-// ─────────────────────────────────────────────────────────────────────────────
 
 function getSchemaVersion(db: Database): number {
   const row = db.query("SELECT version FROM schema_version LIMIT 1").get() as {
