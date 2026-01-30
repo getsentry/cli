@@ -14,6 +14,7 @@ import organizationFixture from "../fixtures/organization.json";
 import organizationsFixture from "../fixtures/organizations.json";
 import projectFixture from "../fixtures/project.json";
 import projectsFixture from "../fixtures/projects.json";
+import userFixture from "../fixtures/user.json";
 import type { MockRoute, MockServer } from "./server.js";
 import { createMockServer } from "./server.js";
 
@@ -25,6 +26,13 @@ export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 
 export const apiRoutes: MockRoute[] = [
+  // Users
+  {
+    method: "GET",
+    path: "/api/0/users/me/",
+    response: userFixture,
+  },
+
   // Organizations
   {
     method: "GET",

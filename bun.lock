@@ -29,6 +29,7 @@
   "patchedDependencies": {
     "@sentry/core@10.36.0": "patches/@sentry%2Fcore@10.36.0.patch",
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
+    "@sentry/core@10.38.0": "patches/@sentry%2Fcore@10.38.0.patch",
   },
   "packages": {
     "@apm-js-collab/code-transformer": ["@apm-js-collab/code-transformer@0.8.2", "", {}, "sha512-YRjJjNq5KFSjDUoqu5pFUWrrsvGOxl6c3bu+uMFc9HNNptZ2rNU/TI2nLw4jnhQNtka972Ee2m3uqbvDQtPeCA=="],
