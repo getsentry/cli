@@ -16,3 +16,6 @@ Sentry.init({
   // Uncomment to debug Sentry initialization
   // debug: true,
 });
+
+// Expose globally for inline scripts
+window.Sentry = Sentry;
