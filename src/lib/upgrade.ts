@@ -1,0 +1,334 @@
+/**
+ * Upgrade Module
+ *
+ * Detects how the CLI was installed and provides self-upgrade functionality.
+ */
+
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { UpgradeError } from "./errors.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type InstallationMethod =
+  | "curl"
+  | "npm"
+  | "pnpm"
+  | "bun"
+  | "yarn"
+  | "unknown";
+
+/** Package managers that can be used for global installs */
+type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Regex to strip 'v' prefix from version strings */
+const VERSION_PREFIX_REGEX = /^v/;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run a shell command and capture stdout.
+ *
+ * @param command - Command to execute
+ * @param args - Command arguments
+ * @returns stdout content and exit code
+ */
+function runCommand(
+  command: string,
+  args: string[]
+): Promise<{ stdout: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+
+    proc.stdout.on("data", (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    // Drain stderr to prevent blocking (content is intentionally discarded)
+    proc.stderr.resume();
+
+    proc.on("close", (code) => {
+      resolve({ stdout: stdout.trim(), exitCode: code ?? 1 });
+    });
+
+    proc.on("error", reject);
+  });
+}
+
+/**
+ * Check if a package is installed globally with a specific package manager.
+ *
+ * @param pm - Package manager to check
+ * @returns true if sentry is installed globally via this package manager
+ */
+async function isInstalledWith(pm: PackageManager): Promise<boolean> {
+  try {
+    const args =
+      pm === "yarn"
+        ? ["global", "list", "--depth=0"]
+        : ["list", "-g", "sentry"];
+
+    const { stdout, exitCode } = await runCommand(pm, args);
+
+    return exitCode === 0 && stdout.includes("sentry@");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect how the CLI was installed by checking executable path and package managers.
+ *
+ * @returns Detected installation method, or "unknown" if unable to determine
+ */
+export async function detectInstallationMethod(): Promise<InstallationMethod> {
+  const sentryBinPath = join(homedir(), ".sentry", "bin");
+
+  // curl installer places binary in ~/.sentry/bin
+  if (process.execPath.startsWith(sentryBinPath)) {
+    return "curl";
+  }
+
+  // Check package managers in order of popularity
+  const packageManagers: PackageManager[] = ["npm", "pnpm", "bun", "yarn"];
+
+  for (const pm of packageManagers) {
+    if (await isInstalledWith(pm)) {
+      return pm;
+    }
+  }
+
+  return "unknown";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Version Fetching
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the latest version from GitHub releases.
+ *
+ * @returns Latest version string (without 'v' prefix)
+ * @throws {UpgradeError} When fetch fails or response is invalid
+ */
+export async function fetchLatestFromGitHub(): Promise<string> {
+  const response = await fetch(
+    "https://api.github.com/repos/getsentry/cli/releases/latest",
+    {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "sentry-cli",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "network_error",
+      `Failed to fetch from GitHub: ${response.status}`
+    );
+  }
+
+  const data = (await response.json()) as { tag_name?: string };
+
+  if (!data.tag_name) {
+    throw new UpgradeError(
+      "network_error",
+      "No version found in GitHub release"
+    );
+  }
+
+  return data.tag_name.replace(VERSION_PREFIX_REGEX, "");
+}
+
+/**
+ * Fetch the latest version from npm registry.
+ *
+ * @returns Latest version string
+ * @throws {UpgradeError} When fetch fails or response is invalid
+ */
+export async function fetchLatestFromNpm(): Promise<string> {
+  const response = await fetch("https://registry.npmjs.org/sentry/latest", {
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "network_error",
+      `Failed to fetch from npm: ${response.status}`
+    );
+  }
+
+  const data = (await response.json()) as { version?: string };
+
+  if (!data.version) {
+    throw new UpgradeError("network_error", "No version found in npm registry");
+  }
+
+  return data.version;
+}
+
+/**
+ * Fetch the latest available version based on installation method.
+ * curl installations check GitHub releases; package managers check npm.
+ *
+ * @param method - How the CLI was installed
+ * @returns Latest version string (without 'v' prefix)
+ * @throws {UpgradeError} When version fetch fails
+ */
+export function fetchLatestVersion(
+  method: InstallationMethod
+): Promise<string> {
+  return method === "curl" ? fetchLatestFromGitHub() : fetchLatestFromNpm();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Upgrade Execution
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Execute upgrade via curl installer script.
+ * Pipes: curl https://cli.sentry.dev/install | bash -s -- --version <v>
+ *
+ * @param version - Target version to install
+ * @throws {UpgradeError} When installation fails
+ */
+function executeUpgradeCurl(version: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const curl = spawn("curl", ["-fsSL", "https://cli.sentry.dev/install"], {
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+
+    const bash = spawn("bash", ["-s", "--", "--version", version], {
+      stdio: [curl.stdout, "inherit", "inherit"],
+    });
+
+    bash.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new UpgradeError(
+            "execution_failed",
+            `Upgrade failed with exit code ${code}`
+          )
+        );
+      }
+    });
+
+    bash.on("error", (err) => {
+      reject(new UpgradeError("execution_failed", err.message));
+    });
+
+    curl.on("error", (err) => {
+      reject(
+        new UpgradeError("execution_failed", `curl failed: ${err.message}`)
+      );
+    });
+  });
+}
+
+/**
+ * Execute upgrade via package manager global install.
+ *
+ * @param pm - Package manager to use
+ * @param version - Target version to install
+ * @throws {UpgradeError} When installation fails
+ */
+function executeUpgradePackageManager(
+  pm: PackageManager,
+  version: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args =
+      pm === "yarn"
+        ? ["global", "add", `sentry@${version}`]
+        : ["install", "-g", `sentry@${version}`];
+
+    const proc = spawn(pm, args, { stdio: "inherit" });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new UpgradeError(
+            "execution_failed",
+            `${pm} install failed with exit code ${code}`
+          )
+        );
+      }
+    });
+
+    proc.on("error", (err) => {
+      reject(
+        new UpgradeError("execution_failed", `${pm} failed: ${err.message}`)
+      );
+    });
+  });
+}
+
+/**
+ * Execute the upgrade using the appropriate method.
+ *
+ * @param method - How the CLI was installed
+ * @param version - Target version to install
+ * @throws {UpgradeError} When method is unknown or installation fails
+ */
+export function executeUpgrade(
+  method: InstallationMethod,
+  version: string
+): Promise<void> {
+  switch (method) {
+    case "curl":
+      return executeUpgradeCurl(version);
+    case "npm":
+    case "pnpm":
+    case "bun":
+    case "yarn":
+      return executeUpgradePackageManager(method, version);
+    default:
+      throw new UpgradeError("unknown_method");
+  }
+}
+
+/** Valid methods that can be specified via --method flag */
+const VALID_METHODS: InstallationMethod[] = [
+  "curl",
+  "npm",
+  "pnpm",
+  "bun",
+  "yarn",
+];
+
+/**
+ * Parse and validate an installation method from user input.
+ *
+ * @param value - Method string from --method flag
+ * @returns Validated installation method
+ * @throws {Error} When method is not recognized
+ */
+export function parseInstallationMethod(value: string): InstallationMethod {
+  const normalized = value.toLowerCase() as InstallationMethod;
+
+  if (!VALID_METHODS.includes(normalized)) {
+    throw new Error(
+      `Invalid method: ${value}. Must be one of: ${VALID_METHODS.join(", ")}`
+    );
+  }
+
+  return normalized;
+}

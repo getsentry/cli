@@ -6,6 +6,7 @@ import { helpCommand } from "./commands/help.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
+import { upgradeCommand } from "./commands/upgrade.js";
 
 import { CLI_VERSION } from "./lib/constants.js";
 
@@ -19,6 +20,10 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     api: apiCommand,
+    upgrade: upgradeCommand,
+  },
+  aliases: {
+    update: "upgrade",
   },
   defaultCommand: "help",
   docs: {
