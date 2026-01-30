@@ -331,6 +331,18 @@ sentry api /organizations/ --include
 sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
+### Upgrade
+
+Update the Sentry CLI to the latest version
+
+#### `sentry upgrade <version>`
+
+Update the Sentry CLI to the latest version
+
+**Flags:**
+- `--check - Check for updates without installing`
+- `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+
 ## Output Formats
 
 ### JSON Output
