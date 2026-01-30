@@ -7,6 +7,8 @@ import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
 
+import { CLI_VERSION } from "./lib/constants.js";
+
 /** Top-level route map containing all CLI commands */
 export const routes = buildRouteMap({
   routes: {
@@ -26,12 +28,6 @@ export const routes = buildRouteMap({
       "It provides commands for authentication, viewing issues, and making API calls.",
   },
 });
-
-declare const SENTRY_CLI_VERSION: string;
-
-/** CLI version string, available for help output and other uses */
-export const CLI_VERSION =
-  typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0";
 
 export const app = buildApplication(routes, {
   name: "sentry",
