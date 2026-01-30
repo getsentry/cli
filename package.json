@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
-    "@sentry/bun": "^10.36.0",
+    "@sentry/bun": "10.38.0",
     "@sentry/esbuild-plugin": "^2.23.0",
     "@sentry/node": "10.38.0",
     "@stricli/auto-complete": "^1.2.4",
