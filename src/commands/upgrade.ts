@@ -14,6 +14,7 @@ import {
   fetchLatestVersion,
   type InstallationMethod,
   parseInstallationMethod,
+  VERSION_PREFIX_REGEX,
   versionExists,
 } from "../lib/upgrade.js";
 
@@ -80,7 +81,7 @@ export const upgradeCommand = buildCommand({
 
     // Fetch latest version
     const latest = await fetchLatestVersion(method);
-    const target = version?.replace(/^v/, "") ?? latest;
+    const target = version?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
     stdout.write(`Latest version: ${latest}\n`);
 

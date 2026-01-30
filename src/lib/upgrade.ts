@@ -29,7 +29,7 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Regex to strip 'v' prefix from version strings */
-const VERSION_PREFIX_REGEX = /^v/;
+export const VERSION_PREFIX_REGEX = /^v/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detection
@@ -220,14 +220,13 @@ export async function versionExists(
       }
     );
     return response.ok;
-  } else {
-    // Check npm registry
-    const response = await fetch(
-      `https://registry.npmjs.org/sentry/${version}`,
-      { method: "HEAD" }
-    );
-    return response.ok;
   }
+
+  // Check npm registry
+  const response = await fetch(`https://registry.npmjs.org/sentry/${version}`, {
+    method: "HEAD",
+  });
+  return response.ok;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
