@@ -20,6 +20,7 @@ import {
   type TraceSpan,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
+import { getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { ApiError } from "./errors.js";
 
@@ -91,6 +92,7 @@ async function createApiClient(): Promise<KyInstance> {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "User-Agent": getUserAgent(),
     },
     hooks: {
       afterResponse: [

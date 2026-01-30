@@ -11,13 +11,7 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node";
-import { SENTRY_CLI_DSN } from "./constants.js";
-
-/**
- * Build-time constant injected by esbuild/bun.
- * This is undefined when running unbundled in development.
- */
-declare const SENTRY_CLI_VERSION: string | undefined;
+import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
 
 /**
  * Wrap CLI execution with telemetry tracking.
@@ -73,11 +67,6 @@ export async function withTelemetry<T>(
  * @internal Exported for testing
  */
 export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
-  // Build-time constants, with dev defaults
-  const version =
-    typeof SENTRY_CLI_VERSION !== "undefined"
-      ? SENTRY_CLI_VERSION
-      : "0.0.0-dev";
   const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({
@@ -91,7 +80,7 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
-    release: version,
+    release: CLI_VERSION,
     // Don't propagate traces to external services
     tracePropagationTargets: [],
 
