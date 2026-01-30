@@ -261,6 +261,32 @@ const defaultOption = highlightedOptions[defaultIndex];
     outline: 2px solid rgba(255, 255, 255, 0.4);
     outline-offset: -2px;
   }
+
+  @media (max-width: 640px) {
+    .install-selector {
+      width: 100%;
+    }
+
+    .install-box {
+      width: 100%;
+    }
+
+    .command-text {
+      min-width: 0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .command-area {
+      flex: 1;
+      min-width: 0;
+      justify-content: space-between;
+    }
+
+    .dropdown-menu {
+      min-width: 100px;
+    }
+  }
 </style>
 
 <script is:inline>
