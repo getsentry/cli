@@ -4,7 +4,27 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
+
+/** User identity for telemetry (single row, id=1) */
+const USER_INFO_TABLE = `
+  CREATE TABLE IF NOT EXISTS user_info (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    user_id TEXT NOT NULL,
+    email TEXT,
+    username TEXT,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
+
+/** Instance identifier for telemetry (single row, id=1) */
+const INSTANCE_INFO_TABLE = `
+  CREATE TABLE IF NOT EXISTS instance_info (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    instance_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
 
 export function initSchema(db: Database): void {
   db.exec(`
@@ -74,6 +94,9 @@ export function initSchema(db: Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    ${USER_INFO_TABLE};
+    ${INSTANCE_INFO_TABLE};
   `);
 
   const versionRow = db
@@ -99,7 +122,12 @@ function getSchemaVersion(db: Database): number {
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
-  // Add migrations here as schema evolves
+  // Migration from v1 to v2: Add user_info and instance_info tables
+  if (currentVersion < 2) {
+    db.exec(`${USER_INFO_TABLE}; ${INSTANCE_INFO_TABLE};`);
+  }
+
+  // Update schema version if needed
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
     db.query("UPDATE schema_version SET version = ?").run(
       CURRENT_SCHEMA_VERSION

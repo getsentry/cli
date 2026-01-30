@@ -18,6 +18,8 @@ import {
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
+  type SentryUser,
+  SentryUserSchema,
   type TraceResponse,
   type TraceSpan,
 } from "../types/index.js";
@@ -25,6 +27,7 @@ import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { ApiError } from "./errors.js";
+import { withHttpSpan } from "./telemetry.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";
 
@@ -182,49 +185,52 @@ export function buildSearchParams(
  * @throws {ApiError} On API errors
  * @throws {z.ZodError} When response fails schema validation
  */
-export async function apiRequest<T>(
+export function apiRequest<T>(
   endpoint: string,
   options: ApiRequestOptions<T> = {}
 ): Promise<T> {
   const { method = "GET", body, params, schema } = options;
-  const client = await createApiClient();
 
-  let response: Response;
-  try {
-    response = await client(normalizePath(endpoint), {
-      method,
-      json: body,
-      searchParams: buildSearchParams(params),
-    });
-  } catch (error) {
-    // Transform ky HTTPError into ApiError
-    if (error && typeof error === "object" && "response" in error) {
-      const kyError = error as { response: Response };
-      const text = await kyError.response.text();
-      let detail: string | undefined;
-      try {
-        const parsed = JSON.parse(text) as { detail?: string };
-        detail = parsed.detail ?? JSON.stringify(parsed);
-      } catch {
-        detail = text;
+  return withHttpSpan(method, endpoint, async () => {
+    const client = await createApiClient();
+
+    let response: Response;
+    try {
+      response = await client(normalizePath(endpoint), {
+        method,
+        json: body,
+        searchParams: buildSearchParams(params),
+      });
+    } catch (error) {
+      // Transform ky HTTPError into ApiError
+      if (error && typeof error === "object" && "response" in error) {
+        const kyError = error as { response: Response };
+        const text = await kyError.response.text();
+        let detail: string | undefined;
+        try {
+          const parsed = JSON.parse(text) as { detail?: string };
+          detail = parsed.detail ?? JSON.stringify(parsed);
+        } catch {
+          detail = text;
+        }
+        throw new ApiError(
+          `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
+          kyError.response.status,
+          detail
+        );
       }
-      throw new ApiError(
-        `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
-        kyError.response.status,
-        detail
-      );
+      throw error;
     }
-    throw error;
-  }
 
-  const data = await response.json();
+    const data = await response.json();
 
-  // Validate response if schema provided
-  if (schema) {
-    return schema.parse(data);
-  }
+    // Validate response if schema provided
+    if (schema) {
+      return schema.parse(data);
+    }
 
-  return data as T;
+    return data as T;
+  });
 }
 
 /**
@@ -237,60 +243,63 @@ export async function apiRequest<T>(
  * @returns Response status, headers, and parsed body
  * @throws {AuthError} Only on authentication failure (not on API errors)
  */
-export async function rawApiRequest(
+export function rawApiRequest(
   endpoint: string,
   options: ApiRequestOptions & { headers?: Record<string, string> } = {}
 ): Promise<{ status: number; headers: Headers; body: unknown }> {
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
-  const client = await createApiClient();
 
-  // Handle body based on type:
-  // - Objects: use ky's json option (auto-stringifies and sets Content-Type)
-  // - Strings: send as raw body (user can set Content-Type via custom headers if needed)
-  // - undefined: no body
-  const isStringBody = typeof body === "string";
+  return withHttpSpan(method, endpoint, async () => {
+    const client = await createApiClient();
 
-  // For string bodies, remove the default Content-Type: application/json from createApiClient
-  // unless the user explicitly provides one. This allows sending non-JSON content.
-  // Check is case-insensitive since HTTP headers are case-insensitive.
-  const hasContentType = Object.keys(customHeaders).some(
-    (k) => k.toLowerCase() === "content-type"
-  );
-  const headers =
-    isStringBody && !hasContentType
-      ? { ...customHeaders, "Content-Type": undefined }
-      : customHeaders;
+    // Handle body based on type:
+    // - Objects: use ky's json option (auto-stringifies and sets Content-Type)
+    // - Strings: send as raw body (user can set Content-Type via custom headers if needed)
+    // - undefined: no body
+    const isStringBody = typeof body === "string";
 
-  const requestOptions: Parameters<typeof client>[1] = {
-    method,
-    searchParams: buildSearchParams(params),
-    headers,
-    throwHttpErrors: false,
-  };
+    // For string bodies, remove the default Content-Type: application/json from createApiClient
+    // unless the user explicitly provides one. This allows sending non-JSON content.
+    // Check is case-insensitive since HTTP headers are case-insensitive.
+    const hasContentType = Object.keys(customHeaders).some(
+      (k) => k.toLowerCase() === "content-type"
+    );
+    const headers =
+      isStringBody && !hasContentType
+        ? { ...customHeaders, "Content-Type": undefined }
+        : customHeaders;
 
-  if (body !== undefined) {
-    if (isStringBody) {
-      requestOptions.body = body;
-    } else {
-      requestOptions.json = body;
+    const requestOptions: Parameters<typeof client>[1] = {
+      method,
+      searchParams: buildSearchParams(params),
+      headers,
+      throwHttpErrors: false,
+    };
+
+    if (body !== undefined) {
+      if (isStringBody) {
+        requestOptions.body = body;
+      } else {
+        requestOptions.json = body;
+      }
     }
-  }
 
-  const response = await client(normalizePath(endpoint), requestOptions);
+    const response = await client(normalizePath(endpoint), requestOptions);
 
-  const text = await response.text();
-  let responseBody: unknown;
-  try {
-    responseBody = JSON.parse(text);
-  } catch {
-    responseBody = text;
-  }
+    const text = await response.text();
+    let responseBody: unknown;
+    try {
+      responseBody = JSON.parse(text);
+    } catch {
+      responseBody = text;
+    }
 
-  return {
-    status: response.status,
-    headers: response.headers,
-    body: responseBody,
-  };
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: responseBody,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -584,5 +593,15 @@ export function triggerSolutionPlanning(
       run_id: runId,
       step: "solution",
     },
+  });
+}
+
+/**
+ * Get the currently authenticated user's information.
+ * Used for setting user context in telemetry.
+ */
+export function getCurrentUser(): Promise<SentryUser> {
+  return apiRequest<SentryUser>("/users/me/", {
+    schema: SentryUserSchema,
   });
 }
