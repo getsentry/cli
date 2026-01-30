@@ -308,7 +308,7 @@ export const listCommand = buildCommand({
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
-    const { stdout, cwd } = this;
+    const { stdout, cwd, setContext } = this;
 
     // Resolve targets (may find multiple in monorepos)
     const { targets, footer, skippedSelfHosted, detectedDsns } =
@@ -318,6 +318,18 @@ export const listCommand = buildCommand({
         cwd,
         usageHint: USAGE_HINT,
       });
+
+    // Set telemetry context (single project mode gets both org and project)
+    const telemetryTarget = targets[0];
+    if (targets.length === 1 && telemetryTarget) {
+      setContext(telemetryTarget.org, telemetryTarget.project);
+    } else if (targets.length > 1 && telemetryTarget) {
+      // Multi-project: set org if all targets share the same org
+      const orgs = new Set(targets.map((t) => t.org));
+      if (orgs.size === 1) {
+        setContext(telemetryTarget.org);
+      }
+    }
 
     if (targets.length === 0) {
       if (skippedSelfHosted) {

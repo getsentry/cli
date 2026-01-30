@@ -71,6 +71,8 @@ export type {
   // Organization & Project
   SentryOrganization,
   SentryProject,
+  // User
+  SentryUser,
   // Span/Trace types
   Span,
   StackFrame,
@@ -102,6 +104,7 @@ export {
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  SentryUserSchema,
   SpanSchema,
   StackFrameSchema,
   StacktraceSchema,

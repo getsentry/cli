@@ -1,15 +1,46 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { listOrganizations } from "../../lib/api-client.js";
+import { getCurrentUser, listOrganizations } from "../../lib/api-client.js";
 import { openBrowser } from "../../lib/browser.js";
 import { setupCopyKeyListener } from "../../lib/clipboard.js";
 import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
+import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
+
+/** Maximum number of retries for fetching user info */
+const USER_FETCH_MAX_RETRIES = 3;
+/** Delay between retries in milliseconds */
+const USER_FETCH_RETRY_DELAY = 1000;
+
+/**
+ * Fetch and store user info for telemetry with retry logic.
+ * This is best-effort - failures don't block authentication.
+ */
+async function fetchAndStoreUserInfo(): Promise<void> {
+  for (let attempt = 1; attempt <= USER_FETCH_MAX_RETRIES; attempt++) {
+    try {
+      const user = await getCurrentUser();
+      await setUserInfo({
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+      });
+      return;
+    } catch {
+      if (attempt < USER_FETCH_MAX_RETRIES) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, USER_FETCH_RETRY_DELAY)
+        );
+      }
+      // If all retries fail, silently continue - user info is not critical
+    }
+  }
+}
 
 type LoginFlags = {
   readonly token?: string;
@@ -68,6 +99,9 @@ export const loginCommand = buildCommand({
           "Invalid API token. Please check your token and try again."
         );
       }
+
+      // Fetch and store user info for telemetry (best-effort with retry)
+      await fetchAndStoreUserInfo();
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
@@ -132,6 +166,9 @@ export const loginCommand = buildCommand({
 
       // Store the token
       await completeOAuthFlow(tokenResponse);
+
+      // Fetch and store user info for telemetry (best-effort with retry)
+      await fetchAndStoreUserInfo();
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
