@@ -14,6 +14,7 @@ import {
   fetchLatestVersion,
   type InstallationMethod,
   parseInstallationMethod,
+  versionExists,
 } from "../lib/upgrade.js";
 
 type UpgradeFlags = {
@@ -79,7 +80,7 @@ export const upgradeCommand = buildCommand({
 
     // Fetch latest version
     const latest = await fetchLatestVersion(method);
-    const target = version ?? latest;
+    const target = version?.replace(/^v/, "") ?? latest;
 
     stdout.write(`Latest version: ${latest}\n`);
 
@@ -92,7 +93,8 @@ export const upgradeCommand = buildCommand({
       if (CLI_VERSION === target) {
         stdout.write("\nYou are already on the target version.\n");
       } else {
-        stdout.write(`\nRun 'sentry upgrade' to update to ${target}.\n`);
+        const cmd = version ? `sentry upgrade ${target}` : "sentry upgrade";
+        stdout.write(`\nRun '${cmd}' to update.\n`);
       }
       return;
     }
@@ -101,6 +103,17 @@ export const upgradeCommand = buildCommand({
     if (CLI_VERSION === target) {
       stdout.write("\nAlready up to date.\n");
       return;
+    }
+
+    // Validate version exists (only for user-specified versions)
+    if (version) {
+      const exists = await versionExists(method, target);
+      if (!exists) {
+        throw new UpgradeError(
+          "version_not_found",
+          `Version ${target} not found`
+        );
+      }
     }
 
     // Execute upgrade

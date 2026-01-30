@@ -195,6 +195,41 @@ export function fetchLatestVersion(
   return method === "curl" ? fetchLatestFromGitHub() : fetchLatestFromNpm();
 }
 
+/**
+ * Check if a specific version exists in the appropriate registry.
+ * curl installations check GitHub releases; package managers check npm.
+ *
+ * @param method - How the CLI was installed
+ * @param version - Version to check (without 'v' prefix)
+ * @returns true if the version exists
+ */
+export async function versionExists(
+  method: InstallationMethod,
+  version: string
+): Promise<boolean> {
+  if (method === "curl") {
+    // Check GitHub releases
+    const response = await fetch(
+      `https://api.github.com/repos/getsentry/cli/releases/tags/v${version}`,
+      {
+        method: "HEAD",
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "sentry-cli",
+        },
+      }
+    );
+    return response.ok;
+  } else {
+    // Check npm registry
+    const response = await fetch(
+      `https://registry.npmjs.org/sentry/${version}`,
+      { method: "HEAD" }
+    );
+    return response.ok;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Upgrade Execution
 // ─────────────────────────────────────────────────────────────────────────────
