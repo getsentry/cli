@@ -301,14 +301,17 @@ describe("resolveOrgAndIssueId", () => {
     await clearAuth();
     await setDefaults(undefined, undefined);
 
-    // Short suffix "G" requires project context - should throw, not fall through
+    // Short suffix "G" first tries to expand with project context (fails with ContextError),
+    // then falls through to full short ID resolution (requires org), which also fails.
+    // The final error is "Organization is required" since the fallthrough logic allows trying
+    // it as a full short ID, and that's where it ultimately fails.
     await expect(
       resolveOrgAndIssueId({
         issueId: "G",
         cwd: testConfigDir,
         commandHint: "sentry issue explain G --org <org-slug>",
       })
-    ).rejects.toThrow("Organization and project");
+    ).rejects.toThrow("Organization is required");
   });
 
   test("resolves short suffix with explicit --org and --project flags", async () => {
