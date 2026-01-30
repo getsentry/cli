@@ -237,6 +237,82 @@ export class DeviceFlowError extends CliError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Seer Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
+
+/**
+ * Seer-specific errors with actionable suggestions.
+ *
+ * @param reason - Type of Seer failure
+ * @param orgSlug - Organization slug for constructing settings URLs
+ */
+export class SeerError extends CliError {
+  readonly reason: SeerErrorReason;
+  readonly orgSlug?: string;
+
+  constructor(reason: SeerErrorReason, orgSlug?: string) {
+    const messages: Record<SeerErrorReason, string> = {
+      not_enabled: "Seer is not enabled for this organization.",
+      no_budget: "Seer requires a paid plan.",
+      ai_disabled: "AI features are disabled for this organization.",
+    };
+    super(messages[reason]);
+    this.name = "SeerError";
+    this.reason = reason;
+    this.orgSlug = orgSlug;
+  }
+
+  override format(): string {
+    const baseUrl = this.orgSlug
+      ? `https://${this.orgSlug}.sentry.io/settings`
+      : "your Sentry organization settings";
+
+    const suggestions: Record<SeerErrorReason, string> = {
+      not_enabled: `To enable Seer:\n  ${baseUrl}/seer/`,
+      no_budget: `To use Seer features, upgrade your plan:\n  ${baseUrl}/billing/`,
+      ai_disabled: `To enable AI features:\n  ${baseUrl}/seer/`,
+    };
+
+    return `${this.message}\n\n${suggestions[this.reason]}`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Upgrade Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type UpgradeErrorReason =
+  | "unknown_method"
+  | "network_error"
+  | "execution_failed"
+  | "version_not_found";
+
+/**
+ * Upgrade-related errors.
+ *
+ * @param reason - Type of upgrade failure
+ * @param message - Custom message (uses default if not provided)
+ */
+export class UpgradeError extends CliError {
+  readonly reason: UpgradeErrorReason;
+
+  constructor(reason: UpgradeErrorReason, message?: string) {
+    const defaultMessages: Record<UpgradeErrorReason, string> = {
+      unknown_method:
+        "Could not detect installation method. Use --method to specify.",
+      network_error: "Failed to fetch version information.",
+      execution_failed: "Upgrade command failed.",
+      version_not_found: "The specified version was not found.",
+    };
+    super(message ?? defaultMessages[reason]);
+    this.name = "UpgradeError";
+    this.reason = reason;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
