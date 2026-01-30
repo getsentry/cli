@@ -409,6 +409,115 @@ describe("resolveOrgAndIssueId", () => {
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("777888999");
   });
+
+  test("short suffix 404 falls through to full short ID resolution", async () => {
+    // Setup: project context exists, but short suffix lookup returns 404
+    // Should fall through and try as full short ID
+    const { setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setToken("test-token");
+    await setDefaults("my-org", "my-project");
+
+    let shortSuffixAttempted = false;
+    let fullShortIdAttempted = false;
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // First attempt: short suffix expansion (MY-PROJECT-15) returns 404
+      if (url.includes("organizations/my-org/issues/MY-PROJECT-15")) {
+        shortSuffixAttempted = true;
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      }
+
+      // Fallthrough: try as full short ID (15 contains no letters, so goes to numeric)
+      // Actually "15" will be treated as numeric ID after fallthrough
+      if (url.includes("issues/15/")) {
+        fullShortIdAttempted = true;
+        return new Response(
+          JSON.stringify({
+            id: "15",
+            shortId: "ACTUAL-PROJECT-X",
+            title: "Found via numeric fallback",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "1",
+            userCount: 1,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueId: "15",
+      cwd: testConfigDir,
+      commandHint: "sentry issue explain 15",
+    });
+
+    expect(shortSuffixAttempted).toBe(true);
+    expect(fullShortIdAttempted).toBe(true);
+    expect(result.issueId).toBe("15");
+  });
+
+  test("short suffix auth error (401) propagates without fallthrough", async () => {
+    const { setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setToken("test-token");
+    await setDefaults("my-org", "my-project");
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+      });
+
+    // Auth errors should propagate, not fall through
+    await expect(
+      resolveOrgAndIssueId({
+        issueId: "G",
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G",
+      })
+    ).rejects.toThrow();
+  });
+
+  test("short suffix server error (500) propagates without fallthrough", async () => {
+    const { setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setToken("test-token");
+    await setDefaults("my-org", "my-project");
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+        status: 500,
+      });
+
+    // Server errors should propagate, not fall through
+    await expect(
+      resolveOrgAndIssueId({
+        issueId: "G",
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G",
+      })
+    ).rejects.toThrow("500");
+  });
 });
 
 describe("pollAutofixState", () => {
