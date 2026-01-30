@@ -10,7 +10,7 @@ import { listOrganizations, listProjects } from "../../lib/api-client.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import { AuthError } from "../../lib/errors.js";
 import {
-  calculateProjectSlugWidth,
+  calculateProjectColumnWidths,
   formatProjectRow,
   writeFooter,
   writeJson,
@@ -104,22 +104,34 @@ function filterByPlatform(
 /**
  * Write the column header row for project list output.
  */
-function writeHeader(stdout: Writer, slugWidth: number): void {
-  stdout.write(`${"SLUG".padEnd(slugWidth)}  ${"PLATFORM".padEnd(20)}  NAME\n`);
+function writeHeader(
+  stdout: Writer,
+  orgWidth: number,
+  slugWidth: number,
+  nameWidth: number
+): void {
+  const org = "ORG".padEnd(orgWidth);
+  const project = "PROJECT".padEnd(slugWidth);
+  const name = "NAME".padEnd(nameWidth);
+  stdout.write(`${org}  ${project}  ${name}  PLATFORM\n`);
 }
+
+type WriteRowsOptions = {
+  stdout: Writer;
+  projects: ProjectWithOrg[];
+  orgWidth: number;
+  slugWidth: number;
+  nameWidth: number;
+};
 
 /**
  * Write formatted project rows to stdout.
  */
-function writeRows(
-  stdout: Writer,
-  projects: ProjectWithOrg[],
-  slugWidth: number,
-  showOrg: boolean
-): void {
+function writeRows(options: WriteRowsOptions): void {
+  const { stdout, projects, orgWidth, slugWidth, nameWidth } = options;
   for (const project of projects) {
     stdout.write(
-      `${formatProjectRow(project, { showOrg, orgSlug: project.orgSlug, slugWidth })}\n`
+      `${formatProjectRow(project, { orgWidth, slugWidth, nameWidth })}\n`
     );
   }
 }
@@ -128,7 +140,6 @@ function writeRows(
 type OrgResolution = {
   orgs: string[];
   footer?: string;
-  showOrg: boolean;
   skippedSelfHosted?: number;
 };
 
@@ -142,13 +153,13 @@ async function resolveOrgsToFetch(
 ): Promise<OrgResolution> {
   // 1. If --org flag provided, use it directly
   if (orgFlag) {
-    return { orgs: [orgFlag], showOrg: false };
+    return { orgs: [orgFlag] };
   }
 
   // 2. Check config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
-    return { orgs: [defaultOrg], showOrg: false };
+    return { orgs: [defaultOrg] };
   }
 
   // 3. Auto-detect from DSNs (may find multiple in monorepos)
@@ -162,13 +173,12 @@ async function resolveOrgsToFetch(
       return {
         orgs: uniqueOrgs,
         footer,
-        showOrg: uniqueOrgs.length > 1,
         skippedSelfHosted,
       };
     }
 
     // No resolvable targets, but may have self-hosted DSNs
-    return { orgs: [], showOrg: true, skippedSelfHosted };
+    return { orgs: [], skippedSelfHosted };
   } catch (error) {
     // Auth errors should propagate - user needs to log in
     if (error instanceof AuthError) {
@@ -177,7 +187,7 @@ async function resolveOrgsToFetch(
     // Fall through to empty orgs for other errors (network, etc.)
   }
 
-  return { orgs: [], showOrg: true };
+  return { orgs: [] };
 }
 
 export const listCommand = buildCommand({
@@ -228,7 +238,6 @@ export const listCommand = buildCommand({
     const {
       orgs: orgsToFetch,
       footer,
-      showOrg,
       skippedSelfHosted,
     } = await resolveOrgsToFetch(flags.org, cwd);
 
@@ -263,9 +272,16 @@ export const listCommand = buildCommand({
       return;
     }
 
-    const slugWidth = calculateProjectSlugWidth(limited, showOrg);
-    writeHeader(stdout, slugWidth);
-    writeRows(stdout, limited, slugWidth, showOrg);
+    const { orgWidth, slugWidth, nameWidth } =
+      calculateProjectColumnWidths(limited);
+    writeHeader(stdout, orgWidth, slugWidth, nameWidth);
+    writeRows({
+      stdout,
+      projects: limited,
+      orgWidth,
+      slugWidth,
+      nameWidth,
+    });
 
     if (filtered.length > limited.length) {
       stdout.write(
@@ -284,6 +300,9 @@ export const listCommand = buildCommand({
       );
     }
 
-    writeFooter(stdout, "Tip: Use 'sentry project view <slug>' for details");
+    writeFooter(
+      stdout,
+      "Tip: Use 'sentry project view <project> --org <org>' for details"
+    );
   },
 });

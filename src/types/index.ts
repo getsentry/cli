@@ -45,6 +45,7 @@ export {
   SolutionArtifactSchema,
   TERMINAL_STATUSES,
 } from "./seer.js";
+// Sentry API types
 export type {
   // Breadcrumb types
   Breadcrumb,
@@ -64,6 +65,8 @@ export type {
   // Organization links for multi-region
   OrganizationLinks,
   OsContext,
+  // Project Key types
+  ProjectKey,
   // Region types for multi-region support
   Region,
   Release,
@@ -84,9 +87,10 @@ export type {
   TraceResponse,
   TraceSpan,
   UserGeo,
+  // User regions response for multi-region
   UserRegionsResponse,
 } from "./sentry.js";
-// Sentry API types and schemas
+// Sentry API schemas (runtime values)
 export {
   // Schemas
   BreadcrumbSchema,
@@ -102,6 +106,7 @@ export {
   MechanismSchema,
   OrganizationLinksSchema,
   OsContextSchema,
+  ProjectKeySchema,
   // Region schemas for multi-region support
   RegionSchema,
   ReleaseSchema,

@@ -7,7 +7,7 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getProject } from "../../lib/api-client.js";
+import { getProject, getProjectKeys } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
@@ -21,7 +21,7 @@ import {
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject } from "../../types/index.js";
+import type { ProjectKey, SentryProject } from "../../types/index.js";
 
 type ViewFlags = {
   readonly org?: string;
@@ -72,15 +72,53 @@ async function handleWebView(
 }
 
 /**
- * Fetch project details for a single target.
+ * Try to fetch project keys, returning null on any error.
+ * Non-blocking - if keys fetch fails, we still display project info.
+ */
+async function tryGetProjectKeys(
+  orgSlug: string,
+  projectSlug: string
+): Promise<ProjectKey[] | null> {
+  try {
+    return await getProjectKeys(orgSlug, projectSlug);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get the primary DSN from project keys.
+ * Returns the first active key's public DSN, or null if none found.
+ */
+function getPrimaryDsn(keys: ProjectKey[] | null): string | null {
+  if (!keys || keys.length === 0) {
+    return null;
+  }
+  const activeKey = keys.find((k) => k.isActive);
+  return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+}
+
+/** Result of fetching a single project with its DSN */
+type ProjectWithDsn = {
+  project: SentryProject;
+  dsn: string | null;
+};
+
+/**
+ * Fetch project details and keys for a single target.
  * Returns null on non-auth errors (e.g., no access to project).
  * Rethrows auth errors so they propagate to the user.
  */
 async function fetchProjectDetails(
   target: ResolvedTarget
-): Promise<SentryProject | null> {
+): Promise<ProjectWithDsn | null> {
   try {
-    return await getProject(target.org, target.project);
+    // Fetch project and keys in parallel
+    const [project, keys] = await Promise.all([
+      getProject(target.org, target.project),
+      tryGetProjectKeys(target.org, target.project),
+    ]);
+    return { project, dsn: getPrimaryDsn(keys) };
   } catch (error) {
     // Rethrow auth errors - user needs to know they're not authenticated
     if (error instanceof AuthError) {
@@ -94,6 +132,7 @@ async function fetchProjectDetails(
 /** Result of fetching project details for multiple targets */
 type FetchResult = {
   projects: SentryProject[];
+  dsns: (string | null)[];
   targets: ResolvedTarget[];
 };
 
@@ -107,18 +146,20 @@ async function fetchAllProjectDetails(
   const results = await Promise.all(targets.map(fetchProjectDetails));
 
   const projects: SentryProject[] = [];
+  const dsns: (string | null)[] = [];
   const validTargets: ResolvedTarget[] = [];
 
   for (let i = 0; i < results.length; i++) {
-    const project = results[i];
+    const result = results[i];
     const target = targets[i];
-    if (project && target) {
-      projects.push(project);
+    if (result && target) {
+      projects.push(result.project);
+      dsns.push(result.dsn);
       validTargets.push(target);
     }
   }
 
-  return { projects, targets: validTargets };
+  return { projects, dsns, targets: validTargets };
 }
 
 /**
@@ -127,10 +168,12 @@ async function fetchAllProjectDetails(
 function writeMultipleProjects(
   stdout: { write: (s: string) => void },
   projects: SentryProject[],
+  dsns: (string | null)[],
   targets: ResolvedTarget[]
 ): void {
   for (let i = 0; i < projects.length; i++) {
     const project = projects[i];
+    const dsn = dsns[i];
     const target = targets[i];
 
     if (i > 0) {
@@ -138,7 +181,7 @@ function writeMultipleProjects(
     }
 
     if (project) {
-      const details = formatProjectDetails(project);
+      const details = formatProjectDetails(project, dsn);
       stdout.write(details.join("\n"));
       stdout.write("\n");
       if (target?.detectedFrom) {
@@ -219,7 +262,8 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch project details for all targets in parallel
-    const { projects, targets } = await fetchAllProjectDetails(resolvedTargets);
+    const { projects, dsns, targets } =
+      await fetchAllProjectDetails(resolvedTargets);
 
     if (projects.length === 0) {
       throw buildContextError();
@@ -227,21 +271,30 @@ export const viewCommand = buildCommand({
 
     // JSON output - array if multiple, single object if one
     if (flags.json) {
-      writeJson(stdout, projects.length === 1 ? projects[0] : projects);
+      // Add dsn field to JSON output
+      const projectsWithDsn = projects.map((p, i) => ({
+        ...p,
+        dsn: dsns[i] ?? null,
+      }));
+      writeJson(
+        stdout,
+        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn
+      );
       return;
     }
 
     // Human output
     const firstProject = projects[0];
+    const firstDsn = dsns[0];
     const firstTarget = targets[0];
     if (projects.length === 1 && firstProject) {
       writeOutput(stdout, firstProject, {
         json: false,
-        formatHuman: formatProjectDetails,
+        formatHuman: (p: SentryProject) => formatProjectDetails(p, firstDsn),
         detectedFrom: firstTarget?.detectedFrom,
       });
     } else {
-      writeMultipleProjects(stdout, projects, targets);
+      writeMultipleProjects(stdout, projects, dsns, targets);
     }
 
     if (footer) {

@@ -1369,48 +1369,52 @@ export function formatOrgDetails(org: SentryOrganization): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ProjectRowOptions = {
-  showOrg: boolean;
-  orgSlug?: string;
+  orgWidth: number;
   slugWidth: number;
+  nameWidth: number;
 };
 
 /**
  * Format project for list display
  */
 export function formatProjectRow(
-  project: SentryProject,
+  project: SentryProject & { orgSlug?: string },
   options: ProjectRowOptions
 ): string {
-  const { showOrg, orgSlug, slugWidth } = options;
-  const slug = showOrg
-    ? `${orgSlug}/${project.slug}`.padEnd(slugWidth)
-    : project.slug.padEnd(slugWidth);
-  const platform = (project.platform || "").padEnd(20);
-  return `${slug}  ${platform}  ${project.name}`;
+  const { orgWidth, slugWidth, nameWidth } = options;
+  const org = (project.orgSlug || "").padEnd(orgWidth);
+  const slug = project.slug.padEnd(slugWidth);
+  const name = project.name.padEnd(nameWidth);
+  const platform = project.platform || "";
+  return `${org}  ${slug}  ${name}  ${platform}`;
 }
 
 /**
- * Calculate max slug width from projects
+ * Calculate column widths for project list display
  */
-export function calculateProjectSlugWidth(
-  projects: Array<SentryProject & { orgSlug?: string }>,
-  showOrg: boolean
-): number {
-  return Math.max(
-    ...projects.map((p) =>
-      showOrg ? `${p.orgSlug}/${p.slug}`.length : p.slug.length
-    ),
-    4
+export function calculateProjectColumnWidths(
+  projects: Array<SentryProject & { orgSlug?: string }>
+): { orgWidth: number; slugWidth: number; nameWidth: number } {
+  const orgWidth = Math.max(
+    ...projects.map((p) => (p.orgSlug || "").length),
+    3
   );
+  const slugWidth = Math.max(...projects.map((p) => p.slug.length), 7);
+  const nameWidth = Math.max(...projects.map((p) => p.name.length), 4);
+  return { orgWidth, slugWidth, nameWidth };
 }
 
 /**
  * Format detailed project information.
  *
  * @param project - The Sentry project to format
+ * @param dsn - Optional DSN string to display
  * @returns Array of formatted lines
  */
-export function formatProjectDetails(project: SentryProject): string[] {
+export function formatProjectDetails(
+  project: SentryProject,
+  dsn?: string | null
+): string[] {
   const lines: string[] = [];
 
   // Header
@@ -1422,6 +1426,7 @@ export function formatProjectDetails(project: SentryProject): string[] {
   lines.push(`Name:       ${project.name || "(unnamed)"}`);
   lines.push(`ID:         ${project.id}`);
   lines.push(`Platform:   ${project.platform || "Not set"}`);
+  lines.push(`DSN:        ${dsn || "No DSN available"}`);
   lines.push(`Status:     ${project.status}`);
   if (project.dateCreated) {
     lines.push(`Created:    ${new Date(project.dateCreated).toLocaleString()}`);

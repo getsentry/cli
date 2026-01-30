@@ -8,6 +8,8 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type ProjectKey,
+  ProjectKeySchema,
   type Region,
   type SentryEvent,
   SentryEventSchema,
@@ -637,6 +639,22 @@ export function getProject(
     `/projects/${orgSlug}/${projectSlug}/`,
     {
       schema: SentryProjectSchema,
+    }
+  );
+}
+
+/**
+ * Get project keys (DSNs) for a project.
+ * Uses region-aware routing for multi-region support.
+ */
+export function getProjectKeys(
+  orgSlug: string,
+  projectSlug: string
+): Promise<ProjectKey[]> {
+  return orgScopedRequest<ProjectKey[]>(
+    `/projects/${orgSlug}/${projectSlug}/keys/`,
+    {
+      schema: z.array(ProjectKeySchema),
     }
   );
 }
