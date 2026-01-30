@@ -517,7 +517,10 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   }
 
   if (regions.length === 0) {
-    return [];
+    // Fall back to default API for self-hosted instances
+    return apiRequest<SentryOrganization[]>("/organizations/", {
+      schema: z.array(SentryOrganizationSchema),
+    });
   }
 
   const results = await Promise.all(
