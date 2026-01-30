@@ -329,7 +329,18 @@ const defaultOption = highlightedOptions[defaultIndex];
           });
           option.classList.add('selected');
           option.setAttribute('aria-selected', 'true');
-          
+
+          // Track install method selection with Sentry metrics
+          try {
+            if (typeof Sentry !== 'undefined' && Sentry.metrics && newLabel) {
+              Sentry.metrics.count('hero_install_method_selected', 1, {
+                attributes: { install_method: newLabel },
+              });
+            }
+          } catch (e) {
+            // Sentry not available, ignore
+          }
+
           // Close dropdown and return focus
           installBox.classList.remove('open');
           trigger.setAttribute('aria-expanded', 'false');
@@ -461,6 +472,18 @@ const defaultOption = highlightedOptions[defaultIndex];
               await navigator.clipboard.writeText(command);
               copyBtn.classList.add('copied');
               setTimeout(function() { copyBtn.classList.remove('copied'); }, 2000);
+
+              // Track copy event with Sentry metrics
+              try {
+                if (typeof Sentry !== 'undefined' && Sentry.metrics) {
+                  const installMethod = label ? label.textContent : 'unknown';
+                  Sentry.metrics.count('hero_command_copied', 1, {
+                    attributes: { install_method: installMethod },
+                  });
+                }
+              } catch (e) {
+                // Sentry not available, ignore
+              }
             }
           });
         }
