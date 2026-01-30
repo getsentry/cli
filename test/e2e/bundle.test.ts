@@ -87,6 +87,24 @@ describe("npm bundle", () => {
     expect(output.length).toBeGreaterThan(0);
   });
 
+  test("bundle does not emit Node.js warnings", async () => {
+    // Run the bundle and capture stderr to check for warnings
+    // This ensures we don't regress on warning suppression (e.g., SQLite experimental)
+    const proc = Bun.spawn(["node", BUNDLE_PATH, "--version"], {
+      cwd: ROOT_DIR,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const stderr = await new Response(proc.stderr).text();
+    await proc.exited;
+
+    // Should not have any Node.js warnings
+    expect(stderr).not.toContain("ExperimentalWarning");
+    expect(stderr).not.toContain("DeprecationWarning");
+    expect(stderr).not.toContain("Warning:");
+  });
+
   test("bundle can be executed directly on Unix", async () => {
     // Skip on Windows where shebang doesn't apply
     if (process.platform === "win32") {

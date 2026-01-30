@@ -90,7 +90,9 @@ const result = await build({
   bundle: true,
   minify: true,
   banner: {
-    js: "#!/usr/bin/env node",
+    // Suppress Node.js warnings (e.g., SQLite experimental) - not useful for CLI users
+    js: `#!/usr/bin/env node
+{let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
   },
   sourcemap: true,
   platform: "node",
