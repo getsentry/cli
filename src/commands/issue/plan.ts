@@ -15,8 +15,8 @@ import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
 import {
-  formatAutofixError,
   formatSolution,
+  handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import {
   type AutofixState,
@@ -249,8 +249,7 @@ export const planCommand = buildCommand({
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
-        const message = formatAutofixError(error.status, error.detail);
-        throw new Error(message);
+        throw handleSeerApiError(error.status, error.detail, flags.org);
       }
       throw error;
     }

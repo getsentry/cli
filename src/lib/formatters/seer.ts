@@ -10,6 +10,7 @@ import type {
   RootCause,
   SolutionArtifact,
 } from "../../types/seer.js";
+import { SeerError } from "../errors.js";
 import { cyan, green, muted, yellow } from "./colors.js";
 
 const bold = (text: string): string => chalk.bold(text);
@@ -199,6 +200,54 @@ export function formatRootCauseList(causes: RootCause[]): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Messages
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a SeerError from an API error status code and detail.
+ *
+ * @param status - HTTP status code
+ * @param detail - Error detail from API
+ * @param orgSlug - Organization slug for constructing settings URLs
+ * @returns SeerError if the status code indicates a Seer-specific error, null otherwise
+ */
+export function createSeerError(
+  status: number,
+  detail?: string,
+  orgSlug?: string
+): SeerError | null {
+  if (status === 402) {
+    return new SeerError("no_budget", orgSlug);
+  }
+  if (status === 403) {
+    if (detail?.includes("not enabled")) {
+      return new SeerError("not_enabled", orgSlug);
+    }
+    if (detail?.includes("AI features")) {
+      return new SeerError("ai_disabled", orgSlug);
+    }
+    return new SeerError("not_enabled", orgSlug); // default 403
+  }
+  return null;
+}
+
+/**
+ * Convert an API error to a Seer-specific error or a generic error.
+ *
+ * @param status - HTTP status code
+ * @param detail - Error detail from API
+ * @param orgSlug - Organization slug for constructing settings URLs
+ * @returns SeerError for Seer-specific errors, or a generic Error for other API errors
+ */
+export function handleSeerApiError(
+  status: number,
+  detail?: string,
+  orgSlug?: string
+): Error {
+  const seerError = createSeerError(status, detail, orgSlug);
+  if (seerError) {
+    return seerError;
+  }
+  return new Error(formatAutofixError(status, detail));
+}
 
 /**
  * Format an error message for common autofix errors.

@@ -237,6 +237,49 @@ export class DeviceFlowError extends CliError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Seer Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
+
+/**
+ * Seer-specific errors with actionable suggestions.
+ *
+ * @param reason - Type of Seer failure
+ * @param orgSlug - Organization slug for constructing settings URLs
+ */
+export class SeerError extends CliError {
+  readonly reason: SeerErrorReason;
+  readonly orgSlug?: string;
+
+  constructor(reason: SeerErrorReason, orgSlug?: string) {
+    const messages: Record<SeerErrorReason, string> = {
+      not_enabled: "Seer is not enabled for this organization.",
+      no_budget: "Seer requires a paid plan.",
+      ai_disabled: "AI features are disabled for this organization.",
+    };
+    super(messages[reason]);
+    this.name = "SeerError";
+    this.reason = reason;
+    this.orgSlug = orgSlug;
+  }
+
+  override format(): string {
+    const baseUrl = this.orgSlug
+      ? `https://${this.orgSlug}.sentry.io/settings`
+      : "your Sentry organization settings";
+
+    const suggestions: Record<SeerErrorReason, string> = {
+      not_enabled: `To enable Seer:\n  ${baseUrl}/seer/`,
+      no_budget: `To use Seer features, upgrade your plan:\n  ${baseUrl}/billing/`,
+      ai_disabled: `To enable AI features:\n  ${baseUrl}/seer/`,
+    };
+
+    return `${this.message}\n\n${suggestions[this.reason]}`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
