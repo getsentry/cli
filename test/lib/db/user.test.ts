@@ -3,11 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  clearUserInfo,
-  getUserInfo,
-  setUserInfo,
-} from "../../../src/lib/db/user.js";
+import { getUserInfo, setUserInfo } from "../../../src/lib/db/user.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
 let testConfigDir: string;
@@ -85,19 +81,5 @@ describe("setUserInfo", () => {
     expect(result?.userId).toBe("minimal");
     expect(result?.email).toBeUndefined();
     expect(result?.username).toBeUndefined();
-  });
-});
-
-describe("clearUserInfo", () => {
-  test("removes stored user info", () => {
-    setUserInfo({ userId: "tobecleared", email: "clear@test.com" });
-    expect(getUserInfo()).toBeDefined();
-
-    clearUserInfo();
-    expect(getUserInfo()).toBeUndefined();
-  });
-
-  test("does not throw when no user info exists", () => {
-    expect(() => clearUserInfo()).not.toThrow();
   });
 });

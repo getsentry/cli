@@ -22,15 +22,11 @@ type Span = Sentry.Span;
  * Initialize telemetry context with user and instance information.
  * Called after Sentry is initialized to set user context and instance tags.
  */
-function initTelemetryContext(): void {
+async function initTelemetryContext(): Promise<void> {
   try {
-    // Dynamic imports to avoid circular dependencies
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getUserInfo } =
-      require("./db/user.js") as typeof import("./db/user.js");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getInstanceId } =
-      require("./db/instance.js") as typeof import("./db/instance.js");
+    // Dynamic imports to avoid circular dependencies and for ES module compatibility
+    const { getUserInfo } = await import("./db/user.js");
+    const { getInstanceId } = await import("./db/instance.js");
 
     const user = getUserInfo();
     const instanceId = getInstanceId();
@@ -70,7 +66,7 @@ export async function withTelemetry<T>(
   }
 
   // Initialize user and instance context
-  initTelemetryContext();
+  await initTelemetryContext();
 
   Sentry.startSession();
   Sentry.captureSession();

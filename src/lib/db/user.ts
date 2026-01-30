@@ -57,12 +57,3 @@ export function setUserInfo(info: UserInfo): void {
       updated_at = excluded.updated_at
   `).run(info.userId, info.email ?? null, info.username ?? null, now);
 }
-
-/**
- * Clear stored user info.
- * Called during logout.
- */
-export function clearUserInfo(): void {
-  const db = getDatabase();
-  db.query("DELETE FROM user_info WHERE id = 1").run();
-}

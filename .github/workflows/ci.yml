@@ -174,11 +174,13 @@ jobs:
           # Retry logic for Windows Bun patch bug (ENOTEMPTY errors)
           for i in 1 2 3; do
             if bun install --frozen-lockfile; then
-              break
+              exit 0
             fi
             echo "Attempt $i failed, clearing Bun cache and retrying..."
             bun pm cache rm 2>/dev/null || true
           done
+          echo "All install attempts failed"
+          exit 1
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
