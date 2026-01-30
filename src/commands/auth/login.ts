@@ -15,6 +15,26 @@ import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import type { SentryUser } from "../../types/index.js";
 
+/**
+ * Format user identity for display.
+ * Handles missing username/email gracefully.
+ */
+function formatUserIdentity(user: SentryUser): string {
+  const { username, email, id } = user;
+
+  if (username && email) {
+    return `${username} <${email}>`;
+  }
+  if (username) {
+    return username;
+  }
+  if (email) {
+    return email;
+  }
+  // Fallback to user ID if no username/email
+  return `user ${id}`;
+}
+
 type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
@@ -80,9 +100,7 @@ export const loginCommand = buildCommand({
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
-      stdout.write(
-        `  Logged in as ${muted(`${user.username} <${user.email}>`)}\n`
-      );
+      stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
@@ -162,9 +180,7 @@ export const loginCommand = buildCommand({
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
       if (user) {
-        stdout.write(
-          `  Logged in as ${muted(`${user.username} <${user.email}>`)}\n`
-        );
+        stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
       }
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
 
