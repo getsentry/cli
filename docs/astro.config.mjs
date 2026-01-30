@@ -1,4 +1,5 @@
 import starlight from "@astrojs/starlight";
+import sentry from "@sentry/astro";
 import { defineConfig } from "astro/config";
 
 // Allow base path override via environment variable for PR previews
@@ -8,6 +9,14 @@ export default defineConfig({
   site: "https://cli.sentry.dev",
   base,
   integrations: [
+    sentry({
+      project: "cli-website",
+      org: "sentry",
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      sourceMapsUploadOptions: {
+        enabled: !!process.env.SENTRY_AUTH_TOKEN,
+      },
+    }),
     starlight({
       title: "Sentry CLI",
       favicon: "/favicon.png",
