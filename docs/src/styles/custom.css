@@ -1607,7 +1607,6 @@ nav.sidebar a[aria-current="page"] {
 
   .hero-command .install-selector {
     max-width: 100%;
-    overflow-x: auto;
   }
 
   .hero-command .install-box {
@@ -1802,30 +1801,12 @@ summary[id="starlight__on-this-page--mobile"] .caret {
   color: #a78bfa;
 }
 
-.overscroll-message span {
-  display: inline-block;
-  padding: 0.5rem 1.25rem;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: 20px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.875rem;
-  font-weight: 500;
-  font-family: var(--sl-font);
-  backdrop-filter: blur(8px);
-  white-space: nowrap;
-}
-
-.overscroll-message span {
-  display: inline-block;
-  padding: 0.5rem 1.25rem;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: 20px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.875rem;
-  font-weight: 500;
-  font-family: var(--sl-font);
-  backdrop-filter: blur(8px);
-  white-space: nowrap;
+@media (max-width: 640px) {
+  .overscroll-message span {
+    white-space: normal;
+    text-align: center;
+    max-width: calc(100vw - 2rem);
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+  }
 }
