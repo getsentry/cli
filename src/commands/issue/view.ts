@@ -169,7 +169,10 @@ export const viewCommand = buildCommand({
     });
 
     // Set telemetry context
-    setContext(orgSlug, issue.project?.slug);
+    setContext(
+      orgSlug ? [orgSlug] : [],
+      issue.project?.slug ? [issue.project.slug] : []
+    );
 
     if (flags.web) {
       await openInBrowser(stdout, issue.permalink, "issue");

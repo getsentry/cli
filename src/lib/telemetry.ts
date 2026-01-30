@@ -192,16 +192,17 @@ export function setCommandSpanName(
  *
  * Call this from commands after resolving the target org/project
  * to enable filtering by org/project in Sentry.
+ * Accepts arrays to support multi-project commands.
  *
- * @param org - The organization slug
- * @param project - The project slug
+ * @param orgs - Organization slugs
+ * @param projects - Project slugs
  */
-export function setOrgProjectContext(org?: string, project?: string): void {
-  if (org) {
-    Sentry.setTag("sentry.org", org);
+export function setOrgProjectContext(orgs: string[], projects: string[]): void {
+  if (orgs.length > 0) {
+    Sentry.setTag("sentry.org", orgs.join(","));
   }
-  if (project) {
-    Sentry.setTag("sentry.project", project);
+  if (projects.length > 0) {
+    Sentry.setTag("sentry.project", projects.join(","));
   }
 }
 

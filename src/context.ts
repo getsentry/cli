@@ -28,8 +28,9 @@ export interface SentryContext extends CommandContext {
    * Set organization and project context for telemetry.
    * Call this after resolving the target org/project to enable
    * filtering by org/project in Sentry.
+   * Accepts arrays to support multi-project commands.
    */
-  readonly setContext: (org?: string, project?: string) => void;
+  readonly setContext: (orgs: string[], projects: string[]) => void;
 }
 
 /**

@@ -1,6 +1,8 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getCurrentUser, listOrganizations } from "../../lib/api-client.js";
+import { getCurrentUser } from "../../lib/api-client.js";
 import { openBrowser } from "../../lib/browser.js";
 import { setupCopyKeyListener } from "../../lib/clipboard.js";
 import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
@@ -11,24 +13,6 @@ import { muted, success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
-
-/**
- * Fetch and store user info for telemetry.
- * This is best-effort - failures don't block authentication.
- * Retries are handled by ky in the API client layer.
- */
-async function fetchAndStoreUserInfo(): Promise<void> {
-  try {
-    const user = await getCurrentUser();
-    setUserInfo({
-      userId: user.id,
-      email: user.email,
-      username: user.username,
-    });
-  } catch {
-    // Silently continue - user info is not critical for auth
-  }
-}
 
 type LoginFlags = {
   readonly token?: string;
@@ -73,12 +57,17 @@ export const loginCommand = buildCommand({
 
     // Token-based authentication
     if (flags.token) {
-      // Save token first, then validate by making an API call
+      // Save token first, then validate by fetching user info
       await setAuthToken(flags.token);
 
-      // Validate the token by trying to list organizations
+      // Validate token and fetch user info in one call
       try {
-        await listOrganizations();
+        const user = await getCurrentUser();
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+        });
       } catch {
         // Token is invalid - clear it and throw
         await clearAuth();
@@ -87,9 +76,6 @@ export const loginCommand = buildCommand({
           "Invalid API token. Please check your token and try again."
         );
       }
-
-      // Fetch and store user info for telemetry (best-effort with retry)
-      await fetchAndStoreUserInfo();
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
@@ -155,8 +141,18 @@ export const loginCommand = buildCommand({
       // Store the token
       await completeOAuthFlow(tokenResponse);
 
-      // Fetch and store user info for telemetry (best-effort with retry)
-      await fetchAndStoreUserInfo();
+      // Fetch and store user info for telemetry (best-effort)
+      try {
+        const user = await getCurrentUser();
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+        });
+      } catch (error) {
+        // Report to Sentry but don't block auth - user info is not critical
+        Sentry.captureException(error);
+      }
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
