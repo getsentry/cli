@@ -292,6 +292,7 @@ jobs:
     if: always()
     needs: [check-skill, merge-artifacts]
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Check CI status
         run: |
