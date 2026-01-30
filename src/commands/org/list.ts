@@ -79,11 +79,7 @@ export const listCommand = buildCommand({
     }
 
     if (limitedOrgs.length === 0) {
-      stdout.write("No organizations found.\n\n");
-      stdout.write("This could mean:\n");
-      stdout.write("  - You haven't been added to any organizations yet\n");
-      stdout.write("  - There may be a network or permissions issue\n\n");
-      stdout.write("Try 'sentry auth status' to verify your authentication.\n");
+      stdout.write("No organizations found.\n");
       return;
     }
 

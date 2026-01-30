@@ -26,6 +26,15 @@ const INSTANCE_INFO_TABLE = `
   )
 `;
 
+/** Organization region cache for multi-region support */
+const ORG_REGIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS org_regions (
+    org_slug TEXT PRIMARY KEY,
+    region_url TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
+
 export function initSchema(db: Database): void {
   db.exec(`
     -- Schema version for future migrations
@@ -95,14 +104,7 @@ export function initSchema(db: Database): void {
       value TEXT NOT NULL
     );
 
-    -- Organization region cache for multi-region support
-    -- Maps org slugs to their region URLs (e.g., us.sentry.io, de.sentry.io)
-    CREATE TABLE IF NOT EXISTS org_regions (
-      org_slug TEXT PRIMARY KEY,
-      region_url TEXT NOT NULL,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-
+    ${ORG_REGIONS_TABLE};
     ${USER_INFO_TABLE};
     ${INSTANCE_INFO_TABLE};
   `);
@@ -133,11 +135,7 @@ export function runMigrations(db: Database): void {
   // Migration 1 -> 2: Add org_regions, user_info, and instance_info tables
   if (currentVersion < 2) {
     db.exec(`
-      CREATE TABLE IF NOT EXISTS org_regions (
-        org_slug TEXT PRIMARY KEY,
-        region_url TEXT NOT NULL,
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-      );
+      ${ORG_REGIONS_TABLE};
       ${USER_INFO_TABLE};
       ${INSTANCE_INFO_TABLE};
     `);

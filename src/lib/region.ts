@@ -61,13 +61,18 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
 }
 
 /**
- * Check if a URL is a Sentry SaaS URL (sentry.io or regional subdomain).
- * Used to determine if multi-region support should be enabled.
+ * Validates that a URL is a legitimate Sentry SaaS domain.
  *
- * @param url - URL string to check
- * @returns true if the URL is a Sentry SaaS URL
+ * Used to determine if multi-region support should be enabled and to
+ * validate region URLs before sending authenticated requests.
+ *
+ * Security: This validates the hostname against known Sentry domains to prevent
+ * sending authenticated requests to arbitrary servers via spoofed region URLs.
+ *
+ * @param url - URL string to validate
+ * @returns true if the hostname is sentry.io or a subdomain of sentry.io
  */
-function isSentrySaasUrl(url: string): boolean {
+export function isSentrySaasUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (
