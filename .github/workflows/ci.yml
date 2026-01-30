@@ -167,8 +167,18 @@ jobs:
         with:
           path: node_modules
           key: node-modules-${{ matrix.os }}-${{ hashFiles('bun.lock', 'patches/**') }}
-      - if: steps.cache.outputs.cache-hit != 'true'
-        run: bun install --frozen-lockfile
+      - name: Install dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          # Retry logic for Windows Bun patch bug (ENOTEMPTY errors)
+          for i in 1 2 3; do
+            if bun install --frozen-lockfile; then
+              break
+            fi
+            echo "Attempt $i failed, clearing Bun cache and retrying..."
+            bun pm cache rm 2>/dev/null || true
+          done
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
