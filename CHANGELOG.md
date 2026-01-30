@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.4.2
+
+### Bug Fixes 🐛
+
+- (docs) For the mobile screen by @MathurAditya724 in [#116](https://github.com/getsentry/cli/pull/116)
+
 ## 0.4.1
 
 ### Bug Fixes 🐛
