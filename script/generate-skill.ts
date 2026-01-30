@@ -15,7 +15,6 @@
 import { routes } from "../src/app.js";
 
 const OUTPUT_PATH = "plugins/sentry-cli/skills/sentry-cli/SKILL.md";
-const WELL_KNOWN_PATH = "docs/public/.well-known/skills/sentry-cli/SKILL.md";
 const DOCS_PATH = "docs/src/content/docs";
 
 /** Regex to match YAML frontmatter at the start of a file */
@@ -773,7 +772,5 @@ async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
 
 const content = await generateSkillMarkdown(routes as unknown as RouteMap);
 await Bun.write(OUTPUT_PATH, content);
-await Bun.write(WELL_KNOWN_PATH, content);
 
 console.log(`Generated ${OUTPUT_PATH}`);
-console.log(`Generated ${WELL_KNOWN_PATH}`);
