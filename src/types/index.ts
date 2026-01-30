@@ -62,6 +62,8 @@ export type {
   IssueSubstatus,
   Mechanism,
   OsContext,
+  // Project Key types
+  ProjectKey,
   Release,
   // Request types
   RequestEntry,
@@ -96,6 +98,7 @@ export {
   ISSUE_STATUSES,
   MechanismSchema,
   OsContextSchema,
+  ProjectKeySchema,
   ReleaseSchema,
   RequestEntrySchema,
   SentryEventSchema,

@@ -8,6 +8,8 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type ProjectKey,
+  ProjectKeySchema,
   type SentryEvent,
   SentryEventSchema,
   type SentryIssue,
@@ -352,6 +354,18 @@ export function getProject(
 ): Promise<SentryProject> {
   return apiRequest<SentryProject>(`/projects/${orgSlug}/${projectSlug}/`, {
     schema: SentryProjectSchema,
+  });
+}
+
+/**
+ * Get project keys (DSNs) for a project
+ */
+export function getProjectKeys(
+  orgSlug: string,
+  projectSlug: string
+): Promise<ProjectKey[]> {
+  return apiRequest<ProjectKey[]>(`/projects/${orgSlug}/${projectSlug}/keys/`, {
+    schema: z.array(ProjectKeySchema),
   });
 }
 
