@@ -11,6 +11,7 @@ import {
 } from "../../../src/commands/issue/utils.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
 let testConfigDir: string;
@@ -21,6 +22,9 @@ beforeEach(async () => {
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
+  // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
+  await setOrgRegion("test-org", "https://sentry.io");
+  await setOrgRegion("my-org", "https://sentry.io");
 });
 
 afterEach(async () => {

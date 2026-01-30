@@ -25,6 +25,18 @@ export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 
 export const apiRoutes: MockRoute[] = [
+  // User Regions (multi-region support)
+  // Returns the mock server itself as the only region
+  {
+    method: "GET",
+    path: "/api/0/users/me/regions/",
+    response: (_req, _params, serverUrl) => ({
+      body: {
+        regions: [{ name: "monolith", url: serverUrl }],
+      },
+    }),
+  },
+
   // Organizations
   {
     method: "GET",

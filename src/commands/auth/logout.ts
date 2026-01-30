@@ -8,6 +8,7 @@ import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { clearAuth, isAuthenticated } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
+import { clearOrgRegions } from "../../lib/db/regions.js";
 import { success } from "../../lib/formatters/colors.js";
 
 export const logoutCommand = buildCommand({
@@ -28,6 +29,8 @@ export const logoutCommand = buildCommand({
     }
 
     await clearAuth();
+    // Clear organization region cache since it's user-specific
+    await clearOrgRegions();
     stdout.write(`${success("✓")} Logged out successfully.\n`);
     stdout.write(`  Credentials removed from: ${getDbPath()}\n`);
   },

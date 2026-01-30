@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 export function initSchema(db: Database): void {
   db.exec(`
@@ -74,6 +74,14 @@ export function initSchema(db: Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- Organization region cache for multi-region support
+    -- Maps org slugs to their region URLs (e.g., us.sentry.io, de.sentry.io)
+    CREATE TABLE IF NOT EXISTS org_regions (
+      org_slug TEXT PRIMARY KEY,
+      region_url TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
   `);
 
   const versionRow = db
@@ -99,7 +107,18 @@ function getSchemaVersion(db: Database): number {
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
-  // Add migrations here as schema evolves
+  // Migration 1 -> 2: Add org_regions table for multi-region support
+  if (currentVersion < 2) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_regions (
+        org_slug TEXT PRIMARY KEY,
+        region_url TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+    `);
+  }
+
+  // Update schema version if migrations were run
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
     db.query("UPDATE schema_version SET version = ?").run(
       CURRENT_SCHEMA_VERSION

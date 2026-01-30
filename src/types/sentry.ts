@@ -9,8 +9,35 @@
 import { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Region
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A Sentry region (e.g., US, EU) */
+export const RegionSchema = z.object({
+  name: z.string(),
+  url: z.string().url(),
+});
+
+export type Region = z.infer<typeof RegionSchema>;
+
+/** Response from /api/0/users/me/regions/ endpoint */
+export const UserRegionsResponseSchema = z.object({
+  regions: z.array(RegionSchema),
+});
+
+export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Organization links with region URL for multi-region support */
+export const OrganizationLinksSchema = z.object({
+  organizationUrl: z.string(),
+  regionUrl: z.string(),
+});
+
+export type OrganizationLinks = z.infer<typeof OrganizationLinksSchema>;
 
 export const SentryOrganizationSchema = z
   .object({
@@ -30,6 +57,8 @@ export const SentryOrganizationSchema = z
       .passthrough()
       .optional(),
     features: z.array(z.string()).optional(),
+    // Multi-region support: links contain the region URL for this org
+    links: OrganizationLinksSchema.optional(),
   })
   .passthrough();
 

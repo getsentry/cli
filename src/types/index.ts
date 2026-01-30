@@ -61,7 +61,11 @@ export type {
   IssueStatus,
   IssueSubstatus,
   Mechanism,
+  // Organization links for multi-region
+  OrganizationLinks,
   OsContext,
+  // Region types for multi-region support
+  Region,
   Release,
   // Request types
   RequestEntry,
@@ -80,6 +84,7 @@ export type {
   TraceResponse,
   TraceSpan,
   UserGeo,
+  UserRegionsResponse,
 } from "./sentry.js";
 // Sentry API types and schemas
 export {
@@ -95,7 +100,10 @@ export {
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
   MechanismSchema,
+  OrganizationLinksSchema,
   OsContextSchema,
+  // Region schemas for multi-region support
+  RegionSchema,
   ReleaseSchema,
   RequestEntrySchema,
   SentryEventSchema,
@@ -109,6 +117,7 @@ export {
   TraceEventSchema,
   TraceResponseSchema,
   UserGeoSchema,
+  UserRegionsResponseSchema,
 } from "./sentry.js";
 
 // I/O types

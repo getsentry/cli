@@ -8,6 +8,7 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type Region,
   type SentryEvent,
   SentryEventSchema,
   type SentryIssue,
@@ -18,6 +19,8 @@ import {
   SentryProjectSchema,
   type TraceResponse,
   type TraceSpan,
+  type UserRegionsResponse,
+  UserRegionsResponseSchema,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { getUserAgent } from "./constants.js";
@@ -25,6 +28,12 @@ import { refreshToken } from "./db/auth.js";
 import { ApiError } from "./errors.js";
 
 const DEFAULT_SENTRY_URL = "https://sentry.io";
+
+/**
+ * Control silo URL - handles OAuth, user accounts, and region routing.
+ * This is always sentry.io for SaaS, or the base URL for self-hosted.
+ */
+const CONTROL_SILO_URL = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
 
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -37,6 +46,12 @@ const MAX_BACKOFF_MS = 10_000;
 
 /** HTTP status codes that trigger automatic retry */
 const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+
+/** Regex to extract org slug from /organizations/{slug}/... endpoints */
+const ORG_ENDPOINT_REGEX = /^\/?organizations\/([^/]+)/;
+
+/** Regex to extract org slug from /projects/{org}/{project}/... endpoints */
+const PROJECT_ENDPOINT_REGEX = /^\/?projects\/([^/]+)\/[^/]+/;
 
 /**
  * Get the Sentry API base URL.
@@ -292,42 +307,277 @@ export async function rawApiRequest(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// High-level API Methods
+// Multi-Region Support
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * List organizations the user has access to
+ * Create a ky client configured for a specific region URL.
+ * Used for making requests to region-specific endpoints.
+ *
+ * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
  */
-export function listOrganizations(): Promise<SentryOrganization[]> {
-  return apiRequest<SentryOrganization[]>("/organizations/", {
-    schema: z.array(SentryOrganizationSchema),
+async function createRegionApiClient(regionUrl: string): Promise<KyInstance> {
+  const { token } = await refreshToken();
+  const baseUrl = regionUrl.endsWith("/") ? regionUrl : `${regionUrl}/`;
+
+  return kyHttpClient.create({
+    prefixUrl: `${baseUrl}api/0/`,
+    timeout: REQUEST_TIMEOUT_MS,
+    retry: {
+      limit: MAX_RETRIES,
+      methods: ["get", "put", "delete", "patch"],
+      statusCodes: RETRYABLE_STATUS_CODES,
+      backoffLimit: MAX_BACKOFF_MS,
+    },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": getUserAgent(),
+    },
+    hooks: {
+      afterResponse: [
+        async (request, options, response) => {
+          const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
+          if (response.status === 401 && !isRetry) {
+            try {
+              const { token: newToken, refreshed } = await refreshToken({
+                force: true,
+              });
+              if (!refreshed) {
+                return response;
+              }
+              const retryHeaders = new Headers(options.headers);
+              retryHeaders.set("Authorization", `Bearer ${newToken}`);
+              retryHeaders.set(RETRY_MARKER_HEADER, "1");
+              const { prefixUrl: _, ...retryOptions } = options;
+              return kyHttpClient(request.url, {
+                ...retryOptions,
+                headers: retryHeaders,
+                retry: 0,
+              });
+            } catch {
+              return response;
+            }
+          }
+          return response;
+        },
+      ],
+    },
   });
 }
 
 /**
- * Get a specific organization
+ * Make an authenticated request to a specific Sentry region.
+ *
+ * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
+ * @param endpoint - API endpoint path (e.g., "/organizations/")
+ * @param options - Request options
+ */
+export async function apiRequestToRegion<T>(
+  regionUrl: string,
+  endpoint: string,
+  options: ApiRequestOptions<T> = {}
+): Promise<T> {
+  const { method = "GET", body, params, schema } = options;
+  const client = await createRegionApiClient(regionUrl);
+
+  let response: Response;
+  try {
+    response = await client(normalizePath(endpoint), {
+      method,
+      json: body,
+      searchParams: buildSearchParams(params),
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "response" in error) {
+      const kyError = error as { response: Response };
+      const text = await kyError.response.text();
+      let detail: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { detail?: string };
+        detail = parsed.detail ?? JSON.stringify(parsed);
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
+        kyError.response.status,
+        detail
+      );
+    }
+    throw error;
+  }
+
+  const data = await response.json();
+
+  if (schema) {
+    return schema.parse(data);
+  }
+
+  return data as T;
+}
+
+/**
+ * Get the list of regions the user has organization membership in.
+ * This endpoint is on the control silo (sentry.io) and returns all regions.
+ *
+ * @returns Array of regions with name and URL
+ */
+export async function getUserRegions(): Promise<Region[]> {
+  // Always use control silo for this endpoint
+  const response = await apiRequestToRegion<UserRegionsResponse>(
+    CONTROL_SILO_URL,
+    "/users/me/regions/",
+    { schema: UserRegionsResponseSchema }
+  );
+  return response.regions;
+}
+
+/**
+ * List organizations in a specific region.
+ *
+ * @param regionUrl - The region's base URL
+ * @returns Organizations in that region
+ */
+export function listOrganizationsInRegion(
+  regionUrl: string
+): Promise<SentryOrganization[]> {
+  return apiRequestToRegion<SentryOrganization[]>(
+    regionUrl,
+    "/organizations/",
+    {
+      schema: z.array(SentryOrganizationSchema),
+    }
+  );
+}
+
+/**
+ * Extract organization slug from an endpoint path.
+ * Supports:
+ * - `/organizations/{slug}/...` - standard organization endpoints
+ * - `/projects/{org}/{project}/...` - project-scoped endpoints
+ */
+function extractOrgSlugFromEndpoint(endpoint: string): string | null {
+  // Try organization path first: /organizations/{slug}/...
+  const orgMatch = endpoint.match(ORG_ENDPOINT_REGEX);
+  if (orgMatch) {
+    return orgMatch[1];
+  }
+
+  // Try project path: /projects/{org}/{project}/...
+  const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
+  if (projectMatch) {
+    return projectMatch[1];
+  }
+
+  return null;
+}
+
+/**
+ * Make an org-scoped API request, automatically resolving the correct region.
+ * This is the preferred way to make org-scoped requests.
+ *
+ * The endpoint must contain the org slug in the path (e.g., `/organizations/{slug}/...`).
+ * The org slug is extracted to look up the correct region URL.
+ *
+ * @param endpoint - API endpoint path containing the org slug
+ * @param options - Request options
+ */
+async function orgScopedRequest<T>(
+  endpoint: string,
+  options: ApiRequestOptions<T> = {}
+): Promise<T> {
+  const orgSlug = extractOrgSlugFromEndpoint(endpoint);
+  if (!orgSlug) {
+    throw new Error(
+      `Cannot extract org slug from endpoint: ${endpoint}. ` +
+        "Endpoint must match /organizations/{slug}/..."
+    );
+  }
+  const { resolveOrgRegion } = await import("./region.js");
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  return apiRequestToRegion(regionUrl, endpoint, options);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// High-level API Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * List all organizations the user has access to across all regions.
+ * Performs a fan-out to each region and combines results.
+ * Also caches the region URL for each organization.
+ */
+export async function listOrganizations(): Promise<SentryOrganization[]> {
+  const { setOrgRegions } = await import("./db/regions.js");
+
+  // Get all regions user has membership in
+  const regions = await getUserRegions();
+
+  if (regions.length === 0) {
+    return [];
+  }
+
+  // Fan out to all regions in parallel
+  const results = await Promise.all(
+    regions.map(async (region) => {
+      try {
+        const orgs = await listOrganizationsInRegion(region.url);
+        // Attach region URL to each org for caching
+        return orgs.map((org) => ({
+          org,
+          regionUrl: org.links?.regionUrl ?? region.url,
+        }));
+      } catch {
+        // If a region fails, continue with others
+        return [];
+      }
+    })
+  );
+
+  // Flatten results and cache region URLs
+  const flatResults = results.flat();
+  const orgs = flatResults.map((r) => r.org);
+
+  // Cache region URLs for later use
+  const regionEntries: [string, string][] = flatResults.map((r) => [
+    r.org.slug,
+    r.regionUrl,
+  ]);
+  await setOrgRegions(regionEntries);
+
+  return orgs;
+}
+
+/**
+ * Get a specific organization.
+ * Uses region-aware routing for multi-region support.
  */
 export function getOrganization(orgSlug: string): Promise<SentryOrganization> {
-  return apiRequest<SentryOrganization>(`/organizations/${orgSlug}/`, {
+  return orgScopedRequest<SentryOrganization>(`/organizations/${orgSlug}/`, {
     schema: SentryOrganizationSchema,
   });
 }
 
 /**
- * List projects in an organization
+ * List projects in an organization.
+ * Uses region-aware routing for multi-region support.
  */
 export function listProjects(orgSlug: string): Promise<SentryProject[]> {
-  return apiRequest<SentryProject[]>(`/organizations/${orgSlug}/projects/`, {
-    schema: z.array(SentryProjectSchema),
-  });
+  return orgScopedRequest<SentryProject[]>(
+    `/organizations/${orgSlug}/projects/`,
+    {
+      schema: z.array(SentryProjectSchema),
+    }
+  );
 }
 
 /**
  * Find a project by DSN public key.
  *
  * Uses the /api/0/projects/ endpoint with query=dsn:<key> to search
- * across all accessible projects. This works for both SaaS and self-hosted
- * DSNs, even when the org ID is not embedded in the DSN.
+ * across all accessible projects in all regions. This works for both
+ * SaaS and self-hosted DSNs, even when the org ID is not embedded in the DSN.
  *
  * @param publicKey - The DSN public key (username portion of DSN URL)
  * @returns The matching project, or null if not found
@@ -335,28 +585,65 @@ export function listProjects(orgSlug: string): Promise<SentryProject[]> {
 export async function findProjectByDsnKey(
   publicKey: string
 ): Promise<SentryProject | null> {
-  const projects = await apiRequest<SentryProject[]>("/projects/", {
-    params: { query: `dsn:${publicKey}` },
-    schema: z.array(SentryProjectSchema),
-  });
+  // Get all regions and search each one
+  const regions = await getUserRegions();
 
-  return projects[0] ?? null;
+  if (regions.length === 0) {
+    // Fall back to default region for self-hosted
+    const projects = await apiRequest<SentryProject[]>("/projects/", {
+      params: { query: `dsn:${publicKey}` },
+      schema: z.array(SentryProjectSchema),
+    });
+    return projects[0] ?? null;
+  }
+
+  // Search all regions in parallel
+  const results = await Promise.all(
+    regions.map(async (region) => {
+      try {
+        return await apiRequestToRegion<SentryProject[]>(
+          region.url,
+          "/projects/",
+          {
+            params: { query: `dsn:${publicKey}` },
+            schema: z.array(SentryProjectSchema),
+          }
+        );
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  // Return the first match found
+  for (const projects of results) {
+    if (projects.length > 0) {
+      return projects[0];
+    }
+  }
+
+  return null;
 }
 
 /**
- * Get a specific project
+ * Get a specific project.
+ * Uses region-aware routing for multi-region support.
  */
 export function getProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<SentryProject> {
-  return apiRequest<SentryProject>(`/projects/${orgSlug}/${projectSlug}/`, {
-    schema: SentryProjectSchema,
-  });
+  return orgScopedRequest<SentryProject>(
+    `/projects/${orgSlug}/${projectSlug}/`,
+    {
+      schema: SentryProjectSchema,
+    }
+  );
 }
 
 /**
- * List issues for a project
+ * List issues for a project.
+ * Uses region-aware routing for multi-region support.
  */
 export function listIssues(
   orgSlug: string,
@@ -369,7 +656,7 @@ export function listIssues(
     statsPeriod?: string;
   } = {}
 ): Promise<SentryIssue[]> {
-  return apiRequest<SentryIssue[]>(
+  return orgScopedRequest<SentryIssue[]>(
     `/projects/${orgSlug}/${projectSlug}/issues/`,
     {
       params: {
@@ -394,9 +681,10 @@ export function getIssue(issueId: string): Promise<SentryIssue> {
 }
 
 /**
- * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D)
+ * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D).
  * Requires organization context to resolve the short ID.
  * The shortId is normalized to uppercase for case-insensitive matching.
+ * Uses region-aware routing for multi-region support.
  *
  * @see https://docs.sentry.io/api/events/retrieve-an-issue/
  */
@@ -406,7 +694,7 @@ export function getIssueByShortId(
 ): Promise<SentryIssue> {
   // Normalize to uppercase for case-insensitive matching
   const normalizedShortId = shortId.toUpperCase();
-  return apiRequest<SentryIssue>(
+  return orgScopedRequest<SentryIssue>(
     `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
     {
       schema: SentryIssueSchema,
@@ -416,7 +704,7 @@ export function getIssueByShortId(
 
 /**
  * Get the latest event for an issue.
- * Uses org-scoped endpoint for proper multi-region support.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - Organization slug (required for multi-region routing)
  * @param issueId - Issue ID (numeric)
@@ -425,13 +713,15 @@ export function getLatestEvent(
   orgSlug: string,
   issueId: string
 ): Promise<SentryEvent> {
-  return apiRequest<SentryEvent>(
+  return orgScopedRequest<SentryEvent>(
     `/organizations/${orgSlug}/issues/${issueId}/events/latest/`
   );
 }
 
 /**
- * Get a specific event by ID
+ * Get a specific event by ID.
+ * Uses region-aware routing for multi-region support.
+ *
  * @see https://docs.sentry.io/api/events/retrieve-an-event-for-a-project/
  */
 export function getEvent(
@@ -439,7 +729,7 @@ export function getEvent(
   projectSlug: string,
   eventId: string
 ): Promise<SentryEvent> {
-  return apiRequest<SentryEvent>(
+  return orgScopedRequest<SentryEvent>(
     `/projects/${orgSlug}/${projectSlug}/events/${eventId}/`,
     {
       schema: SentryEventSchema,
@@ -450,6 +740,7 @@ export function getEvent(
 /**
  * Get trace data including all transactions and spans.
  * Returns the full trace tree for visualization.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
@@ -459,7 +750,7 @@ export function getTrace(
   orgSlug: string,
   traceId: string
 ): Promise<TraceResponse> {
-  return apiRequest<TraceResponse>(
+  return orgScopedRequest<TraceResponse>(
     `/organizations/${orgSlug}/events-trace/${traceId}/`
   );
 }
@@ -467,6 +758,7 @@ export function getTrace(
 /**
  * Get detailed trace with nested children structure.
  * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - Organization slug
  * @param traceId - The trace ID (from event.contexts.trace.trace_id)
@@ -478,7 +770,7 @@ export function getDetailedTrace(
   traceId: string,
   timestamp: number
 ): Promise<TraceSpan[]> {
-  return apiRequest<TraceSpan[]>(
+  return orgScopedRequest<TraceSpan[]>(
     `/organizations/${orgSlug}/trace/${traceId}/`,
     {
       params: {
@@ -513,6 +805,7 @@ export function updateIssueStatus(
 
 /**
  * Trigger root cause analysis for an issue using Seer AI.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
@@ -523,7 +816,7 @@ export function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
 ): Promise<{ run_id: number }> {
-  return apiRequest<{ run_id: number }>(
+  return orgScopedRequest<{ run_id: number }>(
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
       method: "POST",
@@ -534,6 +827,7 @@ export function triggerRootCauseAnalysis(
 
 /**
  * Get the current autofix state for an issue.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
@@ -543,7 +837,7 @@ export async function getAutofixState(
   orgSlug: string,
   issueId: string
 ): Promise<AutofixState | null> {
-  const response = await apiRequest<AutofixResponse>(
+  const response = await orgScopedRequest<AutofixResponse>(
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`
   );
 
@@ -553,6 +847,7 @@ export async function getAutofixState(
 /**
  * Trigger solution planning for an existing autofix run.
  * Continues from root cause analysis to generate a solution.
+ * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
@@ -564,11 +859,14 @@ export function triggerSolutionPlanning(
   issueId: string,
   runId: number
 ): Promise<unknown> {
-  return apiRequest(`/organizations/${orgSlug}/issues/${issueId}/autofix/`, {
-    method: "POST",
-    body: {
-      run_id: runId,
-      step: "solution",
-    },
-  });
+  return orgScopedRequest(
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    {
+      method: "POST",
+      body: {
+        run_id: runId,
+        step: "solution",
+      },
+    }
+  );
 }

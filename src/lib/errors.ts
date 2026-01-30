@@ -237,6 +237,34 @@ export class DeviceFlowError extends CliError {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Region Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Region-related errors for multi-region Sentry deployments.
+ *
+ * @param message - Error description
+ * @param suggestion - Helpful hint for resolving the error
+ */
+export class RegionError extends CliError {
+  readonly suggestion?: string;
+
+  constructor(message: string, suggestion?: string) {
+    super(message);
+    this.name = "RegionError";
+    this.suggestion = suggestion;
+  }
+
+  override format(): string {
+    let msg = this.message;
+    if (this.suggestion) {
+      msg += `\n\nSuggestion: ${this.suggestion}`;
+    }
+    return msg;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 

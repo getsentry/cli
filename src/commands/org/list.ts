@@ -7,6 +7,7 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
+import { getAllOrgRegions } from "../../lib/db/regions.js";
 import {
   calculateOrgSlugWidth,
   formatOrgRow,
@@ -18,6 +19,26 @@ type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
 };
+
+/**
+ * Extract a human-readable region name from a region URL.
+ * e.g., "https://us.sentry.io" -> "US", "https://de.sentry.io" -> "EU"
+ */
+function getRegionDisplayName(regionUrl: string): string {
+  try {
+    const url = new URL(regionUrl);
+    const subdomain = url.hostname.split(".")[0];
+    // Map known subdomains to display names
+    const regionMap: Record<string, string> = {
+      us: "US",
+      de: "EU",
+      sentry: "US", // sentry.io defaults to US
+    };
+    return regionMap[subdomain] ?? subdomain.toUpperCase();
+  } catch {
+    return "?";
+  }
+}
 
 export const listCommand = buildCommand({
   docs: {
@@ -57,18 +78,42 @@ export const listCommand = buildCommand({
     }
 
     if (limitedOrgs.length === 0) {
-      stdout.write("No organizations found.\n");
+      stdout.write("No organizations found.\n\n");
+      stdout.write("This could mean:\n");
+      stdout.write("  - You haven't been added to any organizations yet\n");
+      stdout.write("  - Your organization may be in a different region\n");
+      stdout.write("  - There may be a network or permissions issue\n\n");
+      stdout.write("Try 'sentry auth status' to verify your authentication.\n");
       return;
     }
+
+    // Check if user has orgs in multiple regions
+    const orgRegions = await getAllOrgRegions();
+    const uniqueRegions = new Set(orgRegions.values());
+    const showRegion = uniqueRegions.size > 1;
 
     const slugWidth = calculateOrgSlugWidth(limitedOrgs);
 
     // Header
-    stdout.write(`${"SLUG".padEnd(slugWidth)}  NAME\n`);
+    if (showRegion) {
+      stdout.write(
+        `${"SLUG".padEnd(slugWidth)}  ${"REGION".padEnd(6)}  NAME\n`
+      );
+    } else {
+      stdout.write(`${"SLUG".padEnd(slugWidth)}  NAME\n`);
+    }
 
     // Rows
     for (const org of limitedOrgs) {
-      stdout.write(`${formatOrgRow(org, slugWidth)}\n`);
+      if (showRegion) {
+        const regionUrl = orgRegions.get(org.slug) ?? "";
+        const regionName = getRegionDisplayName(regionUrl);
+        stdout.write(
+          `${org.slug.padEnd(slugWidth)}  ${regionName.padEnd(6)}  ${org.name}\n`
+        );
+      } else {
+        stdout.write(`${formatOrgRow(org, slugWidth)}\n`);
+      }
     }
 
     if (orgs.length > flags.limit) {

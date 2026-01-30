@@ -5,43 +5,37 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import {
   getAutofixState,
   triggerRootCauseAnalysis,
   triggerSolutionPlanning,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
+import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
+import { setOrgRegion } from "../../src/lib/db/regions.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 // Test config directory
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = join(
-    process.env.SENTRY_CLI_CONFIG_DIR ?? "/tmp",
-    `test-seer-api-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  testConfigDir = await createTestConfigDir("test-seer-api-");
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
   // Save original fetch
   originalFetch = globalThis.fetch;
 
   // Set up auth token (manual token, no refresh)
   await setAuthToken("test-token");
+  // Pre-populate region cache to avoid region resolution API calls
+  await setOrgRegion("test-org", "https://sentry.io");
 });
 
-afterEach(() => {
+afterEach(async () => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
-
-  try {
-    rmSync(testConfigDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
+  await cleanupTestDir(testConfigDir);
 });
 
 describe("triggerRootCauseAnalysis", () => {
