@@ -5,6 +5,12 @@
 /** Build-time constant injected by esbuild/bun */
 declare const SENTRY_CLI_VERSION: string | undefined;
 
+/** Default Sentry SaaS hostname */
+export const DEFAULT_SENTRY_HOST = "sentry.io";
+
+/** Default Sentry SaaS URL (control silo for OAuth and region discovery) */
+export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
+
 /** CLI version string, available for help output and other uses */
 export const CLI_VERSION =
   typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0-dev";

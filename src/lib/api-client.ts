@@ -27,12 +27,10 @@ import {
   UserRegionsResponseSchema,
 } from "../types/index.js";
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { getUserAgent } from "./constants.js";
+import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
-import { ApiError } from "./errors.js";
+import { ApiError, AuthError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
-
-const DEFAULT_SENTRY_URL = "https://sentry.io";
 
 /**
  * Control silo URL - handles OAuth, user accounts, and region routing.
@@ -74,10 +72,6 @@ function getApiBaseUrl(): string {
 function normalizePath(endpoint: string): string {
   return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Request Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -185,10 +179,6 @@ export function buildSearchParams(
 
   return searchParams.toString() ? searchParams : undefined;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Request Functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Make an authenticated request to the Sentry API.
@@ -316,10 +306,6 @@ export function rawApiRequest(
     };
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-Region Support
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Create a ky client configured for a specific region URL.
@@ -510,10 +496,6 @@ async function orgScopedRequest<T>(
   return apiRequestToRegion(regionUrl, endpoint, options);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// High-level API Methods
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * List all organizations the user has access to across all regions.
  * Performs a fan-out to each region and combines results.
@@ -522,35 +504,39 @@ async function orgScopedRequest<T>(
 export async function listOrganizations(): Promise<SentryOrganization[]> {
   const { setOrgRegions } = await import("./db/regions.js");
 
-  // Get all regions user has membership in
-  const regions = await getUserRegions();
+  let regions: Region[];
+  try {
+    regions = await getUserRegions();
+  } catch (error) {
+    // Re-throw auth errors - user needs to login
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Self-hosted instances may not have the regions endpoint (404)
+    regions = [];
+  }
 
   if (regions.length === 0) {
     return [];
   }
 
-  // Fan out to all regions in parallel
   const results = await Promise.all(
     regions.map(async (region) => {
       try {
         const orgs = await listOrganizationsInRegion(region.url);
-        // Attach region URL to each org for caching
         return orgs.map((org) => ({
           org,
           regionUrl: org.links?.regionUrl ?? region.url,
         }));
       } catch {
-        // If a region fails, continue with others
         return [];
       }
     })
   );
 
-  // Flatten results and cache region URLs
   const flatResults = results.flat();
   const orgs = flatResults.map((r) => r.org);
 
-  // Cache region URLs for later use
   const regionEntries: [string, string][] = flatResults.map((r) => [
     r.org.slug,
     r.regionUrl,
@@ -596,8 +582,17 @@ export function listProjects(orgSlug: string): Promise<SentryProject[]> {
 export async function findProjectByDsnKey(
   publicKey: string
 ): Promise<SentryProject | null> {
-  // Get all regions and search each one
-  const regions = await getUserRegions();
+  let regions: Region[];
+  try {
+    regions = await getUserRegions();
+  } catch (error) {
+    // Re-throw auth errors - user needs to login
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Self-hosted instances may not have the regions endpoint (404)
+    regions = [];
+  }
 
   if (regions.length === 0) {
     // Fall back to default region for self-hosted
@@ -608,7 +603,6 @@ export async function findProjectByDsnKey(
     return projects[0] ?? null;
   }
 
-  // Search all regions in parallel
   const results = await Promise.all(
     regions.map(async (region) => {
       try {
@@ -626,7 +620,6 @@ export async function findProjectByDsnKey(
     })
   );
 
-  // Return the first match found
   for (const projects of results) {
     if (projects.length > 0) {
       return projects[0] ?? null;
@@ -825,10 +818,6 @@ export function updateIssueStatus(
     schema: SentryIssueSchema,
   });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Autofix (Seer) API Methods
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Trigger root cause analysis for an issue using Seer AI.

@@ -8,6 +8,8 @@
 
 import { getDatabase } from "./index.js";
 
+const TABLE = "org_regions";
+
 type OrgRegionRow = {
   org_slug: string;
   region_url: string;
@@ -25,7 +27,7 @@ export async function getOrgRegion(
 ): Promise<string | undefined> {
   const db = getDatabase();
   const row = db
-    .query("SELECT region_url FROM org_regions WHERE org_slug = ?")
+    .query(`SELECT region_url FROM ${TABLE} WHERE org_slug = ?`)
     .get(orgSlug) as Pick<OrgRegionRow, "region_url"> | undefined;
 
   return row?.region_url;
@@ -45,7 +47,7 @@ export async function setOrgRegion(
   const now = Date.now();
 
   db.query(`
-    INSERT INTO org_regions (org_slug, region_url, updated_at)
+    INSERT INTO ${TABLE} (org_slug, region_url, updated_at)
     VALUES (?, ?, ?)
     ON CONFLICT(org_slug) DO UPDATE SET
       region_url = excluded.region_url,
@@ -70,7 +72,7 @@ export async function setOrgRegions(
   const now = Date.now();
 
   const stmt = db.query(`
-    INSERT INTO org_regions (org_slug, region_url, updated_at)
+    INSERT INTO ${TABLE} (org_slug, region_url, updated_at)
     VALUES (?, ?, ?)
     ON CONFLICT(org_slug) DO UPDATE SET
       region_url = excluded.region_url,
@@ -90,7 +92,7 @@ export async function setOrgRegions(
  */
 export async function clearOrgRegions(): Promise<void> {
   const db = getDatabase();
-  db.query("DELETE FROM org_regions").run();
+  db.query(`DELETE FROM ${TABLE}`).run();
 }
 
 /**
@@ -102,23 +104,8 @@ export async function clearOrgRegions(): Promise<void> {
 export async function getAllOrgRegions(): Promise<Map<string, string>> {
   const db = getDatabase();
   const rows = db
-    .query("SELECT org_slug, region_url FROM org_regions")
+    .query(`SELECT org_slug, region_url FROM ${TABLE}`)
     .all() as Pick<OrgRegionRow, "org_slug" | "region_url">[];
 
   return new Map(rows.map((row) => [row.org_slug, row.region_url]));
-}
-
-/**
- * Get unique region URLs from the cache.
- * Used to determine if user has orgs in multiple regions.
- *
- * @returns Set of unique region URLs
- */
-export async function getUniqueRegions(): Promise<Set<string>> {
-  const db = getDatabase();
-  const rows = db
-    .query("SELECT DISTINCT region_url FROM org_regions")
-    .all() as Pick<OrgRegionRow, "region_url">[];
-
-  return new Set(rows.map((row) => row.region_url));
 }

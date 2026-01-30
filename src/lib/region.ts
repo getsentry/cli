@@ -5,9 +5,8 @@
  * using cached data when available or fetching from the API when needed.
  */
 
+import { DEFAULT_SENTRY_HOST, DEFAULT_SENTRY_URL } from "./constants.js";
 import { getOrgRegion, setOrgRegion } from "./db/regions.js";
-
-const DEFAULT_SENTRY_URL = "https://sentry.io";
 
 /**
  * Get the default API base URL (control silo or self-hosted).
@@ -71,9 +70,9 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
 function isSentrySaasUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    // Check if hostname is sentry.io or a subdomain of sentry.io
     return (
-      parsed.hostname === "sentry.io" || parsed.hostname.endsWith(".sentry.io")
+      parsed.hostname === DEFAULT_SENTRY_HOST ||
+      parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)
     );
   } catch {
     return false;

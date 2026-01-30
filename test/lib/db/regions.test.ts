@@ -15,7 +15,6 @@ import {
   clearOrgRegions,
   getAllOrgRegions,
   getOrgRegion,
-  getUniqueRegions,
   setOrgRegion,
   setOrgRegions,
 } from "../../../src/lib/db/regions.js";
@@ -137,39 +136,5 @@ describe("getAllOrgRegions", () => {
   test("returns empty map when cache is empty", async () => {
     const allRegions = await getAllOrgRegions();
     expect(allRegions.size).toBe(0);
-  });
-});
-
-describe("getUniqueRegions", () => {
-  test("returns unique region URLs", async () => {
-    await setOrgRegions([
-      ["org-1", "https://us.sentry.io"],
-      ["org-2", "https://de.sentry.io"],
-      ["org-3", "https://us.sentry.io"],
-      ["org-4", "https://de.sentry.io"],
-    ]);
-
-    const uniqueRegions = await getUniqueRegions();
-
-    expect(uniqueRegions.size).toBe(2);
-    expect(uniqueRegions.has("https://us.sentry.io")).toBe(true);
-    expect(uniqueRegions.has("https://de.sentry.io")).toBe(true);
-  });
-
-  test("returns empty set when cache is empty", async () => {
-    const uniqueRegions = await getUniqueRegions();
-    expect(uniqueRegions.size).toBe(0);
-  });
-
-  test("returns single region when all orgs in same region", async () => {
-    await setOrgRegions([
-      ["org-1", "https://us.sentry.io"],
-      ["org-2", "https://us.sentry.io"],
-    ]);
-
-    const uniqueRegions = await getUniqueRegions();
-
-    expect(uniqueRegions.size).toBe(1);
-    expect(uniqueRegions.has("https://us.sentry.io")).toBe(true);
   });
 });
