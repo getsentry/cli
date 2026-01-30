@@ -27,7 +27,7 @@ type ListFlags = {
 function getRegionDisplayName(regionUrl: string): string {
   try {
     const url = new URL(regionUrl);
-    const subdomain = url.hostname.split(".")[0];
+    const subdomain = url.hostname.split(".")[0] ?? "";
     // Map known subdomains to display names
     const regionMap: Record<string, string> = {
       us: "US",

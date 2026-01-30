@@ -462,13 +462,13 @@ export function listOrganizationsInRegion(
 function extractOrgSlugFromEndpoint(endpoint: string): string | null {
   // Try organization path first: /organizations/{slug}/...
   const orgMatch = endpoint.match(ORG_ENDPOINT_REGEX);
-  if (orgMatch) {
+  if (orgMatch?.[1]) {
     return orgMatch[1];
   }
 
   // Try project path: /projects/{org}/{project}/...
   const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
-  if (projectMatch) {
+  if (projectMatch?.[1]) {
     return projectMatch[1];
   }
 
@@ -620,7 +620,7 @@ export async function findProjectByDsnKey(
   // Return the first match found
   for (const projects of results) {
     if (projects.length > 0) {
-      return projects[0];
+      return projects[0] ?? null;
     }
   }
 
