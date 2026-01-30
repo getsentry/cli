@@ -290,12 +290,13 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [check-skill, merge-artifacts]
+    needs: [changes, check-skill, merge-artifacts]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
+          # Check for explicit failures or cancellations
           results="${{ needs.check-skill.result }} ${{ needs.merge-artifacts.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
@@ -303,4 +304,16 @@ jobs:
               exit 1
             fi
           done
+
+          # Detect upstream failures: if changes were detected but jobs were skipped,
+          # it means an upstream job failed (skipped jobs cascade to dependents)
+          if [[ "${{ needs.changes.outputs.code }}" == "true" && "${{ needs.merge-artifacts.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing merge-artifacts to be skipped"
+            exit 1
+          fi
+          if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-skill.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing check-skill to be skipped"
+            exit 1
+          fi
+
           echo "CI passed"
