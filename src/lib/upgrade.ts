@@ -208,6 +208,8 @@ export function fetchLatestVersion(
  */
 function executeUpgradeCurl(version: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    let curlFailed = false;
+
     const curl = spawn("curl", ["-fsSL", "https://cli.sentry.dev/install"], {
       stdio: ["ignore", "pipe", "inherit"],
     });
@@ -216,7 +218,23 @@ function executeUpgradeCurl(version: string): Promise<void> {
       stdio: [curl.stdout, "inherit", "inherit"],
     });
 
+    curl.on("close", (code) => {
+      if (code !== 0) {
+        curlFailed = true;
+        bash.kill();
+        reject(
+          new UpgradeError(
+            "execution_failed",
+            `curl failed with exit code ${code}`
+          )
+        );
+      }
+    });
+
     bash.on("close", (code) => {
+      if (curlFailed) {
+        return; // Already rejected by curl handler
+      }
       if (code === 0) {
         resolve();
       } else {
@@ -234,6 +252,7 @@ function executeUpgradeCurl(version: string): Promise<void> {
     });
 
     curl.on("error", (err) => {
+      curlFailed = true;
       reject(
         new UpgradeError("execution_failed", `curl failed: ${err.message}`)
       );
