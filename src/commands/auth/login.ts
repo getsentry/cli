@@ -12,33 +12,21 @@ import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 
-/** Maximum number of retries for fetching user info */
-const USER_FETCH_MAX_RETRIES = 3;
-/** Delay between retries in milliseconds */
-const USER_FETCH_RETRY_DELAY = 1000;
-
 /**
- * Fetch and store user info for telemetry with retry logic.
+ * Fetch and store user info for telemetry.
  * This is best-effort - failures don't block authentication.
+ * Retries are handled by ky in the API client layer.
  */
 async function fetchAndStoreUserInfo(): Promise<void> {
-  for (let attempt = 1; attempt <= USER_FETCH_MAX_RETRIES; attempt++) {
-    try {
-      const user = await getCurrentUser();
-      await setUserInfo({
-        userId: user.id,
-        email: user.email,
-        username: user.username,
-      });
-      return;
-    } catch {
-      if (attempt < USER_FETCH_MAX_RETRIES) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, USER_FETCH_RETRY_DELAY)
-        );
-      }
-      // If all retries fail, silently continue - user info is not critical
-    }
+  try {
+    const user = await getCurrentUser();
+    setUserInfo({
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+    });
+  } catch {
+    // Silently continue - user info is not critical for auth
   }
 }
 
