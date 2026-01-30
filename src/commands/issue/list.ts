@@ -357,9 +357,8 @@ export const listCommand = buildCommand({
         `Failed to fetch issues from ${targets.length} project(s).\n` +
           "Possible causes:\n" +
           "  - Network connection issues\n" +
-          "  - Insufficient permissions for the project\n" +
-          "  - Organization or project may be in a different region\n\n" +
-          "Try running 'sentry org list' to verify your accessible organizations."
+          "  - Insufficient permissions for the project\n\n" +
+          "Try running 'sentry auth status' to verify your authentication."
       );
     }
 

@@ -12,11 +12,6 @@ import { join } from "node:path";
 const ROOT_DIR = join(import.meta.dir, "../..");
 const BUNDLE_PATH = join(ROOT_DIR, "dist/bin.cjs");
 
-/** Check if node is available in PATH */
-function hasNode(): boolean {
-  return Bun.which("node") !== null;
-}
-
 describe("npm bundle", () => {
   beforeAll(async () => {
     // Clean dist directory before building
@@ -66,12 +61,6 @@ describe("npm bundle", () => {
   });
 
   test("bundle executes without syntax errors", async () => {
-    // Skip if node is not available (e.g., in sandboxed environments)
-    if (!hasNode()) {
-      console.log("Skipping: node not available in PATH");
-      return;
-    }
-
     // Run the bundle with --version to verify it executes correctly
     // Using --version instead of --help as it has fewer dependencies
     // This catches the exact error from the bug report where the shell
@@ -99,12 +88,6 @@ describe("npm bundle", () => {
   });
 
   test("bundle does not emit Node.js warnings", async () => {
-    // Skip if node is not available (e.g., in sandboxed environments)
-    if (!hasNode()) {
-      console.log("Skipping: node not available in PATH");
-      return;
-    }
-
     // Run the bundle and capture stderr to check for warnings
     // This ensures we don't regress on warning suppression (e.g., SQLite experimental)
     const proc = Bun.spawn(["node", BUNDLE_PATH, "--version"], {

@@ -9,6 +9,7 @@ import {
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
@@ -23,8 +24,8 @@ beforeEach(async () => {
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
-  await setOrgRegion("test-org", "https://sentry.io");
-  await setOrgRegion("my-org", "https://sentry.io");
+  await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
 });
 
 afterEach(async () => {
