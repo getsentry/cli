@@ -2,6 +2,7 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 
 /** Refresh when less than 10% of token lifetime remains */
@@ -25,67 +26,77 @@ export type AuthConfig = {
   issuedAt?: number;
 };
 
-export async function getAuthConfig(): Promise<AuthConfig | undefined> {
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+export function getAuthConfig(): AuthConfig | undefined {
+  return withDbSpan("getAuthConfig", () => {
+    const db = getDatabase();
+    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+      | AuthRow
+      | undefined;
 
-  if (!row?.token) {
-    return;
-  }
+    if (!row?.token) {
+      return;
+    }
 
-  return {
-    token: row.token ?? undefined,
-    refreshToken: row.refresh_token ?? undefined,
-    expiresAt: row.expires_at ?? undefined,
-    issuedAt: row.issued_at ?? undefined,
-  };
+    return {
+      token: row.token ?? undefined,
+      refreshToken: row.refresh_token ?? undefined,
+      expiresAt: row.expires_at ?? undefined,
+      issuedAt: row.issued_at ?? undefined,
+    };
+  });
 }
 
 /** Get the stored token, or undefined if expired. Use refreshToken() for auto-refresh. */
-export async function getAuthToken(): Promise<string | undefined> {
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+export function getAuthToken(): string | undefined {
+  return withDbSpan("getAuthToken", () => {
+    const db = getDatabase();
+    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+      | AuthRow
+      | undefined;
 
-  if (!row?.token) {
-    return;
-  }
+    if (!row?.token) {
+      return;
+    }
 
-  if (row.expires_at && Date.now() > row.expires_at) {
-    return;
-  }
+    if (row.expires_at && Date.now() > row.expires_at) {
+      return;
+    }
 
-  return row.token;
+    return row.token;
+  });
 }
 
-export async function setAuthToken(
+export function setAuthToken(
   token: string,
   expiresIn?: number,
   newRefreshToken?: string
-): Promise<void> {
-  const db = getDatabase();
-  const now = Date.now();
-  const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
-  const issuedAt = expiresIn ? now : null;
+): void {
+  withDbSpan("setAuthToken", () => {
+    const db = getDatabase();
+    const now = Date.now();
+    const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
+    const issuedAt = expiresIn ? now : null;
 
-  db.query(`
-    INSERT INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
-    VALUES (1, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      token = excluded.token,
-      refresh_token = excluded.refresh_token,
-      expires_at = excluded.expires_at,
-      issued_at = excluded.issued_at,
-      updated_at = excluded.updated_at
-  `).run(token, newRefreshToken ?? null, expiresAt, issuedAt, now);
+    db.query(`
+      INSERT INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
+      VALUES (1, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        token = excluded.token,
+        refresh_token = excluded.refresh_token,
+        expires_at = excluded.expires_at,
+        issued_at = excluded.issued_at,
+        updated_at = excluded.updated_at
+    `).run(token, newRefreshToken ?? null, expiresAt, issuedAt, now);
+  });
 }
 
-export async function clearAuth(): Promise<void> {
-  const db = getDatabase();
-  db.query("DELETE FROM auth WHERE id = 1").run();
+export function clearAuth(): void {
+  withDbSpan("clearAuth", () => {
+    const db = getDatabase();
+    db.query("DELETE FROM auth WHERE id = 1").run();
+    // Also clear user info when logging out
+    db.query("DELETE FROM user_info WHERE id = 1").run();
+  });
 }
 
 export async function isAuthenticated(): Promise<boolean> {

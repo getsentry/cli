@@ -8,7 +8,11 @@
 import { homedir } from "node:os";
 import type { CommandContext } from "@stricli/core";
 import { getConfigDir } from "./lib/db/index.js";
-import { setCommandName } from "./lib/telemetry.js";
+import {
+  type Span,
+  setCommandSpanName,
+  setOrgProjectContext,
+} from "./lib/telemetry.js";
 import type { Writer } from "./types/index.js";
 
 export interface SentryContext extends CommandContext {
@@ -20,6 +24,13 @@ export interface SentryContext extends CommandContext {
   readonly stdout: Writer;
   readonly stderr: Writer;
   readonly stdin: NodeJS.ReadStream & { fd: 0 };
+  /**
+   * Set organization and project context for telemetry.
+   * Call this after resolving the target org/project to enable
+   * filtering by org/project in Sentry.
+   * Accepts arrays to support multi-project commands.
+   */
+  readonly setContext: (orgs: string[], projects: string[]) => void;
 }
 
 /**
@@ -27,9 +38,12 @@ export interface SentryContext extends CommandContext {
  *
  * The forCommand method is called by stricli with the command prefix
  * (e.g., ["auth", "login"]) before running the command.
+ *
+ * @param process - The Node.js process object
+ * @param span - The telemetry span from withTelemetry (optional)
  */
-export function buildContext(process: NodeJS.Process) {
-  const baseContext = {
+export function buildContext(process: NodeJS.Process, span?: Span) {
+  const baseContext: SentryContext = {
     process,
     env: process.env,
     cwd: process.cwd(),
@@ -38,12 +52,13 @@ export function buildContext(process: NodeJS.Process) {
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
+    setContext: setOrgProjectContext,
   };
 
   return {
     ...baseContext,
     forCommand: ({ prefix }: { prefix: readonly string[] }): SentryContext => {
-      setCommandName(prefix.join("."));
+      setCommandSpanName(span, prefix.join("."));
       return baseContext;
     },
   };

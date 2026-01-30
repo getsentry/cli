@@ -65,6 +65,23 @@ export const SentryOrganizationSchema = z
 export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SentryUserSchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    // Optional user info
+    email: z.string().optional(),
+    username: z.string().optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
+export type SentryUser = z.infer<typeof SentryUserSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Project
 // ─────────────────────────────────────────────────────────────────────────────
 
