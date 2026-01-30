@@ -3,27 +3,7 @@ name: CI
 on:
   push:
     branches: [main, release/**]
-    paths:
-      - 'src/**'
-      - 'test/**'
-      - 'script/**'
-      - 'patches/**'
-      - 'docs/**'
-      - 'plugins/**'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/ci.yml'
   pull_request:
-    paths:
-      - 'src/**'
-      - 'test/**'
-      - 'script/**'
-      - 'patches/**'
-      - 'docs/**'
-      - 'plugins/**'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/ci.yml'
   workflow_call:
 
 concurrency:
@@ -31,8 +11,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            skill:
+              - 'src/**'
+              - 'docs/**'
+              - 'plugins/**'
+              - 'script/generate-skill.ts'
+            code:
+              - 'src/**'
+              - 'test/**'
+              - 'script/**'
+              - 'patches/**'
+              - 'docs/**'
+              - 'plugins/**'
+              - 'package.json'
+              - 'bun.lock'
+              - '.github/workflows/ci.yml'
+
   check-skill:
     name: Check SKILL.md
+    needs: [changes]
+    if: needs.changes.outputs.skill == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +91,8 @@ jobs:
 
   lint:
     name: Lint & Typecheck
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +109,8 @@ jobs:
 
   test-unit:
     name: Unit Tests
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -270,3 +286,20 @@ jobs:
             sentry-*/
             npm-package/*.tgz
             gh-pages/gh-pages.zip
+
+  ci-status:
+    name: CI Status
+    if: always()
+    needs: [check-skill, merge-artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI status
+        run: |
+          results="${{ needs.check-skill.result }} ${{ needs.merge-artifacts.result }}"
+          for result in $results; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "::error::CI failed"
+              exit 1
+            fi
+          done
+          echo "CI passed"
