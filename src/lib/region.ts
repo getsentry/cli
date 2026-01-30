@@ -62,13 +62,32 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
 }
 
 /**
+ * Check if a URL is a Sentry SaaS URL (sentry.io or regional subdomain).
+ * Used to determine if multi-region support should be enabled.
+ *
+ * @param url - URL string to check
+ * @returns true if the URL is a Sentry SaaS URL
+ */
+function isSentrySaasUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    // Check if hostname is sentry.io or a subdomain of sentry.io
+    return (
+      parsed.hostname === "sentry.io" || parsed.hostname.endsWith(".sentry.io")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check if the CLI is configured for multi-region support.
  * Returns false for self-hosted instances that don't have regional URLs.
  */
 export function isMultiRegionEnabled(): boolean {
   // Self-hosted instances (custom SENTRY_URL) typically don't have multi-region
   const baseUrl = process.env.SENTRY_URL;
-  if (baseUrl && !baseUrl.includes("sentry.io")) {
+  if (baseUrl && !isSentrySaasUrl(baseUrl)) {
     return false;
   }
   return true;

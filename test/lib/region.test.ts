@@ -57,6 +57,11 @@ describe("isMultiRegionEnabled", () => {
     expect(isMultiRegionEnabled()).toBe(true);
   });
 
+  test("returns true for de.sentry.io", () => {
+    process.env.SENTRY_URL = "https://de.sentry.io";
+    expect(isMultiRegionEnabled()).toBe(true);
+  });
+
   test("returns false for self-hosted URLs", () => {
     process.env.SENTRY_URL = "https://sentry.mycompany.com";
     expect(isMultiRegionEnabled()).toBe(false);
@@ -64,6 +69,27 @@ describe("isMultiRegionEnabled", () => {
 
   test("returns false for localhost", () => {
     process.env.SENTRY_URL = "http://localhost:9000";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  // Security edge cases - ensure proper URL parsing
+  test("returns false for URL with sentry.io in path (not hostname)", () => {
+    process.env.SENTRY_URL = "https://evil.com/sentry.io";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  test("returns false for lookalike domain sentry.io.evil.com", () => {
+    process.env.SENTRY_URL = "https://sentry.io.evil.com";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  test("returns false for domain with sentry.io prefix", () => {
+    process.env.SENTRY_URL = "https://sentry.io-fake.com";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  test("returns false for invalid URL", () => {
+    process.env.SENTRY_URL = "not-a-valid-url";
     expect(isMultiRegionEnabled()).toBe(false);
   });
 });
