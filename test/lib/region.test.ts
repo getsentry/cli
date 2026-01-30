@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
@@ -17,7 +18,7 @@ import {
 
 const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
 
-beforeEach(() => {
+beforeEach(async () => {
   closeDatabase();
   const testConfigDir = join(
     testBaseDir,
@@ -27,6 +28,8 @@ beforeEach(() => {
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   // Clear any SENTRY_URL override for most tests
   delete process.env.SENTRY_URL;
+  // Set up auth token for API tests
+  await setAuthToken("test-token");
 });
 
 afterEach(() => {
@@ -100,6 +103,88 @@ describe("resolveOrgRegion", () => {
 
     const regionUrl = await resolveOrgRegion("cached-org");
     expect(regionUrl).toBe("https://de.sentry.io");
+  });
+
+  test("fetches and caches region from API on cache miss", async () => {
+    // Import getOrgRegion to verify caching
+    const { getOrgRegion } = await import("../../src/lib/db/regions.js");
+
+    // Verify org is not in cache
+    const before = await getOrgRegion("new-org");
+    expect(before).toBeUndefined();
+
+    // Mock fetch to return org with regionUrl
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/organizations/new-org/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123",
+            slug: "new-org",
+            name: "New Organization",
+            links: {
+              organizationUrl: "https://de.sentry.io/organizations/new-org/",
+              regionUrl: "https://de.sentry.io",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    try {
+      const regionUrl = await resolveOrgRegion("new-org");
+
+      // Should return the region from API
+      expect(regionUrl).toBe("https://de.sentry.io");
+
+      // Should have cached the region
+      const after = await getOrgRegion("new-org");
+      expect(after).toBe("https://de.sentry.io");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("uses default URL as region when org has no links.regionUrl", async () => {
+    // Mock fetch to return org without links
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/organizations/no-links-org/")) {
+        return new Response(
+          JSON.stringify({
+            id: "456",
+            slug: "no-links-org",
+            name: "Org Without Links",
+            // No links field
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    try {
+      const regionUrl = await resolveOrgRegion("no-links-org");
+
+      // Should fall back to default URL
+      expect(regionUrl).toBe("https://sentry.io");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("falls back to default URL when API call fails", async () => {
