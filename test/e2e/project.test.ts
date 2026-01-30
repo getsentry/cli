@@ -17,6 +17,7 @@ import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
   createSentryMockServer,
+  TEST_DSN,
   TEST_ORG,
   TEST_PROJECT,
   TEST_TOKEN,
@@ -243,6 +244,26 @@ describe("sentry project view", () => {
   );
 
   test(
+    "displays DSN in human-readable output",
+    async () => {
+      await ctx.setAuthToken(TEST_TOKEN);
+
+      const result = await ctx.run([
+        "project",
+        "view",
+        TEST_PROJECT,
+        "--org",
+        TEST_ORG,
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("DSN:");
+      expect(result.stdout).toContain(TEST_DSN);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
     "supports --json output",
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
@@ -259,6 +280,27 @@ describe("sentry project view", () => {
       expect(result.exitCode).toBe(0);
       const data = JSON.parse(result.stdout);
       expect(data.slug).toBe(TEST_PROJECT);
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "includes DSN in JSON output",
+    async () => {
+      await ctx.setAuthToken(TEST_TOKEN);
+
+      const result = await ctx.run([
+        "project",
+        "view",
+        TEST_PROJECT,
+        "--org",
+        TEST_ORG,
+        "--json",
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout);
+      expect(data.dsn).toBe(TEST_DSN);
     },
     { timeout: 15_000 }
   );

@@ -611,3 +611,24 @@ export const SentryEventSchema = z
   .passthrough();
 
 export type SentryEvent = z.infer<typeof SentryEventSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Keys (DSN)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const ProjectKeyDsnSchema = z.object({
+  public: z.string(),
+  secret: z.string().optional(),
+});
+
+export const ProjectKeySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    dsn: ProjectKeyDsnSchema,
+    isActive: z.boolean(),
+    dateCreated: z.string().optional(),
+  })
+  .passthrough();
+
+export type ProjectKey = z.infer<typeof ProjectKeySchema>;
