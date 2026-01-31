@@ -10,30 +10,13 @@ import { getDbPath } from "../../lib/db/index.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
-import { formatDuration } from "../../lib/formatters/human.js";
+import {
+  formatDuration,
+  formatUserIdentity,
+} from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import type { SentryUser } from "../../types/index.js";
-
-/**
- * Format user identity for display.
- * Handles missing username/email gracefully.
- */
-function formatUserIdentity(user: SentryUser): string {
-  const { username, email, id } = user;
-
-  if (username && email) {
-    return `${username} <${email}>`;
-  }
-  if (username) {
-    return username;
-  }
-  if (email) {
-    return email;
-  }
-  // Fallback to user ID if no username/email
-  return `user ${id}`;
-}
 
 type LoginFlags = {
   readonly token?: string;
@@ -100,6 +83,7 @@ export const loginCommand = buildCommand({
           userId: user.id,
           email: user.email,
           username: user.username,
+          name: user.name,
         });
       } catch (error) {
         // Report to Sentry but don't block auth - user info is not critical
@@ -107,7 +91,7 @@ export const loginCommand = buildCommand({
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
-      stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
+      stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
@@ -166,28 +150,29 @@ export const loginCommand = buildCommand({
       );
 
       // Clear the polling dots
-      stdout.write("\n\n");
+      stdout.write("\n");
 
       // Store the token
       await completeOAuthFlow(tokenResponse);
 
-      // Fetch and store user info for telemetry
-      let user: SentryUser | undefined;
-      try {
-        user = await getCurrentUser();
-        setUserInfo({
-          userId: user.id,
-          email: user.email,
-          username: user.username,
-        });
-      } catch (error) {
-        // Report to Sentry but don't block auth - user info is not critical
-        Sentry.captureException(error);
+      // Store user info from token response for telemetry and display
+      const user = tokenResponse.user;
+      if (user) {
+        try {
+          setUserInfo({
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+          });
+        } catch (error) {
+          // Report to Sentry but don't block auth - user info is not critical
+          Sentry.captureException(error);
+        }
       }
 
       stdout.write(`${success("✓")} Authentication successful!\n`);
       if (user) {
-        stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
+        stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
       }
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
 
