@@ -127,14 +127,10 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     enabled,
     // Keep default integrations but filter out ones that add overhead without benefit
     // Important: Don't use defaultIntegrations: false as it may break debug ID support
-    integrations: (defaults) => {
-      const filtered = defaults.filter(
+    integrations: (defaults) =>
+      defaults.filter(
         (integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)
-      );
-      // Add HTTP integration for API request tracing
-      filtered.push(Sentry.httpIntegration());
-      return filtered;
-    },
+      ),
     environment,
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
