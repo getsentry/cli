@@ -1,113 +1,120 @@
-# sentry
+<p align="center">
+  <img src=".github/assets/banner.png" alt="Sentry CLI" />
+</p>
 
-A gh-like CLI for Sentry.
+<p align="center">
+  The command-line interface for Sentry. Built for developers and AI agents.
+</p>
+
+<p align="center">
+  <a href="https://cli.sentry.dev">Documentation</a> |
+  <a href="https://cli.sentry.dev/getting-started/">Getting Started</a> |
+  <a href="https://cli.sentry.dev/commands/">Commands</a>
+</p>
+
+---
 
 ## Installation
 
-Install globally with your preferred package manager:
+### Install Script (Recommended)
 
 ```bash
-# npm
+curl -fsSL https://cli.sentry.dev/install | bash
+```
+
+### Package Managers
+
+```bash
 npm install -g sentry
-
-# pnpm
 pnpm add -g sentry
-
-# yarn
-yarn global add sentry
-
-# bun
 bun add -g sentry
 ```
 
-Or run directly without installing:
+### Run Without Installing
 
 ```bash
-npx sentry --help
-pnpm dlx sentry --help
-yarn dlx sentry --help
-bunx sentry --help
+npx sentry@latest
 ```
 
-## Setup
+## Quick Start
 
 ```bash
-# Login via OAuth (device flow)
+# Authenticate with Sentry
 sentry auth login
+
+# List issues (auto-detects project from your codebase)
+sentry issue list
+
+# Get AI-powered root cause analysis
+sentry issue explain PROJ-ABC
+
+# Generate a fix plan
+sentry issue plan PROJ-ABC
 ```
 
-You'll be given a URL and a code to enter. Once you authorize, the CLI will automatically receive your token.
+## Features
 
-Or use an API token directly:
-
-```bash
-sentry auth login --token YOUR_SENTRY_API_TOKEN
-```
+- **DSN Auto-Detection** - Automatically detects your project from `.env` files or source code. No flags needed.
+- **Seer AI Integration** - Get root cause analysis and fix plans directly in your terminal.
+- **Monorepo Support** - Works with multiple projects, generates short aliases for easy navigation.
+- **JSON Output** - All commands support `--json` for scripting and pipelines.
+- **Open in Browser** - Use `-w` flag to open any resource in your browser.
 
 ## Commands
 
-### Auth
+| Command | Description |
+|---------|-------------|
+| `sentry auth` | Login, logout, check authentication status |
+| `sentry org` | List and view organizations |
+| `sentry project` | List and view projects |
+| `sentry issue` | List, view, explain, and plan issues |
+| `sentry event` | View event details |
+| `sentry api` | Make direct API requests |
 
-```bash
-sentry auth login      # Login via OAuth device flow
-sentry auth logout     # Logout
-sentry auth status     # Check auth status
-```
+For detailed documentation, visit [cli.sentry.dev](https://cli.sentry.dev).
 
-### Organizations
+## Configuration
 
-```bash
-sentry org list                 # List all orgs
-sentry org list --json          # Output as JSON
-sentry org view my-org          # View organization details
-sentry org view my-org -w       # Open organization in browser
-```
+Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 
-### Projects
-
-```bash
-sentry project list                        # List all projects
-sentry project list my-org                 # List projects in org
-sentry project list --platform javascript  # Filter by platform
-sentry project view my-project             # View project details
-sentry project view my-project -w          # Open project in browser
-```
-
-### Issues
-
-```bash
-sentry issue list --org my-org --project my-project     # List issues
-sentry issue list --org my-org --project my-project --json
-sentry issue view 123456789                             # View issue by ID
-sentry issue view PROJ-ABC                              # View issue by short ID
-sentry issue view 123456789 -w                          # Open issue in browser
-```
-
-### Events
-
-```bash
-sentry event view abc123def                              # View event by ID
-sentry event view abc123def -w                           # Open event in browser
-```
-
-### API
-
-```bash
-sentry api /organizations/                              # GET request
-sentry api /issues/123/ --method PUT --field status=resolved
-sentry api /organizations/ --include                    # Show headers
-```
+---
 
 ## Development
 
+### Prerequisites
+
+- [Bun](https://bun.sh) v1.0+
+
+### Setup
+
 ```bash
+git clone https://github.com/getsentry/cli.git
+cd cli
 bun install
-bun run --env-file=.env.local src/bin.ts --help    # Run CLI in dev mode
-bun run build                                       # Build binary
 ```
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions.
+### Running Locally
 
-## Config
+```bash
+# Run CLI in development mode
+bun run dev --help
 
-Stored in `~/.sentry/config.json` (mode 600).
+# With environment variables
+bun run --env-file=.env.local src/bin.ts --help
+```
+
+### Scripts
+
+```bash
+bun run build        # Build for current platform
+bun run typecheck    # Type checking
+bun run lint         # Check for issues
+bun run lint:fix     # Auto-fix issues
+bun test             # Run tests
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## License
+
+[FSL-1.1-Apache-2.0](LICENSE.md)
