@@ -4,10 +4,6 @@
  * Unified error classes for consistent error handling across the CLI.
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Base Error
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Base class for all CLI errors.
  *
@@ -30,10 +26,6 @@ export class CliError extends Error {
     return this.message;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// API Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * API request errors from Sentry.
@@ -70,10 +62,6 @@ export class ApiError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Authentication Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type AuthErrorReason = "not_authenticated" | "expired" | "invalid";
 
 /**
@@ -98,10 +86,6 @@ export class AuthError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Configuration or DSN errors.
  *
@@ -125,10 +109,6 @@ export class ConfigError extends CliError {
     return msg;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Context Errors (Missing Required Context)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
@@ -196,10 +176,6 @@ export class ContextError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Validation Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Input validation errors.
  *
@@ -216,10 +192,6 @@ export class ValidationError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OAuth Device Flow Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * OAuth device flow errors (RFC 8628).
  *
@@ -235,10 +207,6 @@ export class DeviceFlowError extends CliError {
     this.code = code;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Seer Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
 
@@ -278,10 +246,6 @@ export class SeerError extends CliError {
     return `${this.message}\n\n${suggestions[this.reason]}`;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Error Utilities
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format any error for user display.

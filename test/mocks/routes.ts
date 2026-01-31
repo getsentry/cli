@@ -14,6 +14,7 @@ import organizationFixture from "../fixtures/organization.json";
 import organizationsFixture from "../fixtures/organizations.json";
 import projectFixture from "../fixtures/project.json";
 import projectsFixture from "../fixtures/projects.json";
+import userFixture from "../fixtures/user.json";
 import type { MockRoute, MockServer } from "./server.js";
 import { createMockServer } from "./server.js";
 
@@ -23,8 +24,41 @@ export const TEST_TOKEN = "test-auth-token-12345";
 export const TEST_ISSUE_ID = "400001";
 export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
+export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
+
+const projectKeysFixture = [
+  {
+    id: "key-123",
+    name: "Default",
+    dsn: {
+      public: TEST_DSN,
+      secret: "https://abc123:secret@o123.ingest.sentry.io/456789",
+    },
+    isActive: true,
+    dateCreated: "2024-01-01T00:00:00.000Z",
+  },
+];
 
 export const apiRoutes: MockRoute[] = [
+  // User Regions (multi-region support)
+  // Returns the mock server itself as the only region
+  {
+    method: "GET",
+    path: "/api/0/users/me/regions/",
+    response: (_req, _params, serverUrl) => ({
+      body: {
+        regions: [{ name: "monolith", url: serverUrl }],
+      },
+    }),
+  },
+
+  // Users
+  {
+    method: "GET",
+    path: "/api/0/users/me/",
+    response: userFixture,
+  },
+
   // Organizations
   {
     method: "GET",
@@ -76,6 +110,16 @@ export const apiRoutes: MockRoute[] = [
     response: (_req, params) => {
       if (params.orgSlug === TEST_ORG && params.projectSlug === TEST_PROJECT) {
         return { body: projectFixture };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  {
+    method: "GET",
+    path: "/api/0/projects/:orgSlug/:projectSlug/keys/",
+    response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG && params.projectSlug === TEST_PROJECT) {
+        return { body: projectKeysFixture };
       }
       return { status: 404, body: notFoundFixture };
     },

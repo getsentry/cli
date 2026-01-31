@@ -157,7 +157,7 @@ export const viewCommand = buildCommand({
     flags: ViewFlags,
     issueId: string
   ): Promise<void> {
-    const { stdout, cwd } = this;
+    const { stdout, cwd, setContext } = this;
 
     // Resolve issue using shared resolution logic
     const { org: orgSlug, issue } = await resolveIssue({
@@ -167,6 +167,12 @@ export const viewCommand = buildCommand({
       cwd,
       commandHint: buildCommandHint("view", issueId),
     });
+
+    // Set telemetry context
+    setContext(
+      orgSlug ? [orgSlug] : [],
+      issue.project?.slug ? [issue.project.slug] : []
+    );
 
     if (flags.web) {
       await openInBrowser(stdout, issue.permalink, "issue");

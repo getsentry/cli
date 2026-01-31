@@ -22,6 +22,7 @@ import type {
   TraceResponse,
   TraceSpan,
 } from "../../types/index.js";
+import { withSerializeSpan } from "../telemetry.js";
 import {
   boldUnderline,
   green,
@@ -969,29 +970,31 @@ function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
  * @returns Array of formatted lines ready for display
  */
 export function formatSpanTree(traceResponse: TraceResponse): string[] {
-  const traceEvents = traceResponse.transactions;
+  return withSerializeSpan("formatSpanTree", () => {
+    const traceEvents = traceResponse.transactions;
 
-  if (traceEvents.length === 0) {
-    return [muted("\nNo span data available.")];
-  }
+    if (traceEvents.length === 0) {
+      return [muted("\nNo span data available.")];
+    }
 
-  const lines: string[] = [];
-  lines.push("");
-  lines.push(muted("─── Span Tree ───"));
-  lines.push("");
-
-  const sorted = [...traceEvents].sort((a, b) => {
-    const aStart = a.start_timestamp ?? 0;
-    const bStart = b.start_timestamp ?? 0;
-    return aStart - bStart;
-  });
-
-  for (const traceEvent of sorted) {
-    lines.push(...formatTraceEventAsTree(traceEvent));
+    const lines: string[] = [];
     lines.push("");
-  }
+    lines.push(muted("─── Span Tree ───"));
+    lines.push("");
 
-  return lines;
+    const sorted = [...traceEvents].sort((a, b) => {
+      const aStart = a.start_timestamp ?? 0;
+      const bStart = b.start_timestamp ?? 0;
+      return aStart - bStart;
+    });
+
+    for (const traceEvent of sorted) {
+      lines.push(...formatTraceEventAsTree(traceEvent));
+      lines.push("");
+    }
+
+    return lines;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1049,27 +1052,29 @@ export function formatSimpleSpanTree(
   spans: TraceSpan[],
   maxDepth = Number.MAX_SAFE_INTEGER
 ): string[] {
-  if (spans.length === 0) {
-    return [muted("No span data available.")];
-  }
+  return withSerializeSpan("formatSimpleSpanTree", () => {
+    if (spans.length === 0) {
+      return [muted("No span data available.")];
+    }
 
-  const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
+    const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
 
-  const lines: string[] = [];
-  lines.push(`${muted("Trace —")} ${traceId}`);
+    const lines: string[] = [];
+    lines.push(`${muted("Trace —")} ${traceId}`);
 
-  const spanCount = spans.length;
-  spans.forEach((span, i) => {
-    formatSpanSimple(span, {
-      lines,
-      prefix: "",
-      isLast: i === spanCount - 1,
-      currentDepth: 1,
-      maxDepth: effectiveMaxDepth,
+    const spanCount = spans.length;
+    spans.forEach((span, i) => {
+      formatSpanSimple(span, {
+        lines,
+        prefix: "",
+        isLast: i === spanCount - 1,
+        currentDepth: 1,
+        maxDepth: effectiveMaxDepth,
+      });
     });
-  });
 
-  return lines;
+    return lines;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1238,77 +1243,82 @@ export function formatEventDetails(
   header = "Latest Event",
   issuePermalink?: string
 ): string[] {
-  const lines: string[] = [];
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Event formatting requires multiple conditional sections
+  return withSerializeSpan("formatEventDetails", () => {
+    const lines: string[] = [];
 
-  // Header
-  lines.push("");
-  lines.push(muted(`─── ${header} (${event.eventID.slice(0, 8)}) ───`));
-  lines.push("");
-
-  // Basic info
-  lines.push(`Event ID:   ${event.eventID}`);
-  if (event.dateReceived) {
-    lines.push(`Received:   ${new Date(event.dateReceived).toLocaleString()}`);
-  }
-  if (event.location) {
-    lines.push(`Location:   ${event.location}`);
-  }
-
-  // Trace context
-  const traceCtx = event.contexts?.trace;
-  if (traceCtx?.trace_id) {
-    lines.push(`Trace:      ${traceCtx.trace_id}`);
-  }
-
-  // User info (including geo)
-  lines.push(...formatUserInfo(event));
-
-  // Environment contexts (browser, OS, device)
-  lines.push(...formatEnvironmentContexts(event));
-
-  // HTTP Request
-  const requestEntry = extractEntry(event, "request");
-  if (requestEntry) {
-    lines.push(...formatRequest(requestEntry));
-  }
-
-  // SDK info
-  if (event.sdk) {
+    // Header
     lines.push("");
-    lines.push(`SDK:        ${event.sdk.name} ${event.sdk.version}`);
-  }
-
-  // Release info
-  if (event.release?.shortVersion) {
-    lines.push(`Release:    ${event.release.shortVersion}`);
-  }
-
-  // Stack Trace
-  const exceptionEntry = extractEntry(event, "exception");
-  if (exceptionEntry) {
-    lines.push(...formatStackTrace(exceptionEntry));
-  }
-
-  // Breadcrumbs
-  const breadcrumbsEntry = extractEntry(event, "breadcrumbs");
-  if (breadcrumbsEntry) {
-    lines.push(...formatBreadcrumbs(breadcrumbsEntry));
-  }
-
-  // Replay link
-  lines.push(...formatReplayLink(event, issuePermalink));
-
-  // Tags
-  if (event.tags?.length) {
+    lines.push(muted(`─── ${header} (${event.eventID.slice(0, 8)}) ───`));
     lines.push("");
-    lines.push(muted("─── Tags ───"));
-    lines.push("");
-    for (const tag of event.tags) {
-      lines.push(`  ${tag.key}: ${tag.value}`);
+
+    // Basic info
+    lines.push(`Event ID:   ${event.eventID}`);
+    if (event.dateReceived) {
+      lines.push(
+        `Received:   ${new Date(event.dateReceived).toLocaleString()}`
+      );
     }
-  }
+    if (event.location) {
+      lines.push(`Location:   ${event.location}`);
+    }
 
-  return lines;
+    // Trace context
+    const traceCtx = event.contexts?.trace;
+    if (traceCtx?.trace_id) {
+      lines.push(`Trace:      ${traceCtx.trace_id}`);
+    }
+
+    // User info (including geo)
+    lines.push(...formatUserInfo(event));
+
+    // Environment contexts (browser, OS, device)
+    lines.push(...formatEnvironmentContexts(event));
+
+    // HTTP Request
+    const requestEntry = extractEntry(event, "request");
+    if (requestEntry) {
+      lines.push(...formatRequest(requestEntry));
+    }
+
+    // SDK info
+    if (event.sdk) {
+      lines.push("");
+      lines.push(`SDK:        ${event.sdk.name} ${event.sdk.version}`);
+    }
+
+    // Release info
+    if (event.release?.shortVersion) {
+      lines.push(`Release:    ${event.release.shortVersion}`);
+    }
+
+    // Stack Trace
+    const exceptionEntry = extractEntry(event, "exception");
+    if (exceptionEntry) {
+      lines.push(...formatStackTrace(exceptionEntry));
+    }
+
+    // Breadcrumbs
+    const breadcrumbsEntry = extractEntry(event, "breadcrumbs");
+    if (breadcrumbsEntry) {
+      lines.push(...formatBreadcrumbs(breadcrumbsEntry));
+    }
+
+    // Replay link
+    lines.push(...formatReplayLink(event, issuePermalink));
+
+    // Tags
+    if (event.tags?.length) {
+      lines.push("");
+      lines.push(muted("─── Tags ───"));
+      lines.push("");
+      for (const tag of event.tags) {
+        lines.push(`  ${tag.key}: ${tag.value}`);
+      }
+    }
+
+    return lines;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1369,48 +1379,52 @@ export function formatOrgDetails(org: SentryOrganization): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ProjectRowOptions = {
-  showOrg: boolean;
-  orgSlug?: string;
+  orgWidth: number;
   slugWidth: number;
+  nameWidth: number;
 };
 
 /**
  * Format project for list display
  */
 export function formatProjectRow(
-  project: SentryProject,
+  project: SentryProject & { orgSlug?: string },
   options: ProjectRowOptions
 ): string {
-  const { showOrg, orgSlug, slugWidth } = options;
-  const slug = showOrg
-    ? `${orgSlug}/${project.slug}`.padEnd(slugWidth)
-    : project.slug.padEnd(slugWidth);
-  const platform = (project.platform || "").padEnd(20);
-  return `${slug}  ${platform}  ${project.name}`;
+  const { orgWidth, slugWidth, nameWidth } = options;
+  const org = (project.orgSlug || "").padEnd(orgWidth);
+  const slug = project.slug.padEnd(slugWidth);
+  const name = project.name.padEnd(nameWidth);
+  const platform = project.platform || "";
+  return `${org}  ${slug}  ${name}  ${platform}`;
 }
 
 /**
- * Calculate max slug width from projects
+ * Calculate column widths for project list display
  */
-export function calculateProjectSlugWidth(
-  projects: Array<SentryProject & { orgSlug?: string }>,
-  showOrg: boolean
-): number {
-  return Math.max(
-    ...projects.map((p) =>
-      showOrg ? `${p.orgSlug}/${p.slug}`.length : p.slug.length
-    ),
-    4
+export function calculateProjectColumnWidths(
+  projects: Array<SentryProject & { orgSlug?: string }>
+): { orgWidth: number; slugWidth: number; nameWidth: number } {
+  const orgWidth = Math.max(
+    ...projects.map((p) => (p.orgSlug || "").length),
+    3
   );
+  const slugWidth = Math.max(...projects.map((p) => p.slug.length), 7);
+  const nameWidth = Math.max(...projects.map((p) => p.name.length), 4);
+  return { orgWidth, slugWidth, nameWidth };
 }
 
 /**
  * Format detailed project information.
  *
  * @param project - The Sentry project to format
+ * @param dsn - Optional DSN string to display
  * @returns Array of formatted lines
  */
-export function formatProjectDetails(project: SentryProject): string[] {
+export function formatProjectDetails(
+  project: SentryProject,
+  dsn?: string | null
+): string[] {
   const lines: string[] = [];
 
   // Header
@@ -1422,6 +1436,7 @@ export function formatProjectDetails(project: SentryProject): string[] {
   lines.push(`Name:       ${project.name || "(unnamed)"}`);
   lines.push(`ID:         ${project.id}`);
   lines.push(`Platform:   ${project.platform || "Not set"}`);
+  lines.push(`DSN:        ${dsn || "No DSN available"}`);
   lines.push(`Status:     ${project.status}`);
   if (project.dateCreated) {
     lines.push(`Created:    ${new Date(project.dateCreated).toLocaleString()}`);

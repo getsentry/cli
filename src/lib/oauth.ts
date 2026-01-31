@@ -13,10 +13,7 @@ import {
 } from "../types/index.js";
 import { setAuthToken } from "./db/auth.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration
-// ─────────────────────────────────────────────────────────────────────────────
+import { withHttpSpan } from "./telemetry.js";
 
 // Sentry instance URL (supports self-hosted via env override)
 const SENTRY_URL = process.env.SENTRY_URL ?? "https://sentry.io";
@@ -45,10 +42,6 @@ const SCOPES = [
   "team:read",
 ].join(" ");
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 type DeviceFlowCallbacks = {
   onUserCode: (
     userCode: string,
@@ -58,40 +51,20 @@ type DeviceFlowCallbacks = {
   onPolling?: () => void;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Device Flow Implementation (RFC 8628)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Request a device code from Sentry's device authorization endpoint
+ * Wrap a fetch call with connection error handling.
+ * Converts network errors into user-friendly ApiError messages.
  */
-async function requestDeviceCode() {
-  if (!SENTRY_CLIENT_ID) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for authentication",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
-  let response: Response;
-
+async function fetchWithConnectionError(
+  url: string,
+  init: RequestInit
+): Promise<Response> {
   try {
-    response = await fetch(`${SENTRY_URL}/oauth/device/code/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: SENTRY_CLIENT_ID,
-        scope: SCOPES,
-      }),
-    });
+    return await fetch(url, init);
   } catch (error) {
     const isConnectionError =
       error instanceof Error &&
@@ -108,70 +81,96 @@ async function requestDeviceCode() {
     }
     throw error;
   }
+}
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new ApiError(
-      "Failed to initiate device flow",
-      response.status,
-      errorText,
-      "/oauth/device/code/"
+/** Request a device code from Sentry's device authorization endpoint */
+function requestDeviceCode() {
+  if (!SENTRY_CLIENT_ID) {
+    throw new ConfigError(
+      "SENTRY_CLIENT_ID is required for authentication",
+      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
     );
   }
 
-  const data = await response.json();
-
-  const result = DeviceCodeResponseSchema.safeParse(data);
-  if (!result.success) {
-    throw new ApiError(
-      "Invalid response from device authorization endpoint",
-      response.status,
-      result.error.errors.map((e) => e.message).join(", "),
-      "/oauth/device/code/"
+  return withHttpSpan("POST", "/oauth/device/code/", async () => {
+    const response = await fetchWithConnectionError(
+      `${SENTRY_URL}/oauth/device/code/`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: SENTRY_CLIENT_ID,
+          scope: SCOPES,
+        }),
+      }
     );
-  }
 
-  return result.data;
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new ApiError(
+        "Failed to initiate device flow",
+        response.status,
+        errorText,
+        "/oauth/device/code/"
+      );
+    }
+
+    const data = await response.json();
+
+    const result = DeviceCodeResponseSchema.safeParse(data);
+    if (!result.success) {
+      throw new ApiError(
+        "Invalid response from device authorization endpoint",
+        response.status,
+        result.error.errors.map((e) => e.message).join(", "),
+        "/oauth/device/code/"
+      );
+    }
+
+    return result.data;
+  });
 }
 
 /**
  * Poll Sentry's token endpoint for the access token
  */
-async function pollForToken(deviceCode: string): Promise<TokenResponse> {
-  const response = await fetch(`${SENTRY_URL}/oauth/token/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: SENTRY_CLIENT_ID,
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    }),
-  });
+function pollForToken(deviceCode: string): Promise<TokenResponse> {
+  return withHttpSpan("POST", "/oauth/token/", async () => {
+    const response = await fetch(`${SENTRY_URL}/oauth/token/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: SENTRY_CLIENT_ID,
+        device_code: deviceCode,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      }),
+    });
 
-  const data = await response.json();
+    const data = await response.json();
 
-  // Try to parse as success response first
-  const tokenResult = TokenResponseSchema.safeParse(data);
-  if (tokenResult.success) {
-    return tokenResult.data;
-  }
+    // Try to parse as success response first
+    const tokenResult = TokenResponseSchema.safeParse(data);
+    if (tokenResult.success) {
+      return tokenResult.data;
+    }
 
-  // Try to parse as error response
-  const errorResult = TokenErrorResponseSchema.safeParse(data);
-  if (errorResult.success) {
-    throw new DeviceFlowError(
-      errorResult.data.error,
-      errorResult.data.error_description
+    // Try to parse as error response
+    const errorResult = TokenErrorResponseSchema.safeParse(data);
+    if (errorResult.success) {
+      throw new DeviceFlowError(
+        errorResult.data.error,
+        errorResult.data.error_description
+      );
+    }
+
+    // If neither schema matches, throw a generic error
+    throw new ApiError(
+      "Unexpected response from token endpoint",
+      response.status,
+      JSON.stringify(data),
+      "/oauth/token/"
     );
-  }
-
-  // If neither schema matches, throw a generic error
-  throw new ApiError(
-    "Unexpected response from token endpoint",
-    response.status,
-    JSON.stringify(data),
-    "/oauth/token/"
-  );
+  });
 }
 
 type PollResult =
@@ -281,10 +280,6 @@ export async function performDeviceFlow(
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Complete the OAuth flow by storing the token in the config file.
  *
@@ -311,14 +306,8 @@ export async function setApiToken(token: string): Promise<void> {
   await setAuthToken(token);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Token Refresh (RFC 6749 Section 6)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Refresh an access token using a refresh token.
- */
-export async function refreshAccessToken(
+/** Refresh an access token using a refresh token. */
+export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
   if (!SENTRY_CLIENT_ID) {
@@ -328,65 +317,51 @@ export async function refreshAccessToken(
     );
   }
 
-  let response: Response;
+  return withHttpSpan("POST", "/oauth/token/", async () => {
+    const response = await fetchWithConnectionError(
+      `${SENTRY_URL}/oauth/token/`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: SENTRY_CLIENT_ID,
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }),
+      }
+    );
 
-  try {
-    response = await fetch(`${SENTRY_URL}/oauth/token/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: SENTRY_CLIENT_ID,
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-      }),
-    });
-  } catch (error) {
-    const isConnectionError =
-      error instanceof Error &&
-      (error.message.includes("ECONNREFUSED") ||
-        error.message.includes("fetch failed") ||
-        error.message.includes("network"));
+    if (!response.ok) {
+      let errorDetail = "Token refresh failed";
+      try {
+        const errorData = await response.json();
+        const errorResult = TokenErrorResponseSchema.safeParse(errorData);
+        if (errorResult.success) {
+          errorDetail =
+            errorResult.data.error_description ?? errorResult.data.error;
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
 
-    if (isConnectionError) {
-      throw new ApiError(
-        `Cannot connect to Sentry at ${SENTRY_URL}`,
-        0,
-        "Check your network connection and SENTRY_URL configuration"
+      throw new AuthError(
+        "expired",
+        `Session expired: ${errorDetail}. Run 'sentry auth login' to re-authenticate.`
       );
     }
-    throw error;
-  }
 
-  if (!response.ok) {
-    let errorDetail = "Token refresh failed";
-    try {
-      const errorData = await response.json();
-      const errorResult = TokenErrorResponseSchema.safeParse(errorData);
-      if (errorResult.success) {
-        errorDetail =
-          errorResult.data.error_description ?? errorResult.data.error;
-      }
-    } catch {
-      // Ignore JSON parse errors
+    const data = await response.json();
+    const result = TokenResponseSchema.safeParse(data);
+
+    if (!result.success) {
+      throw new ApiError(
+        "Invalid response from token refresh endpoint",
+        response.status,
+        result.error.errors.map((e) => e.message).join(", "),
+        "/oauth/token/"
+      );
     }
 
-    throw new AuthError(
-      "expired",
-      `Session expired: ${errorDetail}. Run 'sentry auth login' to re-authenticate.`
-    );
-  }
-
-  const data = await response.json();
-  const result = TokenResponseSchema.safeParse(data);
-
-  if (!result.success) {
-    throw new ApiError(
-      "Invalid response from token refresh endpoint",
-      response.status,
-      result.error.errors.map((e) => e.message).join(", "),
-      "/oauth/token/"
-    );
-  }
-
-  return result.data;
+    return result.data;
+  });
 }

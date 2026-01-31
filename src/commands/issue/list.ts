@@ -14,7 +14,7 @@ import {
   setProjectAliases,
 } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { ApiError, AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -48,6 +48,9 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list --org <org> --project <project>";
+
+/** Error type classification for fetch failures */
+type FetchErrorType = "permission" | "network" | "unknown";
 
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
@@ -233,28 +236,43 @@ function getComparator(
   }
 }
 
+type FetchResult =
+  | { success: true; data: IssueListResult }
+  | { success: false; errorType: FetchErrorType };
+
 /**
  * Fetch issues for a single target project.
  *
  * @param target - Resolved org/project target
  * @param options - Query options (query, limit, sort)
- * @returns Issues with target context, or null if fetch failed (except auth errors)
+ * @returns Success with issues, or failure with error type classification
  * @throws {AuthError} When user is not authenticated
  */
 async function fetchIssuesForTarget(
   target: ResolvedTarget,
   options: { query?: string; limit: number; sort: SortValue }
-): Promise<IssueListResult | null> {
+): Promise<FetchResult> {
   try {
     const issues = await listIssues(target.org, target.project, options);
-    return { target, issues };
+    return { success: true, data: { target, issues } };
   } catch (error) {
     // Auth errors should propagate - user needs to authenticate
     if (error instanceof AuthError) {
       throw error;
     }
-    // Other errors (network, permissions) - skip this target silently
-    return null;
+    // Classify error type for better user messaging
+    // 401/403 are permission errors
+    if (
+      error instanceof ApiError &&
+      (error.status === 401 || error.status === 403)
+    ) {
+      return { success: false, errorType: "permission" };
+    }
+    // Network errors (fetch failures, timeouts)
+    if (error instanceof TypeError && error.message.includes("fetch")) {
+      return { success: false, errorType: "network" };
+    }
+    return { success: false, errorType: "unknown" };
   }
 }
 
@@ -308,7 +326,7 @@ export const listCommand = buildCommand({
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
-    const { stdout, cwd } = this;
+    const { stdout, cwd, setContext } = this;
 
     // Resolve targets (may find multiple in monorepos)
     const { targets, footer, skippedSelfHosted, detectedDsns } =
@@ -318,6 +336,11 @@ export const listCommand = buildCommand({
         cwd,
         usageHint: USAGE_HINT,
       });
+
+    // Set telemetry context with unique orgs and projects
+    const orgs = [...new Set(targets.map((t) => t.org))];
+    const projects = [...new Set(targets.map((t) => t.project))];
+    setContext(orgs, projects);
 
     if (targets.length === 0) {
       if (skippedSelfHosted) {
@@ -342,15 +365,35 @@ export const listCommand = buildCommand({
       )
     );
 
-    // Filter out failed fetches
-    const validResults = results.filter(
-      (r): r is IssueListResult => r !== null
-    );
+    // Separate successful fetches from failures
+    const validResults: IssueListResult[] = [];
+    const errorTypes = new Set<FetchErrorType>();
+
+    for (const result of results) {
+      if (result.success) {
+        validResults.push(result.data);
+      } else {
+        errorTypes.add(result.errorType);
+      }
+    }
 
     if (validResults.length === 0) {
+      // Build error message based on what types of errors we saw
+      if (errorTypes.has("permission")) {
+        throw new Error(
+          `Failed to fetch issues from ${targets.length} project(s).\n` +
+            "You don't have permission to access these projects.\n\n" +
+            "Try running 'sentry auth status' to verify your authentication."
+        );
+      }
+      if (errorTypes.has("network")) {
+        throw new Error(
+          `Failed to fetch issues from ${targets.length} project(s).\n` +
+            "Network connection failed. Check your internet connection."
+        );
+      }
       throw new Error(
-        `Failed to fetch issues from ${targets.length} project(s). ` +
-          "Check your network connection and project permissions."
+        `Failed to fetch issues from ${targets.length} project(s).`
       );
     }
 

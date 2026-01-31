@@ -46,32 +46,28 @@ export {
   TERMINAL_STATUSES,
 } from "./seer.js";
 export type {
-  // Breadcrumb types
   Breadcrumb,
   BreadcrumbsEntry,
-  // Context types
   BrowserContext,
   DeviceContext,
-  // Stack trace types
   ExceptionEntry,
   ExceptionValue,
-  // Issue types
   IssueLevel,
   IssuePriority,
   IssueStatus,
   IssueSubstatus,
   Mechanism,
+  OrganizationLinks,
   OsContext,
+  ProjectKey,
+  Region,
   Release,
-  // Request types
   RequestEntry,
-  // Event types
   SentryEvent,
   SentryIssue,
-  // Organization & Project
   SentryOrganization,
   SentryProject,
-  // Span/Trace types
+  SentryUser,
   Span,
   StackFrame,
   Stacktrace,
@@ -80,28 +76,31 @@ export type {
   TraceResponse,
   TraceSpan,
   UserGeo,
+  UserRegionsResponse,
 } from "./sentry.js";
-// Sentry API types and schemas
+
 export {
-  // Schemas
   BreadcrumbSchema,
   BreadcrumbsEntrySchema,
   BrowserContextSchema,
   DeviceContextSchema,
   ExceptionEntrySchema,
   ExceptionValueSchema,
-  // Constants
   ISSUE_LEVELS,
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
   MechanismSchema,
+  OrganizationLinksSchema,
   OsContextSchema,
+  ProjectKeySchema,
+  RegionSchema,
   ReleaseSchema,
   RequestEntrySchema,
   SentryEventSchema,
   SentryIssueSchema,
   SentryOrganizationSchema,
   SentryProjectSchema,
+  SentryUserSchema,
   SpanSchema,
   StackFrameSchema,
   StacktraceSchema,
@@ -109,6 +108,7 @@ export {
   TraceEventSchema,
   TraceResponseSchema,
   UserGeoSchema,
+  UserRegionsResponseSchema,
 } from "./sentry.js";
 
 // I/O types

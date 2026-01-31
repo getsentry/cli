@@ -9,8 +9,35 @@
 import { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Region
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A Sentry region (e.g., US, EU) */
+export const RegionSchema = z.object({
+  name: z.string(),
+  url: z.string().url(),
+});
+
+export type Region = z.infer<typeof RegionSchema>;
+
+/** Response from /api/0/users/me/regions/ endpoint */
+export const UserRegionsResponseSchema = z.object({
+  regions: z.array(RegionSchema),
+});
+
+export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Organization links with region URL for multi-region support */
+export const OrganizationLinksSchema = z.object({
+  organizationUrl: z.string(),
+  regionUrl: z.string(),
+});
+
+export type OrganizationLinks = z.infer<typeof OrganizationLinksSchema>;
 
 export const SentryOrganizationSchema = z
   .object({
@@ -30,10 +57,29 @@ export const SentryOrganizationSchema = z
       .passthrough()
       .optional(),
     features: z.array(z.string()).optional(),
+    // Multi-region support: links contain the region URL for this org
+    links: OrganizationLinksSchema.optional(),
   })
   .passthrough();
 
 export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SentryUserSchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    // Optional user info
+    email: z.string().optional(),
+    username: z.string().optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
+export type SentryUser = z.infer<typeof SentryUserSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Project
@@ -611,3 +657,24 @@ export const SentryEventSchema = z
   .passthrough();
 
 export type SentryEvent = z.infer<typeof SentryEventSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Keys (DSN)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const ProjectKeyDsnSchema = z.object({
+  public: z.string(),
+  secret: z.string().optional(),
+});
+
+export const ProjectKeySchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    dsn: ProjectKeyDsnSchema,
+    isActive: z.boolean(),
+    dateCreated: z.string().optional(),
+  })
+  .passthrough();
+
+export type ProjectKey = z.infer<typeof ProjectKeySchema>;

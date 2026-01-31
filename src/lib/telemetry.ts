@@ -10,8 +10,41 @@
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/node";
+import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+
+export type { Span } from "@sentry/bun";
+
+/** Re-imported locally because Span is exported via re-export */
+type Span = Sentry.Span;
+
+/**
+ * Initialize telemetry context with user and instance information.
+ * Called after Sentry is initialized to set user context and instance tags.
+ */
+async function initTelemetryContext(): Promise<void> {
+  try {
+    // Dynamic imports to avoid circular dependencies and for ES module compatibility
+    const { getUserInfo } = await import("./db/user.js");
+    const { getInstanceId } = await import("./db/instance.js");
+
+    const user = getUserInfo();
+    const instanceId = getInstanceId();
+
+    if (user) {
+      // Only send user ID - email/username are PII
+      Sentry.setUser({ id: user.userId });
+    }
+
+    if (instanceId) {
+      Sentry.setTag("instance_id", instanceId);
+    }
+  } catch (error) {
+    // Context initialization is not critical - continue without it
+    // But capture the error for debugging
+    Sentry.captureException(error);
+  }
+}
 
 /**
  * Wrap CLI execution with telemetry tracking.
@@ -20,25 +53,34 @@ import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
  * Captures any unhandled exceptions and reports them.
  * Telemetry can be disabled via SENTRY_CLI_NO_TELEMETRY=1 env var.
  *
- * @param callback - The CLI execution function to wrap
+ * @param callback - The CLI execution function to wrap, receives the span for naming
  * @returns The result of the callback
  */
 export async function withTelemetry<T>(
-  callback: () => T | Promise<T>
+  callback: (span: Span | undefined) => T | Promise<T>
 ): Promise<T> {
   const enabled = process.env.SENTRY_CLI_NO_TELEMETRY !== "1";
   const client = initSentry(enabled);
   if (!client?.getOptions().enabled) {
-    return callback();
+    return callback(undefined);
   }
+
+  // Initialize user and instance context
+  await initTelemetryContext();
 
   Sentry.startSession();
   Sentry.captureSession();
 
   try {
-    return await Sentry.startSpan(
-      { name: "cli-execution", op: "cli.command" },
-      async () => callback()
+    return await Sentry.startSpanManual(
+      { name: "cli.command", op: "cli.command", forceTransaction: true },
+      async (span) => {
+        try {
+          return await callback(span);
+        } finally {
+          span.end();
+        }
+      }
     );
   } catch (e) {
     Sentry.captureException(e);
@@ -66,7 +108,7 @@ export async function withTelemetry<T>(
  *
  * @internal Exported for testing
  */
-export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
+export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({
@@ -124,21 +166,124 @@ export function initSentry(enabled: boolean): Sentry.NodeClient | undefined {
 }
 
 /**
- * Set the command name for telemetry.
+ * Set the command name on the telemetry span.
  *
  * Called by stricli's forCommand context builder with the resolved
  * command path (e.g., "auth.login", "issue.list").
  *
- * Updates both the active span name and sets a tag for filtering.
- *
+ * @param span - The span to update (from withTelemetry callback)
  * @param command - The command name (dot-separated path)
  */
-export function setCommandName(command: string): void {
-  // Update the span name to the actual command
-  const span = Sentry.getActiveSpan();
+export function setCommandSpanName(
+  span: Span | undefined,
+  command: string
+): void {
   if (span) {
-    span.updateName(command);
+    Sentry.updateSpanName(span, command);
   }
   // Also set as tag for easier filtering in Sentry UI
   Sentry.setTag("command", command);
+}
+
+/**
+ * Set organization and project context as tags.
+ *
+ * Call this from commands after resolving the target org/project
+ * to enable filtering by org/project in Sentry.
+ * Accepts arrays to support multi-project commands.
+ *
+ * @param orgs - Organization slugs
+ * @param projects - Project slugs
+ */
+export function setOrgProjectContext(orgs: string[], projects: string[]): void {
+  if (orgs.length > 0) {
+    Sentry.setTag("sentry.org", orgs.join(","));
+  }
+  if (projects.length > 0) {
+    Sentry.setTag("sentry.project", projects.join(","));
+  }
+}
+
+/**
+ * Wrap an HTTP request with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * HTTP request duration and status.
+ *
+ * @param method - HTTP method (GET, POST, etc.)
+ * @param url - Request URL or path
+ * @param fn - The async function that performs the HTTP request
+ * @returns The result of the function
+ */
+export function withHttpSpan<T>(
+  method: string,
+  url: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  return Sentry.startSpan(
+    {
+      name: `${method} ${url}`,
+      op: "http.client",
+      attributes: {
+        "http.request.method": method,
+        "url.path": url,
+      },
+      onlyIfParent: true,
+    },
+    async (span) => {
+      try {
+        const result = await fn();
+        span.setStatus({ code: 1 }); // OK
+        return result;
+      } catch (error) {
+        span.setStatus({ code: 2 }); // Error
+        throw error;
+      }
+    }
+  );
+}
+
+/**
+ * Wrap a database operation with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * database operation duration.
+ *
+ * @param operation - Name of the operation (e.g., "getAuthToken", "setDefaults")
+ * @param fn - The function that performs the database operation
+ * @returns The result of the function
+ */
+export function withDbSpan<T>(operation: string, fn: () => T): T {
+  return Sentry.startSpan(
+    {
+      name: operation,
+      op: "db",
+      attributes: {
+        "db.system": "sqlite",
+      },
+      onlyIfParent: true,
+    },
+    fn
+  );
+}
+
+/**
+ * Wrap a serialization/formatting operation with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * expensive formatting operations.
+ *
+ * @param operation - Name of the operation (e.g., "formatSpanTree")
+ * @param fn - The function that performs the formatting
+ * @returns The result of the function
+ */
+export function withSerializeSpan<T>(operation: string, fn: () => T): T {
+  return Sentry.startSpan(
+    {
+      name: operation,
+      op: "serialize",
+      onlyIfParent: true,
+    },
+    fn
+  );
 }

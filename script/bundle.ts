@@ -89,6 +89,10 @@ const result = await build({
   entryPoints: ["./src/bin.ts"],
   bundle: true,
   minify: true,
+  // Replace @sentry/bun with @sentry/node for Node.js npm package
+  alias: {
+    "@sentry/bun": "@sentry/node",
+  },
   banner: {
     // Suppress Node.js warnings (e.g., SQLite experimental) - not useful for CLI users
     js: `#!/usr/bin/env node
