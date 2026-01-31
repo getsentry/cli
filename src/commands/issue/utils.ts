@@ -12,7 +12,7 @@ import {
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
-import { ContextError } from "../../lib/errors.js";
+import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import {
   expandToFullShortId,
@@ -121,6 +121,35 @@ type ResolveContext = {
 };
 
 /**
+ * Check if an error from short suffix resolution should allow fallthrough.
+ * Returns true for 404 (issue not found) or ContextError when no explicit flags were provided.
+ * When user explicitly provides --org or --project, we should error clearly instead of
+ * silently falling through to other resolution methods.
+ */
+function shouldFallthrough(error: unknown, ctx: ResolveContext): boolean {
+  if (error instanceof ApiError && error.status === 404) {
+    return true;
+  }
+  if (error instanceof ContextError) {
+    // Only fall through if user didn't provide explicit flags.
+    // If they provided --org or --project, they expect that resolution path to work.
+    return ctx.org === undefined && ctx.project === undefined;
+  }
+  return false;
+}
+
+/**
+ * Re-throw an error, wrapping unexpected ones in ApiError.
+ */
+function rethrowAsApiError(error: unknown): never {
+  if (error instanceof CliError) {
+    throw error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  throw new ApiError(`Failed to resolve issue: ${message}`, 500);
+}
+
+/**
  * Try to resolve a short suffix format (e.g., "G", "4Y").
  * Requires project context to expand to full short ID.
  */
@@ -191,7 +220,7 @@ export type ResolveIssueOptions = {
  *
  * Supports all issue ID formats:
  * - Alias-suffix format (e.g., "f-g" where "f" is a cached project alias)
- * - Short suffix format (e.g., "G", "4Y" - requires project context)
+ * - Short suffix format (e.g., "G", "4Y", "15" - requires project context)
  * - Full short ID format (e.g., "CRAFT-G", "PROJECT-ABC")
  * - Numeric ID format (e.g., "123456789")
  *
@@ -220,11 +249,19 @@ export async function resolveIssue(
     // Fall through to treat as full short ID
   }
 
-  // Short suffix format (e.g., "G", "4Y") - requires project context.
-  // isShortSuffix matches numeric IDs too, so also check isShortId (has letters).
-  const looksLikeShortSuffix = isShortSuffix(issueId) && isShortId(issueId);
+  // Short suffix format (e.g., "G", "4Y", "15") - requires project context.
+  // Try short suffix expansion for any short alphanumeric input that looks too short to be a real numeric ID.
+  // Sentry numeric IDs are typically large numbers (e.g., 6085858322), not small like "15".
+  const looksLikeShortSuffix = isShortSuffix(issueId) && issueId.length <= 4;
   if (looksLikeShortSuffix) {
-    return resolveShortSuffixId(ctx);
+    try {
+      return await resolveShortSuffixId(ctx);
+    } catch (error) {
+      if (!shouldFallthrough(error, ctx)) {
+        rethrowAsApiError(error);
+      }
+      // Fall through to try other resolution methods
+    }
   }
 
   // Full short ID format (e.g., "CRAFT-G") - requires org context
