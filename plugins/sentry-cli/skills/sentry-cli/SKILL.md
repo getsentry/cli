@@ -210,6 +210,24 @@ Analyze an issue's root cause using Seer AI
 - `--json - Output as JSON`
 - `--force - Force new analysis even if one exists`
 
+**Examples:**
+
+```bash
+sentry issue explain <issue-id>
+
+# By numeric issue ID
+sentry issue explain 123456789
+
+# By short ID
+sentry issue explain MYPROJECT-ABC --org my-org
+
+# By short suffix (requires project context)
+sentry issue explain G --org my-org --project my-project
+
+# Force a fresh analysis
+sentry issue explain 123456789 --force
+```
+
 #### `sentry issue plan <arg0>`
 
 Generate a solution plan using Seer AI
@@ -219,6 +237,21 @@ Generate a solution plan using Seer AI
 - `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+
+**Examples:**
+
+```bash
+sentry issue plan <issue-id>
+
+# After running explain, create a plan
+sentry issue plan 123456789
+
+# Specify which root cause to plan for (if multiple were found)
+sentry issue plan 123456789 --cause 0
+
+# By short ID
+sentry issue plan MYPROJECT-ABC --org my-org --cause 1
+```
 
 #### `sentry issue view <arg0>`
 

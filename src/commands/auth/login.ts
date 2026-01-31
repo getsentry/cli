@@ -1,15 +1,39 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { listOrganizations } from "../../lib/api-client.js";
+import { getCurrentUser } from "../../lib/api-client.js";
 import { openBrowser } from "../../lib/browser.js";
 import { setupCopyKeyListener } from "../../lib/clipboard.js";
 import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
+import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
 import { generateQRCode } from "../../lib/qrcode.js";
+import type { SentryUser } from "../../types/index.js";
+
+/**
+ * Format user identity for display.
+ * Handles missing username/email gracefully.
+ */
+function formatUserIdentity(user: SentryUser): string {
+  const { username, email, id } = user;
+
+  if (username && email) {
+    return `${username} <${email}>`;
+  }
+  if (username) {
+    return username;
+  }
+  if (email) {
+    return email;
+  }
+  // Fallback to user ID if no username/email
+  return `user ${id}`;
+}
 
 type LoginFlags = {
   readonly token?: string;
@@ -54,12 +78,13 @@ export const loginCommand = buildCommand({
 
     // Token-based authentication
     if (flags.token) {
-      // Save token first, then validate by making an API call
+      // Save token first, then validate by fetching user info
       await setAuthToken(flags.token);
 
-      // Validate the token by trying to list organizations
+      // Validate token by fetching user info
+      let user: SentryUser;
       try {
-        await listOrganizations();
+        user = await getCurrentUser();
       } catch {
         // Token is invalid - clear it and throw
         await clearAuth();
@@ -69,7 +94,20 @@ export const loginCommand = buildCommand({
         );
       }
 
+      // Store user info for telemetry (non-critical, don't block auth)
+      try {
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+        });
+      } catch (error) {
+        // Report to Sentry but don't block auth - user info is not critical
+        Sentry.captureException(error);
+      }
+
       stdout.write(`${success("✓")} Authenticated with API token\n`);
+      stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
@@ -133,7 +171,24 @@ export const loginCommand = buildCommand({
       // Store the token
       await completeOAuthFlow(tokenResponse);
 
+      // Fetch and store user info for telemetry
+      let user: SentryUser | undefined;
+      try {
+        user = await getCurrentUser();
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+        });
+      } catch (error) {
+        // Report to Sentry but don't block auth - user info is not critical
+        Sentry.captureException(error);
+      }
+
       stdout.write(`${success("✓")} Authentication successful!\n`);
+      if (user) {
+        stdout.write(`  Logged in as ${muted(formatUserIdentity(user))}\n`);
+      }
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
 
       if (tokenResponse.expires_in) {

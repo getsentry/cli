@@ -6,6 +6,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 
 import { glob } from "tinyglobby";
+import { uuidv7 } from "uuidv7";
 
 declare global {
   var Bun: typeof BunPolyfill;
@@ -138,6 +139,10 @@ const BunPolyfill = {
         yield result;
       }
     }
+  },
+
+  randomUUIDv7(): string {
+    return uuidv7();
   },
 };
 
