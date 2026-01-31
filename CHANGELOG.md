@@ -1,6 +1,41 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.5.0
+
+### New Features ✨
+
+#### Api
+
+- Add multi-region support for Sentry SaaS by @BYK in [#134](https://github.com/getsentry/cli/pull/134)
+- Add custom User-Agent header to API requests by @BYK in [#125](https://github.com/getsentry/cli/pull/125)
+
+#### Other
+
+- (docs) Add Sentry SDK for error tracking, replay, and metrics by @betegon in [#122](https://github.com/getsentry/cli/pull/122)
+- (project) Improve project list and view output by @betegon in [#129](https://github.com/getsentry/cli/pull/129)
+- (seer) Add actionable error messages for Seer API errors by @betegon in [#130](https://github.com/getsentry/cli/pull/130)
+- (telemetry) Improve Sentry instrumentation by @BYK in [#127](https://github.com/getsentry/cli/pull/127)
+
+### Bug Fixes 🐛
+
+- (issue) Support numeric short suffixes like "15" in issue view by @BYK in [#138](https://github.com/getsentry/cli/pull/138)
+- (npx) Suppress Node.js warnings in npm package by @BYK in [#115](https://github.com/getsentry/cli/pull/115)
+
+### Documentation 📚
+
+- (issue) Add command reference for explain and plan by @betegon in [#137](https://github.com/getsentry/cli/pull/137)
+- (skill) Add well-known skills discovery endpoint by @sergical in [#135](https://github.com/getsentry/cli/pull/135)
+
+### Internal Changes 🔧
+
+- (db) Add upsert() helper to reduce SQL boilerplate by @BYK in [#139](https://github.com/getsentry/cli/pull/139)
+- Allow PRs to merge when CI jobs are skipped by @BYK in [#123](https://github.com/getsentry/cli/pull/123)
+
+### Other
+
+- fix links to commands from /getting-started by @souredoutlook in [#133](https://github.com/getsentry/cli/pull/133)
+
 ## 0.4.2
 
 ### Bug Fixes 🐛
