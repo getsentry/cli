@@ -94,8 +94,9 @@ export function clearAuth(): void {
   withDbSpan("clearAuth", () => {
     const db = getDatabase();
     db.query("DELETE FROM auth WHERE id = 1").run();
-    // Also clear user info when logging out
+    // Also clear user info and org region cache when logging out
     db.query("DELETE FROM user_info WHERE id = 1").run();
+    db.query("DELETE FROM org_regions").run();
   });
 }
 

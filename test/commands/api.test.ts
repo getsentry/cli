@@ -1153,8 +1153,12 @@ describe("buildBodyFromInput", () => {
   });
 
   test("reads JSON from file", async () => {
-    // Create a temp file
-    const tempFile = `/tmp/test-input-${Date.now()}.json`;
+    // Create a temp file using test config dir (which is writable)
+    const { createTestConfigDir, cleanupTestDir } = await import(
+      "../helpers.js"
+    );
+    const testDir = await createTestConfigDir("test-api-file-");
+    const tempFile = `${testDir}/test-input.json`;
     await Bun.write(tempFile, JSON.stringify({ key: "value" }));
 
     try {
@@ -1162,16 +1166,17 @@ describe("buildBodyFromInput", () => {
       const result = await buildBodyFromInput(tempFile, mockStdin);
       expect(result).toEqual({ key: "value" });
     } finally {
-      // Clean up
-      const { unlink } = await import("node:fs/promises");
-      if (await Bun.file(tempFile).exists()) {
-        await unlink(tempFile);
-      }
+      await cleanupTestDir(testDir);
     }
   });
 
   test("reads non-JSON from file", async () => {
-    const tempFile = `/tmp/test-input-${Date.now()}.txt`;
+    // Create a temp file using test config dir (which is writable)
+    const { createTestConfigDir, cleanupTestDir } = await import(
+      "../helpers.js"
+    );
+    const testDir = await createTestConfigDir("test-api-file-");
+    const tempFile = `${testDir}/test-input.txt`;
     await Bun.write(tempFile, "plain text from file");
 
     try {
@@ -1179,10 +1184,7 @@ describe("buildBodyFromInput", () => {
       const result = await buildBodyFromInput(tempFile, mockStdin);
       expect(result).toBe("plain text from file");
     } finally {
-      const { unlink } = await import("node:fs/promises");
-      if (await Bun.file(tempFile).exists()) {
-        await unlink(tempFile);
-      }
+      await cleanupTestDir(testDir);
     }
   });
 

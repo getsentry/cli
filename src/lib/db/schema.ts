@@ -26,6 +26,15 @@ const INSTANCE_INFO_TABLE = `
   )
 `;
 
+/** Organization region cache for multi-region support */
+const ORG_REGIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS org_regions (
+    org_slug TEXT PRIMARY KEY,
+    region_url TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
+
 export function initSchema(db: Database): void {
   db.exec(`
     -- Schema version for future migrations
@@ -95,6 +104,7 @@ export function initSchema(db: Database): void {
       value TEXT NOT NULL
     );
 
+    ${ORG_REGIONS_TABLE};
     ${USER_INFO_TABLE};
     ${INSTANCE_INFO_TABLE};
   `);
@@ -122,9 +132,13 @@ function getSchemaVersion(db: Database): number {
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
-  // Migration from v1 to v2: Add user_info and instance_info tables
+  // Migration 1 -> 2: Add org_regions, user_info, and instance_info tables
   if (currentVersion < 2) {
-    db.exec(`${USER_INFO_TABLE}; ${INSTANCE_INFO_TABLE};`);
+    db.exec(`
+      ${ORG_REGIONS_TABLE};
+      ${USER_INFO_TABLE};
+      ${INSTANCE_INFO_TABLE};
+    `);
   }
 
   // Update schema version if needed
