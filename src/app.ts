@@ -1,4 +1,9 @@
-import { buildApplication, buildRouteMap } from "@stricli/core";
+import {
+  type ApplicationText,
+  buildApplication,
+  buildRouteMap,
+  text_en,
+} from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { eventRoute } from "./commands/event/index.js";
@@ -8,6 +13,8 @@ import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
 
 import { CLI_VERSION } from "./lib/constants.js";
+import { CliError, getExitCode } from "./lib/errors.js";
+import { error as errorColor } from "./lib/formatters/colors.js";
 
 /** Top-level route map containing all CLI commands */
 export const routes = buildRouteMap({
@@ -29,9 +36,33 @@ export const routes = buildRouteMap({
   },
 });
 
+/**
+ * Custom error formatting for CLI errors.
+ *
+ * - CliError subclasses: Show clean user-friendly message without stack trace
+ * - Other errors: Show stack trace for debugging unexpected issues
+ */
+const customText: ApplicationText = {
+  ...text_en,
+  exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
+    if (exc instanceof CliError) {
+      const prefix = ansiColor ? errorColor("Error:") : "Error:";
+      return `${prefix} ${exc.format()}`;
+    }
+    if (exc instanceof Error) {
+      return `Unexpected error: ${exc.stack ?? exc.message}`;
+    }
+    return `Unexpected error: ${String(exc)}`;
+  },
+};
+
 export const app = buildApplication(routes, {
   name: "sentry",
   versionInfo: {
     currentVersion: CLI_VERSION,
+  },
+  determineExitCode: getExitCode,
+  localization: {
+    loadText: () => customText,
   },
 });
