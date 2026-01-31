@@ -1,6 +1,13 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.5.1
+
+### Bug Fixes 🐛
+
+- (cli) Show clean error messages without stack traces for user-facing errors by @BYK in [#141](https://github.com/getsentry/cli/pull/141)
+- (db) Add transaction method to Node SQLite polyfill by @BYK in [#140](https://github.com/getsentry/cli/pull/140)
+
 ## 0.5.0
 
 ### New Features ✨
