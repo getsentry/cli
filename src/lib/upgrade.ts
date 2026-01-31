@@ -28,6 +28,22 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** GitHub API base URL for releases */
+const GITHUB_RELEASES_URL =
+  "https://api.github.com/repos/getsentry/cli/releases";
+
+/** npm registry base URL */
+const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
+
+/** Sentry CLI install script URL */
+const INSTALL_SCRIPT_URL = "https://cli.sentry.dev/install";
+
+/** Standard headers for GitHub API requests */
+const GITHUB_HEADERS = {
+  Accept: "application/vnd.github.v3+json",
+  "User-Agent": "sentry-cli",
+} as const;
+
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
@@ -124,29 +140,42 @@ function getErrorMessage(error: unknown): string {
 }
 
 /**
+ * Fetch wrapper that converts network errors to UpgradeError.
+ * Handles DNS failures, timeouts, and other connection issues.
+ *
+ * @param url - URL to fetch
+ * @param init - Fetch options
+ * @param serviceName - Service name for error messages (e.g., "GitHub")
+ * @returns Response object
+ * @throws {UpgradeError} On network failure
+ */
+async function fetchWithUpgradeError(
+  url: string,
+  init: RequestInit,
+  serviceName: string
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    throw new UpgradeError(
+      "network_error",
+      `Failed to connect to ${serviceName}: ${getErrorMessage(error)}`
+    );
+  }
+}
+
+/**
  * Fetch the latest version from GitHub releases.
  *
  * @returns Latest version string (without 'v' prefix)
  * @throws {UpgradeError} When fetch fails or response is invalid
  */
 export async function fetchLatestFromGitHub(): Promise<string> {
-  let response: Response;
-  try {
-    response = await fetch(
-      "https://api.github.com/repos/getsentry/cli/releases/latest",
-      {
-        headers: {
-          Accept: "application/vnd.github.v3+json",
-          "User-Agent": "sentry-cli",
-        },
-      }
-    );
-  } catch (error) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to GitHub: ${getErrorMessage(error)}`
-    );
-  }
+  const response = await fetchWithUpgradeError(
+    `${GITHUB_RELEASES_URL}/latest`,
+    { headers: GITHUB_HEADERS },
+    "GitHub"
+  );
 
   if (!response.ok) {
     throw new UpgradeError(
@@ -174,17 +203,11 @@ export async function fetchLatestFromGitHub(): Promise<string> {
  * @throws {UpgradeError} When fetch fails or response is invalid
  */
 export async function fetchLatestFromNpm(): Promise<string> {
-  let response: Response;
-  try {
-    response = await fetch("https://registry.npmjs.org/sentry/latest", {
-      headers: { Accept: "application/json" },
-    });
-  } catch (error) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to npm registry: ${getErrorMessage(error)}`
-    );
-  }
+  const response = await fetchWithUpgradeError(
+    `${NPM_REGISTRY_URL}/latest`,
+    { headers: { Accept: "application/json" } },
+    "npm registry"
+  );
 
   if (!response.ok) {
     throw new UpgradeError(
@@ -230,40 +253,19 @@ export async function versionExists(
   version: string
 ): Promise<boolean> {
   if (method === "curl") {
-    // Check GitHub releases
-    let response: Response;
-    try {
-      response = await fetch(
-        `https://api.github.com/repos/getsentry/cli/releases/tags/v${version}`,
-        {
-          method: "HEAD",
-          headers: {
-            Accept: "application/vnd.github.v3+json",
-            "User-Agent": "sentry-cli",
-          },
-        }
-      );
-    } catch (error) {
-      throw new UpgradeError(
-        "network_error",
-        `Failed to connect to GitHub: ${getErrorMessage(error)}`
-      );
-    }
+    const response = await fetchWithUpgradeError(
+      `${GITHUB_RELEASES_URL}/tags/v${version}`,
+      { method: "HEAD", headers: GITHUB_HEADERS },
+      "GitHub"
+    );
     return response.ok;
   }
 
-  // Check npm registry
-  let response: Response;
-  try {
-    response = await fetch(`https://registry.npmjs.org/sentry/${version}`, {
-      method: "HEAD",
-    });
-  } catch (error) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to npm registry: ${getErrorMessage(error)}`
-    );
-  }
+  const response = await fetchWithUpgradeError(
+    `${NPM_REGISTRY_URL}/${version}`,
+    { method: "HEAD" },
+    "npm registry"
+  );
   return response.ok;
 }
 
@@ -273,7 +275,7 @@ export async function versionExists(
 
 /**
  * Execute upgrade via curl installer script.
- * Pipes: curl https://cli.sentry.dev/install | bash -s -- --version <v>
+ * Downloads and runs the install script with the specified version.
  *
  * @param version - Target version to install
  * @throws {UpgradeError} When installation fails
@@ -282,7 +284,7 @@ function executeUpgradeCurl(version: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let curlFailed = false;
 
-    const curl = spawn("curl", ["-fsSL", "https://cli.sentry.dev/install"], {
+    const curl = spawn("curl", ["-fsSL", INSTALL_SCRIPT_URL], {
       stdio: ["ignore", "pipe", "inherit"],
     });
 
