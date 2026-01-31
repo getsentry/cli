@@ -10,6 +10,7 @@ import type {
   RootCause,
   SolutionArtifact,
 } from "../../types/seer.js";
+import { SeerError } from "../errors.js";
 import { cyan, green, muted, yellow } from "./colors.js";
 
 const bold = (text: string): string => chalk.bold(text);
@@ -201,7 +202,60 @@ export function formatRootCauseList(causes: RootCause[]): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Format an error message for common autofix errors.
+ * Create a SeerError from an API error status code and detail.
+ *
+ * @param status - HTTP status code
+ * @param detail - Error detail from API
+ * @param orgSlug - Organization slug for constructing settings URLs
+ * @returns SeerError if the status code indicates a Seer-specific error, null otherwise
+ */
+export function createSeerError(
+  status: number,
+  detail?: string,
+  orgSlug?: string
+): SeerError | null {
+  if (status === 402) {
+    return new SeerError("no_budget", orgSlug);
+  }
+  if (status === 403) {
+    if (detail?.includes("not enabled")) {
+      return new SeerError("not_enabled", orgSlug);
+    }
+    if (detail?.includes("AI features")) {
+      return new SeerError("ai_disabled", orgSlug);
+    }
+    // Unrecognized 403 - return null to preserve original error detail
+    // (could be permission denied, rate limiting, etc.)
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Convert an API error to a Seer-specific error or a generic error.
+ *
+ * @param status - HTTP status code
+ * @param detail - Error detail from API
+ * @param orgSlug - Organization slug for constructing settings URLs
+ * @returns SeerError for Seer-specific errors, or a generic Error for other API errors
+ */
+export function handleSeerApiError(
+  status: number,
+  detail?: string,
+  orgSlug?: string
+): Error {
+  const seerError = createSeerError(status, detail, orgSlug);
+  if (seerError) {
+    return seerError;
+  }
+  return new Error(formatAutofixError(status, detail));
+}
+
+/**
+ * Format an error message for non-Seer autofix errors.
+ *
+ * Note: Seer-specific errors (402, 403) are handled by SeerError which
+ * provides actionable suggestions. This function handles other API errors.
  *
  * @param status - HTTP status code
  * @param detail - Error detail from API
@@ -209,16 +263,6 @@ export function formatRootCauseList(causes: RootCause[]): string[] {
  */
 export function formatAutofixError(status: number, detail?: string): string {
   switch (status) {
-    case 402:
-      return "No budget for Seer Autofix. Check your billing plan.";
-    case 403:
-      if (detail?.includes("not enabled")) {
-        return "Seer Autofix is not enabled for this organization.";
-      }
-      if (detail?.includes("AI features")) {
-        return "AI features are disabled for this organization.";
-      }
-      return detail ?? "Seer Autofix is not available.";
     case 404:
       return "Issue not found.";
     default:

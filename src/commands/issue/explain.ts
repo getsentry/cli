@@ -13,8 +13,8 @@ import {
 import { ApiError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {
-  formatAutofixError,
   formatRootCauseList,
+  handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
@@ -72,6 +72,9 @@ export const explainCommand = buildCommand({
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
 
+    // Declare org outside try block so it's accessible in catch for error messages
+    let resolvedOrg: string | undefined;
+
     try {
       // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
@@ -81,6 +84,7 @@ export const explainCommand = buildCommand({
         cwd,
         commandHint: buildCommandHint("explain", issueId),
       });
+      resolvedOrg = org;
 
       // 1. Check for existing analysis (skip if --force)
       let state = flags.force ? null : await getAutofixState(org, numericId);
@@ -94,10 +98,10 @@ export const explainCommand = buildCommand({
       // 2. Trigger new analysis if none exists or forced
       if (!state) {
         if (!flags.json) {
-          let message = flags.force ? "Forcing fresh" : "Starting";
-
-          message += " root cause analysis, it can take several minutes...\n";
-          stderr.write(message);
+          const prefix = flags.force ? "Forcing fresh" : "Starting";
+          stderr.write(
+            `${prefix} root cause analysis, it can take several minutes...\n`
+          );
         }
         await triggerRootCauseAnalysis(org, numericId);
       }
@@ -138,7 +142,7 @@ export const explainCommand = buildCommand({
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
-        throw new Error(formatAutofixError(error.status, error.detail));
+        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
       }
       throw error;
     }

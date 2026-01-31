@@ -4,6 +4,12 @@
  * Unified error classes for consistent error handling across the CLI.
  */
 
+import {
+  buildBillingUrl,
+  buildOrgSettingsUrl,
+  buildSeerSettingsUrl,
+} from "./sentry-urls.js";
+
 /**
  * Base class for all CLI errors.
  *
@@ -205,6 +211,54 @@ export class DeviceFlowError extends CliError {
     super(description ?? code);
     this.name = "DeviceFlowError";
     this.code = code;
+  }
+}
+
+export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
+
+/**
+ * Seer-specific errors with actionable suggestions.
+ *
+ * @param reason - Type of Seer failure
+ * @param orgSlug - Organization slug for constructing settings URLs
+ */
+export class SeerError extends CliError {
+  readonly reason: SeerErrorReason;
+  readonly orgSlug?: string;
+
+  constructor(reason: SeerErrorReason, orgSlug?: string) {
+    const messages: Record<SeerErrorReason, string> = {
+      not_enabled: "Seer is not enabled for this organization.",
+      no_budget: "Seer requires a paid plan.",
+      ai_disabled: "AI features are disabled for this organization.",
+    };
+    super(messages[reason]);
+    this.name = "SeerError";
+    this.reason = reason;
+    this.orgSlug = orgSlug;
+  }
+
+  override format(): string {
+    // When org slug is known, provide direct URLs to settings
+    if (this.orgSlug) {
+      const suggestions: Record<SeerErrorReason, string> = {
+        not_enabled: `To enable Seer:\n  ${buildSeerSettingsUrl(this.orgSlug)}`,
+        no_budget: `To use Seer features, upgrade your plan:\n  ${buildBillingUrl(this.orgSlug, "seer")}`,
+        ai_disabled: `To enable AI features:\n  ${buildOrgSettingsUrl(this.orgSlug, "hideAiFeatures")}`,
+      };
+      return `${this.message}\n\n${suggestions[this.reason]}`;
+    }
+
+    // Fallback when org slug is unknown - give generic guidance
+    const fallbackSuggestions: Record<SeerErrorReason, string> = {
+      not_enabled:
+        "To enable Seer, visit your organization's Seer settings in Sentry.",
+      no_budget:
+        "To use Seer features, upgrade your plan in your organization's billing settings.",
+      ai_disabled:
+        "To enable AI features, check the 'Hide AI Features' setting in your organization settings.",
+    };
+    return `${this.message}\n\n${fallbackSuggestions[this.reason]}`;
   }
 }
 
