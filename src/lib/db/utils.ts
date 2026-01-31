@@ -117,38 +117,3 @@ export function runUpsert<T extends Record<string, SqlValue>>(
   const { sql, values } = upsert(table, data, conflictColumns);
   db.query(sql).run(...values);
 }
-
-/**
- * Build multiple UPSERT statements for batch operations.
- * Returns an array of SqlQuery objects to be executed in a transaction.
- *
- * @param table - The table name to insert into
- * @param rows - Array of objects with column names as keys
- * @param conflictColumns - Column(s) that form the unique constraint
- * @param options - Optional configuration
- * @returns Array of { sql, values } objects
- *
- * @example
- * const queries = bulkUpsert('regions', [
- *   { org_slug: 'acme', region_url: 'https://us.sentry.io' },
- *   { org_slug: 'corp', region_url: 'https://eu.sentry.io' },
- * ], ['org_slug']);
- *
- * db.transaction(() => {
- *   for (const { sql, values } of queries) {
- *     db.query(sql).run(...values);
- *   }
- * })();
- */
-export function bulkUpsert<T extends Record<string, SqlValue>>(
-  table: string,
-  rows: T[],
-  conflictColumns: (keyof T)[],
-  options: UpsertOptions<T> = {}
-): SqlQuery[] {
-  if (rows.length === 0) {
-    return [];
-  }
-
-  return rows.map((row) => upsert(table, row, conflictColumns, options));
-}

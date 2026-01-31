@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bulkUpsert, upsert } from "../../../src/lib/db/utils.js";
+import { upsert } from "../../../src/lib/db/utils.js";
 
 describe("upsert", () => {
   test("generates basic UPSERT statement", () => {
@@ -101,45 +101,5 @@ describe("upsert", () => {
 
     expect(result.sql).toContain("(z_col, a_col, m_col)");
     expect(result.values).toEqual([1, 2, 3]);
-  });
-});
-
-describe("bulkUpsert", () => {
-  test("generates multiple UPSERT statements", () => {
-    const result = bulkUpsert(
-      "regions",
-      [
-        { org_slug: "acme", region_url: "https://us.sentry.io" },
-        { org_slug: "corp", region_url: "https://eu.sentry.io" },
-      ],
-      ["org_slug"]
-    );
-
-    expect(result).toHaveLength(2);
-    expect(result[0].sql).toBe(
-      "INSERT INTO regions (org_slug, region_url) VALUES (?, ?) ON CONFLICT(org_slug) DO UPDATE SET region_url = excluded.region_url"
-    );
-    expect(result[0].values).toEqual(["acme", "https://us.sentry.io"]);
-    expect(result[1].values).toEqual(["corp", "https://eu.sentry.io"]);
-  });
-
-  test("returns empty array for empty rows", () => {
-    const result = bulkUpsert("regions", [], ["org_slug"]);
-    expect(result).toEqual([]);
-  });
-
-  test("passes options to each upsert", () => {
-    const result = bulkUpsert(
-      "users",
-      [
-        { id: 1, name: "Bob", created_at: 1000 },
-        { id: 2, name: "Alice", created_at: 2000 },
-      ],
-      ["id"],
-      { excludeFromUpdate: ["created_at"] }
-    );
-
-    expect(result[0].sql).not.toContain("created_at = excluded.created_at");
-    expect(result[1].sql).not.toContain("created_at = excluded.created_at");
   });
 });
