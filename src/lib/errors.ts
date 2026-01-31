@@ -214,6 +214,43 @@ export class DeviceFlowError extends CliError {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Upgrade Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type UpgradeErrorReason =
+  | "unknown_method"
+  | "network_error"
+  | "execution_failed"
+  | "version_not_found";
+
+/**
+ * Upgrade-related errors.
+ *
+ * @param reason - Type of upgrade failure
+ * @param message - Custom message (uses default if not provided)
+ */
+export class UpgradeError extends CliError {
+  readonly reason: UpgradeErrorReason;
+
+  constructor(reason: UpgradeErrorReason, message?: string) {
+    const defaultMessages: Record<UpgradeErrorReason, string> = {
+      unknown_method:
+        "Could not detect installation method. Use --method to specify.",
+      network_error: "Failed to fetch version information.",
+      execution_failed: "Upgrade command failed.",
+      version_not_found: "The specified version was not found.",
+    };
+    super(message ?? defaultMessages[reason]);
+    this.name = "UpgradeError";
+    this.reason = reason;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seer Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
 
 /**
@@ -261,6 +298,10 @@ export class SeerError extends CliError {
     return `${this.message}\n\n${fallbackSuggestions[this.reason]}`;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Error Utilities
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format any error for user display.

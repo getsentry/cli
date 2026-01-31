@@ -136,15 +136,18 @@ function requestDeviceCode() {
  */
 function pollForToken(deviceCode: string): Promise<TokenResponse> {
   return withHttpSpan("POST", "/oauth/token/", async () => {
-    const response = await fetch(`${SENTRY_URL}/oauth/token/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: SENTRY_CLIENT_ID,
-        device_code: deviceCode,
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }),
-    });
+    const response = await fetchWithConnectionError(
+      `${SENTRY_URL}/oauth/token/`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: SENTRY_CLIENT_ID,
+          device_code: deviceCode,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      }
+    );
 
     const data = await response.json();
 
