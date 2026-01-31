@@ -4,6 +4,12 @@
  * Unified error classes for consistent error handling across the CLI.
  */
 
+import {
+  buildBillingUrl,
+  buildOrgSettingsUrl,
+  buildSeerSettingsUrl,
+} from "./sentry-urls.js";
+
 /**
  * Base class for all CLI errors.
  *
@@ -233,17 +239,26 @@ export class SeerError extends CliError {
   }
 
   override format(): string {
-    const baseUrl = this.orgSlug
-      ? `https://${this.orgSlug}.sentry.io/settings`
-      : "your Sentry organization settings";
+    // When org slug is known, provide direct URLs to settings
+    if (this.orgSlug) {
+      const suggestions: Record<SeerErrorReason, string> = {
+        not_enabled: `To enable Seer:\n  ${buildSeerSettingsUrl(this.orgSlug)}`,
+        no_budget: `To use Seer features, upgrade your plan:\n  ${buildBillingUrl(this.orgSlug, "seer")}`,
+        ai_disabled: `To enable AI features:\n  ${buildOrgSettingsUrl(this.orgSlug, "hideAiFeatures")}`,
+      };
+      return `${this.message}\n\n${suggestions[this.reason]}`;
+    }
 
-    const suggestions: Record<SeerErrorReason, string> = {
-      not_enabled: `To enable Seer:\n  ${baseUrl}/seer/`,
-      no_budget: `To use Seer features, upgrade your plan:\n  ${baseUrl}/billing/`,
-      ai_disabled: `To enable AI features:\n  ${baseUrl}/seer/`,
+    // Fallback when org slug is unknown - give generic guidance
+    const fallbackSuggestions: Record<SeerErrorReason, string> = {
+      not_enabled:
+        "To enable Seer, visit your organization's Seer settings in Sentry.",
+      no_budget:
+        "To use Seer features, upgrade your plan in your organization's billing settings.",
+      ai_disabled:
+        "To enable AI features, check the 'Hide AI Features' setting in your organization settings.",
     };
-
-    return `${this.message}\n\n${suggestions[this.reason]}`;
+    return `${this.message}\n\n${fallbackSuggestions[this.reason]}`;
   }
 }
 

@@ -224,7 +224,9 @@ export function createSeerError(
     if (detail?.includes("AI features")) {
       return new SeerError("ai_disabled", orgSlug);
     }
-    return new SeerError("not_enabled", orgSlug); // default 403
+    // Unrecognized 403 - return null to preserve original error detail
+    // (could be permission denied, rate limiting, etc.)
+    return null;
   }
   return null;
 }
@@ -250,7 +252,10 @@ export function handleSeerApiError(
 }
 
 /**
- * Format an error message for common autofix errors.
+ * Format an error message for non-Seer autofix errors.
+ *
+ * Note: Seer-specific errors (402, 403) are handled by SeerError which
+ * provides actionable suggestions. This function handles other API errors.
  *
  * @param status - HTTP status code
  * @param detail - Error detail from API
@@ -258,16 +263,6 @@ export function handleSeerApiError(
  */
 export function formatAutofixError(status: number, detail?: string): string {
   switch (status) {
-    case 402:
-      return "No budget for Seer Autofix. Check your billing plan.";
-    case 403:
-      if (detail?.includes("not enabled")) {
-        return "Seer Autofix is not enabled for this organization.";
-      }
-      if (detail?.includes("AI features")) {
-        return "AI features are disabled for this organization.";
-      }
-      return detail ?? "Seer Autofix is not available.";
     case 404:
       return "Issue not found.";
     default:

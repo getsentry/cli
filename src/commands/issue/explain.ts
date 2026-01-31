@@ -72,6 +72,9 @@ export const explainCommand = buildCommand({
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
 
+    // Declare org outside try block so it's accessible in catch for error messages
+    let resolvedOrg: string | undefined;
+
     try {
       // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
@@ -81,6 +84,7 @@ export const explainCommand = buildCommand({
         cwd,
         commandHint: buildCommandHint("explain", issueId),
       });
+      resolvedOrg = org;
 
       // 1. Check for existing analysis (skip if --force)
       let state = flags.force ? null : await getAutofixState(org, numericId);
@@ -138,7 +142,7 @@ export const explainCommand = buildCommand({
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, flags.org);
+        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
       }
       throw error;
     }

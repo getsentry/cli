@@ -47,3 +47,41 @@ export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
 export function buildEventSearchUrl(orgSlug: string, eventId: string): string {
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/?query=event.id:${eventId}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings URLs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build URL to organization settings page.
+ *
+ * @param orgSlug - Organization slug
+ * @param hash - Optional anchor hash (e.g., "hideAiFeatures")
+ * @returns Full URL to the organization settings page
+ */
+export function buildOrgSettingsUrl(orgSlug: string, hash?: string): string {
+  const url = `${getSentryBaseUrl()}/settings/${orgSlug}/`;
+  return hash ? `${url}#${hash}` : url;
+}
+
+/**
+ * Build URL to Seer settings page.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Full URL to the Seer settings page
+ */
+export function buildSeerSettingsUrl(orgSlug: string): string {
+  return `${getSentryBaseUrl()}/settings/${orgSlug}/seer/`;
+}
+
+/**
+ * Build URL to billing page with optional product filter.
+ *
+ * @param orgSlug - Organization slug
+ * @param product - Optional product to highlight (e.g., "seer")
+ * @returns Full URL to the billing overview page
+ */
+export function buildBillingUrl(orgSlug: string, product?: string): string {
+  const base = `${getSentryBaseUrl()}/settings/${orgSlug}/billing/overview/`;
+  return product ? `${base}?product=${product}` : base;
+}
