@@ -1,3 +1,5 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import {
   type ApplicationText,
   buildApplication,
@@ -11,7 +13,6 @@ import { helpCommand } from "./commands/help.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
-
 import { CLI_VERSION } from "./lib/constants.js";
 import { CliError, getExitCode } from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
@@ -45,6 +46,10 @@ export const routes = buildRouteMap({
 const customText: ApplicationText = {
   ...text_en,
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
+    // Report all command errors to Sentry. Stricli catches exceptions and doesn't
+    // re-throw, so we must capture here to get visibility into command failures.
+    Sentry.captureException(exc);
+
     if (exc instanceof CliError) {
       const prefix = ansiColor ? errorColor("Error:") : "Error:";
       return `${prefix} ${exc.format()}`;
