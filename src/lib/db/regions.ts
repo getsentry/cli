@@ -7,7 +7,7 @@
  */
 
 import { getDatabase } from "./index.js";
-import { upsert } from "./utils.js";
+import { runUpsert } from "./utils.js";
 
 const TABLE = "org_regions";
 
@@ -47,12 +47,12 @@ export async function setOrgRegion(
   const db = getDatabase();
   const now = Date.now();
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     TABLE,
     { org_slug: orgSlug, region_url: regionUrl, updated_at: now },
     ["org_slug"]
   );
-  db.query(sql).run(...values);
 }
 
 /**
@@ -73,12 +73,12 @@ export async function setOrgRegions(
 
   db.transaction(() => {
     for (const [orgSlug, regionUrl] of entries) {
-      const { sql, values } = upsert(
+      runUpsert(
+        db,
         TABLE,
         { org_slug: orgSlug, region_url: regionUrl, updated_at: now },
         ["org_slug"]
       );
-      db.query(sql).run(...values);
     }
   })();
 }

@@ -3,7 +3,7 @@
  */
 
 import { getDatabase } from "./index.js";
-import { upsert } from "./utils.js";
+import { runUpsert } from "./utils.js";
 
 type DefaultsRow = {
   organization: string | null;
@@ -52,10 +52,10 @@ export async function setDefaults(
   const newProject =
     project === undefined ? (current?.project ?? null) : project;
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     "defaults",
     { id: 1, organization: newOrg, project: newProject, updated_at: now },
     ["id"]
   );
-  db.query(sql).run(...values);
 }

@@ -5,7 +5,7 @@
  */
 
 import { getDatabase } from "./index.js";
-import { upsert } from "./utils.js";
+import { runUpsert } from "./utils.js";
 
 export type UserInfo = {
   userId: string;
@@ -48,7 +48,8 @@ export function setUserInfo(info: UserInfo): void {
   const db = getDatabase();
   const now = Date.now();
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     "user_info",
     {
       id: 1,
@@ -59,5 +60,4 @@ export function setUserInfo(info: UserInfo): void {
     },
     ["id"]
   );
-  db.query(sql).run(...values);
 }

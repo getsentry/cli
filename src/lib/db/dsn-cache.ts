@@ -4,7 +4,7 @@
 
 import type { CachedDsnEntry, ResolvedProjectInfo } from "../dsn/types.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
-import { upsert } from "./utils.js";
+import { runUpsert } from "./utils.js";
 
 type DsnCacheRow = {
   directory: string;
@@ -75,7 +75,8 @@ export async function setCachedDsn(
   const db = getDatabase();
   const now = Date.now();
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     "dsn_cache",
     {
       directory,
@@ -93,7 +94,6 @@ export async function setCachedDsn(
     },
     ["directory"]
   );
-  db.query(sql).run(...values);
 
   maybeCleanupCaches();
 }

@@ -91,6 +91,34 @@ export function upsert<T extends Record<string, SqlValue>>(
   return { sql, values };
 }
 
+/** Minimal db interface needed for query execution */
+type QueryRunner = { query(sql: string): { run(...values: SqlValue[]): void } };
+
+/**
+ * Execute an UPSERT statement directly on the database.
+ *
+ * Convenience wrapper that combines upsert() SQL generation with execution.
+ *
+ * @param db - The database instance to execute on
+ * @param table - The table name to insert into
+ * @param data - Object with column names as keys and values to insert
+ * @param conflictColumns - Column(s) that form the unique constraint
+ * @param options - Optional configuration
+ *
+ * @example
+ * runUpsert(db, 'auth', { id: 1, token: 'abc' }, ['id']);
+ */
+export function runUpsert<T extends Record<string, SqlValue>>(
+  db: QueryRunner,
+  table: string,
+  data: T,
+  conflictColumns: (keyof T)[],
+  options: UpsertOptions<T> = {}
+): void {
+  const { sql, values } = upsert(table, data, conflictColumns, options);
+  db.query(sql).run(...values);
+}
+
 /**
  * Build multiple UPSERT statements for batch operations.
  * Returns an array of SqlQuery objects to be executed in a transaction.

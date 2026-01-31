@@ -4,7 +4,7 @@
 
 import type { CachedProject } from "../../types/index.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
-import { upsert } from "./utils.js";
+import { runUpsert } from "./utils.js";
 
 type ProjectCacheRow = {
   cache_key: string;
@@ -69,7 +69,8 @@ export async function setCachedProject(
   const key = projectCacheKey(orgId, projectId);
   const now = Date.now();
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     "project_cache",
     {
       cache_key: key,
@@ -82,7 +83,6 @@ export async function setCachedProject(
     },
     ["cache_key"]
   );
-  db.query(sql).run(...values);
 
   maybeCleanupCaches();
 }
@@ -115,7 +115,8 @@ export async function setCachedProjectByDsnKey(
   const key = dsnCacheKey(publicKey);
   const now = Date.now();
 
-  const { sql, values } = upsert(
+  runUpsert(
+    db,
     "project_cache",
     {
       cache_key: key,
@@ -128,7 +129,6 @@ export async function setCachedProjectByDsnKey(
     },
     ["cache_key"]
   );
-  db.query(sql).run(...values);
 
   maybeCleanupCaches();
 }
