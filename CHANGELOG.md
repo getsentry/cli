@@ -1,6 +1,16 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.5.2
+
+### Bug Fixes 🐛
+
+- (auth) Display user info on login and status commands by @BYK in [#143](https://github.com/getsentry/cli/pull/143)
+
+### Documentation 📚
+
+- Add agentic usage documentation by @sergical in [#142](https://github.com/getsentry/cli/pull/142)
+
 ## 0.5.1
 
 ### Bug Fixes 🐛
