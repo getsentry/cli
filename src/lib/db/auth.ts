@@ -4,6 +4,7 @@
 
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
+import { runUpsert } from "./utils.js";
 
 /** Refresh when less than 10% of token lifetime remains */
 export const REFRESH_THRESHOLD = 0.1;
@@ -77,16 +78,19 @@ export function setAuthToken(
     const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
     const issuedAt = expiresIn ? now : null;
 
-    db.query(`
-      INSERT INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at)
-      VALUES (1, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        token = excluded.token,
-        refresh_token = excluded.refresh_token,
-        expires_at = excluded.expires_at,
-        issued_at = excluded.issued_at,
-        updated_at = excluded.updated_at
-    `).run(token, newRefreshToken ?? null, expiresAt, issuedAt, now);
+    runUpsert(
+      db,
+      "auth",
+      {
+        id: 1,
+        token,
+        refresh_token: newRefreshToken ?? null,
+        expires_at: expiresAt,
+        issued_at: issuedAt,
+        updated_at: now,
+      },
+      ["id"]
+    );
   });
 }
 

@@ -7,6 +7,7 @@
  */
 
 import { getDatabase } from "./index.js";
+import { runUpsert } from "./utils.js";
 
 const TABLE = "org_regions";
 
@@ -46,13 +47,12 @@ export async function setOrgRegion(
   const db = getDatabase();
   const now = Date.now();
 
-  db.query(`
-    INSERT INTO ${TABLE} (org_slug, region_url, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(org_slug) DO UPDATE SET
-      region_url = excluded.region_url,
-      updated_at = excluded.updated_at
-  `).run(orgSlug, regionUrl, now);
+  runUpsert(
+    db,
+    TABLE,
+    { org_slug: orgSlug, region_url: regionUrl, updated_at: now },
+    ["org_slug"]
+  );
 }
 
 /**
@@ -71,17 +71,14 @@ export async function setOrgRegions(
   const db = getDatabase();
   const now = Date.now();
 
-  const stmt = db.query(`
-    INSERT INTO ${TABLE} (org_slug, region_url, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(org_slug) DO UPDATE SET
-      region_url = excluded.region_url,
-      updated_at = excluded.updated_at
-  `);
-
   db.transaction(() => {
     for (const [orgSlug, regionUrl] of entries) {
-      stmt.run(orgSlug, regionUrl, now);
+      runUpsert(
+        db,
+        TABLE,
+        { org_slug: orgSlug, region_url: regionUrl, updated_at: now },
+        ["org_slug"]
+      );
     }
   })();
 }
