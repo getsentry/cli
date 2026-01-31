@@ -98,12 +98,12 @@ type QueryRunner = { query(sql: string): { run(...values: SqlValue[]): void } };
  * Execute an UPSERT statement directly on the database.
  *
  * Convenience wrapper that combines upsert() SQL generation with execution.
+ * For advanced options like excludeFromUpdate, use upsert() directly.
  *
  * @param db - The database instance to execute on
  * @param table - The table name to insert into
  * @param data - Object with column names as keys and values to insert
  * @param conflictColumns - Column(s) that form the unique constraint
- * @param options - Optional configuration
  *
  * @example
  * runUpsert(db, 'auth', { id: 1, token: 'abc' }, ['id']);
@@ -112,10 +112,9 @@ export function runUpsert<T extends Record<string, SqlValue>>(
   db: QueryRunner,
   table: string,
   data: T,
-  conflictColumns: (keyof T)[],
-  options: UpsertOptions<T> = {}
+  conflictColumns: (keyof T)[]
 ): void {
-  const { sql, values } = upsert(table, data, conflictColumns, options);
+  const { sql, values } = upsert(table, data, conflictColumns);
   db.query(sql).run(...values);
 }
 
