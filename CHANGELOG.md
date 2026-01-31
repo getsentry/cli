@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.5.3
+
+### Bug Fixes 🐛
+
+- (telemetry) Enable sourcemap resolution in Sentry by @BYK in [#144](https://github.com/getsentry/cli/pull/144)
+
 ## 0.5.2
 
 ### Bug Fixes 🐛
