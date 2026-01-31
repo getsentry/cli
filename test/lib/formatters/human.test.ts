@@ -7,6 +7,7 @@ import {
   formatIssueListHeader,
   formatIssueRow,
   formatShortId,
+  formatUserIdentity,
 } from "../../../src/lib/formatters/human.js";
 import type { SentryIssue } from "../../../src/types/index.js";
 
@@ -392,5 +393,116 @@ describe("formatIssueRow", () => {
     });
     // Should contain simple alias shorthand
     expect(stripAnsi(row)).toContain("d-a3");
+  });
+});
+
+describe("formatUserIdentity", () => {
+  describe("with name and email", () => {
+    test("formats as 'name <email>'", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        name: "John Doe",
+        email: "john@example.com",
+      });
+      expect(result).toBe("John Doe <john@example.com>");
+    });
+
+    test("prefers name over username", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        name: "John Doe",
+        username: "johnd",
+        email: "john@example.com",
+      });
+      expect(result).toBe("John Doe <john@example.com>");
+    });
+  });
+
+  describe("with username and email (no name)", () => {
+    test("formats as 'username <email>'", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        username: "johnd",
+        email: "john@example.com",
+      });
+      expect(result).toBe("johnd <john@example.com>");
+    });
+  });
+
+  describe("with only name or username", () => {
+    test("returns just name", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        name: "John Doe",
+      });
+      expect(result).toBe("John Doe");
+    });
+
+    test("returns just username when no name", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        username: "johnd",
+      });
+      expect(result).toBe("johnd");
+    });
+  });
+
+  describe("with only email", () => {
+    test("returns just email", () => {
+      const result = formatUserIdentity({
+        id: "123",
+        email: "john@example.com",
+      });
+      expect(result).toBe("john@example.com");
+    });
+  });
+
+  describe("fallback to user ID", () => {
+    test("returns 'user {id}' when only id provided", () => {
+      const result = formatUserIdentity({ id: "123" });
+      expect(result).toBe("user 123");
+    });
+
+    test("returns 'user {userId}' when only userId provided", () => {
+      const result = formatUserIdentity({ userId: "456" });
+      expect(result).toBe("user 456");
+    });
+
+    test("prefers id over userId", () => {
+      const result = formatUserIdentity({ id: "123", userId: "456" });
+      expect(result).toBe("user 123");
+    });
+  });
+
+  describe("UserInfo shape (from database)", () => {
+    test("handles UserInfo with userId field", () => {
+      const result = formatUserIdentity({
+        userId: "12345",
+        email: "test@example.com",
+        username: "testuser",
+        name: "Test User",
+      });
+      expect(result).toBe("Test User <test@example.com>");
+    });
+
+    test("handles UserInfo without name", () => {
+      const result = formatUserIdentity({
+        userId: "12345",
+        email: "test@example.com",
+        username: "testuser",
+      });
+      expect(result).toBe("testuser <test@example.com>");
+    });
+  });
+
+  describe("token response user shape", () => {
+    test("handles token response user with id field", () => {
+      const result = formatUserIdentity({
+        id: "67890",
+        name: "OAuth User",
+        email: "oauth@example.com",
+      });
+      expect(result).toBe("OAuth User <oauth@example.com>");
+    });
   });
 });

@@ -11,12 +11,15 @@ export type UserInfo = {
   userId: string;
   email?: string;
   username?: string;
+  /** Display name (different from username) */
+  name?: string;
 };
 
 type UserRow = {
   user_id: string;
   email: string | null;
   username: string | null;
+  name: string | null;
 };
 
 /**
@@ -37,6 +40,7 @@ export function getUserInfo(): UserInfo | undefined {
     userId: row.user_id,
     email: row.email ?? undefined,
     username: row.username ?? undefined,
+    name: row.name ?? undefined,
   };
 }
 
@@ -56,6 +60,7 @@ export function setUserInfo(info: UserInfo): void {
       user_id: info.userId,
       email: info.email ?? null,
       username: info.username ?? null,
+      name: info.name ?? null,
       updated_at: now,
     },
     ["id"]

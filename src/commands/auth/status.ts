@@ -17,14 +17,30 @@ import {
   getDefaultProject,
 } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
+import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { error, success } from "../../lib/formatters/colors.js";
-import { formatExpiration, maskToken } from "../../lib/formatters/human.js";
+import { error, muted, success } from "../../lib/formatters/colors.js";
+import {
+  formatExpiration,
+  formatUserIdentity,
+  maskToken,
+} from "../../lib/formatters/human.js";
 import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
   readonly showToken: boolean;
 };
+
+/**
+ * Write user identity information
+ */
+function writeUserInfo(stdout: Writer): void {
+  const user = getUserInfo();
+  if (!user) {
+    return;
+  }
+  stdout.write(`User: ${muted(formatUserIdentity(user))}\n`);
+}
 
 /**
  * Write token information
@@ -123,13 +139,15 @@ export const statusCommand = buildCommand({
     const auth = await getAuthConfig();
     const authenticated = await isAuthenticated();
 
-    stdout.write(`Config: ${getDbPath()}\n\n`);
+    stdout.write(`Config: ${getDbPath()}\n`);
 
     if (!authenticated) {
       throw new AuthError("not_authenticated");
     }
 
-    stdout.write(`Status: Authenticated ${success("✓")}\n\n`);
+    stdout.write(`Status: Authenticated ${success("✓")}\n`);
+    writeUserInfo(stdout);
+    stdout.write("\n");
 
     writeTokenInfo(stdout, auth, flags.showToken);
     await writeDefaults(stdout);

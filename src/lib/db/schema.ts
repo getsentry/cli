@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 /** User identity for telemetry (single row, id=1) */
 const USER_INFO_TABLE = `
@@ -13,6 +13,7 @@ const USER_INFO_TABLE = `
     user_id TEXT NOT NULL,
     email TEXT,
     username TEXT,
+    name TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )
 `;
@@ -139,6 +140,24 @@ export function runMigrations(db: Database): void {
       ${USER_INFO_TABLE};
       ${INSTANCE_INFO_TABLE};
     `);
+  }
+
+  // Migration 2 -> 3: Add name column to user_info table
+  // Check if column exists first to handle concurrent CLI processes
+  // (SQLite lacks ADD COLUMN IF NOT EXISTS)
+  if (currentVersion < 3 && currentVersion >= 2) {
+    const hasNameColumn =
+      (
+        db
+          .query(
+            "SELECT COUNT(*) as count FROM pragma_table_info('user_info') WHERE name='name'"
+          )
+          .get() as { count: number }
+      ).count > 0;
+
+    if (!hasNameColumn) {
+      db.exec("ALTER TABLE user_info ADD COLUMN name TEXT");
+    }
   }
 
   // Update schema version if needed

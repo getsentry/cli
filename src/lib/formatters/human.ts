@@ -1473,6 +1473,50 @@ export function formatProjectDetails(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// User Identity Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * User identity fields for display formatting.
+ * Accepts both UserInfo (userId) and token response user (id) shapes.
+ */
+type UserIdentityInput = {
+  /** User ID (from token response) */
+  id?: string;
+  /** User ID (from stored UserInfo) */
+  userId?: string;
+  email?: string;
+  username?: string;
+  /** Display name (different from username) */
+  name?: string;
+};
+
+/**
+ * Format user identity for display.
+ * Prefers name over username, handles missing fields gracefully.
+ *
+ * @param user - User identity object (supports both id and userId fields)
+ * @returns Formatted string like "Name <email>" or fallback to available fields
+ */
+export function formatUserIdentity(user: UserIdentityInput): string {
+  const { name, username, email, id, userId } = user;
+  const displayName = name ?? username;
+  const finalId = id ?? userId;
+
+  if (displayName && email) {
+    return `${displayName} <${email}>`;
+  }
+  if (displayName) {
+    return displayName;
+  }
+  if (email) {
+    return email;
+  }
+  // Fallback to user ID if no name/username/email
+  return `user ${finalId}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Token Formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
