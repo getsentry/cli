@@ -4,9 +4,11 @@
  * Unified error classes for consistent error handling across the CLI.
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Base Error
-// ─────────────────────────────────────────────────────────────────────────────
+import {
+  buildBillingUrl,
+  buildOrgSettingsUrl,
+  buildSeerSettingsUrl,
+} from "./sentry-urls.js";
 
 /**
  * Base class for all CLI errors.
@@ -30,10 +32,6 @@ export class CliError extends Error {
     return this.message;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// API Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * API request errors from Sentry.
@@ -70,10 +68,6 @@ export class ApiError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Authentication Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type AuthErrorReason = "not_authenticated" | "expired" | "invalid";
 
 /**
@@ -98,10 +92,6 @@ export class AuthError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Configuration or DSN errors.
  *
@@ -125,10 +115,6 @@ export class ConfigError extends CliError {
     return msg;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Context Errors (Missing Required Context)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
@@ -196,10 +182,6 @@ export class ContextError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Validation Errors
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Input validation errors.
  *
@@ -215,10 +197,6 @@ export class ValidationError extends CliError {
     this.field = field;
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OAuth Device Flow Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * OAuth device flow errors (RFC 8628).
@@ -266,6 +244,58 @@ export class UpgradeError extends CliError {
     super(message ?? defaultMessages[reason]);
     this.name = "UpgradeError";
     this.reason = reason;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seer Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
+
+/**
+ * Seer-specific errors with actionable suggestions.
+ *
+ * @param reason - Type of Seer failure
+ * @param orgSlug - Organization slug for constructing settings URLs
+ */
+export class SeerError extends CliError {
+  readonly reason: SeerErrorReason;
+  readonly orgSlug?: string;
+
+  constructor(reason: SeerErrorReason, orgSlug?: string) {
+    const messages: Record<SeerErrorReason, string> = {
+      not_enabled: "Seer is not enabled for this organization.",
+      no_budget: "Seer requires a paid plan.",
+      ai_disabled: "AI features are disabled for this organization.",
+    };
+    super(messages[reason]);
+    this.name = "SeerError";
+    this.reason = reason;
+    this.orgSlug = orgSlug;
+  }
+
+  override format(): string {
+    // When org slug is known, provide direct URLs to settings
+    if (this.orgSlug) {
+      const suggestions: Record<SeerErrorReason, string> = {
+        not_enabled: `To enable Seer:\n  ${buildSeerSettingsUrl(this.orgSlug)}`,
+        no_budget: `To use Seer features, upgrade your plan:\n  ${buildBillingUrl(this.orgSlug, "seer")}`,
+        ai_disabled: `To enable AI features:\n  ${buildOrgSettingsUrl(this.orgSlug, "hideAiFeatures")}`,
+      };
+      return `${this.message}\n\n${suggestions[this.reason]}`;
+    }
+
+    // Fallback when org slug is unknown - give generic guidance
+    const fallbackSuggestions: Record<SeerErrorReason, string> = {
+      not_enabled:
+        "To enable Seer, visit your organization's Seer settings in Sentry.",
+      no_budget:
+        "To use Seer features, upgrade your plan in your organization's billing settings.",
+      ai_disabled:
+        "To enable AI features, check the 'Hide AI Features' setting in your organization settings.",
+    };
+    return `${this.message}\n\n${fallbackSuggestions[this.reason]}`;
   }
 }
 

@@ -4,6 +4,7 @@
 
 import type { CachedProject } from "../../types/index.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
+import { runUpsert } from "./utils.js";
 
 type ProjectCacheRow = {
   cache_key: string;
@@ -68,25 +69,19 @@ export async function setCachedProject(
   const key = projectCacheKey(orgId, projectId);
   const now = Date.now();
 
-  db.query(`
-    INSERT INTO project_cache 
-    (cache_key, org_slug, org_name, project_slug, project_name, cached_at, last_accessed)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(cache_key) DO UPDATE SET
-      org_slug = excluded.org_slug,
-      org_name = excluded.org_name,
-      project_slug = excluded.project_slug,
-      project_name = excluded.project_name,
-      cached_at = excluded.cached_at,
-      last_accessed = excluded.last_accessed
-  `).run(
-    key,
-    info.orgSlug,
-    info.orgName,
-    info.projectSlug,
-    info.projectName,
-    now,
-    now
+  runUpsert(
+    db,
+    "project_cache",
+    {
+      cache_key: key,
+      org_slug: info.orgSlug,
+      org_name: info.orgName,
+      project_slug: info.projectSlug,
+      project_name: info.projectName,
+      cached_at: now,
+      last_accessed: now,
+    },
+    ["cache_key"]
   );
 
   maybeCleanupCaches();
@@ -120,25 +115,19 @@ export async function setCachedProjectByDsnKey(
   const key = dsnCacheKey(publicKey);
   const now = Date.now();
 
-  db.query(`
-    INSERT INTO project_cache 
-    (cache_key, org_slug, org_name, project_slug, project_name, cached_at, last_accessed)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(cache_key) DO UPDATE SET
-      org_slug = excluded.org_slug,
-      org_name = excluded.org_name,
-      project_slug = excluded.project_slug,
-      project_name = excluded.project_name,
-      cached_at = excluded.cached_at,
-      last_accessed = excluded.last_accessed
-  `).run(
-    key,
-    info.orgSlug,
-    info.orgName,
-    info.projectSlug,
-    info.projectName,
-    now,
-    now
+  runUpsert(
+    db,
+    "project_cache",
+    {
+      cache_key: key,
+      org_slug: info.orgSlug,
+      org_name: info.orgName,
+      project_slug: info.projectSlug,
+      project_name: info.projectName,
+      cached_at: now,
+      last_accessed: now,
+    },
+    ["cache_key"]
   );
 
   maybeCleanupCaches();

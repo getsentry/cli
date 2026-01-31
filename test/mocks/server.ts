@@ -2,7 +2,8 @@ import unauthorizedFixture from "../fixtures/errors/unauthorized.json";
 
 export type RouteHandler = (
   req: Request,
-  params: Record<string, string>
+  params: Record<string, string>,
+  serverUrl: string
 ) => MockResponse | Promise<MockResponse>;
 
 export type MockResponse = {
@@ -137,9 +138,14 @@ export function createMockServer(
           }
 
           const { route, params } = match;
+          const serverUrl = `http://localhost:${port}`;
           let responseData: MockResponse;
           if (typeof route.response === "function") {
-            const result = await (route.response as RouteHandler)(req, params);
+            const result = await (route.response as RouteHandler)(
+              req,
+              params,
+              serverUrl
+            );
             responseData = result;
           } else {
             responseData = { body: route.response, status: route.status };

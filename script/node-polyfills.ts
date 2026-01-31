@@ -56,6 +56,25 @@ class NodeDatabasePolyfill {
   close(): void {
     this.db.close();
   }
+
+  /**
+   * Wraps a function in a transaction. Returns a callable that executes
+   * the function within BEGIN/COMMIT, with ROLLBACK on error.
+   * Matches Bun's db.transaction() API.
+   */
+  transaction<T>(fn: () => T): () => T {
+    return () => {
+      this.db.exec("BEGIN");
+      try {
+        const result = fn();
+        this.db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    };
+  }
 }
 
 const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };

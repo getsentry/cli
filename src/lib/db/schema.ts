@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 /** User identity for telemetry (single row, id=1) */
 const USER_INFO_TABLE = `
@@ -13,6 +13,7 @@ const USER_INFO_TABLE = `
     user_id TEXT NOT NULL,
     email TEXT,
     username TEXT,
+    name TEXT,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )
 `;
@@ -23,6 +24,15 @@ const INSTANCE_INFO_TABLE = `
     id INTEGER PRIMARY KEY CHECK (id = 1),
     instance_id TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
+
+/** Organization region cache for multi-region support */
+const ORG_REGIONS_TABLE = `
+  CREATE TABLE IF NOT EXISTS org_regions (
+    org_slug TEXT PRIMARY KEY,
+    region_url TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   )
 `;
 
@@ -95,6 +105,7 @@ export function initSchema(db: Database): void {
       value TEXT NOT NULL
     );
 
+    ${ORG_REGIONS_TABLE};
     ${USER_INFO_TABLE};
     ${INSTANCE_INFO_TABLE};
   `);
@@ -122,9 +133,31 @@ function getSchemaVersion(db: Database): number {
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
-  // Migration from v1 to v2: Add user_info and instance_info tables
+  // Migration 1 -> 2: Add org_regions, user_info, and instance_info tables
   if (currentVersion < 2) {
-    db.exec(`${USER_INFO_TABLE}; ${INSTANCE_INFO_TABLE};`);
+    db.exec(`
+      ${ORG_REGIONS_TABLE};
+      ${USER_INFO_TABLE};
+      ${INSTANCE_INFO_TABLE};
+    `);
+  }
+
+  // Migration 2 -> 3: Add name column to user_info table
+  // Check if column exists first to handle concurrent CLI processes
+  // (SQLite lacks ADD COLUMN IF NOT EXISTS)
+  if (currentVersion < 3 && currentVersion >= 2) {
+    const hasNameColumn =
+      (
+        db
+          .query(
+            "SELECT COUNT(*) as count FROM pragma_table_info('user_info') WHERE name='name'"
+          )
+          .get() as { count: number }
+      ).count > 0;
+
+    if (!hasNameColumn) {
+      db.exec("ALTER TABLE user_info ADD COLUMN name TEXT");
+    }
   }
 
   // Update schema version if needed

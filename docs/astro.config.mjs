@@ -193,7 +193,10 @@ export default defineConfig({
         },
         {
           label: "Resources",
-          items: [{ label: "Contributing", slug: "contributing" }],
+          items: [
+            { label: "Agentic Usage", slug: "agentic-usage" },
+            { label: "Contributing", slug: "contributing" },
+          ],
         },
       ],
       customCss: ["./src/styles/custom.css"],

@@ -122,15 +122,18 @@ type ResolveContext = {
 
 /**
  * Check if an error from short suffix resolution should allow fallthrough.
- * Returns true for ContextError (no project context) or 404 (issue not found).
- * Other errors (auth, server, network) should propagate.
+ * Returns true for 404 (issue not found) or ContextError when no explicit flags were provided.
+ * When user explicitly provides --org or --project, we should error clearly instead of
+ * silently falling through to other resolution methods.
  */
-function shouldFallthrough(error: unknown): boolean {
-  if (error instanceof ContextError) {
-    return true;
-  }
+function shouldFallthrough(error: unknown, ctx: ResolveContext): boolean {
   if (error instanceof ApiError && error.status === 404) {
     return true;
+  }
+  if (error instanceof ContextError) {
+    // Only fall through if user didn't provide explicit flags.
+    // If they provided --org or --project, they expect that resolution path to work.
+    return ctx.org === undefined && ctx.project === undefined;
   }
   return false;
 }
@@ -254,7 +257,7 @@ export async function resolveIssue(
     try {
       return await resolveShortSuffixId(ctx);
     } catch (error) {
-      if (!shouldFallthrough(error)) {
+      if (!shouldFallthrough(error, ctx)) {
         rethrowAsApiError(error);
       }
       // Fall through to try other resolution methods

@@ -40,6 +40,18 @@ const projectKeysFixture = [
 ];
 
 export const apiRoutes: MockRoute[] = [
+  // User Regions (multi-region support)
+  // Returns the mock server itself as the only region
+  {
+    method: "GET",
+    path: "/api/0/users/me/regions/",
+    response: (_req, _params, serverUrl) => ({
+      body: {
+        regions: [{ name: "monolith", url: serverUrl }],
+      },
+    }),
+  },
+
   // Users
   {
     method: "GET",

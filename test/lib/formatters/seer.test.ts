@@ -5,13 +5,16 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { SeerError } from "../../../src/lib/errors.js";
 import {
+  createSeerError,
   formatAutofixError,
   formatProgressLine,
   formatRootCause,
   formatRootCauseList,
   getProgressMessage,
   getSpinnerFrame,
+  handleSeerApiError,
   truncateProgressMessage,
 } from "../../../src/lib/formatters/seer.js";
 import type { AutofixState, RootCause } from "../../../src/types/seer.js";
@@ -206,20 +209,8 @@ describe("formatRootCauseList", () => {
 });
 
 describe("formatAutofixError", () => {
-  test("formats 402 Payment Required", () => {
-    const message = formatAutofixError(402);
-    expect(message.toLowerCase()).toContain("budget");
-  });
-
-  test("formats 403 Forbidden for not enabled", () => {
-    const message = formatAutofixError(403, "AI Autofix is not enabled");
-    expect(message.toLowerCase()).toContain("not enabled");
-  });
-
-  test("formats 403 Forbidden for AI features disabled", () => {
-    const message = formatAutofixError(403, "AI features are disabled");
-    expect(message.toLowerCase()).toContain("disabled");
-  });
+  // Note: 402 and 403 errors are handled by SeerError via createSeerError()
+  // formatAutofixError only handles non-Seer errors
 
   test("formats 404 Not Found", () => {
     const message = formatAutofixError(404);
@@ -234,5 +225,94 @@ describe("formatAutofixError", () => {
   test("returns generic message when no detail", () => {
     const message = formatAutofixError(500);
     expect(message).toBeTruthy();
+  });
+});
+
+describe("createSeerError", () => {
+  test("returns SeerError for 402 status", () => {
+    const error = createSeerError(402, undefined, "my-org");
+    expect(error).toBeInstanceOf(SeerError);
+    expect(error?.reason).toBe("no_budget");
+    expect(error?.orgSlug).toBe("my-org");
+  });
+
+  test("returns SeerError for 403 with 'not enabled' detail", () => {
+    const error = createSeerError(403, "Seer is not enabled", "my-org");
+    expect(error).toBeInstanceOf(SeerError);
+    expect(error?.reason).toBe("not_enabled");
+  });
+
+  test("returns SeerError for 403 with 'AI features' detail", () => {
+    const error = createSeerError(403, "AI features are disabled", "my-org");
+    expect(error).toBeInstanceOf(SeerError);
+    expect(error?.reason).toBe("ai_disabled");
+  });
+
+  test("returns null for unrecognized 403 errors", () => {
+    // Unrecognized 403 errors should return null to preserve original error detail
+    // (could be permission denied, rate limiting, etc.)
+    const error = createSeerError(403, "Some other message", "my-org");
+    expect(error).toBeNull();
+  });
+
+  test("returns null for other status codes", () => {
+    expect(createSeerError(404)).toBeNull();
+    expect(createSeerError(500)).toBeNull();
+    expect(createSeerError(200)).toBeNull();
+  });
+});
+
+describe("handleSeerApiError", () => {
+  test("returns SeerError for Seer-specific status codes", () => {
+    const error = handleSeerApiError(402, undefined, "my-org");
+    expect(error).toBeInstanceOf(SeerError);
+  });
+
+  test("returns generic Error for non-Seer status codes", () => {
+    const error = handleSeerApiError(404);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SeerError);
+  });
+
+  test("includes detail in generic error message", () => {
+    const error = handleSeerApiError(500, "Server exploded");
+    expect(error.message).toBe("Server exploded");
+  });
+});
+
+describe("SeerError formatting", () => {
+  test("format() includes message and URL for not_enabled", () => {
+    const error = new SeerError("not_enabled", "my-org");
+    const formatted = error.format();
+    expect(formatted).toContain("Seer is not enabled");
+    expect(formatted).toContain("https://sentry.io/settings/my-org/seer/");
+  });
+
+  test("format() includes message and billing URL for no_budget", () => {
+    const error = new SeerError("no_budget", "my-org");
+    const formatted = error.format();
+    expect(formatted).toContain("Seer requires a paid plan");
+    expect(formatted).toContain(
+      "https://sentry.io/settings/my-org/billing/overview/?product=seer"
+    );
+  });
+
+  test("format() includes message and URL for ai_disabled", () => {
+    const error = new SeerError("ai_disabled", "my-org");
+    const formatted = error.format();
+    expect(formatted).toContain("AI features are disabled");
+    expect(formatted).toContain(
+      "https://sentry.io/settings/my-org/#hideAiFeatures"
+    );
+  });
+
+  test("format() uses fallback text when no orgSlug", () => {
+    const error = new SeerError("not_enabled");
+    const formatted = error.format();
+    expect(formatted).toContain("Seer is not enabled");
+    expect(formatted).toContain("organization's Seer settings");
+    // Should NOT contain broken URL patterns
+    expect(formatted).not.toContain("undefined");
+    expect(formatted).not.toContain("/seer/");
   });
 });

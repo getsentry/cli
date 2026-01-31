@@ -15,8 +15,8 @@ import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
 import {
-  formatAutofixError,
   formatSolution,
+  handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import {
   type AutofixState,
@@ -173,6 +173,9 @@ export const planCommand = buildCommand({
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
 
+    // Declare org outside try block so it's accessible in catch for error messages
+    let resolvedOrg: string | undefined;
+
     try {
       // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
@@ -182,6 +185,7 @@ export const planCommand = buildCommand({
         cwd,
         commandHint: buildCommandHint("plan", issueId),
       });
+      resolvedOrg = org;
 
       // Get current autofix state
       const currentState = await getAutofixState(org, numericId);
@@ -249,8 +253,7 @@ export const planCommand = buildCommand({
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
-        const message = formatAutofixError(error.status, error.detail);
-        throw new Error(message);
+        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
       }
       throw error;
     }

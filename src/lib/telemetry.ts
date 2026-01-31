@@ -108,16 +108,29 @@ export async function withTelemetry<T>(
  *
  * @internal Exported for testing
  */
+/**
+ * Integrations to exclude for CLI.
+ * These add overhead without benefit for short-lived CLI processes.
+ */
+const EXCLUDED_INTEGRATIONS = new Set([
+  "Console", // Captures console output - too noisy for CLI
+  "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
+  "LocalVariables", // Captures local variables - adds significant overhead
+  "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
+]);
+
 export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   const environment = process.env.NODE_ENV ?? "development";
 
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
-    // CLI is short-lived - disable integrations that add overhead with no benefit
-    // (console, context, modules, etc). Only keep http to capture API requests.
-    defaultIntegrations: false,
-    integrations: [Sentry.httpIntegration()],
+    // Keep default integrations but filter out ones that add overhead without benefit
+    // Important: Don't use defaultIntegrations: false as it may break debug ID support
+    integrations: (defaults) =>
+      defaults.filter(
+        (integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)
+      ),
     environment,
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
@@ -133,18 +146,6 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     },
 
     beforeSend: (event) => {
-      // Replace home directory with ~ in stack traces to remove PII
-      const homeDir = process.env.HOME || process.env.USERPROFILE;
-      for (const exception of event.exception?.values ?? []) {
-        if (!exception.stacktrace?.frames) {
-          continue;
-        }
-        for (const frame of exception.stacktrace.frames) {
-          if (frame.filename && homeDir) {
-            frame.filename = frame.filename.replace(homeDir, "~");
-          }
-        }
-      }
       // Remove server_name which may contain hostname (PII)
       event.server_name = undefined;
       return event;
@@ -152,14 +153,11 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   });
 
   if (client?.getOptions().enabled) {
-    // Set global tags for all events
-    Sentry.setTag("platform", process.platform);
-    Sentry.setTag("arch", process.arch);
-    // Detect runtime: bun binary vs node (npm package)
+    // Tag whether running as bun binary or node (npm package)
+    // This is CLI-specific context not provided by the Context integration
     const runtime =
       typeof process.versions.bun !== "undefined" ? "bun" : "node";
-    Sentry.setTag("runtime", runtime);
-    Sentry.setTag("runtime.version", process.version);
+    Sentry.setTag("cli.runtime", runtime);
   }
 
   return client;
