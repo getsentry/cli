@@ -97,7 +97,7 @@ describe("fetchLatestFromGitHub", () => {
     expect(version).toBe("1.0.0");
   });
 
-  test("throws on network error", async () => {
+  test("throws on HTTP error", async () => {
     globalThis.fetch = async () =>
       new Response("Not Found", {
         status: 404,
@@ -106,6 +106,17 @@ describe("fetchLatestFromGitHub", () => {
     await expect(fetchLatestFromGitHub()).rejects.toThrow(UpgradeError);
     await expect(fetchLatestFromGitHub()).rejects.toThrow(
       "Failed to fetch from GitHub: 404"
+    );
+  });
+
+  test("throws on network failure (DNS, timeout, etc.)", async () => {
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "Failed to connect to GitHub: fetch failed"
     );
   });
 
@@ -139,7 +150,7 @@ describe("fetchLatestFromNpm", () => {
     expect(version).toBe("1.2.3");
   });
 
-  test("throws on network error", async () => {
+  test("throws on HTTP error", async () => {
     globalThis.fetch = async () =>
       new Response("Server Error", {
         status: 500,
@@ -148,6 +159,17 @@ describe("fetchLatestFromNpm", () => {
     await expect(fetchLatestFromNpm()).rejects.toThrow(UpgradeError);
     await expect(fetchLatestFromNpm()).rejects.toThrow(
       "Failed to fetch from npm: 500"
+    );
+  });
+
+  test("throws on network failure (DNS, timeout, etc.)", async () => {
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    await expect(fetchLatestFromNpm()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestFromNpm()).rejects.toThrow(
+      "Failed to connect to npm registry: fetch failed"
     );
   });
 
