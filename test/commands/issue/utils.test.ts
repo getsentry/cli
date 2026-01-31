@@ -518,6 +518,52 @@ describe("resolveOrgAndIssueId", () => {
       })
     ).rejects.toThrow("500");
   });
+
+  test("explicit --org without --project errors clearly instead of falling through", async () => {
+    // When user explicitly provides --org but not --project for a short suffix,
+    // they expect that resolution path. Don't silently fall through to 404.
+    const { clearAuth, setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await clearAuth();
+    await setDefaults(undefined, undefined);
+    await setToken("test-token");
+
+    // User provides --org but not --project
+    await expect(
+      resolveOrgAndIssueId({
+        issueId: "G",
+        org: "my-org", // Explicit --org flag
+        // No project provided
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G --org my-org --project <project>",
+      })
+    ).rejects.toThrow("Organization and project");
+  });
+
+  test("explicit --project without --org errors clearly instead of falling through", async () => {
+    // When user explicitly provides --project but not --org for a short suffix,
+    // they expect that resolution path. Don't silently fall through.
+    const { clearAuth, setAuthToken: setToken } = await import(
+      "../../../src/lib/db/auth.js"
+    );
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await clearAuth();
+    await setDefaults(undefined, undefined);
+    await setToken("test-token");
+
+    // User provides --project but not --org
+    await expect(
+      resolveOrgAndIssueId({
+        issueId: "G",
+        // No org provided
+        project: "my-project", // Explicit --project flag
+        cwd: testConfigDir,
+        commandHint: "sentry issue explain G --org <org> --project my-project",
+      })
+    ).rejects.toThrow("Organization and project");
+  });
 });
 
 describe("pollAutofixState", () => {
