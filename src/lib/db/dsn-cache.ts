@@ -4,6 +4,7 @@
 
 import type { CachedDsnEntry, ResolvedProjectInfo } from "../dsn/types.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
+import { upsert } from "./utils.js";
 
 type DsnCacheRow = {
   directory: string;
@@ -74,38 +75,25 @@ export async function setCachedDsn(
   const db = getDatabase();
   const now = Date.now();
 
-  db.query(`
-    INSERT INTO dsn_cache 
-    (directory, dsn, project_id, org_id, source, source_path,
-     resolved_org_slug, resolved_org_name, resolved_project_slug, resolved_project_name,
-     cached_at, last_accessed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(directory) DO UPDATE SET
-      dsn = excluded.dsn,
-      project_id = excluded.project_id,
-      org_id = excluded.org_id,
-      source = excluded.source,
-      source_path = excluded.source_path,
-      resolved_org_slug = excluded.resolved_org_slug,
-      resolved_org_name = excluded.resolved_org_name,
-      resolved_project_slug = excluded.resolved_project_slug,
-      resolved_project_name = excluded.resolved_project_name,
-      cached_at = excluded.cached_at,
-      last_accessed = excluded.last_accessed
-  `).run(
-    directory,
-    entry.dsn,
-    entry.projectId,
-    entry.orgId ?? null,
-    entry.source,
-    entry.sourcePath ?? null,
-    entry.resolved?.orgSlug ?? null,
-    entry.resolved?.orgName ?? null,
-    entry.resolved?.projectSlug ?? null,
-    entry.resolved?.projectName ?? null,
-    now,
-    now
+  const { sql, values } = upsert(
+    "dsn_cache",
+    {
+      directory,
+      dsn: entry.dsn,
+      project_id: entry.projectId,
+      org_id: entry.orgId ?? null,
+      source: entry.source,
+      source_path: entry.sourcePath ?? null,
+      resolved_org_slug: entry.resolved?.orgSlug ?? null,
+      resolved_org_name: entry.resolved?.orgName ?? null,
+      resolved_project_slug: entry.resolved?.projectSlug ?? null,
+      resolved_project_name: entry.resolved?.projectName ?? null,
+      cached_at: now,
+      last_accessed: now,
+    },
+    ["directory"]
   );
+  db.query(sql).run(...values);
 
   maybeCleanupCaches();
 }
