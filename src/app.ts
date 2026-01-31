@@ -9,6 +9,7 @@ import {
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { eventRoute } from "./commands/event/index.js";
+import { feedbackCommand } from "./commands/feedback.js";
 import { helpCommand } from "./commands/help.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
@@ -27,6 +28,7 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     api: apiCommand,
+    feedback: feedbackCommand,
   },
   defaultCommand: "help",
   docs: {
