@@ -2,12 +2,31 @@
 
 Guidelines for AI agents working in this codebase.
 
+## Project Overview
+
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
+
+### Goals
+
+- **Zero-config experience** - Auto-detect project context from DSNs in source code and env files
+- **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
+- **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
+- **Agent-friendly** - JSON output and predictable behavior for AI coding agents
+- **Fast** - Native binaries via Bun, SQLite caching for API responses
+
+### Key Features
+
+- **DSN Auto-Detection** - Scans `.env` files and source code (JS, Python, Go, Java, Ruby, PHP) to find Sentry DSNs
+- **Monorepo Support** - Generates short aliases for multiple projects
+- **Seer AI Integration** - `issue explain` and `issue plan` commands for AI analysis
+- **OAuth Device Flow** - Secure authentication without browser redirects
+
 ## Cursor Rules (Important!)
 
 Before working on this codebase, read the Cursor rules:
 
-- **`.cursor/rules/bun-cli.mdc`** — Bun API usage, file I/O, process spawning, testing
-- **`.cursor/rules/ultracite.mdc`** — Code style, formatting, linting rules
+- **`.cursor/rules/bun-cli.mdc`** - Bun API usage, file I/O, process spawning, testing
+- **`.cursor/rules/ultracite.mdc`** - Code style, formatting, linting rules
 
 ## Quick Reference: Commands
 
@@ -45,7 +64,7 @@ bun run test:e2e                         # Run e2e tests only
 
 Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 
-**Bun Documentation**: https://bun.sh/docs — Consult these docs when unsure about Bun APIs.
+**Bun Documentation**: https://bun.sh/docs - Consult these docs when unsure about Bun APIs.
 
 ### Quick Bun API Reference
 
@@ -70,23 +89,64 @@ mkdirSync(dir, { recursive: true, mode: 0o700 });
 ## Architecture
 
 ```
-src/
-├── bin.ts              # Entry point
-├── app.ts              # Stricli application setup
-├── context.ts          # Dependency injection context
-├── commands/           # CLI commands (auth/, event/, issue/, org/, project/)
-├── lib/                # Shared utilities
-│   ├── api-client.ts   # Sentry API client
-│   ├── config.ts       # Configuration management
-│   ├── oauth.ts        # OAuth device flow
-│   ├── dsn/            # Multi-language DSN detection
-│   └── formatters/     # Output formatting (human, json)
-└── types/              # TypeScript types and Zod schemas
-test/                   # Test files (mirrors src/ structure)
-docs/                   # Documentation site (Astro)
-script/                 # Build scripts
-.cursor/rules/          # Cursor AI rules (read these!)
-biome.jsonc             # Linting config (extends ultracite)
+cli/
+├── src/
+│   ├── bin.ts              # Entry point
+│   ├── app.ts              # Stricli application setup
+│   ├── context.ts          # Dependency injection context
+│   ├── commands/           # CLI commands
+│   │   ├── auth/           # login, logout, status, refresh
+│   │   ├── event/          # view
+│   │   ├── issue/          # list, view, explain, plan
+│   │   ├── org/            # list, view
+│   │   ├── project/        # list, view
+│   │   ├── api.ts          # Direct API access command
+│   │   └── help.ts         # Help command
+│   ├── lib/                # Shared utilities
+│   │   ├── api-client.ts   # Sentry API client (ky-based)
+│   │   ├── db/             # SQLite database layer
+│   │   │   ├── instance.ts # Database singleton
+│   │   │   ├── schema.ts   # Table definitions
+│   │   │   ├── auth.ts     # Token storage
+│   │   │   ├── dsn-cache.ts    # DSN resolution cache
+│   │   │   ├── project-cache.ts # Project data cache
+│   │   │   └── project-aliases.ts # Monorepo alias mappings
+│   │   ├── dsn/            # DSN detection system
+│   │   │   ├── scanner.ts  # File scanning logic
+│   │   │   ├── resolver.ts # DSN to org/project resolution
+│   │   │   ├── detector.ts # High-level detection API
+│   │   │   ├── env.ts      # Environment variable detection
+│   │   │   ├── env-file.ts # .env file parsing
+│   │   │   └── languages/  # Per-language DSN extractors
+│   │   │       ├── javascript.ts
+│   │   │       ├── python.ts
+│   │   │       ├── go.ts
+│   │   │       ├── java.ts
+│   │   │       ├── ruby.ts
+│   │   │       └── php.ts
+│   │   ├── formatters/     # Output formatting
+│   │   │   ├── human.ts    # Human-readable output
+│   │   │   ├── json.ts     # JSON output
+│   │   │   ├── seer.ts     # Seer AI response formatting
+│   │   │   └── colors.ts   # Terminal colors
+│   │   ├── oauth.ts        # OAuth device flow
+│   │   ├── errors.ts       # Error classes
+│   │   ├── resolve-target.ts   # Org/project resolution
+│   │   ├── resolve-issue.ts    # Issue ID resolution
+│   │   └── browser.ts      # Open URLs in browser
+│   └── types/              # TypeScript types and Zod schemas
+│       ├── sentry.ts       # Sentry API types
+│       ├── config.ts       # Configuration types
+│       ├── oauth.ts        # OAuth types
+│       └── seer.ts         # Seer AI types
+├── test/                   # Test files (mirrors src/ structure)
+│   ├── lib/                # Unit tests for lib/
+│   ├── commands/           # Unit tests for commands/
+│   └── e2e/                # End-to-end tests
+├── docs/                   # Documentation site (Astro + Starlight)
+├── script/                 # Build and utility scripts
+├── .cursor/rules/          # Cursor AI rules (read these!)
+└── biome.jsonc             # Linting config (extends ultracite)
 ```
 
 ## Key Patterns
@@ -215,10 +275,10 @@ Include in JSDoc:
 
 ### Inline Comments (rare)
 Inline comments are **allowed only** when they add information the code cannot express:
-- **"Why"** — business reason, constraint, historical context
-- **Non-obvious behavior** — surprising edge cases
-- **Workarounds** — bugs in dependencies, platform quirks
-- **Hardcoded values** — why hardcoded, what would break if changed
+- **"Why"** - business reason, constraint, historical context
+- **Non-obvious behavior** - surprising edge cases
+- **Workarounds** - bugs in dependencies, platform quirks
+- **Hardcoded values** - why hardcoded, what would break if changed
 
 Inline comments are **NOT allowed** if they just restate the code:
 ```typescript
@@ -228,7 +288,7 @@ i++          // increment i
 return result // return result 
 
 // Good:
-// Required by GDPR Article 17 — user requested deletion
+// Required by GDPR Article 17 - user requested deletion
 await deleteUserData(userId)
 ```
 
@@ -264,7 +324,9 @@ mock.module("./some-module", () => ({
 | Add new command | `src/commands/<domain>/` |
 | Add API types | `src/types/sentry.ts` |
 | Add config types | `src/types/config.ts` |
+| Add Seer types | `src/types/seer.ts` |
 | Add utility | `src/lib/` |
+| Add DSN language support | `src/lib/dsn/languages/` |
 | Build scripts | `script/` |
 | Add tests | `test/` (mirror `src/` structure) |
 | Add documentation | `docs/src/content/docs/` |
