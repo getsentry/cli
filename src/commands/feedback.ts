@@ -12,6 +12,7 @@
 import * as Sentry from "@sentry/bun";
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../context.js";
+import { ValidationError } from "../lib/errors.js";
 
 export const feedbackCommand = buildCommand({
   docs: {
@@ -37,16 +38,24 @@ export const feedbackCommand = buildCommand({
     const message = messageParts.join(" ");
 
     if (!message.trim()) {
-      stderr.write("Please provide a feedback message.\n");
-      stderr.write("Usage: sentry feedback <message>\n");
+      throw new ValidationError("Please provide a feedback message.");
+    }
+
+    if (!Sentry.isEnabled()) {
+      stderr.write("Feedback not sent: telemetry is disabled.\n");
+      stderr.write("Unset SENTRY_CLI_NO_TELEMETRY to enable feedback.\n");
       return;
     }
 
     Sentry.captureFeedback({ message });
 
     // Flush to ensure feedback is sent before process exits
-    await Sentry.flush(3000);
+    const sent = await Sentry.flush(3000);
 
-    stdout.write("Feedback submitted. Thank you!\n");
+    if (sent) {
+      stdout.write("Feedback submitted. Thank you!\n");
+    } else {
+      stderr.write("Feedback may not have been sent (network timeout).\n");
+    }
   },
 });
