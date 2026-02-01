@@ -5,6 +5,7 @@ import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 
+import { compare as semverCompare, satisfies as semverSatisfies } from "semver";
 import { glob } from "tinyglobby";
 import { uuidv7 } from "uuidv7";
 
@@ -162,6 +163,15 @@ const BunPolyfill = {
 
   randomUUIDv7(): string {
     return uuidv7();
+  },
+
+  semver: {
+    order(a: string, b: string): -1 | 0 | 1 {
+      return semverCompare(a, b);
+    },
+    satisfies(version: string, range: string): boolean {
+      return semverSatisfies(version, range);
+    },
   },
 };
 
