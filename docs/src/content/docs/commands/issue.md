@@ -79,6 +79,19 @@ sentry issue list my-org/frontend --query "TypeError"
 sentry issue list my-org/frontend --sort freq --limit 20
 ```
 
+**Filter by status:**
+
+```bash
+# Show only unresolved issues
+sentry issue list my-org/frontend --query "is:unresolved"
+
+# Show resolved issues
+sentry issue list my-org/frontend --query "is:resolved"
+
+# Combine with other search terms
+sentry issue list my-org/frontend --query "is:unresolved TypeError"
+```
+
 ### `sentry issue view`
 
 View details of a specific issue.

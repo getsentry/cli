@@ -72,6 +72,7 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
+          placeholder: "event-id",
           brief:
             "Event ID (hexadecimal, e.g., 9999aaaaca8b46d797c23c6077c6ff01)",
           parse: String,

@@ -52,6 +52,7 @@ export const issueIdPositional = {
   kind: "tuple",
   parameters: [
     {
+      placeholder: "issue-id",
       brief:
         "Issue ID, short ID, suffix, or alias-suffix (e.g., 123456, CRAFT-G, G, or f-g)",
       parse: String,

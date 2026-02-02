@@ -207,6 +207,7 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
+          placeholder: "project",
           brief: "Project slug (optional if auto-detected)",
           parse: String,
           optional: true,

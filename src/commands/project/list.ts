@@ -207,6 +207,7 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
+          placeholder: "org",
           brief: "Organization slug (optional)",
           parse: String,
           optional: true,
@@ -233,7 +234,7 @@ export const listCommand = buildCommand({
         optional: true,
       },
     },
-    aliases: { n: "limit" },
+    aliases: { n: "limit", p: "platform" },
   },
   async func(
     this: SentryContext,

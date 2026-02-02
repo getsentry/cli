@@ -33,6 +33,7 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
+          placeholder: "org",
           brief: "Organization slug (optional if auto-detected)",
           parse: String,
           optional: true,

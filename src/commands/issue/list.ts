@@ -397,6 +397,7 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
+          placeholder: "target",
           brief: "Target: <org>/<project>, <org>/, or <project>",
           parse: String,
           optional: true,
@@ -429,6 +430,7 @@ export const listCommand = buildCommand({
         default: false,
       },
     },
+    aliases: { q: "query", s: "sort", n: "limit" },
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
