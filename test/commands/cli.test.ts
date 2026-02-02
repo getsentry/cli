@@ -6,28 +6,8 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
-import { cliRoute } from "../../src/commands/cli/index.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
 
-describe("cliRoute", () => {
-  test("is exported and defined", () => {
-    expect(cliRoute).toBeDefined();
-  });
-});
-
-describe("feedbackCommand", () => {
-  test("is exported and defined", () => {
-    expect(feedbackCommand).toBeDefined();
-  });
-});
-
-describe("upgradeCommand", () => {
-  test("is exported and defined", () => {
-    expect(upgradeCommand).toBeDefined();
-  });
-});
-
-// Test the feedback command func directly
 describe("feedbackCommand.func", () => {
   test("throws ValidationError for empty message", async () => {
     // Access func through loader
