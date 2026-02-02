@@ -1,6 +1,30 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.6.0
+
+### New Features ✨
+
+- (commands) Use positional args for org/project selection by @BYK in [#155](https://github.com/getsentry/cli/pull/155)
+- (feedback) Add command to submit CLI feedback by @betegon in [#150](https://github.com/getsentry/cli/pull/150)
+- (telemetry) Add is_self_hosted tag by @BYK in [#153](https://github.com/getsentry/cli/pull/153)
+- (upgrade) Add self-update command by @betegon in [#132](https://github.com/getsentry/cli/pull/132)
+- Add update available notification by @BYK in [#151](https://github.com/getsentry/cli/pull/151)
+
+### Bug Fixes 🐛
+
+- (telemetry) Capture command errors to Sentry by @betegon in [#145](https://github.com/getsentry/cli/pull/145)
+- Update docs URL in help output by @betegon in [#149](https://github.com/getsentry/cli/pull/149)
+
+### Documentation 📚
+
+- (upgrade) Add documentation for upgrade command by @betegon in [#152](https://github.com/getsentry/cli/pull/152)
+- Update README and AGENTS.md by @betegon in [#148](https://github.com/getsentry/cli/pull/148)
+
+### Internal Changes 🔧
+
+- Move feedback and upgrade under `sentry cli` command by @BYK in [#154](https://github.com/getsentry/cli/pull/154)
+
 ## 0.5.3
 
 ### Bug Fixes 🐛
