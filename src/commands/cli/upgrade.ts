@@ -1,13 +1,13 @@
 /**
- * sentry upgrade
+ * sentry cli upgrade
  *
  * Self-update the Sentry CLI to the latest or a specific version.
  */
 
 import { buildCommand } from "@stricli/core";
-import type { SentryContext } from "../context.js";
-import { CLI_VERSION } from "../lib/constants.js";
-import { UpgradeError } from "../lib/errors.js";
+import type { SentryContext } from "../../context.js";
+import { CLI_VERSION } from "../../lib/constants.js";
+import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
@@ -16,7 +16,7 @@ import {
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
-} from "../lib/upgrade.js";
+} from "../../lib/upgrade.js";
 
 type UpgradeFlags = {
   readonly check: boolean;
@@ -30,10 +30,10 @@ export const upgradeCommand = buildCommand({
       "Check for updates and upgrade the Sentry CLI to the latest or a specific version.\n\n" +
       "By default, detects how the CLI was installed (npm, curl, etc.) and uses the same method to upgrade.\n\n" +
       "Examples:\n" +
-      "  sentry upgrade              # Update to latest version\n" +
-      "  sentry upgrade 0.5.0        # Update to specific version\n" +
-      "  sentry upgrade --check      # Check for updates without installing\n" +
-      "  sentry upgrade --method npm # Force using npm to upgrade",
+      "  sentry cli upgrade              # Update to latest version\n" +
+      "  sentry cli upgrade 0.5.0        # Update to specific version\n" +
+      "  sentry cli upgrade --check      # Check for updates without installing\n" +
+      "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
   parameters: {
     positional: {
@@ -94,7 +94,9 @@ export const upgradeCommand = buildCommand({
       if (CLI_VERSION === target) {
         stdout.write("\nYou are already on the target version.\n");
       } else {
-        const cmd = version ? `sentry upgrade ${target}` : "sentry upgrade";
+        const cmd = version
+          ? `sentry cli upgrade ${target}`
+          : "sentry cli upgrade";
         stdout.write(`\nRun '${cmd}' to update.\n`);
       }
       return;

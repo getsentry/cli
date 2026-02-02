@@ -1,5 +1,5 @@
 ---
-title: upgrade
+title: cli upgrade
 description: Update the Sentry CLI to the latest version
 ---
 
@@ -8,13 +8,11 @@ Self-update the Sentry CLI to the latest or a specific version.
 ## Usage
 
 ```bash
-sentry upgrade              # Update to latest version
-sentry upgrade 0.5.0        # Update to specific version
-sentry upgrade --check      # Check for updates without installing
-sentry upgrade --method npm # Force using npm to upgrade
+sentry cli upgrade              # Update to latest version
+sentry cli upgrade 0.5.0        # Update to specific version
+sentry cli upgrade --check      # Check for updates without installing
+sentry cli upgrade --method npm # Force using npm to upgrade
 ```
-
-**Alias:** `sentry update`
 
 ## Options
 
@@ -41,7 +39,7 @@ The CLI auto-detects how it was installed and uses the same method to upgrade:
 ### Check for updates
 
 ```bash
-sentry upgrade --check
+sentry cli upgrade --check
 ```
 
 ```
@@ -49,13 +47,13 @@ Installation method: curl
 Current version: 0.4.0
 Latest version: 0.5.0
 
-Run 'sentry upgrade' to update.
+Run 'sentry cli upgrade' to update.
 ```
 
 ### Upgrade to latest
 
 ```bash
-sentry upgrade
+sentry cli upgrade
 ```
 
 ```
@@ -71,7 +69,7 @@ Successfully upgraded to 0.5.0.
 ### Upgrade to specific version
 
 ```bash
-sentry upgrade 0.5.0
+sentry cli upgrade 0.5.0
 ```
 
 ### Force installation method
@@ -79,5 +77,5 @@ sentry upgrade 0.5.0
 If auto-detection fails or you want to switch installation methods:
 
 ```bash
-sentry upgrade --method npm
+sentry cli upgrade --method npm
 ```

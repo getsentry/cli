@@ -364,40 +364,21 @@ sentry api /organizations/ --include
 sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
-### Upgrade
+### Cli
 
-Update the Sentry CLI to the latest version
+CLI-related commands
 
-#### `sentry upgrade <version>`
+#### `sentry cli feedback <message...>`
+
+Send feedback about the CLI
+
+#### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
 
 **Flags:**
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
-
-### Feedback
-
-Send feedback about the CLI
-
-#### `sentry feedback <message...>`
-
-Send feedback about the CLI
-
-**Examples:**
-
-```bash
-sentry feedback <message>
-
-# Send positive feedback
-sentry feedback i love this tool
-
-# Report an issue
-sentry feedback the issue view is confusing
-
-# Suggest an improvement
-sentry feedback would be great to have a search command
-```
 
 ## Output Formats
 

@@ -4,15 +4,15 @@
  * Allows users to submit feedback about the CLI.
  * All arguments after 'feedback' are joined into a single message.
  *
- * @example sentry feedback i love this tool
- * @example sentry feedback the issue view is confusing
+ * @example sentry cli feedback i love this tool
+ * @example sentry cli feedback the issue view is confusing
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { buildCommand } from "@stricli/core";
-import type { SentryContext } from "../context.js";
-import { ValidationError } from "../lib/errors.js";
+import type { SentryContext } from "../../context.js";
+import { ValidationError } from "../../lib/errors.js";
 
 export const feedbackCommand = buildCommand({
   docs: {
