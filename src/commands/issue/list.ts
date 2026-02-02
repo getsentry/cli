@@ -8,7 +8,11 @@
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
-import { listIssues } from "../../lib/api-client.js";
+import {
+  findProjectsBySlug,
+  listIssues,
+  listProjects,
+} from "../../lib/api-client.js";
 import {
   clearProjectAliases,
   setProjectAliases,
@@ -24,6 +28,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  parseOrgProjectArg,
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
@@ -34,8 +39,6 @@ import type {
 } from "../../types/index.js";
 
 type ListFlags = {
-  readonly org?: string;
-  readonly project?: string;
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
@@ -47,7 +50,7 @@ type SortValue = "date" | "new" | "freq" | "user";
 const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry issue list --org <org> --project <project>";
+const USAGE_HINT = "sentry issue list <org>/<project>";
 
 /** Error type classification for fetch failures */
 type FetchErrorType = "permission" | "network" | "unknown";
@@ -147,7 +150,7 @@ type AliasMapResult = {
  *   frontend, functions, backend → fr, fu, b
  *
  * Cross-org collision example:
- *   org1:dashboard, org2:dashboard → o1:d, o2:d
+ *   org1:dashboard, org2:dashboard → o1/d, o2/d
  */
 function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
   const entries: Record<string, ProjectAliasEntry> = {};
@@ -240,6 +243,107 @@ type FetchResult =
   | { success: true; data: IssueListResult }
   | { success: false; errorType: FetchErrorType };
 
+/** Result of resolving targets from parsed argument */
+type TargetResolutionResult = {
+  targets: ResolvedTarget[];
+  footer?: string;
+  skippedSelfHosted?: number;
+  detectedDsns?: import("../../lib/dsn/index.js").DetectedDsn[];
+};
+
+/**
+ * Resolve targets based on parsed org/project argument.
+ *
+ * Handles all four cases:
+ * - auto-detect: Use DSN detection / config defaults
+ * - explicit: Single org/project target
+ * - org-all: All projects in specified org
+ * - project-search: Find project across all orgs
+ */
+async function resolveTargetsFromParsedArg(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  cwd: string
+): Promise<TargetResolutionResult> {
+  switch (parsed.type) {
+    case "auto-detect":
+      // Use existing resolution logic (DSN detection, config defaults)
+      return resolveAllTargets({ cwd, usageHint: USAGE_HINT });
+
+    case "explicit":
+      // Single explicit target
+      return {
+        targets: [
+          {
+            org: parsed.org,
+            project: parsed.project,
+            orgDisplay: parsed.org,
+            projectDisplay: parsed.project,
+          },
+        ],
+      };
+
+    case "org-all": {
+      // List all projects in the specified org
+      const projects = await listProjects(parsed.org);
+      const targets: ResolvedTarget[] = projects.map((p) => ({
+        org: parsed.org,
+        project: p.slug,
+        orgDisplay: parsed.org,
+        projectDisplay: p.name,
+      }));
+
+      if (targets.length === 0) {
+        throw new ContextError(
+          "Projects",
+          `No projects found in organization '${parsed.org}'.`
+        );
+      }
+
+      return {
+        targets,
+        footer:
+          targets.length > 1
+            ? `Showing issues from ${targets.length} projects in ${parsed.org}`
+            : undefined,
+      };
+    }
+
+    case "project-search": {
+      // Find project across all orgs
+      const matches = await findProjectsBySlug(parsed.projectSlug);
+
+      if (matches.length === 0) {
+        throw new ContextError(
+          "Project",
+          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
+            `Try: sentry issue list <org>/${parsed.projectSlug}`
+        );
+      }
+
+      const targets: ResolvedTarget[] = matches.map((m) => ({
+        org: m.orgSlug,
+        project: m.slug,
+        orgDisplay: m.orgSlug,
+        projectDisplay: m.name,
+      }));
+
+      return {
+        targets,
+        footer:
+          matches.length > 1
+            ? `Found '${parsed.projectSlug}' in ${matches.length} organizations`
+            : undefined,
+      };
+    }
+
+    default: {
+      // TypeScript exhaustiveness check - this should never be reached
+      const _exhaustiveCheck: never = parsed;
+      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
+    }
+  }
+}
+
 /**
  * Fetch issues for a single target project.
  *
@@ -280,24 +384,26 @@ export const listCommand = buildCommand({
   docs: {
     brief: "List issues in a project",
     fullDescription:
-      "List issues from Sentry projects. Use --org and --project to specify " +
-      "the target, or set defaults with 'sentry config set'.\n\n" +
+      "List issues from Sentry projects.\n\n" +
+      "Target specification:\n" +
+      "  sentry issue list               # auto-detect from DSN or config\n" +
+      "  sentry issue list <org>/<proj>  # explicit org and project\n" +
+      "  sentry issue list <org>/        # all projects in org\n" +
+      "  sentry issue list <project>     # find project across all orgs\n\n" +
       "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
   },
   parameters: {
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          brief: "Target: <org>/<project>, <org>/, or <project>",
+          parse: String,
+          optional: true,
+        },
+      ],
+    },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief: "Project slug",
-        optional: true,
-      },
       query: {
         kind: "parsed",
         parse: String,
@@ -325,17 +431,19 @@ export const listCommand = buildCommand({
     },
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
-  async func(this: SentryContext, flags: ListFlags): Promise<void> {
+  async func(
+    this: SentryContext,
+    flags: ListFlags,
+    target?: string
+  ): Promise<void> {
     const { stdout, cwd, setContext } = this;
 
-    // Resolve targets (may find multiple in monorepos)
+    // Parse positional argument to determine resolution strategy
+    const parsed = parseOrgProjectArg(target);
+
+    // Resolve targets based on parsed argument type
     const { targets, footer, skippedSelfHosted, detectedDsns } =
-      await resolveAllTargets({
-        org: flags.org,
-        project: flags.project,
-        cwd,
-        usageHint: USAGE_HINT,
-      });
+      await resolveTargetsFromParsedArg(parsed, cwd);
 
     // Set telemetry context with unique orgs and projects
     const orgs = [...new Set(targets.map((t) => t.org))];
@@ -348,7 +456,7 @@ export const listCommand = buildCommand({
           "Organization and project",
           `${USAGE_HINT}\n\n` +
             `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
-            "You may not have access to these projects, or you can specify --org and --project explicitly."
+            "You may not have access to these projects, or you can specify the target explicitly."
         );
       }
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -356,8 +464,8 @@ export const listCommand = buildCommand({
 
     // Fetch issues from all targets in parallel
     const results = await Promise.all(
-      targets.map((target) =>
-        fetchIssuesForTarget(target, {
+      targets.map((t) =>
+        fetchIssuesForTarget(t, {
           query: flags.query,
           limit: flags.limit,
           sort: flags.sort,

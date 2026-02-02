@@ -19,7 +19,6 @@ import { resolveAllTargets } from "../../lib/resolve-target.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
 type ListFlags = {
-  readonly org?: string;
   readonly limit: number;
   readonly json: boolean;
   readonly platform?: string;
@@ -197,20 +196,24 @@ export const listCommand = buildCommand({
       "List projects in an organization. If no organization is specified, " +
       "uses the default organization or lists projects from all accessible organizations.\n\n" +
       "Examples:\n" +
-      "  sentry project list\n" +
-      "  sentry project list --org my-org\n" +
+      "  sentry project list              # auto-detect or list all\n" +
+      "  sentry project list my-org       # list projects in my-org\n" +
       "  sentry project list --limit 10\n" +
       "  sentry project list --json\n" +
       "  sentry project list --platform javascript",
   },
   parameters: {
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          brief: "Organization slug (optional)",
+          parse: String,
+          optional: true,
+        },
+      ],
+    },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       limit: {
         kind: "parsed",
         parse: numberParser,
@@ -231,7 +234,11 @@ export const listCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: ListFlags): Promise<void> {
+  async func(
+    this: SentryContext,
+    flags: ListFlags,
+    org?: string
+  ): Promise<void> {
     const { stdout, cwd } = this;
 
     // Resolve which organizations to fetch from
@@ -239,13 +246,13 @@ export const listCommand = buildCommand({
       orgs: orgsToFetch,
       footer,
       skippedSelfHosted,
-    } = await resolveOrgsToFetch(flags.org, cwd);
+    } = await resolveOrgsToFetch(org, cwd);
 
     // Fetch projects from all orgs (or all accessible if none detected)
     let allProjects: ProjectWithOrg[];
     if (orgsToFetch.length > 0) {
       const results = await Promise.all(
-        orgsToFetch.map((org) => fetchOrgProjectsSafe(org))
+        orgsToFetch.map((o) => fetchOrgProjectsSafe(o))
       );
       allProjects = results.flat();
     } else {
@@ -296,13 +303,13 @@ export const listCommand = buildCommand({
     if (skippedSelfHosted) {
       stdout.write(
         `\nNote: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
-          "Use --org to specify organization explicitly.\n"
+          "Specify the organization explicitly: sentry project list <org>\n"
       );
     }
 
     writeFooter(
       stdout,
-      "Tip: Use 'sentry project view <project> --org <org>' for details"
+      "Tip: Use 'sentry project view <org>/<project>' for details"
     );
   },
 });

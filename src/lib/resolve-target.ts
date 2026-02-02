@@ -532,3 +532,65 @@ export async function resolveOrg(
     return null;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Positional Argument Parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parsed result from an org/project positional argument.
+ * Discriminated union based on the `type` field.
+ */
+export type ParsedOrgProject =
+  | { type: "explicit"; org: string; project: string }
+  | { type: "org-all"; org: string }
+  | { type: "project-search"; projectSlug: string }
+  | { type: "auto-detect" };
+
+/**
+ * Parse an org/project positional argument string.
+ *
+ * Supports the following patterns:
+ * - `undefined` or empty → auto-detect from DSN/config
+ * - `sentry/cli` → explicit org and project
+ * - `sentry/` → org with all projects
+ * - `cli` → search for project across all orgs
+ *
+ * @param arg - Input string from CLI positional argument
+ * @returns Parsed result with type discrimination
+ *
+ * @example
+ * parseOrgProjectArg(undefined)     // { type: "auto-detect" }
+ * parseOrgProjectArg("sentry/cli")  // { type: "explicit", org: "sentry", project: "cli" }
+ * parseOrgProjectArg("sentry/")     // { type: "org-all", org: "sentry" }
+ * parseOrgProjectArg("cli")         // { type: "project-search", projectSlug: "cli" }
+ */
+export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
+  if (!arg || arg.trim() === "") {
+    return { type: "auto-detect" };
+  }
+
+  const trimmed = arg.trim();
+
+  if (trimmed.includes("/")) {
+    const slashIndex = trimmed.indexOf("/");
+    const org = trimmed.slice(0, slashIndex);
+    const project = trimmed.slice(slashIndex + 1);
+
+    if (!org) {
+      // "/cli" is invalid - treat as auto-detect with warning
+      return { type: "auto-detect" };
+    }
+
+    if (!project) {
+      // "sentry/" → list all projects in org
+      return { type: "org-all", org };
+    }
+
+    // "sentry/cli" → explicit org and project
+    return { type: "explicit", org, project };
+  }
+
+  // No slash → search for project across all orgs
+  return { type: "project-search", projectSlug: trimmed };
+}

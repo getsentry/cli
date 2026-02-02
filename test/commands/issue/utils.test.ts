@@ -207,14 +207,14 @@ describe("resolveOrgAndIssueId", () => {
     expect(result.issueId).toBe("111222333");
   });
 
-  test("resolves org-aware alias format (e.g., 'o1:d-4y') for cross-org collisions", async () => {
+  test("resolves org-aware alias format (e.g., 'o1/d-4y') for cross-org collisions", async () => {
     const { setProjectAliases } = await import(
       "../../../src/lib/db/project-aliases.js"
     );
     await setProjectAliases(
       {
-        "o1:d": { orgSlug: "org1", projectSlug: "dashboard" },
-        "o2:d": { orgSlug: "org2", projectSlug: "dashboard" },
+        "o1/d": { orgSlug: "org1", projectSlug: "dashboard" },
+        "o2/d": { orgSlug: "org2", projectSlug: "dashboard" },
       },
       ""
     );
@@ -248,9 +248,9 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "o1:d-4y",
+      issueId: "o1/d-4y",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain o1:d-4y",
+      commandHint: "sentry issue explain o1/d-4y",
     });
 
     expect(result.org).toBe("org1");
