@@ -10,12 +10,12 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | Command | Description |
 |---------|-------------|
 | [`auth`](./auth/) | Authentication management |
+| [`cli`](./cli/) | CLI-related commands (feedback, upgrade) |
 | [`org`](./org/) | Organization operations |
 | [`project`](./project/) | Project operations |
 | [`issue`](./issue/) | Issue tracking |
 | [`event`](./event/) | Event inspection |
 | [`api`](./api/) | Direct API access |
-| [`feedback`](./feedback/) | Send feedback about the CLI |
 
 ## Global Options
 

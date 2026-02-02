@@ -8,13 +8,12 @@ import {
 } from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
+import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
-import { feedbackCommand } from "./commands/feedback.js";
 import { helpCommand } from "./commands/help.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
-import { upgradeCommand } from "./commands/upgrade.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import { CliError, getExitCode } from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
@@ -24,16 +23,12 @@ export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
     auth: authRoute,
+    cli: cliRoute,
     org: orgRoute,
     project: projectRoute,
     issue: issueRoute,
     event: eventRoute,
     api: apiCommand,
-    upgrade: upgradeCommand,
-    feedback: feedbackCommand,
-  },
-  aliases: {
-    update: "upgrade",
   },
   defaultCommand: "help",
   docs: {

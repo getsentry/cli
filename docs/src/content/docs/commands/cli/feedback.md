@@ -1,18 +1,14 @@
 ---
-title: feedback
+title: cli feedback
 description: Send feedback about the Sentry CLI
 ---
 
 Send feedback about your experience with the CLI.
 
-## Commands
-
-### `sentry feedback`
-
-Submit feedback about the CLI directly to the Sentry team.
+## Usage
 
 ```bash
-sentry feedback <message>
+sentry cli feedback <message>
 ```
 
 **Arguments:**
@@ -25,13 +21,13 @@ sentry feedback <message>
 
 ```bash
 # Send positive feedback
-sentry feedback i love this tool
+sentry cli feedback i love this tool
 
 # Report an issue
-sentry feedback the issue view is confusing
+sentry cli feedback the issue view is confusing
 
 # Suggest an improvement
-sentry feedback would be great to have a search command
+sentry cli feedback would be great to have a search command
 ```
 
 ## Notes
