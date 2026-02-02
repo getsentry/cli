@@ -309,7 +309,7 @@ export const listCommand = buildCommand({
 
     writeFooter(
       stdout,
-      "Tip: Use 'sentry project view <org>/<project>' for details"
+      "Tip: Use 'sentry project view <project> --org <org>' for details"
     );
   },
 });

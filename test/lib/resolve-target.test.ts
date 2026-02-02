@@ -3,30 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  ProjectSpecificationType,
-  parseOrgProjectArg,
-} from "../../src/lib/resolve-target.js";
-
-describe("ProjectSpecificationType", () => {
-  test("has correct string values", () => {
-    expect(ProjectSpecificationType.Explicit).toBe("explicit");
-    expect(ProjectSpecificationType.OrgAll).toBe("org-all");
-    expect(ProjectSpecificationType.ProjectSearch).toBe("project-search");
-    expect(ProjectSpecificationType.AutoDetect).toBe("auto-detect");
-  });
-
-  test("is immutable (const assertion)", () => {
-    // TypeScript const assertion makes this read-only at compile time
-    // At runtime, we can verify the object structure
-    expect(Object.keys(ProjectSpecificationType)).toEqual([
-      "Explicit",
-      "OrgAll",
-      "ProjectSearch",
-      "AutoDetect",
-    ]);
-  });
-});
+import { parseOrgProjectArg } from "../../src/lib/resolve-target.js";
 
 describe("parseOrgProjectArg", () => {
   test("returns auto-detect for undefined", () => {
