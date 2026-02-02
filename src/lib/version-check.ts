@@ -73,9 +73,16 @@ export function abortPendingVersionCheck(): void {
  * Start a background check for new versions.
  * Does not block - fires a fetch and lets it complete in the background.
  * Reports errors to Sentry in a detached span for visibility.
+ * Never throws - errors are caught and reported to Sentry.
  */
 function checkForUpdateInBackgroundImpl(): void {
-  if (!shouldCheckForUpdate()) {
+  try {
+    if (!shouldCheckForUpdate()) {
+      return;
+    }
+  } catch (error) {
+    // DB access failed - report to Sentry but don't crash CLI
+    Sentry.captureException(error);
     return;
   }
 
@@ -109,22 +116,29 @@ function checkForUpdateInBackgroundImpl(): void {
 
 /**
  * Get the update notification message if a new version is available.
- * Returns null if up-to-date or no cached version info.
+ * Returns null if up-to-date, no cached version info, or on error.
+ * Never throws - errors are caught and reported to Sentry.
  */
 function getUpdateNotificationImpl(): string | null {
-  const { latestVersion } = getVersionCheckInfo();
+  try {
+    const { latestVersion } = getVersionCheckInfo();
 
-  if (!latestVersion) {
+    if (!latestVersion) {
+      return null;
+    }
+
+    // Use Bun's native semver comparison (polyfilled for Node.js)
+    // order() returns 1 if first arg is greater than second
+    if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
+      return null;
+    }
+
+    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} → ${cyan(latestVersion)}  Run ${cyan('"sentry upgrade"')} to update.\n`;
+  } catch (error) {
+    // DB access failed - report to Sentry but don't crash CLI
+    Sentry.captureException(error);
     return null;
   }
-
-  // Use Bun's native semver comparison (polyfilled for Node.js)
-  // order() returns 1 if first arg is greater than second
-  if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
-    return null;
-  }
-
-  return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} → ${cyan(latestVersion)}  Run ${cyan('"sentry upgrade"')} to update.\n`;
 }
 
 // No-op implementations for when update check is disabled
