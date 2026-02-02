@@ -163,7 +163,7 @@ describe("multi-region", () => {
         // First list orgs to populate region cache
         await ctx.run(["org", "list"]);
 
-        const result = await ctx.run(["project", "list", "--org", "acme-corp"]);
+        const result = await ctx.run(["project", "list", "acme-corp"]);
 
         expect(result.exitCode).toBe(0);
         // Should contain US projects for acme-corp
@@ -182,7 +182,7 @@ describe("multi-region", () => {
         // First list orgs to populate region cache
         await ctx.run(["org", "list"]);
 
-        const result = await ctx.run(["project", "list", "--org", "euro-gmbh"]);
+        const result = await ctx.run(["project", "list", "euro-gmbh"]);
 
         expect(result.exitCode).toBe(0);
         // Should contain EU projects for euro-gmbh
@@ -204,7 +204,6 @@ describe("multi-region", () => {
         const result = await ctx.run([
           "project",
           "list",
-          "--org",
           "berlin-startup",
           "--json",
         ]);
@@ -234,10 +233,7 @@ describe("multi-region", () => {
         const result = await ctx.run([
           "issue",
           "list",
-          "--org",
-          "acme-corp",
-          "--project",
-          "acme-frontend",
+          "acme-corp/acme-frontend",
         ]);
 
         expect(result.exitCode).toBe(0);
@@ -258,10 +254,7 @@ describe("multi-region", () => {
         const result = await ctx.run([
           "issue",
           "list",
-          "--org",
-          "euro-gmbh",
-          "--project",
-          "euro-portal",
+          "euro-gmbh/euro-portal",
         ]);
 
         expect(result.exitCode).toBe(0);
@@ -282,10 +275,7 @@ describe("multi-region", () => {
         const result = await ctx.run([
           "issue",
           "list",
-          "--org",
-          "berlin-startup",
-          "--project",
-          "berlin-app",
+          "berlin-startup/berlin-app",
           "--json",
         ]);
 

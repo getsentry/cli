@@ -110,7 +110,7 @@ sentry org list
 sentry org list --json
 ```
 
-#### `sentry org view <arg0>`
+#### `sentry org view <org>`
 
 View details of an organization
 
@@ -132,15 +132,14 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list`
+#### `sentry project list <org>`
 
 List projects
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--limit <value> - Maximum number of projects to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
-- `--platform <value> - Filter by platform (e.g., javascript, python)`
+- `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 
 **Examples:**
 
@@ -155,7 +154,7 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <arg0>`
+#### `sentry project view <project>`
 
 View details of a project
 
@@ -178,29 +177,53 @@ sentry project view frontend -w
 
 Manage Sentry issues
 
-#### `sentry issue list`
+#### `sentry issue list <target>`
 
 List issues in a project
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
-- `--query <value> - Search query (Sentry search syntax)`
-- `--limit <value> - Maximum number of issues to return - (default: "10")`
-- `--sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output as JSON`
 
 **Examples:**
 
 ```bash
-sentry issue list --org <org-slug> --project <project-slug>
+# Explicit org and project
+sentry issue list <org>/<project>
 
-sentry issue list --org my-org --project frontend
+# All projects in an organization
+sentry issue list <org>/
 
-sentry issue list --org my-org --project frontend --query "TypeError"
+# Search for project across all accessible orgs
+sentry issue list <project>
+
+# Auto-detect from DSN or config
+sentry issue list
+
+# List issues in a specific project
+sentry issue list my-org/frontend
+
+sentry issue list my-org/
+
+sentry issue list frontend
+
+sentry issue list my-org/frontend --query "TypeError"
+
+sentry issue list my-org/frontend --sort freq --limit 20
+
+# Show only unresolved issues
+sentry issue list my-org/frontend --query "is:unresolved"
+
+# Show resolved issues
+sentry issue list my-org/frontend --query "is:resolved"
+
+# Combine with other search terms
+sentry issue list my-org/frontend --query "is:unresolved TypeError"
 ```
 
-#### `sentry issue explain <arg0>`
+#### `sentry issue explain <issue-id>`
 
 Analyze an issue's root cause using Seer AI
 
@@ -228,7 +251,7 @@ sentry issue explain G --org my-org --project my-project
 sentry issue explain 123456789 --force
 ```
 
-#### `sentry issue plan <arg0>`
+#### `sentry issue plan <issue-id>`
 
 Generate a solution plan using Seer AI
 
@@ -253,7 +276,7 @@ sentry issue plan 123456789 --cause 0
 sentry issue plan MYPROJECT-ABC --org my-org --cause 1
 ```
 
-#### `sentry issue view <arg0>`
+#### `sentry issue view <issue-id>`
 
 View details of a specific issue
 
@@ -282,7 +305,7 @@ sentry issue view FRONT-ABC -w
 
 View Sentry events
 
-#### `sentry event view <arg0>`
+#### `sentry event view <event-id>`
 
 View details of a specific event
 

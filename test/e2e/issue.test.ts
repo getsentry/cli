@@ -50,26 +50,20 @@ describe("sentry issue list", () => {
     const result = await ctx.run([
       "issue",
       "list",
-      "--org",
-      "test-org",
-      "--project",
-      "test-project",
+      `${TEST_ORG}/${TEST_PROJECT}`,
     ]);
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test("lists issues with valid auth", async () => {
+  test("lists issues with valid auth using positional arg", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "issue",
       "list",
-      "--org",
-      TEST_ORG,
-      "--project",
-      TEST_PROJECT,
+      `${TEST_ORG}/${TEST_PROJECT}`,
     ]);
 
     // Should succeed (may have 0 issues, that's fine)
@@ -82,10 +76,7 @@ describe("sentry issue list", () => {
     const result = await ctx.run([
       "issue",
       "list",
-      "--org",
-      TEST_ORG,
-      "--project",
-      TEST_PROJECT,
+      `${TEST_ORG}/${TEST_PROJECT}`,
       "--json",
     ]);
 
@@ -93,6 +84,32 @@ describe("sentry issue list", () => {
     // Should be valid JSON array
     const data = JSON.parse(result.stdout);
     expect(Array.isArray(data)).toBe(true);
+  });
+
+  test("lists all projects in org with trailing slash", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["issue", "list", `${TEST_ORG}/`, "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    // Should be valid JSON array (issues from all projects in org)
+    const data = JSON.parse(result.stdout);
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  test("searches for project across orgs with project-only arg", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["issue", "list", TEST_PROJECT, "--json"]);
+
+    // Should succeed if project exists in any accessible org
+    // or fail with a "not found" error if not
+    if (result.exitCode === 0) {
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
+    } else {
+      expect(result.stderr + result.stdout).toMatch(/not found|no project/i);
+    }
   });
 });
 

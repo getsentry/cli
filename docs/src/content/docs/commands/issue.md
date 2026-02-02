@@ -12,24 +12,41 @@ Track and manage Sentry issues.
 List issues in a project.
 
 ```bash
-sentry issue list --org <org-slug> --project <project-slug>
+# Explicit org and project
+sentry issue list <org>/<project>
+
+# All projects in an organization
+sentry issue list <org>/
+
+# Search for project across all accessible orgs
+sentry issue list <project>
+
+# Auto-detect from DSN or config
+sentry issue list
 ```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<org>/<project>` | Explicit organization and project (e.g., `my-org/frontend`) |
+| `<org>/` | All projects in the specified organization |
+| `<project>` | Search for project by name across all accessible organizations |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--org <org-slug>` | Organization slug (required) |
-| `--project <project-slug>` | Project slug (required) |
-| `--query <query>` | Search query |
-| `--status <status>` | Filter by status (unresolved, resolved, ignored) |
-| `--limit <n>` | Maximum number of issues to return |
+| `--query <query>` | Search query (Sentry search syntax) |
+| `--sort <sort>` | Sort by: date, new, freq, user (default: date) |
+| `--limit <n>` | Maximum number of issues to return (default: 10) |
 | `--json` | Output as JSON |
 
-**Example:**
+**Examples:**
 
 ```bash
-sentry issue list --org my-org --project frontend
+# List issues in a specific project
+sentry issue list my-org/frontend
 ```
 
 ```
@@ -38,10 +55,41 @@ ID            SHORT ID    TITLE                           COUNT   USERS
 987654321     FRONT-DEF   ReferenceError: x is not de...  456     89
 ```
 
+**List issues from all projects in an org:**
+
+```bash
+sentry issue list my-org/
+```
+
+**Search for a project across organizations:**
+
+```bash
+sentry issue list frontend
+```
+
 **With search query:**
 
 ```bash
-sentry issue list --org my-org --project frontend --query "TypeError"
+sentry issue list my-org/frontend --query "TypeError"
+```
+
+**Sort by frequency:**
+
+```bash
+sentry issue list my-org/frontend --sort freq --limit 20
+```
+
+**Filter by status:**
+
+```bash
+# Show only unresolved issues
+sentry issue list my-org/frontend --query "is:unresolved"
+
+# Show resolved issues
+sentry issue list my-org/frontend --query "is:resolved"
+
+# Combine with other search terms
+sentry issue list my-org/frontend --query "is:unresolved TypeError"
 ```
 
 ### `sentry issue view`

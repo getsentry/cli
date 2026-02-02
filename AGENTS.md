@@ -292,6 +292,9 @@ return result // return result
 await deleteUserData(userId)
 ```
 
+### Prohibited Comment Styles
+- **ASCII art section dividers** - Do not use decorative box-drawing characters like `─────────` to create section headers. Use standard JSDoc comments or simple `// Section Name` comments instead.
+
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 

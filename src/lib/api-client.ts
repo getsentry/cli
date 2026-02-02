@@ -572,6 +572,50 @@ export function listProjects(orgSlug: string): Promise<SentryProject[]> {
   );
 }
 
+/** Project with its organization context */
+export type ProjectWithOrg = SentryProject & {
+  /** Organization slug the project belongs to */
+  orgSlug: string;
+};
+
+/**
+ * Search for projects matching a slug across all accessible organizations.
+ *
+ * Used for `sentry issue list <project-name>` when no org is specified.
+ * Searches all orgs the user has access to and returns matches.
+ *
+ * @param projectSlug - Project slug to search for (exact match)
+ * @returns Array of matching projects with their org context
+ */
+export async function findProjectsBySlug(
+  projectSlug: string
+): Promise<ProjectWithOrg[]> {
+  const orgs = await listOrganizations();
+
+  // Search in parallel for performance
+  const searchResults = await Promise.all(
+    orgs.map(async (org) => {
+      try {
+        const projects = await listProjects(org.slug);
+        const match = projects.find((p) => p.slug === projectSlug);
+        if (match) {
+          return { ...match, orgSlug: org.slug };
+        }
+        return null;
+      } catch (error) {
+        // Re-throw auth errors - user needs to login
+        if (error instanceof AuthError) {
+          throw error;
+        }
+        // Skip orgs where user lacks access (permission errors, etc.)
+        return null;
+      }
+    })
+  );
+
+  return searchResults.filter((r): r is ProjectWithOrg => r !== null);
+}
+
 /**
  * Find a project by DSN public key.
  *
