@@ -12,6 +12,7 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
 
@@ -158,6 +159,9 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     const runtime =
       typeof process.versions.bun !== "undefined" ? "bun" : "node";
     Sentry.setTag("cli.runtime", runtime);
+
+    // Tag whether targeting self-hosted Sentry (not SaaS)
+    Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
   }
 
   return client;

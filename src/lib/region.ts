@@ -5,15 +5,8 @@
  * using cached data when available or fetching from the API when needed.
  */
 
-import { DEFAULT_SENTRY_HOST, DEFAULT_SENTRY_URL } from "./constants.js";
 import { getOrgRegion, setOrgRegion } from "./db/regions.js";
-
-/**
- * Get the default API base URL (control silo or self-hosted).
- */
-export function getDefaultBaseUrl(): string {
-  return process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-}
+import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
  * Resolve the region URL for an organization.
@@ -40,7 +33,7 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
 
   try {
     // First try the default URL - it may route correctly
-    const baseUrl = getDefaultBaseUrl();
+    const baseUrl = getSentryBaseUrl();
     const org = await apiRequestToRegion(
       baseUrl,
       `/organizations/${orgSlug}/`,
@@ -56,31 +49,7 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
   } catch {
     // If fetch fails, fall back to default
     // This handles self-hosted instances without multi-region
-    return getDefaultBaseUrl();
-  }
-}
-
-/**
- * Validates that a URL is a legitimate Sentry SaaS domain.
- *
- * Used to determine if multi-region support should be enabled and to
- * validate region URLs before sending authenticated requests.
- *
- * Security: This validates the hostname against known Sentry domains to prevent
- * sending authenticated requests to arbitrary servers via spoofed region URLs.
- *
- * @param url - URL string to validate
- * @returns true if the hostname is sentry.io or a subdomain of sentry.io
- */
-export function isSentrySaasUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.hostname === DEFAULT_SENTRY_HOST ||
-      parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)
-    );
-  } catch {
-    return false;
+    return getSentryBaseUrl();
   }
 }
 
