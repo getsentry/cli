@@ -22,15 +22,18 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const JITTER_FACTOR = 0.2;
 
 /** Commands/flags that should not show update notifications */
-const SUPPRESSED_ARGS = new Set(["upgrade", "--version", "-V"]);
+const SUPPRESSED_ARGS = new Set(["upgrade", "--version", "-V", "--json"]);
+
+/** AbortController for pending version check fetch */
+let pendingAbortController: AbortController | null = null;
 
 /**
  * Determine if we should check for updates based on time since last check.
  * Uses probabilistic approach: probability increases as we approach/pass the interval.
- *
- * @internal Exported for testing
  */
-export function shouldCheckForUpdate(lastChecked: number | null): boolean {
+function shouldCheckForUpdate(): boolean {
+  const { lastChecked } = getVersionCheckInfo();
+
   if (lastChecked === null) {
     return true;
   }
@@ -54,7 +57,16 @@ export function shouldCheckForUpdate(lastChecked: number | null): boolean {
  * Check if update notifications should be suppressed for these args.
  */
 export function shouldSuppressNotification(args: string[]): boolean {
-  return args.some((arg) => SUPPRESSED_ARGS.has(arg) || arg === "--json");
+  return args.some((arg) => SUPPRESSED_ARGS.has(arg));
+}
+
+/**
+ * Abort any pending version check to allow process exit.
+ * Call this when main CLI work is complete.
+ */
+export function abortPendingVersionCheck(): void {
+  pendingAbortController?.abort();
+  pendingAbortController = null;
 }
 
 /**
@@ -63,32 +75,34 @@ export function shouldSuppressNotification(args: string[]): boolean {
  * Reports errors to Sentry in a detached span for visibility.
  */
 function checkForUpdateInBackgroundImpl(): void {
-  const { lastChecked } = getVersionCheckInfo();
-
-  if (!shouldCheckForUpdate(lastChecked)) {
+  if (!shouldCheckForUpdate()) {
     return;
   }
 
-  // Start a detached span for the background update check
+  pendingAbortController = new AbortController();
+  const { signal } = pendingAbortController;
+
   Sentry.startSpanManual(
     {
       name: "version-check",
       op: "version.check",
       forceTransaction: true,
     },
-    (span) => {
-      fetchLatestFromGitHub()
-        .then((latestVersion) => {
-          setVersionCheckInfo(latestVersion);
-          span.setStatus({ code: 1 }); // OK
-        })
-        .catch((error) => {
+    async (span) => {
+      try {
+        const latestVersion = await fetchLatestFromGitHub(signal);
+        setVersionCheckInfo(latestVersion);
+        span.setStatus({ code: 1 }); // OK
+      } catch (error) {
+        // Don't report abort errors - they're expected when process exits
+        if (error instanceof Error && error.name !== "AbortError") {
           Sentry.captureException(error);
-          span.setStatus({ code: 2 }); // Error
-        })
-        .finally(() => {
-          span.end();
-        });
+        }
+        span.setStatus({ code: 2 }); // Error
+      } finally {
+        pendingAbortController = null;
+        span.end();
+      }
     }
   );
 }

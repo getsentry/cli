@@ -166,12 +166,8 @@ const BunPolyfill = {
   },
 
   semver: {
-    order(a: string, b: string): -1 | 0 | 1 {
-      return semverCompare(a, b);
-    },
-    satisfies(version: string, range: string): boolean {
-      return semverSatisfies(version, range);
-    },
+    order: semverCompare,
+    satisfies: semverSatisfies,
   },
 };
 

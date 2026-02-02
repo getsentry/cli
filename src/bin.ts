@@ -5,6 +5,7 @@ import { formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { withTelemetry } from "./lib/telemetry.js";
 import {
+  abortPendingVersionCheck,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
   shouldSuppressNotification,
@@ -26,6 +27,9 @@ async function main(): Promise<void> {
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exit(getExitCode(err));
+  } finally {
+    // Abort any pending version check to allow clean exit
+    abortPendingVersionCheck();
   }
 
   // Show update notification after command completes

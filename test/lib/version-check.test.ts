@@ -7,7 +7,6 @@ import { setVersionCheckInfo } from "../../src/lib/db/version-check.js";
 import {
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
-  shouldCheckForUpdate,
   shouldSuppressNotification,
 } from "../../src/lib/version-check.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -39,43 +38,8 @@ describe("shouldSuppressNotification", () => {
   });
 });
 
-describe("shouldCheckForUpdate", () => {
-  test("returns true when lastChecked is null (never checked)", () => {
-    expect(shouldCheckForUpdate(null)).toBe(true);
-  });
-
-  test("returns false most of the time for very recent check", () => {
-    // Check done 1 second ago - probability should be near 0
-    const oneSecondAgo = Date.now() - 1000;
-
-    // Run multiple times to verify probabilistic behavior
-    let trueCount = 0;
-    for (let i = 0; i < 100; i += 1) {
-      if (shouldCheckForUpdate(oneSecondAgo)) {
-        trueCount += 1;
-      }
-    }
-
-    // Should be very unlikely to trigger (expect < 5% of the time)
-    expect(trueCount).toBeLessThan(10);
-  });
-
-  test("returns true most of the time for very old check", () => {
-    // Check done 48 hours ago - probability should be very high
-    const twoDaysAgo = Date.now() - 48 * 60 * 60 * 1000;
-
-    // Run multiple times to verify probabilistic behavior
-    let trueCount = 0;
-    for (let i = 0; i < 100; i += 1) {
-      if (shouldCheckForUpdate(twoDaysAgo)) {
-        trueCount += 1;
-      }
-    }
-
-    // Should be very likely to trigger (expect > 80% of the time)
-    expect(trueCount).toBeGreaterThan(80);
-  });
-});
+// Note: shouldCheckForUpdate is now an internal function that reads from the DB.
+// Its probabilistic behavior is tested indirectly through maybeCheckForUpdateInBackground.
 
 describe("getUpdateNotification", () => {
   let testConfigDir: string;
