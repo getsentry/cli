@@ -148,6 +148,7 @@ function getErrorMessage(error: unknown): string {
  * @param serviceName - Service name for error messages (e.g., "GitHub")
  * @returns Response object
  * @throws {UpgradeError} On network failure
+ * @throws {Error} AbortError if signal is aborted (re-thrown as-is)
  */
 async function fetchWithUpgradeError(
   url: string,
@@ -157,6 +158,10 @@ async function fetchWithUpgradeError(
   try {
     return await fetch(url, init);
   } catch (error) {
+    // Re-throw AbortError as-is so callers can handle it specifically
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     throw new UpgradeError(
       "network_error",
       `Failed to connect to ${serviceName}: ${getErrorMessage(error)}`
@@ -167,13 +172,17 @@ async function fetchWithUpgradeError(
 /**
  * Fetch the latest version from GitHub releases.
  *
+ * @param signal - Optional AbortSignal to cancel the request
  * @returns Latest version string (without 'v' prefix)
  * @throws {UpgradeError} When fetch fails or response is invalid
+ * @throws {Error} AbortError if signal is aborted
  */
-export async function fetchLatestFromGitHub(): Promise<string> {
+export async function fetchLatestFromGitHub(
+  signal?: AbortSignal
+): Promise<string> {
   const response = await fetchWithUpgradeError(
     `${GITHUB_RELEASES_URL}/latest`,
-    { headers: GITHUB_HEADERS },
+    { headers: GITHUB_HEADERS, signal },
     "GitHub"
   );
 
