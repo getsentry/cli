@@ -132,13 +132,12 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list`
+#### `sentry project list <arg0>`
 
 List projects
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--limit <value> - Maximum number of projects to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
 - `--platform <value> - Filter by platform (e.g., javascript, python)`
 
@@ -178,13 +177,11 @@ sentry project view frontend -w
 
 Manage Sentry issues
 
-#### `sentry issue list`
+#### `sentry issue list <arg0>`
 
 List issues in a project
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
 - `--query <value> - Search query (Sentry search syntax)`
 - `--limit <value> - Maximum number of issues to return - (default: "10")`
 - `--sort <value> - Sort by: date, new, freq, user - (default: "date")`
@@ -193,11 +190,28 @@ List issues in a project
 **Examples:**
 
 ```bash
-sentry issue list --org <org-slug> --project <project-slug>
+# Explicit org and project
+sentry issue list <org>/<project>
 
-sentry issue list --org my-org --project frontend
+# All projects in an organization
+sentry issue list <org>/
 
-sentry issue list --org my-org --project frontend --query "TypeError"
+# Search for project across all accessible orgs
+sentry issue list <project>
+
+# Auto-detect from DSN or config
+sentry issue list
+
+# List issues in a specific project
+sentry issue list my-org/frontend
+
+sentry issue list my-org/
+
+sentry issue list frontend
+
+sentry issue list my-org/frontend --query "TypeError"
+
+sentry issue list my-org/frontend --sort freq --limit 20
 ```
 
 #### `sentry issue explain <arg0>`
