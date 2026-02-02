@@ -591,7 +591,6 @@ export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
-  const results: ProjectWithOrg[] = [];
 
   // Search in parallel for performance
   const searchResults = await Promise.all(
@@ -614,14 +613,7 @@ export async function findProjectsBySlug(
     })
   );
 
-  // Filter out nulls
-  for (const result of searchResults) {
-    if (result) {
-      results.push(result);
-    }
-  }
-
-  return results;
+  return searchResults.filter((r): r is ProjectWithOrg => r !== null);
 }
 
 /**

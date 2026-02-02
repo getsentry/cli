@@ -233,6 +233,7 @@ export const listCommand = buildCommand({
         optional: true,
       },
     },
+    aliases: { n: "limit" },
   },
   async func(
     this: SentryContext,
@@ -251,9 +252,7 @@ export const listCommand = buildCommand({
     // Fetch projects from all orgs (or all accessible if none detected)
     let allProjects: ProjectWithOrg[];
     if (orgsToFetch.length > 0) {
-      const results = await Promise.all(
-        orgsToFetch.map((o) => fetchOrgProjectsSafe(o))
-      );
+      const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
       allProjects = results.flat();
     } else {
       allProjects = await fetchAllOrgProjects();

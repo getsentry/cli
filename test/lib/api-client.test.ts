@@ -1,7 +1,7 @@
 /**
  * API Client Tests
  *
- * Tests for the Sentry API client 401 retry behavior.
+ * Tests for the Sentry API client 401 retry behavior and utility functions.
  * Uses manual fetch mocking to avoid polluting the module cache.
  */
 
@@ -564,3 +564,7 @@ describe("rawApiRequest", () => {
     expect(result.headers.get("X-Request-Id")).toBe("abc123");
   });
 });
+
+// Note: findProjectsBySlug() is tested via E2E tests in test/e2e/issue.test.ts
+// since it requires complex multi-region API mocking that is better handled
+// by the mock server infrastructure.

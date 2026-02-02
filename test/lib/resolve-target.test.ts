@@ -71,10 +71,10 @@ describe("parseOrgProjectArg", () => {
     });
   });
 
-  test("returns auto-detect for /project pattern (no org)", () => {
-    // "/cli" is invalid - no org specified before the slash
+  test("returns project-search for /project pattern (leading slash)", () => {
+    // "/cli" → search for project across all orgs
     const result = parseOrgProjectArg("/cli");
-    expect(result).toEqual({ type: "auto-detect" });
+    expect(result).toEqual({ type: "project-search", projectSlug: "cli" });
   });
 
   test("handles only first slash for patterns with multiple slashes", () => {

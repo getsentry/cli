@@ -93,15 +93,14 @@ describe("sentry project list", () => {
   });
 
   test(
-    "lists projects with valid auth and org filter",
+    "lists projects with valid auth using positional org arg",
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use --org flag to filter by organization
+      // Use positional argument for organization
       const result = await ctx.run([
         "project",
         "list",
-        "--org",
         TEST_ORG,
         "--limit",
         "5",
@@ -117,11 +116,10 @@ describe("sentry project list", () => {
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use --org flag to filter by organization
+      // Use positional argument for organization
       const result = await ctx.run([
         "project",
         "list",
-        "--org",
         TEST_ORG,
         "--json",
         "--limit",

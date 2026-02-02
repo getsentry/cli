@@ -167,8 +167,8 @@ describe("buildOrgAwareAliases", () => {
       { org: "acme", project: "frontend" },
       { org: "acme", project: "backend" },
     ]);
-    expect(result.aliasMap.get("acme:frontend")).toBe("f");
-    expect(result.aliasMap.get("acme:backend")).toBe("b");
+    expect(result.aliasMap.get("acme/frontend")).toBe("f");
+    expect(result.aliasMap.get("acme/backend")).toBe("b");
   });
 
   test("multiple orgs with unique project slugs - no collision", () => {
@@ -176,8 +176,8 @@ describe("buildOrgAwareAliases", () => {
       { org: "org1", project: "frontend" },
       { org: "org2", project: "backend" },
     ]);
-    expect(result.aliasMap.get("org1:frontend")).toBe("f");
-    expect(result.aliasMap.get("org2:backend")).toBe("b");
+    expect(result.aliasMap.get("org1/frontend")).toBe("f");
+    expect(result.aliasMap.get("org2/backend")).toBe("b");
   });
 
   test("same project slug in different orgs - collision", () => {
@@ -186,8 +186,8 @@ describe("buildOrgAwareAliases", () => {
       { org: "org2", project: "dashboard" },
     ]);
 
-    const alias1 = result.aliasMap.get("org1:dashboard");
-    const alias2 = result.aliasMap.get("org2:dashboard");
+    const alias1 = result.aliasMap.get("org1/dashboard");
+    const alias2 = result.aliasMap.get("org2/dashboard");
 
     // Both should have org-prefixed format with slash
     expect(alias1).toContain("/");
@@ -207,8 +207,8 @@ describe("buildOrgAwareAliases", () => {
       { org: "bigco", project: "api" },
     ]);
 
-    const alias1 = result.aliasMap.get("acme-corp:api");
-    const alias2 = result.aliasMap.get("bigco:api");
+    const alias1 = result.aliasMap.get("acme-corp/api");
+    const alias2 = result.aliasMap.get("bigco/api");
 
     // Org prefixes should be unique: "a" vs "b"
     expect(alias1).toBe("a/a");
@@ -223,14 +223,14 @@ describe("buildOrgAwareAliases", () => {
     ]);
 
     // dashboard collides → org-prefixed aliases with slash
-    const dashAlias1 = result.aliasMap.get("org1:dashboard");
-    const dashAlias2 = result.aliasMap.get("org2:dashboard");
+    const dashAlias1 = result.aliasMap.get("org1/dashboard");
+    const dashAlias2 = result.aliasMap.get("org2/dashboard");
     expect(dashAlias1).toContain("/");
     expect(dashAlias2).toContain("/");
     expect(dashAlias1).not.toBe(dashAlias2);
 
     // backend is unique → simple alias
-    const backendAlias = result.aliasMap.get("org1:backend");
+    const backendAlias = result.aliasMap.get("org1/backend");
     expect(backendAlias).toBe("b");
   });
 
@@ -240,13 +240,13 @@ describe("buildOrgAwareAliases", () => {
       { org: "acme", project: "spotlight-website" },
     ]);
     // Common prefix "spotlight-" is stripped internally, resulting in short aliases
-    expect(result.aliasMap.get("acme:spotlight-electron")).toBe("e");
-    expect(result.aliasMap.get("acme:spotlight-website")).toBe("w");
+    expect(result.aliasMap.get("acme/spotlight-electron")).toBe("e");
+    expect(result.aliasMap.get("acme/spotlight-website")).toBe("w");
   });
 
   test("handles single project", () => {
     const result = buildOrgAwareAliases([{ org: "acme", project: "frontend" }]);
-    expect(result.aliasMap.get("acme:frontend")).toBe("f");
+    expect(result.aliasMap.get("acme/frontend")).toBe("f");
   });
 
   test("collision with similar org names uses longer prefixes", () => {
@@ -255,8 +255,8 @@ describe("buildOrgAwareAliases", () => {
       { org: "organization2", project: "app" },
     ]);
 
-    const alias1 = result.aliasMap.get("organization1:app");
-    const alias2 = result.aliasMap.get("organization2:app");
+    const alias1 = result.aliasMap.get("organization1/app");
+    const alias2 = result.aliasMap.get("organization2/app");
 
     // Both orgs start with "organization", so prefixes need to be longer
     expect(alias1).not.toBe(alias2);
@@ -274,10 +274,10 @@ describe("buildOrgAwareAliases", () => {
     ]);
 
     // All four should have org-prefixed aliases with slash
-    expect(result.aliasMap.get("org1:api")).toContain("/");
-    expect(result.aliasMap.get("org2:api")).toContain("/");
-    expect(result.aliasMap.get("org1:web")).toContain("/");
-    expect(result.aliasMap.get("org2:web")).toContain("/");
+    expect(result.aliasMap.get("org1/api")).toContain("/");
+    expect(result.aliasMap.get("org2/api")).toContain("/");
+    expect(result.aliasMap.get("org1/web")).toContain("/");
+    expect(result.aliasMap.get("org2/web")).toContain("/");
 
     // All should be unique
     const aliases = [...result.aliasMap.values()];
@@ -300,8 +300,8 @@ describe("buildOrgAwareAliases", () => {
     expect(uniqueAliases.size).toBe(4);
 
     // api and app should have different project prefixes (not both "a")
-    const org1Api = result.aliasMap.get("org1:api");
-    const org1App = result.aliasMap.get("org1:app");
+    const org1Api = result.aliasMap.get("org1/api");
+    const org1App = result.aliasMap.get("org1/app");
     expect(org1Api).not.toBe(org1App);
 
     // Project prefixes should distinguish api vs app

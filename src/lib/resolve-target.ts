@@ -27,10 +27,6 @@ import {
 } from "./dsn/index.js";
 import { AuthError, ContextError } from "./errors.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Resolved organization and project target for API calls.
  */
@@ -96,10 +92,6 @@ export type ResolveOrgOptions = {
   /** Current working directory for DSN detection */
   cwd: string;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DSN-based Resolution
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Resolve organization and project from DSN detection.
@@ -439,10 +431,6 @@ export async function resolveAllTargets(
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Full Resolution Chain
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Resolve organization and project from multiple sources.
  *
@@ -533,19 +521,34 @@ export async function resolveOrg(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Positional Argument Parsing
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Discriminated union type values for `ParsedOrgProject`.
+ * Use these constants instead of string literals for type safety.
+ */
+export const ProjectSpecificationType = {
+  /** Explicit org/project provided (e.g., "sentry/cli") */
+  Explicit: "explicit",
+  /** Org with trailing slash for all projects (e.g., "sentry/") */
+  OrgAll: "org-all",
+  /** Project slug only, search across all orgs (e.g., "cli") */
+  ProjectSearch: "project-search",
+  /** No input, auto-detect from DSN/config */
+  AutoDetect: "auto-detect",
+} as const;
 
 /**
  * Parsed result from an org/project positional argument.
  * Discriminated union based on the `type` field.
  */
 export type ParsedOrgProject =
-  | { type: "explicit"; org: string; project: string }
-  | { type: "org-all"; org: string }
-  | { type: "project-search"; projectSlug: string }
-  | { type: "auto-detect" };
+  | {
+      type: typeof ProjectSpecificationType.Explicit;
+      org: string;
+      project: string;
+    }
+  | { type: typeof ProjectSpecificationType.OrgAll; org: string }
+  | { type: typeof ProjectSpecificationType.ProjectSearch; projectSlug: string }
+  | { type: typeof ProjectSpecificationType.AutoDetect };
 
 /**
  * Parse an org/project positional argument string.
@@ -554,6 +557,7 @@ export type ParsedOrgProject =
  * - `undefined` or empty → auto-detect from DSN/config
  * - `sentry/cli` → explicit org and project
  * - `sentry/` → org with all projects
+ * - `/cli` → search for project across all orgs (leading slash)
  * - `cli` → search for project across all orgs
  *
  * @param arg - Input string from CLI positional argument
@@ -563,6 +567,7 @@ export type ParsedOrgProject =
  * parseOrgProjectArg(undefined)     // { type: "auto-detect" }
  * parseOrgProjectArg("sentry/cli")  // { type: "explicit", org: "sentry", project: "cli" }
  * parseOrgProjectArg("sentry/")     // { type: "org-all", org: "sentry" }
+ * parseOrgProjectArg("/cli")        // { type: "project-search", projectSlug: "cli" }
  * parseOrgProjectArg("cli")         // { type: "project-search", projectSlug: "cli" }
  */
 export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
@@ -578,8 +583,8 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     const project = trimmed.slice(slashIndex + 1);
 
     if (!org) {
-      // "/cli" is invalid - treat as auto-detect with warning
-      return { type: "auto-detect" };
+      // "/cli" → search for project across all orgs
+      return { type: "project-search", projectSlug: project };
     }
 
     if (!project) {

@@ -150,7 +150,7 @@ type AliasMapResult = {
  *   frontend, functions, backend → fr, fu, b
  *
  * Cross-org collision example:
- *   org1:dashboard, org2:dashboard → o1/d, o2/d
+ *   org1/dashboard, org2/dashboard → o1/d, o2/d
  */
 function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
   const entries: Record<string, ProjectAliasEntry> = {};
@@ -164,7 +164,7 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
 
   // Build entries record for storage
   for (const result of results) {
-    const key = `${result.target.org}:${result.target.project}`;
+    const key = `${result.target.org}/${result.target.project}`;
     const alias = aliasMap.get(key);
     if (alias) {
       entries[alias] = {
@@ -191,7 +191,7 @@ function attachFormatOptions(
 ): IssueWithOptions[] {
   return results.flatMap((result) =>
     result.issues.map((issue) => {
-      const key = `${result.target.org}:${result.target.project}`;
+      const key = `${result.target.org}/${result.target.project}`;
       const alias = aliasMap.get(key);
       return {
         issue,
