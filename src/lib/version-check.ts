@@ -27,8 +27,10 @@ const SUPPRESSED_ARGS = new Set(["upgrade", "--version", "-V"]);
 /**
  * Determine if we should check for updates based on time since last check.
  * Uses probabilistic approach: probability increases as we approach/pass the interval.
+ *
+ * @internal Exported for testing
  */
-function shouldCheckForUpdate(lastChecked: number | null): boolean {
+export function shouldCheckForUpdate(lastChecked: number | null): boolean {
   if (lastChecked === null) {
     return true;
   }
