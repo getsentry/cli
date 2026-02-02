@@ -11,10 +11,10 @@ import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
-  getDefaultBaseUrl,
   isMultiRegionEnabled,
   resolveOrgRegion,
 } from "../../src/lib/region.js";
+import { getSentryBaseUrl } from "../../src/lib/sentry-urls.js";
 
 const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
 
@@ -37,15 +37,15 @@ afterEach(() => {
   delete process.env.SENTRY_URL;
 });
 
-describe("getDefaultBaseUrl", () => {
+describe("getSentryBaseUrl", () => {
   test("returns sentry.io by default", () => {
     delete process.env.SENTRY_URL;
-    expect(getDefaultBaseUrl()).toBe("https://sentry.io");
+    expect(getSentryBaseUrl()).toBe("https://sentry.io");
   });
 
   test("respects SENTRY_URL env var", () => {
     process.env.SENTRY_URL = "https://sentry.mycompany.com";
-    expect(getDefaultBaseUrl()).toBe("https://sentry.mycompany.com");
+    expect(getSentryBaseUrl()).toBe("https://sentry.mycompany.com");
   });
 });
 

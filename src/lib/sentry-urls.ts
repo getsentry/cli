@@ -5,7 +5,7 @@
  * Supports self-hosted instances via SENTRY_URL environment variable.
  */
 
-const DEFAULT_SENTRY_URL = "https://sentry.io";
+import { DEFAULT_SENTRY_HOST, DEFAULT_SENTRY_URL } from "./constants.js";
 
 /**
  * Get the Sentry web base URL.
@@ -13,6 +13,27 @@ const DEFAULT_SENTRY_URL = "https://sentry.io";
  */
 export function getSentryBaseUrl(): string {
   return process.env.SENTRY_URL ?? DEFAULT_SENTRY_URL;
+}
+
+/**
+ * Check if a URL is a Sentry SaaS domain.
+ *
+ * Used to determine if multi-region support should be enabled and to
+ * validate region URLs before sending authenticated requests.
+ *
+ * @param url - URL string to validate
+ * @returns true if the hostname is sentry.io or a subdomain of sentry.io
+ */
+export function isSentrySaasUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname === DEFAULT_SENTRY_HOST ||
+      parsed.hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
