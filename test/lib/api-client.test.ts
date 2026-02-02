@@ -565,6 +565,175 @@ describe("rawApiRequest", () => {
   });
 });
 
-// Note: findProjectsBySlug() is tested via E2E tests in test/e2e/issue.test.ts
-// since it requires complex multi-region API mocking that is better handled
-// by the mock server infrastructure.
+describe("findProjectsBySlug", () => {
+  test("returns matching projects from multiple orgs", async () => {
+    // Import dynamically inside test to allow mocking
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+    const requests: Request[] = [];
+
+    // Mock the regions endpoint first, then org/project requests
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requests.push(req);
+      const url = req.url;
+
+      // Regions endpoint - return single region to simplify test
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Organizations list
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "acme", name: "Acme Corp" },
+            { id: "2", slug: "beta", name: "Beta Inc" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Projects for acme org - has matching project
+      if (url.includes("/organizations/acme/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "101", slug: "frontend", name: "Frontend" },
+            { id: "102", slug: "backend", name: "Backend" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Projects for beta org - also has matching project
+      if (url.includes("/organizations/beta/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "201", slug: "frontend", name: "Beta Frontend" },
+            { id: "202", slug: "api", name: "API" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Default response
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const results = await findProjectsBySlug("frontend");
+
+    expect(results).toHaveLength(2);
+    expect(results[0].slug).toBe("frontend");
+    expect(results[0].orgSlug).toBe("acme");
+    expect(results[1].slug).toBe("frontend");
+    expect(results[1].orgSlug).toBe("beta");
+  });
+
+  test("returns empty array when no projects match", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Regions endpoint
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Organizations list
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme Corp" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Projects - no match
+      if (url.includes("/organizations/acme/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "101", slug: "backend", name: "Backend" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const results = await findProjectsBySlug("nonexistent");
+
+    expect(results).toHaveLength(0);
+  });
+
+  test("skips orgs where user lacks access (403)", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Regions endpoint
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Organizations list
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "acme", name: "Acme Corp" },
+            { id: "2", slug: "restricted", name: "Restricted Org" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Projects for acme - success
+      if (url.includes("/organizations/acme/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "101", slug: "frontend", name: "Frontend" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Projects for restricted org - 403 forbidden
+      if (url.includes("/organizations/restricted/projects/")) {
+        return new Response(JSON.stringify({ detail: "Forbidden" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Should not throw, should just skip the restricted org
+    const results = await findProjectsBySlug("frontend");
+
+    expect(results).toHaveLength(1);
+    expect(results[0].orgSlug).toBe("acme");
+  });
+});
