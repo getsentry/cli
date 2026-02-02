@@ -82,7 +82,7 @@ describe("getUpdateNotification", () => {
     expect(notification).not.toBeNull();
     expect(notification).toContain("Update available:");
     expect(notification).toContain("99.0.0");
-    expect(notification).toContain("sentry upgrade");
+    expect(notification).toContain("sentry cli upgrade");
   });
 });
 
