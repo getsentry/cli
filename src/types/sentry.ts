@@ -210,7 +210,7 @@ export const SentryIssueSchema = z
     level: z.string().optional(),
     status: z.enum(ISSUE_STATUSES).optional(),
     statusDetails: z.record(z.unknown()).optional(),
-    substatus: z.string().optional(),
+    substatus: z.string().optional().nullable(),
     priority: z.string().optional(),
     isPublic: z.boolean().optional(),
     platform: z.string().optional(),
