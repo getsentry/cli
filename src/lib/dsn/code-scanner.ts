@@ -21,10 +21,6 @@ import pLimit from "p-limit";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Maximum file size to scan (256KB).
  * Files larger than this are skipped as they're unlikely to be source files
@@ -162,10 +158,6 @@ const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
 const DSN_PATTERN =
   /https?:\/\/[a-z0-9]+@[a-z0-9.-]+(?:\.sentry\.io|:[0-9]+)\/\d+/gi;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Options for collecting files to scan.
  */
@@ -179,10 +171,6 @@ type CollectFilesOptions = {
   /** Current depth level */
   depth: number;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Extract all DSN URLs from file content, filtering out commented lines.
@@ -257,10 +245,6 @@ export function extractFirstDsnFromContent(content: string): string | null {
   return dsns[0] ?? null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal: Line Processing
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Check if a line is commented out based on common comment prefixes.
  */
@@ -306,10 +290,6 @@ function isValidDsnHost(dsn: string): boolean {
 
   return false;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal: File Collection
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Load .gitignore from a directory and create an ignore instance.
@@ -385,10 +365,6 @@ async function collectFiles(options: CollectFilesOptions): Promise<string[]> {
 
   return files;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal: File Processing
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Process a single file and extract DSNs.
@@ -496,10 +472,6 @@ async function scanFilesForDsns(
 
   return { results, filesScanned };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal: Main Scanner
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Main scan implementation with Sentry performance tracing.
