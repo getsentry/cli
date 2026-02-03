@@ -179,7 +179,10 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   writeLogs(stdout, chronologicalInitial, flags.json);
 
   // Track newest timestamp (logs are sorted -timestamp, so first is newest)
-  let lastTimestamp = initialLogs[0]?.timestamp_precise ?? 0;
+  // Use current time as fallback to avoid fetching old logs when initial fetch is empty
+  // (timestamp_precise is in nanoseconds, Date.now() is milliseconds)
+  let lastTimestamp =
+    initialLogs[0]?.timestamp_precise ?? Date.now() * 1_000_000;
 
   // Poll for new logs indefinitely
   while (true) {
