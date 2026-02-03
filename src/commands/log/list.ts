@@ -5,6 +5,8 @@
  * Supports real-time streaming with --follow flag.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
@@ -212,10 +214,12 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
         lastTimestamp = newestLog.timestamp_precise;
       }
     } catch (error) {
-      if (!flags.json) {
-        const message = error instanceof Error ? error.message : String(error);
-        stderr.write(`Error fetching logs: ${message}\n`);
-      }
+      // Report to Sentry for visibility into polling failures
+      Sentry.captureException(error);
+
+      // Always write to stderr (doesn't interfere with JSON on stdout)
+      const message = error instanceof Error ? error.message : String(error);
+      stderr.write(`Error fetching logs: ${message}\n`);
       // Continue polling even on errors
     }
   }
