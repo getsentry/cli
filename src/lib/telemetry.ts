@@ -289,3 +289,34 @@ export function withSerializeSpan<T>(operation: string, fn: () => T): T {
     fn
   );
 }
+
+/** Possible outcomes for Seer commands */
+export type SeerOutcome =
+  | "success"
+  | "timeout"
+  | "failed"
+  | "no_budget"
+  | "no_solution"
+  | "not_enabled"
+  | "ai_disabled";
+
+/**
+ * Track Seer command outcome metrics.
+ *
+ * Increments a counter metric for Seer command outcomes to understand
+ * success/failure patterns across explain and plan commands.
+ *
+ * @param command - The Seer command (explain or plan)
+ * @param outcome - The outcome type (success, timeout, failed, etc.)
+ */
+export function trackSeerOutcome(
+  command: "explain" | "plan",
+  outcome: SeerOutcome
+): void {
+  Sentry.metrics.count("seer.command.outcome", 1, {
+    attributes: {
+      command,
+      outcome,
+    },
+  });
+}

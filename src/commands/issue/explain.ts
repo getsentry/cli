@@ -10,15 +10,13 @@ import {
   getAutofixState,
   triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
-import { ApiError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
-import {
-  formatRootCauseList,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { formatRootCauseList } from "../../lib/formatters/seer.js";
+import { trackSeerOutcome } from "../../lib/telemetry.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   buildCommandHint,
+  handleSeerCommandError,
   type IssueIdFlags,
   issueIdFlags,
   issueIdPositional,
@@ -120,11 +118,15 @@ export const explainCommand = buildCommand({
       // 4. Extract root causes from steps
       const causes = extractRootCauses(state);
       if (causes.length === 0) {
+        trackSeerOutcome("explain", "no_solution");
         throw new Error(
           "Analysis completed but no root causes found. " +
             "The issue may not have enough context for root cause analysis."
         );
       }
+
+      // Track successful outcome
+      trackSeerOutcome("explain", "success");
 
       // 5. Output results
       if (flags.json) {
@@ -140,11 +142,7 @@ export const explainCommand = buildCommand({
         `To create a plan, run: sentry issue plan ${issueId}`
       );
     } catch (error) {
-      // Handle API errors with friendly messages
-      if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-      }
-      throw error;
+      throw handleSeerCommandError(error, "explain", resolvedOrg);
     }
   },
 });

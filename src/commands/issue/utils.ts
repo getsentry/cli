@@ -12,8 +12,16 @@ import {
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
-import { ApiError, CliError, ContextError } from "../../lib/errors.js";
-import { getProgressMessage } from "../../lib/formatters/seer.js";
+import {
+  ApiError,
+  CliError,
+  ContextError,
+  SeerError,
+} from "../../lib/errors.js";
+import {
+  getProgressMessage,
+  handleSeerApiError,
+} from "../../lib/formatters/seer.js";
 import {
   expandToFullShortId,
   isShortId,
@@ -22,6 +30,7 @@ import {
 } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { type SeerOutcome, trackSeerOutcome } from "../../lib/telemetry.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
 
@@ -291,6 +300,46 @@ export async function resolveOrgAndIssueId(
     throw new ContextError("Organization", options.commandHint);
   }
   return { org: result.org, issueId: result.issue.id };
+}
+
+/**
+ * Handle and track errors from Seer commands.
+ *
+ * Converts ApiErrors to Seer-specific errors when applicable and
+ * tracks the appropriate telemetry outcome. For timeout errors,
+ * tracks the timeout outcome.
+ *
+ * @param error - The caught error
+ * @param command - The Seer command for telemetry
+ * @param orgSlug - Organization slug for error context
+ * @returns The error to throw (transformed if needed)
+ */
+export function handleSeerCommandError(
+  error: unknown,
+  command: "explain" | "plan",
+  orgSlug: string | undefined
+): Error {
+  // Handle API errors with friendly messages
+  if (error instanceof ApiError) {
+    const seerError = handleSeerApiError(error.status, error.detail, orgSlug);
+    // Track Seer-specific errors vs generic failures
+    const outcome: SeerOutcome =
+      seerError instanceof SeerError ? seerError.reason : "failed";
+    trackSeerOutcome(command, outcome);
+    return seerError;
+  }
+
+  // Track timeout errors from polling
+  if (error instanceof Error && error.message.includes("timed out")) {
+    trackSeerOutcome(command, "timeout");
+    return error;
+  }
+
+  // Re-throw unknown errors without tracking
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(String(error));
 }
 
 type PollAutofixOptions = {

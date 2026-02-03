@@ -11,13 +11,11 @@ import {
   getAutofixState,
   triggerSolutionPlanning,
 } from "../../lib/api-client.js";
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import { ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
-import {
-  formatSolution,
-  handleSeerApiError,
-} from "../../lib/formatters/seer.js";
+import { formatSolution } from "../../lib/formatters/seer.js";
+import { trackSeerOutcome } from "../../lib/telemetry.js";
 import {
   type AutofixState,
   extractRootCauses,
@@ -26,6 +24,7 @@ import {
 } from "../../types/seer.js";
 import {
   buildCommandHint,
+  handleSeerCommandError,
   type IssueIdFlags,
   issueIdFlags,
   issueIdPositional,
@@ -219,12 +218,14 @@ export const planCommand = buildCommand({
 
       // Handle errors
       if (finalState.status === "ERROR") {
+        trackSeerOutcome("plan", "failed");
         throw new Error(
           "Plan creation failed. Check the Sentry web UI for details."
         );
       }
 
       if (finalState.status === "CANCELLED") {
+        trackSeerOutcome("plan", "failed");
         throw new Error("Plan creation was cancelled.");
       }
 
@@ -233,6 +234,8 @@ export const planCommand = buildCommand({
 
       // Output results
       if (flags.json) {
+        // Track outcome based on whether solution was found
+        trackSeerOutcome("plan", solution ? "success" : "no_solution");
         writeJson(stdout, {
           run_id: finalState.run_id,
           status: finalState.status,
@@ -243,19 +246,17 @@ export const planCommand = buildCommand({
 
       // Human-readable output
       if (solution) {
+        trackSeerOutcome("plan", "success");
         const lines = formatSolution(solution);
         stdout.write(`${lines.join("\n")}\n`);
       } else {
+        trackSeerOutcome("plan", "no_solution");
         stderr.write(
           "No solution found. Check the Sentry web UI for details.\n"
         );
       }
     } catch (error) {
-      // Handle API errors with friendly messages
-      if (error instanceof ApiError) {
-        throw handleSeerApiError(error.status, error.detail, resolvedOrg);
-      }
-      throw error;
+      throw handleSeerCommandError(error, "plan", resolvedOrg);
     }
   },
 });
