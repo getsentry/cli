@@ -10,23 +10,16 @@ import {
   getIssue,
   getIssueByShortId,
 } from "../../lib/api-client.js";
+import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
-import { CliError, ContextError } from "../../lib/errors.js";
+import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
-import {
-  expandToFullShortId,
-  isShortSuffix,
-  parseIssueArg,
-  splitProjectSuffix,
-} from "../../lib/issue-id.js";
+import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
-
-/** Pattern to detect numeric IDs */
-const NUMERIC_PATTERN = /^\d+$/;
 
 /** Shared positional parameter for issue ID */
 export const issueIdPositional = {
@@ -106,18 +99,35 @@ async function tryResolveFromAlias(
 }
 
 /**
- * Search for a project by slug across all orgs, then fetch the issue.
+ * Resolve project-search type: search for project across orgs, then fetch issue.
  *
- * @param projectSlug - Project slug to search for (lowercase)
- * @param suffix - Issue suffix to expand (uppercase)
+ * Resolution order:
+ * 1. Try alias cache (fast, local)
+ * 2. Search for project across orgs via API
+ *
+ * @param projectSlug - Project slug to search for
+ * @param suffix - Issue suffix (uppercase)
+ * @param cwd - Current working directory
  * @param commandHint - Hint for error messages
  */
-async function resolveByProjectSearch(
+async function resolveProjectSearch(
   projectSlug: string,
   suffix: string,
+  cwd: string,
   commandHint: string
 ): Promise<StrictResolvedIssue> {
-  const projects = await findProjectsBySlug(projectSlug);
+  // 1. Try alias cache first (fast, local lookup)
+  const aliasResult = await tryResolveFromAlias(
+    projectSlug.toLowerCase(),
+    suffix,
+    cwd
+  );
+  if (aliasResult) {
+    return aliasResult;
+  }
+
+  // 2. Search for project across all accessible orgs
+  const projects = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
     throw new ContextError(`Project '${projectSlug}' not found`, commandHint, [
@@ -139,22 +149,22 @@ async function resolveByProjectSearch(
 
   const project = projects[0];
   if (!project) {
-    // This should never happen given the length check above
     throw new ContextError(`Project '${projectSlug}' not found`, commandHint);
   }
+
   const fullShortId = expandToFullShortId(suffix, project.slug);
   const issue = await getIssueByShortId(project.orgSlug, fullShortId);
   return { org: project.orgSlug, issue };
 }
 
 /**
- * Resolve a suffix-only issue ID using DSN detection for project context.
+ * Resolve suffix-only type using DSN detection for project context.
  *
- * @param suffix - The issue suffix (e.g., "G", "4Y")
+ * @param suffix - The issue suffix (uppercase)
  * @param cwd - Current working directory for DSN detection
  * @param commandHint - Hint for error messages
  */
-async function resolveSuffixWithDsn(
+async function resolveSuffixOnly(
   suffix: string,
   cwd: string,
   commandHint: string
@@ -172,130 +182,30 @@ async function resolveSuffixWithDsn(
 }
 
 /**
- * Resolve a "has-dash" format issue ID.
+ * Resolve explicit-org-suffix type: org provided, need project from DSN.
  *
- * Resolution order:
- * 1. Try alias cache (fast, local)
- * 2. Search for project across orgs
- * 3. Error if project not found
- *
- * @param value - The issue ID with dash (e.g., "cli-G", "EXTENSION-7")
+ * @param org - Explicit organization slug
+ * @param suffix - Issue suffix (uppercase)
  * @param cwd - Current working directory
  * @param commandHint - Hint for error messages
  */
-async function resolveHasDash(
-  value: string,
-  cwd: string,
-  commandHint: string
-): Promise<StrictResolvedIssue> {
-  const { project, suffix } = splitProjectSuffix(value);
-
-  // 1. Try alias cache first (fast, local lookup)
-  const aliasResult = await tryResolveFromAlias(project, suffix, cwd);
-  if (aliasResult) {
-    return aliasResult;
-  }
-
-  // 2. Search for project across all accessible orgs
-  return resolveByProjectSearch(project, suffix, commandHint);
-}
-
-/**
- * Resolve a suffix-only issue ID.
- *
- * Resolution order:
- * 1. Try alias cache (in case suffix is part of an alias like "f")
- * 2. Use DSN detection for project context
- * 3. Error if no context
- *
- * Note: Single-char suffixes might match aliases from `issue list`.
- *
- * @param suffix - The issue suffix (e.g., "G", "4Y")
- * @param cwd - Current working directory
- * @param commandHint - Hint for error messages
- */
-function resolveSuffixOnly(
+async function resolveExplicitOrgSuffix(
+  org: string,
   suffix: string,
   cwd: string,
   commandHint: string
 ): Promise<StrictResolvedIssue> {
-  // Suffix-only means we need project context from DSN detection
-  return resolveSuffixWithDsn(suffix.toUpperCase(), cwd, commandHint);
-}
-
-/**
- * Resolve with explicit org prefix.
- *
- * The "rest" after org/ can be:
- * - A project-suffix format: "cli-G" → org + project + suffix
- * - A direct short ID: "EXTENSION-7" → fetch directly from org
- * - A suffix only: "G" → use DSN for project, explicit org
- * - A numeric ID: "123456" → fetch directly
- *
- * @param org - The explicit organization slug
- * @param rest - The remainder after "org/"
- * @param cwd - Current working directory
- * @param commandHint - Hint for error messages
- */
-async function resolveWithExplicitOrg(
-  org: string,
-  rest: string,
-  cwd: string,
-  commandHint: string
-): Promise<StrictResolvedIssue> {
-  // Check if rest is numeric
-  if (NUMERIC_PATTERN.test(rest)) {
-    const issue = await getIssue(rest);
-    return { org, issue };
-  }
-
-  // Check if rest has a dash (could be project-suffix or short ID)
-  if (rest.includes("-")) {
-    const { project, suffix } = splitProjectSuffix(rest);
-
-    // Try alias cache first
-    const aliasResult = await tryResolveFromAlias(project, suffix, cwd);
-    if (aliasResult) {
-      // Alias found but user specified org - use their org
-      const fullShortId = expandToFullShortId(
-        suffix,
-        aliasResult.issue.project?.slug ?? project
-      );
-      const issue = await getIssueByShortId(org, fullShortId);
-      return { org, issue };
-    }
-
-    // Try as project-suffix within the specified org
-    try {
-      const fullShortId = expandToFullShortId(suffix, project);
-      const issue = await getIssueByShortId(org, fullShortId);
-      return { org, issue };
-    } catch (error) {
-      // If not found as project-suffix, try as literal short ID
-      if (error instanceof CliError) {
-        try {
-          const issue = await getIssueByShortId(org, rest.toUpperCase());
-          return { org, issue };
-        } catch {
-          throw error; // Throw original error
-        }
-      }
-      throw error;
-    }
-  }
-
-  // Suffix only - expand with DSN-detected project or error
   const target = await resolveOrgAndProject({ cwd });
   if (target) {
-    const fullShortId = expandToFullShortId(rest, target.project);
+    const fullShortId = expandToFullShortId(suffix, target.project);
     const issue = await getIssueByShortId(org, fullShortId);
     return { org, issue };
   }
 
   throw new ContextError(
-    `Cannot resolve suffix '${rest}' without project context`,
+    `Cannot resolve suffix '${suffix}' without project context`,
     commandHint,
-    [`Specify the project: sentry issue ... ${org}/<project>-${rest}`]
+    [`Specify the project: sentry issue ... ${org}/<project>-${suffix}`]
   );
 }
 
@@ -314,12 +224,13 @@ export type ResolveIssueOptions = {
 /**
  * Resolve an issue ID to organization slug and full issue object.
  *
- * Supports all issue ID formats:
- * - Org-prefixed: "sentry/EXTENSION-7", "sentry/cli-G"
- * - Project-suffix: "cli-G", "spotlight-electron-4Y"
- * - Short ID: "CLI-G", "EXTENSION-7" (treated as project-suffix)
- * - Suffix only: "G", "4Y" (requires DSN context)
- * - Numeric: "123456789" (direct fetch)
+ * Supports all issue ID formats (now parsed by parseIssueArg in arg-parsing.ts):
+ * - explicit: "sentry/cli-G" → org + project + suffix
+ * - explicit-org-suffix: "sentry/G" → org + suffix (needs DSN for project)
+ * - explicit-org-numeric: "sentry/123456789" → org + numeric ID
+ * - project-search: "cli-G" → search for project across orgs
+ * - suffix-only: "G" (requires DSN context)
+ * - numeric: "123456789" (direct fetch, no org)
  *
  * @param options - Resolution options
  * @returns Object with org slug and full issue
@@ -333,19 +244,46 @@ export async function resolveIssue(
   const commandHint = buildCommandHint(command, issueArg);
 
   switch (parsed.type) {
-    case "explicit-org":
-      return resolveWithExplicitOrg(parsed.org, parsed.rest, cwd, commandHint);
-
-    case "has-dash":
-      return resolveHasDash(parsed.value, cwd, commandHint);
-
-    case "suffix-only":
-      return resolveSuffixOnly(parsed.suffix, cwd, commandHint);
-
     case "numeric": {
+      // Direct fetch by numeric ID - no org context
       const issue = await getIssue(parsed.id);
       return { org: undefined, issue };
     }
+
+    case "explicit": {
+      // Full context: org + project + suffix
+      const fullShortId = expandToFullShortId(parsed.suffix, parsed.project);
+      const issue = await getIssueByShortId(parsed.org, fullShortId);
+      return { org: parsed.org, issue };
+    }
+
+    case "explicit-org-numeric": {
+      // Org + numeric ID
+      const issue = await getIssue(parsed.numericId);
+      return { org: parsed.org, issue };
+    }
+
+    case "explicit-org-suffix":
+      // Org + suffix only - need DSN for project
+      return resolveExplicitOrgSuffix(
+        parsed.org,
+        parsed.suffix,
+        cwd,
+        commandHint
+      );
+
+    case "project-search":
+      // Project slug + suffix - search across orgs
+      return resolveProjectSearch(
+        parsed.projectSlug,
+        parsed.suffix,
+        cwd,
+        commandHint
+      );
+
+    case "suffix-only":
+      // Just suffix - need DSN for org and project
+      return resolveSuffixOnly(parsed.suffix, cwd, commandHint);
 
     default: {
       // Exhaustive check - this should never be reached
