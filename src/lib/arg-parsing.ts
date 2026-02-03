@@ -6,6 +6,8 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
+import { isNumericId } from "./issue-id.js";
+
 /**
  * Type constants for project specification patterns.
  * Use these constants instead of string literals for type safety.
@@ -85,13 +87,6 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   return { type: "project-search", projectSlug: trimmed };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Issue Argument Parsing
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Pattern to detect numeric IDs (pure digits) */
-const NUMERIC_ID_PATTERN = /^\d+$/;
-
 /**
  * Parsed issue argument types - flattened for ergonomics.
  *
@@ -139,7 +134,7 @@ export type ParsedIssueArg =
  */
 export function parseIssueArg(arg: string): ParsedIssueArg {
   // 1. Pure numeric → direct fetch by ID
-  if (NUMERIC_ID_PATTERN.test(arg)) {
+  if (isNumericId(arg)) {
     return { type: "numeric", id: arg };
   }
 
@@ -148,6 +143,13 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     const lastDash = arg.lastIndexOf("-");
     const leftPart = arg.slice(0, lastDash);
     const suffix = arg.slice(lastDash + 1).toUpperCase();
+
+    // Reject trailing dash (empty suffix)
+    if (!suffix) {
+      throw new Error(
+        `Invalid issue format: "${arg}". Missing suffix after dash.`
+      );
+    }
 
     const target = parseOrgProjectArg(leftPart);
 
@@ -197,12 +199,19 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     const org = arg.slice(0, slashIdx);
     const rest = arg.slice(slashIdx + 1);
 
+    // Reject empty suffix after slash (e.g., "org/" or "/")
+    if (!rest) {
+      throw new Error(
+        `Invalid issue format: "${arg}". Missing issue ID after slash.`
+      );
+    }
+
     if (!org) {
       // "/G" → treat as suffix-only (unusual but valid)
       return { type: "suffix-only", suffix: rest.toUpperCase() };
     }
 
-    if (NUMERIC_ID_PATTERN.test(rest)) {
+    if (isNumericId(rest)) {
       // "sentry/123456789" → explicit org + numeric ID
       return { type: "explicit-org-numeric", org, numericId: rest };
     }

@@ -185,6 +185,26 @@ describe("parseIssueArg", () => {
         "Missing project before suffix"
       );
     });
+
+    test("trailing dash (empty suffix) throws error", () => {
+      expect(() => parseIssueArg("cli-")).toThrow("Missing suffix after dash");
+    });
+
+    test("org/project with trailing dash (empty suffix) throws error", () => {
+      expect(() => parseIssueArg("sentry/cli-")).toThrow(
+        "Missing suffix after dash"
+      );
+    });
+
+    test("org with trailing slash (empty issue ID) throws error", () => {
+      expect(() => parseIssueArg("sentry/")).toThrow(
+        "Missing issue ID after slash"
+      );
+    });
+
+    test("just slash throws error", () => {
+      expect(() => parseIssueArg("/")).toThrow("Missing issue ID after slash");
+    });
   });
 
   describe("edge cases", () => {
