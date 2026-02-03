@@ -276,6 +276,15 @@ function isCommentedLine(trimmedLine: string): boolean {
 let hasWarnedInvalidSentryUrl = false;
 
 /**
+ * Reset the invalid SENTRY_URL warning state.
+ * Exported for testing only - allows tests to reset state between runs.
+ * @internal
+ */
+export function _resetInvalidSentryUrlWarning(): void {
+  hasWarnedInvalidSentryUrl = false;
+}
+
+/**
  * Get the expected Sentry host for DSN validation.
  *
  * When SENTRY_URL is set (self-hosted), only DSNs matching that host are valid.

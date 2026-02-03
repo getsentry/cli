@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  _resetInvalidSentryUrlWarning,
   extractDsnsFromContent,
   extractFirstDsnFromContent,
   scanCodeForDsns,
@@ -18,6 +19,7 @@ describe("Code Scanner", () => {
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.SENTRY_URL;
+    _resetInvalidSentryUrlWarning();
   });
 
   describe("extractDsnsFromContent", () => {

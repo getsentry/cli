@@ -172,34 +172,44 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Verify cached DSN is still valid by reading ONLY the cached source file
- *
- * This is the key to fast cache hits - we only read ONE file.
- *
- * @param cwd - Directory
- * @param cached - Cached DSN entry
- * @returns Verified DSN or null if cache is invalid
+ * Check if a higher-priority code DSN exists.
+ * Used to invalidate low-priority cached DSNs when code is added.
  */
-async function verifyCachedDsn(
+function checkForHigherPriorityCodeDsn(
+  cwd: string
+): Promise<DetectedDsn | null> {
+  return scanCodeForFirstDsn(cwd);
+}
+
+/**
+ * Verify cached env var DSN is still valid.
+ * Also checks for higher-priority code DSNs.
+ */
+async function verifyEnvVarCache(
   cwd: string,
   cached: CachedDsnEntry
 ): Promise<DetectedDsn | null> {
-  // For env source, verify by checking the env var directly (no file to read)
-  if (cached.source === "env") {
-    const envDsn = detectFromEnv();
-    if (envDsn && envDsn.raw === cached.dsn) {
-      // Same DSN in env var - cache is valid
-      return envDsn;
-    }
-    if (envDsn) {
-      // DSN changed - return new one (cache will be updated by caller)
-      return envDsn;
-    }
-    // Env var no longer set - cache is invalid
-    return null;
+  // First check if a code DSN exists (higher priority than env var)
+  const codeDsn = await checkForHigherPriorityCodeDsn(cwd);
+  if (codeDsn) {
+    return codeDsn;
   }
 
-  // Need a source path to verify file-based sources
+  // No code DSN, verify the env var is still set
+  const envDsn = detectFromEnv();
+  if (envDsn?.raw === cached.dsn) {
+    return envDsn; // Same DSN - cache valid
+  }
+  return envDsn; // DSN changed or removed - return new value (may be null)
+}
+
+/**
+ * Verify cached file-based DSN is still valid.
+ */
+async function verifyFileDsnCache(
+  cwd: string,
+  cached: CachedDsnEntry
+): Promise<DetectedDsn | null> {
   if (!cached.sourcePath) {
     return null;
   }
@@ -211,19 +221,48 @@ async function verifyCachedDsn(
     const foundDsn = extractDsnFromContent(content, cached.source);
 
     if (foundDsn === cached.dsn) {
-      // Same DSN - cache is valid!
       return createDetectedDsn(cached.dsn, cached.source, cached.sourcePath);
     }
 
     if (foundDsn && parseDsn(foundDsn)) {
-      // DSN changed - return new one (cache will be updated by caller)
       return createDetectedDsn(foundDsn, cached.source, cached.sourcePath);
     }
   } catch {
-    // File doesn't exist or can't read - cache is invalid
+    // File doesn't exist or can't read
   }
 
   return null;
+}
+
+/**
+ * Verify cached DSN is still valid.
+ *
+ * For low-priority sources (env, env_file), also checks if higher-priority
+ * code DSNs have been added since caching to maintain correct priority order.
+ *
+ * @param cwd - Directory
+ * @param cached - Cached DSN entry
+ * @returns Verified DSN or null if cache is invalid
+ */
+async function verifyCachedDsn(
+  cwd: string,
+  cached: CachedDsnEntry
+): Promise<DetectedDsn | null> {
+  // Env var source (lowest priority) - check for higher-priority sources
+  if (cached.source === "env") {
+    return verifyEnvVarCache(cwd, cached);
+  }
+
+  // Env file source - check for higher-priority code DSNs first
+  if (cached.source === "env_file") {
+    const codeDsn = await checkForHigherPriorityCodeDsn(cwd);
+    if (codeDsn) {
+      return codeDsn;
+    }
+  }
+
+  // Verify file-based sources (code, env_file, config)
+  return verifyFileDsnCache(cwd, cached);
 }
 
 /**
