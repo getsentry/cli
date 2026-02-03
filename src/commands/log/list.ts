@@ -158,6 +158,9 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stderr.write("\n");
   }
 
+  // Track if header has been printed (for human mode)
+  let headerPrinted = false;
+
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
   const initialLogs = await listLogs(org, project, {
     query: flags.query,
@@ -168,6 +171,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   // Print header before initial logs (human mode only)
   if (!flags.json && initialLogs.length > 0) {
     stdout.write(formatLogsHeader());
+    headerPrinted = true;
   }
 
   // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
@@ -191,6 +195,12 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
       const newestLog = newLogs[0];
       if (newestLog) {
+        // Print header before first logs if not already printed
+        if (!(flags.json || headerPrinted)) {
+          stdout.write(formatLogsHeader());
+          headerPrinted = true;
+        }
+
         // Reverse for chronological order (oldest first for tail -f style)
         const chronologicalNew = [...newLogs].reverse();
         writeLogs(stdout, chronologicalNew, flags.json);
