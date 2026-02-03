@@ -169,6 +169,17 @@ describe("Code Scanner", () => {
       const dsns = extractDsnsFromContent(content);
       expect(dsns).toEqual(["https://abc@sentry.mycompany.com:9000/123"]);
     });
+
+    test("rejects SaaS DSNs when SENTRY_URL is set (self-hosted mode)", () => {
+      process.env.SENTRY_URL = "https://sentry.mycompany.com:9000";
+      const content = `
+        const SAAS_DSN = "https://abc@o123.ingest.sentry.io/456";
+        const SELF_HOSTED_DSN = "https://def@sentry.mycompany.com:9000/789";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      // Only the self-hosted DSN should be accepted
+      expect(dsns).toEqual(["https://def@sentry.mycompany.com:9000/789"]);
+    });
   });
 
   describe("extractFirstDsnFromContent", () => {
