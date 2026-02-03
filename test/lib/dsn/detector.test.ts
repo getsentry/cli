@@ -99,7 +99,7 @@ describe("DSN Detector (New Module)", () => {
       expect(cached?.dsn).toBe(dsn2);
     });
 
-    test("code DSN takes priority over env file", async () => {
+    test("env file DSN found during walk-up takes priority over code", async () => {
       const envFileDsn = "https://file@o111.ingest.sentry.io/111";
       const codeDsn = "https://code@o222.ingest.sentry.io/222";
 
@@ -111,10 +111,11 @@ describe("DSN Detector (New Module)", () => {
         `Sentry.init({ dsn: "${codeDsn}" })`
       );
 
-      // Should return code DSN (highest priority)
+      // With project root detection, .env files are checked during walk-up
+      // and return immediately if SENTRY_DSN is found (fastest path)
       const result = await detectDsn(testDir);
-      expect(result?.raw).toBe(codeDsn);
-      expect(result?.source).toBe("code");
+      expect(result?.raw).toBe(envFileDsn);
+      expect(result?.source).toBe("env_file");
     });
 
     test("code DSN takes priority over env var", async () => {
@@ -245,8 +246,8 @@ describe("DSN Detector (New Module)", () => {
       const result = await detectAllDsns(testDir);
 
       expect(result.hasMultiple).toBe(true);
-      // Code DSN has higher priority, so it's first
-      expect(result.primary?.raw).toBe(codeDsn);
+      // With project root detection, env file DSN found during walk-up is first
+      expect(result.primary?.raw).toBe(envDsn);
       expect(result.all).toHaveLength(2);
     });
 

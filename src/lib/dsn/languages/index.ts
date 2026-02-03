@@ -4,6 +4,8 @@
  * Unified scanner for detecting DSN from source code across all supported languages.
  * Uses a registry of language detectors to scan files by extension.
  *
+ * Scans with depth limiting (default 2 levels) to avoid deep recursion.
+ *
  * ## Adding a New Language
  *
  * 1. Create `{lang}.ts` implementing `LanguageDetector`
@@ -23,6 +25,8 @@
  */
 
 import { extname, join } from "node:path";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import { createDetectedDsn, inferPackagePath } from "../parser.js";
 import type { DetectedDsn } from "../types.js";
 import { goDetector } from "./go.js";
@@ -79,6 +83,14 @@ const allExtensions = languageDetectors.flatMap((d) => d.extensions);
 const globPattern = `**/*{${allExtensions.join(",")}}`;
 const codeGlob = new Bun.Glob(globPattern);
 
+/**
+ * Maximum depth to scan from project root.
+ * Depth 0 = files in root directory
+ * Depth 1 = files in first-level subdirectories
+ * Depth 2 = files in second-level subdirectories
+ */
+const MAX_SCAN_DEPTH = 2;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,12 +142,36 @@ export function detectAllFromCode(cwd: string): Promise<DetectedDsn[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Get the depth of a file path (number of directory levels).
+ * Files in the root have depth 0, first-level subdirs have depth 1, etc.
+ *
+ * @param filepath - Relative file path
+ * @returns Depth level (0 for root files)
+ */
+function getPathDepth(filepath: string): number {
+  const parts = filepath.split("/");
+  // Depth is number of directory parts (excluding the filename)
+  return parts.length - 1;
+}
+
+/**
  * Check if a path should be skipped during scanning.
  *
+ * Skips paths that:
+ * - Exceed the maximum scan depth
+ * - Contain a known skip directory (node_modules, dist, etc.)
+ *
  * @param filepath - Relative file path to check
- * @returns True if any path segment matches a skip directory
+ * @returns True if the path should be skipped
  */
 function shouldSkipPath(filepath: string): boolean {
+  // Check depth first (fast reject)
+  const depth = getPathDepth(filepath);
+  if (depth > MAX_SCAN_DEPTH) {
+    return true;
+  }
+
+  // Check for skip directories
   const parts = filepath.split("/");
   return parts.some((part) => allSkipDirs.has(part));
 }
@@ -175,31 +211,64 @@ async function processCodeFile(
 }
 
 /**
- * Scan code files for DSNs.
+ * Scan code files for DSNs with Sentry performance tracing.
  *
  * @param cwd - Directory to search in
  * @param stopOnFirst - Whether to stop after first match
  * @returns Array of detected DSNs
  */
-async function scanCodeFiles(
+function scanCodeFiles(
   cwd: string,
   stopOnFirst: boolean
 ): Promise<DetectedDsn[]> {
-  const results: DetectedDsn[] = [];
+  return Sentry.startSpan(
+    {
+      name: "scanCodeFiles",
+      op: "dsn.detect.code",
+      attributes: {
+        "dsn.scan_dir": cwd,
+        "dsn.stop_on_first": stopOnFirst,
+        "dsn.max_depth": MAX_SCAN_DEPTH,
+      },
+      onlyIfParent: true,
+    },
+    async (span) => {
+      const results: DetectedDsn[] = [];
+      let filesScanned = 0;
+      let filesSkipped = 0;
 
-  for await (const relativePath of codeGlob.scan({ cwd, onlyFiles: true })) {
-    if (shouldSkipPath(relativePath)) {
-      continue;
-    }
+      for await (const relativePath of codeGlob.scan({
+        cwd,
+        onlyFiles: true,
+      })) {
+        if (shouldSkipPath(relativePath)) {
+          filesSkipped += 1;
+          continue;
+        }
 
-    const detected = await processCodeFile(cwd, relativePath);
-    if (detected) {
-      results.push(detected);
-      if (stopOnFirst) {
-        return results;
+        filesScanned += 1;
+        const detected = await processCodeFile(cwd, relativePath);
+        if (detected) {
+          results.push(detected);
+          if (stopOnFirst) {
+            span.setAttributes({
+              "dsn.files_scanned": filesScanned,
+              "dsn.files_skipped": filesSkipped,
+              "dsn.dsns_found": results.length,
+            });
+            span.setStatus({ code: 1 });
+            return results;
+          }
+        }
       }
-    }
-  }
 
-  return results;
+      span.setAttributes({
+        "dsn.files_scanned": filesScanned,
+        "dsn.files_skipped": filesSkipped,
+        "dsn.dsns_found": results.length,
+      });
+      span.setStatus({ code: 1 });
+      return results;
+    }
+  );
 }

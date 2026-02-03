@@ -81,3 +81,17 @@ export {
   isValidDsn,
   parseDsn,
 } from "./parser.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Root Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type { ProjectRootReason, ProjectRootResult } from "./project-root.js";
+export {
+  findProjectRoot,
+  getStopBoundary,
+  hasBuildSystemMarker,
+  hasLanguageMarker,
+  hasRepoRootMarker,
+  isProjectRoot,
+} from "./project-root.js";

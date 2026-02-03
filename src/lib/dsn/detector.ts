@@ -1,18 +1,18 @@
 /**
  * DSN Detector
  *
- * Detects Sentry DSN with GitHub CLI-style caching.
+ * Detects Sentry DSN with GitHub CLI-style caching and project root detection.
  *
- * Fast path (cache hit): ~5ms - verify single file
- * Slow path (cache miss): ~2-5s - full scan
+ * Detection algorithm:
+ * 1. Find project root by walking up from cwd (checks .env for DSN at each level)
+ * 2. If DSN found during walk-up, return immediately (fast path)
+ * 3. Check cache for project root
+ * 4. Full scan from project root with depth limiting
  *
- * Detection priority (explicit code DSN wins):
- * 1. Source code (explicit DSN in Sentry.init, etc.)
- * 2. .env files (.env.local, .env, etc.)
- * 3. SENTRY_DSN environment variable
+ * Priority: .env with SENTRY_DSN > code > .env files > SENTRY_DSN env var
  */
 
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { getCachedDsn, setCachedDsn } from "../db/dsn-cache.js";
 import { detectFromEnv, SENTRY_DSN_ENV } from "./env.js";
 import {
@@ -26,6 +26,7 @@ import {
   getDetectorForFile,
 } from "./languages/index.js";
 import { createDetectedDsn, parseDsn } from "./parser.js";
+import { findProjectRoot } from "./project-root.js";
 import type {
   CachedDsnEntry,
   DetectedDsn,
@@ -38,28 +39,49 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Detect DSN with caching support
+ * Detect DSN with project root detection and caching support.
  *
- * Fast path (cache hit): ~5ms
- * Slow path (cache miss): ~2-5s
+ * Algorithm:
+ * 1. Find project root by walking up from cwd (checking .env for SENTRY_DSN at each level)
+ * 2. If DSN found during walk-up, return immediately (fastest path)
+ * 3. Check cache for project root (fast path)
+ * 4. Full scan from project root with depth limiting (slow path)
  *
- * Priority: code > .env files > SENTRY_DSN env var
- *
- * @param cwd - Directory to search in
+ * @param cwd - Directory to start searching from
  * @returns Detected DSN with source info, or null if not found
  */
 export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
-  // 1. Check cache for this directory (fast path)
-  const cached = await getCachedDsn(cwd);
+  // 1. Find project root (may find DSN in .env along the way)
+  const { projectRoot, foundDsn } = await findProjectRoot(cwd);
+
+  // 2. If DSN found during walk-up, cache and return immediately
+  if (foundDsn) {
+    // Make source path relative to project root for caching
+    const sourcePath = foundDsn.sourcePath
+      ? relative(projectRoot, join(cwd, foundDsn.sourcePath)) ||
+        foundDsn.sourcePath
+      : foundDsn.sourcePath;
+
+    await setCachedDsn(projectRoot, {
+      dsn: foundDsn.raw,
+      projectId: foundDsn.projectId,
+      orgId: foundDsn.orgId,
+      source: foundDsn.source,
+      sourcePath,
+    });
+    return foundDsn;
+  }
+
+  // 3. Check cache for project root (fast path)
+  const cached = await getCachedDsn(projectRoot);
 
   if (cached) {
-    // 2. Verify cached source file still has same DSN
-    const verified = await verifyCachedDsn(cwd, cached);
+    const verified = await verifyCachedDsn(projectRoot, cached);
     if (verified) {
       // Check if DSN changed
       if (verified.raw !== cached.dsn) {
         // DSN changed - update cache
-        await setCachedDsn(cwd, {
+        await setCachedDsn(projectRoot, {
           dsn: verified.raw,
           projectId: verified.projectId,
           orgId: verified.orgId,
@@ -78,12 +100,12 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
     // Cache invalid, fall through to full scan
   }
 
-  // 3. Full scan (cache miss): code → .env → env var
-  const detected = await fullScanFirst(cwd);
+  // 4. Full scan from project root (slow path)
+  const detected = await fullScanFirst(projectRoot);
 
   if (detected) {
-    // 4. Cache for next time (without resolved info yet)
-    await setCachedDsn(cwd, {
+    // Cache for next time (without resolved info yet)
+    await setCachedDsn(projectRoot, {
       dsn: detected.raw,
       projectId: detected.projectId,
       orgId: detected.orgId,
@@ -99,6 +121,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
  * Detect all DSNs in a directory (supports monorepos)
  *
  * Unlike detectDsn, this finds ALL DSNs from all sources.
+ * First finds project root, then scans from there with depth limiting.
  * Useful for monorepos with multiple Sentry projects.
  *
  * Collection order matches priority: code > .env files > env var
@@ -107,6 +130,9 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
  * @returns Detection result with all found DSNs and hasMultiple flag
  */
 export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
+  // Find project root first
+  const { projectRoot, foundDsn } = await findProjectRoot(cwd);
+
   const allDsns: DetectedDsn[] = [];
   const seenRawDsns = new Set<string>();
 
@@ -118,14 +144,19 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     }
   };
 
-  // 1. Check all code files (highest priority)
-  const codeDsns = await detectAllFromCode(cwd);
+  // If DSN was found during walk-up, add it first (highest priority)
+  if (foundDsn) {
+    addDsn(foundDsn);
+  }
+
+  // 1. Check all code files from project root
+  const codeDsns = await detectAllFromCode(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
   }
 
-  // 2. Check all .env files (includes monorepo packages/apps)
-  const envFileDsns = await detectFromAllEnvFiles(cwd);
+  // 2. Check all .env files from project root (includes monorepo packages/apps)
+  const envFileDsns = await detectFromAllEnvFiles(projectRoot);
   for (const dsn of envFileDsns) {
     addDsn(dsn);
   }
