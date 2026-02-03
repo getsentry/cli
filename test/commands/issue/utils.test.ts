@@ -26,6 +26,8 @@ beforeEach(async () => {
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
   await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  await setOrgRegion("cached-org", DEFAULT_SENTRY_URL);
+  await setOrgRegion("org1", DEFAULT_SENTRY_URL);
 });
 
 afterEach(async () => {
@@ -34,7 +36,8 @@ afterEach(async () => {
 });
 
 describe("resolveOrgAndIssueId", () => {
-  test("returns org and numeric issue ID when org is provided", async () => {
+  test("throws for numeric ID (org cannot be resolved)", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
@@ -64,18 +67,18 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId({
-      issueId: "123456789",
-      org: "my-org",
-      cwd: testConfigDir,
-      commandHint: "sentry issue explain 123456789 --org <org-slug>",
-    });
-
-    expect(result.org).toBe("my-org");
-    expect(result.issueId).toBe("123456789");
+    // Numeric IDs don't have org context, so resolveOrgAndIssueId should throw
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "123456789",
+        cwd: testConfigDir,
+        command: "explain",
+      })
+    ).rejects.toThrow("Organization");
   });
 
-  test("resolves short ID to numeric ID", async () => {
+  test("resolves explicit org prefix (org/ISSUE-ID)", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
@@ -105,55 +108,13 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "PROJECT-ABC",
-      org: "my-org",
+      issueArg: "my-org/PROJECT-ABC",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain PROJECT-ABC --org <org-slug>",
+      command: "explain",
     });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("987654321");
-  });
-
-  test("throws ContextError when org cannot be resolved", async () => {
-    delete process.env.SENTRY_DSN;
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
-
-      // Numeric ID is fetched directly - this succeeds
-      if (url.includes("/issues/123456789/")) {
-        return new Response(
-          JSON.stringify({
-            id: "123456789",
-            shortId: "PROJECT-ABC",
-            title: "Test Issue",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "10",
-            userCount: 5,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    };
-
-    await expect(
-      resolveOrgAndIssueId({
-        issueId: "123456789",
-        cwd: "/nonexistent/path",
-        commandHint: "sentry issue explain 123456789 --org <org-slug>",
-      })
-    ).rejects.toThrow("Organization");
   });
 
   test("resolves alias-suffix format (e.g., 'f-g') using cached aliases", async () => {
@@ -169,6 +130,7 @@ describe("resolveOrgAndIssueId", () => {
       ""
     );
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
@@ -198,37 +160,28 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "f-g",
+      issueArg: "f-g",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain f-g --org <org-slug>",
+      command: "explain",
     });
 
     expect(result.org).toBe("cached-org");
     expect(result.issueId).toBe("111222333");
   });
 
-  test("resolves org-aware alias format (e.g., 'o1/d-4y') for cross-org collisions", async () => {
-    const { setProjectAliases } = await import(
-      "../../../src/lib/db/project-aliases.js"
-    );
-    await setProjectAliases(
-      {
-        "o1/d": { orgSlug: "org1", projectSlug: "dashboard" },
-        "o2/d": { orgSlug: "org2", projectSlug: "dashboard" },
-      },
-      ""
-    );
-
+  test("resolves explicit org prefix with project-suffix (e.g., 'org1/dashboard-4y')", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
 
+      // With explicit org, we try project-suffix format: dashboard-4y -> DASHBOARD-4Y
       if (url.includes("organizations/org1/issues/DASHBOARD-4Y")) {
         return new Response(
           JSON.stringify({
             id: "999888777",
             shortId: "DASHBOARD-4Y",
-            title: "Test Issue from org-aware alias",
+            title: "Test Issue with explicit org",
             status: "unresolved",
             platform: "javascript",
             type: "error",
@@ -248,19 +201,20 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "o1/d-4y",
+      issueArg: "org1/dashboard-4y",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain o1/d-4y",
+      command: "explain",
     });
 
     expect(result.org).toBe("org1");
     expect(result.issueId).toBe("999888777");
   });
 
-  test("resolves short suffix format (e.g., 'G') using project context", async () => {
+  test("resolves short suffix format (e.g., 'G') using project context from defaults", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
@@ -290,9 +244,9 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "G",
+      issueArg: "G",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain G --org <org-slug>",
+      command: "explain",
     });
 
     expect(result.org).toBe("my-org");
@@ -306,45 +260,34 @@ describe("resolveOrgAndIssueId", () => {
     await clearAuth();
     await setDefaults(undefined, undefined);
 
-    // Short suffix "G" first tries to expand with project context (fails with ContextError),
-    // then falls through to full short ID resolution (requires org), which also fails.
-    // The final error is "Organization is required" since the fallthrough logic allows trying
-    // it as a full short ID, and that's where it ultimately fails.
     await expect(
       resolveOrgAndIssueId({
-        issueId: "G",
+        issueArg: "G",
         cwd: testConfigDir,
-        commandHint: "sentry issue explain G --org <org-slug>",
+        command: "explain",
       })
-    ).rejects.toThrow("Organization is required");
+    ).rejects.toThrow("Cannot resolve issue suffix");
   });
 
-  test("resolves short suffix with explicit --org and --project flags", async () => {
-    // Clear defaults but keep auth token to ensure we're testing explicit flags
-    const { clearAuth, setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
+  test("searches projects across orgs for project-suffix format", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
     );
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await clearAuth();
-    await setDefaults(undefined, undefined);
-    await setToken("test-token");
+    await clearProjectAliases();
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("organizations/my-org/issues/MY-PROJECT-G")) {
+      // listOrganizations call
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/")
+      ) {
         return new Response(
-          JSON.stringify({
-            id: "555666777",
-            shortId: "MY-PROJECT-G",
-            title: "Test Issue with explicit flags",
-            status: "unresolved",
-            platform: "python",
-            type: "error",
-            count: "3",
-            userCount: 1,
-          }),
+          JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -352,33 +295,24 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    };
-
-    const result = await resolveOrgAndIssueId({
-      issueId: "G",
-      org: "my-org",
-      project: "my-project",
-      cwd: testConfigDir,
-      commandHint:
-        "sentry issue explain G --org <org-slug> --project <project-slug>",
-    });
-
-    expect(result.org).toBe("my-org");
-    expect(result.issueId).toBe("555666777");
-  });
-
-  test("falls back to full short ID when alias is not found in cache", async () => {
-    const { clearProjectAliases } = await import(
-      "../../../src/lib/db/project-aliases.js"
-    );
-    await clearProjectAliases();
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
+      // listProjects for my-org
+      if (url.includes("organizations/my-org/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "123", slug: "craft", name: "Craft", platform: "javascript" },
+            {
+              id: "456",
+              slug: "other-project",
+              name: "Other",
+              platform: "python",
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
 
       if (url.includes("organizations/my-org/issues/CRAFT-G")) {
         return new Response(
@@ -405,56 +339,52 @@ describe("resolveOrgAndIssueId", () => {
     };
 
     const result = await resolveOrgAndIssueId({
-      issueId: "craft-g",
-      org: "my-org",
+      issueArg: "craft-g",
       cwd: testConfigDir,
-      commandHint: "sentry issue explain craft-g --org <org-slug>",
+      command: "explain",
     });
 
     expect(result.org).toBe("my-org");
     expect(result.issueId).toBe("777888999");
   });
 
-  test("short suffix 404 falls through to full short ID resolution", async () => {
-    // Setup: project context exists, but short suffix lookup returns 404
-    // Should fall through and try as full short ID
-    const { setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
+  test("throws when project not found in any org", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
     );
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setToken("test-token");
-    await setDefaults("my-org", "my-project");
+    await clearProjectAliases();
 
-    let shortSuffixAttempted = false;
-    let fullShortIdAttempted = false;
-
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      // First attempt: short suffix expansion (MY-PROJECT-15) returns 404
-      if (url.includes("organizations/my-org/issues/MY-PROJECT-15")) {
-        shortSuffixAttempted = true;
-        return new Response(JSON.stringify({ detail: "Not found" }), {
-          status: 404,
-        });
+      // listOrganizations call
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/")
+      ) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
       }
 
-      // Fallthrough: try as full short ID (15 contains no letters, so goes to numeric)
-      // Actually "15" will be treated as numeric ID after fallthrough
-      if (url.includes("issues/15/")) {
-        fullShortIdAttempted = true;
+      // listProjects - return projects that don't match "nonexistent"
+      if (url.includes("/projects/")) {
         return new Response(
-          JSON.stringify({
-            id: "15",
-            shortId: "ACTUAL-PROJECT-X",
-            title: "Found via numeric fallback",
-            status: "unresolved",
-            platform: "python",
-            type: "error",
-            count: "1",
-            userCount: 1,
-          }),
+          JSON.stringify([
+            {
+              id: "123",
+              slug: "other-project",
+              name: "Other",
+              platform: "python",
+            },
+          ]),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -467,107 +397,129 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
-    const result = await resolveOrgAndIssueId({
-      issueId: "15",
-      cwd: testConfigDir,
-      commandHint: "sentry issue explain 15",
-    });
-
-    expect(shortSuffixAttempted).toBe(true);
-    expect(fullShortIdAttempted).toBe(true);
-    expect(result.issueId).toBe("15");
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "nonexistent-g",
+        cwd: testConfigDir,
+        command: "explain",
+      })
+    ).rejects.toThrow("not found");
   });
 
-  test("short suffix auth error (401) propagates without fallthrough", async () => {
-    const { setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
+  test("throws when project found in multiple orgs without explicit org", async () => {
+    const { clearProjectAliases } = await import(
+      "../../../src/lib/db/project-aliases.js"
     );
+    await clearProjectAliases();
+
+    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listOrganizations call
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/")
+      ) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "org1", name: "Org 1" },
+            { id: "2", slug: "org2", name: "Org 2" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // listProjects for org1 - has "common" project
+      if (url.includes("organizations/org1/projects/")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "123",
+              slug: "common",
+              name: "Common",
+              platform: "javascript",
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // listProjects for org2 - also has "common" project
+      if (url.includes("organizations/org2/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "456", slug: "common", name: "Common", platform: "python" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "common-g",
+        cwd: testConfigDir,
+        command: "explain",
+      })
+    ).rejects.toThrow("multiple organizations");
+  });
+
+  test("short suffix auth error (401) propagates", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setToken("test-token");
     await setDefaults("my-org", "my-project");
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ detail: "Unauthorized" }), {
         status: 401,
       });
 
-    // Auth errors should propagate, not fall through
+    // Auth errors should propagate
     await expect(
       resolveOrgAndIssueId({
-        issueId: "G",
+        issueArg: "G",
         cwd: testConfigDir,
-        commandHint: "sentry issue explain G",
+        command: "explain",
       })
     ).rejects.toThrow();
   });
 
-  test("short suffix server error (500) propagates without fallthrough", async () => {
-    const { setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
-    );
+  test("short suffix server error (500) propagates", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await setToken("test-token");
     await setDefaults("my-org", "my-project");
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ detail: "Internal Server Error" }), {
         status: 500,
       });
 
-    // Server errors should propagate, not fall through
+    // Server errors should propagate
     await expect(
       resolveOrgAndIssueId({
-        issueId: "G",
+        issueArg: "G",
         cwd: testConfigDir,
-        commandHint: "sentry issue explain G",
+        command: "explain",
       })
     ).rejects.toThrow("500");
-  });
-
-  test("explicit --org without --project errors clearly instead of falling through", async () => {
-    // When user explicitly provides --org but not --project for a short suffix,
-    // they expect that resolution path. Don't silently fall through to 404.
-    const { clearAuth, setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
-    );
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await clearAuth();
-    await setDefaults(undefined, undefined);
-    await setToken("test-token");
-
-    // User provides --org but not --project
-    await expect(
-      resolveOrgAndIssueId({
-        issueId: "G",
-        org: "my-org", // Explicit --org flag
-        // No project provided
-        cwd: testConfigDir,
-        commandHint: "sentry issue explain G --org my-org --project <project>",
-      })
-    ).rejects.toThrow("Organization and project");
-  });
-
-  test("explicit --project without --org errors clearly instead of falling through", async () => {
-    // When user explicitly provides --project but not --org for a short suffix,
-    // they expect that resolution path. Don't silently fall through.
-    const { clearAuth, setAuthToken: setToken } = await import(
-      "../../../src/lib/db/auth.js"
-    );
-    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
-    await clearAuth();
-    await setDefaults(undefined, undefined);
-    await setToken("test-token");
-
-    // User provides --project but not --org
-    await expect(
-      resolveOrgAndIssueId({
-        issueId: "G",
-        // No org provided
-        project: "my-project", // Explicit --project flag
-        cwd: testConfigDir,
-        commandHint: "sentry issue explain G --org <org> --project my-project",
-      })
-    ).rejects.toThrow("Organization and project");
   });
 });
 
@@ -581,6 +533,7 @@ describe("pollAutofixState", () => {
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () => {
       fetchCount += 1;
       return new Response(
@@ -610,6 +563,7 @@ describe("pollAutofixState", () => {
   });
 
   test("returns immediately when state is ERROR", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -636,6 +590,7 @@ describe("pollAutofixState", () => {
   });
 
   test("stops at WAITING_FOR_USER_RESPONSE when stopOnWaitingForUser is true", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -665,6 +620,7 @@ describe("pollAutofixState", () => {
   test("continues polling when PROCESSING", async () => {
     let fetchCount = 0;
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () => {
       fetchCount += 1;
 
@@ -718,6 +674,7 @@ describe("pollAutofixState", () => {
 
     // Return PROCESSING first to allow animation interval to fire,
     // then COMPLETED on second call
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () => {
       fetchCount += 1;
 
@@ -783,6 +740,7 @@ describe("pollAutofixState", () => {
   });
 
   test("throws timeout error when exceeding timeoutMs", async () => {
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -814,6 +772,7 @@ describe("pollAutofixState", () => {
   test("continues polling when autofix is null", async () => {
     let fetchCount = 0;
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async () => {
       fetchCount += 1;
 
