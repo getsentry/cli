@@ -55,6 +55,12 @@ describe("parseOrgProjectArg", () => {
       project: "spotlight-electron",
     });
   });
+
+  test("just slash throws error", () => {
+    expect(() => parseOrgProjectArg("/")).toThrow(
+      'Invalid format: "/" requires a project slug'
+    );
+  });
 });
 
 describe("parseIssueArg", () => {

@@ -71,6 +71,11 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
 
     if (!org) {
       // "/cli" → search for project across all orgs
+      if (!project) {
+        throw new Error(
+          'Invalid format: "/" requires a project slug (e.g., "/cli")'
+        );
+      }
       return { type: "project-search", projectSlug: project };
     }
 

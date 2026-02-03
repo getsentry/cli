@@ -193,30 +193,29 @@ async function resolveSuffixOnly(
 }
 
 /**
- * Resolve explicit-org-suffix type: org provided, need project from DSN.
+ * Resolve explicit-org-suffix type: org provided but only suffix given.
+ *
+ * This format (`org/suffix`) is ambiguous - we have org but no project.
+ * We don't use DSN detection here because mixing explicit org with
+ * DSN-detected project (which belongs to a potentially different org)
+ * would be semantically wrong and confusing.
  *
  * @param org - Explicit organization slug
  * @param suffix - Issue suffix (uppercase)
- * @param cwd - Current working directory
  * @param commandHint - Hint for error messages
  */
-async function resolveExplicitOrgSuffix(
+function resolveExplicitOrgSuffix(
   org: string,
   suffix: string,
-  cwd: string,
   commandHint: string
-): Promise<StrictResolvedIssue> {
-  const target = await resolveOrgAndProject({ cwd });
-  if (target) {
-    const fullShortId = expandToFullShortId(suffix, target.project);
-    const issue = await getIssueByShortId(org, fullShortId);
-    return { org, issue };
-  }
-
+): never {
   throw new ContextError(
     `Cannot resolve suffix '${suffix}' without project context`,
     commandHint,
-    [`Specify the project: sentry issue ... ${org}/<project>-${suffix}`]
+    [
+      `The format '${org}/${suffix}' requires a project to build the full issue ID.`,
+      `Use: sentry issue ... ${org}/<project>-${suffix}`,
+    ]
   );
 }
 
@@ -275,13 +274,8 @@ export async function resolveIssue(
     }
 
     case "explicit-org-suffix":
-      // Org + suffix only - need DSN for project
-      return resolveExplicitOrgSuffix(
-        parsed.org,
-        parsed.suffix,
-        cwd,
-        commandHint
-      );
+      // Org + suffix only - ambiguous without project, always errors
+      return resolveExplicitOrgSuffix(parsed.org, parsed.suffix, commandHint);
 
     case "project-search":
       // Project slug + suffix - search across orgs
