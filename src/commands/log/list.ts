@@ -137,6 +137,7 @@ type FollowModeOptions = {
  * Each poll requests logs with timestamp_precise > last seen timestamp,
  * ensuring no duplicates and no missed logs.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: streaming loop with error handling
 async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   const { stdout, stderr, org, project, flags } = options;
   const pollIntervalMs = flags.pollInterval * 1000;
@@ -152,6 +153,11 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     limit: flags.tail,
     statsPeriod: "90d",
   });
+
+  // Print header before initial logs (human mode only)
+  if (!flags.json && initialLogs.length > 0) {
+    stdout.write(formatLogsHeader());
+  }
 
   writeLogs(stdout, initialLogs, flags.json);
 

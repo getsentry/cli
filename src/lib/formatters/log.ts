@@ -37,10 +37,16 @@ function formatSeverity(severity: string | null | undefined): string {
  * Converts to local time in "YYYY-MM-DD HH:MM:SS" format.
  *
  * @param timestamp - ISO 8601 timestamp string
- * @returns Formatted local timestamp
+ * @returns Formatted local timestamp, or original string if invalid
  */
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
+
+  // Handle invalid dates - return original string
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
   // Format as local time: YYYY-MM-DD HH:MM:SS
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
