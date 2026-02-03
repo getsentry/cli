@@ -395,12 +395,15 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
     }
 
     // Build relative path - entry.parentPath is the directory containing the entry
-    const relativePath = relative(cwd, join(entry.parentPath, entry.name));
-
-    // Normalize path separators for cross-platform support.
-    // The `ignore` package requires forward slashes for pattern matching,
-    // but Windows returns backslashes from path.relative().
-    const normalizedPath = relativePath.replaceAll("\\", "/");
+    // Normalize to forward slashes for cross-platform consistency.
+    // Windows returns backslashes from path.relative(), but we need forward slashes for:
+    // 1. The `ignore` package pattern matching
+    // 2. inferPackagePath() which splits by "/"
+    // 3. Consistent sourcePath values in DetectedDsn objects
+    const relativePath = relative(
+      cwd,
+      join(entry.parentPath, entry.name)
+    ).replaceAll("\\", "/");
 
     // Skip files beyond max depth
     if (getPathDepth(relativePath) > MAX_SCAN_DEPTH) {
@@ -408,7 +411,7 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
     }
 
     // Skip ignored paths (includes ALWAYS_SKIP_DIRS and .gitignore patterns)
-    if (ig.ignores(normalizedPath)) {
+    if (ig.ignores(relativePath)) {
       continue;
     }
 
