@@ -25,18 +25,15 @@ import {
   type RootCause,
 } from "../../types/seer.js";
 import {
-  buildCommandHint,
-  type IssueIdFlags,
-  issueIdFlags,
   issueIdPositional,
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "./utils.js";
 
-interface PlanFlags extends IssueIdFlags {
+type PlanFlags = {
   readonly cause?: number;
   readonly json: boolean;
-}
+};
 
 /**
  * Validate that an autofix run exists and has completed root cause analysis.
@@ -141,18 +138,23 @@ export const planCommand = buildCommand({
       "to identify the root cause. It will then generate a solution plan with " +
       "specific implementation steps to fix the issue.\n\n" +
       "If multiple root causes were identified, use --cause to specify which one.\n\n" +
+      "Issue formats:\n" +
+      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
+      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix         - Suffix only: G (requires DSN context)\n" +
+      "  numeric        - Numeric ID: 123456789\n\n" +
       "Prerequisites:\n" +
       "  - GitHub integration configured for your organization\n" +
       "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
       "  sentry issue plan 123456789 --cause 0\n" +
-      "  sentry issue plan MYPROJECT-ABC --org my-org --cause 1\n" +
-      "  sentry issue plan G --org my-org --project my-project --cause 0",
+      "  sentry issue plan sentry/EXTENSION-7 --cause 1\n" +
+      "  sentry issue plan cli-G --cause 0",
   },
   parameters: {
     positional: issueIdPositional,
     flags: {
-      ...issueIdFlags,
       cause: {
         kind: "parsed",
         parse: numberParser,
@@ -169,7 +171,7 @@ export const planCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: PlanFlags,
-    issueId: string
+    issueArg: string
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
 
@@ -179,11 +181,9 @@ export const planCommand = buildCommand({
     try {
       // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
-        issueId,
-        org: flags.org,
-        project: flags.project,
+        issueArg,
         cwd,
-        commandHint: buildCommandHint("plan", issueId),
+        command: "plan",
       });
       resolvedOrg = org;
 
@@ -191,10 +191,10 @@ export const planCommand = buildCommand({
       const currentState = await getAutofixState(org, numericId);
 
       // Validate we have a completed root cause analysis
-      const { state, causes } = validateAutofixState(currentState, issueId);
+      const { state, causes } = validateAutofixState(currentState, issueArg);
 
       // Validate cause selection
-      const causeId = validateCauseSelection(causes, flags.cause, issueId);
+      const causeId = validateCauseSelection(causes, flags.cause, issueArg);
       const selectedCause = causes[causeId];
 
       if (!flags.json) {

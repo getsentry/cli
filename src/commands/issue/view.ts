@@ -17,19 +17,13 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
-import {
-  buildCommandHint,
-  type IssueIdFlags,
-  issueIdFlags,
-  issueIdPositional,
-  resolveIssue,
-} from "./utils.js";
+import { issueIdPositional, resolveIssue } from "./utils.js";
 
-interface ViewFlags extends IssueIdFlags {
+type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly spans?: number;
-}
+};
 
 /**
  * Try to fetch the latest event for an issue.
@@ -119,19 +113,18 @@ export const viewCommand = buildCommand({
     fullDescription:
       "View detailed information about a Sentry issue by its ID or short ID. " +
       "The latest event is automatically included for full context.\n\n" +
-      "You can use just the unique suffix (e.g., 'G' instead of 'CRAFT-G') when " +
-      "project context is available from DSN detection or flags.\n\n" +
+      "Issue formats:\n" +
+      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
+      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix         - Suffix only: G (requires DSN context)\n" +
+      "  numeric        - Numeric ID: 123456789\n\n" +
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
-      "where 'f' is the project alias shown in the list).\n\n" +
-      "For short IDs, the organization is resolved from:\n" +
-      "  1. --org flag\n" +
-      "  2. Config defaults\n" +
-      "  3. SENTRY_DSN environment variable",
+      "where 'f' is the project alias shown in the list).",
   },
   parameters: {
     positional: issueIdPositional,
     flags: {
-      ...issueIdFlags,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -155,17 +148,15 @@ export const viewCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ViewFlags,
-    issueId: string
+    issueArg: string
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
 
     // Resolve issue using shared resolution logic
     const { org: orgSlug, issue } = await resolveIssue({
-      issueId,
-      org: flags.org,
-      project: flags.project,
+      issueArg,
       cwd,
-      commandHint: buildCommandHint("view", issueId),
+      command: "view",
     });
 
     // Set telemetry context
@@ -206,7 +197,7 @@ export const viewCommand = buildCommand({
 
     writeFooter(
       stdout,
-      `Tip: Use 'sentry issue explain ${issue.shortId}' for AI root cause analysis`
+      `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`
     );
   },
 });
