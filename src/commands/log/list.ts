@@ -150,11 +150,11 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stderr.write("Press Ctrl+C to stop.\n\n");
   }
 
-  // Initial fetch to get starting point and show recent logs
+  // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
   const initialLogs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.tail,
-    statsPeriod: "90d",
+    statsPeriod: "1m",
   });
 
   // Print header before initial logs (human mode only)
