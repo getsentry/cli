@@ -19,6 +19,7 @@ import {
   parseOrgProjectArg,
   resolveOrgAndProject,
 } from "../../lib/resolve-target.js";
+import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
 
 type ListFlags = {
@@ -147,7 +148,14 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
   if (!flags.json) {
     stderr.write(`Streaming logs... (poll interval: ${flags.pollInterval}s)\n`);
-    stderr.write("Press Ctrl+C to stop.\n\n");
+    stderr.write("Press Ctrl+C to stop.\n");
+
+    // Show update notification before streaming (since we'll never reach the normal exit)
+    const notification = getUpdateNotification();
+    if (notification) {
+      stderr.write(notification);
+    }
+    stderr.write("\n");
   }
 
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
