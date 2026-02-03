@@ -14,17 +14,17 @@
 
 import { join, relative } from "node:path";
 import { getCachedDsn, setCachedDsn } from "../db/dsn-cache.js";
+import {
+  extractFirstDsnFromContent,
+  scanCodeForDsns,
+  scanCodeForFirstDsn,
+} from "./code-scanner.js";
 import { detectFromEnv, SENTRY_DSN_ENV } from "./env.js";
 import {
   detectFromAllEnvFiles,
   detectFromEnvFiles,
   extractDsnFromEnvContent,
 } from "./env-file.js";
-import {
-  detectAllFromCode,
-  detectFromCode,
-  getDetectorForFile,
-} from "./languages/index.js";
 import { createDetectedDsn, parseDsn } from "./parser.js";
 import { findProjectRoot } from "./project-root.js";
 import type {
@@ -150,7 +150,7 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   }
 
   // 1. Check all code files from project root
-  const codeDsns = await detectAllFromCode(projectRoot);
+  const codeDsns = await scanCodeForDsns(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
   }
@@ -208,11 +208,7 @@ async function verifyCachedDsn(
 
   try {
     const content = await Bun.file(filePath).text();
-    const foundDsn = extractDsnFromContent(
-      content,
-      cached.source,
-      cached.sourcePath
-    );
+    const foundDsn = extractDsnFromContent(content, cached.source);
 
     if (foundDsn === cached.dsn) {
       // Same DSN - cache is valid!
@@ -231,27 +227,21 @@ async function verifyCachedDsn(
 }
 
 /**
- * Extract DSN from content based on source type and file path.
+ * Extract DSN from content based on source type.
  *
  * @param content - File content
  * @param source - Source type (env_file, code, etc.)
- * @param sourcePath - Path to the file (used to determine language for code files)
  */
 function extractDsnFromContent(
   content: string,
-  source: DsnSource,
-  sourcePath?: string
+  source: DsnSource
 ): string | null {
   switch (source) {
     case "env_file":
       return extractDsnFromEnvContent(content);
     case "code": {
-      if (!sourcePath) {
-        return null;
-      }
-      // Find the right language detector based on file extension
-      const detector = getDetectorForFile(sourcePath);
-      return detector?.extractDsn(content) ?? null;
+      // Use language-agnostic DSN extraction
+      return extractFirstDsnFromContent(content);
     }
     default:
       return null;
@@ -272,7 +262,7 @@ function extractDsnFromContent(
  */
 async function fullScanFirst(cwd: string): Promise<DetectedDsn | null> {
   // 1. Search source code first (explicit DSN = highest priority)
-  const codeDsn = await detectFromCode(cwd);
+  const codeDsn = await scanCodeForFirstDsn(cwd);
   if (codeDsn) {
     return codeDsn;
   }

@@ -57,5 +57,9 @@
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
     "@sentry/core@10.38.0": "patches/@sentry%2Fcore@10.38.0.patch"
+  },
+  "dependencies": {
+    "ignore": "^7.0.5",
+    "p-limit": "^7.2.0"
   }
 }
