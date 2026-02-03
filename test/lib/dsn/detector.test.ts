@@ -166,6 +166,39 @@ describe("DSN Detector (New Module)", () => {
       expect(result?.source).toBe("env");
     });
 
+    test("env var DSN is cached and verified without full scan", async () => {
+      const envVarDsn = "https://var@o111.ingest.sentry.io/111";
+      const changedDsn = "https://changed@o222.ingest.sentry.io/222";
+
+      // Only set env var
+      process.env.SENTRY_DSN = envVarDsn;
+
+      // First detection - should detect and cache
+      const result1 = await detectDsn(testDir);
+      expect(result1?.raw).toBe(envVarDsn);
+      expect(result1?.source).toBe("env");
+
+      // Verify it's cached
+      const cached = await getCachedDsn(testDir);
+      expect(cached?.dsn).toBe(envVarDsn);
+      expect(cached?.source).toBe("env");
+
+      // Second detection - should use cache verification (not full scan)
+      const result2 = await detectDsn(testDir);
+      expect(result2?.raw).toBe(envVarDsn);
+      expect(result2?.source).toBe("env");
+
+      // Change env var - should detect the change
+      process.env.SENTRY_DSN = changedDsn;
+      const result3 = await detectDsn(testDir);
+      expect(result3?.raw).toBe(changedDsn);
+      expect(result3?.source).toBe("env");
+
+      // Cache should be updated
+      const updatedCache = await getCachedDsn(testDir);
+      expect(updatedCache?.dsn).toBe(changedDsn);
+    });
+
     test("skips node_modules and dist directories", async () => {
       const nodeModulesDsn = "https://nm@o111.ingest.sentry.io/111";
       const distDsn = "https://dist@o222.ingest.sentry.io/222";

@@ -184,12 +184,22 @@ async function verifyCachedDsn(
   cwd: string,
   cached: CachedDsnEntry
 ): Promise<DetectedDsn | null> {
-  // For env source, we already checked above in detectDsn
+  // For env source, verify by checking the env var directly (no file to read)
   if (cached.source === "env") {
+    const envDsn = detectFromEnv();
+    if (envDsn && envDsn.raw === cached.dsn) {
+      // Same DSN in env var - cache is valid
+      return envDsn;
+    }
+    if (envDsn) {
+      // DSN changed - return new one (cache will be updated by caller)
+      return envDsn;
+    }
+    // Env var no longer set - cache is invalid
     return null;
   }
 
-  // Need a source path to verify
+  // Need a source path to verify file-based sources
   if (!cached.sourcePath) {
     return null;
   }
