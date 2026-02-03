@@ -403,6 +403,21 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
 
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --tail <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow - Stream logs in real-time`
+- `--pollInterval <value> - Poll interval in seconds (only with --follow) - (default: "2")`
+- `--json - Output as JSON`
+
 ## Output Formats
 
 ### JSON Output
