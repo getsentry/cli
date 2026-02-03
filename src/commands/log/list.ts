@@ -159,7 +159,9 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stdout.write(formatLogsHeader());
   }
 
-  writeLogs(stdout, initialLogs, flags.json);
+  // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
+  const chronologicalInitial = [...initialLogs].reverse();
+  writeLogs(stdout, chronologicalInitial, flags.json);
 
   // Track newest timestamp (logs are sorted -timestamp, so first is newest)
   let lastTimestamp = initialLogs[0]?.timestamp_precise ?? 0;
@@ -178,8 +180,12 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
       const newestLog = newLogs[0];
       if (newestLog) {
+        // Reverse for chronological order (oldest first for tail -f style)
+        const chronologicalNew = [...newLogs].reverse();
+        writeLogs(stdout, chronologicalNew, flags.json);
+
+        // Update timestamp AFTER successful write to avoid losing logs on write failure
         lastTimestamp = newestLog.timestamp_precise;
-        writeLogs(stdout, newLogs, flags.json);
       }
     } catch (error) {
       if (!flags.json) {
