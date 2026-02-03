@@ -151,6 +151,11 @@ const TEXT_EXTENSIONS = new Set([
 const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
 
 /**
+ * Pattern to split paths on both forward and back slashes for cross-platform support.
+ */
+const PATH_SEPARATOR_PATTERN = /[/\\]/;
+
+/**
  * Pattern to match Sentry DSN URLs.
  * Captures the full DSN including protocol, public key, host, and project ID.
  *
@@ -355,12 +360,13 @@ function shouldScanFile(filename: string): boolean {
 
 /**
  * Get the depth of a path (number of directory separators).
+ * Uses regex to split on both forward and back slashes for cross-platform support.
  */
 function getPathDepth(relativePath: string): number {
   if (!relativePath) {
     return 0;
   }
-  return relativePath.split("/").length - 1;
+  return relativePath.split(PATH_SEPARATOR_PATTERN).length - 1;
 }
 
 /**

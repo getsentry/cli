@@ -383,7 +383,7 @@ export function hasBuildSystemMarker(dir: string): Promise<boolean> {
  * @param dir - Directory to check
  * @returns Detected DSN or null
  */
-export function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
+function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
   return withFsSpan("checkEnvForDsn", async () => {
     // Check all env files in parallel for existence
     const existenceChecks = ENV_FILES.map(async (filename) => {
@@ -551,7 +551,9 @@ async function walkUpDirectories(
     buildSystemAt: null,
   };
 
-  while (state.currentDir !== "/" && state.currentDir !== stopBoundary) {
+  // Use do-while to ensure starting directory is always checked,
+  // even when it equals the stop boundary (e.g., user runs from home dir)
+  do {
     state.levelsTraversed += 1;
 
     const { dsnResult, repoRootResult, hasLang, hasBuild } =
@@ -595,7 +597,7 @@ async function walkUpDirectories(
       break; // Reached filesystem root
     }
     state.currentDir = parentDir;
-  }
+  } while (state.currentDir !== "/" && state.currentDir !== stopBoundary);
 
   // Determine project root from candidates (priority order)
   const selected = selectProjectRoot(

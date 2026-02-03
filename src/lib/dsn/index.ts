@@ -87,11 +87,4 @@ export {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type { ProjectRootReason, ProjectRootResult } from "./project-root.js";
-export {
-  findProjectRoot,
-  getStopBoundary,
-  hasBuildSystemMarker,
-  hasLanguageMarker,
-  hasRepoRootMarker,
-  isProjectRoot,
-} from "./project-root.js";
+export { findProjectRoot } from "./project-root.js";
