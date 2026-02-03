@@ -14,7 +14,6 @@ import {
   hasBuildSystemMarker,
   hasLanguageMarker,
   hasRepoRootMarker,
-  isProjectRoot,
 } from "../../../src/lib/dsn/project-root.js";
 
 // Test directory structure helper
@@ -159,27 +158,6 @@ describe("project-root", () => {
 
     test("returns false when no markers", async () => {
       expect(await hasBuildSystemMarker(testDir)).toBe(false);
-    });
-  });
-
-  describe("isProjectRoot", () => {
-    test("returns true for directory with .git", async () => {
-      createDir(join(testDir, ".git"));
-      expect(await isProjectRoot(testDir)).toBe(true);
-    });
-
-    test("returns true for directory with package.json", async () => {
-      createFile(join(testDir, "package.json"), "{}");
-      expect(await isProjectRoot(testDir)).toBe(true);
-    });
-
-    test("returns true for directory with Makefile", async () => {
-      createFile(join(testDir, "Makefile"), "");
-      expect(await isProjectRoot(testDir)).toBe(true);
-    });
-
-    test("returns false for empty directory", async () => {
-      expect(await isProjectRoot(testDir)).toBe(false);
     });
   });
 

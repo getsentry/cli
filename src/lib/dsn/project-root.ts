@@ -647,27 +647,3 @@ export function findProjectRoot(startDir: string): Promise<ProjectRootResult> {
     }
   );
 }
-
-/**
- * Check if a directory is a project root.
- *
- * A directory is considered a project root if it has any of:
- * - VCS markers (.git, .hg, etc.)
- * - CI/CD markers (.github, etc.)
- * - .editorconfig with root=true
- * - Language/package markers
- * - Build system markers
- *
- * @param dir - Directory to check
- * @returns True if directory appears to be a project root
- */
-export async function isProjectRoot(dir: string): Promise<boolean> {
-  // Check all marker types in parallel
-  const [hasRepo, hasLang, hasBuild] = await Promise.all([
-    hasRepoRootMarker(dir),
-    hasLanguageMarker(dir),
-    hasBuildSystemMarker(dir),
-  ]);
-
-  return hasRepo.found || hasLang || hasBuild;
-}
