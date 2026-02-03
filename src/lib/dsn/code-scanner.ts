@@ -272,15 +272,20 @@ function isCommentedLine(trimmedLine: string): boolean {
   return COMMENT_PREFIXES.some((prefix) => trimmedLine.startsWith(prefix));
 }
 
+/** Track whether we've already warned about invalid SENTRY_URL (warn once per process) */
+let hasWarnedInvalidSentryUrl = false;
+
 /**
  * Get the expected Sentry host for DSN validation.
  *
  * When SENTRY_URL is set (self-hosted), only DSNs matching that host are valid.
  * When not set (SaaS), only *.sentry.io DSNs are valid.
  *
- * @returns Object with host info for validation
+ * If SENTRY_URL is set but invalid, logs a warning and falls back to SaaS behavior.
+ *
+ * @returns Object with host info for validation (never null)
  */
-function getExpectedHost(): { host: string; isSaas: boolean } | null {
+function getExpectedHost(): { host: string; isSaas: boolean } {
   const sentryUrl = process.env.SENTRY_URL;
 
   if (sentryUrl) {
@@ -289,8 +294,14 @@ function getExpectedHost(): { host: string; isSaas: boolean } | null {
       const url = new URL(sentryUrl);
       return { host: url.host, isSaas: false };
     } catch {
-      // Invalid SENTRY_URL, can't validate
-      return null;
+      // Invalid SENTRY_URL - warn once and fall back to SaaS behavior
+      if (!hasWarnedInvalidSentryUrl) {
+        hasWarnedInvalidSentryUrl = true;
+        console.warn(
+          `Warning: SENTRY_URL "${sentryUrl}" is not a valid URL. Falling back to sentry.io for DSN detection.`
+        );
+      }
+      // Fall through to SaaS default
     }
   }
 
@@ -314,9 +325,6 @@ function isValidDsnHost(dsn: string): boolean {
   }
 
   const expected = getExpectedHost();
-  if (!expected) {
-    return false;
-  }
 
   if (expected.isSaas) {
     // SaaS: accept sentry.io or any subdomain (e.g., o123.ingest.us.sentry.io)

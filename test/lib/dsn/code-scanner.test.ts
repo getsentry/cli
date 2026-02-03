@@ -180,6 +180,31 @@ describe("Code Scanner", () => {
       // Only the self-hosted DSN should be accepted
       expect(dsns).toEqual(["https://def@sentry.mycompany.com:9000/789"]);
     });
+
+    test("falls back to SaaS when SENTRY_URL is invalid", () => {
+      // Capture console.warn to verify warning is emitted
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (msg: string) => warnings.push(msg);
+
+      try {
+        process.env.SENTRY_URL = "not-a-valid-url";
+        const content = `
+          const SAAS_DSN = "https://abc@o123.ingest.sentry.io/456";
+        `;
+        const dsns = extractDsnsFromContent(content);
+
+        // Should accept SaaS DSNs when SENTRY_URL is invalid (fallback behavior)
+        expect(dsns).toEqual(["https://abc@o123.ingest.sentry.io/456"]);
+
+        // Should have warned about the invalid URL
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(warnings[0]).toContain("not-a-valid-url");
+        expect(warnings[0]).toContain("not a valid URL");
+      } finally {
+        console.warn = originalWarn;
+      }
+    });
   });
 
   describe("extractFirstDsnFromContent", () => {
