@@ -8,6 +8,8 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type LogsResponse,
+  LogsResponseSchema,
   type ProjectKey,
   ProjectKeySchema,
   type Region,
@@ -15,6 +17,7 @@ import {
   SentryEventSchema,
   type SentryIssue,
   SentryIssueSchema,
+  type SentryLog,
   type SentryOrganization,
   SentryOrganizationSchema,
   type SentryProject,
@@ -942,4 +945,82 @@ export function getCurrentUser(): Promise<SentryUser> {
   return apiRequest<SentryUser>("/users/me/", {
     schema: SentryUserSchema,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Logs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Fields to request from the logs API */
+const LOG_FIELDS = [
+  "sentry.item_id",
+  "trace",
+  "severity",
+  "timestamp",
+  "timestamp_precise",
+  "message",
+];
+
+/** Regex to check if a project identifier is a numeric ID */
+const NUMERIC_PROJECT_REGEX = /^\d+$/;
+
+type ListLogsOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of log entries to return */
+  limit?: number;
+  /** Time period for logs (e.g., "90d", "10m") */
+  statsPeriod?: string;
+  /** Only return logs after this timestamp_precise value (for streaming) */
+  afterTimestamp?: number;
+};
+
+/**
+ * List logs for an organization/project.
+ * Uses the Explore/Events API with dataset=logs.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, statsPeriod)
+ * @returns Array of log entries
+ */
+export async function listLogs(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListLogsOptions = {}
+): Promise<SentryLog[]> {
+  // API only accepts numeric project IDs as param, slugs go in query
+  const isNumericProject = NUMERIC_PROJECT_REGEX.test(projectSlug);
+
+  // Build query parts
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const timestampFilter = options.afterTimestamp
+    ? `timestamp_precise:>${options.afterTimestamp}`
+    : "";
+
+  const fullQuery = [projectFilter, options.query, timestampFilter]
+    .filter(Boolean)
+    .join(" ");
+
+  const response = await orgScopedRequest<LogsResponse>(
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "logs",
+        field: LOG_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit ?? 100,
+        statsPeriod: options.statsPeriod ?? "90d",
+        sort: "-timestamp",
+      },
+      schema: LogsResponseSchema,
+    }
+  );
+
+  return response.data;
 }
