@@ -12,7 +12,7 @@
  * Priority: .env with SENTRY_DSN > code > .env files > SENTRY_DSN env var
  */
 
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { getCachedDsn, setCachedDsn } from "../db/dsn-cache.js";
 import {
   extractFirstDsnFromContent,
@@ -42,37 +42,25 @@ import type {
  * Detect DSN with project root detection and caching support.
  *
  * Algorithm:
- * 1. Find project root by walking up from cwd (checking .env for SENTRY_DSN at each level)
- * 2. If DSN found during walk-up, return immediately (fastest path)
- * 3. Check cache for project root (fast path)
- * 4. Full scan from project root with depth limiting (slow path)
+ * 1. Find project root by walking up from cwd (checks .env for SENTRY_DSN to stop walk)
+ * 2. Check cache for project root (fast path)
+ * 3. Full scan from project root with depth limiting (slow path)
+ *
+ * Priority: code > .env files > SENTRY_DSN env var
+ *
+ * Note: Finding a DSN in .env during walk-up stops the walk (determines project root)
+ * but does NOT short-circuit detection - we still scan for code DSNs which have
+ * higher priority.
  *
  * @param cwd - Directory to start searching from
  * @returns Detected DSN with source info, or null if not found
  */
 export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
-  // 1. Find project root (may find DSN in .env along the way)
-  const { projectRoot, foundDsn } = await findProjectRoot(cwd);
+  // 1. Find project root (may find DSN in .env along the way, but we don't
+  //    return it immediately - code DSNs take priority)
+  const { projectRoot } = await findProjectRoot(cwd);
 
-  // 2. If DSN found during walk-up, cache and return immediately
-  if (foundDsn) {
-    // Make source path relative to project root for caching
-    const sourcePath = foundDsn.sourcePath
-      ? relative(projectRoot, join(cwd, foundDsn.sourcePath)) ||
-        foundDsn.sourcePath
-      : foundDsn.sourcePath;
-
-    await setCachedDsn(projectRoot, {
-      dsn: foundDsn.raw,
-      projectId: foundDsn.projectId,
-      orgId: foundDsn.orgId,
-      source: foundDsn.source,
-      sourcePath,
-    });
-    return foundDsn;
-  }
-
-  // 3. Check cache for project root (fast path)
+  // 2. Check cache for project root (fast path)
   const cached = await getCachedDsn(projectRoot);
 
   if (cached) {
@@ -100,7 +88,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
     // Cache invalid, fall through to full scan
   }
 
-  // 4. Full scan from project root (slow path)
+  // 3. Full scan from project root (slow path)
   const detected = await fullScanFirst(projectRoot);
 
   if (detected) {
