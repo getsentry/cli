@@ -110,8 +110,11 @@ async function executeSingleFetch(
     return;
   }
 
+  // Reverse for chronological order (API returns newest first, tail shows oldest first)
+  const chronological = [...logs].reverse();
+
   stdout.write(formatLogsHeader());
-  for (const log of logs) {
+  for (const log of chronological) {
     stdout.write(formatLogRow(log));
   }
 
