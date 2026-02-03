@@ -15,7 +15,11 @@ import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
-import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
+import {
+  expandToFullShortId,
+  isNumericId,
+  isShortSuffix,
+} from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
@@ -38,6 +42,7 @@ export const issueIdPositional = {
  * Build a command hint string for error messages.
  *
  * Returns context-aware hints based on the issue ID format:
+ * - Numeric ID (e.g., "123456789") → suggest `<org>/123456789`
  * - Suffix only (e.g., "G") → suggest `<project>-G`
  * - Has dash (e.g., "cli-G") → suggest `<org>/cli-G`
  *
@@ -45,9 +50,15 @@ export const issueIdPositional = {
  * @param issueId - The user-provided issue ID
  */
 export function buildCommandHint(command: string, issueId: string): string {
+  // Numeric IDs always need org context - can't be combined with project
+  if (isNumericId(issueId)) {
+    return `sentry issue ${command} <org>/${issueId}`;
+  }
+  // Short suffixes can be combined with project prefix
   if (isShortSuffix(issueId)) {
     return `sentry issue ${command} <project>-${issueId}`;
   }
+  // Everything else (has dash) needs org prefix
   return `sentry issue ${command} <org>/${issueId}`;
 }
 

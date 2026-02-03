@@ -5,10 +5,35 @@
 import { describe, expect, test } from "bun:test";
 import {
   expandToFullShortId,
+  isNumericId,
   isShortId,
   isShortSuffix,
   parseAliasSuffix,
 } from "../../src/lib/issue-id.js";
+
+describe("isNumericId", () => {
+  test("returns true for pure numeric strings", () => {
+    expect(isNumericId("123456789")).toBe(true);
+    expect(isNumericId("0")).toBe(true);
+    expect(isNumericId("12345")).toBe(true);
+  });
+
+  test("returns false for alphanumeric strings", () => {
+    expect(isNumericId("G")).toBe(false);
+    expect(isNumericId("4Y")).toBe(false);
+    expect(isNumericId("a123")).toBe(false);
+    expect(isNumericId("123a")).toBe(false);
+  });
+
+  test("returns false for strings with hyphens", () => {
+    expect(isNumericId("123-456")).toBe(false);
+    expect(isNumericId("CLI-G")).toBe(false);
+  });
+
+  test("returns false for empty string", () => {
+    expect(isNumericId("")).toBe(false);
+  });
+});
 
 describe("isShortSuffix", () => {
   test("returns true for simple alphanumeric suffixes", () => {

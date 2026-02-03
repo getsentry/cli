@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  buildCommandHint,
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
@@ -14,6 +15,36 @@ import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+
+describe("buildCommandHint", () => {
+  test("suggests <org>/ID for numeric IDs", () => {
+    expect(buildCommandHint("view", "123456789")).toBe(
+      "sentry issue view <org>/123456789"
+    );
+    expect(buildCommandHint("explain", "0")).toBe(
+      "sentry issue explain <org>/0"
+    );
+  });
+
+  test("suggests <project>-suffix for short suffixes", () => {
+    expect(buildCommandHint("view", "G")).toBe("sentry issue view <project>-G");
+    expect(buildCommandHint("explain", "4Y")).toBe(
+      "sentry issue explain <project>-4Y"
+    );
+    expect(buildCommandHint("plan", "ABC")).toBe(
+      "sentry issue plan <project>-ABC"
+    );
+  });
+
+  test("suggests <org>/ID for IDs with dashes", () => {
+    expect(buildCommandHint("view", "cli-G")).toBe(
+      "sentry issue view <org>/cli-G"
+    );
+    expect(buildCommandHint("explain", "PROJECT-ABC")).toBe(
+      "sentry issue explain <org>/PROJECT-ABC"
+    );
+  });
+});
 
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
