@@ -1,0 +1,42 @@
+# Implementation Plan: Issue Org Prefix Syntax
+
+## Context
+- Sentry Issue: CLI-16 - User got unhelpful error when running `sentry issue view EXTENSION-7` without org context
+- Goal: When user types an issue ID, intelligently resolve it by searching across orgs instead of requiring explicit --org flag
+
+## Completed Work
+
+### 1. `src/lib/issue-id.ts` - New parsing functions
+- `parseIssueArg()` - Parses CLI input into discriminated union types: `explicit-org`, `has-dash`, `suffix-only`, `numeric`
+- `splitProjectSuffix()` - Splits `cli-G` into `{project: "cli", suffix: "G"}`
+
+### 2. `src/commands/issue/utils.ts` - Major refactoring
+- Removed `IssueIdFlags` type and `issueIdFlags` export (the old --org/--project flags)
+- New `ResolveIssueOptions` type: `{ issueArg, cwd, command }`
+- New resolution functions:
+  - `tryResolveFromAlias()` - Check alias cache first (fast, local)
+  - `resolveByProjectSearch()` - Uses `findProjectsBySlug()` to search across orgs
+  - `resolveSuffixWithDsn()` - Use DSN detection for project context
+  - `resolveHasDash()` - Main resolver for `cli-G` format
+  - `resolveSuffixOnly()` - For suffix-only input like `G`
+  - `resolveWithExplicitOrg()` - For `sentry/EXTENSION-7` format
+
+### 3. Updated Commands (view.ts, explain.ts, plan.ts)
+- Removed IssueIdFlags and issueIdFlags imports/usage
+- Updated positional parameter from `issueId` to `issueArg`
+- Updated `resolveIssue()` calls to use new options format
+- Updated documentation with new syntax examples
+
+### 4. Updated Tests
+- Rewrote test/commands/issue/utils.test.ts for new API
+- Updated mocks to properly handle listOrganizations/listProjects calls
+- Tests verify all resolution paths
+
+## Resolution Logic
+
+| Input | Resolution |
+|-------|------------|
+| `sentry/CLI-G` | Explicit org, fetch directly |
+| `cli-G` | Alias cache → project search across orgs → error if not found |
+| `G` | Alias cache → DSN detection → error if no context |
+| `123456789` | Direct fetch via `/issues/{id}/` |
