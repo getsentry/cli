@@ -118,7 +118,7 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
  * @returns Detection result with all found DSNs and hasMultiple flag
  */
 export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
-  // Find project root first
+  // Find project root first (may find DSN in .env during walk-up)
   const { projectRoot, foundDsn } = await findProjectRoot(cwd);
 
   const allDsns: DetectedDsn[] = [];
@@ -132,24 +132,26 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     }
   };
 
-  // If DSN was found during walk-up, add it first (highest priority)
-  if (foundDsn) {
-    addDsn(foundDsn);
-  }
-
-  // 1. Check all code files from project root
+  // 1. Check all code files from project root (highest priority)
   const codeDsns = await scanCodeForDsns(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
   }
 
   // 2. Check all .env files from project root (includes monorepo packages/apps)
+  // Note: foundDsn from walk-up is already included in env file scan results
   const envFileDsns = await detectFromAllEnvFiles(projectRoot);
   for (const dsn of envFileDsns) {
     addDsn(dsn);
   }
 
-  // 3. Check env var (lowest priority)
+  // 3. Add DSN found during walk-up if not already added (deduplication handles this)
+  // This ensures it's included even if env file scan missed it somehow
+  if (foundDsn) {
+    addDsn(foundDsn);
+  }
+
+  // 4. Check env var (lowest priority)
   const envDsn = detectFromEnv();
   if (envDsn) {
     addDsn(envDsn);

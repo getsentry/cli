@@ -246,8 +246,8 @@ describe("DSN Detector (New Module)", () => {
       const result = await detectAllDsns(testDir);
 
       expect(result.hasMultiple).toBe(true);
-      // With project root detection, env file DSN found during walk-up is first
-      expect(result.primary?.raw).toBe(envDsn);
+      // Code DSNs have highest priority (code > env_file > env_var)
+      expect(result.primary?.raw).toBe(codeDsn);
       expect(result.all).toHaveLength(2);
     });
 

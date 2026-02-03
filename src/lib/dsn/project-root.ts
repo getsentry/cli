@@ -18,7 +18,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
-import { extractDsnFromEnvContent } from "./env-file.js";
+import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -164,16 +164,6 @@ const BUILD_SYSTEM_MARKERS = [
   "premake4.lua",
   "wscript",
   "Earthfile",
-] as const;
-
-/** .env files to check for SENTRY_DSN (in priority order) */
-const ENV_FILES = [
-  ".env.local",
-  ".env.development.local",
-  ".env.production.local",
-  ".env",
-  ".env.development",
-  ".env.production",
 ] as const;
 
 /** Regex for detecting root=true in .editorconfig (top-level for performance) */
@@ -591,13 +581,19 @@ async function walkUpDirectories(
       state.buildSystemAt = state.currentDir;
     }
 
+    // Stop at boundary BEFORE moving to parent - this ensures we don't
+    // traverse past home directory when starting there
+    if (state.currentDir === stopBoundary) {
+      break;
+    }
+
     // Move to parent directory
     const parentDir = dirname(state.currentDir);
     if (parentDir === state.currentDir) {
       break; // Reached filesystem root
     }
     state.currentDir = parentDir;
-  } while (state.currentDir !== "/" && state.currentDir !== stopBoundary);
+  } while (state.currentDir !== "/");
 
   // Determine project root from candidates (priority order)
   const selected = selectProjectRoot(

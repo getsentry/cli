@@ -389,13 +389,18 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
     // Build relative path - entry.parentPath is the directory containing the entry
     const relativePath = relative(cwd, join(entry.parentPath, entry.name));
 
+    // Normalize path separators for cross-platform support.
+    // The `ignore` package requires forward slashes for pattern matching,
+    // but Windows returns backslashes from path.relative().
+    const normalizedPath = relativePath.replaceAll("\\", "/");
+
     // Skip files beyond max depth
     if (getPathDepth(relativePath) > MAX_SCAN_DEPTH) {
       continue;
     }
 
     // Skip ignored paths (includes ALWAYS_SKIP_DIRS and .gitignore patterns)
-    if (ig.ignores(relativePath)) {
+    if (ig.ignores(normalizedPath)) {
       continue;
     }
 
