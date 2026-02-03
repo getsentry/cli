@@ -104,6 +104,15 @@ describe("formatLogRow", () => {
     // Should have date and time format (actual values depend on timezone)
     expect(result).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
   });
+
+  test("handles invalid timestamp gracefully", () => {
+    const log = createTestLog({ timestamp: "invalid-date" });
+    const result = formatLogRow(log);
+
+    // Should return original string instead of NaN
+    expect(result).toContain("invalid-date");
+    expect(result).not.toContain("NaN");
+  });
 });
 
 describe("formatLogsHeader", () => {
