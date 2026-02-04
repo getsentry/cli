@@ -34,10 +34,6 @@ import type {
   DsnSource,
 } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main API
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Detect DSN with project root detection and caching support.
  *
@@ -167,10 +163,6 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cache Verification
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Check if a higher-priority code DSN exists.
  * Used to invalidate low-priority cached DSNs when code is added.
@@ -287,10 +279,6 @@ function extractDsnFromContent(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Full Scan
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Full scan to find first DSN (cache miss path)
  *
@@ -320,10 +308,6 @@ async function fullScanFirst(cwd: string): Promise<DetectedDsn | null> {
 
   return null;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Get a human-readable description of where DSN was found

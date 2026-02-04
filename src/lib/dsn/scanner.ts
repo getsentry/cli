@@ -8,13 +8,7 @@
 import { join } from "node:path";
 import type { DetectedDsn } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Result of processing a single file for DSN extraction.
- */
+/** Result of processing a single file for DSN extraction. */
 export type FileProcessResult = {
   /** Extracted DSN string (null if not found) */
   dsn: string | null;
@@ -35,10 +29,6 @@ export type FileProcessor = (
   relativePath: string,
   content: string
 ) => FileProcessResult | null;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Scanner
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Scan specific files (not glob) and extract DSNs.
@@ -68,14 +58,10 @@ export async function scanSpecificFiles(
 
   for (const filename of filenames) {
     const filepath = join(cwd, filename);
-    const file = Bun.file(filepath);
-
-    if (!(await file.exists())) {
-      continue;
-    }
 
     try {
-      const content = await file.text();
+      // Read file directly - handles ENOENT gracefully
+      const content = await Bun.file(filepath).text();
       const result = processFile(filename, content);
 
       if (result?.dsn) {
@@ -89,7 +75,7 @@ export async function scanSpecificFiles(
         }
       }
     } catch {
-      // Skip files we can't read
+      // File doesn't exist or can't be read - continue to next
     }
   }
 

@@ -22,13 +22,7 @@ import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Why a directory was chosen as project root
- */
+/** Why a directory was chosen as project root */
 export type ProjectRootReason =
   | "env_dsn" // Found .env with SENTRY_DSN
   | "vcs" // Version control (.git, .hg, etc.)
@@ -38,9 +32,7 @@ export type ProjectRootReason =
   | "build_system" // Build system marker
   | "fallback"; // No markers found, using cwd
 
-/**
- * Result of project root detection
- */
+/** Result of project root detection */
 export type ProjectRootResult = {
   /** The determined project root directory */
   projectRoot: string;
@@ -51,10 +43,6 @@ export type ProjectRootResult = {
   /** Number of directories traversed to find root */
   levelsTraversed: number;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Marker Definitions
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** VCS directories - definitive repo root */
 const VCS_MARKERS = [
@@ -166,12 +154,11 @@ const BUILD_SYSTEM_MARKERS = [
   "Earthfile",
 ] as const;
 
-/** Regex for detecting root=true in .editorconfig (top-level for performance) */
+/**
+ * Regex for detecting root=true in .editorconfig.
+ * Leading whitespace is valid per EditorConfig spec (allows indentation).
+ */
 const EDITORCONFIG_ROOT_REGEX = /^\s*root\s*=\s*true\s*$/im;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Telemetry Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Wrap a file system operation with a span for tracing.
@@ -199,16 +186,12 @@ function withFsSpan<T>(
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// File System Helpers (Parallelized)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Check if a path exists (file or directory)
+ * Check if a path exists (file or directory) using stat.
  */
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(filePath: string): Promise<boolean> {
   try {
-    await stat(path);
+    await stat(filePath);
     return true;
   } catch {
     return false;
@@ -216,19 +199,8 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 /**
- * Check if a file exists (async) - only for regular files
- */
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    return await Bun.file(path).exists();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if any of the given paths exist in a directory (parallel)
- * Works for both files and directories.
+ * Check if any of the given paths exist in a directory.
+ * Uses early exit - returns true as soon as first match is found.
  *
  * @param dir - Directory to check
  * @param names - Array of file/directory names to check
@@ -238,13 +210,17 @@ async function anyExists(
   dir: string,
   names: readonly string[]
 ): Promise<boolean> {
-  const checks = names.map((name) => pathExists(join(dir, name)));
-  const results = await Promise.all(checks);
-  return results.some((exists) => exists);
+  for (const name of names) {
+    if (await pathExists(join(dir, name))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
- * Check if any files matching glob patterns exist in a directory (parallel)
+ * Check if any files matching glob patterns exist in a directory.
+ * Uses early exit - returns true as soon as first match is found.
  *
  * @param dir - Directory to check
  * @param patterns - Glob patterns to match
@@ -254,24 +230,18 @@ async function anyGlobMatches(
   dir: string,
   patterns: readonly string[]
 ): Promise<boolean> {
-  const checks = patterns.map(async (pattern) => {
+  for (const pattern of patterns) {
     const glob = new Bun.Glob(pattern);
     for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
       return true; // Found at least one match
     }
-    return false;
-  });
-
-  const results = await Promise.all(checks);
-  return results.some((found) => found);
+  }
+  return false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Marker Detection Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Check if .editorconfig exists and contains root=true
+ * Check if .editorconfig exists and contains root=true.
+ * Reads file directly and handles ENOENT gracefully.
  *
  * @param dir - Directory to check
  * @returns True if .editorconfig with root=true found
@@ -279,19 +249,17 @@ async function anyGlobMatches(
 async function checkEditorConfigRoot(dir: string): Promise<boolean> {
   const editorConfigPath = join(dir, ".editorconfig");
   try {
-    const file = Bun.file(editorConfigPath);
-    if (!(await file.exists())) {
-      return false;
-    }
-    const content = await file.text();
+    const content = await Bun.file(editorConfigPath).text();
     return EDITORCONFIG_ROOT_REGEX.test(content);
   } catch {
+    // File doesn't exist or can't be read
     return false;
   }
 }
 
 /**
- * Determine the type of repo root marker found
+ * Determine the type of repo root marker found.
+ * Returns in priority order: VCS > CI > editorconfig.
  */
 function getRepoRootType(
   hasVcs: boolean,
@@ -340,12 +308,11 @@ export function hasRepoRootMarker(
  */
 export function hasLanguageMarker(dir: string): Promise<boolean> {
   return withFsSpan("hasLanguageMarker", async () => {
-    // Check exact filenames and glob patterns in parallel
-    const [hasExact, hasGlob] = await Promise.all([
-      anyExists(dir, LANGUAGE_MARKERS),
-      anyGlobMatches(dir, LANGUAGE_MARKER_GLOBS),
-    ]);
-    return hasExact || hasGlob;
+    // Check exact filenames first (more common), then glob patterns
+    if (await anyExists(dir, LANGUAGE_MARKERS)) {
+      return true;
+    }
+    return anyGlobMatches(dir, LANGUAGE_MARKER_GLOBS);
   });
 }
 
@@ -361,64 +328,34 @@ export function hasBuildSystemMarker(dir: string): Promise<boolean> {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DSN Detection in .env Files
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Check .env files in a directory for SENTRY_DSN
- *
- * Checks files in priority order and returns immediately on first match.
+ * Check .env files in a directory for SENTRY_DSN.
+ * Reads files directly and handles ENOENT gracefully.
  *
  * @param dir - Directory to check
  * @returns Detected DSN or null
  */
 function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
   return withFsSpan("checkEnvForDsn", async () => {
-    // Check all env files in parallel for existence
-    const existenceChecks = ENV_FILES.map(async (filename) => {
-      const path = join(dir, filename);
-      const exists = await fileExists(path);
-      return { filename, path, exists };
-    });
-
-    const results = await Promise.all(existenceChecks);
-    const existingFiles = results.filter((r) => r.exists);
-
-    // Read existing files in parallel
-    const contentChecks = existingFiles.map(async ({ filename, path }) => {
-      try {
-        const content = await Bun.file(path).text();
-        const dsn = extractDsnFromEnvContent(content);
-        return dsn ? { dsn, filename } : null;
-      } catch {
-        return null;
-      }
-    });
-
-    const dsnResults = await Promise.all(contentChecks);
-
-    // Return first found DSN (respecting priority order)
+    // Check env files in priority order, stop on first DSN found
     for (const filename of ENV_FILES) {
-      const found = dsnResults.find(
-        (r) => r !== null && r.filename === filename
-      );
-      if (found) {
-        return createDetectedDsn(found.dsn, "env_file", found.filename);
+      const filePath = join(dir, filename);
+      try {
+        const content = await Bun.file(filePath).text();
+        const dsn = extractDsnFromEnvContent(content);
+        if (dsn) {
+          return createDetectedDsn(dsn, "env_file", filename);
+        }
+      } catch {
+        // File doesn't exist or can't be read - continue to next file
       }
     }
-
     return null;
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main API
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Get the stop boundary for project root search.
- *
  * Returns home directory if it exists, otherwise filesystem root.
  */
 export function getStopBoundary(): string {
@@ -454,22 +391,6 @@ async function processDirectoryLevel(
 }
 
 /**
- * Convert repo root type to project root reason
- */
-function repoRootTypeToReason(
-  type: "vcs" | "ci" | "editorconfig" | undefined
-): ProjectRootReason {
-  switch (type) {
-    case "editorconfig":
-      return "editorconfig";
-    case "ci":
-      return "ci";
-    default:
-      return "vcs";
-  }
-}
-
-/**
  * Determine the final project root from candidates
  */
 function selectProjectRoot(
@@ -486,9 +407,7 @@ function selectProjectRoot(
   return { projectRoot: fallback, reason: "fallback" };
 }
 
-/**
- * State tracked during directory walk-up
- */
+/** State tracked during directory walk-up */
 type WalkState = {
   currentDir: string;
   levelsTraversed: number;
@@ -513,7 +432,8 @@ function createDsnFoundResult(
 }
 
 /**
- * Create result when repo root marker is found
+ * Create result when repo root marker is found.
+ * Maps marker type to reason (defaults to "vcs" for undefined).
  */
 function createRepoRootResult(
   currentDir: string,
@@ -522,13 +442,18 @@ function createRepoRootResult(
 ): ProjectRootResult {
   return {
     projectRoot: currentDir,
-    reason: repoRootTypeToReason(markerType),
+    reason: markerType ?? "vcs",
     levelsTraversed,
   };
 }
 
 /**
- * Walk up directories searching for project root
+ * Walk up directories searching for project root.
+ *
+ * Loop logic:
+ * 1. Always process starting directory (do-while ensures this)
+ * 2. Stop at stopBoundary AFTER processing it (break before moving to parent)
+ * 3. Stop at filesystem root (parentDir === currentDir)
  */
 async function walkUpDirectories(
   resolvedStart: string,
@@ -541,7 +466,7 @@ async function walkUpDirectories(
     buildSystemAt: null,
   };
 
-  // Use do-while to ensure starting directory is always checked,
+  // do-while ensures starting directory is always checked,
   // even when it equals the stop boundary (e.g., user runs from home dir)
   do {
     state.levelsTraversed += 1;
@@ -581,19 +506,16 @@ async function walkUpDirectories(
       state.buildSystemAt = state.currentDir;
     }
 
-    // Stop at boundary BEFORE moving to parent - this ensures we don't
-    // traverse past home directory when starting there
-    if (state.currentDir === stopBoundary) {
+    // Move to parent directory (or stop if at boundary/root)
+    const parentDir = dirname(state.currentDir);
+    const shouldStop =
+      state.currentDir === stopBoundary || parentDir === state.currentDir;
+    if (shouldStop) {
       break;
     }
-
-    // Move to parent directory
-    const parentDir = dirname(state.currentDir);
-    if (parentDir === state.currentDir) {
-      break; // Reached filesystem root
-    }
     state.currentDir = parentDir;
-  } while (state.currentDir !== "/");
+    // biome-ignore lint/correctness/noConstantCondition: loop exits via break
+  } while (true);
 
   // Determine project root from candidates (priority order)
   const selected = selectProjectRoot(

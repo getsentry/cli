@@ -13,7 +13,7 @@
  */
 
 import { readdir } from "node:fs/promises";
-import { extname, join, relative } from "node:path";
+import path from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import ignore, { type Ignore } from "ignore";
@@ -156,6 +156,21 @@ const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
 const PATH_SEPARATOR_PATTERN = /[/\\]/;
 
 /**
+ * Normalize path separators to forward slashes for cross-platform consistency.
+ * On POSIX systems, this is a no-op (identity function).
+ * On Windows, converts backslashes to forward slashes.
+ *
+ * This is needed for:
+ * 1. The `ignore` package pattern matching (requires forward slashes)
+ * 2. inferPackagePath() which splits by "/"
+ * 3. Consistent sourcePath values in DetectedDsn objects
+ */
+const normalizePath: (p: string) => string =
+  path.sep === path.posix.sep
+    ? (x) => x
+    : (x) => x.replaceAll(path.sep, path.posix.sep);
+
+/**
  * Pattern to match Sentry DSN URLs.
  * Captures the full DSN including protocol, public key, host, and project ID.
  *
@@ -272,17 +287,7 @@ function isCommentedLine(trimmedLine: string): boolean {
   return COMMENT_PREFIXES.some((prefix) => trimmedLine.startsWith(prefix));
 }
 
-/** Track whether we've already warned about invalid SENTRY_URL (warn once per process) */
-let hasWarnedInvalidSentryUrl = false;
-
-/**
- * Reset the invalid SENTRY_URL warning state.
- * Exported for testing only - allows tests to reset state between runs.
- * @internal
- */
-export function _resetInvalidSentryUrlWarning(): void {
-  hasWarnedInvalidSentryUrl = false;
-}
+import { ConfigError } from "../errors.js";
 
 /**
  * Get the expected Sentry host for DSN validation.
@@ -290,8 +295,7 @@ export function _resetInvalidSentryUrlWarning(): void {
  * When SENTRY_URL is set (self-hosted), only DSNs matching that host are valid.
  * When not set (SaaS), only *.sentry.io DSNs are valid.
  *
- * If SENTRY_URL is set but invalid, logs a warning and falls back to SaaS behavior.
- *
+ * @throws {ConfigError} If SENTRY_URL is set but not a valid URL
  * @returns Object with host info for validation (never null)
  */
 function getExpectedHost(): { host: string; isSaas: boolean } {
@@ -303,14 +307,11 @@ function getExpectedHost(): { host: string; isSaas: boolean } {
       const url = new URL(sentryUrl);
       return { host: url.host, isSaas: false };
     } catch {
-      // Invalid SENTRY_URL - warn once and fall back to SaaS behavior
-      if (!hasWarnedInvalidSentryUrl) {
-        hasWarnedInvalidSentryUrl = true;
-        console.warn(
-          `Warning: SENTRY_URL "${sentryUrl}" is not a valid URL. Falling back to sentry.io for DSN detection.`
-        );
-      }
-      // Fall through to SaaS default
+      // Invalid SENTRY_URL - throw immediately since nothing will work
+      throw new ConfigError(
+        `SENTRY_URL "${sentryUrl}" is not a valid URL`,
+        "Set SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
+      );
     }
   }
 
@@ -321,7 +322,7 @@ function getExpectedHost(): { host: string; isSaas: boolean } {
 /**
  * Validate that a DSN has an acceptable Sentry host.
  *
- * When SENTRY_URL is set (self-hosted): only DSNs matching that exact host are valid
+ * When SENTRY_URL is set (self-hosted): DSNs matching host or any subdomain are valid
  * When SENTRY_URL is not set (SaaS): only *.sentry.io DSNs are valid
  *
  * This ensures we don't detect SaaS DSNs when configured for self-hosted
@@ -335,15 +336,12 @@ function isValidDsnHost(dsn: string): boolean {
 
   const expected = getExpectedHost();
 
-  if (expected.isSaas) {
-    // SaaS: accept sentry.io or any subdomain (e.g., o123.ingest.us.sentry.io)
-    return (
-      parsed.host === expected.host || parsed.host.endsWith(`.${expected.host}`)
-    );
-  }
-
-  // Self-hosted: exact host match only
-  return parsed.host === expected.host;
+  // Accept exact match or any subdomain for both SaaS and self-hosted
+  // e.g., for sentry.io: accept sentry.io or o123.ingest.us.sentry.io
+  // e.g., for sentry.example.com: accept sentry.example.com or ingest.sentry.example.com
+  return (
+    parsed.host === expected.host || parsed.host.endsWith(`.${expected.host}`)
+  );
 }
 
 /**
@@ -357,7 +355,7 @@ async function createIgnoreFilter(cwd: string): Promise<Ignore> {
 
   // Then add .gitignore rules if present
   try {
-    const gitignorePath = join(cwd, ".gitignore");
+    const gitignorePath = path.join(cwd, ".gitignore");
     const content = await Bun.file(gitignorePath).text();
     ig.add(content);
   } catch {
@@ -371,7 +369,7 @@ async function createIgnoreFilter(cwd: string): Promise<Ignore> {
  * Check if a file should be scanned based on its extension.
  */
 function shouldScanFile(filename: string): boolean {
-  const ext = extname(filename);
+  const ext = path.extname(filename);
   return ext !== "" && TEXT_EXTENSIONS.has(ext);
 }
 
@@ -404,20 +402,19 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
     }
 
     // Build relative path - entry.parentPath is the directory containing the entry
-    // Normalize to forward slashes for cross-platform consistency.
-    // Windows returns backslashes from path.relative(), but we need forward slashes for:
-    // 1. The `ignore` package pattern matching
-    // 2. inferPackagePath() which splits by "/"
-    // 3. Consistent sourcePath values in DetectedDsn objects
-    const relativePath = relative(
+    const rawRelativePath = path.relative(
       cwd,
-      join(entry.parentPath, entry.name)
-    ).replaceAll("\\", "/");
+      path.join(entry.parentPath, entry.name)
+    );
 
-    // Skip files beyond max depth
-    if (getPathDepth(relativePath) > MAX_SCAN_DEPTH) {
+    // Check depth early before more expensive operations
+    // Uses raw path (may have backslashes on Windows) since getPathDepth handles both
+    if (getPathDepth(rawRelativePath) > MAX_SCAN_DEPTH) {
       continue;
     }
+
+    // Normalize to forward slashes for cross-platform consistency
+    const relativePath = normalizePath(rawRelativePath);
 
     // Skip ignored paths (includes ALWAYS_SKIP_DIRS and .gitignore patterns)
     if (ig.ignores(relativePath)) {
@@ -436,6 +433,11 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
 /**
  * Process a single file and extract DSNs.
  *
+ * Note on Bun.file().size: This is a lazy property that reads file metadata
+ * (via stat) only when accessed, not the file content. This is verified in
+ * Bun's source code and is cheaper than a separate stat() call since it uses
+ * the already-created file handle.
+ *
  * @param cwd - Root directory
  * @param relativePath - Path relative to cwd
  * @param limit - Maximum DSNs to extract (undefined = no limit)
@@ -446,13 +448,12 @@ async function processFile(
   relativePath: string,
   limit?: number
 ): Promise<DetectedDsn[]> {
-  const filepath = join(cwd, relativePath);
+  const filepath = path.join(cwd, relativePath);
 
   try {
     const file = Bun.file(filepath);
 
-    // Skip large files - check happens here to avoid extra stat() calls during
-    // collection. Bun.file().size is cheap once we have the file handle.
+    // Skip large files (Bun.file().size reads metadata, not content)
     if (file.size > MAX_FILE_SIZE) {
       return [];
     }

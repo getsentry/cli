@@ -15,10 +15,6 @@ import { scanSpecificFiles } from "./scanner.js";
 import type { DetectedDsn } from "./types.js";
 import { MONOREPO_ROOTS } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * .env file names to search (in priority order).
  *
@@ -40,10 +36,6 @@ export const ENV_FILES = [
  * Also handles trailing comments: SENTRY_DSN=value # comment
  */
 const ENV_DSN_PATTERN = /^SENTRY_DSN\s*=\s*(['"]?)(.+?)\1\s*(?:#.*)?$/;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DSN Extraction
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Extract SENTRY_DSN value from .env file content.
@@ -84,10 +76,6 @@ export function extractDsnFromEnvContent(content: string): string | null {
 // Legacy alias for backwards compatibility
 export const parseEnvFile = extractDsnFromEnvContent;
 export const extractDsnFromEnvFile = extractDsnFromEnvContent;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Detection Functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Detect DSN from .env files in the given directory.
@@ -147,10 +135,6 @@ export async function detectFromAllEnvFiles(
 
   return results;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Monorepo Support
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Detect DSN from .env files in monorepo package directories.
