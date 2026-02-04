@@ -1,0 +1,33 @@
+## Implementation Plan
+
+### Problem
+Sentry span instrumentation requires verbose boilerplate (~15-20 lines per span):
+- Manual try/catch with status setting
+- Repetitive onlyIfParent: true option
+- Error/OK status codes
+
+### Solution
+Created generic tracing helpers in src/lib/telemetry.ts:
+
+1. **withTracing(name, op, fn, attributes?)** - Simple async wrapper
+   - Auto-sets span status (OK on success, Error on failure)
+   - Accepts optional attributes
+
+2. **withTracingSpan(name, op, fn, attributes?)** - Advanced wrapper
+   - Passes span to callback for dynamic attribute setting
+   - Tracks if callback sets status (via wrapped setStatus)
+   - Won't override manually-set status (for graceful error handling)
+
+3. **withFsSpan(operation, fn)** - File system operations
+   - Uses withTracing with op='file'
+
+### Files Modified
+- src/lib/telemetry.ts: Added withTracing, withTracingSpan, withFsSpan
+- src/lib/dsn/code-scanner.ts: Refactored scanDirectory to use withTracingSpan
+- src/lib/dsn/project-root.ts: Removed local withFsSpan, use shared helpers
+- test/lib/telemetry.test.ts: Added 19 new tests
+
+### Key Design Decision
+withTracingSpan wraps span.setStatus() to track if callback manually sets status.
+This allows callbacks to set error status and return gracefully (e.g., return
+empty array instead of throwing) without the wrapper overriding with OK status.
