@@ -13,13 +13,20 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import {
+  cleanupTestDir,
+  createTestConfigDir,
+  mockFetch,
+} from "../../helpers.js";
 
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-issue-utils-");
+  // Use isolateProjectRoot to prevent DSN detection from scanning the real project
+  testConfigDir = await createTestConfigDir("test-issue-utils-", {
+    isolateProjectRoot: true,
+  });
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
@@ -35,7 +42,7 @@ afterEach(async () => {
 
 describe("resolveOrgAndIssueId", () => {
   test("returns org and numeric issue ID when org is provided", async () => {
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -62,7 +69,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "123456789",
@@ -76,7 +83,7 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves short ID to numeric ID", async () => {
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -102,7 +109,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "PROJECT-ABC",
@@ -116,152 +123,179 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("throws ContextError when org cannot be resolved", async () => {
+    // Create isolated dir with no DSNs to simulate "no org context"
+    const isolatedDir = await createTestConfigDir("test-no-org-", {
+      isolateProjectRoot: true,
+    });
     delete process.env.SENTRY_DSN;
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
+    try {
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input, init);
+        const url = req.url;
 
-      // Numeric ID is fetched directly - this succeeds
-      if (url.includes("/issues/123456789/")) {
-        return new Response(
-          JSON.stringify({
-            id: "123456789",
-            shortId: "PROJECT-ABC",
-            title: "Test Issue",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "10",
-            userCount: 5,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
+        // Numeric ID is fetched directly - this succeeds
+        if (url.includes("/issues/123456789/")) {
+          return new Response(
+            JSON.stringify({
+              id: "123456789",
+              shortId: "PROJECT-ABC",
+              title: "Test Issue",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "10",
+              userCount: 5,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
 
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
       });
-    };
 
-    await expect(
-      resolveOrgAndIssueId({
-        issueId: "123456789",
-        cwd: "/nonexistent/path",
-        commandHint: "sentry issue explain 123456789 --org <org-slug>",
-      })
-    ).rejects.toThrow("Organization");
+      await expect(
+        resolveOrgAndIssueId({
+          issueId: "123456789",
+          cwd: isolatedDir,
+          commandHint: "sentry issue explain 123456789 --org <org-slug>",
+        })
+      ).rejects.toThrow("Organization");
+    } finally {
+      await cleanupTestDir(isolatedDir);
+    }
   });
 
   test("resolves alias-suffix format (e.g., 'f-g') using cached aliases", async () => {
-    // Empty fingerprint matches detectAllDsns on empty dir
-    const { setProjectAliases } = await import(
-      "../../../src/lib/db/project-aliases.js"
-    );
-    await setProjectAliases(
-      {
-        f: { orgSlug: "cached-org", projectSlug: "frontend" },
-        b: { orgSlug: "cached-org", projectSlug: "backend" },
-      },
-      ""
-    );
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
-
-      if (url.includes("organizations/cached-org/issues/FRONTEND-G")) {
-        return new Response(
-          JSON.stringify({
-            id: "111222333",
-            shortId: "FRONTEND-G",
-            title: "Test Issue from alias",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "5",
-            userCount: 2,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    };
-
-    const result = await resolveOrgAndIssueId({
-      issueId: "f-g",
-      cwd: testConfigDir,
-      commandHint: "sentry issue explain f-g --org <org-slug>",
+    // Create isolated project root so DSN detection finds no DSNs (empty fingerprint)
+    const isolatedDir = await createTestConfigDir("test-alias-", {
+      isolateProjectRoot: true,
     });
+    await setOrgRegion("cached-org", DEFAULT_SENTRY_URL);
 
-    expect(result.org).toBe("cached-org");
-    expect(result.issueId).toBe("111222333");
+    try {
+      const { setProjectAliases } = await import(
+        "../../../src/lib/db/project-aliases.js"
+      );
+      await setProjectAliases(
+        {
+          f: { orgSlug: "cached-org", projectSlug: "frontend" },
+          b: { orgSlug: "cached-org", projectSlug: "backend" },
+        },
+        ""
+      );
+
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input, init);
+        const url = req.url;
+
+        if (url.includes("organizations/cached-org/issues/FRONTEND-G")) {
+          return new Response(
+            JSON.stringify({
+              id: "111222333",
+              shortId: "FRONTEND-G",
+              title: "Test Issue from alias",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "5",
+              userCount: 2,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      });
+
+      const result = await resolveOrgAndIssueId({
+        issueId: "f-g",
+        cwd: isolatedDir,
+        commandHint: "sentry issue explain f-g --org <org-slug>",
+      });
+
+      expect(result.org).toBe("cached-org");
+      expect(result.issueId).toBe("111222333");
+    } finally {
+      await cleanupTestDir(isolatedDir);
+    }
   });
 
   test("resolves org-aware alias format (e.g., 'o1/d-4y') for cross-org collisions", async () => {
-    const { setProjectAliases } = await import(
-      "../../../src/lib/db/project-aliases.js"
-    );
-    await setProjectAliases(
-      {
-        "o1/d": { orgSlug: "org1", projectSlug: "dashboard" },
-        "o2/d": { orgSlug: "org2", projectSlug: "dashboard" },
-      },
-      ""
-    );
-
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
-
-      if (url.includes("organizations/org1/issues/DASHBOARD-4Y")) {
-        return new Response(
-          JSON.stringify({
-            id: "999888777",
-            shortId: "DASHBOARD-4Y",
-            title: "Test Issue from org-aware alias",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "1",
-            userCount: 1,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    };
-
-    const result = await resolveOrgAndIssueId({
-      issueId: "o1/d-4y",
-      cwd: testConfigDir,
-      commandHint: "sentry issue explain o1/d-4y",
+    // Create isolated project root so DSN detection finds no DSNs (empty fingerprint)
+    const isolatedDir = await createTestConfigDir("test-alias-", {
+      isolateProjectRoot: true,
     });
+    await setOrgRegion("org1", DEFAULT_SENTRY_URL);
 
-    expect(result.org).toBe("org1");
-    expect(result.issueId).toBe("999888777");
+    try {
+      const { setProjectAliases } = await import(
+        "../../../src/lib/db/project-aliases.js"
+      );
+      await setProjectAliases(
+        {
+          "o1/d": { orgSlug: "org1", projectSlug: "dashboard" },
+          "o2/d": { orgSlug: "org2", projectSlug: "dashboard" },
+        },
+        ""
+      );
+
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input, init);
+        const url = req.url;
+
+        if (url.includes("organizations/org1/issues/DASHBOARD-4Y")) {
+          return new Response(
+            JSON.stringify({
+              id: "999888777",
+              shortId: "DASHBOARD-4Y",
+              title: "Test Issue from org-aware alias",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "1",
+              userCount: 1,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      });
+
+      const result = await resolveOrgAndIssueId({
+        issueId: "o1/d-4y",
+        cwd: isolatedDir,
+        commandHint: "sentry issue explain o1/d-4y",
+      });
+
+      expect(result.org).toBe("org1");
+      expect(result.issueId).toBe("999888777");
+    } finally {
+      await cleanupTestDir(isolatedDir);
+    }
   });
 
   test("resolves short suffix format (e.g., 'G') using project context", async () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -287,7 +321,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "G",
@@ -329,7 +363,7 @@ describe("resolveOrgAndIssueId", () => {
     await setDefaults(undefined, undefined);
     await setToken("test-token");
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -355,7 +389,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "G",
@@ -376,7 +410,7 @@ describe("resolveOrgAndIssueId", () => {
     );
     await clearProjectAliases();
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -402,7 +436,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "craft-g",
@@ -428,7 +462,7 @@ describe("resolveOrgAndIssueId", () => {
     let shortSuffixAttempted = false;
     let fullShortIdAttempted = false;
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -465,7 +499,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueId: "15",
@@ -486,10 +520,12 @@ describe("resolveOrgAndIssueId", () => {
     await setToken("test-token");
     await setDefaults("my-org", "my-project");
 
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "Unauthorized" }), {
-        status: 401,
-      });
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Unauthorized" }), {
+          status: 401,
+        })
+    );
 
     // Auth errors should propagate, not fall through
     await expect(
@@ -509,10 +545,12 @@ describe("resolveOrgAndIssueId", () => {
     await setToken("test-token");
     await setDefaults("my-org", "my-project");
 
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "Internal Server Error" }), {
-        status: 500,
-      });
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+          status: 500,
+        })
+    );
 
     // Server errors should propagate, not fall through
     await expect(
@@ -581,7 +619,7 @@ describe("pollAutofixState", () => {
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = mockFetch(async () => {
       fetchCount += 1;
       return new Response(
         JSON.stringify({
@@ -596,7 +634,7 @@ describe("pollAutofixState", () => {
           headers: { "Content-Type": "application/json" },
         }
       );
-    };
+    });
 
     const result = await pollAutofixState({
       orgSlug: "test-org",
@@ -610,20 +648,22 @@ describe("pollAutofixState", () => {
   });
 
   test("returns immediately when state is ERROR", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "ERROR",
-            steps: [],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_345,
+              status: "ERROR",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+    );
 
     const result = await pollAutofixState({
       orgSlug: "test-org",
@@ -636,20 +676,22 @@ describe("pollAutofixState", () => {
   });
 
   test("stops at WAITING_FOR_USER_RESPONSE when stopOnWaitingForUser is true", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "WAITING_FOR_USER_RESPONSE",
-            steps: [],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_345,
+              status: "WAITING_FOR_USER_RESPONSE",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+    );
 
     const result = await pollAutofixState({
       orgSlug: "test-org",
@@ -665,7 +707,7 @@ describe("pollAutofixState", () => {
   test("continues polling when PROCESSING", async () => {
     let fetchCount = 0;
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = mockFetch(async () => {
       fetchCount += 1;
 
       // Return PROCESSING for first call, COMPLETED for second
@@ -698,7 +740,7 @@ describe("pollAutofixState", () => {
           headers: { "Content-Type": "application/json" },
         }
       );
-    };
+    });
 
     const result = await pollAutofixState({
       orgSlug: "test-org",
@@ -718,7 +760,7 @@ describe("pollAutofixState", () => {
 
     // Return PROCESSING first to allow animation interval to fire,
     // then COMPLETED on second call
-    globalThis.fetch = async () => {
+    globalThis.fetch = mockFetch(async () => {
       fetchCount += 1;
 
       if (fetchCount === 1) {
@@ -763,7 +805,7 @@ describe("pollAutofixState", () => {
           headers: { "Content-Type": "application/json" },
         }
       );
-    };
+    });
 
     const stderrMock = {
       write: (s: string) => {
@@ -783,20 +825,22 @@ describe("pollAutofixState", () => {
   });
 
   test("throws timeout error when exceeding timeoutMs", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "PROCESSING",
-            steps: [],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_345,
+              status: "PROCESSING",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+    );
 
     await expect(
       pollAutofixState({
@@ -814,7 +858,7 @@ describe("pollAutofixState", () => {
   test("continues polling when autofix is null", async () => {
     let fetchCount = 0;
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = mockFetch(async () => {
       fetchCount += 1;
 
       // Return null for first call, state for second
@@ -838,7 +882,7 @@ describe("pollAutofixState", () => {
           headers: { "Content-Type": "application/json" },
         }
       );
-    };
+    });
 
     const result = await pollAutofixState({
       orgSlug: "test-org",
