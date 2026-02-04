@@ -200,43 +200,78 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 /**
  * Check if any of the given paths exist in a directory.
- * Uses early exit - returns true as soon as first match is found.
+ * Runs checks in parallel and resolves as soon as any returns true.
  *
  * @param dir - Directory to check
  * @param names - Array of file/directory names to check
  * @returns True if any path exists
  */
-async function anyExists(
-  dir: string,
-  names: readonly string[]
-): Promise<boolean> {
-  for (const name of names) {
-    if (await pathExists(join(dir, name))) {
-      return true;
-    }
+function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
+  if (names.length === 0) {
+    return Promise.resolve(false);
   }
-  return false;
+
+  return new Promise((done) => {
+    let pending = names.length;
+
+    const checkDone = () => {
+      pending -= 1;
+      if (pending === 0) {
+        done(false);
+      }
+    };
+
+    for (const name of names) {
+      pathExists(join(dir, name))
+        .then((exists) => {
+          if (exists) {
+            done(true);
+          } else {
+            checkDone();
+          }
+        })
+        .catch(checkDone);
+    }
+  });
 }
 
 /**
  * Check if any files matching glob patterns exist in a directory.
- * Uses early exit - returns true as soon as first match is found.
+ * Runs pattern checks in parallel and resolves as soon as any finds a match.
  *
  * @param dir - Directory to check
  * @param patterns - Glob patterns to match
  * @returns True if any matching file exists
  */
-async function anyGlobMatches(
+function anyGlobMatches(
   dir: string,
   patterns: readonly string[]
 ): Promise<boolean> {
-  for (const pattern of patterns) {
-    const glob = new Bun.Glob(pattern);
-    for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
-      return true; // Found at least one match
-    }
+  if (patterns.length === 0) {
+    return Promise.resolve(false);
   }
-  return false;
+
+  return new Promise((done) => {
+    let pending = patterns.length;
+
+    const checkDone = () => {
+      pending -= 1;
+      if (pending === 0) {
+        done(false);
+      }
+    };
+
+    for (const pattern of patterns) {
+      const glob = new Bun.Glob(pattern);
+      (async () => {
+        for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
+          done(true);
+          return;
+        }
+        checkDone();
+      })().catch(checkDone);
+    }
+  });
 }
 
 /**
