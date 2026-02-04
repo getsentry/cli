@@ -1,0 +1,17 @@
+## Implementation Plan
+
+### Problem
+The upgrade module had a hardcoded User-Agent string ('sentry-cli') for GitHub API requests, while the Sentry API client uses a centralized getUserAgent() function that includes version and runtime information.
+
+### Solution
+1. Import getUserAgent() from constants.ts
+2. Convert static GITHUB_HEADERS constant to getGitHubHeaders() function
+3. Update two call sites: fetchLatestFromGitHub() and versionExists()
+
+### Changes
+- src/lib/upgrade.ts: Added import, converted constant to function, updated 2 usages
+
+### Testing
+- All 18 upgrade tests pass
+- Typecheck passes
+- Lint passes
