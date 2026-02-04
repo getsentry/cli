@@ -19,6 +19,7 @@ import * as Sentry from "@sentry/bun";
 import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST } from "../constants.js";
+import { ConfigError } from "../errors.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -287,8 +288,6 @@ function isCommentedLine(trimmedLine: string): boolean {
   return COMMENT_PREFIXES.some((prefix) => trimmedLine.startsWith(prefix));
 }
 
-import { ConfigError } from "../errors.js";
-
 /**
  * Get the expected Sentry host for DSN validation.
  *
@@ -296,16 +295,16 @@ import { ConfigError } from "../errors.js";
  * When not set (SaaS), only *.sentry.io DSNs are valid.
  *
  * @throws {ConfigError} If SENTRY_URL is set but not a valid URL
- * @returns Object with host info for validation (never null)
+ * @returns The expected host domain for DSN validation
  */
-function getExpectedHost(): { host: string; isSaas: boolean } {
+function getExpectedHost(): string {
   const sentryUrl = process.env.SENTRY_URL;
 
   if (sentryUrl) {
     // Self-hosted: only accept DSNs matching the configured host
     try {
       const url = new URL(sentryUrl);
-      return { host: url.host, isSaas: false };
+      return url.host;
     } catch {
       // Invalid SENTRY_URL - throw immediately since nothing will work
       throw new ConfigError(
@@ -316,7 +315,7 @@ function getExpectedHost(): { host: string; isSaas: boolean } {
   }
 
   // SaaS: only accept *.sentry.io
-  return { host: DEFAULT_SENTRY_HOST, isSaas: true };
+  return DEFAULT_SENTRY_HOST;
 }
 
 /**
@@ -334,13 +333,13 @@ function isValidDsnHost(dsn: string): boolean {
     return false;
   }
 
-  const expected = getExpectedHost();
+  const expectedHost = getExpectedHost();
 
   // Accept exact match or any subdomain for both SaaS and self-hosted
   // e.g., for sentry.io: accept sentry.io or o123.ingest.us.sentry.io
   // e.g., for sentry.example.com: accept sentry.example.com or ingest.sentry.example.com
   return (
-    parsed.host === expected.host || parsed.host.endsWith(`.${expected.host}`)
+    parsed.host === expectedHost || parsed.host.endsWith(`.${expectedHost}`)
   );
 }
 
@@ -503,6 +502,9 @@ async function processFileAndCollect(
   for (const dsn of dsns) {
     if (!state.results.has(dsn.raw)) {
       state.results.set(dsn.raw, dsn);
+      // When stopOnFirst is true, processFile returns at most 1 DSN per file.
+      // This check triggers early exit when we find the first *unique* DSN,
+      // handling the case where the same DSN appears in multiple files.
       if (stopOnFirst) {
         return true;
       }
