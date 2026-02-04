@@ -49,7 +49,7 @@ function validateAutofixState(
   if (!state) {
     throw new ValidationError(
       `No root cause analysis found for issue ${issueId}.\n` +
-        `Run 'sentry issue explain ${issueId}' first.`
+        `Run 'sentry issue explain ${issueId}' first to identify the root cause.`
     );
   }
 
