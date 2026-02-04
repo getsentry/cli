@@ -1,11 +1,25 @@
 /**
  * Cached DSN detection results storage (per directory).
+ *
+ * Supports two cache modes:
+ * 1. Single DSN cache (original) - Used by detectDsn()
+ * 2. Full detection cache (v4) - Used by detectAllDsns() with mtime validation
  */
 
-import type { CachedDsnEntry, ResolvedProjectInfo } from "../dsn/types.js";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import type {
+  CachedDsnEntry,
+  DetectedDsn,
+  ResolvedProjectInfo,
+} from "../dsn/types.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 import { runUpsert } from "./utils.js";
 
+/** Cache TTL in milliseconds (24 hours) */
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Row type matching the dsn_cache table schema (including v4 columns) */
 type DsnCacheRow = {
   directory: string;
   dsn: string;
@@ -17,8 +31,45 @@ type DsnCacheRow = {
   resolved_org_name: string | null;
   resolved_project_slug: string | null;
   resolved_project_name: string | null;
+  // v4 columns for full detection caching
+  fingerprint: string | null;
+  all_dsns_json: string | null;
+  source_mtimes_json: string | null;
+  dir_mtimes_json: string | null;
+  root_dir_mtime: number | null;
+  ttl_expires_at: number | null;
   cached_at: number;
   last_accessed: number;
+};
+
+/** Full detection cache entry (v4) */
+export type CachedDetection = {
+  /** Pre-computed fingerprint for alias validation */
+  fingerprint: string;
+  /** All detected DSNs */
+  allDsns: DetectedDsn[];
+  /** Map of source file paths to their mtimes (files only) */
+  sourceMtimes: Record<string, number>;
+  /** Map of scanned directory paths to their mtimes (for detecting new files) */
+  dirMtimes: Record<string, number>;
+  /** mtime of the project root directory */
+  rootDirMtime: number;
+  /** When the cache expires (TTL) */
+  ttlExpiresAt: number;
+};
+
+/** Input for storing a full detection result */
+export type DetectionCacheEntry = {
+  /** Pre-computed fingerprint */
+  fingerprint: string;
+  /** All detected DSNs */
+  allDsns: DetectedDsn[];
+  /** Map of source file paths to their mtimes (files only) */
+  sourceMtimes: Record<string, number>;
+  /** Map of scanned directory paths to their mtimes (for detecting new files) */
+  dirMtimes: Record<string, number>;
+  /** mtime of the project root directory */
+  rootDirMtime: number;
 };
 
 function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
@@ -138,4 +189,215 @@ export async function clearDsnCache(directory?: string): Promise<void> {
   } else {
     db.query("DELETE FROM dsn_cache").run();
   }
+}
+
+// =============================================================================
+// Full Detection Cache (v4) - mtime-based validation
+// =============================================================================
+
+/**
+ * Validate a single directory mtime.
+ * @returns True if mtime matches, false if changed or missing
+ */
+async function validateDirMtime(
+  fullPath: string,
+  cachedMtime: number
+): Promise<boolean> {
+  try {
+    const stats = await stat(fullPath);
+    return Math.floor(stats.mtimeMs) === cachedMtime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate a single file mtime.
+ * @returns True if mtime matches, false if changed or missing
+ */
+async function validateFileMtime(
+  fullPath: string,
+  cachedMtime: number
+): Promise<boolean> {
+  try {
+    const file = Bun.file(fullPath);
+    if (!(await file.exists())) {
+      return false;
+    }
+    return file.lastModified === cachedMtime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate that cached source file mtimes still match.
+ *
+ * @param projectRoot - Project root directory
+ * @param sourceMtimes - Map of relative file paths to cached mtimes
+ * @returns True if all file mtimes match, false if any changed or missing
+ */
+async function validateSourceMtimes(
+  projectRoot: string,
+  sourceMtimes: Record<string, number>
+): Promise<boolean> {
+  for (const [relativePath, cachedMtime] of Object.entries(sourceMtimes)) {
+    const fullPath = join(projectRoot, relativePath);
+    if (!(await validateFileMtime(fullPath, cachedMtime))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Validate that cached directory mtimes still match.
+ * Used to detect when new files are added to scanned directories.
+ *
+ * @param projectRoot - Project root directory
+ * @param dirMtimes - Map of relative directory paths to cached mtimes
+ * @returns True if all directory mtimes match, false if any changed
+ */
+async function validateDirMtimes(
+  projectRoot: string,
+  dirMtimes: Record<string, number>
+): Promise<boolean> {
+  for (const [relativePath, cachedMtime] of Object.entries(dirMtimes)) {
+    const fullPath = join(projectRoot, relativePath);
+    if (!(await validateDirMtime(fullPath, cachedMtime))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Get cached full detection result if valid.
+ *
+ * Validation checks (in order):
+ * 1. Cache entry exists with full detection data
+ * 2. TTL not expired (24h max age)
+ * 3. Project root directory mtime unchanged (no new files)
+ * 4. All source file mtimes unchanged
+ *
+ * @param projectRoot - Project root directory
+ * @returns Cached detection or undefined if not cached/invalid
+ */
+export async function getCachedDetection(
+  projectRoot: string
+): Promise<CachedDetection | undefined> {
+  const db = getDatabase();
+
+  const row = db
+    .query("SELECT * FROM dsn_cache WHERE directory = ?")
+    .get(projectRoot) as DsnCacheRow | undefined;
+
+  if (!row) {
+    return;
+  }
+
+  // Check if full detection data exists (v4 columns)
+  if (
+    !(row.fingerprint && row.all_dsns_json && row.source_mtimes_json) ||
+    row.root_dir_mtime === null ||
+    row.ttl_expires_at === null
+  ) {
+    // Old cache entry without full detection data
+    return;
+  }
+
+  const now = Date.now();
+
+  // Check TTL expiration
+  if (now > row.ttl_expires_at) {
+    return;
+  }
+
+  // Check project root directory mtime
+  if (!(await validateDirMtime(projectRoot, row.root_dir_mtime))) {
+    return;
+  }
+
+  // Parse source mtimes and validate
+  const sourceMtimes = JSON.parse(row.source_mtimes_json) as Record<
+    string,
+    number
+  >;
+  if (!(await validateSourceMtimes(projectRoot, sourceMtimes))) {
+    return;
+  }
+
+  // Parse directory mtimes and validate (if present)
+  const dirMtimes = row.dir_mtimes_json
+    ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
+    : {};
+  if (!(await validateDirMtimes(projectRoot, dirMtimes))) {
+    return;
+  }
+
+  // Cache is valid - update last access time
+  touchCacheEntry(projectRoot);
+
+  // Parse and return cached detection
+  const allDsns = JSON.parse(row.all_dsns_json) as DetectedDsn[];
+
+  return {
+    fingerprint: row.fingerprint,
+    allDsns,
+    sourceMtimes,
+    dirMtimes,
+    rootDirMtime: row.root_dir_mtime,
+    ttlExpiresAt: row.ttl_expires_at,
+  };
+}
+
+/**
+ * Store full detection result in cache.
+ *
+ * This updates the existing cache entry (if any) with full detection data.
+ * The primary DSN from allDsns[0] is used for the single-DSN fields.
+ *
+ * @param projectRoot - Project root directory
+ * @param entry - Detection result to cache
+ */
+export async function setCachedDetection(
+  projectRoot: string,
+  entry: DetectionCacheEntry
+): Promise<void> {
+  const db = getDatabase();
+  const now = Date.now();
+
+  // Use primary DSN for backwards-compatible single-DSN fields
+  const primaryDsn = entry.allDsns[0];
+
+  runUpsert(
+    db,
+    "dsn_cache",
+    {
+      directory: projectRoot,
+      // Single-DSN fields (for backwards compatibility)
+      dsn: primaryDsn?.raw ?? "",
+      project_id: primaryDsn?.projectId ?? "",
+      org_id: primaryDsn?.orgId ?? null,
+      source: primaryDsn?.source ?? "code",
+      source_path: primaryDsn?.sourcePath ?? null,
+      resolved_org_slug: null,
+      resolved_org_name: null,
+      resolved_project_slug: null,
+      resolved_project_name: null,
+      // Full detection fields (v4)
+      fingerprint: entry.fingerprint,
+      all_dsns_json: JSON.stringify(entry.allDsns),
+      source_mtimes_json: JSON.stringify(entry.sourceMtimes),
+      dir_mtimes_json: JSON.stringify(entry.dirMtimes),
+      root_dir_mtime: entry.rootDirMtime,
+      ttl_expires_at: now + CACHE_TTL_MS,
+      // Timestamps
+      cached_at: now,
+      last_accessed: now,
+    },
+    ["directory"]
+  );
+
+  maybeCleanupCaches();
 }

@@ -6,9 +6,7 @@
 
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Status Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Possible autofix run statuses */
 export const AUTOFIX_STATUSES = [
@@ -39,9 +37,7 @@ export const STOPPING_POINTS = [
 
 export type StoppingPoint = (typeof STOPPING_POINTS)[number];
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Progress Message
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ProgressMessageSchema = z.object({
   message: z.string(),
@@ -51,9 +47,7 @@ export const ProgressMessageSchema = z.object({
 
 export type ProgressMessage = z.infer<typeof ProgressMessageSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Relevant Code File
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const RelevantCodeFileSchema = z.object({
   file_path: z.string(),
@@ -62,9 +56,7 @@ export const RelevantCodeFileSchema = z.object({
 
 export type RelevantCodeFile = z.infer<typeof RelevantCodeFileSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Reproduction Step
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ReproductionStepSchema = z.object({
   title: z.string(),
@@ -76,9 +68,7 @@ export const ReproductionStepSchema = z.object({
 
 export type ReproductionStep = z.infer<typeof ReproductionStepSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Root Cause
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const RootCauseSchema = z.object({
   id: z.number(),
@@ -90,9 +80,7 @@ export const RootCauseSchema = z.object({
 
 export type RootCause = z.infer<typeof RootCauseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Root Cause Selection
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const RootCauseSelectionSchema = z.object({
   cause_id: z.number(),
@@ -101,9 +89,7 @@ export const RootCauseSelectionSchema = z.object({
 
 export type RootCauseSelection = z.infer<typeof RootCauseSelectionSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Autofix Step
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const AutofixStepSchema = z
   .object({
@@ -119,9 +105,7 @@ export const AutofixStepSchema = z
 
 export type AutofixStep = z.infer<typeof AutofixStepSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Repository Info
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const RepositoryInfoSchema = z.object({
   integration_id: z.number().optional(),
@@ -136,9 +120,7 @@ export const RepositoryInfoSchema = z.object({
 
 export type RepositoryInfo = z.infer<typeof RepositoryInfoSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Codebase Info
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const CodebaseInfoSchema = z.object({
   repo_external_id: z.string(),
@@ -149,9 +131,7 @@ export const CodebaseInfoSchema = z.object({
 
 export type CodebaseInfo = z.infer<typeof CodebaseInfoSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // PR Info (from completed fix)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const PullRequestInfoSchema = z.object({
   pr_number: z.number().optional(),
@@ -161,9 +141,7 @@ export const PullRequestInfoSchema = z.object({
 
 export type PullRequestInfo = z.infer<typeof PullRequestInfoSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Solution Artifact (from plan command)
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single step in the solution plan */
 export const SolutionStepSchema = z.object({
@@ -190,9 +168,7 @@ export const SolutionArtifactSchema = z.object({
 
 export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Autofix State
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const AutofixStateSchema = z
   .object({
@@ -217,9 +193,7 @@ export const AutofixStateSchema = z
 
 export type AutofixState = z.infer<typeof AutofixStateSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Autofix Response (GET /issues/{id}/autofix/)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const AutofixResponseSchema = z.object({
   autofix: AutofixStateSchema.nullable(),
@@ -227,9 +201,7 @@ export const AutofixResponseSchema = z.object({
 
 export type AutofixResponse = z.infer<typeof AutofixResponseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Update Payloads
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SelectRootCausePayloadSchema = z.object({
   type: z.literal("select_root_cause"),
@@ -258,9 +230,7 @@ export type AutofixUpdatePayload =
   | SelectSolutionPayload
   | CreatePrPayload;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Check if an autofix status is terminal (no more updates expected).

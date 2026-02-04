@@ -58,6 +58,41 @@ delete process.env.SENTRY_AUTH_TOKEN;
 delete process.env.SENTRY_CLIENT_ID;
 delete process.env.SENTRY_URL;
 
+// Disable telemetry and background update checks in tests
+// This prevents Sentry SDK from keeping the process alive and making external calls
+process.env.SENTRY_CLI_NO_TELEMETRY = "1";
+process.env.SENTRY_CLI_NO_UPDATE_CHECK = "1";
+
+// Mock global fetch to prevent any external network calls in unit tests
+// Tests that need real fetch should restore it in their setup
+const originalFetch = globalThis.fetch;
+
+function getUrlFromInput(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+const mockFetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
+  const url = getUrlFromInput(input);
+  console.error(`[TEST] Unexpected fetch call to: ${url}`);
+  console.error(
+    "[TEST] Tests should mock fetch or use SENTRY_TEST_* credentials for real API calls"
+  );
+  throw new Error(`Unmocked fetch call to: ${url}`);
+};
+
+// Cast via unknown to avoid Bun's extended fetch type (which includes preconnect)
+globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+// Export original fetch for tests that need to restore it
+(globalThis as { __originalFetch?: typeof fetch }).__originalFetch =
+  originalFetch;
+
 // Cleanup after all tests
 process.on("exit", () => {
   try {

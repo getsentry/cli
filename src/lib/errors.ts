@@ -214,9 +214,7 @@ export class DeviceFlowError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Upgrade Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type UpgradeErrorReason =
   | "unknown_method"
@@ -247,9 +245,7 @@ export class UpgradeError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Seer Errors
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type SeerErrorReason = "not_enabled" | "no_budget" | "ai_disabled";
 
@@ -299,9 +295,7 @@ export class SeerError extends CliError {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Error Utilities
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format any error for user display.

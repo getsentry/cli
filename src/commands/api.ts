@@ -23,9 +23,7 @@ type ApiFlags = {
   readonly verbose: boolean;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Request Parsing
-// ─────────────────────────────────────────────────────────────────────────────
 
 const VALID_METHODS: HttpMethod[] = ["GET", "POST", "PUT", "DELETE", "PATCH"];
 
@@ -532,9 +530,7 @@ export function parseHeaders(headers: string[]): Record<string, string> {
   return result;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Request Body Building
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Build request body from --input flag (file or stdin).
@@ -598,9 +594,7 @@ export function buildBodyFromFields(
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Response Output
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Write response headers to stdout (standard format)
@@ -704,9 +698,7 @@ export function handleResponse(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Command Definition
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const apiCommand = buildCommand({
   docs: {

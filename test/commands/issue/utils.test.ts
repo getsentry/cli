@@ -50,7 +50,10 @@ let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-issue-utils-");
+  // Use isolateProjectRoot to prevent DSN detection from scanning the real project
+  testConfigDir = await createTestConfigDir("test-issue-utils-", {
+    isolateProjectRoot: true,
+  });
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
