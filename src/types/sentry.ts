@@ -2,50 +2,46 @@
  * Sentry API Types
  *
  * Types representing Sentry API resources.
- * Zod schemas provide runtime validation, types are inferred from schemas.
- * Schemas are lenient to handle API variations - only core identifiers are required.
+ * Most types are plain TypeScript interfaces; Zod schemas are only used
+ * where runtime validation is actually needed.
  */
 
 import { z } from "zod";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Region
+// Region (undocumented API: /users/me/regions/)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A Sentry region (e.g., US, EU) */
-export const RegionSchema = z.object({
-  name: z.string(),
-  url: z.string().url(),
-});
-
-export type Region = z.infer<typeof RegionSchema>;
+export type Region = {
+  name: string;
+  url: string;
+};
 
 /** Response from /api/0/users/me/regions/ endpoint */
-export const UserRegionsResponseSchema = z.object({
-  regions: z.array(RegionSchema),
-});
-
-export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
+export type UserRegionsResponse = {
+  regions: Region[];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Organization
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Organization links with region URL for multi-region support */
-export const OrganizationLinksSchema = z.object({
-  organizationUrl: z.string(),
-  regionUrl: z.string(),
-});
+export type OrganizationLinks = {
+  organizationUrl: string;
+  regionUrl: string;
+};
 
-export type OrganizationLinks = z.infer<typeof OrganizationLinksSchema>;
-
+/**
+ * Zod schema for SentryOrganization.
+ * Used for runtime validation in region.ts via apiRequestToRegion({ schema }).
+ */
 export const SentryOrganizationSchema = z
   .object({
-    // Core identifiers (required)
     id: z.string(),
     slug: z.string(),
     name: z.string(),
-    // Optional metadata
     dateCreated: z.string().optional(),
     isEarlyAdopter: z.boolean().optional(),
     require2FA: z.boolean().optional(),
@@ -57,78 +53,66 @@ export const SentryOrganizationSchema = z
       .passthrough()
       .optional(),
     features: z.array(z.string()).optional(),
-    // Multi-region support: links contain the region URL for this org
-    links: OrganizationLinksSchema.optional(),
+    links: z
+      .object({
+        organizationUrl: z.string(),
+        regionUrl: z.string(),
+      })
+      .optional(),
   })
   .passthrough();
 
 export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// User
+// User (undocumented API: /users/me/)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SentryUserSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    // Optional user info
-    email: z.string().optional(),
-    username: z.string().optional(),
-    name: z.string().optional(),
-  })
-  .passthrough();
-
-export type SentryUser = z.infer<typeof SentryUserSchema>;
+export type SentryUser = {
+  id: string;
+  email?: string;
+  username?: string;
+  name?: string;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Project
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SentryProjectSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    slug: z.string(),
-    name: z.string(),
-    // Optional metadata
-    platform: z.string().nullable().optional(),
-    dateCreated: z.string().optional(),
-    isBookmarked: z.boolean().optional(),
-    isMember: z.boolean().optional(),
-    features: z.array(z.string()).optional(),
-    firstEvent: z.string().nullable().optional(),
-    firstTransactionEvent: z.boolean().optional(),
-    access: z.array(z.string()).optional(),
-    hasAccess: z.boolean().optional(),
-    hasMinifiedStackTrace: z.boolean().optional(),
-    hasMonitors: z.boolean().optional(),
-    hasProfiles: z.boolean().optional(),
-    hasReplays: z.boolean().optional(),
-    hasSessions: z.boolean().optional(),
-    isInternal: z.boolean().optional(),
-    isPublic: z.boolean().optional(),
-    avatar: z
-      .object({
-        avatarType: z.string(),
-        avatarUuid: z.string().nullable(),
-      })
-      .passthrough()
-      .optional(),
-    color: z.string().optional(),
-    status: z.string().optional(),
-    organization: z
-      .object({
-        id: z.string(),
-        slug: z.string(),
-        name: z.string(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
-
-export type SentryProject = z.infer<typeof SentryProjectSchema>;
+export type SentryProject = {
+  id: string;
+  slug: string;
+  name: string;
+  platform?: string | null;
+  dateCreated?: string;
+  isBookmarked?: boolean;
+  isMember?: boolean;
+  features?: string[];
+  firstEvent?: string | null;
+  firstTransactionEvent?: boolean;
+  access?: string[];
+  hasAccess?: boolean;
+  hasMinifiedStackTrace?: boolean;
+  hasMonitors?: boolean;
+  hasProfiles?: boolean;
+  hasReplays?: boolean;
+  hasSessions?: boolean;
+  isInternal?: boolean;
+  isPublic?: boolean;
+  avatar?: {
+    avatarType: string;
+    avatarUuid: string | null;
+  };
+  color?: string;
+  status?: string;
+  organization?: {
+    id: string;
+    slug: string;
+    name: string;
+  };
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Issue Status & Level Constants
@@ -164,185 +148,145 @@ export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 // Release (embedded in Issue)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ReleaseSchema = z
-  .object({
-    id: z.number().optional(),
-    version: z.string(),
-    shortVersion: z.string().optional(),
-    status: z.string().optional(),
-    dateCreated: z.string().optional(),
-    dateReleased: z.string().nullable().optional(),
-    ref: z.string().nullable().optional(),
-    url: z.string().nullable().optional(),
-    commitCount: z.number().optional(),
-    deployCount: z.number().optional(),
-    authors: z.array(z.unknown()).optional(),
-    projects: z
-      .array(
-        z
-          .object({
-            id: z.union([z.string(), z.number()]),
-            slug: z.string(),
-            name: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
-
-export type Release = z.infer<typeof ReleaseSchema>;
+export type Release = {
+  id?: number;
+  version: string;
+  shortVersion?: string;
+  status?: string;
+  dateCreated?: string;
+  dateReleased?: string | null;
+  ref?: string | null;
+  url?: string | null;
+  commitCount?: number;
+  deployCount?: number;
+  authors?: unknown[];
+  projects?: Array<{
+    id: string | number;
+    slug: string;
+    name: string;
+  }>;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Issue
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SentryIssueSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    shortId: z.string(),
-    title: z.string(),
-    // Optional metadata
-    culprit: z.string().optional(),
-    permalink: z.string().optional(),
-    logger: z.string().nullable().optional(),
-    level: z.string().optional(),
-    status: z.enum(ISSUE_STATUSES).optional(),
-    statusDetails: z.record(z.unknown()).optional(),
-    substatus: z.string().optional().nullable(),
-    priority: z.string().optional(),
-    isPublic: z.boolean().optional(),
-    platform: z.string().optional(),
-    project: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        slug: z.string(),
-        platform: z.string().nullable().optional(),
-      })
-      .passthrough()
-      .optional(),
-    type: z.string().optional(),
-    metadata: z
-      .object({
-        value: z.string().optional(),
-        type: z.string().optional(),
-        filename: z.string().optional(),
-        function: z.string().optional(),
-        display_title_with_tree_label: z.boolean().optional(),
-      })
-      .passthrough()
-      .optional(),
-    numComments: z.number().optional(),
-    assignedTo: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        type: z.string(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    isBookmarked: z.boolean().optional(),
-    isSubscribed: z.boolean().optional(),
-    subscriptionDetails: z
-      .object({
-        reason: z.string().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    hasSeen: z.boolean().optional(),
-    annotations: z.array(z.string()).optional(),
-    isUnhandled: z.boolean().optional(),
-    count: z.string().optional(),
-    userCount: z.number().optional(),
-    firstSeen: z.string().datetime({ offset: true }).optional(),
-    lastSeen: z.string().datetime({ offset: true }).optional(),
-    // Release information
-    firstRelease: ReleaseSchema.nullable().optional(),
-    lastRelease: ReleaseSchema.nullable().optional(),
-  })
-  .passthrough();
-
-export type SentryIssue = z.infer<typeof SentryIssueSchema>;
+export type SentryIssue = {
+  id: string;
+  shortId: string;
+  title: string;
+  culprit?: string;
+  permalink?: string;
+  logger?: string | null;
+  level?: string;
+  status?: IssueStatus;
+  statusDetails?: Record<string, unknown>;
+  substatus?: string | null;
+  priority?: string;
+  isPublic?: boolean;
+  platform?: string;
+  project?: {
+    id: string;
+    name: string;
+    slug: string;
+    platform?: string | null;
+  };
+  type?: string;
+  metadata?: {
+    value?: string;
+    type?: string;
+    filename?: string;
+    function?: string;
+    display_title_with_tree_label?: boolean;
+  };
+  numComments?: number;
+  assignedTo?: {
+    id: string;
+    name: string;
+    type: string;
+  } | null;
+  isBookmarked?: boolean;
+  isSubscribed?: boolean;
+  subscriptionDetails?: {
+    reason?: string;
+  } | null;
+  hasSeen?: boolean;
+  annotations?: string[];
+  isUnhandled?: boolean;
+  count?: string;
+  userCount?: number;
+  firstSeen?: string;
+  lastSeen?: string;
+  firstRelease?: Release | null;
+  lastRelease?: Release | null;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Trace Context
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TraceContextSchema = z
-  .object({
-    trace_id: z.string().optional(),
-    span_id: z.string().optional(),
-    parent_span_id: z.string().nullable().optional(),
-    op: z.string().optional(),
-    status: z.string().optional(),
-    description: z.string().nullable().optional(),
-  })
-  .passthrough();
-
-export type TraceContext = z.infer<typeof TraceContextSchema>;
+export type TraceContext = {
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string | null;
+  op?: string;
+  status?: string;
+  description?: string | null;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Span (for trace tree display)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A single span in a trace */
-export const SpanSchema = z
-  .object({
-    span_id: z.string(),
-    parent_span_id: z.string().nullable().optional(),
-    trace_id: z.string().optional(),
-    op: z.string().optional(),
-    description: z.string().nullable().optional(),
-    /** Start time as Unix timestamp (seconds with fractional ms) */
-    start_timestamp: z.number(),
-    /** End time as Unix timestamp (seconds with fractional ms) */
-    timestamp: z.number(),
-    status: z.string().optional(),
-    data: z.record(z.unknown()).optional(),
-    tags: z.record(z.string()).optional(),
-  })
-  .passthrough();
-
-export type Span = z.infer<typeof SpanSchema>;
+export type Span = {
+  span_id: string;
+  parent_span_id?: string | null;
+  trace_id?: string;
+  op?: string;
+  description?: string | null;
+  /** Start time as Unix timestamp (seconds with fractional ms) */
+  start_timestamp: number;
+  /** End time as Unix timestamp (seconds with fractional ms) */
+  timestamp: number;
+  status?: string;
+  data?: Record<string, unknown>;
+  tags?: Record<string, string>;
+  [key: string]: unknown;
+};
 
 /** A transaction/event in a trace (from events-trace endpoint) */
-export const TraceEventSchema = z
-  .object({
-    event_id: z.string(),
-    span_id: z.string().optional(),
-    transaction: z.string().optional(),
-    "transaction.duration": z.number().optional(),
-    "transaction.op": z.string().optional(),
-    project_slug: z.string().optional(),
-    project_id: z.union([z.string(), z.number()]).optional(),
-    /** Child spans within this transaction */
-    spans: z.array(SpanSchema).optional(),
-    /** Start time */
-    start_timestamp: z.number().optional(),
-    /** End time */
-    timestamp: z.number().optional(),
-    /** Errors associated with this transaction */
-    errors: z.array(z.unknown()).optional(),
-    /** Performance issues */
-    performance_issues: z.array(z.unknown()).optional(),
-  })
-  .passthrough();
-
-export type TraceEvent = z.infer<typeof TraceEventSchema>;
+export type TraceEvent = {
+  event_id: string;
+  span_id?: string;
+  transaction?: string;
+  "transaction.duration"?: number;
+  "transaction.op"?: string;
+  project_slug?: string;
+  project_id?: string | number;
+  /** Child spans within this transaction */
+  spans?: Span[];
+  /** Start time */
+  start_timestamp?: number;
+  /** End time */
+  timestamp?: number;
+  /** Errors associated with this transaction */
+  errors?: unknown[];
+  /** Performance issues */
+  performance_issues?: unknown[];
+  [key: string]: unknown;
+};
 
 /** Response from /events-trace/{traceId}/ endpoint */
-export const TraceResponseSchema = z.object({
+export type TraceResponse = {
   /** Transactions with their nested children (span trees) */
-  transactions: z.array(TraceEventSchema),
+  transactions: TraceEvent[];
   /** Errors not associated with any transaction */
-  orphan_errors: z.array(z.unknown()).optional(),
-});
-
-export type TraceResponse = z.infer<typeof TraceResponseSchema>;
+  orphan_errors?: unknown[];
+};
 
 /**
  * Span from /trace/{traceId}/ endpoint with nested children.
@@ -368,313 +312,225 @@ export type TraceSpan = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A single frame in a stack trace */
-export const StackFrameSchema = z
-  .object({
-    filename: z.string().nullable().optional(),
-    absPath: z.string().nullable().optional(),
-    module: z.string().nullable().optional(),
-    package: z.string().nullable().optional(),
-    platform: z.string().nullable().optional(),
-    function: z.string().nullable().optional(),
-    rawFunction: z.string().nullable().optional(),
-    symbol: z.string().nullable().optional(),
-    lineNo: z.number().nullable().optional(),
-    colNo: z.number().nullable().optional(),
-    /** Whether this frame is in the user's application code */
-    inApp: z.boolean().nullable().optional(),
-    /** Surrounding code lines: [[lineNo, code], ...] */
-    context: z
-      .array(z.tuple([z.number(), z.string()]))
-      .nullable()
-      .optional(),
-    vars: z.record(z.unknown()).nullable().optional(),
-    instructionAddr: z.string().nullable().optional(),
-    symbolAddr: z.string().nullable().optional(),
-    trust: z.string().nullable().optional(),
-    errors: z.array(z.unknown()).nullable().optional(),
-  })
-  .passthrough();
-
-export type StackFrame = z.infer<typeof StackFrameSchema>;
+export type StackFrame = {
+  filename?: string | null;
+  absPath?: string | null;
+  module?: string | null;
+  package?: string | null;
+  platform?: string | null;
+  function?: string | null;
+  rawFunction?: string | null;
+  symbol?: string | null;
+  lineNo?: number | null;
+  colNo?: number | null;
+  /** Whether this frame is in the user's application code */
+  inApp?: boolean | null;
+  /** Surrounding code lines: [[lineNo, code], ...] */
+  context?: [number, string][] | null;
+  vars?: Record<string, unknown> | null;
+  instructionAddr?: string | null;
+  symbolAddr?: string | null;
+  trust?: string | null;
+  errors?: unknown[] | null;
+  [key: string]: unknown;
+};
 
 /** Stack trace containing frames */
-export const StacktraceSchema = z
-  .object({
-    frames: z.array(StackFrameSchema).optional(),
-    framesOmitted: z.array(z.number()).nullable().optional(),
-    registers: z.record(z.string()).nullable().optional(),
-    hasSystemFrames: z.boolean().optional(),
-  })
-  .passthrough();
-
-export type Stacktrace = z.infer<typeof StacktraceSchema>;
+export type Stacktrace = {
+  frames?: StackFrame[];
+  framesOmitted?: number[] | null;
+  registers?: Record<string, string> | null;
+  hasSystemFrames?: boolean;
+  [key: string]: unknown;
+};
 
 /** Exception mechanism (how the error was captured) */
-export const MechanismSchema = z
-  .object({
-    type: z.string().optional(),
-    handled: z.boolean().optional(),
-    synthetic: z.boolean().optional(),
-    description: z.string().nullable().optional(),
-    data: z.record(z.unknown()).optional(),
-  })
-  .passthrough();
-
-export type Mechanism = z.infer<typeof MechanismSchema>;
+export type Mechanism = {
+  type?: string;
+  handled?: boolean;
+  synthetic?: boolean;
+  description?: string | null;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
 
 /** A single exception value in the exception entry */
-export const ExceptionValueSchema = z
-  .object({
-    type: z.string().nullable().optional(),
-    value: z.string().nullable().optional(),
-    module: z.string().nullable().optional(),
-    threadId: z.union([z.string(), z.number()]).nullable().optional(),
-    mechanism: MechanismSchema.nullable().optional(),
-    stacktrace: StacktraceSchema.nullable().optional(),
-    rawStacktrace: StacktraceSchema.nullable().optional(),
-  })
-  .passthrough();
-
-export type ExceptionValue = z.infer<typeof ExceptionValueSchema>;
+export type ExceptionValue = {
+  type?: string | null;
+  value?: string | null;
+  module?: string | null;
+  threadId?: string | number | null;
+  mechanism?: Mechanism | null;
+  stacktrace?: Stacktrace | null;
+  rawStacktrace?: Stacktrace | null;
+  [key: string]: unknown;
+};
 
 /** Exception entry in event.entries */
-export const ExceptionEntrySchema = z.object({
-  type: z.literal("exception"),
-  data: z
-    .object({
-      values: z.array(ExceptionValueSchema).optional(),
-      excOmitted: z.array(z.number()).nullable().optional(),
-      hasSystemFrames: z.boolean().optional(),
-    })
-    .passthrough(),
-});
-
-export type ExceptionEntry = z.infer<typeof ExceptionEntrySchema>;
+export type ExceptionEntry = {
+  type: "exception";
+  data: {
+    values?: ExceptionValue[];
+    excOmitted?: number[] | null;
+    hasSystemFrames?: boolean;
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Breadcrumbs Entry
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A single breadcrumb */
-export const BreadcrumbSchema = z
-  .object({
-    type: z.string().optional(),
-    category: z.string().nullable().optional(),
-    level: z.string().optional(),
-    message: z.string().nullable().optional(),
-    timestamp: z.string().optional(),
-    event_id: z.string().nullable().optional(),
-    data: z.record(z.unknown()).nullable().optional(),
-  })
-  .passthrough();
-
-export type Breadcrumb = z.infer<typeof BreadcrumbSchema>;
+export type Breadcrumb = {
+  type?: string;
+  category?: string | null;
+  level?: string;
+  message?: string | null;
+  timestamp?: string;
+  event_id?: string | null;
+  data?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
 
 /** Breadcrumbs entry in event.entries */
-export const BreadcrumbsEntrySchema = z.object({
-  type: z.literal("breadcrumbs"),
-  data: z
-    .object({
-      values: z.array(BreadcrumbSchema).optional(),
-    })
-    .passthrough(),
-});
-
-export type BreadcrumbsEntry = z.infer<typeof BreadcrumbsEntrySchema>;
+export type BreadcrumbsEntry = {
+  type: "breadcrumbs";
+  data: {
+    values?: Breadcrumb[];
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Entry
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** HTTP request entry in event.entries */
-export const RequestEntrySchema = z.object({
-  type: z.literal("request"),
-  data: z
-    .object({
-      url: z.string().nullable().optional(),
-      method: z.string().nullable().optional(),
-      fragment: z.string().nullable().optional(),
-      query: z
-        .union([
-          z.array(z.tuple([z.string(), z.string()])),
-          z.string(),
-          z.record(z.string()),
-        ])
-        .nullable()
-        .optional(),
-      data: z.unknown().nullable().optional(),
-      headers: z
-        .array(z.tuple([z.string(), z.string()]))
-        .nullable()
-        .optional(),
-      cookies: z
-        .union([
-          z.array(z.tuple([z.string(), z.string()])),
-          z.record(z.string()),
-        ])
-        .nullable()
-        .optional(),
-      env: z.record(z.string()).nullable().optional(),
-      inferredContentType: z.string().nullable().optional(),
-      apiTarget: z.string().nullable().optional(),
-    })
-    .passthrough(),
-});
-
-export type RequestEntry = z.infer<typeof RequestEntrySchema>;
+export type RequestEntry = {
+  type: "request";
+  data: {
+    url?: string | null;
+    method?: string | null;
+    fragment?: string | null;
+    query?: [string, string][] | string | Record<string, string> | null;
+    data?: unknown | null;
+    headers?: [string, string][] | null;
+    cookies?: [string, string][] | Record<string, string> | null;
+    env?: Record<string, string> | null;
+    inferredContentType?: string | null;
+    apiTarget?: string | null;
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Contexts
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Browser context */
-export const BrowserContextSchema = z
-  .object({
-    name: z.string().optional(),
-    version: z.string().optional(),
-    type: z.literal("browser").optional(),
-  })
-  .passthrough();
-
-export type BrowserContext = z.infer<typeof BrowserContextSchema>;
+export type BrowserContext = {
+  name?: string;
+  version?: string;
+  type?: "browser";
+  [key: string]: unknown;
+};
 
 /** Operating system context */
-export const OsContextSchema = z
-  .object({
-    name: z.string().optional(),
-    version: z.string().optional(),
-    type: z.literal("os").optional(),
-  })
-  .passthrough();
-
-export type OsContext = z.infer<typeof OsContextSchema>;
+export type OsContext = {
+  name?: string;
+  version?: string;
+  type?: "os";
+  [key: string]: unknown;
+};
 
 /** Device context */
-export const DeviceContextSchema = z
-  .object({
-    family: z.string().optional(),
-    model: z.string().optional(),
-    brand: z.string().optional(),
-    type: z.literal("device").optional(),
-  })
-  .passthrough();
-
-export type DeviceContext = z.infer<typeof DeviceContextSchema>;
+export type DeviceContext = {
+  family?: string;
+  model?: string;
+  brand?: string;
+  type?: "device";
+  [key: string]: unknown;
+};
 
 /** User geo information */
-export const UserGeoSchema = z
-  .object({
-    country_code: z.string().optional(),
-    city: z.string().optional(),
-    region: z.string().optional(),
-  })
-  .passthrough();
-
-export type UserGeo = z.infer<typeof UserGeoSchema>;
+export type UserGeo = {
+  country_code?: string;
+  city?: string;
+  region?: string;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SentryEventSchema = z
-  .object({
-    // Core identifier (required)
-    eventID: z.string(),
-    // Optional metadata
-    id: z.string().optional(),
-    projectID: z.string().optional(),
-    context: z.record(z.unknown()).optional(),
-    contexts: z
-      .object({
-        trace: TraceContextSchema.optional(),
-        browser: BrowserContextSchema.optional(),
-        os: OsContextSchema.optional(),
-        device: DeviceContextSchema.optional(),
-      })
-      .passthrough()
-      .optional(),
-    dateCreated: z.string().optional(),
-    dateReceived: z.string().optional(),
-    /** Event entries: exception, breadcrumbs, request, spans, etc. */
-    entries: z.array(z.unknown()).optional(),
-    errors: z.array(z.unknown()).optional(),
-    fingerprints: z.array(z.string()).optional(),
-    groupID: z.string().optional(),
-    message: z.string().optional(),
-    metadata: z.record(z.unknown()).optional(),
-    platform: z.string().optional(),
-    /** File location where the error occurred */
-    location: z.string().nullable().optional(),
-    /** URL where the event occurred */
-    culprit: z.string().nullable().optional(),
-    sdk: z
-      .object({
-        name: z.string(),
-        version: z.string(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    tags: z
-      .array(
-        z.object({
-          key: z.string(),
-          value: z.string(),
-        })
-      )
-      .optional(),
-    title: z.string().optional(),
-    type: z.string().optional(),
-    user: z
-      .object({
-        id: z.string().nullable().optional(),
-        email: z.string().nullable().optional(),
-        username: z.string().nullable().optional(),
-        ip_address: z.string().nullable().optional(),
-        name: z.string().nullable().optional(),
-        geo: UserGeoSchema.nullable().optional(),
-        data: z.record(z.unknown()).nullable().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    /** Release information for this event */
-    release: ReleaseSchema.nullable().optional(),
-    /** SDK update suggestions */
-    sdkUpdates: z
-      .array(
-        z
-          .object({
-            type: z.string().optional(),
-            sdkName: z.string().optional(),
-            newSdkVersion: z.string().optional(),
-            sdkUrl: z.string().optional(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
-
-export type SentryEvent = z.infer<typeof SentryEventSchema>;
+export type SentryEvent = {
+  eventID: string;
+  id?: string;
+  projectID?: string;
+  context?: Record<string, unknown>;
+  contexts?: {
+    trace?: TraceContext;
+    browser?: BrowserContext;
+    os?: OsContext;
+    device?: DeviceContext;
+    [key: string]: unknown;
+  };
+  dateCreated?: string;
+  dateReceived?: string;
+  /** Event entries: exception, breadcrumbs, request, spans, etc. */
+  entries?: unknown[];
+  errors?: unknown[];
+  fingerprints?: string[];
+  groupID?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
+  platform?: string;
+  /** File location where the error occurred */
+  location?: string | null;
+  /** URL where the event occurred */
+  culprit?: string | null;
+  sdk?: {
+    name: string;
+    version: string;
+  } | null;
+  tags?: Array<{
+    key: string;
+    value: string;
+  }>;
+  title?: string;
+  type?: string;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+    username?: string | null;
+    ip_address?: string | null;
+    name?: string | null;
+    geo?: UserGeo | null;
+    data?: Record<string, unknown> | null;
+  } | null;
+  /** Release information for this event */
+  release?: Release | null;
+  /** SDK update suggestions */
+  sdkUpdates?: Array<{
+    type?: string;
+    sdkName?: string;
+    newSdkVersion?: string;
+    sdkUrl?: string;
+  }>;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Keys (DSN)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ProjectKeyDsnSchema = z.object({
-  public: z.string(),
-  secret: z.string().optional(),
-});
-
-export const ProjectKeySchema = z
-  .object({
-    id: z.string(),
-    name: z.string(),
-    dsn: ProjectKeyDsnSchema,
-    isActive: z.boolean(),
-    dateCreated: z.string().optional(),
-  })
-  .passthrough();
-
-export type ProjectKey = z.infer<typeof ProjectKeySchema>;
+export type ProjectKey = {
+  id: string;
+  name: string;
+  dsn: {
+    public: string;
+    secret?: string;
+  };
+  isActive: boolean;
+  dateCreated?: string;
+  [key: string]: unknown;
+};
