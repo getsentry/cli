@@ -35,6 +35,7 @@ type DsnCacheRow = {
   fingerprint: string | null;
   all_dsns_json: string | null;
   source_mtimes_json: string | null;
+  dir_mtimes_json: string | null;
   root_dir_mtime: number | null;
   ttl_expires_at: number | null;
   cached_at: number;
@@ -47,8 +48,10 @@ export type CachedDetection = {
   fingerprint: string;
   /** All detected DSNs */
   allDsns: DetectedDsn[];
-  /** Map of source file paths to their mtimes */
+  /** Map of source file paths to their mtimes (files only) */
   sourceMtimes: Record<string, number>;
+  /** Map of scanned directory paths to their mtimes (for detecting new files) */
+  dirMtimes: Record<string, number>;
   /** mtime of the project root directory */
   rootDirMtime: number;
   /** When the cache expires (TTL) */
@@ -61,8 +64,10 @@ export type DetectionCacheEntry = {
   fingerprint: string;
   /** All detected DSNs */
   allDsns: DetectedDsn[];
-  /** Map of source file paths to their mtimes */
+  /** Map of source file paths to their mtimes (files only) */
   sourceMtimes: Record<string, number>;
+  /** Map of scanned directory paths to their mtimes (for detecting new files) */
+  dirMtimes: Record<string, number>;
   /** mtime of the project root directory */
   rootDirMtime: number;
 };
@@ -226,30 +231,40 @@ async function validateFileMtime(
 }
 
 /**
- * Validate that cached source file and directory mtimes still match.
- *
- * Entries ending with "/" are directories (for detecting new files added to subdirs).
- * Other entries are files (for detecting modified DSN files).
+ * Validate that cached source file mtimes still match.
  *
  * @param projectRoot - Project root directory
- * @param sourceMtimes - Map of relative paths to cached mtimes
- * @returns True if all mtimes match, false if any changed or missing
+ * @param sourceMtimes - Map of relative file paths to cached mtimes
+ * @returns True if all file mtimes match, false if any changed or missing
  */
 async function validateSourceMtimes(
   projectRoot: string,
   sourceMtimes: Record<string, number>
 ): Promise<boolean> {
   for (const [relativePath, cachedMtime] of Object.entries(sourceMtimes)) {
-    // Check if this is a directory entry (ends with "/")
-    const isDir = relativePath.endsWith("/");
-    const cleanPath = isDir ? relativePath.slice(0, -1) : relativePath;
-    const fullPath = join(projectRoot, cleanPath);
+    const fullPath = join(projectRoot, relativePath);
+    if (!(await validateFileMtime(fullPath, cachedMtime))) {
+      return false;
+    }
+  }
+  return true;
+}
 
-    const isValid = isDir
-      ? await validateDirMtime(fullPath, cachedMtime)
-      : await validateFileMtime(fullPath, cachedMtime);
-
-    if (!isValid) {
+/**
+ * Validate that cached directory mtimes still match.
+ * Used to detect when new files are added to scanned directories.
+ *
+ * @param projectRoot - Project root directory
+ * @param dirMtimes - Map of relative directory paths to cached mtimes
+ * @returns True if all directory mtimes match, false if any changed
+ */
+async function validateDirMtimes(
+  projectRoot: string,
+  dirMtimes: Record<string, number>
+): Promise<boolean> {
+  for (const [relativePath, cachedMtime] of Object.entries(dirMtimes)) {
+    const fullPath = join(projectRoot, relativePath);
+    if (!(await validateDirMtime(fullPath, cachedMtime))) {
       return false;
     }
   }
@@ -312,6 +327,14 @@ export async function getCachedDetection(
     return;
   }
 
+  // Parse directory mtimes and validate (if present)
+  const dirMtimes = row.dir_mtimes_json
+    ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
+    : {};
+  if (!(await validateDirMtimes(projectRoot, dirMtimes))) {
+    return;
+  }
+
   // Cache is valid - update last access time
   touchCacheEntry(projectRoot);
 
@@ -322,6 +345,7 @@ export async function getCachedDetection(
     fingerprint: row.fingerprint,
     allDsns,
     sourceMtimes,
+    dirMtimes,
     rootDirMtime: row.root_dir_mtime,
     ttlExpiresAt: row.ttl_expires_at,
   };
@@ -365,6 +389,7 @@ export async function setCachedDetection(
       fingerprint: entry.fingerprint,
       all_dsns_json: JSON.stringify(entry.allDsns),
       source_mtimes_json: JSON.stringify(entry.sourceMtimes),
+      dir_mtimes_json: JSON.stringify(entry.dirMtimes),
       root_dir_mtime: entry.rootDirMtime,
       ttl_expires_at: now + CACHE_TTL_MS,
       // Timestamps

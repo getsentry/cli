@@ -86,7 +86,7 @@ export function initSchema(db: Database): void {
     );
 
     -- DSN cache (directory -> detected DSN info)
-    -- Extended in v4 with fingerprint, all_dsns_json, source_mtimes_json for full detection caching
+    -- Extended in v4 with fingerprint, all_dsns_json, source_mtimes_json, dir_mtimes_json for full detection caching
     CREATE TABLE IF NOT EXISTS dsn_cache (
       directory TEXT PRIMARY KEY,
       dsn TEXT NOT NULL,
@@ -101,6 +101,7 @@ export function initSchema(db: Database): void {
       fingerprint TEXT,
       all_dsns_json TEXT,
       source_mtimes_json TEXT,
+      dir_mtimes_json TEXT,
       root_dir_mtime INTEGER,
       ttl_expires_at INTEGER,
       cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
@@ -196,6 +197,7 @@ export function runMigrations(db: Database): void {
     addColumnIfMissing(db, "dsn_cache", "fingerprint", "TEXT");
     addColumnIfMissing(db, "dsn_cache", "all_dsns_json", "TEXT");
     addColumnIfMissing(db, "dsn_cache", "source_mtimes_json", "TEXT");
+    addColumnIfMissing(db, "dsn_cache", "dir_mtimes_json", "TEXT");
     addColumnIfMissing(db, "dsn_cache", "root_dir_mtime", "INTEGER");
     addColumnIfMissing(db, "dsn_cache", "ttl_expires_at", "INTEGER");
 

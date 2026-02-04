@@ -210,6 +210,7 @@ describe("getCachedDetection", () => {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -234,6 +235,7 @@ describe("getCachedDetection", () => {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -267,6 +269,7 @@ describe("getCachedDetection", () => {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -293,6 +296,7 @@ describe("getCachedDetection", () => {
       fingerprint: "test-fingerprint",
       allDsns: [testDsn],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -305,6 +309,43 @@ describe("getCachedDetection", () => {
     writeFileSync(join(testProjectDir, "new-file.txt"), "test");
 
     // Cache should be invalidated
+    const after = await getCachedDetection(testProjectDir);
+    expect(after).toBeUndefined();
+  });
+
+  test("invalidates cache when tracked subdirectory mtime changes", async () => {
+    const testDsn = createTestDsn();
+    const sourceMtimes = {
+      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+    };
+
+    const { stat } = await import("node:fs/promises");
+    const rootStats = await stat(testProjectDir);
+    const rootDirMtime = Math.floor(rootStats.mtimeMs);
+    const srcStats = await stat(join(testProjectDir, "src"));
+    const srcDirMtime = Math.floor(srcStats.mtimeMs);
+
+    // Store cache with tracked src/ directory mtime
+    await setCachedDetection(testProjectDir, {
+      fingerprint: "test-fingerprint",
+      allDsns: [testDsn],
+      sourceMtimes,
+      dirMtimes: { src: srcDirMtime },
+      rootDirMtime,
+    });
+
+    // Verify cache exists
+    const before = await getCachedDetection(testProjectDir);
+    expect(before).toBeDefined();
+
+    // Wait and add a new file to src/ to change its mtime
+    await Bun.sleep(10);
+    writeFileSync(
+      join(testProjectDir, "src/new-config.ts"),
+      "export default {}"
+    );
+
+    // Cache should be invalidated because src/ mtime changed
     const after = await getCachedDetection(testProjectDir);
     expect(after).toBeUndefined();
   });
@@ -325,6 +366,7 @@ describe("setCachedDetection", () => {
       fingerprint: "fp-123",
       allDsns: [testDsn],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -349,6 +391,7 @@ describe("setCachedDetection", () => {
       fingerprint: "fp-multi",
       allDsns: [dsn1, dsn2],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -365,6 +408,7 @@ describe("setCachedDetection", () => {
       fingerprint: "fp-empty",
       allDsns: [],
       sourceMtimes: {},
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -388,6 +432,7 @@ describe("setCachedDetection", () => {
       fingerprint: "fp-first",
       allDsns: [dsn1],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
@@ -395,6 +440,7 @@ describe("setCachedDetection", () => {
       fingerprint: "fp-second",
       allDsns: [dsn2],
       sourceMtimes,
+      dirMtimes: {},
       rootDirMtime,
     });
 
