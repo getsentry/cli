@@ -289,34 +289,3 @@ export function withSerializeSpan<T>(operation: string, fn: () => T): T {
     fn
   );
 }
-
-/**
- * Check if telemetry is enabled.
- *
- * @returns true if telemetry is enabled, false otherwise
- */
-export function isTelemetryEnabled(): boolean {
-  return process.env.SENTRY_CLI_NO_TELEMETRY !== "1";
-}
-
-/**
- * Record a distribution metric (histogram) for telemetry.
- *
- * Wraps Sentry.metrics.distribution() but only calls it when telemetry is enabled.
- * This prevents the Sentry metrics SDK from creating internal timers that keep
- * the process alive when telemetry is disabled.
- *
- * @param name - The metric name
- * @param value - The numeric value to record
- * @param attributes - Optional attributes/tags for the metric
- */
-export function recordDistribution(
-  name: string,
-  value: number,
-  attributes?: Record<string, string | number | boolean>
-): void {
-  if (!isTelemetryEnabled()) {
-    return;
-  }
-  Sentry.metrics.distribution(name, value, { attributes });
-}
