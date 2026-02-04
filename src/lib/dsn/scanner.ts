@@ -6,6 +6,7 @@
  */
 
 import { join } from "node:path";
+import { handleFileError } from "./fs-utils.js";
 import type { DetectedDsn } from "./types.js";
 
 /** Result of processing a single file for DSN extraction. */
@@ -74,8 +75,11 @@ export async function scanSpecificFiles(
           }
         }
       }
-    } catch {
-      // File doesn't exist or can't be read - continue to next
+    } catch (error) {
+      handleFileError(error, {
+        operation: "scanSpecificFiles",
+        path: filepath,
+      });
     }
   }
 

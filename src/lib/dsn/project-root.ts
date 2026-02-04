@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
+import { handleFileError } from "./fs-utils.js";
 import { createDetectedDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -286,8 +287,11 @@ async function checkEditorConfigRoot(dir: string): Promise<boolean> {
   try {
     const content = await Bun.file(editorConfigPath).text();
     return EDITORCONFIG_ROOT_REGEX.test(content);
-  } catch {
-    // File doesn't exist or can't be read
+  } catch (error) {
+    handleFileError(error, {
+      operation: "checkEditorConfigRoot",
+      path: editorConfigPath,
+    });
     return false;
   }
 }
@@ -385,8 +389,8 @@ function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
         if (dsn) {
           return createDetectedDsn(dsn, "env_file", filename);
         }
-      } catch {
-        // File doesn't exist or can't be read - continue to next file
+      } catch (error) {
+        handleFileError(error, { operation: "checkEnvForDsn", path: filePath });
       }
     }
     return null;
