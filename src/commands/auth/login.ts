@@ -3,19 +3,13 @@ import * as Sentry from "@sentry/bun";
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getCurrentUser } from "../../lib/api-client.js";
-import { openBrowser } from "../../lib/browser.js";
-import { setupCopyKeyListener } from "../../lib/clipboard.js";
 import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
-import {
-  formatDuration,
-  formatUserIdentity,
-} from "../../lib/formatters/human.js";
-import { completeOAuthFlow, performDeviceFlow } from "../../lib/oauth.js";
-import { generateQRCode } from "../../lib/qrcode.js";
+import { formatUserIdentity } from "../../lib/formatters/human.js";
+import { runInteractiveLogin } from "../../lib/interactive-login.js";
 import type { SentryUser } from "../../types/index.js";
 
 type LoginFlags = {
@@ -97,93 +91,15 @@ export const loginCommand = buildCommand({
     }
 
     // Device Flow OAuth
-    stdout.write("Starting authentication...\n\n");
+    const loginSuccess = await runInteractiveLogin(stdout, process.stdin, {
+      timeout: flags.timeout * 1000,
+    });
 
-    let urlToCopy = "";
-    // Object wrapper needed for TypeScript control flow analysis with async callbacks
-    const keyListener = { cleanup: null as (() => void) | null };
-    const stdin = process.stdin;
-
-    try {
-      const tokenResponse = await performDeviceFlow(
-        {
-          onUserCode: async (
-            userCode,
-            verificationUri,
-            verificationUriComplete
-          ) => {
-            urlToCopy = verificationUriComplete;
-
-            // Try to open browser (best effort)
-            const browserOpened = await openBrowser(verificationUriComplete);
-
-            if (browserOpened) {
-              stdout.write("Opening in browser...\n\n");
-            } else {
-              // Show QR code as fallback when browser can't open
-              stdout.write("Scan this QR code or visit the URL below:\n\n");
-              const qr = await generateQRCode(verificationUriComplete);
-              stdout.write(qr);
-              stdout.write("\n");
-            }
-
-            stdout.write(`URL: ${verificationUri}\n`);
-            stdout.write(`Code: ${userCode}\n\n`);
-            const copyHint = stdin.isTTY ? ` ${muted("(c to copy)")}` : "";
-            stdout.write(
-              `Browser didn't open? Use the url above to sign in${copyHint}\n\n`
-            );
-            stdout.write("Waiting for authorization...\n");
-
-            // Setup keyboard listener for 'c' to copy URL
-            keyListener.cleanup = setupCopyKeyListener(
-              stdin,
-              () => urlToCopy,
-              stdout
-            );
-          },
-          onPolling: () => {
-            stdout.write(".");
-          },
-        },
-        flags.timeout * 1000
+    if (!loginSuccess) {
+      throw new AuthError(
+        "not_authenticated",
+        "Authentication was cancelled or failed."
       );
-
-      // Clear the polling dots
-      stdout.write("\n");
-
-      // Store the token
-      await completeOAuthFlow(tokenResponse);
-
-      // Store user info from token response for telemetry and display
-      const user = tokenResponse.user;
-      if (user) {
-        try {
-          setUserInfo({
-            userId: user.id,
-            email: user.email,
-            name: user.name,
-          });
-        } catch (error) {
-          // Report to Sentry but don't block auth - user info is not critical
-          Sentry.captureException(error);
-        }
-      }
-
-      stdout.write(`${success("✓")} Authentication successful!\n`);
-      if (user) {
-        stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
-      }
-      stdout.write(`  Config saved to: ${getDbPath()}\n`);
-
-      if (tokenResponse.expires_in) {
-        stdout.write(
-          `  Token expires in: ${formatDuration(tokenResponse.expires_in)}\n`
-        );
-      }
-    } finally {
-      // Always cleanup keyboard listener
-      keyListener.cleanup?.();
     }
   },
 });
