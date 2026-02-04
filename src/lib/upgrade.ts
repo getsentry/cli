@@ -7,6 +7,7 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getUserAgent } from "./constants.js";
 import { UpgradeError } from "./errors.js";
 
 // Types
@@ -34,11 +35,13 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 /** Sentry CLI install script URL */
 const INSTALL_SCRIPT_URL = "https://cli.sentry.dev/install";
 
-/** Standard headers for GitHub API requests */
-const GITHUB_HEADERS = {
-  Accept: "application/vnd.github.v3+json",
-  "User-Agent": "sentry-cli",
-} as const;
+/** Build headers for GitHub API requests */
+function getGitHubHeaders() {
+  return {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": getUserAgent(),
+  };
+}
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
@@ -174,7 +177,7 @@ export async function fetchLatestFromGitHub(
 ): Promise<string> {
   const response = await fetchWithUpgradeError(
     `${GITHUB_RELEASES_URL}/latest`,
-    { headers: GITHUB_HEADERS, signal },
+    { headers: getGitHubHeaders(), signal },
     "GitHub"
   );
 
@@ -256,7 +259,7 @@ export async function versionExists(
   if (method === "curl") {
     const response = await fetchWithUpgradeError(
       `${GITHUB_RELEASES_URL}/tags/v${version}`,
-      { method: "HEAD", headers: GITHUB_HEADERS },
+      { method: "HEAD", headers: getGitHubHeaders() },
       "GitHub"
     );
     return response.ok;
