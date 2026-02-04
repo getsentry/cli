@@ -161,6 +161,28 @@ describe("Code Scanner", () => {
       expect(dsns).toEqual(["https://abc@o123.ingest.sentry.io/456"]);
     });
 
+    test("extracts DSN with secret key (legacy format)", () => {
+      // Some older Sentry installations or SDKs use public:secret format
+      const content = `
+        const DSN = "https://publickey:secretkey@o123.ingest.sentry.io/456";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toEqual([
+        "https://publickey:secretkey@o123.ingest.sentry.io/456",
+      ]);
+    });
+
+    test("extracts both regular and secret-key DSNs", () => {
+      const content = `
+        const DSN1 = "https://public@o123.ingest.sentry.io/111";
+        const DSN2 = "https://public:secret@o456.ingest.sentry.io/222";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toHaveLength(2);
+      expect(dsns).toContain("https://public@o123.ingest.sentry.io/111");
+      expect(dsns).toContain("https://public:secret@o456.ingest.sentry.io/222");
+    });
+
     test("accepts self-hosted DSNs when SENTRY_URL is set", () => {
       process.env.SENTRY_URL = "https://sentry.mycompany.com:9000";
       const content = `

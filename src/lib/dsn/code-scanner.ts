@@ -179,19 +179,24 @@ const normalizePath: (p: string) => string =
 
 /**
  * Pattern to match Sentry DSN URLs.
- * Captures the full DSN including protocol, public key, host, and project ID.
+ * Captures the full DSN including protocol, public key, optional secret key, host, and project ID.
  *
- * Format: https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}
- * Example: https://abc123def456@o123456.ingest.us.sentry.io/4507654321
+ * Formats supported:
+ * - https://{PUBLIC_KEY}@{HOST}/{PROJECT_ID}
+ * - https://{PUBLIC_KEY}:{SECRET_KEY}@{HOST}/{PROJECT_ID}
+ *
+ * Examples:
+ * - https://abc123def456@o123456.ingest.us.sentry.io/4507654321
+ * - https://abc123def456:secret789@sentry.example.com/123
  *
  * The public key is typically a 32-character hex string, but we accept any
  * alphanumeric string to support test fixtures and edge cases.
  *
- * Uses 'g' flag for global matching - IMPORTANT: reset lastIndex before reuse
- * or create new RegExp instances when needed.
+ * Note: Uses 'g' and 'i' flags. When used with String.matchAll(), the iterator
+ * always starts from the beginning regardless of lastIndex, so no reset needed.
  */
 const DSN_PATTERN =
-  /https?:\/\/[a-z0-9]+@[a-z0-9.-]+(?:\.[a-z]+|:[0-9]+)\/\d+/gi;
+  /https?:\/\/[a-z0-9]+(?::[a-z0-9]+)?@[a-z0-9.-]+(?:\.[a-z]+|:[0-9]+)\/\d+/gi;
 
 /**
  * Extract DSN URLs from file content, filtering out those in commented lines.
