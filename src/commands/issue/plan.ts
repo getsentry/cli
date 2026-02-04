@@ -74,7 +74,8 @@ function validateAutofixState(
   const causes = extractRootCauses(state);
   if (causes.length === 0) {
     throw new ValidationError(
-      "No root causes identified. Cannot create a plan without a root cause."
+      `Root cause analysis found no causes for issue ${issueId}.\n` +
+        `Try running 'sentry issue explain ${issueId} --force' to retry the analysis.`
     );
   }
 
