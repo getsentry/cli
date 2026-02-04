@@ -69,9 +69,7 @@ export function buildEventSearchUrl(orgSlug: string, eventId: string): string {
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/?query=event.id:${eventId}`;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Settings URLs
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Build URL to organization settings page.

@@ -8,9 +8,7 @@
 
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Region
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A Sentry region (e.g., US, EU) */
 export const RegionSchema = z.object({
@@ -27,9 +25,7 @@ export const UserRegionsResponseSchema = z.object({
 
 export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Organization
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Organization links with region URL for multi-region support */
 export const OrganizationLinksSchema = z.object({
@@ -64,9 +60,7 @@ export const SentryOrganizationSchema = z
 
 export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // User
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryUserSchema = z
   .object({
@@ -81,9 +75,7 @@ export const SentryUserSchema = z
 
 export type SentryUser = z.infer<typeof SentryUserSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Project
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryProjectSchema = z
   .object({
@@ -130,9 +122,7 @@ export const SentryProjectSchema = z
 
 export type SentryProject = z.infer<typeof SentryProjectSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Issue Status & Level Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ISSUE_STATUSES = ["resolved", "unresolved", "ignored"] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
@@ -160,9 +150,7 @@ export const ISSUE_SUBSTATUSES = [
 ] as const;
 export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Release (embedded in Issue)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ReleaseSchema = z
   .object({
@@ -193,9 +181,7 @@ export const ReleaseSchema = z
 
 export type Release = z.infer<typeof ReleaseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Issue
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryIssueSchema = z
   .object({
@@ -277,9 +263,7 @@ export const SentryIssueSchema = z
 
 export type SentryIssue = z.infer<typeof SentryIssueSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Trace Context
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const TraceContextSchema = z
   .object({
@@ -294,9 +278,7 @@ export const TraceContextSchema = z
 
 export type TraceContext = z.infer<typeof TraceContextSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Span (for trace tree display)
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single span in a trace */
 export const SpanSchema = z
@@ -372,9 +354,7 @@ export type TraceSpan = {
   children?: TraceSpan[];
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Stack Frame & Exception Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single frame in a stack trace */
 export const StackFrameSchema = z
@@ -460,9 +440,7 @@ export const ExceptionEntrySchema = z.object({
 
 export type ExceptionEntry = z.infer<typeof ExceptionEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Breadcrumbs Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single breadcrumb */
 export const BreadcrumbSchema = z
@@ -491,9 +469,7 @@ export const BreadcrumbsEntrySchema = z.object({
 
 export type BreadcrumbsEntry = z.infer<typeof BreadcrumbsEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Request Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** HTTP request entry in event.entries */
 export const RequestEntrySchema = z.object({
@@ -532,9 +508,7 @@ export const RequestEntrySchema = z.object({
 
 export type RequestEntry = z.infer<typeof RequestEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Event Contexts
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Browser context */
 export const BrowserContextSchema = z
@@ -581,9 +555,7 @@ export const UserGeoSchema = z
 
 export type UserGeo = z.infer<typeof UserGeoSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Event
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryEventSchema = z
   .object({
@@ -667,9 +639,7 @@ export const SentryEventSchema = z
 
 export type SentryEvent = z.infer<typeof SentryEventSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Project Keys (DSN)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ProjectKeyDsnSchema = z.object({
   public: z.string(),

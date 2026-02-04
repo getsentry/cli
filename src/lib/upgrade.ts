@@ -9,9 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { UpgradeError } from "./errors.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type InstallationMethod =
   | "curl"
@@ -24,9 +22,7 @@ export type InstallationMethod =
 /** Package managers that can be used for global installs */
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** GitHub API base URL for releases */
 const GITHUB_RELEASES_URL =
@@ -47,9 +43,7 @@ const GITHUB_HEADERS = {
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Detection
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Run a shell command and capture stdout.
@@ -130,9 +124,7 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
   return "unknown";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Version Fetching
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Extract error message from unknown caught value */
 function getErrorMessage(error: unknown): string {
@@ -278,9 +270,7 @@ export async function versionExists(
   return response.ok;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Upgrade Execution
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Execute upgrade via curl installer script.

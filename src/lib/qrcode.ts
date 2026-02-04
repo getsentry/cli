@@ -8,9 +8,7 @@
 import qrcodeTerminal from "qrcode-terminal";
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Schema & Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * QR code generation options schema
@@ -25,9 +23,7 @@ export const QRCodeOptionsSchema = z.object({
 
 export type QRCodeOptions = z.infer<typeof QRCodeOptionsSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Public API
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Generate a QR code string for terminal display

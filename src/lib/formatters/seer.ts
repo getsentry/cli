@@ -15,9 +15,7 @@ import { cyan, green, muted, yellow } from "./colors.js";
 
 const bold = (text: string): string => chalk.bold(text);
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Spinner Frames
-// ─────────────────────────────────────────────────────────────────────────────
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -33,9 +31,7 @@ export function getSpinnerFrame(tick: number): string {
   return SPINNER_FRAMES[index]!;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Progress Formatting
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Maximum length for progress messages to fit in a single terminal line */
 const MAX_PROGRESS_LENGTH = 300;
@@ -100,9 +96,7 @@ export function getProgressMessage(state: AutofixState): string {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Root Cause Formatting
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format a single reproduction step.
@@ -197,9 +191,7 @@ export function formatRootCauseList(causes: RootCause[]): string[] {
   return lines;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Error Messages
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Create a SeerError from an API error status code and detail.
@@ -270,9 +262,7 @@ export function formatAutofixError(status: number, detail?: string): string {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Solution Formatting
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format a solution artifact for human-readable display.
