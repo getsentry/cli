@@ -12,6 +12,7 @@
  * 6. Skips large files and known non-source directories
  */
 
+import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
@@ -160,11 +161,6 @@ const TEXT_EXTENSIONS = new Set([
  * Lines starting with these (after trimming whitespace) are ignored.
  */
 const COMMENT_PREFIXES = ["//", "#", "--", "<!--", "/*", "*", "'''", '"""'];
-
-/**
- * Pattern to split paths on both forward and back slashes for cross-platform support.
- */
-const PATH_SEPARATOR_PATTERN = /[/\\]/;
 
 /**
  * Normalize path separators to forward slashes for cross-platform consistency.
@@ -383,59 +379,56 @@ function shouldScanFile(filename: string): boolean {
 }
 
 /**
- * Get the depth of a path (number of directory separators).
- * Uses regex to split on both forward and back slashes for cross-platform support.
+ * Safely read directory entries, returning empty array on error.
  */
-function getPathDepth(relativePath: string): number {
-  if (!relativePath) {
-    return 0;
+async function safeReaddir(dir: string): Promise<Dirent[]> {
+  try {
+    return await readdir(dir, { withFileTypes: true });
+  } catch {
+    // Can't read directory (permissions, etc.) - skip it
+    return [];
   }
-  return relativePath.split(PATH_SEPARATOR_PATTERN).length - 1;
 }
 
 /**
- * Collect files to scan from a directory using recursive readdir.
+ * Collect files to scan from a directory using manual recursive walk.
+ *
+ * Unlike readdir with recursive: true, this implementation checks ignore rules
+ * BEFORE traversing into directories, avoiding unnecessary traversal of large
+ * ignored directories like node_modules.
  *
  * @param cwd - Root directory to scan
  * @param ig - Ignore filter instance
  * @returns Array of file paths relative to cwd
  */
 async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
-  const entries = await readdir(cwd, { withFileTypes: true, recursive: true });
   const files: string[] = [];
 
-  for (const entry of entries) {
-    // Skip non-files
-    if (!entry.isFile()) {
-      continue;
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > MAX_SCAN_DEPTH) {
+      return;
     }
 
-    // Build relative path - entry.parentPath is the directory containing the entry
-    const rawRelativePath = path.relative(
-      cwd,
-      path.join(entry.parentPath, entry.name)
-    );
+    const entries = await safeReaddir(dir);
 
-    // Check depth early before more expensive operations
-    // Uses raw path (may have backslashes on Windows) since getPathDepth handles both
-    if (getPathDepth(rawRelativePath) > MAX_SCAN_DEPTH) {
-      continue;
-    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = normalizePath(path.relative(cwd, fullPath));
 
-    // Normalize to forward slashes for cross-platform consistency
-    const relativePath = normalizePath(rawRelativePath);
+      // Check ignore rules BEFORE traversing - prevents walking into node_modules, etc.
+      if (ig.ignores(relativePath)) {
+        continue;
+      }
 
-    // Skip ignored paths (includes ALWAYS_SKIP_DIRS and .gitignore patterns)
-    if (ig.ignores(relativePath)) {
-      continue;
-    }
-
-    // Only include files with scannable extensions
-    if (shouldScanFile(entry.name)) {
-      files.push(relativePath);
+      if (entry.isDirectory()) {
+        await walk(fullPath, depth + 1);
+      } else if (entry.isFile() && shouldScanFile(entry.name)) {
+        files.push(relativePath);
+      }
     }
   }
 
+  await walk(cwd, 0);
   return files;
 }
 

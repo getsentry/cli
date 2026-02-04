@@ -521,8 +521,10 @@ async function walkUpDirectories(
         state.buildSystemAt
       );
 
-    // 1. Check for DSN in .env files - immediate return
-    if (dsnResult) {
+    // 1. Check for DSN in .env files - immediate return (unless at/above home directory)
+    // Don't use a .env in the home directory as a project root indicator,
+    // as users may have global configs that shouldn't define project boundaries
+    if (dsnResult && state.currentDir !== stopBoundary) {
       return createDsnFoundResult(
         state.currentDir,
         dsnResult,

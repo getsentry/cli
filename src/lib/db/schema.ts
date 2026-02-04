@@ -186,23 +186,12 @@ export function runMigrations(db: Database): void {
   // Migration 2 -> 3: Add name column to user_info table
   // Check if column exists first to handle concurrent CLI processes
   // (SQLite lacks ADD COLUMN IF NOT EXISTS)
-  if (currentVersion < 3 && currentVersion >= 2) {
-    const hasNameColumn =
-      (
-        db
-          .query(
-            "SELECT COUNT(*) as count FROM pragma_table_info('user_info') WHERE name='name'"
-          )
-          .get() as { count: number }
-      ).count > 0;
-
-    if (!hasNameColumn) {
-      db.exec("ALTER TABLE user_info ADD COLUMN name TEXT");
-    }
+  if (currentVersion < 3) {
+    addColumnIfMissing(db, "user_info", "name", "TEXT");
   }
 
   // Migration 3 -> 4: Add detection caching columns to dsn_cache and project_root_cache table
-  if (currentVersion < 4 && currentVersion >= 3) {
+  if (currentVersion < 4) {
     // Add new columns to dsn_cache for full detection caching
     addColumnIfMissing(db, "dsn_cache", "fingerprint", "TEXT");
     addColumnIfMissing(db, "dsn_cache", "all_dsns_json", "TEXT");
