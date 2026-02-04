@@ -19,7 +19,7 @@ import * as Sentry from "@sentry/bun";
  * @param error - The error to check
  * @returns True if the error is expected and should be ignored
  */
-export function isIgnorableFileError(error: unknown): boolean {
+function isIgnorableFileError(error: unknown): boolean {
   if (error instanceof Error && "code" in error) {
     const code = (error as NodeJS.ErrnoException).code;
     return code === "ENOENT" || code === "EACCES";

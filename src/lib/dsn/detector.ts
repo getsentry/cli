@@ -235,19 +235,27 @@ function checkForHigherPriorityCodeDsn(
 
 /**
  * Verify cached env var DSN is still valid.
- * Also checks for higher-priority code DSNs.
+ * Also checks for higher-priority code and env_file DSNs.
+ *
+ * Priority: code > env_file > env_var
  */
 async function verifyEnvVarCache(
   cwd: string,
   cached: CachedDsnEntry
 ): Promise<DetectedDsn | null> {
-  // First check if a code DSN exists (higher priority than env var)
+  // First check if a code DSN exists (highest priority)
   const codeDsn = await checkForHigherPriorityCodeDsn(cwd);
   if (codeDsn) {
     return codeDsn;
   }
 
-  // No code DSN, verify the env var is still set
+  // Check for env_file DSN (medium priority)
+  const envFileDsn = await detectFromEnvFiles(cwd);
+  if (envFileDsn) {
+    return envFileDsn;
+  }
+
+  // No code or env_file DSN, verify the env var is still set
   const envDsn = detectFromEnv();
   if (envDsn?.raw === cached.dsn) {
     return envDsn; // Same DSN - cache valid
