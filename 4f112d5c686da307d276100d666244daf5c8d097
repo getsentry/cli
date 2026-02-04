@@ -1,0 +1,39 @@
+## Implementation Plan: Parallel-with-Early-Exit Promise Helper
+
+### Problem
+Recurring pattern in codebase where we want to:
+1. Start multiple async operations in parallel
+2. Resolve as soon as any one succeeds (returns true)
+3. Not wait for remaining operations
+
+Used in anyExists() and anyGlobMatches() in src/lib/dsn/project-root.ts.
+
+### Solution
+Create generic helper anyTrue<T>() that:
+- Runs predicates concurrently
+- Resolves true on first truthy result
+- Resolves false only when all complete with falsy/error
+- Treats errors as false (consistent with file system checks)
+
+### API
+```typescript
+function anyTrue<T>(
+  items: readonly T[],
+  predicate: (item: T) => Promise<boolean>
+): Promise<boolean>;
+```
+
+### Design Decisions
+1. No onError callback - keeps API simple, errors = false is correct for FS ops
+2. No findFirst<T>() variant - existing use cases are boolean checks or require order
+3. No AbortController - minimal overhead from redundant work
+
+### Files
+- src/lib/promises.ts: New helper (~60 lines)
+- test/lib/promises.test.ts: 12 test cases (~115 lines)
+- src/lib/dsn/project-root.ts: Refactored (-44 lines)
+
+### Alternatives Considered
+- Promise.race(): Resolves on first settlement regardless of value
+- Promise.any(): Requires throwing on false, awkward API
+- Sequential iteration: Slower when match is late in array
