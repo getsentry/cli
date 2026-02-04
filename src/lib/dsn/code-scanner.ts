@@ -455,6 +455,7 @@ async function processFile(
 
     // Skip large files (Bun.file().size reads metadata, not content)
     if (file.size > MAX_FILE_SIZE) {
+      // TODO: Add debug log when logging infrastructure is available
       return [];
     }
 
@@ -472,7 +473,7 @@ async function processFile(
       .map((dsn) => createDetectedDsn(dsn, "code", relativePath, packagePath))
       .filter((d): d is DetectedDsn => d !== null);
   } catch {
-    // Skip files we can't read
+    // TODO: Add warning log for unreadable files when logging infrastructure is available
     return [];
   }
 }
