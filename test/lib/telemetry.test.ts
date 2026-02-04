@@ -4,8 +4,10 @@
  * Tests for withTelemetry wrapper and opt-out behavior.
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  createTracedDatabase,
   initSentry,
   setCommandSpanName,
   setOrgProjectContext,
@@ -175,15 +177,6 @@ describe("withDbSpan", () => {
       })
     ).toThrow("db error");
   });
-
-  test("accepts optional query parameter", () => {
-    const result = withDbSpan(
-      "getUser",
-      () => ({ id: 1, name: "test" }),
-      "SELECT * FROM users WHERE id = ?"
-    );
-    expect(result).toEqual({ id: 1, name: "test" });
-  });
 });
 
 describe("withSerializeSpan", () => {
@@ -324,5 +317,101 @@ describe("withTracingSpan", () => {
       "init.attr": "initial",
     });
     expect(result).toBe("success");
+  });
+});
+
+describe("createTracedDatabase", () => {
+  test("wraps database and traces query().get()", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
+    db.exec("INSERT INTO test (id, name) VALUES (1, 'Alice')");
+
+    const tracedDb = createTracedDatabase(db);
+    const row = tracedDb.query("SELECT * FROM test WHERE id = ?").get(1) as {
+      id: number;
+      name: string;
+    };
+
+    expect(row).toEqual({ id: 1, name: "Alice" });
+    db.close();
+  });
+
+  test("wraps database and traces query().all()", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
+    db.exec("INSERT INTO test (id, name) VALUES (1, 'Alice'), (2, 'Bob')");
+
+    const tracedDb = createTracedDatabase(db);
+    const rows = tracedDb.query("SELECT * FROM test ORDER BY id").all() as {
+      id: number;
+      name: string;
+    }[];
+
+    expect(rows).toEqual([
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" },
+    ]);
+    db.close();
+  });
+
+  test("wraps database and traces query().run()", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
+
+    const tracedDb = createTracedDatabase(db);
+    tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(1, "Alice");
+
+    const row = db.query("SELECT * FROM test WHERE id = 1").get() as {
+      id: number;
+      name: string;
+    };
+    expect(row).toEqual({ id: 1, name: "Alice" });
+    db.close();
+  });
+
+  test("passes through non-query methods like exec", () => {
+    const db = new Database(":memory:");
+    const tracedDb = createTracedDatabase(db);
+
+    // exec should work without tracing (passes through proxy)
+    tracedDb.exec("CREATE TABLE test (id INTEGER)");
+    tracedDb.exec("INSERT INTO test VALUES (1)");
+
+    const row = tracedDb.query("SELECT * FROM test").get() as { id: number };
+    expect(row).toEqual({ id: 1 });
+    db.close();
+  });
+
+  test("passes through close method", () => {
+    const db = new Database(":memory:");
+    const tracedDb = createTracedDatabase(db);
+
+    // Should not throw
+    expect(() => tracedDb.close()).not.toThrow();
+  });
+
+  test("propagates errors from queries", () => {
+    const db = new Database(":memory:");
+    const tracedDb = createTracedDatabase(db);
+
+    expect(() => {
+      tracedDb.query("SELECT * FROM nonexistent_table").get();
+    }).toThrow();
+
+    db.close();
+  });
+
+  test("statement non-execution methods pass through", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE test (id INTEGER, name TEXT)");
+    const tracedDb = createTracedDatabase(db);
+
+    const stmt = tracedDb.query("SELECT * FROM test WHERE id = ?");
+
+    // These should pass through without tracing
+    expect(stmt.columnNames).toEqual(["id", "name"]);
+    expect(typeof stmt.toString).toBe("function");
+
+    db.close();
   });
 });

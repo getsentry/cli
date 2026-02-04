@@ -28,51 +28,43 @@ export type AuthConfig = {
 };
 
 export function getAuthConfig(): AuthConfig | undefined {
-  return withDbSpan(
-    "getAuthConfig",
-    () => {
-      const db = getDatabase();
-      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-        | AuthRow
-        | undefined;
+  return withDbSpan("getAuthConfig", () => {
+    const db = getDatabase();
+    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+      | AuthRow
+      | undefined;
 
-      if (!row?.token) {
-        return;
-      }
+    if (!row?.token) {
+      return;
+    }
 
-      return {
-        token: row.token ?? undefined,
-        refreshToken: row.refresh_token ?? undefined,
-        expiresAt: row.expires_at ?? undefined,
-        issuedAt: row.issued_at ?? undefined,
-      };
-    },
-    "SELECT * FROM auth WHERE id = ?"
-  );
+    return {
+      token: row.token ?? undefined,
+      refreshToken: row.refresh_token ?? undefined,
+      expiresAt: row.expires_at ?? undefined,
+      issuedAt: row.issued_at ?? undefined,
+    };
+  });
 }
 
 /** Get the stored token, or undefined if expired. Use refreshToken() for auto-refresh. */
 export function getAuthToken(): string | undefined {
-  return withDbSpan(
-    "getAuthToken",
-    () => {
-      const db = getDatabase();
-      const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-        | AuthRow
-        | undefined;
+  return withDbSpan("getAuthToken", () => {
+    const db = getDatabase();
+    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
+      | AuthRow
+      | undefined;
 
-      if (!row?.token) {
-        return;
-      }
+    if (!row?.token) {
+      return;
+    }
 
-      if (row.expires_at && Date.now() > row.expires_at) {
-        return;
-      }
+    if (row.expires_at && Date.now() > row.expires_at) {
+      return;
+    }
 
-      return row.token;
-    },
-    "SELECT * FROM auth WHERE id = ?"
-  );
+    return row.token;
+  });
 }
 
 export function setAuthToken(
@@ -80,44 +72,36 @@ export function setAuthToken(
   expiresIn?: number,
   newRefreshToken?: string
 ): void {
-  withDbSpan(
-    "setAuthToken",
-    () => {
-      const db = getDatabase();
-      const now = Date.now();
-      const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
-      const issuedAt = expiresIn ? now : null;
+  withDbSpan("setAuthToken", () => {
+    const db = getDatabase();
+    const now = Date.now();
+    const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
+    const issuedAt = expiresIn ? now : null;
 
-      runUpsert(
-        db,
-        "auth",
-        {
-          id: 1,
-          token,
-          refresh_token: newRefreshToken ?? null,
-          expires_at: expiresAt,
-          issued_at: issuedAt,
-          updated_at: now,
-        },
-        ["id"]
-      );
-    },
-    "INSERT OR REPLACE INTO auth (id, token, refresh_token, expires_at, issued_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  );
+    runUpsert(
+      db,
+      "auth",
+      {
+        id: 1,
+        token,
+        refresh_token: newRefreshToken ?? null,
+        expires_at: expiresAt,
+        issued_at: issuedAt,
+        updated_at: now,
+      },
+      ["id"]
+    );
+  });
 }
 
 export function clearAuth(): void {
-  withDbSpan(
-    "clearAuth",
-    () => {
-      const db = getDatabase();
-      db.query("DELETE FROM auth WHERE id = 1").run();
-      // Also clear user info and org region cache when logging out
-      db.query("DELETE FROM user_info WHERE id = 1").run();
-      db.query("DELETE FROM org_regions").run();
-    },
-    "DELETE FROM auth, user_info, org_regions"
-  );
+  withDbSpan("clearAuth", () => {
+    const db = getDatabase();
+    db.query("DELETE FROM auth WHERE id = 1").run();
+    // Also clear user info and org region cache when logging out
+    db.query("DELETE FROM user_info WHERE id = 1").run();
+    db.query("DELETE FROM org_regions").run();
+  });
 }
 
 export async function isAuthenticated(): Promise<boolean> {
