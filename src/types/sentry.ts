@@ -254,7 +254,16 @@ export const SentryIssueSchema = z
       .nullable()
       .optional(),
     hasSeen: z.boolean().optional(),
-    annotations: z.array(z.string()).optional(),
+    annotations: z
+      .array(
+        z
+          .object({
+            displayName: z.string(),
+            url: z.string(),
+          })
+          .passthrough()
+      )
+      .optional(),
     isUnhandled: z.boolean().optional(),
     count: z.string().optional(),
     userCount: z.number().optional(),
@@ -609,8 +618,8 @@ export const SentryEventSchema = z
     culprit: z.string().nullable().optional(),
     sdk: z
       .object({
-        name: z.string(),
-        version: z.string(),
+        name: z.string().nullable().optional(),
+        version: z.string().nullable().optional(),
       })
       .passthrough()
       .nullable()

@@ -1282,9 +1282,11 @@ export function formatEventDetails(
     }
 
     // SDK info
-    if (event.sdk) {
+    if (event.sdk?.name || event.sdk?.version) {
       lines.push("");
-      lines.push(`SDK:        ${event.sdk.name} ${event.sdk.version}`);
+      const sdkName = event.sdk.name ?? "unknown";
+      const sdkVersion = event.sdk.version ?? "";
+      lines.push(`SDK:        ${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""}`);
     }
 
     // Release info
