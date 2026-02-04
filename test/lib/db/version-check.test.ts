@@ -3,22 +3,37 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+  CONFIG_DIR_ENV_VAR,
+  closeDatabase,
+} from "../../../src/lib/db/index.js";
 import {
   getVersionCheckInfo,
   setVersionCheckInfo,
 } from "../../../src/lib/db/version-check.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
+/**
+ * Test isolation: Each test gets its own config directory.
+ * Uses the same pattern as config.test.ts to avoid env var conflicts.
+ */
+const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
 
-beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-version-check-");
-  process.env.SENTRY_CONFIG_DIR = testConfigDir;
+beforeEach(() => {
+  closeDatabase();
+  const testConfigDir = join(
+    testBaseDir,
+    `version-check-${Math.random().toString(36).slice(2)}`
+  );
+  mkdirSync(testConfigDir, { recursive: true });
+  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 });
 
-afterEach(async () => {
-  delete process.env.SENTRY_CONFIG_DIR;
-  await cleanupTestDir(testConfigDir);
+afterEach(() => {
+  closeDatabase();
+  // Restore original base dir to maintain test isolation
+  process.env[CONFIG_DIR_ENV_VAR] = testBaseDir;
 });
 
 describe("getVersionCheckInfo", () => {
