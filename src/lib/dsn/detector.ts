@@ -171,12 +171,20 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   };
 
   // 3a. Check all code files from project root (highest priority)
-  const { dsns: codeDsns, sourceMtimes: codeMtimes } =
-    await scanCodeForDsns(projectRoot);
+  const {
+    dsns: codeDsns,
+    sourceMtimes: codeMtimes,
+    dirMtimes: codeDirMtimes,
+  } = await scanCodeForDsns(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
   }
   Object.assign(allSourceMtimes, codeMtimes);
+  // Store directory mtimes with trailing "/" to distinguish from files
+  // This allows detecting when new files are added to scanned directories
+  for (const [dir, mtime] of Object.entries(codeDirMtimes)) {
+    allSourceMtimes[`${dir}/`] = mtime;
+  }
 
   // 3b. Check all .env files from project root (includes monorepo packages/apps)
   const { dsns: envFileDsns, sourceMtimes: envMtimes } =
@@ -196,6 +204,9 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
   const fingerprint = createDsnFingerprint(allDsns);
 
   // Get project root directory mtime for new-file detection
+  // Note: Individual scanned directory mtimes are stored in sourceMtimes
+  // with trailing "/" suffix, but we still track root separately for
+  // quick invalidation when files are added/removed at root level
   let rootDirMtime = 0;
   try {
     const stats = await stat(projectRoot);

@@ -32,6 +32,8 @@ export type CodeScanResult = {
   dsns: DetectedDsn[];
   /** Map of source file paths to their mtimes (only files containing DSNs) */
   sourceMtimes: Record<string, number>;
+  /** Mtimes of scanned directories (for detecting new files added to subdirs) */
+  dirMtimes: Record<string, number>;
 };
 
 /**
@@ -395,6 +397,25 @@ async function safeReaddir(dir: string): Promise<Dirent[]> {
   }
 }
 
+/** Result of file collection */
+type CollectResult = {
+  files: string[];
+  /** Mtimes of scanned directories (for detecting new files) */
+  dirMtimes: Record<string, number>;
+};
+
+/**
+ * Get directory mtime safely.
+ */
+async function getDirMtime(dir: string): Promise<number> {
+  try {
+    const stats = await Bun.file(dir).stat();
+    return stats?.mtimeMs ? Math.floor(stats.mtimeMs) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Collect files to scan from a directory using manual recursive walk.
  *
@@ -402,17 +423,25 @@ async function safeReaddir(dir: string): Promise<Dirent[]> {
  * BEFORE traversing into directories, avoiding unnecessary traversal of large
  * ignored directories like node_modules.
  *
+ * Also collects mtimes of all scanned directories for cache invalidation
+ * (detects when new files are added to subdirectories).
+ *
  * @param cwd - Root directory to scan
  * @param ig - Ignore filter instance
- * @returns Array of file paths relative to cwd
+ * @returns Files and directory mtimes
  */
-async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
+async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
   const files: string[] = [];
+  const dirMtimes: Record<string, number> = {};
 
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > MAX_SCAN_DEPTH) {
       return;
     }
+
+    // Track this directory's mtime for cache invalidation
+    const relativeDirPath = normalizePath(path.relative(cwd, dir)) || ".";
+    dirMtimes[relativeDirPath] = await getDirMtime(dir);
 
     const entries = await safeReaddir(dir);
 
@@ -434,7 +463,7 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
   }
 
   await walk(cwd, 0);
-  return files;
+  return { files, dirMtimes };
 }
 
 /** Result from processing a single file */
@@ -617,14 +646,16 @@ function scanDirectory(
       // Create ignore filter with built-in patterns and .gitignore
       const ig = await createIgnoreFilter(cwd);
 
-      // Collect all files to scan
-      let files: string[];
+      // Collect all files to scan (also collects directory mtimes)
+      let collectResult: CollectResult;
       try {
-        files = await collectFiles(cwd, ig);
+        collectResult = await collectFiles(cwd, ig);
       } catch {
         span.setStatus({ code: 2, message: "Directory scan failed" });
-        return { dsns: [], sourceMtimes: {} };
+        return { dsns: [], sourceMtimes: {}, dirMtimes: {} };
       }
+
+      const { files, dirMtimes } = collectResult;
 
       span.setAttribute("dsn.files_collected", files.length);
       Sentry.metrics.distribution("dsn.files_collected", files.length, {
@@ -633,7 +664,7 @@ function scanDirectory(
 
       if (files.length === 0) {
         span.setStatus({ code: 1 });
-        return { dsns: [], sourceMtimes: {} };
+        return { dsns: [], sourceMtimes: {}, dirMtimes };
       }
 
       // Scan files
@@ -657,7 +688,7 @@ function scanDirectory(
 
       span.setStatus({ code: 1 });
 
-      return { dsns: [...results.values()], sourceMtimes };
+      return { dsns: [...results.values()], sourceMtimes, dirMtimes };
     }
   );
 }

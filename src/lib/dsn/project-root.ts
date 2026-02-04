@@ -477,12 +477,26 @@ function createDsnFoundResult(
 /**
  * Create result when repo root marker is found.
  * Maps marker type to reason (defaults to "vcs" for undefined).
+ *
+ * If a language marker was already found closer to cwd, prefer it over the
+ * repo root to support monorepos (e.g., user working in packages/frontend
+ * should use that as root, not the repo root).
  */
 function createRepoRootResult(
   currentDir: string,
   markerType: "vcs" | "ci" | "editorconfig" | undefined,
-  levelsTraversed: number
+  levelsTraversed: number,
+  languageMarkerAt: string | null
 ): ProjectRootResult {
+  // Prefer closer language marker over repo root for monorepo support
+  if (languageMarkerAt) {
+    return {
+      projectRoot: languageMarkerAt,
+      reason: "language",
+      levelsTraversed,
+    };
+  }
+
   return {
     projectRoot: currentDir,
     reason: markerType ?? "vcs",
@@ -537,7 +551,8 @@ async function walkUpDirectories(
       return createRepoRootResult(
         state.currentDir,
         repoRootResult.type,
-        state.levelsTraversed
+        state.levelsTraversed,
+        state.languageMarkerAt
       );
     }
 

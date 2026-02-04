@@ -191,29 +191,65 @@ export async function clearDsnCache(directory?: string): Promise<void> {
 // =============================================================================
 
 /**
- * Validate that cached source file mtimes still match current files.
+ * Validate a single directory mtime.
+ * @returns True if mtime matches, false if changed or missing
+ */
+async function validateDirMtime(
+  fullPath: string,
+  cachedMtime: number
+): Promise<boolean> {
+  try {
+    const stats = await stat(fullPath);
+    return Math.floor(stats.mtimeMs) === cachedMtime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate a single file mtime.
+ * @returns True if mtime matches, false if changed or missing
+ */
+async function validateFileMtime(
+  fullPath: string,
+  cachedMtime: number
+): Promise<boolean> {
+  try {
+    const file = Bun.file(fullPath);
+    if (!(await file.exists())) {
+      return false;
+    }
+    return file.lastModified === cachedMtime;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate that cached source file and directory mtimes still match.
+ *
+ * Entries ending with "/" are directories (for detecting new files added to subdirs).
+ * Other entries are files (for detecting modified DSN files).
  *
  * @param projectRoot - Project root directory
  * @param sourceMtimes - Map of relative paths to cached mtimes
- * @returns True if all mtimes match, false if any changed or file missing
+ * @returns True if all mtimes match, false if any changed or missing
  */
 async function validateSourceMtimes(
   projectRoot: string,
   sourceMtimes: Record<string, number>
 ): Promise<boolean> {
   for (const [relativePath, cachedMtime] of Object.entries(sourceMtimes)) {
-    try {
-      const file = Bun.file(join(projectRoot, relativePath));
-      if (!(await file.exists())) {
-        // File was deleted
-        return false;
-      }
-      if (file.lastModified !== cachedMtime) {
-        // File was modified
-        return false;
-      }
-    } catch {
-      // Can't access file - invalidate
+    // Check if this is a directory entry (ends with "/")
+    const isDir = relativePath.endsWith("/");
+    const cleanPath = isDir ? relativePath.slice(0, -1) : relativePath;
+    const fullPath = join(projectRoot, cleanPath);
+
+    const isValid = isDir
+      ? await validateDirMtime(fullPath, cachedMtime)
+      : await validateFileMtime(fullPath, cachedMtime);
+
+    if (!isValid) {
       return false;
     }
   }
