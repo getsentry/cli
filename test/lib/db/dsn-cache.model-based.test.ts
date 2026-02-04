@@ -120,9 +120,11 @@ const dsnArb = tuple(
   constantFrom("sentry.io", "us.sentry.io", "de.sentry.io")
 ).map(([key, projectId, host]) => `https://${key}@${host}/${projectId}`);
 
-const sourceArb = constantFrom("env", "env-file", "code") as ReturnType<
-  typeof constantFrom<CachedDsnEntry["source"]>
->;
+const sourceArb = constantFrom(
+  "env" as CachedDsnEntry["source"],
+  "env-file" as CachedDsnEntry["source"],
+  "code" as CachedDsnEntry["source"]
+);
 
 const slugArb = constantFrom(
   "my-org",
@@ -199,7 +201,10 @@ class GetCachedDsnCommand implements AsyncCommand<CacheModel, RealCache> {
       expect(realEntry).toBeDefined();
       expect(realEntry?.dsn).toBe(modelEntry.dsn);
       expect(realEntry?.projectId).toBe(modelEntry.projectId);
+      expect(realEntry?.orgId).toBe(modelEntry.orgId);
       expect(realEntry?.source).toBe(modelEntry.source);
+      expect(realEntry?.sourcePath).toBe(modelEntry.sourcePath);
+      expect(realEntry?.resolved).toEqual(modelEntry.resolved);
     } else {
       expect(realEntry).toBeUndefined();
     }
@@ -475,8 +480,8 @@ const allCommands = [
 // Tests
 
 describe("model-based: DSN and project cache", () => {
-  test("random sequences of cache operations maintain consistency", () => {
-    fcAssert(
+  test("random sequences of cache operations maintain consistency", async () => {
+    await fcAssert(
       asyncProperty(commands(allCommands, { size: "+1" }), async (cmds) => {
         const cleanup = createIsolatedDbContext();
         try {
@@ -497,8 +502,8 @@ describe("model-based: DSN and project cache", () => {
     );
   });
 
-  test("updateCachedResolution only updates existing entries", () => {
-    fcAssert(
+  test("updateCachedResolution only updates existing entries", async () => {
+    await fcAssert(
       asyncProperty(
         tuple(directoryArb, resolvedInfoArb),
         async ([directory, resolved]) => {
@@ -519,8 +524,8 @@ describe("model-based: DSN and project cache", () => {
     );
   });
 
-  test("clearDsnCache with directory only clears that entry", () => {
-    fcAssert(
+  test("clearDsnCache with directory only clears that entry", async () => {
+    await fcAssert(
       asyncProperty(
         tuple(directoryArb, directoryArb, dsnArb, projectIdArb, sourceArb),
         async ([dir1, dir2, dsn, projectId, source]) => {
@@ -548,8 +553,8 @@ describe("model-based: DSN and project cache", () => {
     );
   });
 
-  test("project cache by DSN key is separate from org:project key", () => {
-    fcAssert(
+  test("project cache by DSN key is separate from org:project key", async () => {
+    await fcAssert(
       asyncProperty(
         tuple(orgIdArb, projectIdArb, publicKeyArb, resolvedInfoArb),
         async ([orgId, projectId, publicKey, info]) => {
