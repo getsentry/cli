@@ -43,14 +43,22 @@ describe("shouldSuppressNotification", () => {
 
 describe("getUpdateNotification", () => {
   let testConfigDir: string;
+  let savedNoUpdateCheck: string | undefined;
 
   beforeEach(async () => {
     testConfigDir = await createTestConfigDir("test-version-notif-");
     process.env.SENTRY_CONFIG_DIR = testConfigDir;
+    // Save and clear the env var to test real implementation
+    savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
   });
 
   afterEach(async () => {
     delete process.env.SENTRY_CONFIG_DIR;
+    // Restore the env var
+    if (savedNoUpdateCheck !== undefined) {
+      process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
+    }
     await cleanupTestDir(testConfigDir);
   });
 
