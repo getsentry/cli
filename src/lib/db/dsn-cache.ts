@@ -257,26 +257,6 @@ async function validateSourceMtimes(
 }
 
 /**
- * Validate that project root directory mtime hasn't changed.
- * A change indicates files were added or removed.
- *
- * @param projectRoot - Project root directory
- * @param cachedMtime - Cached directory mtime
- * @returns True if mtime matches, false if changed
- */
-async function validateRootDirMtime(
-  projectRoot: string,
-  cachedMtime: number
-): Promise<boolean> {
-  try {
-    const stats = await stat(projectRoot);
-    return Math.floor(stats.mtimeMs) === cachedMtime;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Get cached full detection result if valid.
  *
  * Validation checks (in order):
@@ -319,7 +299,7 @@ export async function getCachedDetection(
   }
 
   // Check project root directory mtime
-  if (!(await validateRootDirMtime(projectRoot, row.root_dir_mtime))) {
+  if (!(await validateDirMtime(projectRoot, row.root_dir_mtime))) {
     return;
   }
 

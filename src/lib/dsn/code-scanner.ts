@@ -405,12 +405,14 @@ type CollectResult = {
 };
 
 /**
- * Get directory mtime safely.
+ * Get directory mtime safely using node:fs/promises stat.
+ * Must use stat() from node:fs/promises (not Bun.file()) for directories.
  */
 async function getDirMtime(dir: string): Promise<number> {
   try {
-    const stats = await Bun.file(dir).stat();
-    return stats?.mtimeMs ? Math.floor(stats.mtimeMs) : 0;
+    const { stat } = await import("node:fs/promises");
+    const stats = await stat(dir);
+    return Math.floor(stats.mtimeMs);
   } catch {
     return 0;
   }
