@@ -20,11 +20,13 @@
     "test": "bun test",
     "test:unit": "bun test test/lib test/commands test/types",
     "test:e2e": "bun test test/e2e",
+    "generate:client": "bun run script/api-client.ts",
     "generate:skill": "bun run script/generate-skill.ts",
     "check:skill": "bun run script/check-skill.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
+    "@hey-api/openapi-ts": "0.91.1",
     "@sentry/bun": "10.38.0",
     "@sentry/esbuild-plugin": "^2.23.0",
     "@sentry/node": "10.38.0",

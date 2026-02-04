@@ -1,7 +1,8 @@
 /**
  * Seer API Types
  *
- * Zod schemas and TypeScript types for Sentry's Seer Autofix API.
+ * Types for Sentry's Seer Autofix API.
+ * Only SolutionArtifactSchema is used for runtime validation (in extractSolution).
  */
 
 import { z } from "zod";
@@ -43,126 +44,108 @@ export type StoppingPoint = (typeof STOPPING_POINTS)[number];
 // Progress Message
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ProgressMessageSchema = z.object({
-  message: z.string(),
-  timestamp: z.string(),
-  type: z.string().optional(),
-});
-
-export type ProgressMessage = z.infer<typeof ProgressMessageSchema>;
+export type ProgressMessage = {
+  message: string;
+  timestamp: string;
+  type?: string;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Relevant Code File
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RelevantCodeFileSchema = z.object({
-  file_path: z.string(),
-  repo_name: z.string(),
-});
-
-export type RelevantCodeFile = z.infer<typeof RelevantCodeFileSchema>;
+export type RelevantCodeFile = {
+  file_path: string;
+  repo_name: string;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reproduction Step
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ReproductionStepSchema = z.object({
-  title: z.string(),
-  code_snippet_and_analysis: z.string(),
-  is_most_important_event: z.boolean().optional(),
-  relevant_code_file: RelevantCodeFileSchema.optional(),
-  timeline_item_type: z.string().optional(),
-});
-
-export type ReproductionStep = z.infer<typeof ReproductionStepSchema>;
+export type ReproductionStep = {
+  title: string;
+  code_snippet_and_analysis: string;
+  is_most_important_event?: boolean;
+  relevant_code_file?: RelevantCodeFile;
+  timeline_item_type?: string;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Root Cause
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RootCauseSchema = z.object({
-  id: z.number(),
-  description: z.string(),
-  relevant_repos: z.array(z.string()).optional(),
-  reproduction_urls: z.array(z.string()).optional(),
-  root_cause_reproduction: z.array(ReproductionStepSchema).optional(),
-});
-
-export type RootCause = z.infer<typeof RootCauseSchema>;
+export type RootCause = {
+  id: number;
+  description: string;
+  relevant_repos?: string[];
+  reproduction_urls?: string[];
+  root_cause_reproduction?: ReproductionStep[];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Root Cause Selection
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RootCauseSelectionSchema = z.object({
-  cause_id: z.number(),
-  instruction: z.string().nullable().optional(),
-});
-
-export type RootCauseSelection = z.infer<typeof RootCauseSelectionSchema>;
+export type RootCauseSelection = {
+  cause_id: number;
+  instruction?: string | null;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Autofix Step
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AutofixStepSchema = z
-  .object({
-    id: z.string(),
-    key: z.string(),
-    status: z.string(),
-    title: z.string(),
-    progress: z.array(ProgressMessageSchema).optional(),
-    causes: z.array(RootCauseSchema).optional(),
-    selection: RootCauseSelectionSchema.optional(),
-  })
-  .passthrough(); // Allow additional fields like artifacts
-
-export type AutofixStep = z.infer<typeof AutofixStepSchema>;
+export type AutofixStep = {
+  id: string;
+  key: string;
+  status: string;
+  title: string;
+  progress?: ProgressMessage[];
+  causes?: RootCause[];
+  selection?: RootCauseSelection;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Repository Info
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const RepositoryInfoSchema = z.object({
-  integration_id: z.number().optional(),
-  url: z.string().optional(),
-  external_id: z.string(),
-  name: z.string(),
-  provider: z.string().optional(),
-  default_branch: z.string().optional(),
-  is_readable: z.boolean().optional(),
-  is_writeable: z.boolean().optional(),
-});
-
-export type RepositoryInfo = z.infer<typeof RepositoryInfoSchema>;
+export type RepositoryInfo = {
+  integration_id?: number;
+  url?: string;
+  external_id: string;
+  name: string;
+  provider?: string;
+  default_branch?: string;
+  is_readable?: boolean;
+  is_writeable?: boolean;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Codebase Info
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const CodebaseInfoSchema = z.object({
-  repo_external_id: z.string(),
-  file_changes: z.array(z.unknown()).optional(),
-  is_readable: z.boolean().optional(),
-  is_writeable: z.boolean().optional(),
-});
-
-export type CodebaseInfo = z.infer<typeof CodebaseInfoSchema>;
+export type CodebaseInfo = {
+  repo_external_id: string;
+  file_changes?: unknown[];
+  is_readable?: boolean;
+  is_writeable?: boolean;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PR Info (from completed fix)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const PullRequestInfoSchema = z.object({
-  pr_number: z.number().optional(),
-  pr_url: z.string().optional(),
-  repo_name: z.string().optional(),
-});
-
-export type PullRequestInfo = z.infer<typeof PullRequestInfoSchema>;
+export type PullRequestInfo = {
+  pr_number?: number;
+  pr_url?: string;
+  repo_name?: string;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solution Artifact (from plan command)
+// Used for runtime validation in extractSolution()
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A single step in the solution plan */
@@ -194,64 +177,49 @@ export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
 // Autofix State
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AutofixStateSchema = z
-  .object({
-    run_id: z.number(),
-    status: z.string(),
-    updated_at: z.string().optional(),
-    request: z
-      .object({
-        organization_id: z.number().optional(),
-        project_id: z.number().optional(),
-        repos: z.array(z.unknown()).optional(),
-      })
-      .optional(),
-    codebases: z.record(z.string(), CodebaseInfoSchema).optional(),
-    steps: z.array(AutofixStepSchema).optional(),
-    repositories: z.array(RepositoryInfoSchema).optional(),
-    coding_agents: z.record(z.string(), z.unknown()).optional(),
-    created_at: z.string().optional(),
-    completed_at: z.string().optional(),
-  })
-  .passthrough(); // Allow additional fields like blocks
-
-export type AutofixState = z.infer<typeof AutofixStateSchema>;
+export type AutofixState = {
+  run_id: number;
+  status: string;
+  updated_at?: string;
+  request?: {
+    organization_id?: number;
+    project_id?: number;
+    repos?: unknown[];
+  };
+  codebases?: Record<string, CodebaseInfo>;
+  steps?: AutofixStep[];
+  repositories?: RepositoryInfo[];
+  coding_agents?: Record<string, unknown>;
+  created_at?: string;
+  completed_at?: string;
+  [key: string]: unknown;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Autofix Response (GET /issues/{id}/autofix/)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const AutofixResponseSchema = z.object({
-  autofix: AutofixStateSchema.nullable(),
-});
-
-export type AutofixResponse = z.infer<typeof AutofixResponseSchema>;
+export type AutofixResponse = {
+  autofix: AutofixState | null;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Payloads
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SelectRootCausePayloadSchema = z.object({
-  type: z.literal("select_root_cause"),
-  cause_id: z.number(),
-  stopping_point: z.enum(["solution", "code_changes", "open_pr"]).optional(),
-});
+export type SelectRootCausePayload = {
+  type: "select_root_cause";
+  cause_id: number;
+  stopping_point?: "solution" | "code_changes" | "open_pr";
+};
 
-export type SelectRootCausePayload = z.infer<
-  typeof SelectRootCausePayloadSchema
->;
+export type SelectSolutionPayload = {
+  type: "select_solution";
+};
 
-export const SelectSolutionPayloadSchema = z.object({
-  type: z.literal("select_solution"),
-});
-
-export type SelectSolutionPayload = z.infer<typeof SelectSolutionPayloadSchema>;
-
-export const CreatePrPayloadSchema = z.object({
-  type: z.literal("create_pr"),
-});
-
-export type CreatePrPayload = z.infer<typeof CreatePrPayloadSchema>;
+export type CreatePrPayload = {
+  type: "create_pr";
+};
 
 export type AutofixUpdatePayload =
   | SelectRootCausePayload

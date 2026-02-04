@@ -7,6 +7,7 @@
 
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
+
 // Configuration types
 export type {
   CachedProject,
@@ -19,25 +20,26 @@ export {
   ProjectAliasesSchema,
   SentryConfigSchema,
 } from "./config.js";
+
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,
   TokenErrorResponse,
   TokenResponse,
 } from "./oauth.js";
-// OAuth types and schemas
 export {
   DeviceCodeResponseSchema,
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "./oauth.js";
+
+// Seer types and helpers
 export type {
   AutofixResponse,
   AutofixState,
   RootCause,
   SolutionArtifact,
 } from "./seer.js";
-// Seer types
 export {
   extractRootCauses,
   extractSolution,
@@ -45,6 +47,8 @@ export {
   SolutionArtifactSchema,
   TERMINAL_STATUSES,
 } from "./seer.js";
+
+// Sentry API types
 export type {
   Breadcrumb,
   BreadcrumbsEntry,
@@ -79,36 +83,12 @@ export type {
   UserRegionsResponse,
 } from "./sentry.js";
 
+// Sentry API constants and schemas (only those used for validation)
 export {
-  BreadcrumbSchema,
-  BreadcrumbsEntrySchema,
-  BrowserContextSchema,
-  DeviceContextSchema,
-  ExceptionEntrySchema,
-  ExceptionValueSchema,
   ISSUE_LEVELS,
   ISSUE_PRIORITIES,
   ISSUE_STATUSES,
-  MechanismSchema,
-  OrganizationLinksSchema,
-  OsContextSchema,
-  ProjectKeySchema,
-  RegionSchema,
-  ReleaseSchema,
-  RequestEntrySchema,
-  SentryEventSchema,
-  SentryIssueSchema,
   SentryOrganizationSchema,
-  SentryProjectSchema,
-  SentryUserSchema,
-  SpanSchema,
-  StackFrameSchema,
-  StacktraceSchema,
-  TraceContextSchema,
-  TraceEventSchema,
-  TraceResponseSchema,
-  UserGeoSchema,
-  UserRegionsResponseSchema,
 } from "./sentry.js";
 
 // I/O types
