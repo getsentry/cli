@@ -122,7 +122,7 @@ const dsnArb = tuple(
 
 const sourceArb = constantFrom(
   "env" as CachedDsnEntry["source"],
-  "env-file" as CachedDsnEntry["source"],
+  "env_file" as CachedDsnEntry["source"],
   "code" as CachedDsnEntry["source"]
 );
 
@@ -322,7 +322,9 @@ class GetCachedProjectCommand implements AsyncCommand<CacheModel, RealCache> {
     if (modelEntry) {
       expect(realEntry).toBeDefined();
       expect(realEntry?.orgSlug).toBe(modelEntry.orgSlug);
+      expect(realEntry?.orgName).toBe(modelEntry.orgName);
       expect(realEntry?.projectSlug).toBe(modelEntry.projectSlug);
+      expect(realEntry?.projectName).toBe(modelEntry.projectName);
     } else {
       expect(realEntry).toBeUndefined();
     }
@@ -381,7 +383,9 @@ class GetCachedProjectByDsnKeyCommand
     if (modelEntry) {
       expect(realEntry).toBeDefined();
       expect(realEntry?.orgSlug).toBe(modelEntry.orgSlug);
+      expect(realEntry?.orgName).toBe(modelEntry.orgName);
       expect(realEntry?.projectSlug).toBe(modelEntry.projectSlug);
+      expect(realEntry?.projectName).toBe(modelEntry.projectName);
     } else {
       expect(realEntry).toBeUndefined();
     }
