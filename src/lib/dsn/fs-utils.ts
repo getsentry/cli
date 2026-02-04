@@ -13,6 +13,7 @@ import * as Sentry from "@sentry/bun";
  * Expected errors during file scanning:
  * - ENOENT: File or directory does not exist
  * - EACCES: Permission denied (e.g., no read access)
+ * - EPERM: Operation not permitted (e.g., file locked, or system-level restriction)
  *
  * All other errors are unexpected and should be reported to Sentry.
  *
@@ -22,7 +23,7 @@ import * as Sentry from "@sentry/bun";
 function isIgnorableFileError(error: unknown): boolean {
   if (error instanceof Error && "code" in error) {
     const code = (error as NodeJS.ErrnoException).code;
-    return code === "ENOENT" || code === "EACCES";
+    return code === "ENOENT" || code === "EACCES" || code === "EPERM";
   }
   return false;
 }

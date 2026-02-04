@@ -519,7 +519,13 @@ async function processFile(
 
     // Return mtime only if we found valid DSNs (for cache invalidation)
     return dsns.length > 0 ? { dsns, mtime: file.lastModified } : { dsns: [] };
-  } catch {
+  } catch (error) {
+    // Re-throw configuration errors - they indicate user misconfiguration
+    // that should be surfaced rather than silently ignored
+    if (error instanceof ConfigError) {
+      throw error;
+    }
+    // For file system errors (ENOENT, EACCES, EPERM, etc.), return empty result
     // TODO: Add warning log for unreadable files when logging infrastructure is available
     return { dsns: [] };
   }
