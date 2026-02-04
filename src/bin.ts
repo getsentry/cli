@@ -1,3 +1,4 @@
+import { isatty } from "node:tty";
 import { run } from "@stricli/core";
 import { app } from "./app.js";
 import { buildContext } from "./context.js";
@@ -17,6 +18,8 @@ import {
  *
  * If the command fails due to missing authentication and we're in a TTY,
  * automatically run the interactive login flow and retry the command.
+ *
+ * @throws Re-throws any non-authentication errors from the command
  */
 async function executeWithAutoAuth(args: string[]): Promise<void> {
   try {
@@ -24,11 +27,12 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
       run(app, args, buildContext(process, span))
     );
   } catch (err) {
-    // Auto-login for auth errors in TTY environments
+    // Auto-login for auth errors in interactive TTY environments
+    // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY is undefined in Bun)
     if (
       err instanceof AuthError &&
       err.reason === "not_authenticated" &&
-      process.stdin.isTTY
+      isatty(0)
     ) {
       process.stderr.write(
         "Authentication required. Starting login flow...\n\n"
@@ -40,7 +44,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
       );
 
       if (loginSuccess) {
-        process.stdout.write("\nRetrying command...\n\n");
+        process.stderr.write("\nRetrying command...\n\n");
         // Retry the original command
         await withTelemetry(async (span) =>
           run(app, args, buildContext(process, span))
