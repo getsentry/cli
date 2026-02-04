@@ -16,6 +16,7 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { anyTrue } from "../promises.js";
 import { withFsSpan, withTracingSpan } from "../telemetry.js";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { handleFileError } from "./fs-utils.js";
@@ -181,32 +182,7 @@ async function pathExists(filePath: string): Promise<boolean> {
  * @returns True if any path exists
  */
 function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
-  if (names.length === 0) {
-    return Promise.resolve(false);
-  }
-
-  return new Promise((done) => {
-    let pending = names.length;
-
-    const checkDone = () => {
-      pending -= 1;
-      if (pending === 0) {
-        done(false);
-      }
-    };
-
-    for (const name of names) {
-      pathExists(join(dir, name))
-        .then((exists) => {
-          if (exists) {
-            done(true);
-          } else {
-            checkDone();
-          }
-        })
-        .catch(checkDone);
-    }
-  });
+  return anyTrue(names, (name) => pathExists(join(dir, name)));
 }
 
 /**
@@ -221,30 +197,12 @@ function anyGlobMatches(
   dir: string,
   patterns: readonly string[]
 ): Promise<boolean> {
-  if (patterns.length === 0) {
-    return Promise.resolve(false);
-  }
-
-  return new Promise((done) => {
-    let pending = patterns.length;
-
-    const checkDone = () => {
-      pending -= 1;
-      if (pending === 0) {
-        done(false);
-      }
-    };
-
-    for (const pattern of patterns) {
-      const glob = new Bun.Glob(pattern);
-      (async () => {
-        for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
-          done(true);
-          return;
-        }
-        checkDone();
-      })().catch(checkDone);
+  return anyTrue(patterns, async (pattern) => {
+    const glob = new Bun.Glob(pattern);
+    for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
+      return true;
     }
+    return false;
   });
 }
 
