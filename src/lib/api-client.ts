@@ -11,7 +11,6 @@ import {
   listAProject_sClientKeys,
   listAProject_sIssues,
   listYourOrganizations,
-  resolveAShortId,
   retrieveAnEventForAProject,
   retrieveAnOrganization,
   retrieveAProject,
@@ -460,19 +459,13 @@ export async function getIssueByShortId(
 
   return withApiSpan(
     "GET",
-    `/organizations/${orgSlug}/shortids/${normalizedShortId}/`,
+    `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
     async () => {
-      // The hey-api SDK uses issue_id for the path parameter
-      const response = await resolveAShortId({
-        client,
-        path: {
-          organization_id_or_slug: orgSlug,
-          issue_id: normalizedShortId,
-        },
+      // Use raw client call to maintain original endpoint behavior
+      const response = await client.get({
+        url: `/api/0/organizations/${orgSlug}/issues/${normalizedShortId}/`,
       });
-      const data = extractData(response) as unknown;
-      // resolveAShortId returns { group: Issue, ... }
-      return (data as { group: SentryIssue }).group;
+      return extractData(response) as SentryIssue;
     }
   );
 }
