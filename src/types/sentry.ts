@@ -618,8 +618,8 @@ export const SentryEventSchema = z
     culprit: z.string().nullable().optional(),
     sdk: z
       .object({
-        name: z.string(),
-        version: z.string(),
+        name: z.string().nullable().optional(),
+        version: z.string().nullable().optional(),
       })
       .passthrough()
       .nullable()
