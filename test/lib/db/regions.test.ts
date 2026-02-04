@@ -33,6 +33,8 @@ beforeEach(() => {
 
 afterEach(() => {
   closeDatabase();
+  // Restore original base dir to maintain test isolation
+  process.env[CONFIG_DIR_ENV_VAR] = testBaseDir;
 });
 
 describe("setOrgRegion / getOrgRegion", () => {

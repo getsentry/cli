@@ -223,13 +223,11 @@ sentry issue list my-org/frontend --query "is:resolved"
 sentry issue list my-org/frontend --query "is:unresolved TypeError"
 ```
 
-#### `sentry issue explain <issue-id>`
+#### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--json - Output as JSON`
 - `--force - Force new analysis even if one exists`
 
@@ -251,13 +249,11 @@ sentry issue explain G --org my-org --project my-project
 sentry issue explain 123456789 --force
 ```
 
-#### `sentry issue plan <issue-id>`
+#### `sentry issue plan <issue>`
 
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
 
@@ -276,13 +272,11 @@ sentry issue plan 123456789 --cause 0
 sentry issue plan MYPROJECT-ABC --org my-org --cause 1
 ```
 
-#### `sentry issue view <issue-id>`
+#### `sentry issue view <issue>`
 
 View details of a specific issue
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Show span tree with N levels of nesting depth`

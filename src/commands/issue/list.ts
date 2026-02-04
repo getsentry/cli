@@ -13,6 +13,7 @@ import {
   listIssues,
   listProjects,
 } from "../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import {
   clearProjectAliases,
   setProjectAliases,
@@ -28,7 +29,6 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
-  parseOrgProjectArg,
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";

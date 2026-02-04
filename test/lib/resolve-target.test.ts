@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { parseOrgProjectArg } from "../../src/lib/resolve-target.js";
+import { parseOrgProjectArg } from "../../src/lib/arg-parsing.js";
 
 describe("parseOrgProjectArg", () => {
   test("returns auto-detect for undefined", () => {
