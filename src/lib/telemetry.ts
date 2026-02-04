@@ -374,17 +374,21 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
     get(target, prop) {
       const value = Reflect.get(target, prop);
 
-      // Only trace execution methods, pass through everything else
+      // Non-function properties pass through directly
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      // Non-traced methods get bound to preserve 'this' context for native methods
       if (
-        typeof value !== "function" ||
         !TRACED_STATEMENT_METHODS.includes(
           prop as (typeof TRACED_STATEMENT_METHODS)[number]
         )
       ) {
-        return value;
+        return value.bind(target);
       }
 
-      // Return a traced wrapper for the method
+      // Traced methods get wrapped with Sentry span
       return (...args: unknown[]) =>
         Sentry.startSpan(
           {

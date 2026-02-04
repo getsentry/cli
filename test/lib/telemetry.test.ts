@@ -414,4 +414,21 @@ describe("createTracedDatabase", () => {
 
     db.close();
   });
+
+  test("statement methods are properly bound for native calls", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE test (id INTEGER, name TEXT)");
+    const tracedDb = createTracedDatabase(db);
+
+    const stmt = tracedDb.query("SELECT * FROM test WHERE id = ?");
+
+    // toString() requires proper 'this' binding to access native private fields
+    const sqlString = stmt.toString();
+    expect(sqlString).toContain("SELECT * FROM test");
+
+    // finalize() should work without errors
+    expect(() => stmt.finalize()).not.toThrow();
+
+    db.close();
+  });
 });
