@@ -21,6 +21,7 @@ import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST } from "../constants.js";
 import { ConfigError } from "../errors.js";
+import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -639,17 +640,9 @@ function scanDirectory(
   cwd: string,
   stopOnFirst: boolean
 ): Promise<CodeScanResult> {
-  return Sentry.startSpan(
-    {
-      name: "scanCodeForDsns",
-      op: "dsn.detect.code",
-      attributes: {
-        "dsn.scan_dir": cwd,
-        "dsn.stop_on_first": stopOnFirst,
-        "dsn.max_depth": MAX_SCAN_DEPTH,
-      },
-      onlyIfParent: true,
-    },
+  return withTracingSpan(
+    "scanCodeForDsns",
+    "dsn.detect.code",
     async (span) => {
       // Create ignore filter with built-in patterns and .gitignore
       const ig = await createIgnoreFilter(cwd);
@@ -671,7 +664,6 @@ function scanDirectory(
       });
 
       if (files.length === 0) {
-        span.setStatus({ code: 1 });
         return { dsns: [], sourceMtimes: {}, dirMtimes };
       }
 
@@ -694,9 +686,12 @@ function scanDirectory(
         attributes: { stop_on_first: stopOnFirst },
       });
 
-      span.setStatus({ code: 1 });
-
       return { dsns: [...results.values()], sourceMtimes, dirMtimes };
+    },
+    {
+      "dsn.scan_dir": cwd,
+      "dsn.stop_on_first": stopOnFirst,
+      "dsn.max_depth": MAX_SCAN_DEPTH,
     }
   );
 }

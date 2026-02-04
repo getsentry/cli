@@ -207,6 +207,105 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 }
 
 /**
+ * Wrap an operation with a Sentry span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * operation duration and status. Automatically sets span status
+ * to OK on success or Error on failure.
+ *
+ * Use this generic helper for custom operations, or use the specialized
+ * helpers (withHttpSpan, withDbSpan, withFsSpan, withSerializeSpan) for
+ * common operation types.
+ *
+ * @param name - Span name (e.g., "scanDirectory", "findProjectRoot")
+ * @param op - Operation type (e.g., "dsn.scan", "file.read")
+ * @param fn - Function to execute within the span
+ * @param attributes - Optional span attributes for additional context
+ * @returns The result of the function
+ */
+export function withTracing<T>(
+  name: string,
+  op: string,
+  fn: () => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      try {
+        const result = await fn();
+        span.setStatus({ code: 1 }); // OK
+        return result;
+      } catch (error) {
+        span.setStatus({ code: 2 }); // Error
+        throw error;
+      }
+    }
+  );
+}
+
+/**
+ * Wrap an operation with a Sentry span, passing the span to the callback.
+ *
+ * Like `withTracing`, but passes the span to the callback for cases where
+ * you need to set attributes or record metrics during execution.
+ * Automatically sets span status to OK on success or Error on failure,
+ * unless the callback has already set a status.
+ *
+ * @param name - Span name (e.g., "scanDirectory", "findProjectRoot")
+ * @param op - Operation type (e.g., "dsn.scan", "file.read")
+ * @param fn - Function to execute, receives the span as argument
+ * @param attributes - Optional initial span attributes
+ * @returns The result of the function
+ *
+ * @example
+ * ```ts
+ * const result = await withTracingSpan(
+ *   "scanDirectory",
+ *   "dsn.scan",
+ *   async (span) => {
+ *     const files = await collectFiles();
+ *     span.setAttribute("files.count", files.length);
+ *     return processFiles(files);
+ *   },
+ *   { "scan.dir": cwd }
+ * );
+ * ```
+ */
+export function withTracingSpan<T>(
+  name: string,
+  op: string,
+  fn: (span: Span) => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      // Track if callback sets status, so we don't override it
+      let statusWasSet = false;
+      const originalSetStatus = span.setStatus.bind(span);
+      span.setStatus = (...args) => {
+        statusWasSet = true;
+        return originalSetStatus(...args);
+      };
+
+      try {
+        const result = await fn(span);
+        if (!statusWasSet) {
+          span.setStatus({ code: 1 }); // OK
+        }
+        return result;
+      } catch (error) {
+        if (!statusWasSet) {
+          span.setStatus({ code: 2 }); // Error
+        }
+        throw error;
+      }
+    }
+  );
+}
+
+/**
  * Wrap an HTTP request with a span for tracing.
  *
  * Creates a child span under the current active span to track
@@ -222,34 +321,18 @@ export function withHttpSpan<T>(
   url: string,
   fn: () => Promise<T>
 ): Promise<T> {
-  return Sentry.startSpan(
-    {
-      name: `${method} ${url}`,
-      op: "http.client",
-      attributes: {
-        "http.request.method": method,
-        "url.path": url,
-      },
-      onlyIfParent: true,
-    },
-    async (span) => {
-      try {
-        const result = await fn();
-        span.setStatus({ code: 1 }); // OK
-        return result;
-      } catch (error) {
-        span.setStatus({ code: 2 }); // Error
-        throw error;
-      }
-    }
-  );
+  return withTracing(`${method} ${url}`, "http.client", fn, {
+    "http.request.method": method,
+    "url.path": url,
+  });
 }
 
 /**
  * Wrap a database operation with a span for tracing.
  *
  * Creates a child span under the current active span to track
- * database operation duration.
+ * database operation duration. This is a synchronous wrapper that
+ * preserves the sync nature of the callback.
  *
  * @param operation - Name of the operation (e.g., "getAuthToken", "setDefaults")
  * @param fn - The function that performs the database operation
@@ -260,9 +343,7 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
     {
       name: operation,
       op: "db",
-      attributes: {
-        "db.system": "sqlite",
-      },
+      attributes: { "db.system": "sqlite" },
       onlyIfParent: true,
     },
     fn
@@ -273,7 +354,8 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
  * Wrap a serialization/formatting operation with a span for tracing.
  *
  * Creates a child span under the current active span to track
- * expensive formatting operations.
+ * expensive formatting operations. This is a synchronous wrapper that
+ * preserves the sync nature of the callback.
  *
  * @param operation - Name of the operation (e.g., "formatSpanTree")
  * @param fn - The function that performs the formatting
@@ -288,4 +370,21 @@ export function withSerializeSpan<T>(operation: string, fn: () => T): T {
     },
     fn
   );
+}
+
+/**
+ * Wrap a file system operation with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * file system operation duration and status.
+ *
+ * @param operation - Name of the operation (e.g., "readFile", "scanDirectory")
+ * @param fn - The function that performs the file operation
+ * @returns The result of the function
+ */
+export function withFsSpan<T>(
+  operation: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
+  return withTracing(operation, "file", fn);
 }

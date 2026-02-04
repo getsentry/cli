@@ -16,8 +16,7 @@
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
-import * as Sentry from "@sentry/bun";
+import { withFsSpan, withTracingSpan } from "../telemetry.js";
 import { ENV_FILES, extractDsnFromEnvContent } from "./env-file.js";
 import { handleFileError } from "./fs-utils.js";
 import { createDetectedDsn } from "./parser.js";
@@ -160,32 +159,6 @@ const BUILD_SYSTEM_MARKERS = [
  * Leading whitespace is valid per EditorConfig spec (allows indentation).
  */
 const EDITORCONFIG_ROOT_REGEX = /^\s*root\s*=\s*true\s*$/im;
-
-/**
- * Wrap a file system operation with a span for tracing.
- */
-function withFsSpan<T>(
-  operation: string,
-  fn: () => T | Promise<T>
-): Promise<T> {
-  return Sentry.startSpan(
-    {
-      name: operation,
-      op: "file",
-      onlyIfParent: true,
-    },
-    async (span) => {
-      try {
-        const result = await fn();
-        span.setStatus({ code: 1 }); // OK
-        return result;
-      } catch (error) {
-        span.setStatus({ code: 2 }); // Error
-        throw error;
-      }
-    }
-  );
-}
 
 /**
  * Check if a path exists (file or directory) using stat.
@@ -602,15 +575,9 @@ async function walkUpDirectories(
  * @returns Project root result with optional DSN
  */
 export function findProjectRoot(startDir: string): Promise<ProjectRootResult> {
-  return Sentry.startSpan(
-    {
-      name: "findProjectRoot",
-      op: "dsn.detect",
-      attributes: {
-        "dsn.start_dir": startDir,
-      },
-      onlyIfParent: true,
-    },
+  return withTracingSpan(
+    "findProjectRoot",
+    "dsn.detect",
     async (span) => {
       const resolvedStart = resolve(startDir);
       const stopBoundary = getStopBoundary();
@@ -623,9 +590,9 @@ export function findProjectRoot(startDir: string): Promise<ProjectRootResult> {
         "dsn.levels_traversed": result.levelsTraversed,
         "dsn.project_root": result.projectRoot,
       });
-      span.setStatus({ code: 1 });
 
       return result;
-    }
+    },
+    { "dsn.start_dir": startDir }
   );
 }
