@@ -21,6 +21,7 @@ import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST } from "../constants.js";
 import { ConfigError } from "../errors.js";
+import { recordDistribution } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
@@ -666,8 +667,8 @@ function scanDirectory(
       const { files, dirMtimes } = collectResult;
 
       span.setAttribute("dsn.files_collected", files.length);
-      Sentry.metrics.distribution("dsn.files_collected", files.length, {
-        attributes: { stop_on_first: stopOnFirst },
+      recordDistribution("dsn.files_collected", files.length, {
+        stop_on_first: stopOnFirst,
       });
 
       if (files.length === 0) {
@@ -687,11 +688,11 @@ function scanDirectory(
         "dsn.dsns_found": results.size,
       });
 
-      Sentry.metrics.distribution("dsn.files_scanned", filesScanned, {
-        attributes: { stop_on_first: stopOnFirst },
+      recordDistribution("dsn.files_scanned", filesScanned, {
+        stop_on_first: stopOnFirst,
       });
-      Sentry.metrics.distribution("dsn.dsns_found", results.size, {
-        attributes: { stop_on_first: stopOnFirst },
+      recordDistribution("dsn.dsns_found", results.size, {
+        stop_on_first: stopOnFirst,
       });
 
       span.setStatus({ code: 1 });
