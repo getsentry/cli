@@ -588,7 +588,7 @@ function scanDirectory(
 
       span.setAttribute("dsn.files_collected", files.length);
       Sentry.metrics.distribution("dsn.files_collected", files.length, {
-        attributes: { stop_on_first: String(stopOnFirst) },
+        attributes: { stop_on_first: stopOnFirst },
       });
 
       if (files.length === 0) {
@@ -609,10 +609,10 @@ function scanDirectory(
       });
 
       Sentry.metrics.distribution("dsn.files_scanned", filesScanned, {
-        attributes: { stop_on_first: String(stopOnFirst) },
+        attributes: { stop_on_first: stopOnFirst },
       });
       Sentry.metrics.distribution("dsn.dsns_found", results.size, {
-        attributes: { stop_on_first: String(stopOnFirst) },
+        attributes: { stop_on_first: stopOnFirst },
       });
 
       span.setStatus({ code: 1 });
