@@ -12,8 +12,18 @@
  * Priority: .env with SENTRY_DSN > code > .env files > SENTRY_DSN env var
  */
 
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { getCachedDsn, setCachedDsn } from "../db/dsn-cache.js";
+import {
+  getCachedDetection,
+  getCachedDsn,
+  setCachedDetection,
+  setCachedDsn,
+} from "../db/dsn-cache.js";
+import {
+  getCachedProjectRoot,
+  setCachedProjectRoot,
+} from "../db/project-root-cache.js";
 import {
   extractFirstDsnFromContent,
   scanCodeForDsns,
@@ -25,7 +35,7 @@ import {
   detectFromEnvFiles,
   extractDsnFromEnvContent,
 } from "./env-file.js";
-import { createDetectedDsn, parseDsn } from "./parser.js";
+import { createDetectedDsn, createDsnFingerprint, parseDsn } from "./parser.js";
 import { findProjectRoot } from "./project-root.js";
 import type {
   CachedDsnEntry,
@@ -105,20 +115,52 @@ export async function detectDsn(cwd: string): Promise<DetectedDsn | null> {
  * Detect all DSNs in a directory (supports monorepos)
  *
  * Unlike detectDsn, this finds ALL DSNs from all sources.
- * First finds project root, then scans from there with depth limiting.
- * Useful for monorepos with multiple Sentry projects.
+ * Uses SQLite caching with mtime-based validation for fast repeated lookups.
+ *
+ * Algorithm:
+ * 1. Try cached project root, or walk up to find it
+ * 2. Try cached detection result (validates mtimes)
+ * 3. Full scan if cache miss, then store in cache
  *
  * Collection order matches priority: code > .env files > env var
  *
  * @param cwd - Directory to search in
- * @returns Detection result with all found DSNs and hasMultiple flag
+ * @returns Detection result with all found DSNs, fingerprint, and hasMultiple flag
  */
 export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
-  // Find project root first (may find DSN in .env during walk-up)
-  const { projectRoot, foundDsn } = await findProjectRoot(cwd);
+  // 1. Get project root (cached or walk-up)
+  let projectRoot: string;
+  const cachedRoot = await getCachedProjectRoot(cwd);
 
+  if (cachedRoot) {
+    projectRoot = cachedRoot.projectRoot;
+  } else {
+    const rootResult = await findProjectRoot(cwd);
+    projectRoot = rootResult.projectRoot;
+    // Cache the project root lookup
+    await setCachedProjectRoot(cwd, {
+      projectRoot: rootResult.projectRoot,
+      reason: rootResult.reason,
+    });
+  }
+
+  // 2. Try cached detection result
+  const cachedDetection = await getCachedDetection(projectRoot);
+
+  if (cachedDetection) {
+    // Cache hit! Return cached result
+    return {
+      primary: cachedDetection.allDsns[0] ?? null,
+      all: cachedDetection.allDsns,
+      hasMultiple: cachedDetection.allDsns.length > 1,
+      fingerprint: cachedDetection.fingerprint,
+    };
+  }
+
+  // 3. Full scan (cache miss)
   const allDsns: DetectedDsn[] = [];
   const seenRawDsns = new Set<string>();
+  const allSourceMtimes: Record<string, number> = {};
 
   // Helper to add DSN if not duplicate
   const addDsn = (dsn: DetectedDsn) => {
@@ -128,30 +170,47 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     }
   };
 
-  // 1. Check all code files from project root (highest priority)
-  const codeDsns = await scanCodeForDsns(projectRoot);
+  // 3a. Check all code files from project root (highest priority)
+  const { dsns: codeDsns, sourceMtimes: codeMtimes } =
+    await scanCodeForDsns(projectRoot);
   for (const dsn of codeDsns) {
     addDsn(dsn);
   }
+  Object.assign(allSourceMtimes, codeMtimes);
 
-  // 2. Check all .env files from project root (includes monorepo packages/apps)
-  // Note: foundDsn from walk-up is already included in env file scan results
-  const envFileDsns = await detectFromAllEnvFiles(projectRoot);
+  // 3b. Check all .env files from project root (includes monorepo packages/apps)
+  const { dsns: envFileDsns, sourceMtimes: envMtimes } =
+    await detectFromAllEnvFiles(projectRoot);
   for (const dsn of envFileDsns) {
     addDsn(dsn);
   }
+  Object.assign(allSourceMtimes, envMtimes);
 
-  // 3. Add DSN found during walk-up if not already added (deduplication handles this)
-  // This ensures it's included even if env file scan missed it somehow
-  if (foundDsn) {
-    addDsn(foundDsn);
-  }
-
-  // 4. Check env var (lowest priority)
+  // 3c. Check env var (lowest priority) - no mtime for env vars
   const envDsn = detectFromEnv();
   if (envDsn) {
     addDsn(envDsn);
   }
+
+  // 4. Compute fingerprint and cache result
+  const fingerprint = createDsnFingerprint(allDsns);
+
+  // Get project root directory mtime for new-file detection
+  let rootDirMtime = 0;
+  try {
+    const stats = await stat(projectRoot);
+    rootDirMtime = Math.floor(stats.mtimeMs);
+  } catch {
+    // Can't stat - still cache but validation will fail on next lookup
+  }
+
+  // Store in cache
+  await setCachedDetection(projectRoot, {
+    fingerprint,
+    allDsns,
+    sourceMtimes: allSourceMtimes,
+    rootDirMtime,
+  });
 
   // Multiple DSNs is valid in monorepos (different packages/apps)
   const hasMultiple = allDsns.length > 1;
@@ -160,6 +219,7 @@ export async function detectAllDsns(cwd: string): Promise<DsnDetectionResult> {
     primary: allDsns[0] ?? null,
     all: allDsns,
     hasMultiple,
+    fingerprint,
   };
 }
 

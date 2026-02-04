@@ -24,13 +24,18 @@ export {
   setCachedDsn,
   updateCachedResolution,
 } from "../db/dsn-cache.js";
+// Code Scanner (for advanced use)
+export type { CodeScanResult } from "./code-scanner.js";
+export { scanCodeForDsns, scanCodeForFirstDsn } from "./code-scanner.js";
 // Main Detection API
 export {
   detectAllDsns,
   detectDsn,
   getDsnSourceDescription,
 } from "./detector.js";
-
+// Env File Scanner
+export type { EnvFileScanResult } from "./env-file.js";
+export { detectFromAllEnvFiles, detectFromEnvFiles } from "./env-file.js";
 // Error Formatting
 export {
   formatConflictError,

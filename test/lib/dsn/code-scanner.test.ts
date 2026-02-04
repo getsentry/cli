@@ -327,12 +327,17 @@ describe("Code Scanner", () => {
         'const DSN = "https://backend@o456.ingest.sentry.io/222";'
       );
 
-      const results = await scanCodeForDsns(testDir);
-      expect(results).toHaveLength(2);
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(2);
 
-      const dsns = results.map((r) => r.raw);
+      const dsns = result.dsns.map((r) => r.raw);
       expect(dsns).toContain("https://frontend@o123.ingest.sentry.io/111");
       expect(dsns).toContain("https://backend@o456.ingest.sentry.io/222");
+
+      // Verify mtimes are tracked for source files
+      expect(Object.keys(result.sourceMtimes)).toHaveLength(2);
+      expect(result.sourceMtimes["src/frontend.ts"]).toBeGreaterThan(0);
+      expect(result.sourceMtimes["src/backend.ts"]).toBeGreaterThan(0);
     });
 
     test("deduplicates same DSN from multiple files", async () => {
@@ -345,15 +350,18 @@ describe("Code Scanner", () => {
         'const DSN = "https://same@o123.ingest.sentry.io/456";'
       );
 
-      const results = await scanCodeForDsns(testDir);
-      expect(results).toHaveLength(1);
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      // Both source files should be tracked even if DSN is deduplicated
+      expect(Object.keys(result.sourceMtimes)).toHaveLength(2);
     });
 
-    test("returns empty array when no DSNs found", async () => {
+    test("returns empty result when no DSNs found", async () => {
       writeFileSync(join(testDir, "index.ts"), "console.log('hello');");
 
-      const results = await scanCodeForDsns(testDir);
-      expect(results).toEqual([]);
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toEqual([]);
+      expect(result.sourceMtimes).toEqual({});
     });
   });
 });

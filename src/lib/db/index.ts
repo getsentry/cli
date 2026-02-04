@@ -115,6 +115,7 @@ function shouldRunCleanup(): boolean {
 function cleanupExpiredCaches(): void {
   const database = getDatabase();
   const expiryTime = Date.now() - CACHE_TTL_MS;
+  const now = Date.now();
 
   database
     .query("DELETE FROM project_cache WHERE last_accessed < ?")
@@ -125,6 +126,10 @@ function cleanupExpiredCaches(): void {
   database
     .query("DELETE FROM project_aliases WHERE last_accessed < ?")
     .run(expiryTime);
+  // project_root_cache uses ttl_expires_at instead of last_accessed
+  database
+    .query("DELETE FROM project_root_cache WHERE ttl_expires_at < ?")
+    .run(now);
 }
 
 export function maybeCleanupCaches(): void {

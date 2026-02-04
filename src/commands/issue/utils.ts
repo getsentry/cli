@@ -11,7 +11,7 @@ import {
   getIssueByShortId,
 } from "../../lib/api-client.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
-import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
+import { detectAllDsns } from "../../lib/dsn/index.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import {
@@ -100,9 +100,9 @@ async function resolveAliasSuffixId(
   suffix: string,
   cwd: string
 ): Promise<StrictResolvedIssue | null> {
-  // Detect DSNs to create fingerprint for validation
+  // Detect DSNs to get fingerprint for validation
   const detection = await detectAllDsns(cwd);
-  const fingerprint = createDsnFingerprint(detection.all);
+  const fingerprint = detection.fingerprint;
   const projectEntry = await getProjectByAlias(alias, fingerprint);
   if (!projectEntry) {
     return null;

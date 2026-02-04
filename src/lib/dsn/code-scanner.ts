@@ -24,6 +24,16 @@ import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
 
 /**
+ * Result of scanning code for DSNs, including mtimes for caching.
+ */
+export type CodeScanResult = {
+  /** All detected DSNs */
+  dsns: DetectedDsn[];
+  /** Map of source file paths to their mtimes (only files containing DSNs) */
+  sourceMtimes: Record<string, number>;
+};
+
+/**
  * Maximum file size to scan (256KB).
  * Files larger than this are skipped as they're unlikely to be source files
  * with DSN configuration.
@@ -256,12 +266,12 @@ export function extractFirstDsnFromContent(content: string): string | null {
  * Scan a directory for all DSNs in source code files.
  *
  * Respects .gitignore, skips large files, and limits depth.
- * Returns all unique DSNs found across all files.
+ * Returns all unique DSNs found across all files, plus mtimes for caching.
  *
  * @param cwd - Directory to scan
- * @returns Array of detected DSNs with source information
+ * @returns Object with detected DSNs and source file mtimes
  */
-export function scanCodeForDsns(cwd: string): Promise<DetectedDsn[]> {
+export function scanCodeForDsns(cwd: string): Promise<CodeScanResult> {
   return scanDirectory(cwd, false);
 }
 
@@ -277,8 +287,8 @@ export function scanCodeForDsns(cwd: string): Promise<DetectedDsn[]> {
 export async function scanCodeForFirstDsn(
   cwd: string
 ): Promise<DetectedDsn | null> {
-  const results = await scanDirectory(cwd, true);
-  return results[0] ?? null;
+  const { dsns } = await scanDirectory(cwd, true);
+  return dsns[0] ?? null;
 }
 
 /**
@@ -429,24 +439,30 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<string[]> {
   return files;
 }
 
+/** Result from processing a single file */
+type FileProcessResult = {
+  dsns: DetectedDsn[];
+  /** File mtime in ms, only set if DSNs were found */
+  mtime?: number;
+};
+
 /**
  * Process a single file and extract DSNs.
  *
- * Note on Bun.file().size: This is a lazy property that reads file metadata
- * (via stat) only when accessed, not the file content. This is verified in
- * Bun's source code and is cheaper than a separate stat() call since it uses
- * the already-created file handle.
+ * Note on Bun.file().size and lastModified: These are lazy properties that read
+ * file metadata (via stat) only when accessed, not the file content. This is
+ * cheaper than a separate stat() call since it uses the already-created file handle.
  *
  * @param cwd - Root directory
  * @param relativePath - Path relative to cwd
  * @param limit - Maximum DSNs to extract (undefined = no limit)
- * @returns Array of detected DSNs (may be empty)
+ * @returns Object with detected DSNs and mtime (if DSNs found)
  */
 async function processFile(
   cwd: string,
   relativePath: string,
   limit?: number
-): Promise<DetectedDsn[]> {
+): Promise<FileProcessResult> {
   const filepath = path.join(cwd, relativePath);
 
   try {
@@ -455,25 +471,28 @@ async function processFile(
     // Skip large files (Bun.file().size reads metadata, not content)
     if (file.size > MAX_FILE_SIZE) {
       // TODO: Add debug log when logging infrastructure is available
-      return [];
+      return { dsns: [] };
     }
 
     const content = await file.text();
     const dsnStrings = extractDsnsFromContent(content, limit);
 
     if (dsnStrings.length === 0) {
-      return [];
+      return { dsns: [] };
     }
 
     const packagePath = inferPackagePath(relativePath);
 
     // Map DSN strings to DetectedDsn objects, filtering out any that fail to parse
-    return dsnStrings
+    const dsns = dsnStrings
       .map((dsn) => createDetectedDsn(dsn, "code", relativePath, packagePath))
       .filter((d): d is DetectedDsn => d !== null);
+
+    // Return mtime only if we found valid DSNs (for cache invalidation)
+    return dsns.length > 0 ? { dsns, mtime: file.lastModified } : { dsns: [] };
   } catch {
     // TODO: Add warning log for unreadable files when logging infrastructure is available
-    return [];
+    return { dsns: [] };
   }
 }
 
@@ -482,6 +501,8 @@ async function processFile(
  */
 type ScanState = {
   results: Map<string, DetectedDsn>;
+  /** Map of source file paths to their mtimes (only files containing DSNs) */
+  sourceMtimes: Record<string, number>;
   filesScanned: number;
   earlyExit: boolean;
 };
@@ -497,7 +518,16 @@ async function processFileAndCollect(
   state: ScanState
 ): Promise<boolean> {
   state.filesScanned += 1;
-  const dsns = await processFile(cwd, file, stopOnFirst ? 1 : undefined);
+  const { dsns, mtime } = await processFile(
+    cwd,
+    file,
+    stopOnFirst ? 1 : undefined
+  );
+
+  // Record mtime for files that contain DSNs (for cache invalidation)
+  if (mtime !== undefined && dsns.length > 0) {
+    state.sourceMtimes[file] = mtime;
+  }
 
   for (const dsn of dsns) {
     if (!state.results.has(dsn.raw)) {
@@ -519,16 +549,21 @@ async function processFileAndCollect(
  * @param cwd - Root directory
  * @param files - Files to scan (relative paths)
  * @param stopOnFirst - Whether to stop after finding the first DSN
- * @returns Map of DSNs (keyed by raw string) and count of files scanned
+ * @returns Map of DSNs (keyed by raw string), source mtimes, and count of files scanned
  */
 async function scanFilesForDsns(
   cwd: string,
   files: string[],
   stopOnFirst: boolean
-): Promise<{ results: Map<string, DetectedDsn>; filesScanned: number }> {
+): Promise<{
+  results: Map<string, DetectedDsn>;
+  sourceMtimes: Record<string, number>;
+  filesScanned: number;
+}> {
   const limit = pLimit(CONCURRENCY_LIMIT);
   const state: ScanState = {
     results: new Map(),
+    sourceMtimes: {},
     filesScanned: 0,
     earlyExit: false,
   };
@@ -555,7 +590,11 @@ async function scanFilesForDsns(
 
   await Promise.all(files.map(processWithLimit));
 
-  return { results: state.results, filesScanned: state.filesScanned };
+  return {
+    results: state.results,
+    sourceMtimes: state.sourceMtimes,
+    filesScanned: state.filesScanned,
+  };
 }
 
 /**
@@ -564,7 +603,7 @@ async function scanFilesForDsns(
 function scanDirectory(
   cwd: string,
   stopOnFirst: boolean
-): Promise<DetectedDsn[]> {
+): Promise<CodeScanResult> {
   return Sentry.startSpan(
     {
       name: "scanCodeForDsns",
@@ -586,7 +625,7 @@ function scanDirectory(
         files = await collectFiles(cwd, ig);
       } catch {
         span.setStatus({ code: 2, message: "Directory scan failed" });
-        return [];
+        return { dsns: [], sourceMtimes: {} };
       }
 
       span.setAttribute("dsn.files_collected", files.length);
@@ -596,11 +635,11 @@ function scanDirectory(
 
       if (files.length === 0) {
         span.setStatus({ code: 1 });
-        return [];
+        return { dsns: [], sourceMtimes: {} };
       }
 
       // Scan files
-      const { results, filesScanned } = await scanFilesForDsns(
+      const { results, sourceMtimes, filesScanned } = await scanFilesForDsns(
         cwd,
         files,
         stopOnFirst
@@ -620,7 +659,7 @@ function scanDirectory(
 
       span.setStatus({ code: 1 });
 
-      return [...results.values()];
+      return { dsns: [...results.values()], sourceMtimes };
     }
   );
 }

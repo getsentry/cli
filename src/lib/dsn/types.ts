@@ -116,6 +116,8 @@ export type DsnDetectionResult = {
   all: DetectedDsn[];
   /** Whether multiple different DSNs were found (common in monorepos) */
   hasMultiple: boolean;
+  /** Pre-computed fingerprint for alias validation (sorted org:project pairs) */
+  fingerprint: string;
   /** Detected project language (for future use) */
   language?: string;
 };

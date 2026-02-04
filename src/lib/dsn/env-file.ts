@@ -16,6 +16,16 @@ import type { DetectedDsn } from "./types.js";
 import { MONOREPO_ROOTS } from "./types.js";
 
 /**
+ * Result of scanning env files, including mtimes for caching.
+ */
+export type EnvFileScanResult = {
+  /** All detected DSNs from env files */
+  dsns: DetectedDsn[];
+  /** Map of source file paths to their mtimes (only files containing DSNs) */
+  sourceMtimes: Record<string, number>;
+};
+
+/**
  * .env file names to search (in priority order).
  *
  * More specific files (.env.local, .env.development.local) are checked first
@@ -89,7 +99,7 @@ export const extractDsnFromEnvFile = extractDsnFromEnvContent;
 export async function detectFromEnvFiles(
   cwd: string
 ): Promise<DetectedDsn | null> {
-  const results = await scanSpecificFiles(cwd, [...ENV_FILES], {
+  const { dsns } = await scanSpecificFiles(cwd, [...ENV_FILES], {
     stopOnFirst: true,
     processFile: (_relativePath, content) => {
       const dsn = extractDsnFromEnvContent(content);
@@ -99,7 +109,7 @@ export async function detectFromEnvFiles(
       createDetectedDsn(raw, "env_file", relativePath),
   });
 
-  return results[0] ?? null;
+  return dsns[0] ?? null;
 }
 
 /**
@@ -110,30 +120,38 @@ export async function detectFromEnvFiles(
  * 2. Monorepo package directories (packages/star/.env, apps/star/.env, etc.)
  *
  * @param cwd - Directory to search in
- * @returns Array of all detected DSNs
+ * @returns Object with all detected DSNs and source file mtimes
  */
 export async function detectFromAllEnvFiles(
   cwd: string
-): Promise<DetectedDsn[]> {
-  const results: DetectedDsn[] = [];
+): Promise<EnvFileScanResult> {
+  const allDsns: DetectedDsn[] = [];
+  const allMtimes: Record<string, number> = {};
 
   // 1. Check root .env files (all of them, not just first)
-  const rootResults = await scanSpecificFiles(cwd, [...ENV_FILES], {
-    stopOnFirst: false,
-    processFile: (_relativePath, content) => {
-      const dsn = extractDsnFromEnvContent(content);
-      return dsn ? { dsn } : null;
-    },
-    createDsn: (raw, relativePath) =>
-      createDetectedDsn(raw, "env_file", relativePath),
-  });
-  results.push(...rootResults);
+  const { dsns: rootDsns, sourceMtimes: rootMtimes } = await scanSpecificFiles(
+    cwd,
+    [...ENV_FILES],
+    {
+      stopOnFirst: false,
+      processFile: (_relativePath, content) => {
+        const dsn = extractDsnFromEnvContent(content);
+        return dsn ? { dsn } : null;
+      },
+      createDsn: (raw, relativePath) =>
+        createDetectedDsn(raw, "env_file", relativePath),
+    }
+  );
+  allDsns.push(...rootDsns);
+  Object.assign(allMtimes, rootMtimes);
 
   // 2. Check monorepo package directories
-  const monorepoResults = await detectFromMonorepoEnvFiles(cwd);
-  results.push(...monorepoResults);
+  const { dsns: monorepoDsns, sourceMtimes: monorepoMtimes } =
+    await detectFromMonorepoEnvFiles(cwd);
+  allDsns.push(...monorepoDsns);
+  Object.assign(allMtimes, monorepoMtimes);
 
-  return results;
+  return { dsns: allDsns, sourceMtimes: allMtimes };
 }
 
 /**
@@ -143,12 +161,13 @@ export async function detectFromAllEnvFiles(
  * for .env files containing SENTRY_DSN.
  *
  * @param cwd - Root directory to search from
- * @returns Array of detected DSNs with packagePath set
+ * @returns Object with detected DSNs (with packagePath set) and source file mtimes
  */
 export async function detectFromMonorepoEnvFiles(
   cwd: string
-): Promise<DetectedDsn[]> {
-  const results: DetectedDsn[] = [];
+): Promise<EnvFileScanResult> {
+  const dsns: DetectedDsn[] = [];
+  const sourceMtimes: Record<string, number> = {};
   const pkgGlob = new Bun.Glob("*");
 
   for (const monorepoRoot of MONOREPO_ROOTS) {
@@ -174,9 +193,10 @@ export async function detectFromMonorepoEnvFiles(
 
         const packagePath = `${monorepoRoot}/${pkgName}`;
 
-        const detected = await detectDsnInPackage(pkgDir, packagePath);
-        if (detected) {
-          results.push(detected);
+        const result = await detectDsnInPackage(pkgDir, packagePath);
+        if (result.dsn) {
+          dsns.push(result.dsn);
+          Object.assign(sourceMtimes, result.sourceMtimes);
         }
       }
     } catch {
@@ -184,38 +204,54 @@ export async function detectFromMonorepoEnvFiles(
     }
   }
 
-  return results;
+  return { dsns, sourceMtimes };
 }
+
+/** Result of detecting DSN in a single package */
+type PackageDsnResult = {
+  dsn: DetectedDsn | null;
+  sourceMtimes: Record<string, number>;
+};
 
 /**
  * Detect DSN from .env files in a specific package directory.
  *
  * @param pkgDir - Full path to the package directory
  * @param packagePath - Relative package path (e.g., "packages/frontend")
- * @returns Detected DSN or null if not found
+ * @returns Object with detected DSN (or null) and source file mtimes
  */
 async function detectDsnInPackage(
   pkgDir: string,
   packagePath: string
-): Promise<DetectedDsn | null> {
-  const results = await scanSpecificFiles(pkgDir, [...ENV_FILES], {
-    stopOnFirst: true,
-    processFile: (_relativePath, content) => {
-      const dsn = extractDsnFromEnvContent(content);
-      return dsn ? { dsn, metadata: { packagePath } } : null;
-    },
-    createDsn: (raw, relativePath, metadata) => {
-      const sourcePath = `${packagePath}/${relativePath}`;
-      return createDetectedDsn(
-        raw,
-        "env_file",
-        sourcePath,
-        metadata?.packagePath
-      );
-    },
-  });
+): Promise<PackageDsnResult> {
+  const { dsns, sourceMtimes: rawMtimes } = await scanSpecificFiles(
+    pkgDir,
+    [...ENV_FILES],
+    {
+      stopOnFirst: true,
+      processFile: (_relativePath, content) => {
+        const dsn = extractDsnFromEnvContent(content);
+        return dsn ? { dsn, metadata: { packagePath } } : null;
+      },
+      createDsn: (raw, relativePath, metadata) => {
+        const sourcePath = `${packagePath}/${relativePath}`;
+        return createDetectedDsn(
+          raw,
+          "env_file",
+          sourcePath,
+          metadata?.packagePath
+        );
+      },
+    }
+  );
 
-  return results[0] ?? null;
+  // Prefix mtimes with package path for uniqueness
+  const sourceMtimes: Record<string, number> = {};
+  for (const [file, mtime] of Object.entries(rawMtimes)) {
+    sourceMtimes[`${packagePath}/${file}`] = mtime;
+  }
+
+  return { dsn: dsns[0] ?? null, sourceMtimes };
 }
 
 // Legacy export name for backwards compatibility with detector.ts
