@@ -1,0 +1,32 @@
+## Implementation Plan: Model-Based & Property-Based Testing
+
+### Goals
+- Add model-based testing using fast-check for stateful components (SQLite database layer)
+- Add property-based testing for pure functions (DSN parsing, issue ID parsing, alias generation)
+- Improve test coverage with randomized inputs that find edge cases
+
+### Phase 1: Infrastructure (Completed)
+- Install fast-check as dev dependency
+- Create shared test utilities in test/model-based/helpers.ts
+- Implement isolated DB context for model-based tests
+
+### Phase 2: Model-Based Tests for DB Layer (Completed)
+- Auth commands: SetAuthToken, GetAuthToken, GetAuthConfig, ClearAuth, IsAuthenticated
+- Region commands: SetOrgRegion, GetOrgRegion, SetOrgRegions, GetAllOrgRegions, ClearOrgRegions
+- Alias commands: SetProjectAliases, GetProjectAliases, GetProjectByAlias, ClearProjectAliases
+- Version check commands: SetVersionCheck, GetVersionCheck
+- Key invariant tested: clearAuth() also clears org regions
+
+### Phase 3: Property-Based Tests for Pure Functions (Completed)
+- Issue ID parsing: isNumericId, isShortId, isShortSuffix, parseAliasSuffix, expandToFullShortId
+- DSN parsing: parseDsn, extractOrgIdFromHost, isValidDsn, createDetectedDsn, createDsnFingerprint, inferPackagePath
+- Alias generation: findShortestUniquePrefixes, findCommonWordPrefix, buildOrgAwareAliases
+
+### Configuration
+- 50 iterations per test (configurable via DEFAULT_NUM_RUNS)
+- Shared configuration in test/model-based/helpers.ts
+
+### Future Phases (Not Implemented)
+- Phase 4: DSN Detection & Caching model-based tests
+- Phase 5: Issue Resolution Logic model-based tests
+- Phase 6: API Client Retry Logic model-based tests (async)
