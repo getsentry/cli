@@ -295,6 +295,10 @@ async function checkEditorConfigRoot(dir: string): Promise<boolean> {
 /**
  * Determine the type of repo root marker found.
  * Returns in priority order: VCS > CI > editorconfig.
+ *
+ * Note: This only handles "definitive" repo root markers (VCS, CI, editorconfig).
+ * Language and build markers are handled separately in walkUpDirectories() because
+ * they indicate project boundaries but don't definitively mark the repository root.
  */
 function getRepoRootType(
   hasVcs: boolean,

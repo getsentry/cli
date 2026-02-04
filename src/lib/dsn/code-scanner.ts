@@ -533,7 +533,8 @@ async function scanFilesForDsns(
     earlyExit: false,
   };
 
-  const tasks = files.map((file) =>
+  // Create a rate-limited processor that handles early exit
+  const processWithLimit = (file: string) =>
     limit(async () => {
       if (state.earlyExit) {
         return;
@@ -550,10 +551,9 @@ async function scanFilesForDsns(
         state.earlyExit = true;
         limit.clearQueue();
       }
-    })
-  );
+    });
 
-  await Promise.all(tasks);
+  await Promise.all(files.map(processWithLimit));
 
   return { results: state.results, filesScanned: state.filesScanned };
 }
