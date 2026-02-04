@@ -207,6 +207,105 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 }
 
 /**
+ * Wrap an operation with a Sentry span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * operation duration and status. Automatically sets span status
+ * to OK on success or Error on failure.
+ *
+ * Use this generic helper for custom operations, or use the specialized
+ * helpers (withHttpSpan, withDbSpan, withFsSpan, withSerializeSpan) for
+ * common operation types.
+ *
+ * @param name - Span name (e.g., "scanDirectory", "findProjectRoot")
+ * @param op - Operation type (e.g., "dsn.scan", "file.read")
+ * @param fn - Function to execute within the span
+ * @param attributes - Optional span attributes for additional context
+ * @returns The result of the function
+ */
+export function withTracing<T>(
+  name: string,
+  op: string,
+  fn: () => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      try {
+        const result = await fn();
+        span.setStatus({ code: 1 }); // OK
+        return result;
+      } catch (error) {
+        span.setStatus({ code: 2 }); // Error
+        throw error;
+      }
+    }
+  );
+}
+
+/**
+ * Wrap an operation with a Sentry span, passing the span to the callback.
+ *
+ * Like `withTracing`, but passes the span to the callback for cases where
+ * you need to set attributes or record metrics during execution.
+ * Automatically sets span status to OK on success or Error on failure,
+ * unless the callback has already set a status.
+ *
+ * @param name - Span name (e.g., "scanDirectory", "findProjectRoot")
+ * @param op - Operation type (e.g., "dsn.scan", "file.read")
+ * @param fn - Function to execute, receives the span as argument
+ * @param attributes - Optional initial span attributes
+ * @returns The result of the function
+ *
+ * @example
+ * ```ts
+ * const result = await withTracingSpan(
+ *   "scanDirectory",
+ *   "dsn.scan",
+ *   async (span) => {
+ *     const files = await collectFiles();
+ *     span.setAttribute("files.count", files.length);
+ *     return processFiles(files);
+ *   },
+ *   { "scan.dir": cwd }
+ * );
+ * ```
+ */
+export function withTracingSpan<T>(
+  name: string,
+  op: string,
+  fn: (span: Span) => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      // Track if callback sets status, so we don't override it
+      let statusWasSet = false;
+      const originalSetStatus = span.setStatus.bind(span);
+      span.setStatus = (...args) => {
+        statusWasSet = true;
+        return originalSetStatus(...args);
+      };
+
+      try {
+        const result = await fn(span);
+        if (!statusWasSet) {
+          span.setStatus({ code: 1 }); // OK
+        }
+        return result;
+      } catch (error) {
+        if (!statusWasSet) {
+          span.setStatus({ code: 2 }); // Error
+        }
+        throw error;
+      }
+    }
+  );
+}
+
+/**
  * Wrap an HTTP request with a span for tracing.
  *
  * Creates a child span under the current active span to track
@@ -222,34 +321,22 @@ export function withHttpSpan<T>(
   url: string,
   fn: () => Promise<T>
 ): Promise<T> {
-  return Sentry.startSpan(
-    {
-      name: `${method} ${url}`,
-      op: "http.client",
-      attributes: {
-        "http.request.method": method,
-        "url.path": url,
-      },
-      onlyIfParent: true,
-    },
-    async (span) => {
-      try {
-        const result = await fn();
-        span.setStatus({ code: 1 }); // OK
-        return result;
-      } catch (error) {
-        span.setStatus({ code: 2 }); // Error
-        throw error;
-      }
-    }
-  );
+  return withTracing(`${method} ${url}`, "http.client", fn, {
+    "http.request.method": method,
+    "url.path": url,
+  });
 }
 
 /**
  * Wrap a database operation with a span for tracing.
  *
  * Creates a child span under the current active span to track
- * database operation duration.
+ * database operation duration. This is a synchronous wrapper that
+ * preserves the sync nature of the callback.
+ *
+ * Use this for grouping logical operations (e.g., "clearAuth" which runs
+ * multiple queries). Individual SQL queries are automatically traced when
+ * using a database wrapped with `createTracedDatabase`.
  *
  * @param operation - Name of the operation (e.g., "getAuthToken", "setDefaults")
  * @param fn - The function that performs the database operation
@@ -259,21 +346,114 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
   return Sentry.startSpan(
     {
       name: operation,
-      op: "db",
-      attributes: {
-        "db.system": "sqlite",
-      },
+      op: "db.operation",
+      attributes: { "db.system": "sqlite" },
       onlyIfParent: true,
     },
     fn
   );
 }
 
+/** Methods on SQLite Statement that execute queries and should be traced */
+const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
+
+/**
+ * Wrap a SQLite Statement to automatically trace query execution.
+ *
+ * Intercepts get/run/all/values methods and wraps them with Sentry spans
+ * that include the SQL query as both the span name and db.statement attribute.
+ *
+ * @param stmt - The SQLite Statement to wrap
+ * @param sql - The SQL query string (parameterized)
+ * @returns A proxied Statement with automatic tracing
+ *
+ * @internal Used by createTracedDatabase
+ */
+function createTracedStatement<T>(stmt: T, sql: string): T {
+  return new Proxy(stmt as object, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+
+      // Non-function properties pass through directly
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      // Non-traced methods get bound to preserve 'this' context for native methods
+      if (
+        !TRACED_STATEMENT_METHODS.includes(
+          prop as (typeof TRACED_STATEMENT_METHODS)[number]
+        )
+      ) {
+        return value.bind(target);
+      }
+
+      // Traced methods get wrapped with Sentry span
+      return (...args: unknown[]) =>
+        Sentry.startSpan(
+          {
+            name: sql,
+            op: "db",
+            attributes: {
+              "db.system": "sqlite",
+              "db.statement": sql,
+            },
+            onlyIfParent: true,
+          },
+          () => (value as (...a: unknown[]) => unknown).apply(target, args)
+        );
+    },
+  }) as T;
+}
+
+/** Minimal interface for a database with a query method */
+type QueryableDatabase = { query: (sql: string) => unknown };
+
+/**
+ * Wrap a SQLite Database to automatically trace all queries.
+ *
+ * Intercepts the query() method and wraps returned Statements with
+ * createTracedStatement, which traces get/run/all/values calls.
+ *
+ * @param db - The SQLite Database to wrap
+ * @returns A proxied Database with automatic query tracing
+ *
+ * @example
+ * ```ts
+ * const db = new Database(":memory:");
+ * const tracedDb = createTracedDatabase(db);
+ *
+ * // This query execution is automatically traced with the SQL as span name
+ * tracedDb.query("SELECT * FROM users WHERE id = ?").get(1);
+ * ```
+ */
+export function createTracedDatabase<T extends QueryableDatabase>(db: T): T {
+  const originalQuery = db.query.bind(db) as (sql: string) => unknown;
+
+  return new Proxy(db as object, {
+    get(target, prop) {
+      if (prop === "query") {
+        return (sql: string) => {
+          const stmt = originalQuery(sql);
+          return createTracedStatement(stmt, sql);
+        };
+      }
+      const value = Reflect.get(target, prop);
+      // Bind methods to preserve 'this' context for native methods with private fields
+      if (typeof value === "function") {
+        return value.bind(target);
+      }
+      return value;
+    },
+  }) as T;
+}
+
 /**
  * Wrap a serialization/formatting operation with a span for tracing.
  *
  * Creates a child span under the current active span to track
- * expensive formatting operations.
+ * expensive formatting operations. This is a synchronous wrapper that
+ * preserves the sync nature of the callback.
  *
  * @param operation - Name of the operation (e.g., "formatSpanTree")
  * @param fn - The function that performs the formatting
@@ -288,4 +468,21 @@ export function withSerializeSpan<T>(operation: string, fn: () => T): T {
     },
     fn
   );
+}
+
+/**
+ * Wrap a file system operation with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * file system operation duration and status.
+ *
+ * @param operation - Name of the operation (e.g., "readFile", "scanDirectory")
+ * @param fn - The function that performs the file operation
+ * @returns The result of the function
+ */
+export function withFsSpan<T>(
+  operation: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
+  return withTracing(operation, "file", fn);
 }
