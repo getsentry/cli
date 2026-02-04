@@ -336,14 +336,22 @@ export function withHttpSpan<T>(
  *
  * @param operation - Name of the operation (e.g., "getAuthToken", "setDefaults")
  * @param fn - The function that performs the database operation
+ * @param query - Optional SQL query for Sentry Queries feature (use parameterized query, no values)
  * @returns The result of the function
  */
-export function withDbSpan<T>(operation: string, fn: () => T): T {
+export function withDbSpan<T>(
+  operation: string,
+  fn: () => T,
+  query?: string
+): T {
   return Sentry.startSpan(
     {
-      name: operation,
+      name: query ?? operation,
       op: "db",
-      attributes: { "db.system": "sqlite" },
+      attributes: {
+        "db.system": "sqlite",
+        ...(query && { "db.statement": query }),
+      },
       onlyIfParent: true,
     },
     fn

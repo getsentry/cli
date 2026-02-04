@@ -175,6 +175,15 @@ describe("withDbSpan", () => {
       })
     ).toThrow("db error");
   });
+
+  test("accepts optional query parameter", () => {
+    const result = withDbSpan(
+      "getUser",
+      () => ({ id: 1, name: "test" }),
+      "SELECT * FROM users WHERE id = ?"
+    );
+    expect(result).toEqual({ id: 1, name: "test" });
+  });
 });
 
 describe("withSerializeSpan", () => {
