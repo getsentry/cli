@@ -55,8 +55,10 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
         return;
       }
 
-      // Login failed or was cancelled
-      process.exit(1);
+      // Login failed or was cancelled - set exit code and return
+      // (don't call process.exit() directly to allow finally blocks to run)
+      process.exitCode = 1;
+      return;
     }
 
     // Re-throw non-auth errors to be handled by main
@@ -77,7 +79,8 @@ async function main(): Promise<void> {
     await executeWithAutoAuth(args);
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
-    process.exit(getExitCode(err));
+    process.exitCode = getExitCode(err);
+    return;
   } finally {
     // Abort any pending version check to allow clean exit
     abortPendingVersionCheck();
