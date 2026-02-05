@@ -22,7 +22,10 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Probability of running cleanup on write operations */
 const CLEANUP_PROBABILITY = 0.1;
 
+/** Traced database wrapper (returned by getDatabase) */
 let db: Database | null = null;
+/** Raw database without tracing (used for repair operations) */
+let rawDb: Database | null = null;
 let dbOpenedPath: string | null = null;
 
 export function getConfigDir(): string {
@@ -78,7 +81,7 @@ export function getDatabase(): Database {
 
   ensureConfigDir();
 
-  const rawDb = new Database(dbPath);
+  rawDb = new Database(dbPath);
 
   // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
   // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
@@ -107,8 +110,26 @@ export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    rawDb = null;
     dbOpenedPath = null;
   }
+}
+
+/**
+ * Get the raw (unwrapped) database connection.
+ * Used for repair operations to avoid triggering the traced wrapper's
+ * auto-repair logic (which would cause infinite loops).
+ */
+export function getRawDatabase(): Database {
+  if (!rawDb) {
+    // Ensure database is initialized
+    getDatabase();
+  }
+  // After getDatabase() call, rawDb is guaranteed to be set
+  if (!rawDb) {
+    throw new Error("Database initialization failed");
+  }
+  return rawDb;
 }
 
 function shouldRunCleanup(): boolean {
