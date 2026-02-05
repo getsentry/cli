@@ -389,6 +389,13 @@ CLI-related commands
 
 Send feedback about the CLI
 
+#### `sentry cli fix`
+
+Diagnose and repair CLI database issues
+
+**Flags:**
+- `--dry-run - Show what would be fixed without making changes`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
