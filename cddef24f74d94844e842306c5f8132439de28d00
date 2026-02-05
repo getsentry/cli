@@ -1,0 +1,35 @@
+## Implementation Plan for Profile Command (Issue #56)
+
+### Goal
+Surface CPU profiling data from Sentry via CLI commands.
+
+### Research Findings
+- Sentry's profiling API uses Explore Events with dataset=profile_functions for listing
+- Flamegraph endpoint: GET /organizations/{org}/profiling/flamegraph/ for detailed analysis
+- Found schema patterns in sentry-api-schema and sentry-mcp repositories
+
+### Implementation Approach
+1. Types (src/types/profile.ts) - Zod schemas for flamegraph response, profile functions, analysis results
+2. API Client - Add getFlamegraph() and listProfiledTransactions() methods
+3. Analyzer (src/lib/profile/analyzer.ts) - Hot path detection, percentile calculation, frame analysis
+4. Formatters (src/lib/formatters/profile.ts) - Human-readable output for profile data
+5. Commands:
+   - profile list: Lists transactions with available profile data
+   - profile view: Analyzes CPU profile showing hot paths, percentiles, recommendations
+
+### Key Features
+- Hot path analysis with CPU time percentages
+- P75/P95/P99 percentile statistics
+- User code filtering (--all-frames to include library code)
+- JSON output for automation
+- --web flag to open in Sentry UI
+- Configurable time periods (1h/24h/7d/14d/30d)
+
+### Files Created/Modified
+- src/types/profile.ts (new)
+- src/lib/profile/analyzer.ts (new)
+- src/lib/formatters/profile.ts (new)
+- src/commands/profile/{index,list,view}.ts (new)
+- src/lib/api-client.ts (modified)
+- src/lib/sentry-urls.ts (modified)
+- src/app.ts (modified)
