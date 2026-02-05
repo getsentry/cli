@@ -2,15 +2,12 @@
  * sentry issue plan
  *
  * Generate a solution plan for a Sentry issue using Seer AI.
- * Requires that 'sentry issue explain' has been run first.
+ * Automatically runs root cause analysis if not already done.
  */
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  getAutofixState,
-  triggerSolutionPlanning,
-} from "../../lib/api-client.js";
+import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";
@@ -25,6 +22,7 @@ import {
   type RootCause,
 } from "../../types/seer.js";
 import {
+  ensureRootCauseAnalysis,
   issueIdPositional,
   pollAutofixState,
   resolveOrgAndIssueId,
@@ -36,49 +34,20 @@ type PlanFlags = {
 };
 
 /**
- * Validate that an autofix run exists and has completed root cause analysis.
+ * Validate that the autofix state has root causes identified.
  *
- * @param state - Current autofix state
- * @param issueId - Issue ID for error messages
- * @returns The validated state and root causes
+ * @param state - Current autofix state (already ensured to exist)
+ * @returns Array of root causes
+ * @throws {ValidationError} If no root causes found
  */
-function validateAutofixState(
-  state: AutofixState | null,
-  issueId: string
-): { state: AutofixState; causes: RootCause[] } {
-  if (!state) {
-    throw new ValidationError(
-      `No root cause analysis found for issue ${issueId}.\n` +
-        `Run 'sentry issue explain ${issueId}' first.`
-    );
-  }
-
-  // Check if the autofix is in a state where we can continue
-  const validStatuses = ["COMPLETED", "WAITING_FOR_USER_RESPONSE"];
-  if (!validStatuses.includes(state.status)) {
-    if (state.status === "PROCESSING") {
-      throw new ValidationError(
-        "Root cause analysis is still in progress. Please wait for it to complete."
-      );
-    }
-    if (state.status === "ERROR") {
-      throw new ValidationError(
-        "Root cause analysis failed. Check the Sentry web UI for details."
-      );
-    }
-    throw new ValidationError(
-      `Cannot create plan: autofix is in '${state.status}' state.`
-    );
-  }
-
+function validateRootCauses(state: AutofixState): RootCause[] {
   const causes = extractRootCauses(state);
   if (causes.length === 0) {
     throw new ValidationError(
       "No root causes identified. Cannot create a plan without a root cause."
     );
   }
-
-  return { state, causes };
+  return causes;
 }
 
 /**
@@ -134,10 +103,9 @@ export const planCommand = buildCommand({
     brief: "Generate a solution plan using Seer AI",
     fullDescription:
       "Generate a solution plan for a Sentry issue using Seer AI.\n\n" +
-      "This command requires that 'sentry issue explain' has been run first " +
-      "to identify the root cause. It will then generate a solution plan with " +
-      "specific implementation steps to fix the issue.\n\n" +
-      "If multiple root causes were identified, use --cause to specify which one.\n\n" +
+      "This command automatically runs root cause analysis if needed, then " +
+      "generates a solution plan with specific implementation steps to fix the issue.\n\n" +
+      "If multiple root causes are identified, use --cause to specify which one.\n\n" +
       "Issue formats:\n" +
       "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
       "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
@@ -187,11 +155,16 @@ export const planCommand = buildCommand({
       });
       resolvedOrg = org;
 
-      // Get current autofix state
-      const currentState = await getAutofixState(org, numericId);
+      // Ensure root cause analysis exists (runs explain if needed)
+      const state = await ensureRootCauseAnalysis({
+        org,
+        issueId: numericId,
+        stderr,
+        json: flags.json,
+      });
 
-      // Validate we have a completed root cause analysis
-      const { state, causes } = validateAutofixState(currentState, issueArg);
+      // Validate we have root causes
+      const causes = validateRootCauses(state);
 
       // Validate cause selection
       const causeId = validateCauseSelection(causes, flags.cause, issueArg);
