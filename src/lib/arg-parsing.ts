@@ -192,6 +192,10 @@ function parseWithSlash(arg: string): ParsedIssueArg {
   }
 
   if (!org) {
+    // Leading slash with dash → project-search (e.g., "/cli-G")
+    if (rest.includes("-")) {
+      return parseWithDash(rest);
+    }
     // "/G" → treat as suffix-only (unusual but valid)
     return { type: "suffix-only", suffix: rest.toUpperCase() };
   }
