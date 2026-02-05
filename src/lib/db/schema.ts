@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 /** User identity for telemetry (single row, id=1) */
 const USER_INFO_TABLE = `
@@ -46,6 +46,25 @@ const PROJECT_ROOT_CACHE_TABLE = `
     cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     ttl_expires_at INTEGER NOT NULL
   )
+`;
+
+/** Transaction aliases for profile commands (1, i → full transaction name) */
+const TRANSACTION_ALIASES_TABLE = `
+  CREATE TABLE IF NOT EXISTS transaction_aliases (
+    idx INTEGER NOT NULL,
+    alias TEXT NOT NULL,
+    transaction_name TEXT NOT NULL,
+    org_slug TEXT NOT NULL,
+    project_slug TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    PRIMARY KEY (fingerprint, idx)
+  )
+`;
+
+const TRANSACTION_ALIASES_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_txn_alias_lookup 
+  ON transaction_aliases(alias, fingerprint)
 `;
 
 export function initSchema(db: Database): void {
@@ -128,6 +147,8 @@ export function initSchema(db: Database): void {
     ${USER_INFO_TABLE};
     ${INSTANCE_INFO_TABLE};
     ${PROJECT_ROOT_CACHE_TABLE};
+    ${TRANSACTION_ALIASES_TABLE};
+    ${TRANSACTION_ALIASES_INDEX};
   `);
 
   const versionRow = db
@@ -203,6 +224,12 @@ export function runMigrations(db: Database): void {
 
     // Create project_root_cache table
     db.exec(PROJECT_ROOT_CACHE_TABLE);
+  }
+
+  // Migration 4 -> 5: Add transaction_aliases table for profile commands
+  if (currentVersion < 5) {
+    db.exec(TRANSACTION_ALIASES_TABLE);
+    db.exec(TRANSACTION_ALIASES_INDEX);
   }
 
   // Update schema version if needed

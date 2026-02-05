@@ -20,6 +20,7 @@ import {
   hasProfileData,
 } from "../../lib/profile/analyzer.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { resolveTransaction } from "../../lib/resolve-transaction.js";
 import { buildProfileUrl } from "../../lib/sentry-urls.js";
 
 type ViewFlags = {
@@ -68,7 +69,8 @@ export const viewCommand = buildCommand({
       parameters: [
         {
           placeholder: "transaction",
-          brief: 'Transaction name (e.g., "/api/users", "POST /api/orders")',
+          brief:
+            'Transaction: index (1), alias (i), or full name ("/api/users")',
           parse: String,
         },
       ],
@@ -119,24 +121,35 @@ export const viewCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ViewFlags,
-    transactionName: string
+    transactionRef: string
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
 
-    // Resolve org and project
+    // Resolve org and project from flags or detection
     const target = await resolveOrgAndProject({
       org: flags.org,
       project: flags.project,
       cwd,
-      usageHint: `sentry profile view "${transactionName}" --org <org> --project <project>`,
+      usageHint: `sentry profile view "${transactionRef}" --org <org> --project <project>`,
     });
 
     if (!target) {
       throw new ContextError(
         "Organization and project",
-        `sentry profile view "${transactionName}" --org <org-slug> --project <project-slug>`
+        `sentry profile view "${transactionRef}" --org <org-slug> --project <project-slug>`
       );
     }
+
+    // Resolve transaction reference (alias, index, or full name)
+    // This may throw ContextError if alias is stale or not found
+    const resolved = resolveTransaction(transactionRef, {
+      org: target.org,
+      project: target.project,
+      period: flags.period,
+    });
+
+    // Use resolved transaction name for the rest of the command
+    const transactionName = resolved.transaction;
 
     // Set telemetry context
     setContext([target.org], [target.project]);

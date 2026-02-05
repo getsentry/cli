@@ -9,6 +9,10 @@ import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getProject, listProfiledTransactions } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  buildTransactionFingerprint,
+  setTransactionAliases,
+} from "../../lib/db/transaction-aliases.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   divider,
@@ -19,7 +23,8 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
-import type { Writer } from "../../types/index.js";
+import { buildTransactionAliases } from "../../lib/transaction-alias.js";
+import type { TransactionAliasEntry, Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly period: string;
@@ -160,6 +165,31 @@ export const listCommand = buildCommand({
 
     const orgProject = `${resolvedTarget.org}/${resolvedTarget.project}`;
 
+    // Build and store transaction aliases for later use with profile view
+    const transactionInputs = response.data
+      .filter((row) => row.transaction)
+      .map((row) => ({
+        transaction: row.transaction as string,
+        orgSlug: resolvedTarget.org,
+        projectSlug: resolvedTarget.project,
+      }));
+
+    const aliases = buildTransactionAliases(transactionInputs);
+
+    // Store aliases with fingerprint for cache validation
+    const fingerprint = buildTransactionFingerprint(
+      resolvedTarget.org,
+      resolvedTarget.project,
+      flags.period
+    );
+    setTransactionAliases(aliases, fingerprint);
+
+    // Build alias lookup map for formatting
+    const aliasMap = new Map<string, TransactionAliasEntry>();
+    for (const alias of aliases) {
+      aliasMap.set(alias.transaction, alias);
+    }
+
     // JSON output
     if (flags.json) {
       writeJson(stdout, response.data);
@@ -172,16 +202,18 @@ export const listCommand = buildCommand({
       return;
     }
 
-    // Human-readable output
+    // Human-readable output with aliases
+    const hasAliases = aliases.length > 0;
     stdout.write(`${formatProfileListHeader(orgProject, flags.period)}\n\n`);
-    stdout.write(`${formatProfileListTableHeader()}\n`);
-    stdout.write(`${divider(76)}\n`);
+    stdout.write(`${formatProfileListTableHeader(hasAliases)}\n`);
+    stdout.write(`${divider(82)}\n`);
 
     for (const row of response.data) {
-      stdout.write(`${formatProfileListRow(row)}\n`);
+      const alias = row.transaction ? aliasMap.get(row.transaction) : undefined;
+      stdout.write(`${formatProfileListRow(row, alias)}\n`);
     }
 
-    stdout.write(formatProfileListFooter());
+    stdout.write(formatProfileListFooter(hasAliases));
 
     if (resolvedTarget.detectedFrom) {
       stdout.write(`\n\nDetected from ${resolvedTarget.detectedFrom}\n`);

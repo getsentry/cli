@@ -42,6 +42,7 @@ export type {
   ProfileAnalysis,
   ProfileFunctionRow,
   ProfileFunctionsResponse,
+  TransactionAliasEntry,
 } from "./profile.js";
 export {
   FlamegraphFrameInfoSchema,

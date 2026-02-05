@@ -197,6 +197,23 @@ export type HotPath = {
 };
 
 /**
+ * A cached transaction alias entry for quick reference in profile commands.
+ * Stored in SQLite and used to resolve short aliases like "i" or "1" to full transaction names.
+ */
+export type TransactionAliasEntry = {
+  /** 1-based numeric index from the list command */
+  idx: number;
+  /** Short alias derived from last meaningful segment (e.g., "i" for issues) */
+  alias: string;
+  /** Full transaction name (e.g., "/api/0/organizations/{org}/issues/") */
+  transaction: string;
+  /** Organization slug */
+  orgSlug: string;
+  /** Project slug */
+  projectSlug: string;
+};
+
+/**
  * Analyzed profile data ready for display.
  */
 export type ProfileAnalysis = {

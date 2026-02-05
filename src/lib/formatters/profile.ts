@@ -5,7 +5,11 @@
  * Formats flamegraph analysis, hot paths, and transaction lists.
  */
 
-import type { ProfileAnalysis, ProfileFunctionRow } from "../../types/index.js";
+import type {
+  ProfileAnalysis,
+  ProfileFunctionRow,
+  TransactionAliasEntry,
+} from "../../types/index.js";
 import { formatDuration } from "../profile/analyzer.js";
 import { bold, muted, yellow } from "./colors.js";
 
@@ -177,8 +181,15 @@ export function formatProfileListHeader(
 
 /**
  * Format the column headers for the transaction list table.
+ *
+ * @param hasAliases - Whether to include # and ALIAS columns
  */
-export function formatProfileListTableHeader(): string {
+export function formatProfileListTableHeader(hasAliases = false): string {
+  if (hasAliases) {
+    return muted(
+      "  #   ALIAS   TRANSACTION                                    PROFILES       p75"
+    );
+  }
   return muted(
     "  TRANSACTION                                         PROFILES       p75"
   );
@@ -188,22 +199,38 @@ export function formatProfileListTableHeader(): string {
  * Format a single transaction row for the list.
  *
  * @param row - Profile function row data
+ * @param alias - Optional alias entry for this transaction
  * @returns Formatted row string
  */
-export function formatProfileListRow(row: ProfileFunctionRow): string {
-  const transaction = (row.transaction ?? "unknown").slice(0, 48).padEnd(48);
+export function formatProfileListRow(
+  row: ProfileFunctionRow,
+  alias?: TransactionAliasEntry
+): string {
   const count = `${row["count()"] ?? 0}`.padStart(10);
   const p75Ms = row["p75(function.duration)"]
     ? formatDuration(row["p75(function.duration)"] / 1_000_000) // ns to ms
     : "-";
   const p75 = p75Ms.padStart(10);
 
+  if (alias) {
+    const idx = `${alias.idx}`.padStart(3);
+    const aliasStr = alias.alias.padEnd(6);
+    const transaction = (row.transaction ?? "unknown").slice(0, 42).padEnd(42);
+    return `  ${idx}   ${aliasStr}  ${transaction}  ${count}  ${p75}`;
+  }
+
+  const transaction = (row.transaction ?? "unknown").slice(0, 48).padEnd(48);
   return `  ${transaction}  ${count}  ${p75}`;
 }
 
 /**
  * Format the footer tip for profile list command.
+ *
+ * @param hasAliases - Whether aliases are available for quick access
  */
-export function formatProfileListFooter(): string {
+export function formatProfileListFooter(hasAliases = false): string {
+  if (hasAliases) {
+    return "\nTip: Use 'sentry profile view 1' or 'sentry profile view <alias>' to analyze.";
+  }
   return "\nTip: Use 'sentry profile view \"<transaction>\"' to analyze.";
 }
