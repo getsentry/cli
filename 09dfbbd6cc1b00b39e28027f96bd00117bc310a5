@@ -1,0 +1,36 @@
+## Implementation Plan: Directory Name Project Inference
+
+### Problem
+When no DSN is found in the project, the CLI has no way to determine which
+Sentry project to use. Users must manually specify --org and --project flags.
+
+### Solution
+Add a fallback that infers the project from the directory name using
+bidirectional word-boundary matching.
+
+### Matching Rules
+1. **Exact match**: `cli` matches `cli`
+2. **Directory in project** (word boundary): dir `cli` matches project `sentry-cli`
+3. **Project in directory** (word boundary): project `docs` matches dir `sentry-docs`
+
+Note: Underscore does NOT create a word boundary (it's part of `\w` in regex).
+
+### Implementation Steps
+1. Add `"inferred"` to `DsnSource` type in `src/lib/dsn/types.ts`
+2. Add `escapeRegex()` and `matchesWordBoundary()` helpers in `api-client.ts`
+3. Add `findProjectsByPattern()` API function for server-side filtering
+4. Add `inferFromDirectoryName()` in `resolve-target.ts`:
+   - Gets project root directory name
+   - Skips if name is <2 chars or just dots
+   - Checks cache first (reuses `dsn_cache` with `source: "inferred"`)
+   - Calls `findProjectsByPattern()` for bidirectional matching
+   - Caches result and returns all matches (monorepo pattern)
+   - Gracefully returns empty if not authenticated
+5. Update `resolveAllTargets()` and `resolveOrgAndProject()` with fallback
+6. Add unit tests for word boundary matching
+7. Add property-based tests using fast-check
+
+### Key Functions
+- `matchesWordBoundary(a, b)`: Bidirectional `\b` regex matching
+- `findProjectsByPattern(pattern)`: API call with client-side filtering
+- `inferFromDirectoryName()`: Main inference logic with caching
