@@ -1,0 +1,21 @@
+## Implementation Plan
+
+### Problem
+Unicode arrow → (U+2192) has East Asian Width "Ambiguous", causing inconsistent rendering across terminals/fonts. Some render it as 2 cells while cursor advances 1, eating the following space.
+
+Reported with Iosevka font where the update notification showed no space after the arrow.
+
+### Options Considered
+1. **ASCII arrow `->`** (chosen) - 100% consistent across all terminals
+2. Extra padding (2 spaces) - Doesn't fix root cause
+3. Different Unicode arrow - Still ambiguous width
+4. string-width library - Overkill for this issue
+
+### Changes
+Replaced → with -> in 4 user-facing output strings:
+- src/lib/version-check.ts:136 (update notification)
+- src/lib/formatters/human.ts:532 (release range)
+- src/lib/formatters/human.ts:706 (HTTP breadcrumb status)
+- src/lib/formatters/human.ts:710 (navigation breadcrumb)
+
+Comments/docs left unchanged as they don't affect terminal output.
