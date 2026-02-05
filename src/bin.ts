@@ -28,7 +28,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
     );
   } catch (err) {
     // Auto-login for auth errors in interactive TTY environments
-    // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY is undefined in Bun)
+    // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
     if (
       err instanceof AuthError &&
       err.reason === "not_authenticated" &&
