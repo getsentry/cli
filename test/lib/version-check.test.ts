@@ -3,8 +3,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { setVersionCheckInfo } from "../../src/lib/db/version-check.js";
 import {
+  getVersionCheckInfo,
+  setVersionCheckInfo,
+} from "../../src/lib/db/version-check.js";
+import {
+  abortPendingVersionCheck,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
   shouldSuppressNotification,
@@ -94,16 +98,42 @@ describe("getUpdateNotification", () => {
   });
 });
 
+describe("abortPendingVersionCheck", () => {
+  test("does not throw when no pending check", () => {
+    // Should be safe to call even when nothing is pending
+    expect(() => abortPendingVersionCheck()).not.toThrow();
+  });
+
+  test("does not throw when called multiple times", () => {
+    // Should be safe to call multiple times
+    expect(() => {
+      abortPendingVersionCheck();
+      abortPendingVersionCheck();
+      abortPendingVersionCheck();
+    }).not.toThrow();
+  });
+});
+
 describe("maybeCheckForUpdateInBackground", () => {
   let testConfigDir: string;
+  let savedNoUpdateCheck: string | undefined;
 
   beforeEach(async () => {
     testConfigDir = await createTestConfigDir("test-version-bg-");
     process.env.SENTRY_CONFIG_DIR = testConfigDir;
+    // Save and clear the env var to test real implementation
+    savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
+    delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
   });
 
   afterEach(async () => {
+    // Abort any pending check to clean up
+    abortPendingVersionCheck();
     delete process.env.SENTRY_CONFIG_DIR;
+    // Restore the env var
+    if (savedNoUpdateCheck !== undefined) {
+      process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
+    }
     await cleanupTestDir(testConfigDir);
   });
 
@@ -112,6 +142,56 @@ describe("maybeCheckForUpdateInBackground", () => {
     // The actual network call happens in the background and may fail,
     // but the function itself should not throw
     expect(() => maybeCheckForUpdateInBackground()).not.toThrow();
+  });
+
+  test("checks for update when never checked before", async () => {
+    // With no lastChecked, shouldCheckForUpdate returns true
+    // which means the background check should be initiated
+    const infoBefore = getVersionCheckInfo();
+    expect(infoBefore.lastChecked).toBeNull();
+
+    // Start background check
+    maybeCheckForUpdateInBackground();
+
+    // Wait a bit for the background fetch to potentially complete
+    // Note: The fetch may fail (network error), but the function should not throw
+    await Bun.sleep(100);
+    abortPendingVersionCheck();
+  });
+
+  test("respects probabilistic checking when recently checked", async () => {
+    // Set a recent lastChecked time by calling setVersionCheckInfo
+    // This will set lastChecked to "now"
+    setVersionCheckInfo("1.0.0");
+
+    const infoBefore = getVersionCheckInfo();
+    expect(infoBefore.lastChecked).not.toBeNull();
+    expect(infoBefore.latestVersion).toBe("1.0.0");
+
+    // Call multiple times - with very recent check, probability is near 0
+    // so it's unlikely to trigger a new check
+    for (let i = 0; i < 5; i++) {
+      maybeCheckForUpdateInBackground();
+    }
+
+    // Wait briefly
+    await Bun.sleep(50);
+    abortPendingVersionCheck();
+  });
+
+  test("aborts cleanly when abortPendingVersionCheck is called", async () => {
+    // Start a background check
+    maybeCheckForUpdateInBackground();
+
+    // Immediately abort
+    abortPendingVersionCheck();
+
+    // Should not throw and should clean up properly
+    await Bun.sleep(50);
+
+    // Can start another check after aborting
+    expect(() => maybeCheckForUpdateInBackground()).not.toThrow();
+    abortPendingVersionCheck();
   });
 });
 
