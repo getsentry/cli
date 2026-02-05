@@ -239,11 +239,11 @@ sentry issue explain <issue-id>
 # By numeric issue ID
 sentry issue explain 123456789
 
-# By short ID
-sentry issue explain MYPROJECT-ABC --org my-org
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
 
-# By short suffix (requires project context)
-sentry issue explain G --org my-org --project my-project
+# By project-suffix format
+sentry issue explain myproject-G
 
 # Force a fresh analysis
 sentry issue explain 123456789 --force
@@ -269,8 +269,11 @@ sentry issue plan 123456789
 # Specify which root cause to plan for (if multiple were found)
 sentry issue plan 123456789 --cause 0
 
-# By short ID
-sentry issue plan MYPROJECT-ABC --org my-org --cause 1
+# By short ID with org prefix
+sentry issue plan my-org/MYPROJECT-ABC --cause 1
+
+# By project-suffix format
+sentry issue plan myproject-G --cause 0
 ```
 
 #### `sentry issue view <issue>`
@@ -300,13 +303,11 @@ sentry issue view FRONT-ABC -w
 
 View Sentry events
 
-#### `sentry event view <event-id>`
+#### `sentry event view <args...>`
 
 View details of a specific event
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`

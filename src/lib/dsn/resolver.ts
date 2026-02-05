@@ -59,7 +59,7 @@ export async function resolveProject(
     if (!project?.organization) {
       throw new Error(
         "Cannot resolve project: DSN could not be matched to any accessible project. " +
-          "You may not have access, or please specify --org and --project explicitly."
+          "You may not have access, or specify the target explicitly: sentry <command> <org>/<project>"
       );
     }
 

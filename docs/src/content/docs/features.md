@@ -7,7 +7,7 @@ The Sentry CLI includes several features designed to streamline your workflow, e
 
 ## DSN Auto-Detection
 
-The CLI automatically detects your Sentry project from your codebase, eliminating the need to specify `--org` and `--project` flags for every command.
+The CLI automatically detects your Sentry project from your codebase, eliminating the need to specify the target for every command.
 
 ### How It Works
 
@@ -47,7 +47,7 @@ Once your project has a DSN configured, commands automatically use it:
 
 ```bash
 # Instead of:
-sentry issue list --org my-org --project my-project
+sentry issue list my-org/my-project
 
 # Just run:
 sentry issue list
@@ -151,10 +151,10 @@ sentry issue explain FRONTEND-XYZ
 
 ### Short Suffix
 
-Just the suffix portion when `--project` context is provided:
+Just the suffix portion when project context is provided via the `<org>/` prefix:
 
 ```bash
-sentry issue view ABC --org my-org --project myproject
+sentry issue view my-org/myproject-ABC
 ```
 
 ### Alias-Suffix
