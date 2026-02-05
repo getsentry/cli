@@ -14,12 +14,54 @@ import {
   CURRENT_SCHEMA_VERSION,
   EXPECTED_COLUMNS,
   EXPECTED_TABLES,
+  generatePreMigrationTableDDL,
   getSchemaIssues,
   hasColumn,
   initSchema,
   repairSchema,
   tableExists,
 } from "../../../src/lib/db/schema.js";
+
+/**
+ * Create a database with all tables but some missing (for testing repair).
+ */
+function createDatabaseWithMissingTables(
+  db: Database,
+  missingTables: string[]
+): void {
+  const statements: string[] = [];
+  for (const tableName of Object.keys(EXPECTED_TABLES)) {
+    if (!missingTables.includes(tableName)) {
+      statements.push(EXPECTED_TABLES[tableName] as string);
+    }
+  }
+  db.exec(statements.join(";\n"));
+  db.query("INSERT INTO schema_version (version) VALUES (?)").run(
+    CURRENT_SCHEMA_VERSION
+  );
+}
+
+/**
+ * Create a database with pre-migration versions of specified tables.
+ * Tables with migrated columns will be created without those columns.
+ */
+function createPreMigrationDatabase(
+  db: Database,
+  preMigrationTables: string[]
+): void {
+  const statements: string[] = [];
+  for (const tableName of Object.keys(EXPECTED_TABLES)) {
+    if (preMigrationTables.includes(tableName)) {
+      statements.push(generatePreMigrationTableDDL(tableName));
+    } else {
+      statements.push(EXPECTED_TABLES[tableName] as string);
+    }
+  }
+  db.exec(statements.join(";\n"));
+  db.query("INSERT INTO schema_version (version) VALUES (?)").run(
+    CURRENT_SCHEMA_VERSION
+  );
+}
 
 let testDir: string;
 let originalConfigDir: string | undefined;
@@ -105,22 +147,8 @@ describe("getSchemaIssues", () => {
 
   test("detects missing table", () => {
     const db = new Database(join(testDir, "test.db"));
-    // Create minimal schema without dsn_cache
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      CREATE TABLE auth (id INTEGER PRIMARY KEY);
-      CREATE TABLE defaults (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_cache (cache_key TEXT PRIMARY KEY);
-      CREATE TABLE project_aliases (alias TEXT PRIMARY KEY);
-      CREATE TABLE metadata (key TEXT PRIMARY KEY);
-      CREATE TABLE org_regions (org_slug TEXT PRIMARY KEY);
-      CREATE TABLE user_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE instance_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_root_cache (cwd TEXT PRIMARY KEY);
-    `);
-    db.query("INSERT INTO schema_version (version) VALUES (?)").run(
-      CURRENT_SCHEMA_VERSION
-    );
+    // Create schema without dsn_cache using the helper
+    createDatabaseWithMissingTables(db, ["dsn_cache"]);
 
     const issues = getSchemaIssues(db);
     const missingTables = issues.filter((i) => i.type === "missing_table");
@@ -134,41 +162,13 @@ describe("getSchemaIssues", () => {
 
   test("detects missing column", () => {
     const db = new Database(join(testDir, "test.db"));
-    // Create dsn_cache table without v4 columns
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      CREATE TABLE auth (id INTEGER PRIMARY KEY);
-      CREATE TABLE defaults (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_cache (cache_key TEXT PRIMARY KEY);
-      CREATE TABLE dsn_cache (
-        directory TEXT PRIMARY KEY,
-        dsn TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        org_id TEXT,
-        source TEXT NOT NULL,
-        source_path TEXT,
-        resolved_org_slug TEXT,
-        resolved_org_name TEXT,
-        resolved_project_slug TEXT,
-        resolved_project_name TEXT,
-        cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-        last_accessed INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-      );
-      CREATE TABLE project_aliases (alias TEXT PRIMARY KEY);
-      CREATE TABLE metadata (key TEXT PRIMARY KEY);
-      CREATE TABLE org_regions (org_slug TEXT PRIMARY KEY);
-      CREATE TABLE user_info (id INTEGER PRIMARY KEY, user_id TEXT, email TEXT, username TEXT, name TEXT);
-      CREATE TABLE instance_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_root_cache (cwd TEXT PRIMARY KEY);
-    `);
-    db.query("INSERT INTO schema_version (version) VALUES (?)").run(
-      CURRENT_SCHEMA_VERSION
-    );
+    // Create dsn_cache without v4 columns (pre-migration state)
+    createPreMigrationDatabase(db, ["dsn_cache"]);
 
     const issues = getSchemaIssues(db);
     const missingColumns = issues.filter((i) => i.type === "missing_column");
 
-    // Should detect all v4 columns are missing
+    // Should detect all v4 columns are missing from dsn_cache
     expect(missingColumns).toContainEqual({
       type: "missing_column",
       table: "dsn_cache",
@@ -207,24 +207,9 @@ describe("repairSchema", () => {
     const db = new Database(join(testDir, "test.db"));
     initSchema(db);
 
-    // Remove a column by recreating the table without it
-    db.exec(`
-      DROP TABLE dsn_cache;
-      CREATE TABLE dsn_cache (
-        directory TEXT PRIMARY KEY,
-        dsn TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        org_id TEXT,
-        source TEXT NOT NULL,
-        source_path TEXT,
-        resolved_org_slug TEXT,
-        resolved_org_name TEXT,
-        resolved_project_slug TEXT,
-        resolved_project_name TEXT,
-        cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-        last_accessed INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-      );
-    `);
+    // Remove migrated columns by recreating the table in pre-migration state
+    db.exec("DROP TABLE dsn_cache");
+    db.exec(generatePreMigrationTableDDL("dsn_cache"));
 
     // Verify column is missing
     expect(hasColumn(db, "dsn_cache", "fingerprint")).toBe(false);

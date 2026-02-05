@@ -20,7 +20,7 @@ const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
 
 type SqliteType = "TEXT" | "INTEGER";
 
-type ColumnDef = {
+export type ColumnDef = {
   type: SqliteType;
   primaryKey?: boolean;
   notNull?: boolean;
@@ -30,7 +30,7 @@ type ColumnDef = {
   addedInVersion?: number;
 };
 
-type TableSchema = {
+export type TableSchema = {
   columns: Record<string, ColumnDef>;
 };
 
@@ -38,7 +38,7 @@ type TableSchema = {
  * Canonical schema definitions for all tables.
  * DDL and repair info are generated from this single source of truth.
  */
-const TABLE_SCHEMAS: Record<string, TableSchema> = {
+export const TABLE_SCHEMAS: Record<string, TableSchema> = {
   schema_version: {
     columns: {
       version: { type: "INTEGER", primaryKey: true },
@@ -196,8 +196,12 @@ const TABLE_SCHEMAS: Record<string, TableSchema> = {
 };
 
 /** Generate CREATE TABLE DDL from a table schema */
-function generateTableDDL(tableName: string, schema: TableSchema): string {
-  const columnDefs = Object.entries(schema.columns).map(([name, col]) => {
+/** Generate CREATE TABLE DDL from column definitions */
+function columnDefsToDDL(
+  tableName: string,
+  columns: [string, ColumnDef][]
+): string {
+  const columnDefs = columns.map(([name, col]) => {
     const parts = [name, col.type];
     if (col.primaryKey) {
       parts.push("PRIMARY KEY");
@@ -215,6 +219,31 @@ function generateTableDDL(tableName: string, schema: TableSchema): string {
   });
 
   return `CREATE TABLE IF NOT EXISTS ${tableName} (\n    ${columnDefs.join(",\n    ")}\n  )`;
+}
+
+/** Generate CREATE TABLE DDL from a table schema */
+export function generateTableDDL(
+  tableName: string,
+  schema: TableSchema
+): string {
+  return columnDefsToDDL(tableName, Object.entries(schema.columns));
+}
+
+/**
+ * Generate CREATE TABLE DDL excluding columns added in migrations.
+ * Useful for testing schema repair by creating "pre-migration" tables.
+ */
+export function generatePreMigrationTableDDL(tableName: string): string {
+  const schema = TABLE_SCHEMAS[tableName];
+  if (!schema) {
+    throw new Error(`Unknown table: ${tableName}`);
+  }
+
+  const baseColumns = Object.entries(schema.columns).filter(
+    ([, col]) => col.addedInVersion === undefined
+  );
+
+  return columnDefsToDDL(tableName, baseColumns);
 }
 
 /** Generated DDL statements for all tables (used for repair and init) */

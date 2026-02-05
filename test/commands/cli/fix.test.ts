@@ -11,7 +11,58 @@ import {
   CONFIG_DIR_ENV_VAR,
   closeDatabase,
 } from "../../../src/lib/db/index.js";
-import { initSchema } from "../../../src/lib/db/schema.js";
+import {
+  EXPECTED_TABLES,
+  generatePreMigrationTableDDL,
+  initSchema,
+} from "../../../src/lib/db/schema.js";
+
+/**
+ * Generate DDL for creating a database with pre-migration tables.
+ * This simulates a database that was created before certain migrations ran.
+ */
+function createPreMigrationDatabase(db: Database): void {
+  // Create all tables, but use pre-migration versions for tables with migrated columns
+  const preMigrationTables = ["dsn_cache", "user_info"];
+  const statements: string[] = [];
+
+  for (const tableName of Object.keys(EXPECTED_TABLES)) {
+    if (preMigrationTables.includes(tableName)) {
+      statements.push(generatePreMigrationTableDDL(tableName));
+    } else {
+      statements.push(EXPECTED_TABLES[tableName] as string);
+    }
+  }
+
+  db.exec(statements.join(";\n"));
+  db.query("INSERT INTO schema_version (version) VALUES (4)").run();
+  db.query(
+    "INSERT INTO metadata (key, value) VALUES ('json_migration_completed', 'true')"
+  ).run();
+}
+
+/**
+ * Generate DDL for creating a database with specific tables omitted.
+ * This simulates a database that is missing certain tables.
+ */
+function createDatabaseWithMissingTables(
+  db: Database,
+  missingTables: string[]
+): void {
+  const statements: string[] = [];
+
+  for (const tableName of Object.keys(EXPECTED_TABLES)) {
+    if (!missingTables.includes(tableName)) {
+      statements.push(EXPECTED_TABLES[tableName] as string);
+    }
+  }
+
+  db.exec(statements.join(";\n"));
+  db.query("INSERT INTO schema_version (version) VALUES (4)").run();
+  db.query(
+    "INSERT INTO metadata (key, value) VALUES ('json_migration_completed', 'true')"
+  ).run();
+}
 
 let testDir: string;
 let originalConfigDir: string | undefined;
@@ -72,31 +123,9 @@ describe("sentry cli fix", () => {
   });
 
   test("detects and reports missing columns in dry-run mode", async () => {
-    // Create database with missing v4 columns
+    // Create database with pre-migration tables (missing v4 columns)
     const db = new Database(join(testDir, "cli.db"));
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      INSERT INTO schema_version (version) VALUES (4);
-      CREATE TABLE auth (id INTEGER PRIMARY KEY);
-      CREATE TABLE defaults (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_cache (cache_key TEXT PRIMARY KEY);
-      CREATE TABLE dsn_cache (
-        directory TEXT PRIMARY KEY,
-        dsn TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        org_id TEXT,
-        source TEXT NOT NULL,
-        cached_at INTEGER NOT NULL DEFAULT 0,
-        last_accessed INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE project_aliases (alias TEXT PRIMARY KEY);
-      CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata (key, value) VALUES ('json_migration_completed', 'true');
-      CREATE TABLE org_regions (org_slug TEXT PRIMARY KEY);
-      CREATE TABLE user_info (id INTEGER PRIMARY KEY, user_id TEXT, name TEXT);
-      CREATE TABLE instance_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_root_cache (cwd TEXT PRIMARY KEY);
-    `);
+    createPreMigrationDatabase(db);
     db.close();
 
     const stdoutWrite = mock(() => true);
@@ -118,31 +147,9 @@ describe("sentry cli fix", () => {
   });
 
   test("fixes missing columns when not in dry-run mode", async () => {
-    // Create database with missing v4 columns
+    // Create database with pre-migration tables (missing v4 columns)
     const db = new Database(join(testDir, "cli.db"));
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      INSERT INTO schema_version (version) VALUES (4);
-      CREATE TABLE auth (id INTEGER PRIMARY KEY);
-      CREATE TABLE defaults (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_cache (cache_key TEXT PRIMARY KEY);
-      CREATE TABLE dsn_cache (
-        directory TEXT PRIMARY KEY,
-        dsn TEXT NOT NULL,
-        project_id TEXT NOT NULL,
-        org_id TEXT,
-        source TEXT NOT NULL,
-        cached_at INTEGER NOT NULL DEFAULT 0,
-        last_accessed INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE project_aliases (alias TEXT PRIMARY KEY);
-      CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata (key, value) VALUES ('json_migration_completed', 'true');
-      CREATE TABLE org_regions (org_slug TEXT PRIMARY KEY);
-      CREATE TABLE user_info (id INTEGER PRIMARY KEY, user_id TEXT, name TEXT);
-      CREATE TABLE instance_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_root_cache (cwd TEXT PRIMARY KEY);
-    `);
+    createPreMigrationDatabase(db);
     db.close();
 
     const stdoutWrite = mock(() => true);
@@ -182,21 +189,7 @@ describe("sentry cli fix", () => {
   test("handles database that was auto-repaired at startup", async () => {
     // Create database missing dsn_cache - initSchema will create it when command runs
     const db = new Database(join(testDir, "cli.db"));
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
-      INSERT INTO schema_version (version) VALUES (4);
-      CREATE TABLE auth (id INTEGER PRIMARY KEY);
-      CREATE TABLE defaults (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_cache (cache_key TEXT PRIMARY KEY);
-      CREATE TABLE project_aliases (alias TEXT PRIMARY KEY);
-      CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata (key, value) VALUES ('json_migration_completed', 'true');
-      CREATE TABLE org_regions (org_slug TEXT PRIMARY KEY);
-      CREATE TABLE user_info (id INTEGER PRIMARY KEY, user_id TEXT, name TEXT);
-      CREATE TABLE instance_info (id INTEGER PRIMARY KEY);
-      CREATE TABLE project_root_cache (cwd TEXT PRIMARY KEY);
-    `);
-    // Note: dsn_cache is missing - will be auto-created by initSchema()
+    createDatabaseWithMissingTables(db, ["dsn_cache"]);
     db.close();
 
     const stdoutWrite = mock(() => true);
