@@ -12,7 +12,8 @@ import { openBrowser } from "./browser.js";
 import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
-import { muted, success } from "./formatters/colors.js";
+import { CliError } from "./errors.js";
+import { error as errorColor, muted, success } from "./formatters/colors.js";
 import { formatDuration, formatUserIdentity } from "./formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
@@ -129,9 +130,14 @@ export async function runInteractiveLogin(
     }
 
     return true;
-  } catch {
-    // Login failed or was cancelled
+  } catch (err) {
+    // Show error message to user
     stdout.write("\n");
+    if (err instanceof CliError) {
+      stdout.write(`${errorColor("Error:")} ${err.format()}\n`);
+    } else if (err instanceof Error) {
+      stdout.write(`${errorColor("Error:")} ${err.message}\n`);
+    }
     return false;
   } finally {
     // Always cleanup keyboard listener
