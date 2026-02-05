@@ -439,6 +439,11 @@ function isSchemaError(error: unknown): boolean {
   return false;
 }
 
+/** Result of a repair attempt */
+export type RepairAttemptResult<T> =
+  | { attempted: false }
+  | { attempted: true; result: T };
+
 /**
  * Attempt to repair the database schema and retry a failed operation.
  *
@@ -450,27 +455,28 @@ function isSchemaError(error: unknown): boolean {
  *
  * @param operation - The failed operation to retry after repair
  * @param error - The error that triggered the repair attempt
- * @returns The result of the retried operation, or undefined if repair was
- *          not attempted (wrong error type, disabled, or already repairing).
- *          When undefined is returned, the caller should re-throw the original error.
+ * @returns An object indicating whether repair was attempted and the result.
+ *          When `attempted` is false, the caller should re-throw the original error.
+ *          When `attempted` is true, use `result` (which may be undefined for queries
+ *          like stmt.get() that legitimately return undefined).
  */
 export function tryRepairAndRetry<T>(
   operation: () => T,
   error: unknown
-): T | undefined {
+): RepairAttemptResult<T> {
   // Skip repair if disabled via environment variable
   if (process.env[NO_AUTO_REPAIR_ENV] === "1") {
-    return;
+    return { attempted: false };
   }
 
   // Only repair schema-related errors
   if (!isSchemaError(error)) {
-    return;
+    return { attempted: false };
   }
 
   // Prevent infinite loops if repair itself causes errors
   if (isRepairing) {
-    return;
+    return { attempted: false };
   }
 
   isRepairing = true;
@@ -497,10 +503,10 @@ export function tryRepairAndRetry<T>(
   // Retry operation AFTER try-catch so any new error from operation() propagates
   // instead of being swallowed and replaced with the original error
   if (repairSucceeded) {
-    return operation();
+    return { attempted: true, result: operation() };
   }
 
-  return;
+  return { attempted: false };
 }
 
 export function initSchema(db: Database): void {

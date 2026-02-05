@@ -84,26 +84,33 @@ export function getDatabase(): Database {
 
   rawDb = new Database(dbPath);
 
-  // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
-  // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
-  // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
-  // must wait. Without sufficient timeout, concurrent processes fail immediately.
-  // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
-  rawDb.exec("PRAGMA busy_timeout = 5000");
-  rawDb.exec("PRAGMA journal_mode = WAL");
-  rawDb.exec("PRAGMA foreign_keys = ON");
-  rawDb.exec("PRAGMA synchronous = NORMAL");
+  try {
+    // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
+    // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
+    // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
+    // must wait. Without sufficient timeout, concurrent processes fail immediately.
+    // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
+    rawDb.exec("PRAGMA busy_timeout = 5000");
+    rawDb.exec("PRAGMA journal_mode = WAL");
+    rawDb.exec("PRAGMA foreign_keys = ON");
+    rawDb.exec("PRAGMA synchronous = NORMAL");
 
-  setDbPermissions();
-  initSchema(rawDb);
-  runMigrations(rawDb);
-  migrateFromJson(rawDb);
+    setDbPermissions();
+    initSchema(rawDb);
+    runMigrations(rawDb);
+    migrateFromJson(rawDb);
 
-  // Wrap with tracing proxy for automatic query instrumentation
-  db = createTracedDatabase(rawDb);
-  dbOpenedPath = dbPath;
+    // Wrap with tracing proxy for automatic query instrumentation
+    db = createTracedDatabase(rawDb);
+    dbOpenedPath = dbPath;
 
-  return db;
+    return db;
+  } catch (error) {
+    // Clean up on initialization failure to prevent connection leak
+    rawDb.close();
+    rawDb = null;
+    throw error;
+  }
 }
 
 /** Close the database connection (used for testing). */

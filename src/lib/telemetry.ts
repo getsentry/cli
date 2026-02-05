@@ -409,9 +409,9 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
               return execute();
             } catch (error) {
               // Attempt auto-repair for schema errors
-              const result = tryRepairAndRetry(execute, error);
-              if (result !== undefined) {
-                return result;
+              const repairResult = tryRepairAndRetry(execute, error);
+              if (repairResult.attempted) {
+                return repairResult.result;
               }
               // Re-throw if repair didn't help or wasn't applicable
               throw error;
@@ -458,9 +458,9 @@ export function createTracedDatabase<T extends QueryableDatabase>(db: T): T {
             stmt = prepareStatement();
           } catch (error) {
             // Attempt auto-repair for schema errors during statement preparation
-            const repaired = tryRepairAndRetry(prepareStatement, error);
-            if (repaired !== undefined) {
-              stmt = repaired;
+            const repairResult = tryRepairAndRetry(prepareStatement, error);
+            if (repairResult.attempted) {
+              stmt = repairResult.result;
             } else {
               throw error;
             }
