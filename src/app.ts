@@ -49,15 +49,15 @@ export const routes = buildRouteMap({
 const customText: ApplicationText = {
   ...text_en,
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
-    // Report all command errors to Sentry. Stricli catches exceptions and doesn't
-    // re-throw, so we must capture here to get visibility into command failures.
-    Sentry.captureException(exc);
-
-    // Re-throw AuthError for "not_authenticated" to allow auto-login flow in bin.ts
-    // This bypasses Stricli's error handling so our catch block can trigger login
+    // Re-throw AuthError("not_authenticated") for auto-login flow in bin.ts
+    // Don't capture to Sentry - it's an expected state (user not logged in), not an error
     if (exc instanceof AuthError && exc.reason === "not_authenticated") {
       throw exc;
     }
+
+    // Report command errors to Sentry. Stricli catches exceptions and doesn't
+    // re-throw, so we must capture here to get visibility into command failures.
+    Sentry.captureException(exc);
 
     if (exc instanceof CliError) {
       const prefix = ansiColor ? errorColor("Error:") : "Error:";

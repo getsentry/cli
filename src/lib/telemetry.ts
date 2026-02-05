@@ -12,6 +12,7 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+import { AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
@@ -84,10 +85,16 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    Sentry.captureException(e);
-    const session = Sentry.getCurrentScope().getSession();
-    if (session) {
-      session.status = "crashed";
+    // Don't capture or mark as crashed for expected auth state
+    // AuthError("not_authenticated") is re-thrown from app.ts for auto-login flow
+    const isExpectedAuthState =
+      e instanceof AuthError && e.reason === "not_authenticated";
+    if (!isExpectedAuthState) {
+      Sentry.captureException(e);
+      const session = Sentry.getCurrentScope().getSession();
+      if (session) {
+        session.status = "crashed";
+      }
     }
     throw e;
   } finally {
