@@ -12,7 +12,7 @@ import { openBrowser } from "./browser.js";
 import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
-import { CliError } from "./errors.js";
+import { formatError } from "./errors.js";
 import { error as errorColor, muted, success } from "./formatters/colors.js";
 import { formatDuration, formatUserIdentity } from "./formatters/human.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
@@ -33,13 +33,15 @@ export type InteractiveLoginOptions = {
  * - Setting up keyboard listener for copying URL
  * - Storing the token and user info on success
  *
- * @param stdout - Output stream for displaying messages
+ * @param stdout - Output stream for displaying UI messages
+ * @param stderr - Error stream for error messages
  * @param stdin - Input stream for keyboard listener (must be TTY)
  * @param options - Optional configuration
  * @returns true on successful authentication, false on failure/cancellation
  */
 export async function runInteractiveLogin(
   stdout: Writer,
+  stderr: Writer,
   stdin: NodeJS.ReadStream & { fd: 0 },
   options?: InteractiveLoginOptions
 ): Promise<boolean> {
@@ -131,13 +133,8 @@ export async function runInteractiveLogin(
 
     return true;
   } catch (err) {
-    // Show error message to user
     stdout.write("\n");
-    if (err instanceof CliError) {
-      stdout.write(`${errorColor("Error:")} ${err.format()}\n`);
-    } else if (err instanceof Error) {
-      stdout.write(`${errorColor("Error:")} ${err.message}\n`);
-    }
+    stderr.write(`${errorColor("Error:")} ${formatError(err)}\n`);
     return false;
   } finally {
     // Always cleanup keyboard listener

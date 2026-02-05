@@ -43,7 +43,7 @@ export const loginCommand = buildCommand({
     },
   },
   async func(this: SentryContext, flags: LoginFlags): Promise<void> {
-    const { stdout } = this;
+    const { stdout, stderr } = this;
 
     // Check if already authenticated
     if (await isAuthenticated()) {
@@ -91,9 +91,14 @@ export const loginCommand = buildCommand({
     }
 
     // Device Flow OAuth
-    const loginSuccess = await runInteractiveLogin(stdout, process.stdin, {
-      timeout: flags.timeout * 1000,
-    });
+    const loginSuccess = await runInteractiveLogin(
+      stdout,
+      stderr,
+      process.stdin,
+      {
+        timeout: flags.timeout * 1000,
+      }
+    );
 
     if (!loginSuccess) {
       throw new AuthError(

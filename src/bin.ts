@@ -43,6 +43,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 
       const loginSuccess = await runInteractiveLogin(
         process.stdout,
+        process.stderr,
         process.stdin
       );
 
