@@ -102,9 +102,9 @@ export const FlamegraphProfileSchema = z
     /** Time weights for each sample */
     weights: z.array(z.number()),
     /** Sample durations in nanoseconds */
-    sample_durations_ns: z.array(z.number()).optional(),
+    sample_durations_ns: z.array(z.number()).nullish(),
     /** Sample counts */
-    sample_counts: z.array(z.number()).optional(),
+    sample_counts: z.array(z.number()).nullish(),
   })
   .passthrough();
 
@@ -132,8 +132,8 @@ export const FlamegraphSchema = z
       frames: z.array(FlamegraphFrameSchema),
       /** Statistics for each frame (parallel array to frames) */
       frame_infos: z.array(FlamegraphFrameInfoSchema),
-      /** Profile metadata */
-      profiles: z.array(FlamegraphProfileMetadataSchema),
+      /** Profile metadata (may be absent when no profiles exist) */
+      profiles: z.array(FlamegraphProfileMetadataSchema).optional(),
     }),
     /** Transaction name this flamegraph represents */
     transactionName: z.string().optional(),

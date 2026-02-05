@@ -60,14 +60,13 @@ export function hasProfileData(flamegraph: Flamegraph): boolean {
 }
 
 /**
- * Get the total weight (time) across all samples.
+ * Get the total self time across all frames.
+ * This gives the total CPU time spent in all functions.
  */
-function getTotalWeight(flamegraph: Flamegraph): number {
+function getTotalSelfTime(flamegraph: Flamegraph): number {
   let total = 0;
-  for (const profile of flamegraph.profiles) {
-    for (const weight of profile.weights) {
-      total += weight;
-    }
+  for (const info of flamegraph.shared.frame_infos) {
+    total += info.sumSelfTime;
   }
   return total;
 }
@@ -87,9 +86,9 @@ export function analyzeHotPaths(
   userCodeOnly: boolean
 ): HotPath[] {
   const { frames, frame_infos } = flamegraph.shared;
-  const totalWeight = getTotalWeight(flamegraph);
+  const totalSelfTime = getTotalSelfTime(flamegraph);
 
-  if (totalWeight === 0 || frames.length === 0) {
+  if (totalSelfTime === 0 || frames.length === 0) {
     return [];
   }
 
@@ -125,7 +124,7 @@ export function analyzeHotPaths(
   return topFrames.map(({ frame, info }) => ({
     frames: [frame], // Single frame for now (could expand to full call stack)
     frameInfo: info,
-    percentage: (info.sumSelfTime / totalWeight) * 100,
+    percentage: (info.sumSelfTime / totalSelfTime) * 100,
   }));
 }
 
