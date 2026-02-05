@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   buildSearchParams,
-  escapeRegex,
   matchesWordBoundary,
   rawApiRequest,
 } from "../../src/lib/api-client.js";
@@ -567,33 +566,6 @@ describe("rawApiRequest", () => {
     const result = await rawApiRequest("test/");
 
     expect(result.headers.get("X-Request-Id")).toBe("abc123");
-  });
-});
-
-describe("escapeRegex", () => {
-  test("escapes special regex characters", () => {
-    expect(escapeRegex("a.b")).toBe("a\\.b");
-    expect(escapeRegex("a*b")).toBe("a\\*b");
-    expect(escapeRegex("a+b")).toBe("a\\+b");
-    expect(escapeRegex("a?b")).toBe("a\\?b");
-    expect(escapeRegex("a^b")).toBe("a\\^b");
-    expect(escapeRegex("a$b")).toBe("a\\$b");
-    expect(escapeRegex("a{b}")).toBe("a\\{b\\}");
-    expect(escapeRegex("a(b)")).toBe("a\\(b\\)");
-    expect(escapeRegex("a|b")).toBe("a\\|b");
-    expect(escapeRegex("a[b]")).toBe("a\\[b\\]");
-    expect(escapeRegex("a\\b")).toBe("a\\\\b");
-  });
-
-  test("leaves normal characters unchanged", () => {
-    expect(escapeRegex("hello")).toBe("hello");
-    expect(escapeRegex("hello-world")).toBe("hello-world");
-    expect(escapeRegex("hello_world")).toBe("hello_world");
-    expect(escapeRegex("hello123")).toBe("hello123");
-  });
-
-  test("handles empty string", () => {
-    expect(escapeRegex("")).toBe("");
   });
 });
 

@@ -617,14 +617,6 @@ export async function findProjectsBySlug(
 }
 
 /**
- * Escape special regex characters in a string.
- * @internal Exported for testing
- */
-export function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
  * Check if two strings match with word-boundary semantics (bidirectional).
  *
  * Returns true if either:
@@ -639,8 +631,8 @@ export function escapeRegex(str: string): string {
  * @internal Exported for testing
  */
 export function matchesWordBoundary(a: string, b: string): boolean {
-  const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
-  const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
+  const aInB = new RegExp(`\\b${RegExp.escape(a)}\\b`, "i");
+  const bInA = new RegExp(`\\b${RegExp.escape(b)}\\b`, "i");
   return aInB.test(b) || bInA.test(a);
 }
 
