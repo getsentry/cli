@@ -5,7 +5,7 @@
  * in src/commands/event/view.ts
  */
 
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   parsePositionalArgs,
   resolveFromProjectSearch,
@@ -98,6 +98,10 @@ describe("resolveFromProjectSearch", () => {
 
   beforeEach(() => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+  });
+
+  afterEach(() => {
+    findProjectsBySlugSpy.mockRestore();
   });
 
   describe("no projects found", () => {
