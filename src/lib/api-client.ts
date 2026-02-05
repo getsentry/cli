@@ -1008,7 +1008,7 @@ export async function listLogs(
         field: LOG_FIELDS,
         project: isNumericProject ? projectSlug : undefined,
         query: fullQuery || undefined,
-        per_page: options.limit ?? 100,
+        per_page: options.limit || 100,
         statsPeriod: options.statsPeriod ?? "90d",
         sort: "-timestamp",
       },
