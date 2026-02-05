@@ -15,13 +15,10 @@ import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
 import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
-import {
-  expandToFullShortId,
-  isNumericId,
-  isShortSuffix,
-} from "../../lib/issue-id.js";
+import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
 
@@ -51,7 +48,7 @@ export const issueIdPositional = {
  */
 export function buildCommandHint(command: string, issueId: string): string {
   // Numeric IDs always need org context - can't be combined with project
-  if (isNumericId(issueId)) {
+  if (isAllDigits(issueId)) {
     return `sentry issue ${command} <org>/${issueId}`;
   }
   // Short suffixes can be combined with project prefix
