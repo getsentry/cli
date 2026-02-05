@@ -8,6 +8,8 @@ import {
   DeviceFlowError,
   formatError,
   getExitCode,
+  SeerError,
+  UpgradeError,
   ValidationError,
 } from "../../src/lib/errors.js";
 
@@ -149,6 +151,105 @@ describe("DeviceFlowError", () => {
   test("uses code as message if no description", () => {
     const err = new DeviceFlowError("authorization_pending");
     expect(err.message).toBe("authorization_pending");
+  });
+});
+
+describe("UpgradeError", () => {
+  test("unknown_method has default message", () => {
+    const err = new UpgradeError("unknown_method");
+    expect(err.message).toBe(
+      "Could not detect installation method. Use --method to specify."
+    );
+    expect(err.reason).toBe("unknown_method");
+  });
+
+  test("network_error has default message", () => {
+    const err = new UpgradeError("network_error");
+    expect(err.message).toBe("Failed to fetch version information.");
+    expect(err.reason).toBe("network_error");
+  });
+
+  test("execution_failed has default message", () => {
+    const err = new UpgradeError("execution_failed");
+    expect(err.message).toBe("Upgrade command failed.");
+    expect(err.reason).toBe("execution_failed");
+  });
+
+  test("version_not_found has default message", () => {
+    const err = new UpgradeError("version_not_found");
+    expect(err.message).toBe("The specified version was not found.");
+    expect(err.reason).toBe("version_not_found");
+  });
+
+  test("accepts custom message", () => {
+    const err = new UpgradeError("network_error", "Custom upgrade error");
+    expect(err.message).toBe("Custom upgrade error");
+    expect(err.reason).toBe("network_error");
+  });
+});
+
+describe("SeerError", () => {
+  test("not_enabled has default message", () => {
+    const err = new SeerError("not_enabled");
+    expect(err.message).toBe("Seer is not enabled for this organization.");
+    expect(err.reason).toBe("not_enabled");
+  });
+
+  test("no_budget has default message", () => {
+    const err = new SeerError("no_budget");
+    expect(err.message).toBe("Seer requires a paid plan.");
+    expect(err.reason).toBe("no_budget");
+  });
+
+  test("ai_disabled has default message", () => {
+    const err = new SeerError("ai_disabled");
+    expect(err.message).toBe("AI features are disabled for this organization.");
+    expect(err.reason).toBe("ai_disabled");
+  });
+
+  test("format() includes settings URL when orgSlug provided", () => {
+    const err = new SeerError("not_enabled", "my-org");
+    const formatted = err.format();
+    expect(formatted).toContain("Seer is not enabled for this organization.");
+    expect(formatted).toContain("To enable Seer:");
+    expect(formatted).toContain("my-org");
+  });
+
+  test("format() includes billing URL for no_budget with orgSlug", () => {
+    const err = new SeerError("no_budget", "my-org");
+    const formatted = err.format();
+    expect(formatted).toContain("Seer requires a paid plan.");
+    expect(formatted).toContain("upgrade your plan");
+    expect(formatted).toContain("my-org");
+  });
+
+  test("format() includes org settings URL for ai_disabled with orgSlug", () => {
+    const err = new SeerError("ai_disabled", "my-org");
+    const formatted = err.format();
+    expect(formatted).toContain("AI features are disabled");
+    expect(formatted).toContain("To enable AI features:");
+    expect(formatted).toContain("my-org");
+  });
+
+  test("format() shows fallback message without orgSlug", () => {
+    const err = new SeerError("not_enabled");
+    const formatted = err.format();
+    expect(formatted).toContain("Seer is not enabled for this organization.");
+    expect(formatted).toContain("visit your organization's Seer settings");
+  });
+
+  test("format() shows fallback for no_budget without orgSlug", () => {
+    const err = new SeerError("no_budget");
+    const formatted = err.format();
+    expect(formatted).toContain(
+      "upgrade your plan in your organization's billing settings"
+    );
+  });
+
+  test("format() shows fallback for ai_disabled without orgSlug", () => {
+    const err = new SeerError("ai_disabled");
+    const formatted = err.format();
+    expect(formatted).toContain("Hide AI Features");
   });
 });
 
