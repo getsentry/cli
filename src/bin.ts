@@ -29,10 +29,13 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
   } catch (err) {
     // Auto-login for auth errors in interactive TTY environments
     // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
+    // Skip for auth commands - they handle their own auth flow (prevents loop on login failure)
+    const isAuthCommand = args[0] === "auth";
     if (
       err instanceof AuthError &&
       err.reason === "not_authenticated" &&
-      isatty(0)
+      isatty(0) &&
+      !isAuthCommand
     ) {
       process.stderr.write(
         "Authentication required. Starting login flow...\n\n"
