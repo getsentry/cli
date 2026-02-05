@@ -16,7 +16,7 @@ import { logRoute } from "./commands/log/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { CLI_VERSION } from "./lib/constants.js";
-import { CliError, getExitCode } from "./lib/errors.js";
+import { AuthError, CliError, getExitCode } from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
 
 /** Top-level route map containing all CLI commands */
@@ -44,13 +44,20 @@ export const routes = buildRouteMap({
 /**
  * Custom error formatting for CLI errors.
  *
- * - CliError subclasses: Show clean user-friendly message without stack trace
+ * - AuthError (not_authenticated): Re-thrown to allow auto-login flow in bin.ts
+ * - Other CliError subclasses: Show clean user-friendly message without stack trace
  * - Other errors: Show stack trace for debugging unexpected issues
  */
 const customText: ApplicationText = {
   ...text_en,
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
-    // Report all command errors to Sentry. Stricli catches exceptions and doesn't
+    // Re-throw AuthError("not_authenticated") for auto-login flow in bin.ts
+    // Don't capture to Sentry - it's an expected state (user not logged in), not an error
+    if (exc instanceof AuthError && exc.reason === "not_authenticated") {
+      throw exc;
+    }
+
+    // Report command errors to Sentry. Stricli catches exceptions and doesn't
     // re-throw, so we must capture here to get visibility into command failures.
     Sentry.captureException(exc);
 
