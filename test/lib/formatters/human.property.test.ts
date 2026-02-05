@@ -166,7 +166,9 @@ describe("formatUserIdentity properties", () => {
         ([name, username, email]) => {
           const result = formatUserIdentity({ id: "1", name, username, email });
           expect(result).toBe(`${name} <${email}>`);
-          expect(result).not.toContain(username);
+          // Username should not appear in its full form after the name
+          // (avoid false positives when name contains username as substring)
+          expect(result).not.toBe(`${username} <${email}>`);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }

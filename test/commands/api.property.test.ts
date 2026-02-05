@@ -111,8 +111,21 @@ const jsonValueArb = oneof(
   )
 );
 
-/** Non-JSON string values */
-const plainStringArb = stringMatching(/^[a-zA-Z][a-zA-Z0-9 ]{0,20}$/);
+/**
+ * Non-JSON string values that won't be parsed as JSON.
+ * Excludes: "true", "false", "null", pure numbers, and anything starting with JSON delimiters.
+ * Uses a prefix that ensures the string can't be valid JSON.
+ */
+const plainStringArb = stringMatching(/^[a-zA-Z][a-zA-Z0-9 ]{0,20}$/).filter(
+  (s) =>
+    s !== "true" &&
+    s !== "false" &&
+    s !== "null" &&
+    !/^\d+(\.\d+)?$/.test(s) &&
+    !s.startsWith('"') &&
+    !s.startsWith("[") &&
+    !s.startsWith("{")
+);
 
 describe("normalizeEndpoint properties", () => {
   test("result never has leading slash (except for root)", async () => {
