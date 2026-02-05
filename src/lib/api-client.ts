@@ -1009,7 +1009,7 @@ export async function listLogs(
         project: isNumericProject ? projectSlug : undefined,
         query: fullQuery || undefined,
         per_page: options.limit || 100,
-        statsPeriod: options.statsPeriod ?? "90d",
+        statsPeriod: options.statsPeriod ?? "7d",
         sort: "-timestamp",
       },
       schema: LogsResponseSchema,
