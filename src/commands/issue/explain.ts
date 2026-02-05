@@ -18,18 +18,15 @@ import {
 } from "../../lib/formatters/seer.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
-  buildCommandHint,
-  type IssueIdFlags,
-  issueIdFlags,
   issueIdPositional,
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "./utils.js";
 
-interface ExplainFlags extends IssueIdFlags {
+type ExplainFlags = {
   readonly json: boolean;
   readonly force: boolean;
-}
+};
 
 export const explainCommand = buildCommand({
   docs: {
@@ -42,17 +39,22 @@ export const explainCommand = buildCommand({
       "  - Relevant code locations\n\n" +
       "The analysis may take a few minutes for new issues.\n" +
       "Use --force to trigger a fresh analysis even if one already exists.\n\n" +
+      "Issue formats:\n" +
+      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
+      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix         - Suffix only: G (requires DSN context)\n" +
+      "  numeric        - Numeric ID: 123456789\n\n" +
       "Examples:\n" +
       "  sentry issue explain 123456789\n" +
-      "  sentry issue explain MYPROJECT-ABC --org my-org\n" +
-      "  sentry issue explain G --org my-org --project my-project\n" +
+      "  sentry issue explain sentry/EXTENSION-7\n" +
+      "  sentry issue explain cli-G\n" +
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
   parameters: {
     positional: issueIdPositional,
     flags: {
-      ...issueIdFlags,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -68,7 +70,7 @@ export const explainCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ExplainFlags,
-    issueId: string
+    issueArg: string
   ): Promise<void> {
     const { stdout, stderr, cwd } = this;
 
@@ -78,11 +80,9 @@ export const explainCommand = buildCommand({
     try {
       // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
-        issueId,
-        org: flags.org,
-        project: flags.project,
+        issueArg,
         cwd,
-        commandHint: buildCommandHint("explain", issueId),
+        command: "explain",
       });
       resolvedOrg = org;
 
@@ -137,7 +137,7 @@ export const explainCommand = buildCommand({
       stdout.write(`${lines.join("\n")}\n`);
       writeFooter(
         stdout,
-        `To create a plan, run: sentry issue plan ${issueId}`
+        `To create a plan, run: sentry issue plan ${issueArg}`
       );
     } catch (error) {
       // Handle API errors with friendly messages

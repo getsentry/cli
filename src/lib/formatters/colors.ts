@@ -7,9 +7,7 @@
 import chalk from "chalk";
 import type { IssueLevel, IssueStatus } from "../../types/index.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Color Palette (Full Sentinel palette)
-// ─────────────────────────────────────────────────────────────────────────────
 
 const COLORS = {
   red: "#fe4144",
@@ -22,9 +20,7 @@ const COLORS = {
   muted: "#898294",
 } as const;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Base Color Functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const red = (text: string): string => chalk.hex(COLORS.red)(text);
 export const green = (text: string): string => chalk.hex(COLORS.green)(text);
@@ -40,9 +36,7 @@ export const underline = (text: string): string => chalk.underline(text);
 export const boldUnderline = (text: string): string =>
   chalk.bold.underline(text);
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Semantic Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Format success messages (green) */
 export const success = (text: string): string => green(text);
@@ -59,9 +53,7 @@ export const info = (text: string): string => cyan(text);
 /** Format headers and dividers (muted) */
 export const header = (text: string): string => muted(text);
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Status-based Coloring
-// ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<IssueStatus, (text: string) => string> = {
   resolved: green,
@@ -78,9 +70,7 @@ export function statusColor(text: string, status: string | undefined): string {
   return colorFn(text);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Level-based Coloring
-// ─────────────────────────────────────────────────────────────────────────────
 
 const LEVEL_COLORS: Record<IssueLevel, (text: string) => string> = {
   fatal: red,

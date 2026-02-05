@@ -1,7 +1,19 @@
+diff --git a/node_modules/@sentry/core/.bun-tag-3268c2da6ddf3847 b/.bun-tag-3268c2da6ddf3847
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/build/cjs/client.js b/build/cjs/client.js
-index 492d897927b0a791e0dac10647274e92053ac985..e253ad00bc5f858b62a9581d09688fe7a5d45f23 100644
+index 492d897927b0a791e0dac10647274e92053ac985..79795fd82d36f419afcb0bb4059ef02b2c525711 100644
 --- a/build/cjs/client.js
 +++ b/build/cjs/client.js
+@@ -108,7 +108,7 @@ function setupWeightBasedFlushing
+         flushFn(client);
+         // Note: isTimerActive is reset by the flushHook handler above, not here,
+         // to avoid race conditions when new items arrive during the flush.
+-      }, DEFAULT_FLUSH_INTERVAL);
++      }, DEFAULT_FLUSH_INTERVAL); if (typeof flushTimeout !== 'number' && flushTimeout.unref) flushTimeout.unref();
+     }
+   });
+ 
 @@ -645,11 +645,16 @@ class Client {
     * `false` otherwise
     */
@@ -34,9 +46,18 @@ index 6413b77ec339af98b608c4609fc9462d9a8e967d..85a9af7221cfabcfe5c65df2f4ece5a2
      // Promise.race will resolve to the first promise that resolves or rejects
      // So if the drainPromise resolves, the timeout promise will be ignored
 diff --git a/build/esm/client.js b/build/esm/client.js
-index bcc614aa8485bd110abc51149370bbf114ac9e54..2677a9bb0b3d9451a0bd50926b3a36516664c69f 100644
+index bcc614aa8485bd110abc51149370bbf114ac9e54..b98a1e07b0a7c43602105738b8afb38ee1e3db15 100644
 --- a/build/esm/client.js
 +++ b/build/esm/client.js
+@@ -106,7 +106,7 @@ function setupWeightBasedFlushing
+         flushFn(client);
+         // Note: isTimerActive is reset by the flushHook handler above, not here,
+         // to avoid race conditions when new items arrive during the flush.
+-      }, DEFAULT_FLUSH_INTERVAL);
++      }, DEFAULT_FLUSH_INTERVAL); if (typeof flushTimeout !== 'number' && flushTimeout.unref) flushTimeout.unref();
+     }
+   });
+ 
 @@ -643,11 +643,16 @@ class Client {
     * `false` otherwise
     */

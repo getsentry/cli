@@ -6,15 +6,10 @@
  */
 
 import { join } from "node:path";
+import { handleFileError } from "./fs-utils.js";
 import type { DetectedDsn } from "./types.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Result of processing a single file for DSN extraction.
- */
+/** Result of processing a single file for DSN extraction. */
 export type FileProcessResult = {
   /** Extracted DSN string (null if not found) */
   dsn: string | null;
@@ -22,6 +17,14 @@ export type FileProcessResult = {
   metadata?: {
     packagePath?: string;
   };
+};
+
+/** Result of scanning specific files, including mtimes for caching. */
+export type SpecificFileScanResult = {
+  /** Detected DSNs */
+  dsns: DetectedDsn[];
+  /** Map of source file paths to their mtimes (only files containing DSNs) */
+  sourceMtimes: Record<string, number>;
 };
 
 /**
@@ -36,10 +39,6 @@ export type FileProcessor = (
   content: string
 ) => FileProcessResult | null;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scanner
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Scan specific files (not glob) and extract DSNs.
  *
@@ -48,7 +47,7 @@ export type FileProcessor = (
  * @param cwd - Root directory
  * @param filenames - List of filenames to check (relative to cwd)
  * @param options - Processing options
- * @returns Array of detected DSNs
+ * @returns Object with detected DSNs and source file mtimes
  */
 export async function scanSpecificFiles(
   cwd: string,
@@ -62,36 +61,39 @@ export async function scanSpecificFiles(
       metadata?: { packagePath?: string }
     ) => DetectedDsn | null;
   }
-): Promise<DetectedDsn[]> {
+): Promise<SpecificFileScanResult> {
   const { stopOnFirst = false, processFile, createDsn } = options;
-  const results: DetectedDsn[] = [];
+  const dsns: DetectedDsn[] = [];
+  const sourceMtimes: Record<string, number> = {};
 
   for (const filename of filenames) {
     const filepath = join(cwd, filename);
-    const file = Bun.file(filepath);
-
-    if (!(await file.exists())) {
-      continue;
-    }
 
     try {
+      const file = Bun.file(filepath);
+      // Read file directly - handles ENOENT gracefully
       const content = await file.text();
       const result = processFile(filename, content);
 
       if (result?.dsn) {
         const detected = createDsn(result.dsn, filename, result.metadata);
         if (detected) {
-          results.push(detected);
+          dsns.push(detected);
+          // Record mtime for cache invalidation
+          sourceMtimes[filename] = file.lastModified;
 
           if (stopOnFirst) {
-            return results;
+            return { dsns, sourceMtimes };
           }
         }
       }
-    } catch {
-      // Skip files we can't read
+    } catch (error) {
+      handleFileError(error, {
+        operation: "scanSpecificFiles",
+        path: filepath,
+      });
     }
   }
 
-  return results;
+  return { dsns, sourceMtimes };
 }

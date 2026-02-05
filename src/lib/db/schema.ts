@@ -4,7 +4,7 @@
 
 import type { Database } from "bun:sqlite";
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 /** User identity for telemetry (single row, id=1) */
 const USER_INFO_TABLE = `
@@ -33,6 +33,18 @@ const ORG_REGIONS_TABLE = `
     org_slug TEXT PRIMARY KEY,
     region_url TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )
+`;
+
+/** Project root cache for cwd → projectRoot mapping with mtime-based invalidation */
+const PROJECT_ROOT_CACHE_TABLE = `
+  CREATE TABLE IF NOT EXISTS project_root_cache (
+    cwd TEXT PRIMARY KEY,
+    project_root TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    cwd_mtime INTEGER NOT NULL,
+    cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    ttl_expires_at INTEGER NOT NULL
   )
 `;
 
@@ -74,6 +86,7 @@ export function initSchema(db: Database): void {
     );
 
     -- DSN cache (directory -> detected DSN info)
+    -- Extended in v4 with fingerprint, all_dsns_json, source_mtimes_json, dir_mtimes_json for full detection caching
     CREATE TABLE IF NOT EXISTS dsn_cache (
       directory TEXT PRIMARY KEY,
       dsn TEXT NOT NULL,
@@ -85,6 +98,12 @@ export function initSchema(db: Database): void {
       resolved_org_name TEXT,
       resolved_project_slug TEXT,
       resolved_project_name TEXT,
+      fingerprint TEXT,
+      all_dsns_json TEXT,
+      source_mtimes_json TEXT,
+      dir_mtimes_json TEXT,
+      root_dir_mtime INTEGER,
+      ttl_expires_at INTEGER,
       cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       last_accessed INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
@@ -108,6 +127,7 @@ export function initSchema(db: Database): void {
     ${ORG_REGIONS_TABLE};
     ${USER_INFO_TABLE};
     ${INSTANCE_INFO_TABLE};
+    ${PROJECT_ROOT_CACHE_TABLE};
   `);
 
   const versionRow = db
@@ -130,6 +150,28 @@ function getSchemaVersion(db: Database): number {
   return row?.version ?? 0;
 }
 
+/** Check if a column exists in a table */
+function hasColumn(db: Database, table: string, column: string): boolean {
+  const result = db
+    .query(
+      `SELECT COUNT(*) as count FROM pragma_table_info('${table}') WHERE name='${column}'`
+    )
+    .get() as { count: number };
+  return result.count > 0;
+}
+
+/** Add a column to a table if it doesn't exist */
+function addColumnIfMissing(
+  db: Database,
+  table: string,
+  column: string,
+  type: string
+): void {
+  if (!hasColumn(db, table, column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 export function runMigrations(db: Database): void {
   const currentVersion = getSchemaVersion(db);
 
@@ -145,19 +187,22 @@ export function runMigrations(db: Database): void {
   // Migration 2 -> 3: Add name column to user_info table
   // Check if column exists first to handle concurrent CLI processes
   // (SQLite lacks ADD COLUMN IF NOT EXISTS)
-  if (currentVersion < 3 && currentVersion >= 2) {
-    const hasNameColumn =
-      (
-        db
-          .query(
-            "SELECT COUNT(*) as count FROM pragma_table_info('user_info') WHERE name='name'"
-          )
-          .get() as { count: number }
-      ).count > 0;
+  if (currentVersion < 3) {
+    addColumnIfMissing(db, "user_info", "name", "TEXT");
+  }
 
-    if (!hasNameColumn) {
-      db.exec("ALTER TABLE user_info ADD COLUMN name TEXT");
-    }
+  // Migration 3 -> 4: Add detection caching columns to dsn_cache and project_root_cache table
+  if (currentVersion < 4) {
+    // Add new columns to dsn_cache for full detection caching
+    addColumnIfMissing(db, "dsn_cache", "fingerprint", "TEXT");
+    addColumnIfMissing(db, "dsn_cache", "all_dsns_json", "TEXT");
+    addColumnIfMissing(db, "dsn_cache", "source_mtimes_json", "TEXT");
+    addColumnIfMissing(db, "dsn_cache", "dir_mtimes_json", "TEXT");
+    addColumnIfMissing(db, "dsn_cache", "root_dir_mtime", "INTEGER");
+    addColumnIfMissing(db, "dsn_cache", "ttl_expires_at", "INTEGER");
+
+    // Create project_root_cache table
+    db.exec(PROJECT_ROOT_CACHE_TABLE);
   }
 
   // Update schema version if needed

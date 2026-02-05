@@ -8,10 +8,17 @@
  * 1. Explicit CLI flags
  * 2. Config defaults
  * 3. DSN auto-detection (source code, .env files, environment variables)
+ * 4. Directory name inference (matches project slugs with word boundaries)
  */
 
-import { findProjectByDsnKey, getProject } from "./api-client.js";
+import { basename } from "node:path";
+import {
+  findProjectByDsnKey,
+  findProjectsByPattern,
+  getProject,
+} from "./api-client.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
+import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
   getCachedProject,
   getCachedProjectByDsnKey,
@@ -22,6 +29,7 @@ import type { DetectedDsn } from "./dsn/index.js";
 import {
   detectAllDsns,
   detectDsn,
+  findProjectRoot,
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
@@ -323,6 +331,134 @@ async function resolveDsnToTarget(
   }
 }
 
+/** Minimum directory name length for inference (avoids matching too broadly) */
+const MIN_DIR_NAME_LENGTH = 2;
+
+/**
+ * Check if a directory name is valid for project inference.
+ * Rejects empty strings, hidden directories, and names that are too short.
+ *
+ * @internal Exported for testing
+ */
+export function isValidDirNameForInference(dirName: string): boolean {
+  if (!dirName || dirName.length < MIN_DIR_NAME_LENGTH) {
+    return false;
+  }
+  // Reject hidden directories (starting with .) - includes ".", "..", ".git", ".env"
+  if (dirName.startsWith(".")) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Infer project(s) from directory name when DSN detection fails.
+ * Uses word-boundary matching (`\b`) against all accessible projects.
+ *
+ * Caches results in dsn_cache with source: "inferred" for performance.
+ * Cache is invalidated when directory mtime changes or after 24h TTL.
+ *
+ * @param cwd - Current working directory
+ * @returns Resolved targets, or empty if no matches found
+ */
+async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
+  const { projectRoot } = await findProjectRoot(cwd);
+  const dirName = basename(projectRoot);
+
+  // Skip inference for invalid directory names
+  if (!isValidDirNameForInference(dirName)) {
+    return { targets: [] };
+  }
+
+  // Check cache first (reuse DSN cache with source: "inferred")
+  const cached = await getCachedDsn(projectRoot);
+  if (cached?.source === "inferred") {
+    const detectedFrom = `directory name "${dirName}"`;
+
+    // Return all cached targets if available
+    if (cached.allResolved && cached.allResolved.length > 0) {
+      const targets = cached.allResolved.map((r) => ({
+        org: r.orgSlug,
+        project: r.projectSlug,
+        orgDisplay: r.orgName,
+        projectDisplay: r.projectName,
+        detectedFrom,
+      }));
+      return {
+        targets,
+        footer:
+          targets.length > 1
+            ? `Found ${targets.length} projects matching directory "${dirName}"`
+            : undefined,
+      };
+    }
+
+    // Fallback to single resolved target (legacy cache entries)
+    if (cached.resolved) {
+      return {
+        targets: [
+          {
+            org: cached.resolved.orgSlug,
+            project: cached.resolved.projectSlug,
+            orgDisplay: cached.resolved.orgName,
+            projectDisplay: cached.resolved.projectName,
+            detectedFrom,
+          },
+        ],
+      };
+    }
+  }
+
+  // Search for matching projects using word-boundary matching
+  let matches: Awaited<ReturnType<typeof findProjectsByPattern>>;
+  try {
+    matches = await findProjectsByPattern(dirName);
+  } catch {
+    // If not authenticated or API fails, skip inference silently
+    return { targets: [] };
+  }
+
+  if (matches.length === 0) {
+    return { targets: [] };
+  }
+
+  // Cache all matches for faster subsequent lookups
+  const [primary] = matches;
+  if (primary) {
+    const allResolved = matches.map((m) => ({
+      orgSlug: m.orgSlug,
+      orgName: m.organization?.name ?? m.orgSlug,
+      projectSlug: m.slug,
+      projectName: m.name,
+    }));
+
+    await setCachedDsn(projectRoot, {
+      dsn: "", // No DSN for inferred
+      projectId: primary.id,
+      source: "inferred",
+      resolved: allResolved[0], // Primary for backwards compatibility
+      allResolved,
+    });
+  }
+
+  const detectedFrom = `directory name "${dirName}"`;
+  const targets: ResolvedTarget[] = matches.map((m) => ({
+    org: m.orgSlug,
+    project: m.slug,
+    orgDisplay: m.organization?.name ?? m.orgSlug,
+    projectDisplay: m.name,
+    detectedFrom,
+  }));
+
+  return {
+    targets,
+    footer:
+      matches.length > 1
+        ? `Found ${matches.length} projects matching directory "${dirName}"`
+        : undefined,
+  };
+}
+
 /**
  * Resolve all targets for monorepo-aware commands.
  *
@@ -333,6 +469,7 @@ async function resolveDsnToTarget(
  * 1. CLI flags (--org and --project) - returns single target
  * 2. Config defaults - returns single target
  * 3. DSN auto-detection - may return multiple targets
+ * 4. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with flags and cwd
  * @returns All resolved targets and optional footer message
@@ -385,7 +522,8 @@ export async function resolveAllTargets(
   const detection = await detectAllDsns(cwd);
 
   if (detection.all.length === 0) {
-    return { targets: [] };
+    // 4. Fallback: infer from directory name
+    return inferFromDirectoryName(cwd);
   }
 
   // Resolve all DSNs in parallel
@@ -438,6 +576,7 @@ export async function resolveAllTargets(
  * 1. CLI flags (--org and --project) - both must be provided together
  * 2. Config defaults
  * 3. DSN auto-detection
+ * 4. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with flags and cwd
  * @returns Resolved target, or null if resolution failed
@@ -480,10 +619,31 @@ export async function resolveOrgAndProject(
 
   // 3. DSN auto-detection
   try {
-    return await resolveFromDsn(cwd);
+    const dsnResult = await resolveFromDsn(cwd);
+    if (dsnResult) {
+      return dsnResult;
+    }
   } catch {
-    return null;
+    // Fall through to directory inference
   }
+
+  // 4. Fallback: infer from directory name
+  const inferred = await inferFromDirectoryName(cwd);
+  if (inferred.targets.length > 0) {
+    const [first] = inferred.targets;
+    if (first) {
+      // If multiple matches, note it in detectedFrom
+      return {
+        ...first,
+        detectedFrom:
+          inferred.targets.length > 1
+            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
+            : first.detectedFrom,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -519,83 +679,4 @@ export async function resolveOrg(
   } catch {
     return null;
   }
-}
-
-/**
- * Discriminated union type values for `ParsedOrgProject`.
- * Use these constants instead of string literals for type safety.
- */
-export const ProjectSpecificationType = {
-  /** Explicit org/project provided (e.g., "sentry/cli") */
-  Explicit: "explicit",
-  /** Org with trailing slash for all projects (e.g., "sentry/") */
-  OrgAll: "org-all",
-  /** Project slug only, search across all orgs (e.g., "cli") */
-  ProjectSearch: "project-search",
-  /** No input, auto-detect from DSN/config */
-  AutoDetect: "auto-detect",
-} as const;
-
-/**
- * Parsed result from an org/project positional argument.
- * Discriminated union based on the `type` field.
- */
-export type ParsedOrgProject =
-  | {
-      type: typeof ProjectSpecificationType.Explicit;
-      org: string;
-      project: string;
-    }
-  | { type: typeof ProjectSpecificationType.OrgAll; org: string }
-  | { type: typeof ProjectSpecificationType.ProjectSearch; projectSlug: string }
-  | { type: typeof ProjectSpecificationType.AutoDetect };
-
-/**
- * Parse an org/project positional argument string.
- *
- * Supports the following patterns:
- * - `undefined` or empty → auto-detect from DSN/config
- * - `sentry/cli` → explicit org and project
- * - `sentry/` → org with all projects
- * - `/cli` → search for project across all orgs (leading slash)
- * - `cli` → search for project across all orgs
- *
- * @param arg - Input string from CLI positional argument
- * @returns Parsed result with type discrimination
- *
- * @example
- * parseOrgProjectArg(undefined)     // { type: "auto-detect" }
- * parseOrgProjectArg("sentry/cli")  // { type: "explicit", org: "sentry", project: "cli" }
- * parseOrgProjectArg("sentry/")     // { type: "org-all", org: "sentry" }
- * parseOrgProjectArg("/cli")        // { type: "project-search", projectSlug: "cli" }
- * parseOrgProjectArg("cli")         // { type: "project-search", projectSlug: "cli" }
- */
-export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
-  if (!arg || arg.trim() === "") {
-    return { type: "auto-detect" };
-  }
-
-  const trimmed = arg.trim();
-
-  if (trimmed.includes("/")) {
-    const slashIndex = trimmed.indexOf("/");
-    const org = trimmed.slice(0, slashIndex);
-    const project = trimmed.slice(slashIndex + 1);
-
-    if (!org) {
-      // "/cli" → search for project across all orgs
-      return { type: "project-search", projectSlug: project };
-    }
-
-    if (!project) {
-      // "sentry/" → list all projects in org
-      return { type: "org-all", org };
-    }
-
-    // "sentry/cli" → explicit org and project
-    return { type: "explicit", org, project };
-  }
-
-  // No slash → search for project across all orgs
-  return { type: "project-search", projectSlug: trimmed };
 }

@@ -17,48 +17,47 @@
  * }
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Detection API
-// ─────────────────────────────────────────────────────────────────────────────
-
-export {
-  detectAllDsns,
-  detectDsn,
-  getDsnSourceDescription,
-} from "./detector.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Project Resolution
-// ─────────────────────────────────────────────────────────────────────────────
-
-export { getAccessibleProjects, resolveProject } from "./resolver.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Error Formatting
-// ─────────────────────────────────────────────────────────────────────────────
-
-export {
-  formatConflictError,
-  formatMultipleProjectsFooter,
-  formatNoDsnError,
-  formatResolutionError,
-} from "./errors.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Cache Management
-// ─────────────────────────────────────────────────────────────────────────────
-
 export {
   clearDsnCache,
   getCachedDsn,
   setCachedDsn,
   updateCachedResolution,
 } from "../db/dsn-cache.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
+// Code Scanner (for advanced use)
+export type { CodeScanResult } from "./code-scanner.js";
+export { scanCodeForDsns, scanCodeForFirstDsn } from "./code-scanner.js";
+// Main Detection API
+export {
+  detectAllDsns,
+  detectDsn,
+  getDsnSourceDescription,
+} from "./detector.js";
+// Env File Scanner
+export type { EnvFileScanResult } from "./env-file.js";
+export { detectFromAllEnvFiles, detectFromEnvFiles } from "./env-file.js";
+// Error Formatting
+export {
+  formatConflictError,
+  formatMultipleProjectsFooter,
+  formatNoDsnError,
+  formatResolutionError,
+} from "./errors.js";
+// Utilities (for advanced use)
+export {
+  createDetectedDsn,
+  createDsnFingerprint,
+  extractOrgIdFromHost,
+  inferPackagePath,
+  isValidDsn,
+  parseDsn,
+} from "./parser.js";
+// Project Root Detection
+export type { ProjectRootReason, ProjectRootResult } from "./project-root.js";
+export { findProjectRoot } from "./project-root.js";
+// Project Resolution
+export { getAccessibleProjects, resolveProject } from "./resolver.js";
 // Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 export type {
   CachedDsnEntry,
   DetectedDsn,
@@ -68,16 +67,3 @@ export type {
   ResolvedProject,
   ResolvedProjectInfo,
 } from "./types.js";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Utilities (for advanced use)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export {
-  createDetectedDsn,
-  createDsnFingerprint,
-  extractOrgIdFromHost,
-  inferPackagePath,
-  isValidDsn,
-  parseDsn,
-} from "./parser.js";

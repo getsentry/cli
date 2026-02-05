@@ -4,65 +4,62 @@
  * Common functionality used by explain, plan, view, and other issue commands.
  */
 
-import type { FlagParametersForType } from "@stricli/core";
 import {
+  findProjectsBySlug,
   getAutofixState,
   getIssue,
   getIssueByShortId,
 } from "../../lib/api-client.js";
+import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
-import { createDsnFingerprint, detectAllDsns } from "../../lib/dsn/index.js";
-import { ApiError, CliError, ContextError } from "../../lib/errors.js";
+import { detectAllDsns } from "../../lib/dsn/index.js";
+import { ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import {
   expandToFullShortId,
-  isShortId,
+  isNumericId,
   isShortSuffix,
-  parseAliasSuffix,
 } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
-import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
 
-/** Base flags for issue commands that accept an issue ID */
-export type IssueIdFlags = {
-  readonly org?: string;
-  readonly project?: string;
-};
-
-/** Shared --org and --project flag definitions for issue ID commands */
-export const issueIdFlags: FlagParametersForType<IssueIdFlags> = {
-  org: {
-    kind: "parsed",
-    parse: String,
-    brief: "Organization slug (required for short IDs if not auto-detected)",
-    optional: true,
-  },
-  project: {
-    kind: "parsed",
-    parse: String,
-    brief: "Project slug (required for short suffixes if not auto-detected)",
-    optional: true,
-  },
-};
-
-/** Shared positional parameter for issue ID (numeric, short ID, suffix, or alias-suffix) */
+/** Shared positional parameter for issue ID */
 export const issueIdPositional = {
   kind: "tuple",
   parameters: [
     {
-      placeholder: "issue-id",
+      placeholder: "issue",
       brief:
-        "Issue ID, short ID, suffix, or alias-suffix (e.g., 123456, CRAFT-G, G, or f-g)",
+        "Issue: <org>/ID, <project>-suffix, ID, or suffix (e.g., sentry/CLI-G, cli-G, CLI-G, G)",
       parse: String,
     },
   ],
 } as const;
 
-/** Build a command hint string for error messages */
+/**
+ * Build a command hint string for error messages.
+ *
+ * Returns context-aware hints based on the issue ID format:
+ * - Numeric ID (e.g., "123456789") → suggest `<org>/123456789`
+ * - Suffix only (e.g., "G") → suggest `<project>-G`
+ * - Has dash (e.g., "cli-G") → suggest `<org>/cli-G`
+ *
+ * @param command - The issue subcommand (e.g., "view", "explain")
+ * @param issueId - The user-provided issue ID
+ */
 export function buildCommandHint(command: string, issueId: string): string {
-  return `sentry issue ${command} ${issueId} --org <org-slug> --project <project-slug>`;
+  // Numeric IDs always need org context - can't be combined with project
+  if (isNumericId(issueId)) {
+    return `sentry issue ${command} <org>/${issueId}`;
+  }
+  // Short suffixes can be combined with project prefix
+  if (isShortSuffix(issueId)) {
+    return `sentry issue ${command} <project>-${issueId}`;
+  }
+  // Everything else (has dash) needs org prefix
+  return `sentry issue ${command} <org>/${issueId}`;
 }
 
 /** Default timeout in milliseconds (3 minutes) */
@@ -88,21 +85,21 @@ type StrictResolvedIssue = {
 };
 
 /**
- * Try to resolve an alias-suffix format issue ID (e.g., "f-g").
+ * Try to resolve via alias cache.
  * Returns null if the alias is not found in cache or fingerprint doesn't match.
  *
- * @param alias - The project alias from the alias-suffix format
- * @param suffix - The issue suffix
+ * @param alias - The project alias (lowercase)
+ * @param suffix - The issue suffix (uppercase)
  * @param cwd - Current working directory for DSN detection
  */
-async function resolveAliasSuffixId(
+async function tryResolveFromAlias(
   alias: string,
   suffix: string,
   cwd: string
 ): Promise<StrictResolvedIssue | null> {
-  // Detect DSNs to create fingerprint for validation
+  // Detect DSNs to get fingerprint for validation
   const detection = await detectAllDsns(cwd);
-  const fingerprint = createDsnFingerprint(detection.all);
+  const fingerprint = detection.fingerprint;
   const projectEntry = await getProjectByAlias(alias, fingerprint);
   if (!projectEntry) {
     return null;
@@ -113,165 +110,195 @@ async function resolveAliasSuffixId(
   return { org: projectEntry.orgSlug, issue };
 }
 
-type ResolveContext = {
-  issueId: string;
-  org: string | undefined;
-  project: string | undefined;
-  cwd: string;
-  commandHint: string;
-};
-
 /**
- * Check if an error from short suffix resolution should allow fallthrough.
- * Returns true for 404 (issue not found) or ContextError when no explicit flags were provided.
- * When user explicitly provides --org or --project, we should error clearly instead of
- * silently falling through to other resolution methods.
+ * Resolve project-search type: search for project across orgs, then fetch issue.
+ *
+ * Resolution order:
+ * 1. Try alias cache (fast, local)
+ * 2. Search for project across orgs via API
+ *
+ * @param projectSlug - Project slug to search for
+ * @param suffix - Issue suffix (uppercase)
+ * @param cwd - Current working directory
+ * @param commandHint - Hint for error messages
  */
-function shouldFallthrough(error: unknown, ctx: ResolveContext): boolean {
-  if (error instanceof ApiError && error.status === 404) {
-    return true;
-  }
-  if (error instanceof ContextError) {
-    // Only fall through if user didn't provide explicit flags.
-    // If they provided --org or --project, they expect that resolution path to work.
-    return ctx.org === undefined && ctx.project === undefined;
-  }
-  return false;
-}
-
-/**
- * Re-throw an error, wrapping unexpected ones in ApiError.
- */
-function rethrowAsApiError(error: unknown): never {
-  if (error instanceof CliError) {
-    throw error;
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  throw new ApiError(`Failed to resolve issue: ${message}`, 500);
-}
-
-/**
- * Try to resolve a short suffix format (e.g., "G", "4Y").
- * Requires project context to expand to full short ID.
- */
-async function resolveShortSuffixId(
-  ctx: ResolveContext
+async function resolveProjectSearch(
+  projectSlug: string,
+  suffix: string,
+  cwd: string,
+  commandHint: string
 ): Promise<StrictResolvedIssue> {
-  const target = await resolveOrgAndProject({
-    org: ctx.org,
-    project: ctx.project,
-    cwd: ctx.cwd,
-  });
-  if (!target) {
-    throw new ContextError("Organization and project", ctx.commandHint);
+  // 1. Try alias cache first (fast, local lookup)
+  const aliasResult = await tryResolveFromAlias(
+    projectSlug.toLowerCase(),
+    suffix,
+    cwd
+  );
+  if (aliasResult) {
+    return aliasResult;
   }
-  const resolvedShortId = expandToFullShortId(ctx.issueId, target.project);
-  const issue = await getIssueByShortId(target.org, resolvedShortId);
+
+  // 2. Search for project across all accessible orgs
+  const projects = await findProjectsBySlug(projectSlug.toLowerCase());
+
+  if (projects.length === 0) {
+    throw new ContextError(`Project '${projectSlug}' not found`, commandHint, [
+      "No project with this slug found in any accessible organization",
+    ]);
+  }
+
+  if (projects.length > 1) {
+    const orgList = projects.map((p) => p.orgSlug).join(", ");
+    throw new ContextError(
+      `Project '${projectSlug}' found in multiple organizations`,
+      commandHint,
+      [
+        `Found in: ${orgList}`,
+        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+      ]
+    );
+  }
+
+  const project = projects[0];
+  if (!project) {
+    throw new ContextError(`Project '${projectSlug}' not found`, commandHint);
+  }
+
+  const fullShortId = expandToFullShortId(suffix, project.slug);
+  const issue = await getIssueByShortId(project.orgSlug, fullShortId);
+  return { org: project.orgSlug, issue };
+}
+
+/**
+ * Resolve suffix-only type using DSN detection for project context.
+ *
+ * @param suffix - The issue suffix (uppercase)
+ * @param cwd - Current working directory for DSN detection
+ * @param commandHint - Hint for error messages
+ */
+async function resolveSuffixOnly(
+  suffix: string,
+  cwd: string,
+  commandHint: string
+): Promise<StrictResolvedIssue> {
+  const target = await resolveOrgAndProject({ cwd });
+  if (!target) {
+    throw new ContextError(
+      `Cannot resolve issue suffix '${suffix}' without project context`,
+      commandHint
+    );
+  }
+  const fullShortId = expandToFullShortId(suffix, target.project);
+  const issue = await getIssueByShortId(target.org, fullShortId);
   return { org: target.org, issue };
 }
 
 /**
- * Try to resolve a full short ID format (e.g., "CRAFT-G").
- * Project is embedded in the ID, only needs org context.
+ * Resolve explicit-org-suffix type: org provided but only suffix given.
+ *
+ * This format (`org/suffix`) is ambiguous - we have org but no project.
+ * We don't use DSN detection here because mixing explicit org with
+ * DSN-detected project (which belongs to a potentially different org)
+ * would be semantically wrong and confusing.
+ *
+ * @param org - Explicit organization slug
+ * @param suffix - Issue suffix (uppercase)
+ * @param commandHint - Hint for error messages
  */
-async function resolveFullShortId(
-  ctx: ResolveContext
-): Promise<StrictResolvedIssue> {
-  const resolved = await resolveOrg({ org: ctx.org, cwd: ctx.cwd });
-  if (!resolved) {
-    throw new ContextError("Organization", ctx.commandHint);
-  }
-  const normalizedId = ctx.issueId.toUpperCase();
-  const issue = await getIssueByShortId(resolved.org, normalizedId);
-  return { org: resolved.org, issue };
-}
-
-/**
- * Try to resolve a numeric issue ID.
- * Fetches issue directly by ID (doesn't require org).
- * Org is resolved separately for API routing (optional).
- */
-async function resolveNumericId(
-  ctx: ResolveContext
-): Promise<ResolvedIssueResult> {
-  const issue = await getIssue(ctx.issueId);
-  const resolved = await resolveOrg({ org: ctx.org, cwd: ctx.cwd });
-  return { org: resolved?.org, issue };
+function resolveExplicitOrgSuffix(
+  org: string,
+  suffix: string,
+  commandHint: string
+): never {
+  throw new ContextError(
+    `Cannot resolve suffix '${suffix}' without project context`,
+    commandHint,
+    [
+      `The format '${org}/${suffix}' requires a project to build the full issue ID.`,
+      `Use: sentry issue ... ${org}/<project>-${suffix}`,
+    ]
+  );
 }
 
 /**
  * Options for resolving an issue ID.
  */
 export type ResolveIssueOptions = {
-  /** User-provided issue ID in any supported format */
-  issueId: string;
-  /** Optional org slug from CLI flag */
-  org?: string;
-  /** Optional project slug from CLI flag */
-  project?: string;
+  /** User-provided issue argument (raw CLI input) */
+  issueArg: string;
   /** Current working directory for context resolution */
   cwd: string;
-  /** Command example for error messages */
-  commandHint: string;
+  /** Command name for error messages (e.g., "view", "explain") */
+  command: string;
 };
 
 /**
  * Resolve an issue ID to organization slug and full issue object.
- * Used by view command which needs the complete issue data.
  *
- * Supports all issue ID formats:
- * - Alias-suffix format (e.g., "f-g" where "f" is a cached project alias)
- * - Short suffix format (e.g., "G", "4Y", "15" - requires project context)
- * - Full short ID format (e.g., "CRAFT-G", "PROJECT-ABC")
- * - Numeric ID format (e.g., "123456789")
+ * Supports all issue ID formats (now parsed by parseIssueArg in arg-parsing.ts):
+ * - explicit: "sentry/cli-G" → org + project + suffix
+ * - explicit-org-suffix: "sentry/G" → org + suffix (needs DSN for project)
+ * - explicit-org-numeric: "sentry/123456789" → org + numeric ID
+ * - project-search: "cli-G" → search for project across orgs
+ * - suffix-only: "G" (requires DSN context)
+ * - numeric: "123456789" (direct fetch, no org)
  *
  * @param options - Resolution options
- * @returns Object with org slug (may be undefined for numeric) and full issue
+ * @returns Object with org slug and full issue
  * @throws {ContextError} When required context cannot be resolved
  */
 export async function resolveIssue(
   options: ResolveIssueOptions
 ): Promise<ResolvedIssueResult> {
-  const { issueId, org, project, cwd, commandHint } = options;
-  const ctx: ResolveContext = { issueId, org, project, cwd, commandHint };
+  const { issueArg, cwd, command } = options;
+  const parsed = parseIssueArg(issueArg);
+  const commandHint = buildCommandHint(command, issueArg);
 
-  // Try alias-suffix format (e.g., "f-g")
-  const aliasSuffix = parseAliasSuffix(issueId);
-  if (aliasSuffix) {
-    const result = await resolveAliasSuffixId(
-      aliasSuffix.alias,
-      aliasSuffix.suffix,
-      cwd
-    );
-    // Only fall through if alias not found (null). Let real errors propagate.
-    if (result) {
-      return result;
+  switch (parsed.type) {
+    case "numeric": {
+      // Direct fetch by numeric ID - no org context
+      const issue = await getIssue(parsed.id);
+      return { org: undefined, issue };
     }
-    // Fall through to treat as full short ID
-  }
 
-  // Short suffix format (e.g., "G", "4Y", "15") - requires project context.
-  // Try short suffix expansion for any short alphanumeric input that looks too short to be a real numeric ID.
-  // Sentry numeric IDs are typically large numbers (e.g., 6085858322), not small like "15".
-  const looksLikeShortSuffix = isShortSuffix(issueId) && issueId.length <= 4;
-  if (looksLikeShortSuffix) {
-    try {
-      return await resolveShortSuffixId(ctx);
-    } catch (error) {
-      if (!shouldFallthrough(error, ctx)) {
-        rethrowAsApiError(error);
-      }
-      // Fall through to try other resolution methods
+    case "explicit": {
+      // Full context: org + project + suffix
+      const fullShortId = expandToFullShortId(parsed.suffix, parsed.project);
+      const issue = await getIssueByShortId(parsed.org, fullShortId);
+      return { org: parsed.org, issue };
+    }
+
+    case "explicit-org-numeric": {
+      // Org + numeric ID
+      const issue = await getIssue(parsed.numericId);
+      return { org: parsed.org, issue };
+    }
+
+    case "explicit-org-suffix":
+      // Org + suffix only - ambiguous without project, always errors
+      return resolveExplicitOrgSuffix(parsed.org, parsed.suffix, commandHint);
+
+    case "project-search":
+      // Project slug + suffix - search across orgs
+      return resolveProjectSearch(
+        parsed.projectSlug,
+        parsed.suffix,
+        cwd,
+        commandHint
+      );
+
+    case "suffix-only":
+      // Just suffix - need DSN for org and project
+      return resolveSuffixOnly(parsed.suffix, cwd, commandHint);
+
+    default: {
+      // Exhaustive check - this should never be reached
+      const _exhaustive: never = parsed;
+      throw new Error(
+        `Unexpected issue arg type: ${JSON.stringify(_exhaustive)}`
+      );
     }
   }
-
-  // Full short ID format (e.g., "CRAFT-G") - requires org context
-  if (isShortId(issueId)) {
-    return resolveFullShortId(ctx);
-  }
-
-  // Numeric ID - fetch issue directly, org is optional
-  return resolveNumericId(ctx);
 }
 
 /**
@@ -288,7 +315,8 @@ export async function resolveOrgAndIssueId(
 ): Promise<{ org: string; issueId: string }> {
   const result = await resolveIssue(options);
   if (!result.org) {
-    throw new ContextError("Organization", options.commandHint);
+    const commandHint = buildCommandHint(options.command, options.issueArg);
+    throw new ContextError("Organization", commandHint);
   }
   return { org: result.org, issueId: result.issue.id };
 }

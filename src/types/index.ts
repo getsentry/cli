@@ -75,8 +75,6 @@ export type {
   StackFrame,
   Stacktrace,
   TraceContext,
-  TraceEvent,
-  TraceResponse,
   TraceSpan,
   UserGeo,
   UserRegionsResponse,
@@ -111,8 +109,6 @@ export {
   StackFrameSchema,
   StacktraceSchema,
   TraceContextSchema,
-  TraceEventSchema,
-  TraceResponseSchema,
   UserGeoSchema,
   UserRegionsResponseSchema,
 } from "./sentry.js";

@@ -6,10 +6,6 @@
 
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Source where DSN was detected from
  *
@@ -17,8 +13,9 @@ import { z } from "zod";
  * - env_file: .env file
  * - config: Language-specific config file (e.g., sentry.properties)
  * - code: Source code patterns (e.g., Sentry.init)
+ * - inferred: Inferred from directory name matching project slugs
  */
-export type DsnSource = "env" | "env_file" | "config" | "code";
+export type DsnSource = "env" | "env_file" | "config" | "code" | "inferred";
 
 /**
  * Parsed DSN components
@@ -51,13 +48,7 @@ export type DetectedDsn = ParsedDsn & {
   resolved?: ResolvedProjectInfo;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Resolution Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Resolved project information from Sentry API
- */
+/** Resolved project information from Sentry API */
 export type ResolvedProjectInfo = {
   orgSlug: string;
   orgName: string;
@@ -65,18 +56,12 @@ export type ResolvedProjectInfo = {
   projectName: string;
 };
 
-/**
- * Full resolved project with DSN and source info
- */
+/** Full resolved project with DSN and source info */
 export type ResolvedProject = ResolvedProjectInfo & {
   dsn: DetectedDsn;
   /** Human-readable description of where DSN was found */
   sourceDescription: string;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cache Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Cached DSN entry with full resolution info
@@ -96,13 +81,13 @@ export type CachedDsnEntry = {
   sourcePath?: string;
   /** Resolved project info (avoids API call on cache hit) */
   resolved?: ResolvedProjectInfo;
+  /** All resolved targets (for inferred source with multiple matches) */
+  allResolved?: ResolvedProjectInfo[];
   /** Timestamp when this entry was cached */
   cachedAt: number;
 };
 
-/**
- * Zod schema for ResolvedProjectInfo
- */
+/** Zod schema for ResolvedProjectInfo */
 export const ResolvedProjectInfoSchema = z.object({
   orgSlug: z.string(),
   orgName: z.string(),
@@ -110,22 +95,17 @@ export const ResolvedProjectInfoSchema = z.object({
   projectName: z.string(),
 });
 
-/**
- * Zod schema for cached DSN entries (for config validation)
- */
+/** Zod schema for cached DSN entries (for config validation) */
 export const CachedDsnEntrySchema = z.object({
   dsn: z.string(),
   projectId: z.string(),
   orgId: z.string().optional(),
-  source: z.enum(["env", "env_file", "config", "code"]),
+  source: z.enum(["env", "env_file", "config", "code", "inferred"]),
   sourcePath: z.string().optional(),
   resolved: ResolvedProjectInfoSchema.optional(),
+  allResolved: z.array(ResolvedProjectInfoSchema).optional(),
   cachedAt: z.number(),
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Detection Result Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Result of DSN detection with support for monorepos.
@@ -140,13 +120,11 @@ export type DsnDetectionResult = {
   all: DetectedDsn[];
   /** Whether multiple different DSNs were found (common in monorepos) */
   hasMultiple: boolean;
+  /** Pre-computed fingerprint for alias validation (sorted org:project pairs) */
+  fingerprint: string;
   /** Detected project language (for future use) */
   language?: string;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Common monorepo root directories to scan for packages/apps with their own DSN.

@@ -1,10 +1,13 @@
 /**
  * Tests for human-readable formatters
+ *
+ * Note: Core invariants (uppercase, length preservation, determinism) are tested
+ * via property-based tests in human.property.test.ts. These tests focus on
+ * specific edge cases and environment-dependent behavior.
  */
 
 import { describe, expect, test } from "bun:test";
 import {
-  formatIssueListHeader,
   formatIssueRow,
   formatShortId,
   formatUserIdentity,
@@ -17,328 +20,67 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-describe("formatShortId", () => {
-  describe("without options (passthrough)", () => {
-    test("returns uppercase short ID", () => {
-      expect(stripAnsi(formatShortId("craft-g"))).toBe("CRAFT-G");
-      expect(stripAnsi(formatShortId("CRAFT-G"))).toBe("CRAFT-G");
-    });
-
-    test("handles multi-part project names", () => {
-      expect(stripAnsi(formatShortId("spotlight-electron-4y"))).toBe(
-        "SPOTLIGHT-ELECTRON-4Y"
-      );
-    });
-
-    test("handles mixed case input", () => {
-      expect(stripAnsi(formatShortId("Craft-g"))).toBe("CRAFT-G");
-      expect(stripAnsi(formatShortId("SpotLight-Website-2a"))).toBe(
-        "SPOTLIGHT-WEBSITE-2A"
-      );
-    });
+describe("formatShortId edge cases", () => {
+  test("handles empty options object", () => {
+    expect(stripAnsi(formatShortId("CRAFT-G", {}))).toBe("CRAFT-G");
   });
 
-  describe("single project mode (projectSlug only)", () => {
-    test("formats short ID uppercase", () => {
-      const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-    });
-
-    test("handles lowercase input", () => {
-      const result = formatShortId("craft-g", { projectSlug: "craft" });
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-    });
-
-    test("handles multi-character suffix", () => {
-      const result = formatShortId("PROJECT-A3B", { projectSlug: "project" });
-      expect(stripAnsi(result)).toBe("PROJECT-A3B");
-    });
-
-    test("handles legacy string parameter", () => {
-      const result = formatShortId("CRAFT-G", "craft");
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-    });
-
-    test("handles multi-part project slug", () => {
-      const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
-        projectSlug: "spotlight-electron",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-    });
+  test("handles undefined options", () => {
+    expect(stripAnsi(formatShortId("CRAFT-G", undefined))).toBe("CRAFT-G");
   });
 
-  describe("multi-project mode (with projectAlias)", () => {
-    test("formats simple project name uppercase", () => {
-      const result = formatShortId("FRONTEND-G", {
-        projectSlug: "frontend",
-        projectAlias: "f",
-      });
-      expect(stripAnsi(result)).toBe("FRONTEND-G");
-    });
-
-    test("formats multi-char alias project uppercase", () => {
-      const result = formatShortId("FRONTEND-G", {
-        projectSlug: "frontend",
-        projectAlias: "fr",
-      });
-      expect(stripAnsi(result)).toBe("FRONTEND-G");
-    });
-
-    test("formats spotlight-website in multi-project mode", () => {
-      const result = formatShortId("SPOTLIGHT-WEBSITE-2A", {
-        projectSlug: "spotlight-website",
-        projectAlias: "w",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
-    });
-
-    test("formats spotlight-electron in multi-project mode", () => {
-      const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
-        projectSlug: "spotlight-electron",
-        projectAlias: "e",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-    });
-
-    test("formats spotlight in multi-project mode", () => {
-      const result = formatShortId("SPOTLIGHT-73", {
-        projectSlug: "spotlight",
-        projectAlias: "s",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
-    });
-
-    test("formats project without stripped prefix", () => {
-      const result = formatShortId("BACKEND-A3", {
-        projectSlug: "backend",
-        projectAlias: "b",
-      });
-      expect(stripAnsi(result)).toBe("BACKEND-A3");
-    });
-
-    test("handles lowercase input in multi-project mode", () => {
-      const result = formatShortId("spotlight-website-2a", {
-        projectSlug: "spotlight-website",
-        projectAlias: "w",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
-    });
+  test("handles mismatched project slug gracefully", () => {
+    const result = formatShortId("CRAFT-G", { projectSlug: "other" });
+    expect(stripAnsi(result)).toBe("CRAFT-G");
   });
 
-  describe("output is always uppercase", () => {
-    const testCases = [
-      { input: "craft-g", expected: "CRAFT-G" },
-      { input: "CRAFT-G", expected: "CRAFT-G" },
-      { input: "Craft-G", expected: "CRAFT-G" },
-      { input: "spotlight-website-2a", expected: "SPOTLIGHT-WEBSITE-2A" },
-      { input: "SPOTLIGHT-WEBSITE-2A", expected: "SPOTLIGHT-WEBSITE-2A" },
-    ];
-
-    for (const { input, expected } of testCases) {
-      test(`"${input}" becomes "${expected}"`, () => {
-        expect(stripAnsi(formatShortId(input))).toBe(expected);
-      });
-    }
-
-    test("single project mode outputs uppercase", () => {
-      const result = formatShortId("craft-g", { projectSlug: "craft" });
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-    });
-
-    test("multi-project mode outputs uppercase", () => {
-      const result = formatShortId("spotlight-website-2a", {
-        projectSlug: "spotlight-website",
-        projectAlias: "w",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2A");
-    });
-  });
-
-  describe("edge cases", () => {
-    test("handles empty options object", () => {
-      expect(stripAnsi(formatShortId("CRAFT-G", {}))).toBe("CRAFT-G");
-    });
-
-    test("handles undefined options", () => {
-      expect(stripAnsi(formatShortId("CRAFT-G", undefined))).toBe("CRAFT-G");
-    });
-
-    test("handles mismatched project slug gracefully", () => {
-      const result = formatShortId("CRAFT-G", { projectSlug: "other" });
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-    });
-
-    test("handles numeric-only suffix", () => {
-      const result = formatShortId("PROJECT-123", { projectSlug: "project" });
-      expect(stripAnsi(result)).toBe("PROJECT-123");
-    });
-
-    test("handles single character suffix", () => {
-      const result = formatShortId("PROJECT-A", { projectSlug: "project" });
-      expect(stripAnsi(result)).toBe("PROJECT-A");
-    });
-
-    test("handles long suffix", () => {
-      const result = formatShortId("PROJECT-ABCDEF123", {
-        projectSlug: "project",
-      });
-      expect(stripAnsi(result)).toBe("PROJECT-ABCDEF123");
-    });
-  });
-
-  describe("display length consistency", () => {
-    test("display length matches raw short ID length", () => {
-      const shortId = "SPOTLIGHT-WEBSITE-2A";
-      const formatted = formatShortId(shortId, {
-        projectSlug: "spotlight-website",
-        projectAlias: "w",
-      });
-      expect(stripAnsi(formatted).length).toBe(shortId.length);
-    });
-
-    test("display length consistent across all modes", () => {
-      const shortId = "CRAFT-G";
-
-      const noOptions = formatShortId(shortId);
-      const singleProject = formatShortId(shortId, { projectSlug: "craft" });
-      const multiProject = formatShortId(shortId, {
-        projectSlug: "craft",
-        projectAlias: "c",
-      });
-
-      expect(stripAnsi(noOptions).length).toBe(shortId.length);
-      expect(stripAnsi(singleProject).length).toBe(shortId.length);
-      expect(stripAnsi(multiProject).length).toBe(shortId.length);
-    });
-
-    test("long project names maintain correct length", () => {
-      const shortId = "SPOTLIGHT-ELECTRON-4Y";
-      const formatted = formatShortId(shortId, {
-        projectSlug: "spotlight-electron",
-        projectAlias: "e",
-      });
-      expect(stripAnsi(formatted).length).toBe(shortId.length);
-    });
-  });
-
-  describe("real-world scenarios", () => {
-    test("spotlight monorepo: electron project", () => {
-      const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
-        projectSlug: "spotlight-electron",
-        projectAlias: "e",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-    });
-
-    test("spotlight monorepo: website project", () => {
-      const result = formatShortId("SPOTLIGHT-WEBSITE-2C", {
-        projectSlug: "spotlight-website",
-        projectAlias: "w",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-WEBSITE-2C");
-    });
-
-    test("spotlight monorepo: main spotlight project", () => {
-      const result = formatShortId("SPOTLIGHT-73", {
-        projectSlug: "spotlight",
-        projectAlias: "s",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-73");
-    });
-
-    test("simple monorepo without common prefix", () => {
-      const results = [
-        formatShortId("FRONTEND-A1", {
-          projectSlug: "frontend",
-          projectAlias: "f",
-        }),
-        formatShortId("BACKEND-B2", {
-          projectSlug: "backend",
-          projectAlias: "b",
-        }),
-        formatShortId("WORKER-C3", {
-          projectSlug: "worker",
-          projectAlias: "w",
-        }),
-      ];
-
-      expect(stripAnsi(results[0])).toBe("FRONTEND-A1");
-      expect(stripAnsi(results[1])).toBe("BACKEND-B2");
-      expect(stripAnsi(results[2])).toBe("WORKER-C3");
-    });
-  });
-
-  describe("ANSI formatting (FORCE_COLOR=1)", () => {
-    // Note: These tests verify formatting is applied when colors are enabled.
-    // In CI/test environments without TTY, chalk may disable colors.
-    // Run with FORCE_COLOR=1 to test color output.
-
-    // Helper to check for ANSI escape codes
-    function hasAnsiCodes(str: string): boolean {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
-      return /\x1b\[[0-9;]*m/.test(str);
-    }
-
-    // Check if colors are enabled (chalk respects FORCE_COLOR env)
-    const colorsEnabled = process.env.FORCE_COLOR === "1";
-
-    test("single project mode applies formatting to suffix", () => {
-      const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
-      // Content is always correct
-      expect(stripAnsi(result)).toBe("CRAFT-G");
-      // ANSI codes only present when colors enabled
-      if (colorsEnabled) {
-        expect(hasAnsiCodes(result)).toBe(true);
-        expect(result.length).toBeGreaterThan(stripAnsi(result).length);
-      }
-    });
-
-    test("multi-project mode applies formatting to suffix", () => {
-      const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
-        projectSlug: "spotlight-electron",
-        projectAlias: "e",
-      });
-      expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-      if (colorsEnabled) {
-        expect(hasAnsiCodes(result)).toBe(true);
-        expect(result.length).toBeGreaterThan(stripAnsi(result).length);
-      }
-    });
-
-    test("no formatting when no options provided", () => {
-      const result = formatShortId("CRAFT-G");
-      expect(hasAnsiCodes(result)).toBe(false);
-      expect(result).toBe("CRAFT-G");
-    });
+  test("handles legacy string parameter", () => {
+    const result = formatShortId("CRAFT-G", "craft");
+    expect(stripAnsi(result)).toBe("CRAFT-G");
   });
 });
 
-describe("formatIssueListHeader", () => {
-  test("single project mode does not include ALIAS column", () => {
-    const header = formatIssueListHeader(false);
-    expect(header).not.toContain("ALIAS");
-    expect(header).toContain("LEVEL");
-    expect(header).toContain("SHORT ID");
-    expect(header).toContain("COUNT");
-    expect(header).toContain("SEEN");
-    expect(header).toContain("TITLE");
+describe("formatShortId ANSI formatting", () => {
+  // Note: These tests verify formatting is applied when colors are enabled.
+  // In CI/test environments without TTY, chalk may disable colors.
+  // Run with FORCE_COLOR=1 to test color output.
+
+  // Helper to check for ANSI escape codes
+  function hasAnsiCodes(str: string): boolean {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
+    return /\x1b\[[0-9;]*m/.test(str);
+  }
+
+  // Check if colors are enabled (chalk respects FORCE_COLOR env)
+  const colorsEnabled = process.env.FORCE_COLOR === "1";
+
+  test("single project mode applies formatting to suffix", () => {
+    const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
+    // Content is always correct
+    expect(stripAnsi(result)).toBe("CRAFT-G");
+    // ANSI codes only present when colors enabled
+    if (colorsEnabled) {
+      expect(hasAnsiCodes(result)).toBe(true);
+      expect(result.length).toBeGreaterThan(stripAnsi(result).length);
+    }
   });
 
-  test("multi-project mode includes ALIAS column", () => {
-    const header = formatIssueListHeader(true);
-    expect(header).toContain("ALIAS");
-    expect(header).toContain("LEVEL");
-    expect(header).toContain("SHORT ID");
-    expect(header).toContain("COUNT");
-    expect(header).toContain("SEEN");
-    expect(header).toContain("TITLE");
+  test("multi-project mode applies formatting to suffix", () => {
+    const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
+      projectSlug: "spotlight-electron",
+      projectAlias: "e",
+    });
+    expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
+    if (colorsEnabled) {
+      expect(hasAnsiCodes(result)).toBe(true);
+      expect(result.length).toBeGreaterThan(stripAnsi(result).length);
+    }
   });
 
-  test("ALIAS column comes before SHORT ID in multi-project mode", () => {
-    const header = formatIssueListHeader(true);
-    const aliasIndex = header.indexOf("ALIAS");
-    const shortIdIndex = header.indexOf("SHORT ID");
-    expect(aliasIndex).toBeLessThan(shortIdIndex);
+  test("no formatting when no options provided", () => {
+    const result = formatShortId("CRAFT-G");
+    expect(hasAnsiCodes(result)).toBe(false);
+    expect(result).toBe("CRAFT-G");
   });
 });
 
@@ -396,113 +138,35 @@ describe("formatIssueRow", () => {
   });
 });
 
-describe("formatUserIdentity", () => {
-  describe("with name and email", () => {
-    test("formats as 'name <email>'", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        name: "John Doe",
-        email: "john@example.com",
-      });
-      expect(result).toBe("John Doe <john@example.com>");
-    });
+describe("formatUserIdentity API shapes", () => {
+  // Note: Core behavior is tested via property-based tests.
+  // These tests verify specific API contract shapes.
 
-    test("prefers name over username", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        name: "John Doe",
-        username: "johnd",
-        email: "john@example.com",
-      });
-      expect(result).toBe("John Doe <john@example.com>");
+  test("handles UserInfo shape (from database)", () => {
+    const result = formatUserIdentity({
+      userId: "12345",
+      email: "test@example.com",
+      username: "testuser",
+      name: "Test User",
     });
+    expect(result).toBe("Test User <test@example.com>");
   });
 
-  describe("with username and email (no name)", () => {
-    test("formats as 'username <email>'", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        username: "johnd",
-        email: "john@example.com",
-      });
-      expect(result).toBe("johnd <john@example.com>");
+  test("handles UserInfo without name", () => {
+    const result = formatUserIdentity({
+      userId: "12345",
+      email: "test@example.com",
+      username: "testuser",
     });
+    expect(result).toBe("testuser <test@example.com>");
   });
 
-  describe("with only name or username", () => {
-    test("returns just name", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        name: "John Doe",
-      });
-      expect(result).toBe("John Doe");
+  test("handles token response user with id field", () => {
+    const result = formatUserIdentity({
+      id: "67890",
+      name: "OAuth User",
+      email: "oauth@example.com",
     });
-
-    test("returns just username when no name", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        username: "johnd",
-      });
-      expect(result).toBe("johnd");
-    });
-  });
-
-  describe("with only email", () => {
-    test("returns just email", () => {
-      const result = formatUserIdentity({
-        id: "123",
-        email: "john@example.com",
-      });
-      expect(result).toBe("john@example.com");
-    });
-  });
-
-  describe("fallback to user ID", () => {
-    test("returns 'user {id}' when only id provided", () => {
-      const result = formatUserIdentity({ id: "123" });
-      expect(result).toBe("user 123");
-    });
-
-    test("returns 'user {userId}' when only userId provided", () => {
-      const result = formatUserIdentity({ userId: "456" });
-      expect(result).toBe("user 456");
-    });
-
-    test("prefers id over userId", () => {
-      const result = formatUserIdentity({ id: "123", userId: "456" });
-      expect(result).toBe("user 123");
-    });
-  });
-
-  describe("UserInfo shape (from database)", () => {
-    test("handles UserInfo with userId field", () => {
-      const result = formatUserIdentity({
-        userId: "12345",
-        email: "test@example.com",
-        username: "testuser",
-        name: "Test User",
-      });
-      expect(result).toBe("Test User <test@example.com>");
-    });
-
-    test("handles UserInfo without name", () => {
-      const result = formatUserIdentity({
-        userId: "12345",
-        email: "test@example.com",
-        username: "testuser",
-      });
-      expect(result).toBe("testuser <test@example.com>");
-    });
-  });
-
-  describe("token response user shape", () => {
-    test("handles token response user with id field", () => {
-      const result = formatUserIdentity({
-        id: "67890",
-        name: "OAuth User",
-        email: "oauth@example.com",
-      });
-      expect(result).toBe("OAuth User <oauth@example.com>");
-    });
+    expect(result).toBe("OAuth User <oauth@example.com>");
   });
 });

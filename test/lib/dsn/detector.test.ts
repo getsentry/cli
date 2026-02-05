@@ -111,7 +111,8 @@ describe("DSN Detector (New Module)", () => {
         `Sentry.init({ dsn: "${codeDsn}" })`
       );
 
-      // Should return code DSN (highest priority)
+      // Code DSN takes priority over .env file DSN
+      // Priority order: code > env_file > env_var
       const result = await detectDsn(testDir);
       expect(result?.raw).toBe(codeDsn);
       expect(result?.source).toBe("code");
@@ -163,6 +164,72 @@ describe("DSN Detector (New Module)", () => {
       const result = await detectDsn(testDir);
       expect(result?.raw).toBe(envVarDsn);
       expect(result?.source).toBe("env");
+    });
+
+    test("env var DSN is cached and verified without full scan", async () => {
+      const envVarDsn = "https://var@o111.ingest.sentry.io/111";
+      const changedDsn = "https://changed@o222.ingest.sentry.io/222";
+
+      // Only set env var
+      process.env.SENTRY_DSN = envVarDsn;
+
+      // First detection - should detect and cache
+      const result1 = await detectDsn(testDir);
+      expect(result1?.raw).toBe(envVarDsn);
+      expect(result1?.source).toBe("env");
+
+      // Verify it's cached
+      const cached = await getCachedDsn(testDir);
+      expect(cached?.dsn).toBe(envVarDsn);
+      expect(cached?.source).toBe("env");
+
+      // Second detection - should use cache verification (not full scan)
+      const result2 = await detectDsn(testDir);
+      expect(result2?.raw).toBe(envVarDsn);
+      expect(result2?.source).toBe("env");
+
+      // Change env var - should detect the change
+      process.env.SENTRY_DSN = changedDsn;
+      const result3 = await detectDsn(testDir);
+      expect(result3?.raw).toBe(changedDsn);
+      expect(result3?.source).toBe("env");
+
+      // Cache should be updated
+      const updatedCache = await getCachedDsn(testDir);
+      expect(updatedCache?.dsn).toBe(changedDsn);
+    });
+
+    test("cache verification respects priority when code DSN is added after env var", async () => {
+      const envVarDsn = "https://var@o111.ingest.sentry.io/111";
+      const codeDsn = "https://code@o222.ingest.sentry.io/222";
+
+      // First, detect with only env var
+      process.env.SENTRY_DSN = envVarDsn;
+      const result1 = await detectDsn(testDir);
+      expect(result1?.raw).toBe(envVarDsn);
+      expect(result1?.source).toBe("env");
+
+      // Verify it's cached
+      const cached = await getCachedDsn(testDir);
+      expect(cached?.source).toBe("env");
+
+      // Now add a code DSN (higher priority)
+      mkdirSync(join(testDir, "src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "src/config.ts"),
+        `Sentry.init({ dsn: "${codeDsn}" })`
+      );
+
+      // Next detection should find the code DSN (higher priority)
+      // even though env var is still cached
+      const result2 = await detectDsn(testDir);
+      expect(result2?.raw).toBe(codeDsn);
+      expect(result2?.source).toBe("code");
+
+      // Cache should be updated to code DSN
+      const updatedCache = await getCachedDsn(testDir);
+      expect(updatedCache?.dsn).toBe(codeDsn);
+      expect(updatedCache?.source).toBe("code");
     });
 
     test("skips node_modules and dist directories", async () => {
@@ -245,7 +312,7 @@ describe("DSN Detector (New Module)", () => {
       const result = await detectAllDsns(testDir);
 
       expect(result.hasMultiple).toBe(true);
-      // Code DSN has higher priority, so it's first
+      // Code DSNs have highest priority (code > env_file > env_var)
       expect(result.primary?.raw).toBe(codeDsn);
       expect(result.all).toHaveLength(2);
     });

@@ -12,7 +12,7 @@
  */
 
 import { getProjectByAlias } from "./db/project-aliases.js";
-import { createDsnFingerprint, detectAllDsns } from "./dsn/index.js";
+import { detectAllDsns } from "./dsn/index.js";
 import { ContextError } from "./errors.js";
 import {
   expandToFullShortId,
@@ -59,9 +59,9 @@ async function resolveAliasSuffix(
   suffix: string,
   cwd: string
 ): Promise<ResolvedIssue | null> {
-  // Detect DSNs to create fingerprint for validation
+  // Detect DSNs to get fingerprint for validation
   const detection = await detectAllDsns(cwd);
-  const fingerprint = createDsnFingerprint(detection.all);
+  const fingerprint = detection.fingerprint;
   const projectEntry = await getProjectByAlias(alias, fingerprint);
 
   if (!projectEntry) {

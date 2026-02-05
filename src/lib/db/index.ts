@@ -6,6 +6,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createTracedDatabase } from "../telemetry.js";
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
 
@@ -77,23 +78,25 @@ export function getDatabase(): Database {
 
   ensureConfigDir();
 
-  db = new Database(dbPath);
+  const rawDb = new Database(dbPath);
 
   // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
   // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
   // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
   // must wait. Without sufficient timeout, concurrent processes fail immediately.
   // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA synchronous = NORMAL");
+  rawDb.exec("PRAGMA busy_timeout = 5000");
+  rawDb.exec("PRAGMA journal_mode = WAL");
+  rawDb.exec("PRAGMA foreign_keys = ON");
+  rawDb.exec("PRAGMA synchronous = NORMAL");
 
   setDbPermissions();
-  initSchema(db);
-  runMigrations(db);
-  migrateFromJson(db);
+  initSchema(rawDb);
+  runMigrations(rawDb);
+  migrateFromJson(rawDb);
 
+  // Wrap with tracing proxy for automatic query instrumentation
+  db = createTracedDatabase(rawDb);
   dbOpenedPath = dbPath;
 
   return db;
@@ -115,6 +118,7 @@ function shouldRunCleanup(): boolean {
 function cleanupExpiredCaches(): void {
   const database = getDatabase();
   const expiryTime = Date.now() - CACHE_TTL_MS;
+  const now = Date.now();
 
   database
     .query("DELETE FROM project_cache WHERE last_accessed < ?")
@@ -125,6 +129,10 @@ function cleanupExpiredCaches(): void {
   database
     .query("DELETE FROM project_aliases WHERE last_accessed < ?")
     .run(expiryTime);
+  // project_root_cache uses ttl_expires_at instead of last_accessed
+  database
+    .query("DELETE FROM project_root_cache WHERE ttl_expires_at < ?")
+    .run(now);
 }
 
 export function maybeCleanupCaches(): void {
