@@ -1,0 +1,32 @@
+## Implementation Plan
+
+### Issue 1: Double-Dash in Alias
+
+**Root Cause:** `findCommonWordPrefix` doesn't handle the case where one slug is
+literally a prefix of another (e.g., 'cli' is prefix of 'cli-website').
+
+**Fix:** Added `applyPrefixRelationships()` helper in `src/lib/alias.ts` that:
+1. For each slug, finds the longest other slug that it starts with (plus dash)
+2. Uses the suffix after that prefix as the remainder for alias generation
+
+### Issue 2: SHORT ID Highlighting Mismatch
+
+**Root Cause:** `formatShortId` only highlighted the final issue number, not the
+portion corresponding to the alias.
+
+**Fix:** Added `formatShortIdWithAlias()` helper in `src/lib/formatters/human.ts`:
+- In multi-project mode, finds where the alias matches in the shortId
+- Highlights from that point onwards (e.g., 'CLI-WEBSITE-1' → 'CLI-' + highlight('WEBSITE-1'))
+
+### Example Results
+
+| Projects                     | Aliases   | Issue Shorthands | SHORT ID Highlighting        |
+|------------------------------|-----------|------------------|------------------------------|
+| cli, cli-website             | c, w      | c-33, w-1        | CLI-33, CLI-**WEBSITE-1**    |
+| api, api-server, api-server-v2 | a, s, v | a-1, s-2, v-3    | API-1, API-**SERVER-2**, ... |
+
+### Tests Added
+
+1. 'handles slug that is prefix of another slug' - cli + cli-website → c, w
+2. 'handles nested prefix relationships' - api + api-server + api-server-v2 → a, s, v
+3. 'no alias ends with dash or underscore' - ensures aliases are well-formed
