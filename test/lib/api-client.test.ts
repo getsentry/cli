@@ -6,11 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  buildSearchParams,
-  matchesWordBoundary,
-  rawApiRequest,
-} from "../../src/lib/api-client.js";
+import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -566,64 +562,6 @@ describe("rawApiRequest", () => {
     const result = await rawApiRequest("test/");
 
     expect(result.headers.get("X-Request-Id")).toBe("abc123");
-  });
-});
-
-describe("matchesWordBoundary", () => {
-  test("exact match returns true", () => {
-    expect(matchesWordBoundary("cli", "cli")).toBe(true);
-    expect(matchesWordBoundary("docs", "docs")).toBe(true);
-  });
-
-  test("is case-insensitive", () => {
-    expect(matchesWordBoundary("CLI", "cli")).toBe(true);
-    expect(matchesWordBoundary("cli", "CLI")).toBe(true);
-    expect(matchesWordBoundary("MyProject", "myproject")).toBe(true);
-  });
-
-  test("matches at hyphen boundaries (start)", () => {
-    expect(matchesWordBoundary("cli", "cli-website")).toBe(true);
-    expect(matchesWordBoundary("docs", "docs-site")).toBe(true);
-  });
-
-  test("matches at hyphen boundaries (end)", () => {
-    expect(matchesWordBoundary("cli", "sentry-cli")).toBe(true);
-    expect(matchesWordBoundary("docs", "my-docs")).toBe(true);
-  });
-
-  test("matches at hyphen boundaries (middle)", () => {
-    expect(matchesWordBoundary("cli", "my-cli-app")).toBe(true);
-    expect(matchesWordBoundary("docs", "my-docs-site")).toBe(true);
-  });
-
-  test("bidirectional: project slug in directory name", () => {
-    // Directory "sentry-docs" contains project "docs" at word boundary
-    expect(matchesWordBoundary("sentry-docs", "docs")).toBe(true);
-    // Directory "my-cli-project" contains project "cli" at word boundary
-    expect(matchesWordBoundary("my-cli-project", "cli")).toBe(true);
-  });
-
-  test("does NOT match with underscore (underscore is a word char)", () => {
-    // In regex \b, underscore is part of \w (word characters)
-    expect(matchesWordBoundary("cli", "cli_utils")).toBe(false);
-    expect(matchesWordBoundary("cli", "my_cli")).toBe(false);
-    expect(matchesWordBoundary("cli", "my_cli_app")).toBe(false);
-  });
-
-  test("does NOT match partial words without boundary", () => {
-    expect(matchesWordBoundary("cli", "eclipse")).toBe(false);
-    expect(matchesWordBoundary("cli", "clipping")).toBe(false);
-    expect(matchesWordBoundary("cli", "publicist")).toBe(false);
-    expect(matchesWordBoundary("docs", "documentary")).toBe(false);
-  });
-
-  test("handles special regex characters safely", () => {
-    // These should not throw and should return correct results
-    expect(matchesWordBoundary("a.b", "a.b")).toBe(true);
-    expect(matchesWordBoundary("a.b", "axb")).toBe(false); // dot is escaped
-    expect(matchesWordBoundary("a*b", "aaaaab")).toBe(false); // asterisk is escaped
-    expect(() => matchesWordBoundary("(test)", "(test)")).not.toThrow();
-    expect(() => matchesWordBoundary("[test]", "[test]")).not.toThrow();
   });
 });
 
