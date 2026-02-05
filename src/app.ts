@@ -11,6 +11,7 @@ import { authRoute } from "./commands/auth/index.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
+import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
@@ -22,6 +23,7 @@ import { error as errorColor } from "./lib/formatters/colors.js";
 export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
+    init: initCommand,
     auth: authRoute,
     cli: cliRoute,
     org: orgRoute,
