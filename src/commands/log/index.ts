@@ -16,12 +16,7 @@ export const logRoute = buildRouteMap({
     fullDescription:
       "View and stream logs from your Sentry projects.\n\n" +
       "Commands:\n" +
-      "  list     List or stream logs from a project\n\n" +
-      "Examples:\n" +
-      "  sentry log list                    # Auto-detect from DSN\n" +
-      "  sentry log list myorg/myproject    # Explicit org/project\n" +
-      "  sentry log list -f                 # Stream logs in real-time\n" +
-      "  sentry log list -q 'level:error'   # Filter to error level only",
+      "  list     List or stream logs from a project",
     hideRoute: {},
   },
 });
