@@ -919,15 +919,12 @@ describe("ensureRootCauseAnalysis", () => {
   });
 
   test("triggers new analysis when no state exists", async () => {
-    let fetchCount = 0;
     let triggerCalled = false;
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
-
-      fetchCount += 1;
 
       // First call: getAutofixState returns null
       if (url.includes("/autofix/") && req.method === "GET") {
@@ -980,15 +977,12 @@ describe("ensureRootCauseAnalysis", () => {
   });
 
   test("retries when existing analysis has ERROR status", async () => {
-    let fetchCount = 0;
     let triggerCalled = false;
 
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
-
-      fetchCount += 1;
 
       // getAutofixState
       if (url.includes("/autofix/") && req.method === "GET") {
