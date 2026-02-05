@@ -33,7 +33,9 @@ import {
   yellow,
 } from "./colors.js";
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Status Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_ICONS: Record<IssueStatus, string> = {
   resolved: green("✓"),
@@ -50,7 +52,9 @@ const STATUS_LABELS: Record<IssueStatus, string> = {
 /** Maximum features to display before truncating with "... and N more" */
 const MAX_DISPLAY_FEATURES = 10;
 
+// ─────────────────────────────────────────────────────────────────────────────
 // String Utilities
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Capitalize the first letter of a string
@@ -59,7 +63,9 @@ function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Event Entry Extraction
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Map of entry type strings to their TypeScript types */
 type EntryTypeMap = {
@@ -162,7 +168,9 @@ export function formatStatusLabel(status: string | undefined): string {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Table Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 type TableColumn = {
   header: string;
@@ -215,7 +223,9 @@ export function divider(length = 80, char = "─"): string {
   return muted(char.repeat(length));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Date Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format a date as relative time (e.g., "2h ago", "3d ago") or short date for older dates.
@@ -252,7 +262,9 @@ export function formatRelativeTime(dateString: string | undefined): string {
   return text.padEnd(10);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Issue Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Column widths for issue list table */
 const COL_LEVEL = 7;
@@ -595,7 +607,9 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Stack Trace Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format a single stack frame
@@ -673,7 +687,9 @@ function formatStackTrace(exceptionEntry: ExceptionEntry): string[] {
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Breadcrumbs Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format breadcrumb level with color
@@ -752,7 +768,9 @@ function formatBreadcrumbs(breadcrumbsEntry: BreadcrumbsEntry): string[] {
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Request Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format the HTTP request section
@@ -785,7 +803,9 @@ function formatRequest(requestEntry: RequestEntry): string[] {
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Span Tree Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Maximum length for span descriptions before truncation */
 const SPAN_DESCRIPTION_MAX_LENGTH = 50;
@@ -977,7 +997,9 @@ export function formatSpanTree(traceResponse: TraceResponse): string[] {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Simple Span Tree Formatting (for --spans flag)
+// ─────────────────────────────────────────────────────────────────────────────
 
 type FormatSpanOptions = {
   lines: string[];
@@ -1038,6 +1060,9 @@ export function formatSimpleSpanTree(
     const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
 
     const lines: string[] = [];
+    lines.push("");
+    lines.push(muted("─── Span Tree ───"));
+    lines.push("");
     lines.push(`${muted("Trace —")} ${traceId}`);
 
     const spanCount = spans.length;
@@ -1055,7 +1080,9 @@ export function formatSimpleSpanTree(
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Environment Context Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format the environment contexts (browser, OS, device)
@@ -1202,7 +1229,9 @@ function formatReplayLink(
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Event Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format event details for display.
@@ -1297,7 +1326,9 @@ export function formatEventDetails(
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Format organization for list display
@@ -1348,7 +1379,9 @@ export function formatOrgDetails(org: SentryOrganization): string[] {
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Project Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 type ProjectRowOptions = {
   orgWidth: number;
@@ -1444,7 +1477,9 @@ export function formatProjectDetails(
   return lines;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // User Identity Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * User identity fields for display formatting.
@@ -1486,7 +1521,9 @@ export function formatUserIdentity(user: UserIdentityInput): string {
   return `user ${finalId}`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 // Token Formatting
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Mask a token for display

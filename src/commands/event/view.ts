@@ -6,12 +6,12 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getEvent, getTrace } from "../../lib/api-client.js";
+import { getDetailedTrace, getEvent } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   formatEventDetails,
-  formatSpanTree,
+  formatSimpleSpanTree,
   muted,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -145,18 +145,22 @@ export const viewCommand = buildCommand({
     const event = await getEvent(target.org, target.project, eventId);
 
     let spanTreeLines: string[] | undefined;
-    if (flags.spans !== undefined && event.contexts?.trace?.trace_id) {
+    const traceId = event.contexts?.trace?.trace_id;
+    const dateCreated = (event as { dateCreated?: string }).dateCreated;
+    const timestamp = dateCreated
+      ? new Date(dateCreated).getTime() / 1000
+      : undefined;
+
+    if (flags.spans !== undefined && traceId && timestamp) {
       try {
-        const traceEvents = await getTrace(
-          target.org,
-          event.contexts.trace.trace_id
-        );
-        spanTreeLines = formatSpanTree(traceEvents);
+        const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
+        const spans = await getDetailedTrace(target.org, traceId, timestamp);
+        spanTreeLines = formatSimpleSpanTree(traceId, spans, depth);
       } catch {
         // Non-fatal: trace data may not be available for all events
         spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
       }
-    } else if (flags.spans !== undefined && !event.contexts?.trace?.trace_id) {
+    } else if (flags.spans !== undefined && !traceId) {
       spanTreeLines = [muted("\nNo trace data available for this event.")];
     }
 
