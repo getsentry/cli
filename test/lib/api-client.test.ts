@@ -6,7 +6,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
+import {
+  buildSearchParams,
+  matchesWordBoundary,
+  rawApiRequest,
+} from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -305,6 +309,97 @@ describe("buildSearchParams", () => {
     const result = buildSearchParams({ tags: [] });
     // Empty array produces no entries, so result should be undefined
     expect(result).toBeUndefined();
+  });
+});
+
+describe("matchesWordBoundary", () => {
+  // Exact match cases
+  test("exact match returns true", () => {
+    expect(matchesWordBoundary("cli", "cli")).toBe(true);
+    expect(matchesWordBoundary("frontend", "frontend")).toBe(true);
+  });
+
+  // Word boundary matching: a in b
+  test("matches when first string is word-bounded in second", () => {
+    expect(matchesWordBoundary("cli", "cli-website")).toBe(true);
+    expect(matchesWordBoundary("cli", "sentry-cli")).toBe(true);
+    expect(matchesWordBoundary("cli", "sentry-cli-tools")).toBe(true);
+    expect(matchesWordBoundary("docs", "sentry-docs")).toBe(true);
+  });
+
+  // Word boundary matching: b in a (bidirectional)
+  test("matches when second string is word-bounded in first", () => {
+    expect(matchesWordBoundary("sentry-cli", "cli")).toBe(true);
+    expect(matchesWordBoundary("cli-website", "cli")).toBe(true);
+    expect(matchesWordBoundary("sentry-docs", "docs")).toBe(true);
+  });
+
+  // Non-matching cases
+  test("returns false when no word boundary match", () => {
+    expect(matchesWordBoundary("cli", "eclipse")).toBe(false);
+    expect(matchesWordBoundary("cli", "decliners")).toBe(false);
+    expect(matchesWordBoundary("api", "rapid")).toBe(false);
+  });
+
+  // Case insensitivity
+  test("matching is case-insensitive", () => {
+    expect(matchesWordBoundary("CLI", "cli")).toBe(true);
+    expect(matchesWordBoundary("cli", "CLI-Website")).toBe(true);
+    expect(matchesWordBoundary("Sentry-CLI", "cli")).toBe(true);
+  });
+
+  // Symmetry property
+  test("matching is symmetric", () => {
+    // If a matches b, then b matches a
+    expect(matchesWordBoundary("cli", "sentry-cli")).toBe(
+      matchesWordBoundary("sentry-cli", "cli")
+    );
+    expect(matchesWordBoundary("docs", "sentry-docs")).toBe(
+      matchesWordBoundary("sentry-docs", "docs")
+    );
+    expect(matchesWordBoundary("api", "rapid")).toBe(
+      matchesWordBoundary("rapid", "api")
+    );
+  });
+
+  // Edge cases with special regex characters
+  test("handles strings with regex special characters safely", () => {
+    // These should not cause regex errors (characters are escaped)
+    expect(matchesWordBoundary("test.project", "test.project")).toBe(true);
+    expect(matchesWordBoundary("test+plus", "test+plus")).toBe(true);
+    expect(matchesWordBoundary("test*star", "test*star")).toBe(true);
+    // Note: brackets at end don't match due to word boundary rules -
+    // \b requires transition between word/non-word chars, but ] at end
+    // has no word char after it
+    expect(matchesWordBoundary("test[bracket]", "test[bracket]")).toBe(false);
+    // But without trailing non-word char, it works
+    expect(matchesWordBoundary("test-bracket", "test-bracket")).toBe(true);
+  });
+
+  // Hyphenated project names (common pattern)
+  test("handles hyphenated project slugs", () => {
+    expect(matchesWordBoundary("frontend", "sentry-frontend")).toBe(true);
+    expect(matchesWordBoundary("backend", "acme-backend-api")).toBe(true);
+    expect(matchesWordBoundary("api", "backend-api")).toBe(true);
+  });
+
+  // Underscore separators - note: underscores are word characters in regex,
+  // so there's no word boundary between sentry_ and frontend
+  test("underscores do not create word boundaries", () => {
+    // Underscores connect words, so these should NOT match
+    expect(matchesWordBoundary("frontend", "sentry_frontend")).toBe(false);
+    expect(matchesWordBoundary("api", "backend_api")).toBe(false);
+    // But hyphens DO create word boundaries
+    expect(matchesWordBoundary("frontend", "sentry-frontend")).toBe(true);
+    expect(matchesWordBoundary("api", "backend-api")).toBe(true);
+  });
+
+  // Multi-word directory names
+  test("handles directory names that are partial matches", () => {
+    // Directory "sentry" should match project "sentry-cli"
+    expect(matchesWordBoundary("sentry", "sentry-cli")).toBe(true);
+    // Directory "sentry-cli" should match project "cli"
+    expect(matchesWordBoundary("sentry-cli", "cli")).toBe(true);
   });
 });
 
