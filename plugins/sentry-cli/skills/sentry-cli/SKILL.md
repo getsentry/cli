@@ -256,6 +256,7 @@ Generate a solution plan using Seer AI
 **Flags:**
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+- `--force - Force new plan even if one exists`
 
 **Examples:**
 

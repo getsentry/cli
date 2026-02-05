@@ -9,6 +9,7 @@ import {
   getAutofixState,
   getIssue,
   getIssueByShortId,
+  triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
 import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
@@ -62,8 +63,8 @@ export function buildCommandHint(command: string, issueId: string): string {
   return `sentry issue ${command} <org>/${issueId}`;
 }
 
-/** Default timeout in milliseconds (3 minutes) */
-const DEFAULT_TIMEOUT_MS = 180_000;
+/** Default timeout in milliseconds (6 minutes) */
+const DEFAULT_TIMEOUT_MS = 360_000;
 
 /**
  * Result of resolving an issue ID - includes full issue object.
@@ -332,13 +333,81 @@ type PollAutofixOptions = {
   json: boolean;
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
-  /** Maximum time to wait in milliseconds (default: 180000 = 3 minutes) */
+  /** Maximum time to wait in milliseconds (default: 360000 = 6 minutes) */
   timeoutMs?: number;
   /** Custom timeout error message */
   timeoutMessage?: string;
   /** Stop polling when status is WAITING_FOR_USER_RESPONSE (default: false) */
   stopOnWaitingForUser?: boolean;
 };
+
+type EnsureRootCauseOptions = {
+  /** Organization slug */
+  org: string;
+  /** Numeric issue ID */
+  issueId: string;
+  /** Writer for progress output */
+  stderr: Writer;
+  /** Whether to suppress progress output (JSON mode) */
+  json: boolean;
+  /** Force new analysis even if one exists */
+  force?: boolean;
+};
+
+/**
+ * Ensure root cause analysis exists for an issue.
+ *
+ * If no analysis exists (or force is true), triggers a new analysis.
+ * If analysis is in progress, waits for it to complete.
+ * If analysis failed (ERROR status), retries automatically.
+ *
+ * @param options - Configuration options
+ * @returns The completed autofix state with root causes
+ */
+export async function ensureRootCauseAnalysis(
+  options: EnsureRootCauseOptions
+): Promise<AutofixState> {
+  const { org, issueId, stderr, json, force = false } = options;
+
+  // 1. Check for existing analysis (skip if --force)
+  let state = force ? null : await getAutofixState(org, issueId);
+
+  // Handle error status - we will retry the analysis
+  if (state?.status === "ERROR") {
+    if (!json) {
+      stderr.write("Previous analysis failed, retrying...\n");
+    }
+    state = null;
+  }
+
+  // 2. Trigger new analysis if none exists or forced
+  if (!state) {
+    if (!json) {
+      const prefix = force ? "Forcing fresh" : "Starting";
+      stderr.write(
+        `${prefix} root cause analysis, it can take several minutes...\n`
+      );
+    }
+    await triggerRootCauseAnalysis(org, issueId);
+  }
+
+  // 3. Poll until complete (if not already completed)
+  if (
+    !state ||
+    (state.status !== "COMPLETED" &&
+      state.status !== "WAITING_FOR_USER_RESPONSE")
+  ) {
+    state = await pollAutofixState({
+      orgSlug: org,
+      issueId,
+      stderr,
+      json,
+      stopOnWaitingForUser: true,
+    });
+  }
+
+  return state;
+}
 
 /**
  * Check if polling should stop based on current state.
@@ -378,7 +447,7 @@ export async function pollAutofixState(
     json,
     pollIntervalMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    timeoutMessage = "Operation timed out after 3 minutes. Try again or check the issue in Sentry web UI.",
+    timeoutMessage = "Operation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
     stopOnWaitingForUser = false,
   } = options;
 
