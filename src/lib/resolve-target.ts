@@ -8,10 +8,17 @@
  * 1. Explicit CLI flags
  * 2. Config defaults
  * 3. DSN auto-detection (source code, .env files, environment variables)
+ * 4. Directory name inference (matches project slugs with word boundaries)
  */
 
-import { findProjectByDsnKey, getProject } from "./api-client.js";
+import { basename } from "node:path";
+import {
+  findProjectByDsnKey,
+  findProjectsByPattern,
+  getProject,
+} from "./api-client.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
+import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
   getCachedProject,
   getCachedProjectByDsnKey,
@@ -22,6 +29,7 @@ import type { DetectedDsn } from "./dsn/index.js";
 import {
   detectAllDsns,
   detectDsn,
+  findProjectRoot,
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
@@ -323,6 +331,114 @@ async function resolveDsnToTarget(
   }
 }
 
+/** Minimum directory name length for inference (avoids matching too broadly) */
+const MIN_DIR_NAME_LENGTH = 2;
+
+/** Regex to match dot-only directory names like ".", ".." */
+const DOT_ONLY_REGEX = /^\.+$/;
+
+/**
+ * Check if a directory name is valid for project inference.
+ * Rejects empty strings, dot-only names, and names that are too short.
+ */
+function isValidDirNameForInference(dirName: string): boolean {
+  if (!dirName || dirName.length < MIN_DIR_NAME_LENGTH) {
+    return false;
+  }
+  // Reject dot-only names like ".", ".."
+  if (DOT_ONLY_REGEX.test(dirName)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Infer project(s) from directory name when DSN detection fails.
+ * Uses word-boundary matching (`\b`) against all accessible projects.
+ *
+ * Caches results in dsn_cache with source: "inferred" for performance.
+ * Cache is invalidated when directory mtime changes or after 24h TTL.
+ *
+ * @param cwd - Current working directory
+ * @returns Resolved targets, or empty if no matches found
+ */
+async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
+  const { projectRoot } = await findProjectRoot(cwd);
+  const dirName = basename(projectRoot);
+
+  // Skip inference for invalid directory names
+  if (!isValidDirNameForInference(dirName)) {
+    return { targets: [] };
+  }
+
+  // Check cache first (reuse DSN cache with source: "inferred")
+  const cached = await getCachedDsn(projectRoot);
+  if (cached?.source === "inferred" && cached.resolved) {
+    // Return cached result
+    const detectedFrom = `directory name "${dirName}"`;
+    return {
+      targets: [
+        {
+          org: cached.resolved.orgSlug,
+          project: cached.resolved.projectSlug,
+          orgDisplay: cached.resolved.orgName,
+          projectDisplay: cached.resolved.projectName,
+          detectedFrom,
+        },
+      ],
+    };
+  }
+
+  // Search for matching projects using word-boundary matching
+  let matches: Awaited<ReturnType<typeof findProjectsByPattern>>;
+  try {
+    matches = await findProjectsByPattern(dirName);
+  } catch (error) {
+    // If not authenticated or API fails, skip inference
+    if (error instanceof AuthError) {
+      return { targets: [] };
+    }
+    throw error;
+  }
+
+  if (matches.length === 0) {
+    return { targets: [] };
+  }
+
+  // Cache the first match for faster subsequent lookups
+  const [primary] = matches;
+  if (primary) {
+    await setCachedDsn(projectRoot, {
+      dsn: "", // No DSN for inferred
+      projectId: primary.id,
+      source: "inferred",
+      resolved: {
+        orgSlug: primary.orgSlug,
+        orgName: primary.organization?.name ?? primary.orgSlug,
+        projectSlug: primary.slug,
+        projectName: primary.name,
+      },
+    });
+  }
+
+  const detectedFrom = `directory name "${dirName}"`;
+  const targets: ResolvedTarget[] = matches.map((m) => ({
+    org: m.orgSlug,
+    project: m.slug,
+    orgDisplay: m.orgSlug,
+    projectDisplay: m.name,
+    detectedFrom,
+  }));
+
+  return {
+    targets,
+    footer:
+      matches.length > 1
+        ? `Found ${matches.length} projects matching directory "${dirName}"`
+        : undefined,
+  };
+}
+
 /**
  * Resolve all targets for monorepo-aware commands.
  *
@@ -333,6 +449,7 @@ async function resolveDsnToTarget(
  * 1. CLI flags (--org and --project) - returns single target
  * 2. Config defaults - returns single target
  * 3. DSN auto-detection - may return multiple targets
+ * 4. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with flags and cwd
  * @returns All resolved targets and optional footer message
@@ -385,7 +502,8 @@ export async function resolveAllTargets(
   const detection = await detectAllDsns(cwd);
 
   if (detection.all.length === 0) {
-    return { targets: [] };
+    // 4. Fallback: infer from directory name
+    return inferFromDirectoryName(cwd);
   }
 
   // Resolve all DSNs in parallel
@@ -438,6 +556,7 @@ export async function resolveAllTargets(
  * 1. CLI flags (--org and --project) - both must be provided together
  * 2. Config defaults
  * 3. DSN auto-detection
+ * 4. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with flags and cwd
  * @returns Resolved target, or null if resolution failed
@@ -480,10 +599,31 @@ export async function resolveOrgAndProject(
 
   // 3. DSN auto-detection
   try {
-    return await resolveFromDsn(cwd);
+    const dsnResult = await resolveFromDsn(cwd);
+    if (dsnResult) {
+      return dsnResult;
+    }
   } catch {
-    return null;
+    // Fall through to directory inference
   }
+
+  // 4. Fallback: infer from directory name
+  const inferred = await inferFromDirectoryName(cwd);
+  if (inferred.targets.length > 0) {
+    const [first] = inferred.targets;
+    if (first) {
+      // If multiple matches, note it in detectedFrom
+      return {
+        ...first,
+        detectedFrom:
+          inferred.targets.length > 1
+            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
+            : first.detectedFrom,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**

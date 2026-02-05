@@ -13,8 +13,9 @@ import { z } from "zod";
  * - env_file: .env file
  * - config: Language-specific config file (e.g., sentry.properties)
  * - code: Source code patterns (e.g., Sentry.init)
+ * - inferred: Inferred from directory name matching project slugs
  */
-export type DsnSource = "env" | "env_file" | "config" | "code";
+export type DsnSource = "env" | "env_file" | "config" | "code" | "inferred";
 
 /**
  * Parsed DSN components
@@ -97,7 +98,7 @@ export const CachedDsnEntrySchema = z.object({
   dsn: z.string(),
   projectId: z.string(),
   orgId: z.string().optional(),
-  source: z.enum(["env", "env_file", "config", "code"]),
+  source: z.enum(["env", "env_file", "config", "code", "inferred"]),
   sourcePath: z.string().optional(),
   resolved: ResolvedProjectInfoSchema.optional(),
   cachedAt: z.number(),
