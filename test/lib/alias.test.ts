@@ -152,4 +152,58 @@ describe("buildOrgAwareAliases specific outputs", () => {
     expect(org1Api).toMatch(/^o.*\/api$/);
     expect(org1App).toMatch(/^o.*\/app$/);
   });
+
+  test("handles slug that is prefix of another slug", () => {
+    const result = buildOrgAwareAliases([
+      { org: "acme", project: "cli" },
+      { org: "acme", project: "cli-website" },
+    ]);
+    // "cli" is a prefix of "cli-website", so cli-website uses "website" as remainder
+    expect(result.aliasMap.get("acme/cli")).toBe("c");
+    expect(result.aliasMap.get("acme/cli-website")).toBe("w");
+  });
+
+  test("handles nested prefix relationships", () => {
+    const result = buildOrgAwareAliases([
+      { org: "acme", project: "api" },
+      { org: "acme", project: "api-server" },
+      { org: "acme", project: "api-server-v2" },
+    ]);
+    // api → api, api-server → server, api-server-v2 → v2
+    expect(result.aliasMap.get("acme/api")).toBe("a");
+    expect(result.aliasMap.get("acme/api-server")).toBe("s");
+    expect(result.aliasMap.get("acme/api-server-v2")).toBe("v");
+  });
+
+  test("no alias ends with dash or underscore", () => {
+    const result = buildOrgAwareAliases([
+      { org: "acme", project: "cli" },
+      { org: "acme", project: "cli-website" },
+      { org: "acme", project: "cli-app" },
+    ]);
+    for (const alias of result.aliasMap.values()) {
+      expect(alias.endsWith("-")).toBe(false);
+      expect(alias.endsWith("_")).toBe(false);
+    }
+  });
+
+  test("avoids collision when prefix-stripped remainder matches another slug", () => {
+    // Edge case: "cli-website" would become "website" after stripping "cli-",
+    // but "website" is already a project slug - must avoid duplicate aliases
+    const result = buildOrgAwareAliases([
+      { org: "acme", project: "cli" },
+      { org: "acme", project: "cli-website" },
+      { org: "acme", project: "website" },
+    ]);
+
+    // All aliases must be unique
+    const aliases = [...result.aliasMap.values()];
+    const uniqueAliases = new Set(aliases);
+    expect(uniqueAliases.size).toBe(aliases.length);
+
+    // No alias should end with dash
+    for (const alias of aliases) {
+      expect(alias.endsWith("-")).toBe(false);
+    }
+  });
 });

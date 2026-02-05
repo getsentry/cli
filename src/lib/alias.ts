@@ -85,7 +85,7 @@ export function findShortestUniquePrefixes(
 
     // Find the shortest prefix that's unique among all strings
     while (prefixLen <= lowerStr.length) {
-      const prefix = lowerStr.slice(0, prefixLen);
+      let prefix = lowerStr.slice(0, prefixLen);
       const isUnique = strings.every((other) => {
         if (other === str) {
           return true;
@@ -94,6 +94,14 @@ export function findShortestUniquePrefixes(
       });
 
       if (isUnique) {
+        // Extend past any trailing word boundary characters (- or _)
+        while (
+          (prefix.endsWith("-") || prefix.endsWith("_")) &&
+          prefixLen < lowerStr.length
+        ) {
+          prefixLen += 1;
+          prefix = lowerStr.slice(0, prefixLen);
+        }
         result.set(str, prefix);
         break;
       }
@@ -148,6 +156,46 @@ function groupByProjectSlug(pairs: OrgProjectPair[]): {
   return { projectToOrgs, collidingSlugs, uniqueSlugs };
 }
 
+/**
+ * Handle "one slug is prefix of another" relationships.
+ * e.g., ["cli", "cli-website"] → cli stays "cli", cli-website becomes "website"
+ *
+ * For each slug, finds the longest other slug that it starts with (plus dash),
+ * and uses the suffix after that prefix as its remainder.
+ *
+ * Skips prefix stripping if it would create a collision with another slug
+ * (e.g., won't strip "cli-" from "cli-website" if "website" is also a project).
+ */
+function applyPrefixRelationships(
+  slugs: string[],
+  slugToRemainder: Map<string, string>
+): void {
+  // Collect all existing remainders to detect potential collisions
+  const existingRemainders = new Set(slugToRemainder.values());
+  const slugSet = new Set(slugs);
+
+  for (const slug of slugs) {
+    let longestPrefix = "";
+    for (const other of slugs) {
+      if (
+        other !== slug &&
+        slug.startsWith(`${other}-`) &&
+        other.length > longestPrefix.length
+      ) {
+        longestPrefix = other;
+      }
+    }
+    if (longestPrefix) {
+      const suffix = slug.slice(longestPrefix.length + 1);
+      // Only apply if suffix is non-empty and won't collide with another slug
+      if (suffix && !slugSet.has(suffix) && !existingRemainders.has(suffix)) {
+        slugToRemainder.set(slug, suffix);
+        existingRemainders.add(suffix);
+      }
+    }
+  }
+}
+
 /** Internal: Processes unique (non-colliding) project slugs */
 function processUniqueSlugs(
   pairs: OrgProjectPair[],
@@ -170,6 +218,9 @@ function processUniqueSlugs(
     const remainder = slug.slice(strippedPrefix.length);
     slugToRemainder.set(slug, remainder || slug);
   }
+
+  // Handle prefix relationships (e.g., "cli" is prefix of "cli-website")
+  applyPrefixRelationships(uniqueProjectSlugs, slugToRemainder);
 
   const uniqueRemainders = [...slugToRemainder.values()];
   const uniquePrefixes = findShortestUniquePrefixes(uniqueRemainders);
