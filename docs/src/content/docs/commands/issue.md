@@ -169,8 +169,6 @@ The analysis may take a few minutes for new issues.
 
 | Option | Description |
 |--------|-------------|
-| `--org <org-slug>` | Organization slug (required for short IDs if not auto-detected) |
-| `--project <project-slug>` | Project slug (required for short suffixes if not auto-detected) |
 | `--force` | Force new analysis even if one already exists |
 | `--json` | Output as JSON |
 
@@ -180,11 +178,11 @@ The analysis may take a few minutes for new issues.
 # By numeric issue ID
 sentry issue explain 123456789
 
-# By short ID
-sentry issue explain MYPROJECT-ABC --org my-org
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
 
-# By short suffix (requires project context)
-sentry issue explain G --org my-org --project my-project
+# By project-suffix format
+sentry issue explain myproject-G
 
 # Force a fresh analysis
 sentry issue explain 123456789 --force
@@ -216,8 +214,6 @@ This command requires that `sentry issue explain` has been run first to identify
 
 | Option | Description |
 |--------|-------------|
-| `--org <org-slug>` | Organization slug (required for short IDs if not auto-detected) |
-| `--project <project-slug>` | Project slug (required for short suffixes if not auto-detected) |
 | `--cause <n>` | Root cause ID to plan (required if multiple causes were identified) |
 | `--json` | Output as JSON |
 
@@ -230,8 +226,11 @@ sentry issue plan 123456789
 # Specify which root cause to plan for (if multiple were found)
 sentry issue plan 123456789 --cause 0
 
-# By short ID
-sentry issue plan MYPROJECT-ABC --org my-org --cause 1
+# By short ID with org prefix
+sentry issue plan my-org/MYPROJECT-ABC --cause 1
+
+# By project-suffix format
+sentry issue plan myproject-G --cause 0
 ```
 
 **Requirements:**

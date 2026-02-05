@@ -8,15 +8,21 @@ We follow [gh CLI](https://cli.github.com/) conventions for best-in-class develo
 
 ### List Commands
 
-List commands use **flags only** for context (no positional arguments).
+List commands use **optional positional arguments** for context with smart auto-detection.
 
 ```bash
 sentry org list [--limit N] [--json]
-sentry project list [--org ORG] [--limit N] [--json]
-sentry issue list [--org ORG] [--project PROJECT] [--json]
+sentry project list [org] [--limit N] [--json]
+sentry issue list [<org>/<project>] [--json]
 ```
 
-**Rationale**: Flags are self-documenting and avoid ambiguity when multiple identifiers are needed.
+**Target syntax**:
+- `<org>/<project>` - Explicit organization and project (e.g., `my-org/frontend`)
+- `<org>/` - All projects in the specified organization
+- `<project>` - Search for project by name across all accessible organizations
+- *(omit)* - Auto-detect from DSN or config
+
+**Rationale**: Positional arguments follow `gh` CLI conventions and are more concise than flags.
 
 ### View Commands
 
@@ -24,9 +30,9 @@ View commands use **optional positional arguments** for the primary identifier, 
 
 ```bash
 sentry org view [org-slug] [--json] [-w]                       # works with DSN if no arg
-sentry project view [project-slug] [--org ORG] [--json] [-w]   # works with DSN if no arg
-sentry issue view <issue-id> [--org ORG] [--json] [-w]         # issue ID required
-sentry event view <event-id> [--org ORG] [--project PROJECT] [--json] [-w]
+sentry project view [<org>/<project>] [--json] [-w]            # works with DSN if no arg
+sentry issue view <issue-id> [--json] [-w]                     # issue ID required
+sentry event view [<org>/<project>] <event-id> [--json] [-w]   # event ID required
 ```
 
 **Key insight**: `org view` and `project view` mirror `gh repo view` - works in context (DSN) or with explicit arg.
@@ -37,7 +43,7 @@ sentry event view <event-id> [--org ORG] [--project PROJECT] [--json] [-w]
 
 Context (org, project) is resolved in this priority order:
 
-1. **CLI flags** (`--org`, `--project`) - explicit, always wins
+1. **Positional arguments** (`<org>/<project>`) - explicit, always wins
 2. **Config defaults** - set via `sentry config set`
 3. **DSN auto-detection** - from `SENTRY_DSN` env var or source code
 
@@ -45,8 +51,6 @@ Context (org, project) is resolved in this priority order:
 
 | Flag | Description | Used In |
 |------|-------------|---------|
-| `--org` | Organization slug | Most commands |
-| `--project` | Project slug | Project/issue/event commands |
 | `--json` | Output as JSON | All view/list commands |
 | `-w`, `--web` | Open in browser | All view commands |
 | `--limit` | Max items to return | List commands |
