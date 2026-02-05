@@ -195,7 +195,6 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
   },
 };
 
-/** Generate CREATE TABLE DDL from a table schema */
 /** Generate CREATE TABLE DDL from column definitions */
 function columnDefsToDDL(
   tableName: string,
