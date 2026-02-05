@@ -223,13 +223,11 @@ sentry issue list my-org/frontend --query "is:resolved"
 sentry issue list my-org/frontend --query "is:unresolved TypeError"
 ```
 
-#### `sentry issue explain <issue-id>`
+#### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--json - Output as JSON`
 - `--force - Force new analysis even if one exists`
 
@@ -251,15 +249,14 @@ sentry issue explain G --org my-org --project my-project
 sentry issue explain 123456789 --force
 ```
 
-#### `sentry issue plan <issue-id>`
+#### `sentry issue plan <issue>`
 
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+- `--force - Force new plan even if one exists`
 
 **Examples:**
 
@@ -276,16 +273,14 @@ sentry issue plan 123456789 --cause 0
 sentry issue plan MYPROJECT-ABC --org my-org --cause 1
 ```
 
-#### `sentry issue view <issue-id>`
+#### `sentry issue view <issue>`
 
 View details of a specific issue
 
 **Flags:**
-- `--org <value> - Organization slug (required for short IDs if not auto-detected)`
-- `--project <value> - Project slug (required for short suffixes if not auto-detected)`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree with N levels of nesting depth`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -314,7 +309,7 @@ View details of a specific event
 - `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree from the event's trace`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -395,6 +390,13 @@ CLI-related commands
 
 Send feedback about the CLI
 
+#### `sentry cli fix`
+
+Diagnose and repair CLI database issues
+
+**Flags:**
+- `--dry-run - Show what would be fixed without making changes`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
@@ -402,6 +404,20 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
 
 ## Output Formats
 
