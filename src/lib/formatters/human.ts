@@ -823,7 +823,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  *
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
- * @param maxDepth - Maximum nesting depth to display (default: unlimited). Values <= 0 show unlimited depth.
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
  * @returns Array of formatted lines ready for display
  */
 export function formatSimpleSpanTree(
@@ -832,11 +832,15 @@ export function formatSimpleSpanTree(
   maxDepth = Number.MAX_SAFE_INTEGER
 ): string[] {
   return withSerializeSpan("formatSimpleSpanTree", () => {
-    if (spans.length === 0) {
-      return [muted("No span data available.")];
+    // maxDepth = 0 means disabled (caller should skip, but handle gracefully)
+    if (maxDepth === 0 || spans.length === 0) {
+      return [];
     }
 
-    const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
+    // Infinity or large numbers = unlimited depth
+    const effectiveMaxDepth = Number.isFinite(maxDepth)
+      ? maxDepth
+      : Number.MAX_SAFE_INTEGER;
 
     const lines: string[] = [];
     lines.push("");

@@ -15,30 +15,34 @@ const DEFAULT_SPAN_DEPTH = 3;
  * Parse span depth flag value.
  *
  * Supports:
- * - Numeric values (e.g., "3", "5")
+ * - Numeric values (e.g., "3", "5") - depth limit
  * - "all" for unlimited depth (returns Infinity)
- * - "0" for unlimited depth (returns Infinity)
+ * - "no" or "0" to disable span tree (returns 0)
  * - Invalid values fall back to default depth (3)
  *
  * @param input - Raw input string from CLI flag
- * @returns Parsed depth as number (Infinity for unlimited)
+ * @returns Parsed depth as number (0 = disabled, Infinity = unlimited)
  *
  * @example
  * parseSpanDepth("3")    // 3
  * parseSpanDepth("all")  // Infinity
- * parseSpanDepth("0")    // Infinity
+ * parseSpanDepth("no")   // 0
+ * parseSpanDepth("0")    // 0
  * parseSpanDepth("foo")  // 3 (default)
  */
 export function parseSpanDepth(input: string): number {
-  if (input.toLowerCase() === "all") {
+  const lower = input.toLowerCase();
+  if (lower === "all") {
     return Number.POSITIVE_INFINITY;
+  }
+  if (lower === "no") {
+    return 0;
   }
   const n = Number(input);
   if (Number.isNaN(n)) {
     return DEFAULT_SPAN_DEPTH;
   }
-  // 0 means unlimited
-  return n === 0 ? Number.POSITIVE_INFINITY : n;
+  return n;
 }
 
 /**
@@ -57,7 +61,8 @@ export const spansFlag = {
   spans: {
     kind: "parsed" as const,
     parse: parseSpanDepth,
-    brief: 'Span tree depth limit (number or "all" for unlimited)',
+    brief:
+      'Span tree depth limit (number, "all" for unlimited, "no" to disable)',
     default: String(DEFAULT_SPAN_DEPTH),
   },
 };

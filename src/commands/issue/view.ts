@@ -138,10 +138,11 @@ export const viewCommand = buildCommand({
       : undefined;
 
     // Fetch span tree data (for both JSON and human output)
+    // Skip when spans=0 (disabled via --spans no or --spans 0)
     let spanTreeResult:
       | Awaited<ReturnType<typeof getSpanTreeLines>>
       | undefined;
-    if (orgSlug && event) {
+    if (orgSlug && event && flags.spans > 0) {
       spanTreeResult = await getSpanTreeLines(orgSlug, event, flags.spans);
     }
 

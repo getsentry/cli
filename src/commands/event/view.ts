@@ -136,14 +136,14 @@ export const viewCommand = buildCommand({
     const event = await getEvent(target.org, target.project, eventId);
 
     // Fetch span tree data (for both JSON and human output)
-    const spanTreeResult = await getSpanTreeLines(
-      target.org,
-      event,
-      flags.spans
-    );
+    // Skip when spans=0 (disabled via --spans no or --spans 0)
+    const spanTreeResult =
+      flags.spans > 0
+        ? await getSpanTreeLines(target.org, event, flags.spans)
+        : undefined;
 
     if (flags.json) {
-      const trace = spanTreeResult.success
+      const trace = spanTreeResult?.success
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
       writeJson(stdout, { event, trace });
@@ -153,7 +153,7 @@ export const viewCommand = buildCommand({
     writeHumanOutput(stdout, {
       event,
       detectedFrom: target.detectedFrom,
-      spanTreeLines: spanTreeResult.lines,
+      spanTreeLines: spanTreeResult?.lines,
     });
   },
 });

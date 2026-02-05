@@ -48,10 +48,9 @@ function makeTraceSpan(
 
 describe("formatSimpleSpanTree", () => {
   describe("empty and edge cases", () => {
-    test("returns message for empty spans array", () => {
+    test("returns empty array for empty spans array", () => {
       const result = formatSimpleSpanTree("trace-123", []);
-      const output = stripAnsi(result.join("\n"));
-      expect(output).toContain("No span data available");
+      expect(result).toEqual([]);
     });
 
     test("includes trace ID in header", () => {
@@ -212,13 +211,27 @@ describe("formatSimpleSpanTree", () => {
       expect(output).not.toContain("level3 — Third");
     });
 
-    test("maxDepth 0 shows unlimited depth", () => {
+    test("maxDepth 0 returns empty (disabled)", () => {
       const spans = [
         makeTraceSpan("level1", "First", [
           makeTraceSpan("level2", "Second", [makeTraceSpan("level3", "Third")]),
         ]),
       ];
       const result = formatSimpleSpanTree("trace-123", spans, 0);
+      expect(result).toEqual([]);
+    });
+
+    test("maxDepth Infinity shows all levels", () => {
+      const spans = [
+        makeTraceSpan("level1", "First", [
+          makeTraceSpan("level2", "Second", [makeTraceSpan("level3", "Third")]),
+        ]),
+      ];
+      const result = formatSimpleSpanTree(
+        "trace-123",
+        spans,
+        Number.POSITIVE_INFINITY
+      );
       const output = stripAnsi(result.join("\n"));
 
       expect(output).toContain("level1 — First");
