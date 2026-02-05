@@ -617,6 +617,15 @@ export async function findProjectsBySlug(
 }
 
 /**
+ * Escape special regex characters in a string.
+ * Uses native RegExp.escape if available (Node.js 23.6+, Bun), otherwise polyfills.
+ */
+const escapeRegex: (str: string) => string =
+  typeof RegExp.escape === "function"
+    ? RegExp.escape
+    : (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
  * Check if two strings match with word-boundary semantics (bidirectional).
  *
  * Returns true if either:
@@ -631,8 +640,8 @@ export async function findProjectsBySlug(
  * @internal Exported for testing
  */
 export function matchesWordBoundary(a: string, b: string): boolean {
-  const aInB = new RegExp(`\\b${RegExp.escape(a)}\\b`, "i");
-  const bInA = new RegExp(`\\b${RegExp.escape(b)}\\b`, "i");
+  const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
+  const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
   return aInB.test(b) || bInA.test(a);
 }
 
