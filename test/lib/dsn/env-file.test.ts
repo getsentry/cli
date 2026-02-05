@@ -287,8 +287,12 @@ describe("detectFromAllEnvFiles", () => {
     );
 
     const result = await detectFromAllEnvFiles(testDir);
-    // Should find DSNs in multiple files (not stop at first)
-    expect(result.dsns.length).toBeGreaterThanOrEqual(1);
+    // Should find DSNs in both files (not stop at first)
+    expect(result.dsns).toHaveLength(2);
+
+    const rawDsns = result.dsns.map((d) => d.raw).sort();
+    expect(rawDsns).toContain("https://default@sentry.io/1");
+    expect(rawDsns).toContain("https://local@sentry.io/2");
   });
 
   test("includes source mtimes for caching", async () => {
