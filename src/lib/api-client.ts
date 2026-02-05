@@ -617,6 +617,75 @@ export async function findProjectsBySlug(
 }
 
 /**
+ * Escape special regex characters in a string.
+ * Uses native RegExp.escape if available (Node.js 23.6+, Bun), otherwise polyfills.
+ */
+const escapeRegex: (str: string) => string =
+  typeof RegExp.escape === "function"
+    ? RegExp.escape
+    : (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Check if two strings match with word-boundary semantics (bidirectional).
+ *
+ * Returns true if either:
+ * - `a` appears in `b` at a word boundary
+ * - `b` appears in `a` at a word boundary
+ *
+ * @example
+ * matchesWordBoundary("cli", "cli-website")  // true: "cli" in "cli-website"
+ * matchesWordBoundary("sentry-docs", "docs") // true: "docs" in "sentry-docs"
+ * matchesWordBoundary("cli", "eclipse")      // false: no word boundary
+ *
+ * @internal Exported for testing
+ */
+export function matchesWordBoundary(a: string, b: string): boolean {
+  const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
+  const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
+  return aInB.test(b) || bInA.test(a);
+}
+
+/**
+ * Find projects matching a pattern with bidirectional word-boundary matching.
+ * Used for directory name inference when DSN detection fails.
+ *
+ * Uses `\b` regex word boundary, which matches:
+ * - Start/end of string
+ * - Between word char (`\w`) and non-word char (like "-")
+ *
+ * Matching is bidirectional:
+ * - Directory name in project slug: dir "cli" matches project "cli-website"
+ * - Project slug in directory name: project "docs" matches dir "sentry-docs"
+ *
+ * @param pattern - Directory name to match against project slugs
+ * @returns Array of matching projects with their org context
+ */
+export async function findProjectsByPattern(
+  pattern: string
+): Promise<ProjectWithOrg[]> {
+  const orgs = await listOrganizations();
+
+  const searchResults = await Promise.all(
+    orgs.map(async (org) => {
+      try {
+        const projects = await listProjects(org.slug);
+        return projects
+          .filter((p) => matchesWordBoundary(pattern, p.slug))
+          .map((p) => ({ ...p, orgSlug: org.slug }));
+      } catch (error) {
+        if (error instanceof AuthError) {
+          throw error;
+        }
+        // Skip orgs where user lacks access (permission errors, etc.)
+        return [];
+      }
+    })
+  );
+
+  return searchResults.flat();
+}
+
+/**
  * Find a project by DSN public key.
  *
  * Uses the /api/0/projects/ endpoint with query=dsn:<key> to search
