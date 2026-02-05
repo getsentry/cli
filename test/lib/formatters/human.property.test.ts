@@ -165,10 +165,8 @@ describe("formatUserIdentity properties", () => {
         tuple(nameArb, usernameArb, emailArb),
         ([name, username, email]) => {
           const result = formatUserIdentity({ id: "1", name, username, email });
+          // If this passes, name is used (proving username is ignored when name exists)
           expect(result).toBe(`${name} <${email}>`);
-          // Username should not appear in its full form after the name
-          // (avoid false positives when name contains username as substring)
-          expect(result).not.toBe(`${username} <${email}>`);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
