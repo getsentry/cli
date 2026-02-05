@@ -142,7 +142,10 @@ export const statusCommand = buildCommand({
     stdout.write(`Config: ${getDbPath()}\n`);
 
     if (!authenticated) {
-      throw new AuthError("not_authenticated");
+      // Skip auto-login - user explicitly ran status to check auth state
+      throw new AuthError("not_authenticated", undefined, {
+        skipAutoAuth: true,
+      });
     }
 
     stdout.write(`Status: Authenticated ${success("✓")}\n`);

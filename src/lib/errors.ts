@@ -70,16 +70,29 @@ export class ApiError extends CliError {
 
 export type AuthErrorReason = "not_authenticated" | "expired" | "invalid";
 
+/** Options for AuthError */
+export type AuthErrorOptions = {
+  /** Skip auto-login flow when this error is caught (for auth commands) */
+  skipAutoAuth?: boolean;
+};
+
 /**
  * Authentication errors.
  *
  * @param reason - Type of auth failure
  * @param message - Custom message (uses default if not provided)
+ * @param options - Additional options (e.g., skipAutoAuth for auth commands)
  */
 export class AuthError extends CliError {
   readonly reason: AuthErrorReason;
+  /** When true, the auto-login flow should not be triggered for this error */
+  readonly skipAutoAuth: boolean;
 
-  constructor(reason: AuthErrorReason, message?: string) {
+  constructor(
+    reason: AuthErrorReason,
+    message?: string,
+    options?: AuthErrorOptions
+  ) {
     const defaultMessages: Record<AuthErrorReason, string> = {
       not_authenticated: "Not authenticated. Run 'sentry auth login' first.",
       expired:
@@ -89,6 +102,7 @@ export class AuthError extends CliError {
     super(message ?? defaultMessages[reason]);
     this.name = "AuthError";
     this.reason = reason;
+    this.skipAutoAuth = options?.skipAutoAuth ?? false;
   }
 }
 
