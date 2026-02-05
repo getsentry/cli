@@ -1,0 +1,35 @@
+## Implementation Plan
+
+### Problem
+During development, the schema version can get out of sync with actual table
+structure (e.g., version bumped but columns weren't added). Migration checks
+like `if (currentVersion < 4)` then skip adding missing columns.
+
+### Solution
+
+#### 1. Auto-Repair on SQLiteError
+- Catch schema errors ("no such column", "no such table") in traced DB wrapper
+- Call repairSchema() to add missing tables/columns non-destructively
+- Retry the failed operation
+- Log to stderr: "Auto-repaired database: ..."
+- Opt-out via SENTRY_CLI_NO_AUTO_REPAIR=1
+
+#### 2. sentry cli fix Command
+Manual repair for diagnostics:
+- --dry-run: Show issues without fixing
+- Reports database path and schema version
+- Lists all missing tables and columns
+- Performs non-destructive repairs
+
+#### 3. Schema Repair Utilities (schema.ts)
+- EXPECTED_TABLES: DDL for all tables
+- EXPECTED_COLUMNS: Columns that may be missing from migrations
+- tableExists(), hasColumn(): Schema introspection
+- getSchemaIssues(): Diagnostics
+- repairSchema(): Non-destructive repair
+
+### Key Design Decisions
+- Repair happens at both query preparation and execution
+- Uses raw DB connection to avoid infinite loops
+- Non-destructive: only adds missing elements, never deletes
+- Tracked via isRepairing flag to prevent recursion
