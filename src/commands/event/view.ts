@@ -93,8 +93,11 @@ export function parsePositionalArgs(args: string[]): {
   return { eventId: second, targetArg: first };
 }
 
-/** Resolved target type for internal use */
-type ResolvedEventTarget = {
+/**
+ * Resolved target type for event commands.
+ * @internal Exported for testing
+ */
+export type ResolvedEventTarget = {
   org: string;
   project: string;
   orgDisplay: string;
@@ -104,8 +107,19 @@ type ResolvedEventTarget = {
 
 /**
  * Resolve target from a project search result.
+ *
+ * Searches for a project by slug across all accessible organizations.
+ * Throws if no project found or if multiple projects found in different orgs.
+ *
+ * @param projectSlug - Project slug to search for
+ * @param eventId - Event ID (used in error messages)
+ * @returns Resolved target with org and project info
+ * @throws {ContextError} If no project found
+ * @throws {ValidationError} If project exists in multiple organizations
+ *
+ * @internal Exported for testing
  */
-async function resolveFromProjectSearch(
+export async function resolveFromProjectSearch(
   projectSlug: string,
   eventId: string
 ): Promise<ResolvedEventTarget> {
