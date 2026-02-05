@@ -81,6 +81,8 @@ export type CachedDsnEntry = {
   sourcePath?: string;
   /** Resolved project info (avoids API call on cache hit) */
   resolved?: ResolvedProjectInfo;
+  /** All resolved targets (for inferred source with multiple matches) */
+  allResolved?: ResolvedProjectInfo[];
   /** Timestamp when this entry was cached */
   cachedAt: number;
 };
@@ -101,6 +103,7 @@ export const CachedDsnEntrySchema = z.object({
   source: z.enum(["env", "env_file", "config", "code", "inferred"]),
   sourcePath: z.string().optional(),
   resolved: ResolvedProjectInfoSchema.optional(),
+  allResolved: z.array(ResolvedProjectInfoSchema).optional(),
   cachedAt: z.number(),
 });
 

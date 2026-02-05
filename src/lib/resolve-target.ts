@@ -372,51 +372,72 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
 
   // Check cache first (reuse DSN cache with source: "inferred")
   const cached = await getCachedDsn(projectRoot);
-  if (cached?.source === "inferred" && cached.resolved) {
-    // Return cached result
+  if (cached?.source === "inferred") {
     const detectedFrom = `directory name "${dirName}"`;
-    return {
-      targets: [
-        {
-          org: cached.resolved.orgSlug,
-          project: cached.resolved.projectSlug,
-          orgDisplay: cached.resolved.orgName,
-          projectDisplay: cached.resolved.projectName,
-          detectedFrom,
-        },
-      ],
-    };
+
+    // Return all cached targets if available
+    if (cached.allResolved && cached.allResolved.length > 0) {
+      const targets = cached.allResolved.map((r) => ({
+        org: r.orgSlug,
+        project: r.projectSlug,
+        orgDisplay: r.orgName,
+        projectDisplay: r.projectName,
+        detectedFrom,
+      }));
+      return {
+        targets,
+        footer:
+          targets.length > 1
+            ? `Found ${targets.length} projects matching directory "${dirName}"`
+            : undefined,
+      };
+    }
+
+    // Fallback to single resolved target (legacy cache entries)
+    if (cached.resolved) {
+      return {
+        targets: [
+          {
+            org: cached.resolved.orgSlug,
+            project: cached.resolved.projectSlug,
+            orgDisplay: cached.resolved.orgName,
+            projectDisplay: cached.resolved.projectName,
+            detectedFrom,
+          },
+        ],
+      };
+    }
   }
 
   // Search for matching projects using word-boundary matching
   let matches: Awaited<ReturnType<typeof findProjectsByPattern>>;
   try {
     matches = await findProjectsByPattern(dirName);
-  } catch (error) {
-    // If not authenticated or API fails, skip inference
-    if (error instanceof AuthError) {
-      return { targets: [] };
-    }
-    throw error;
+  } catch {
+    // If not authenticated or API fails, skip inference silently
+    return { targets: [] };
   }
 
   if (matches.length === 0) {
     return { targets: [] };
   }
 
-  // Cache the first match for faster subsequent lookups
+  // Cache all matches for faster subsequent lookups
   const [primary] = matches;
   if (primary) {
+    const allResolved = matches.map((m) => ({
+      orgSlug: m.orgSlug,
+      orgName: m.organization?.name ?? m.orgSlug,
+      projectSlug: m.slug,
+      projectName: m.name,
+    }));
+
     await setCachedDsn(projectRoot, {
       dsn: "", // No DSN for inferred
       projectId: primary.id,
       source: "inferred",
-      resolved: {
-        orgSlug: primary.orgSlug,
-        orgName: primary.organization?.name ?? primary.orgSlug,
-        projectSlug: primary.slug,
-        projectName: primary.name,
-      },
+      resolved: allResolved[0], // Primary for backwards compatibility
+      allResolved,
     });
   }
 
@@ -424,7 +445,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
   const targets: ResolvedTarget[] = matches.map((m) => ({
     org: m.orgSlug,
     project: m.slug,
-    orgDisplay: m.orgSlug,
+    orgDisplay: m.organization?.name ?? m.orgSlug,
     projectDisplay: m.name,
     detectedFrom,
   }));

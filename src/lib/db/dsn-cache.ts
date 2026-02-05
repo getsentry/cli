@@ -91,6 +91,17 @@ function rowToCachedDsnEntry(row: DsnCacheRow): CachedDsnEntry {
     };
   }
 
+  // Parse allResolved from all_dsns_json for inferred sources
+  if (row.source === "inferred" && row.all_dsns_json) {
+    try {
+      entry.allResolved = JSON.parse(
+        row.all_dsns_json
+      ) as CachedDsnEntry["allResolved"];
+    } catch {
+      // Ignore parse errors, allResolved will be undefined
+    }
+  }
+
   return entry;
 }
 
@@ -140,6 +151,10 @@ export async function setCachedDsn(
       resolved_org_name: entry.resolved?.orgName ?? null,
       resolved_project_slug: entry.resolved?.projectSlug ?? null,
       resolved_project_name: entry.resolved?.projectName ?? null,
+      // Store allResolved in all_dsns_json for inferred sources
+      all_dsns_json: entry.allResolved
+        ? JSON.stringify(entry.allResolved)
+        : null,
       cached_at: now,
       last_accessed: now,
     },
