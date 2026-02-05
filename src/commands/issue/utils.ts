@@ -63,8 +63,8 @@ export function buildCommandHint(command: string, issueId: string): string {
   return `sentry issue ${command} <org>/${issueId}`;
 }
 
-/** Default timeout in milliseconds (3 minutes) */
-const DEFAULT_TIMEOUT_MS = 180_000;
+/** Default timeout in milliseconds (6 minutes) */
+const DEFAULT_TIMEOUT_MS = 360_000;
 
 /**
  * Result of resolving an issue ID - includes full issue object.
@@ -333,7 +333,7 @@ type PollAutofixOptions = {
   json: boolean;
   /** Polling interval in milliseconds (default: 1000) */
   pollIntervalMs?: number;
-  /** Maximum time to wait in milliseconds (default: 180000 = 3 minutes) */
+  /** Maximum time to wait in milliseconds (default: 360000 = 6 minutes) */
   timeoutMs?: number;
   /** Custom timeout error message */
   timeoutMessage?: string;
@@ -447,7 +447,7 @@ export async function pollAutofixState(
     json,
     pollIntervalMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    timeoutMessage = "Operation timed out after 3 minutes. Try again or check the issue in Sentry web UI.",
+    timeoutMessage = "Operation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
     stopOnWaitingForUser = false,
   } = options;
 
