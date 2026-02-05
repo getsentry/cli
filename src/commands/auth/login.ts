@@ -101,10 +101,8 @@ export const loginCommand = buildCommand({
     );
 
     if (!loginSuccess) {
-      throw new AuthError(
-        "not_authenticated",
-        "Authentication was cancelled or failed."
-      );
+      // Error already displayed by runInteractiveLogin - just set exit code
+      process.exitCode = 1;
     }
   },
 });
