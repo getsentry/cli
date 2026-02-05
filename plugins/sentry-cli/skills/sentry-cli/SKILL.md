@@ -293,12 +293,6 @@ sentry issue view <short-id>
 sentry issue view FRONT-ABC
 
 sentry issue view FRONT-ABC -w
-
-# Show span tree with default depth (3)
-sentry issue view FRONT-ABC --spans 3
-
-# Show full span tree (unlimited depth)
-sentry issue view FRONT-ABC --spans 0
 ```
 
 ### Event
@@ -324,12 +318,6 @@ sentry event view <event-id>
 sentry event view abc123def456
 
 sentry event view abc123def456 -w
-
-# Show span tree with default depth (3)
-sentry event view abc123def456 --spans 3
-
-# Show full span tree (unlimited depth)
-sentry event view abc123def456 --spans 0
 ```
 
 ### Api
