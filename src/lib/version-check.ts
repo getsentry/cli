@@ -133,7 +133,7 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} → ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
