@@ -13,6 +13,13 @@ import {
   shouldSuppressNotification,
 } from "./lib/version-check.js";
 
+/** Run CLI command with telemetry wrapper */
+async function runCommand(args: string[]): Promise<void> {
+  await withTelemetry(async (span) =>
+    run(app, args, buildContext(process, span))
+  );
+}
+
 /**
  * Execute command with automatic authentication.
  *
@@ -23,9 +30,7 @@ import {
  */
 async function executeWithAutoAuth(args: string[]): Promise<void> {
   try {
-    await withTelemetry(async (span) =>
-      run(app, args, buildContext(process, span))
-    );
+    await runCommand(args);
   } catch (err) {
     // Auto-login for auth errors in interactive TTY environments
     // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
@@ -49,10 +54,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 
       if (loginSuccess) {
         process.stderr.write("\nRetrying command...\n\n");
-        // Retry the original command
-        await withTelemetry(async (span) =>
-          run(app, args, buildContext(process, span))
-        );
+        await runCommand(args);
         return;
       }
 
