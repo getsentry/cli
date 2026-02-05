@@ -1,0 +1,35 @@
+## Implementation Plan
+
+### Root Cause
+
+The `findCommonWordPrefix` function only finds a common prefix when ≥2 strings
+have word boundaries. It doesn't handle the case where one slug is literally a
+prefix of another (e.g., `cli` is prefix of `cli-website`).
+
+As a result, `findShortestUniquePrefixes(['cli', 'cli-website'])` produces:
+- 'cli' → 'cli' (full string)
+- 'cli-website' → 'cli-' (shortest unique prefix)
+
+This 'cli-' alias, when combined with issue suffix via `computeAliasShorthand`,
+creates double-dashes: 'cli-' + '-' + '1' = 'cli--1'
+
+### Fix
+
+Added `applyPrefixRelationships()` helper in `src/lib/alias.ts` that:
+1. For each slug, finds the longest other slug that it starts with (plus dash)
+2. Uses the suffix after that prefix as the remainder for alias generation
+
+This runs after the initial `slugToRemainder` map is built from `findCommonWordPrefix`.
+
+### Example Traces
+
+| Input slugs                          | slugToRemainder                                    | Final aliases |
+|--------------------------------------|---------------------------------------------------|---------------|
+| ['cli', 'cli-website']               | cli→cli, cli-website→website                      | c, w          |
+| ['api', 'api-server', 'api-server-v2'] | api→api, api-server→server, api-server-v2→v2    | a, s, v       |
+
+### Tests Added
+
+1. 'handles slug that is prefix of another slug' - cli + cli-website → c, w
+2. 'handles nested prefix relationships' - api + api-server + api-server-v2 → a, s, v
+3. 'no alias ends with dash or underscore' - ensures aliases are well-formed
