@@ -13,7 +13,7 @@ import {
   spansFlag,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
-import { ContextError } from "../../lib/errors.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
@@ -116,30 +116,19 @@ async function resolveFromProjectSearch(
     ]);
   }
   if (found.length > 1) {
-    const alternatives = found.map(
-      (p) => `${p.organization?.slug ?? "unknown"}/${p.slug}`
-    );
-    throw new ContextError(
-      `Project "${projectSlug}" exists in multiple organizations`,
-      `sentry event view <org>/${projectSlug} ${eventId}`,
-      alternatives
+    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
+    throw new ValidationError(
+      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+        `Specify the organization:\n${orgList}\n\n` +
+        `Example: sentry event view <org>/${projectSlug} ${eventId}`
     );
   }
-  const foundProject = found[0];
-  if (!foundProject) {
-    throw new ContextError(`Project "${projectSlug}" not found`, USAGE_HINT);
-  }
-  const orgSlug = foundProject.organization?.slug;
-  if (!orgSlug) {
-    throw new ContextError(
-      `Could not determine organization for project "${projectSlug}"`,
-      USAGE_HINT
-    );
-  }
+  // Safe assertion: length is exactly 1 after the checks above
+  const foundProject = found[0] as (typeof found)[0];
   return {
-    org: orgSlug,
+    org: foundProject.orgSlug,
     project: foundProject.slug,
-    orgDisplay: orgSlug,
+    orgDisplay: foundProject.orgSlug,
     projectDisplay: foundProject.slug,
   };
 }
@@ -207,10 +196,7 @@ export const viewCommand = buildCommand({
         break;
 
       case ProjectSpecificationType.OrgAll:
-        throw new ContextError(
-          "A specific project is required for event view",
-          USAGE_HINT
-        );
+        throw new ContextError("Specific project", USAGE_HINT);
 
       case ProjectSpecificationType.AutoDetect:
         target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
@@ -218,7 +204,7 @@ export const viewCommand = buildCommand({
 
       default:
         // Exhaustive check - should never reach here
-        throw new ContextError("Invalid target specification", USAGE_HINT);
+        throw new ValidationError("Invalid target specification");
     }
 
     if (!target) {

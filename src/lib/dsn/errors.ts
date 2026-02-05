@@ -31,7 +31,7 @@ export function formatConflictError(result: DsnDetectionResult): string {
   });
 
   lines.push("To resolve, specify which project to use:");
-  lines.push("  sentry issue list <org>/<project>");
+  lines.push("  sentry <command> <org>/<project>");
   lines.push("");
   lines.push("Or set a default project:");
   lines.push("  sentry config set defaults.org <org>");
@@ -91,7 +91,7 @@ export async function formatNoDsnError(
   );
   lines.push("");
   lines.push("3. Specify project explicitly:");
-  lines.push("   sentry issue list <org>/<project>");
+  lines.push("   sentry <command> <org>/<project>");
   lines.push("");
   lines.push("4. Set default project:");
   lines.push("   sentry config set defaults.org <org>");
@@ -119,7 +119,7 @@ export function formatResolutionError(error: Error, dsnRaw: string): string {
     "  - The DSN is invalid or expired",
     "",
     "Try specifying the project explicitly:",
-    "  sentry issue list <org>/<project>",
+    "  sentry <command> <org>/<project>",
   ];
 
   return lines.join("\n");
@@ -147,7 +147,7 @@ type ProjectInfo = {
  * Found 2 Sentry projects:
  *   • my-org / frontend (from packages/frontend/.env)
  *   • my-org / backend (from src/sentry.ts)
- * Specify a project: sentry issue list <org>/<project>
+ * Use <org>/<project> to target a specific project.
  * ```
  */
 export function formatMultipleProjectsFooter(projects: ProjectInfo[]): string {
@@ -162,7 +162,7 @@ export function formatMultipleProjectsFooter(projects: ProjectInfo[]): string {
     lines.push(`  • ${p.orgDisplay} / ${p.projectDisplay}${source}`);
   }
 
-  lines.push("Specify a project: sentry issue list <org>/<project>");
+  lines.push("Use <org>/<project> to target a specific project.");
 
   return lines.join("\n");
 }

@@ -59,7 +59,7 @@ describe("formatConflictError", () => {
     expect(error).toContain("def456@o789.ingest.sentry.io/101112");
     expect(error).toContain("Project ID: 456");
     expect(error).toContain("Project ID: 101112");
-    expect(error).toContain("sentry issue list <org>/<project>");
+    expect(error).toContain("sentry <command> <org>/<project>");
     expect(error).toContain("sentry config set defaults.org");
   });
 
@@ -183,7 +183,7 @@ describe("formatNoDsnError", () => {
     expect(error).toContain(".env files");
     expect(error).toContain("JavaScript/TypeScript source code");
     expect(error).toContain("export SENTRY_DSN=");
-    expect(error).toContain("sentry issue list <org>/<project>");
+    expect(error).toContain("sentry <command> <org>/<project>");
     expect(error).toContain("sentry config set defaults.org");
   });
 
@@ -245,7 +245,7 @@ describe("formatResolutionError", () => {
     expect(formatted).toContain("You don't have access to this project");
     expect(formatted).toContain("self-hosted Sentry instance");
     expect(formatted).toContain("invalid or expired");
-    expect(formatted).toContain("sentry issue list <org>/<project>");
+    expect(formatted).toContain("sentry <command> <org>/<project>");
   });
 
   test("formats error with access denied message", () => {
@@ -302,7 +302,7 @@ describe("formatMultipleProjectsFooter", () => {
     );
     expect(footer).toContain("• my-org / backend (from src/sentry.ts)");
     expect(footer).toContain(
-      "Specify a project: sentry issue list <org>/<project>"
+      "Use <org>/<project> to target a specific project."
     );
   });
 
