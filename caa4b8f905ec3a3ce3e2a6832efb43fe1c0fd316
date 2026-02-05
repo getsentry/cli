@@ -1,0 +1,54 @@
+## Implementation Plan
+
+### Testing Section - Major Rewrite
+
+Goal: Emphasize property & model-based testing as PREFERRED over traditional unit tests
+
+New Structure:
+1. Testing Hierarchy (in order of preference):
+   - Model-Based Tests - Stateful systems (DB, caches)
+   - Property-Based Tests - Pure functions, parsing, validation
+   - Unit Tests - Trivial cases, simple assertions
+
+2. Property-Based Testing Pattern:
+   - File naming: *.property.test.ts
+   - Pattern for defining arbitraries and properties
+   - Use of DEFAULT_NUM_RUNS from test/model-based/helpers.ts
+   - Examples from: alias, DSN, issue-id, word-boundary tests
+
+3. Model-Based Testing Pattern:
+   - File naming: *.model-based.test.ts
+   - Pattern for state machines (model + commands)
+   - Isolated DB contexts for testing
+   - Cross-invariant verification
+
+### Architecture Updates
+
+Updated db/ directory:
+- Added: utils.ts, regions.ts, user.ts, version-check.ts, migration.ts,
+         defaults.ts, project-root-cache.ts
+
+Updated dsn/ directory:
+- Added: project-root.ts, code-scanner.ts, fs-utils.ts, errors.ts, parser.ts
+
+New lib/ files:
+- region.ts, telemetry.ts, sentry-urls.ts, issue-id.ts, arg-parsing.ts,
+  alias.ts, promises.ts, polling.ts, upgrade.ts, version-check.ts,
+  clipboard.ts, qrcode.ts
+
+### Error Handling Updates
+
+New error classes:
+- SeerError (not_enabled | no_budget | ai_disabled)
+- UpgradeError (unknown_method | network_error | execution_failed | version_not_found)
+
+### New Patterns
+
+SQL Utilities: Document upsert() helper from src/lib/db/utils.ts
+
+### File Locations Table
+
+Added rows for:
+- Property tests: test/lib/<name>.property.test.ts
+- Model-based tests: test/lib/db/<name>.model-based.test.ts
+- Test helpers: test/model-based/helpers.ts
