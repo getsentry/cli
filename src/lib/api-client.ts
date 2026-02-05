@@ -21,7 +21,6 @@ import {
   SentryProjectSchema,
   type SentryUser,
   SentryUserSchema,
-  type TraceResponse,
   type TraceSpan,
   type UserRegionsResponse,
   UserRegionsResponseSchema,
@@ -870,24 +869,6 @@ export function getEvent(
     {
       schema: SentryEventSchema,
     }
-  );
-}
-
-/**
- * Get trace data including all transactions and spans.
- * Returns the full trace tree for visualization.
- * Uses region-aware routing for multi-region support.
- *
- * @param orgSlug - Organization slug
- * @param traceId - The trace ID (from event.contexts.trace.trace_id)
- * @returns Trace response with transactions array and orphan_errors
- */
-export function getTrace(
-  orgSlug: string,
-  traceId: string
-): Promise<TraceResponse> {
-  return orgScopedRequest<TraceResponse>(
-    `/organizations/${orgSlug}/events-trace/${traceId}/`
   );
 }
 
