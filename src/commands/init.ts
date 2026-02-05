@@ -104,6 +104,7 @@ export const initCommand = buildCommand({
         default: false,
       },
     },
+    aliases: { i: "integration", u: "url", s: "signup" },
   },
   async func(this: SentryContext, flags: InitFlags): Promise<void> {
     const { stdout } = this;

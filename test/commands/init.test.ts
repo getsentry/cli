@@ -4,8 +4,35 @@
  * Tests for the sentry init command and wizard flag mapping.
  */
 
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { _buildWizardArgs, type WizardOptions } from "../../src/lib/wizard.js";
+
+// Track runWizard calls for assertions
+let runWizardCalls: WizardOptions[] = [];
+let mockGetDefaultOrg: (() => Promise<string | null>) | null = null;
+
+beforeEach(() => {
+  runWizardCalls = [];
+  mockGetDefaultOrg = null;
+
+  // Mock runWizard to avoid spawning the wizard process
+  mock.module("../../src/lib/wizard.js", () => ({
+    runWizard: async (options: WizardOptions) => {
+      runWizardCalls.push(options);
+    },
+    _buildWizardArgs,
+  }));
+
+  // Mock getDefaultOrganization
+  mock.module("../../src/lib/db/defaults.js", () => ({
+    getDefaultOrganization: async () => {
+      if (mockGetDefaultOrg) {
+        return mockGetDefaultOrg();
+      }
+      return null;
+    },
+  }));
+});
 
 describe("buildWizardArgs", () => {
   test("returns empty array when no options provided", () => {
@@ -137,5 +164,206 @@ describe("buildWizardArgs", () => {
     expect(args).toContain("-s");
     expect(args).toContain("--disable-telemetry");
     expect(args).toHaveLength(7);
+  });
+});
+
+describe("initCommand.func", () => {
+  test("maps flags to WizardOptions and calls runWizard", async () => {
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      integration: "nextjs",
+      org: "test-org",
+      project: "test-project",
+      url: "https://sentry.example.com",
+      debug: true,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": true,
+      saas: true,
+      signup: false,
+      "disable-telemetry": true,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0]).toMatchObject({
+      integration: "nextjs",
+      org: "test-org",
+      project: "test-project",
+      url: "https://sentry.example.com",
+      debug: true,
+      uninstall: false,
+      quiet: false,
+      skipConnect: true,
+      saas: true,
+      signup: false,
+      disableTelemetry: true,
+    });
+  });
+
+  test("auto-populates org from defaults when --org not provided", async () => {
+    mockGetDefaultOrg = async () => "my-default-org";
+
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0].org).toBe("my-default-org");
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "Using organization: my-default-org\n"
+    );
+  });
+
+  test("does not override org when explicitly provided", async () => {
+    mockGetDefaultOrg = async () => "default-org";
+
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      org: "explicit-org",
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0].org).toBe("explicit-org");
+    // Should not write "Using organization" when org is explicitly provided
+    expect(stdoutWrite).not.toHaveBeenCalledWith(
+      expect.stringContaining("Using organization:")
+    );
+  });
+
+  test("does not write 'Using organization' when no default org", async () => {
+    mockGetDefaultOrg = async () => null;
+
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0].org).toBeUndefined();
+    // Should not write "Using organization" when no default org
+    expect(stdoutWrite).not.toHaveBeenCalledWith(
+      expect.stringContaining("Using organization:")
+    );
+  });
+
+  test("writes 'Starting Sentry Wizard...' to stdout", async () => {
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(stdoutWrite).toHaveBeenCalledWith("Starting Sentry Wizard...\n\n");
+  });
+
+  test("handles all flags correctly including integration", async () => {
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      integration: "reactNative",
+      debug: true,
+      uninstall: true,
+      quiet: true,
+      "skip-connect": true,
+      saas: true,
+      signup: true,
+      "disable-telemetry": true,
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0]).toMatchObject({
+      integration: "reactNative",
+      debug: true,
+      uninstall: true,
+      quiet: true,
+      skipConnect: true,
+      saas: true,
+      signup: true,
+      disableTelemetry: true,
+    });
   });
 });
