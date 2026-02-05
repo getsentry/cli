@@ -24,7 +24,7 @@ type ViewFlags = {
   readonly project?: string;
   readonly json: boolean;
   readonly web: boolean;
-  readonly spans?: number;
+  readonly spans: number;
 };
 
 type HumanOutputOptions = {
@@ -104,10 +104,9 @@ export const viewCommand = buildCommand({
       },
       spans: {
         kind: "parsed",
-        parse: (input: string) => Number(input === "" ? 1 : input),
-        brief: "Show span tree from the event's trace",
-        optional: true,
-        inferEmpty: true,
+        parse: Number,
+        brief: "Span tree nesting depth (0 for unlimited)",
+        default: "3",
       },
     },
     aliases: { w: "web" },
@@ -151,7 +150,7 @@ export const viewCommand = buildCommand({
       ? new Date(dateCreated).getTime() / 1000
       : undefined;
 
-    if (flags.spans !== undefined && traceId && timestamp) {
+    if (traceId && timestamp) {
       try {
         const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
         const spans = await getDetailedTrace(target.org, traceId, timestamp);
@@ -160,7 +159,7 @@ export const viewCommand = buildCommand({
         // Non-fatal: trace data may not be available for all events
         spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
       }
-    } else if (flags.spans !== undefined && !traceId) {
+    } else if (!traceId) {
       spanTreeLines = [muted("\nNo trace data available for this event.")];
     }
 

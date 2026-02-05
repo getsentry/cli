@@ -22,7 +22,7 @@ import { issueIdPositional, resolveIssue } from "./utils.js";
 type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
-  readonly spans?: number;
+  readonly spans: number;
 };
 
 /**
@@ -137,10 +137,9 @@ export const viewCommand = buildCommand({
       },
       spans: {
         kind: "parsed",
-        parse: (input: string) => Number(input === "" ? 1 : input),
-        brief: "Show span tree with N levels of nesting depth",
-        optional: true,
-        inferEmpty: true,
+        parse: Number,
+        brief: "Span tree nesting depth (0 for unlimited)",
+        default: "3",
       },
     },
     aliases: { w: "web" },
@@ -183,15 +182,15 @@ export const viewCommand = buildCommand({
 
     writeHumanOutput(stdout, { issue, event });
 
-    if (flags.spans !== undefined && orgSlug && event) {
+    if (orgSlug && event) {
       const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
       stdout.write("\n");
       await displaySpanTree(stdout, orgSlug, event, depth);
-    } else if (flags.spans !== undefined && !orgSlug) {
+    } else if (!orgSlug) {
       stdout.write(
         muted("\nOrganization context required to fetch span tree.\n")
       );
-    } else if (flags.spans !== undefined && !event) {
+    } else if (!event) {
       stdout.write(muted("\nCould not fetch event to display span tree.\n"));
     }
 
