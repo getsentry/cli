@@ -137,92 +137,111 @@ export type ParsedIssueArg =
  * parseIssueArg("sentry/G")           // { type: "explicit-org-suffix", org: "sentry", suffix: "G" }
  * parseIssueArg("G")                  // { type: "suffix-only", suffix: "G" }
  */
-export function parseIssueArg(arg: string): ParsedIssueArg {
-  // 1. Pure numeric → direct fetch by ID
-  if (isNumericId(arg)) {
-    return { type: "numeric", id: arg };
+/**
+ * Parse the part after slash in "org/..." format.
+ * Returns the appropriate ParsedIssueArg based on the content.
+ */
+function parseAfterSlash(
+  arg: string,
+  org: string,
+  rest: string
+): ParsedIssueArg {
+  if (isNumericId(rest)) {
+    // "my-org/123456789" → explicit org + numeric ID
+    return { type: "explicit-org-numeric", org, numericId: rest };
   }
 
-  // 2. Has dash → split on last "-", parse left with org/project logic
-  if (arg.includes("-")) {
-    const lastDash = arg.lastIndexOf("-");
-    const leftPart = arg.slice(0, lastDash);
-    const suffix = arg.slice(lastDash + 1).toUpperCase();
+  // Check if rest contains a dash (project-suffix pattern)
+  if (rest.includes("-")) {
+    const lastDash = rest.lastIndexOf("-");
+    const project = rest.slice(0, lastDash);
+    const suffix = rest.slice(lastDash + 1).toUpperCase();
 
-    // Reject trailing dash (empty suffix)
+    if (!project) {
+      throw new Error(
+        `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`
+      );
+    }
+
     if (!suffix) {
       throw new Error(
         `Invalid issue format: "${arg}". Missing suffix after dash.`
       );
     }
 
-    const target = parseOrgProjectArg(leftPart);
-
-    switch (target.type) {
-      case "explicit":
-        // "sentry/cli-G" → org + project + suffix
-        return {
-          type: "explicit",
-          org: target.org,
-          project: target.project,
-          suffix,
-        };
-
-      case "project-search":
-        // "cli-G" → search for project, then use suffix
-        return {
-          type: "project-search",
-          projectSlug: target.projectSlug,
-          suffix,
-        };
-
-      case "org-all":
-        // "sentry/-G" is invalid - can't have org-all with issue suffix
-        throw new Error(
-          `Invalid issue format: "${arg}". Cannot use trailing slash before suffix.`
-        );
-
-      case "auto-detect":
-        // "-G" is invalid - empty left part
-        throw new Error(
-          `Invalid issue format: "${arg}". Missing project before suffix.`
-        );
-
-      default: {
-        // Exhaustive check
-        const _exhaustive: never = target;
-        throw new Error(
-          `Unexpected target type: ${JSON.stringify(_exhaustive)}`
-        );
-      }
-    }
+    // "my-org/cli-G" or "sentry/spotlight-electron-4Y"
+    return { type: "explicit", org, project, suffix };
   }
 
-  // 3. Has slash but no dash (e.g., "sentry/G" or "sentry/123456789")
+  // "my-org/G" → explicit org + suffix only (no dash in rest)
+  return { type: "explicit-org-suffix", org, suffix: rest.toUpperCase() };
+}
+
+/**
+ * Parse issue arg with slash (org/...).
+ */
+function parseWithSlash(arg: string): ParsedIssueArg {
+  const slashIdx = arg.indexOf("/");
+  const org = arg.slice(0, slashIdx);
+  const rest = arg.slice(slashIdx + 1);
+
+  if (!rest) {
+    throw new Error(
+      `Invalid issue format: "${arg}". Missing issue ID after slash.`
+    );
+  }
+
+  if (!org) {
+    // Leading slash with dash → project-search (e.g., "/cli-G")
+    if (rest.includes("-")) {
+      return parseWithDash(rest);
+    }
+    // "/G" → treat as suffix-only (unusual but valid)
+    return { type: "suffix-only", suffix: rest.toUpperCase() };
+  }
+
+  return parseAfterSlash(arg, org, rest);
+}
+
+/**
+ * Parse issue arg with dash but no slash (project-suffix).
+ */
+function parseWithDash(arg: string): ParsedIssueArg {
+  const lastDash = arg.lastIndexOf("-");
+  const projectSlug = arg.slice(0, lastDash);
+  const suffix = arg.slice(lastDash + 1).toUpperCase();
+
+  if (!projectSlug) {
+    throw new Error(
+      `Invalid issue format: "${arg}". Missing project before suffix.`
+    );
+  }
+
+  if (!suffix) {
+    throw new Error(
+      `Invalid issue format: "${arg}". Missing suffix after dash.`
+    );
+  }
+
+  // "cli-G" or "spotlight-electron-4Y"
+  return { type: "project-search", projectSlug, suffix };
+}
+
+export function parseIssueArg(arg: string): ParsedIssueArg {
+  // 1. Pure numeric → direct fetch by ID
+  if (isNumericId(arg)) {
+    return { type: "numeric", id: arg };
+  }
+
+  // 2. Has slash → check slash FIRST (takes precedence over dashes)
+  // This ensures "my-org/123" parses as org="my-org", not project="my"
   if (arg.includes("/")) {
-    const slashIdx = arg.indexOf("/");
-    const org = arg.slice(0, slashIdx);
-    const rest = arg.slice(slashIdx + 1);
+    return parseWithSlash(arg);
+  }
 
-    // Reject empty suffix after slash (e.g., "org/" or "/")
-    if (!rest) {
-      throw new Error(
-        `Invalid issue format: "${arg}". Missing issue ID after slash.`
-      );
-    }
-
-    if (!org) {
-      // "/G" → treat as suffix-only (unusual but valid)
-      return { type: "suffix-only", suffix: rest.toUpperCase() };
-    }
-
-    if (isNumericId(rest)) {
-      // "sentry/123456789" → explicit org + numeric ID
-      return { type: "explicit-org-numeric", org, numericId: rest };
-    }
-
-    // "sentry/G" → explicit org + suffix only
-    return { type: "explicit-org-suffix", org, suffix: rest.toUpperCase() };
+  // 3. Has dash but no slash → split on last "-" for project-suffix
+  if (arg.includes("-")) {
+    return parseWithDash(arg);
   }
 
   // 4. No dash, no slash → suffix only (needs DSN context)

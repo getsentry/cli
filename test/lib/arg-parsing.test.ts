@@ -221,5 +221,23 @@ describe("parseIssueArg", () => {
         suffix: "G",
       });
     });
+
+    test("/project-suffix returns project-search", () => {
+      // Leading slash with project and suffix
+      expect(parseIssueArg("/cli-G")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("/multi-part-project-suffix returns project-search", () => {
+      // Leading slash with multi-part project slug
+      expect(parseIssueArg("/spotlight-electron-4Y")).toEqual({
+        type: "project-search",
+        projectSlug: "spotlight-electron",
+        suffix: "4Y",
+      });
+    });
   });
 });
