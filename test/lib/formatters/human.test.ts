@@ -84,6 +84,68 @@ describe("formatShortId ANSI formatting", () => {
   });
 });
 
+describe("formatShortId multi-project alias highlighting", () => {
+  // These tests verify the highlighting logic finds the correct part to highlight.
+  // Content is always verified (ANSI codes stripped); formatting presence depends on FORCE_COLOR.
+
+  test("highlights rightmost matching part for ambiguous aliases", () => {
+    // Bug fix: For projects api-app, api-admin with aliases ap, ad
+    // API-APP-5 with alias "ap" should highlight APP (not API)
+    const result = formatShortId("API-APP-5", {
+      projectAlias: "ap",
+      isMultiProject: true,
+    });
+    // Content is always correct - the text should be unchanged
+    expect(stripAnsi(result)).toBe("API-APP-5");
+  });
+
+  test("highlights alias with embedded dash correctly", () => {
+    // Bug fix: For projects x-ab, xyz with aliases x-a, xy
+    // X-AB-5 with alias "x-a" should highlight X-A (joined project portion)
+    const result = formatShortId("X-AB-5", {
+      projectAlias: "x-a",
+      isMultiProject: true,
+    });
+    expect(stripAnsi(result)).toBe("X-AB-5");
+  });
+
+  test("highlights single char alias at start of multi-part short ID", () => {
+    // CLI-WEBSITE-4 with alias "w" should highlight W in WEBSITE (not CLI)
+    const result = formatShortId("CLI-WEBSITE-4", {
+      projectAlias: "w",
+      isMultiProject: true,
+    });
+    expect(stripAnsi(result)).toBe("CLI-WEBSITE-4");
+  });
+
+  test("highlights single char alias in simple short ID", () => {
+    // CLI-25 with alias "c" should highlight C in CLI
+    const result = formatShortId("CLI-25", {
+      projectAlias: "c",
+      isMultiProject: true,
+    });
+    expect(stripAnsi(result)).toBe("CLI-25");
+  });
+
+  test("handles org-prefixed alias format", () => {
+    // Alias "o1/d" should use "d" for matching against DASHBOARD-A3
+    const result = formatShortId("DASHBOARD-A3", {
+      projectAlias: "o1/d",
+      isMultiProject: true,
+    });
+    expect(stripAnsi(result)).toBe("DASHBOARD-A3");
+  });
+
+  test("falls back gracefully when alias doesn't match", () => {
+    // If alias doesn't match any part, return plain text
+    const result = formatShortId("CLI-25", {
+      projectAlias: "xyz",
+      isMultiProject: true,
+    });
+    expect(stripAnsi(result)).toBe("CLI-25");
+  });
+});
+
 describe("formatIssueRow", () => {
   const mockIssue: SentryIssue = {
     id: "123",

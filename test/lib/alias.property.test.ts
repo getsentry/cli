@@ -156,6 +156,28 @@ describe("property: findShortestUniquePrefixes", () => {
     );
   });
 
+  test("prefixes never end with dash or underscore", () => {
+    // Use slugs that may contain hyphens to test the extension logic
+    fcAssert(
+      property(
+        uniqueArray(slugWithHyphensArb, {
+          minLength: 1,
+          maxLength: 10,
+          comparator: (a, b) => a.toLowerCase() === b.toLowerCase(),
+        }),
+        (strings) => {
+          const prefixes = findShortestUniquePrefixes(strings);
+
+          for (const prefix of prefixes.values()) {
+            expect(prefix.endsWith("-")).toBe(false);
+            expect(prefix.endsWith("_")).toBe(false);
+          }
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
   test("empty array returns empty map", () => {
     const prefixes = findShortestUniquePrefixes([]);
     expect(prefixes.size).toBe(0);
@@ -297,6 +319,23 @@ describe("property: buildOrgAwareAliases", () => {
 
           for (const alias of aliasMap.values()) {
             expect(alias.length).toBeGreaterThan(0);
+          }
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("aliases never end with dash or underscore", () => {
+    fcAssert(
+      property(
+        array(orgProjectPairArb, { minLength: 1, maxLength: 10 }),
+        (pairs) => {
+          const { aliasMap } = buildOrgAwareAliases(pairs);
+
+          for (const alias of aliasMap.values()) {
+            expect(alias.endsWith("-")).toBe(false);
+            expect(alias.endsWith("_")).toBe(false);
           }
         }
       ),

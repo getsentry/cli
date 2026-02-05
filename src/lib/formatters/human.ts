@@ -360,15 +360,78 @@ export type FormatShortIdOptions = {
 };
 
 /**
- * Format a short ID with the unique suffix highlighted with underline.
+ * Format short ID for multi-project mode by highlighting the alias characters.
+ * Only highlights the specific characters that form the alias:
+ * - CLI-25 with alias "c" → **C**LI-**25**
+ * - CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4**
+ * - API-APP-5 with alias "ap" → API-**AP**P-**5** (searches backwards to find correct part)
+ * - X-AB-5 with alias "x-a" → **X-A**B-**5** (handles aliases with embedded dashes)
  *
- * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
- * Multi-project mode: "DASHBOARD-A3" → "DASHBOARD-_A3_" (just suffix underlined,
- *   alias is shown in separate ALIAS column)
+ * @returns Formatted string if alias matches, null otherwise (to fall back to default)
+ */
+function formatShortIdWithAlias(
+  upperShortId: string,
+  projectAlias: string
+): string | null {
+  // Extract project part of alias (handle "o1/d" format for collision cases)
+  const aliasProjectPart = projectAlias.includes("/")
+    ? projectAlias.split("/").pop()
+    : projectAlias;
+
+  if (!aliasProjectPart) {
+    return null;
+  }
+
+  const parts = upperShortId.split("-");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const aliasUpper = aliasProjectPart.toUpperCase();
+  const aliasLen = aliasUpper.length;
+  const projectParts = parts.slice(0, -1);
+  const issueSuffix = parts.at(-1) ?? "";
+
+  // Method 1: For aliases without dashes, search backwards through project parts
+  // This handles cases like "api-app" where alias "ap" should match "APP" not "API"
+  if (!aliasUpper.includes("-")) {
+    for (let i = projectParts.length - 1; i >= 0; i--) {
+      const part = projectParts[i];
+      if (part?.startsWith(aliasUpper)) {
+        // Found match - highlight alias prefix in this part and the issue suffix
+        const result = projectParts.map((p, idx) => {
+          if (idx === i) {
+            return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
+          }
+          return p;
+        });
+        return `${result.join("-")}-${boldUnderline(issueSuffix)}`;
+      }
+    }
+  }
+
+  // Method 2: For aliases with dashes (or if Method 1 found no match),
+  // match against the joined project portion
+  const projectPortion = projectParts.join("-");
+  if (projectPortion.startsWith(aliasUpper)) {
+    // Highlight first aliasLen chars of project portion, plus issue suffix
+    const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
+    const rest = projectPortion.slice(aliasLen);
+    return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
+  }
+
+  return null;
+}
+
+/**
+ * Format a short ID with highlighting to show what the user can type as shorthand.
  *
- * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
+ * - Single project: CLI-25 → CLI-**25** (suffix highlighted)
+ * - Multi-project: CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4** (alias chars highlighted)
+ *
+ * @param shortId - Full short ID (e.g., "CLI-25", "CLI-WEBSITE-4")
  * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
- * @returns Formatted short ID with underline highlights
+ * @returns Formatted short ID with highlights
  */
 export function formatShortId(
   shortId: string,
@@ -378,27 +441,27 @@ export function formatShortId(
   const opts: FormatShortIdOptions =
     typeof options === "string" ? { projectSlug: options } : (options ?? {});
 
-  const { projectSlug } = opts;
-
-  // Extract suffix from shortId (the part after PROJECT-)
+  const { projectSlug, projectAlias, isMultiProject } = opts;
   const upperShortId = shortId.toUpperCase();
-  let suffix = shortId;
-  if (projectSlug) {
-    const prefix = `${projectSlug.toUpperCase()}-`;
-    if (upperShortId.startsWith(prefix)) {
-      suffix = shortId.slice(prefix.length);
+
+  // In multi-project mode with an alias, highlight the part that the alias represents
+  if (isMultiProject && projectAlias) {
+    const formatted = formatShortIdWithAlias(upperShortId, projectAlias);
+    if (formatted) {
+      return formatted;
     }
   }
 
-  // Show full shortId with suffix highlighted
+  // Single-project mode or fallback: highlight just the issue suffix
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
+      const suffix = shortId.slice(prefix.length);
       return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
     }
   }
 
-  return shortId.toUpperCase();
+  return upperShortId;
 }
 
 /**
