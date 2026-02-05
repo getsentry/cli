@@ -11,7 +11,7 @@ import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { ContextError } from "../../lib/errors.js";
+import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   formatLogRow,
   formatLogsHeader,
@@ -217,13 +217,18 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
         lastTimestamp = newestLog.timestamp_precise;
       }
     } catch (error) {
-      // Report to Sentry for visibility into polling failures
+      // Auth errors should propagate - user needs to re-authenticate
+      if (error instanceof AuthError) {
+        throw error;
+      }
+
+      // Report transient errors to Sentry for visibility
       Sentry.captureException(error);
 
       // Always write to stderr (doesn't interfere with JSON on stdout)
       const message = error instanceof Error ? error.message : String(error);
       stderr.write(`Error fetching logs: ${message}\n`);
-      // Continue polling even on errors
+      // Continue polling on transient errors (network, etc.)
     }
   }
 }
