@@ -20,9 +20,6 @@ const SHORT_SUFFIX_PATTERN = /^[a-zA-Z0-9]+$/;
 /** Pattern for alias-suffix format (e.g., "f-g", "fr-a3", "spotlight-e-4y") */
 const ALIAS_SUFFIX_PATTERN = /^(.+)-([a-zA-Z0-9]+)$/i;
 
-/** Pattern for pure numeric IDs (all digits) */
-const NUMERIC_ID_PATTERN = /^\d+$/;
-
 /**
  * Check if a string looks like a short ID (e.g., PROJECT-ABC)
  * vs a numeric ID (e.g., 123456).
@@ -76,15 +73,4 @@ export function expandToFullShortId(
   projectSlug: string
 ): string {
   return `${projectSlug.toUpperCase()}-${suffix.toUpperCase()}`;
-}
-
-/**
- * Check if a string is a pure numeric ID (all digits).
- *
- * Used to distinguish between:
- * - Numeric issue IDs: "123456789" → need org context
- * - Short suffixes: "G", "A3" → can be combined with project
- */
-export function isNumericId(input: string): boolean {
-  return NUMERIC_ID_PATTERN.test(input);
 }

@@ -6,7 +6,7 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
-import { isNumericId } from "./issue-id.js";
+import { isAllDigits } from "./utils.js";
 
 /** Default span depth when no value is provided */
 const DEFAULT_SPAN_DEPTH = 3;
@@ -205,7 +205,7 @@ function parseAfterSlash(
   org: string,
   rest: string
 ): ParsedIssueArg {
-  if (isNumericId(rest)) {
+  if (isAllDigits(rest)) {
     // "my-org/123456789" → explicit org + numeric ID
     return { type: "explicit-org-numeric", org, numericId: rest };
   }
@@ -288,7 +288,7 @@ function parseWithDash(arg: string): ParsedIssueArg {
 
 export function parseIssueArg(arg: string): ParsedIssueArg {
   // 1. Pure numeric → direct fetch by ID
-  if (isNumericId(arg)) {
+  if (isAllDigits(arg)) {
     return { type: "numeric", id: arg };
   }
 
