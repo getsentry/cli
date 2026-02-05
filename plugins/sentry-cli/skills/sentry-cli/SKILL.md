@@ -279,7 +279,7 @@ View details of a specific issue
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree with N levels of nesting depth`
+- `--spans <value> - Span tree nesting depth (0 for unlimited) - (default: "3")`
 
 **Examples:**
 
@@ -293,6 +293,12 @@ sentry issue view <short-id>
 sentry issue view FRONT-ABC
 
 sentry issue view FRONT-ABC -w
+
+# Show span tree with default depth (3)
+sentry issue view FRONT-ABC --spans 3
+
+# Show full span tree (unlimited depth)
+sentry issue view FRONT-ABC --spans 0
 ```
 
 ### Event
@@ -308,7 +314,7 @@ View details of a specific event
 - `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree from the event's trace`
+- `--spans <value> - Span tree nesting depth (0 for unlimited) - (default: "3")`
 
 **Examples:**
 
@@ -318,6 +324,12 @@ sentry event view <event-id>
 sentry event view abc123def456
 
 sentry event view abc123def456 -w
+
+# Show span tree with default depth (3)
+sentry event view abc123def456 --spans 3
+
+# Show full span tree (unlimited depth)
+sentry event view abc123def456 --spans 0
 ```
 
 ### Api
