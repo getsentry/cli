@@ -6,16 +6,16 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getDetailedTrace, getLatestEvent } from "../../lib/api-client.js";
+import { getLatestEvent } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
   formatEventDetails,
   formatIssueDetails,
-  formatSimpleSpanTree,
   muted,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
 
@@ -47,13 +47,14 @@ async function tryGetLatestEvent(
 type HumanOutputOptions = {
   issue: SentryIssue;
   event?: SentryEvent;
+  spanTreeLines?: string[];
 };
 
 /**
  * Write human-readable issue output
  */
 function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
-  const { issue, event } = options;
+  const { issue, event, spanTreeLines } = options;
 
   const issueLines = formatIssueDetails(issue);
   stdout.write(`${issueLines.join("\n")}\n`);
@@ -67,43 +68,9 @@ function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
     );
     stdout.write(`${eventLines.join("\n")}\n`);
   }
-}
 
-/**
- * Display the span tree for an event.
- * Shows ONLY the tree structure, no issue/event details.
- *
- * @param stdout - Output writer
- * @param orgSlug - Organization slug
- * @param event - The event to get trace from
- * @param maxDepth - Maximum nesting depth to display
- * @returns true if successfully displayed, false if missing data
- */
-async function displaySpanTree(
-  stdout: Writer,
-  orgSlug: string,
-  event: SentryEvent,
-  maxDepth: number
-): Promise<boolean> {
-  const traceId = event.contexts?.trace?.trace_id;
-  const dateCreated = (event as { dateCreated?: string }).dateCreated;
-  const timestamp = dateCreated
-    ? new Date(dateCreated).getTime() / 1000
-    : undefined;
-
-  if (!(traceId && timestamp)) {
-    stdout.write(muted("No trace data available for this event.\n"));
-    return false;
-  }
-
-  try {
-    const spans = await getDetailedTrace(orgSlug, traceId, timestamp);
-    const lines = formatSimpleSpanTree(traceId, spans, maxDepth);
-    stdout.write(`${lines.join("\n")}\n`);
-    return true;
-  } catch {
-    stdout.write(muted("Unable to fetch span tree for this event.\n"));
-    return false;
+  if (spanTreeLines && spanTreeLines.length > 0) {
+    stdout.write(`${spanTreeLines.join("\n")}\n`);
   }
 }
 
@@ -183,19 +150,21 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    writeHumanOutput(stdout, { issue, event });
-
+    // Fetch span tree lines
+    let spanTreeLines: string[] | undefined;
     if (orgSlug && event) {
       const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
-      stdout.write("\n");
-      await displaySpanTree(stdout, orgSlug, event, depth);
+      const result = await getSpanTreeLines(orgSlug, event, depth);
+      spanTreeLines = result.lines;
     } else if (!orgSlug) {
-      stdout.write(
-        muted("\nOrganization context required to fetch span tree.\n")
-      );
+      spanTreeLines = [
+        muted("\nOrganization context required to fetch span tree."),
+      ];
     } else if (!event) {
-      stdout.write(muted("\nCould not fetch event to display span tree.\n"));
+      spanTreeLines = [muted("\nCould not fetch event to display span tree.")];
     }
+
+    writeHumanOutput(stdout, { issue, event, spanTreeLines });
 
     writeFooter(
       stdout,

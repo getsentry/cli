@@ -6,17 +6,13 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getDetailedTrace, getEvent } from "../../lib/api-client.js";
+import { getEvent } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
-import {
-  formatEventDetails,
-  formatSimpleSpanTree,
-  muted,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
+import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
 
 type ViewFlags = {
@@ -146,27 +142,13 @@ export const viewCommand = buildCommand({
 
     const event = await getEvent(target.org, target.project, eventId);
 
-    let spanTreeLines: string[] | undefined;
-    const traceId = event.contexts?.trace?.trace_id;
-    const dateCreated = (event as { dateCreated?: string }).dateCreated;
-    const timestamp = dateCreated
-      ? new Date(dateCreated).getTime() / 1000
-      : undefined;
-
-    if (traceId && timestamp) {
-      try {
-        const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
-        const spans = await getDetailedTrace(target.org, traceId, timestamp);
-        spanTreeLines = formatSimpleSpanTree(traceId, spans, depth);
-      } catch {
-        // Non-fatal: trace data may not be available for all events
-        spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
-      }
-    } else if (!traceId) {
-      spanTreeLines = [muted("\nNo trace data available for this event.")];
-    } else if (!timestamp) {
-      spanTreeLines = [muted("\nNo timestamp available to fetch span tree.")];
-    }
+    // Fetch span tree lines
+    const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
+    const { lines: spanTreeLines } = await getSpanTreeLines(
+      target.org,
+      event,
+      depth
+    );
 
     if (flags.json) {
       writeJson(stdout, event);
