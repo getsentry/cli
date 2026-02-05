@@ -107,7 +107,8 @@ async function executeSingleFetch(
   });
 
   if (flags.json) {
-    writeJson(stdout, logs);
+    // Reverse for chronological order (API returns newest first)
+    writeJson(stdout, [...logs].reverse());
     return;
   }
 
