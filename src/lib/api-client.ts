@@ -34,6 +34,7 @@ import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { ApiError, AuthError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
+import { isAllDigits } from "./utils.js";
 
 /**
  * Control silo URL - handles OAuth, user accounts, and region routing.
@@ -957,9 +958,6 @@ const LOG_FIELDS = [
   "message",
 ];
 
-/** Regex to check if a project identifier is a numeric ID */
-const NUMERIC_PROJECT_REGEX = /^\d+$/;
-
 type ListLogsOptions = {
   /** Search query using Sentry query syntax */
   query?: string;
@@ -990,7 +988,7 @@ export async function listLogs(
   options: ListLogsOptions = {}
 ): Promise<SentryLog[]> {
   // API only accepts numeric project IDs as param, slugs go in query
-  const isNumericProject = NUMERIC_PROJECT_REGEX.test(projectSlug);
+  const isNumericProject = isAllDigits(projectSlug);
 
   // Build query parts
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
