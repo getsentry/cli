@@ -6,6 +6,7 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createTracedDatabase } from "../telemetry.js";
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
 
@@ -21,7 +22,10 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Probability of running cleanup on write operations */
 const CLEANUP_PROBABILITY = 0.1;
 
+/** Traced database wrapper (returned by getDatabase) */
 let db: Database | null = null;
+/** Raw database without tracing (used for repair operations) */
+let rawDb: Database | null = null;
 let dbOpenedPath: string | null = null;
 
 export function getConfigDir(): string {
@@ -68,6 +72,7 @@ export function getDatabase(): Database {
   if (db && dbOpenedPath !== dbPath) {
     db.close();
     db = null;
+    rawDb = null;
     dbOpenedPath = null;
   }
 
@@ -77,26 +82,35 @@ export function getDatabase(): Database {
 
   ensureConfigDir();
 
-  db = new Database(dbPath);
+  rawDb = new Database(dbPath);
 
-  // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
-  // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
-  // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
-  // must wait. Without sufficient timeout, concurrent processes fail immediately.
-  // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA synchronous = NORMAL");
+  try {
+    // 5000ms busy_timeout prevents SQLITE_BUSY errors during concurrent CLI access.
+    // When multiple CLI instances run simultaneously (e.g., parallel terminals, CI jobs),
+    // SQLite needs time to acquire locks. WAL mode allows concurrent reads, but writers
+    // must wait. Without sufficient timeout, concurrent processes fail immediately.
+    // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
+    rawDb.exec("PRAGMA busy_timeout = 5000");
+    rawDb.exec("PRAGMA journal_mode = WAL");
+    rawDb.exec("PRAGMA foreign_keys = ON");
+    rawDb.exec("PRAGMA synchronous = NORMAL");
 
-  setDbPermissions();
-  initSchema(db);
-  runMigrations(db);
-  migrateFromJson(db);
+    setDbPermissions();
+    initSchema(rawDb);
+    runMigrations(rawDb);
+    migrateFromJson(rawDb);
 
-  dbOpenedPath = dbPath;
+    // Wrap with tracing proxy for automatic query instrumentation
+    db = createTracedDatabase(rawDb);
+    dbOpenedPath = dbPath;
 
-  return db;
+    return db;
+  } catch (error) {
+    // Clean up on initialization failure to prevent connection leak
+    rawDb.close();
+    rawDb = null;
+    throw error;
+  }
 }
 
 /** Close the database connection (used for testing). */
@@ -104,8 +118,26 @@ export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    rawDb = null;
     dbOpenedPath = null;
   }
+}
+
+/**
+ * Get the raw (unwrapped) database connection.
+ * Used for repair operations to avoid triggering the traced wrapper's
+ * auto-repair logic (which would cause infinite loops).
+ */
+export function getRawDatabase(): Database {
+  if (!rawDb) {
+    // Ensure database is initialized
+    getDatabase();
+  }
+  // After getDatabase() call, rawDb is guaranteed to be set
+  if (!rawDb) {
+    throw new Error("Database initialization failed");
+  }
+  return rawDb;
 }
 
 function shouldRunCleanup(): boolean {
@@ -115,6 +147,7 @@ function shouldRunCleanup(): boolean {
 function cleanupExpiredCaches(): void {
   const database = getDatabase();
   const expiryTime = Date.now() - CACHE_TTL_MS;
+  const now = Date.now();
 
   database
     .query("DELETE FROM project_cache WHERE last_accessed < ?")
@@ -125,6 +158,10 @@ function cleanupExpiredCaches(): void {
   database
     .query("DELETE FROM project_aliases WHERE last_accessed < ?")
     .run(expiryTime);
+  // project_root_cache uses ttl_expires_at instead of last_accessed
+  database
+    .query("DELETE FROM project_root_cache WHERE ttl_expires_at < ?")
+    .run(now);
 }
 
 export function maybeCleanupCaches(): void {

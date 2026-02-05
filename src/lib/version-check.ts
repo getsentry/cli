@@ -133,7 +133,7 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} → ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
@@ -141,22 +141,32 @@ function getUpdateNotificationImpl(): string | null {
   }
 }
 
-// No-op implementations for when update check is disabled
-function noop(): void {
-  // Intentionally empty - used when update check is disabled
+/**
+ * Check if update checking is disabled via environment variable.
+ * Checked at runtime to support test isolation.
+ */
+function isUpdateCheckDisabled(): boolean {
+  return process.env.SENTRY_CLI_NO_UPDATE_CHECK === "1";
 }
 
-function noopNull(): null {
-  return null;
+/**
+ * Start a background check for new versions (if not disabled).
+ * Does not block - fires a fetch and lets it complete in the background.
+ */
+export function maybeCheckForUpdateInBackground(): void {
+  if (isUpdateCheckDisabled()) {
+    return;
+  }
+  checkForUpdateInBackgroundImpl();
 }
 
-// Export either real implementations or no-ops based on environment variable
-const isDisabled = process.env.SENTRY_CLI_NO_UPDATE_CHECK === "1";
-
-export const maybeCheckForUpdateInBackground = isDisabled
-  ? noop
-  : checkForUpdateInBackgroundImpl;
-
-export const getUpdateNotification = isDisabled
-  ? noopNull
-  : getUpdateNotificationImpl;
+/**
+ * Get the update notification message if a new version is available.
+ * Returns null if disabled, up-to-date, no cached version info, or on error.
+ */
+export function getUpdateNotification(): string | null {
+  if (isUpdateCheckDisabled()) {
+    return null;
+  }
+  return getUpdateNotificationImpl();
+}

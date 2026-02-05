@@ -7,11 +7,10 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getUserAgent } from "./constants.js";
 import { UpgradeError } from "./errors.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type InstallationMethod =
   | "curl"
@@ -24,9 +23,7 @@ export type InstallationMethod =
 /** Package managers that can be used for global installs */
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** GitHub API base URL for releases */
 const GITHUB_RELEASES_URL =
@@ -38,18 +35,18 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 /** Sentry CLI install script URL */
 const INSTALL_SCRIPT_URL = "https://cli.sentry.dev/install";
 
-/** Standard headers for GitHub API requests */
-const GITHUB_HEADERS = {
-  Accept: "application/vnd.github.v3+json",
-  "User-Agent": "sentry-cli",
-} as const;
+/** Build headers for GitHub API requests */
+function getGitHubHeaders() {
+  return {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": getUserAgent(),
+  };
+}
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Detection
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Run a shell command and capture stdout.
@@ -130,9 +127,7 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
   return "unknown";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Version Fetching
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Extract error message from unknown caught value */
 function getErrorMessage(error: unknown): string {
@@ -182,7 +177,7 @@ export async function fetchLatestFromGitHub(
 ): Promise<string> {
   const response = await fetchWithUpgradeError(
     `${GITHUB_RELEASES_URL}/latest`,
-    { headers: GITHUB_HEADERS, signal },
+    { headers: getGitHubHeaders(), signal },
     "GitHub"
   );
 
@@ -264,7 +259,7 @@ export async function versionExists(
   if (method === "curl") {
     const response = await fetchWithUpgradeError(
       `${GITHUB_RELEASES_URL}/tags/v${version}`,
-      { method: "HEAD", headers: GITHUB_HEADERS },
+      { method: "HEAD", headers: getGitHubHeaders() },
       "GitHub"
     );
     return response.ok;
@@ -278,9 +273,7 @@ export async function versionExists(
   return response.ok;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Upgrade Execution
-// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Execute upgrade via curl installer script.

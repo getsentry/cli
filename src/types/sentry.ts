@@ -8,9 +8,7 @@
 
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Region
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A Sentry region (e.g., US, EU) */
 export const RegionSchema = z.object({
@@ -27,9 +25,7 @@ export const UserRegionsResponseSchema = z.object({
 
 export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Organization
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Organization links with region URL for multi-region support */
 export const OrganizationLinksSchema = z.object({
@@ -64,9 +60,7 @@ export const SentryOrganizationSchema = z
 
 export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // User
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryUserSchema = z
   .object({
@@ -81,9 +75,7 @@ export const SentryUserSchema = z
 
 export type SentryUser = z.infer<typeof SentryUserSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Project
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryProjectSchema = z
   .object({
@@ -130,9 +122,7 @@ export const SentryProjectSchema = z
 
 export type SentryProject = z.infer<typeof SentryProjectSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Issue Status & Level Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ISSUE_STATUSES = ["resolved", "unresolved", "ignored"] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
@@ -160,9 +150,7 @@ export const ISSUE_SUBSTATUSES = [
 ] as const;
 export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Release (embedded in Issue)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ReleaseSchema = z
   .object({
@@ -193,9 +181,7 @@ export const ReleaseSchema = z
 
 export type Release = z.infer<typeof ReleaseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Issue
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryIssueSchema = z
   .object({
@@ -277,9 +263,7 @@ export const SentryIssueSchema = z
 
 export type SentryIssue = z.infer<typeof SentryIssueSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Trace Context
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const TraceContextSchema = z
   .object({
@@ -294,9 +278,7 @@ export const TraceContextSchema = z
 
 export type TraceContext = z.infer<typeof TraceContextSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Span (for trace tree display)
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single span in a trace */
 export const SpanSchema = z
@@ -318,41 +300,6 @@ export const SpanSchema = z
 
 export type Span = z.infer<typeof SpanSchema>;
 
-/** A transaction/event in a trace (from events-trace endpoint) */
-export const TraceEventSchema = z
-  .object({
-    event_id: z.string(),
-    span_id: z.string().optional(),
-    transaction: z.string().optional(),
-    "transaction.duration": z.number().optional(),
-    "transaction.op": z.string().optional(),
-    project_slug: z.string().optional(),
-    project_id: z.union([z.string(), z.number()]).optional(),
-    /** Child spans within this transaction */
-    spans: z.array(SpanSchema).optional(),
-    /** Start time */
-    start_timestamp: z.number().optional(),
-    /** End time */
-    timestamp: z.number().optional(),
-    /** Errors associated with this transaction */
-    errors: z.array(z.unknown()).optional(),
-    /** Performance issues */
-    performance_issues: z.array(z.unknown()).optional(),
-  })
-  .passthrough();
-
-export type TraceEvent = z.infer<typeof TraceEventSchema>;
-
-/** Response from /events-trace/{traceId}/ endpoint */
-export const TraceResponseSchema = z.object({
-  /** Transactions with their nested children (span trees) */
-  transactions: z.array(TraceEventSchema),
-  /** Errors not associated with any transaction */
-  orphan_errors: z.array(z.unknown()).optional(),
-});
-
-export type TraceResponse = z.infer<typeof TraceResponseSchema>;
-
 /**
  * Span from /trace/{traceId}/ endpoint with nested children.
  * This endpoint returns a hierarchical structure unlike /events-trace/.
@@ -372,9 +319,7 @@ export type TraceSpan = {
   children?: TraceSpan[];
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Stack Frame & Exception Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single frame in a stack trace */
 export const StackFrameSchema = z
@@ -460,9 +405,7 @@ export const ExceptionEntrySchema = z.object({
 
 export type ExceptionEntry = z.infer<typeof ExceptionEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Breadcrumbs Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** A single breadcrumb */
 export const BreadcrumbSchema = z
@@ -491,9 +434,7 @@ export const BreadcrumbsEntrySchema = z.object({
 
 export type BreadcrumbsEntry = z.infer<typeof BreadcrumbsEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Request Entry
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** HTTP request entry in event.entries */
 export const RequestEntrySchema = z.object({
@@ -532,9 +473,7 @@ export const RequestEntrySchema = z.object({
 
 export type RequestEntry = z.infer<typeof RequestEntrySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Event Contexts
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** Browser context */
 export const BrowserContextSchema = z
@@ -581,9 +520,7 @@ export const UserGeoSchema = z
 
 export type UserGeo = z.infer<typeof UserGeoSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Event
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const SentryEventSchema = z
   .object({
@@ -667,9 +604,7 @@ export const SentryEventSchema = z
 
 export type SentryEvent = z.infer<typeof SentryEventSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Project Keys (DSN)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const ProjectKeyDsnSchema = z.object({
   public: z.string(),
@@ -687,3 +622,51 @@ export const ProjectKeySchema = z
   .passthrough();
 
 export type ProjectKey = z.infer<typeof ProjectKeySchema>;
+
+/** Log severity levels (similar to issue levels but includes trace) */
+export const LOG_SEVERITIES = [
+  "fatal",
+  "error",
+  "warning",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+] as const;
+export type LogSeverity = (typeof LOG_SEVERITIES)[number];
+
+/**
+ * Individual log entry from the logs dataset.
+ * Fields match the Sentry Explore/Events API response for dataset=logs.
+ */
+export const SentryLogSchema = z
+  .object({
+    /** Unique identifier for deduplication */
+    "sentry.item_id": z.string(),
+    /** ISO timestamp of the log entry */
+    timestamp: z.string(),
+    /** Nanosecond-precision timestamp for accurate ordering and filtering */
+    timestamp_precise: z.number(),
+    /** Log message content */
+    message: z.string().nullable().optional(),
+    /** Log severity level (error, warning, info, debug, etc.) */
+    severity: z.string().nullable().optional(),
+    /** Trace ID for correlation with traces */
+    trace: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type SentryLog = z.infer<typeof SentryLogSchema>;
+
+/** Response from the logs events endpoint */
+export const LogsResponseSchema = z.object({
+  data: z.array(SentryLogSchema),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+export type LogsResponse = z.infer<typeof LogsResponseSchema>;

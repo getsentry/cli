@@ -12,6 +12,7 @@ import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
 import { issueRoute } from "./commands/issue/index.js";
+import { logRoute } from "./commands/log/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { CLI_VERSION } from "./lib/constants.js";
@@ -28,6 +29,7 @@ export const routes = buildRouteMap({
     project: projectRoute,
     issue: issueRoute,
     event: eventRoute,
+    log: logRoute,
     api: apiCommand,
   },
   defaultCommand: "help",

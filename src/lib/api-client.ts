@@ -8,6 +8,8 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type LogsResponse,
+  LogsResponseSchema,
   type ProjectKey,
   ProjectKeySchema,
   type Region,
@@ -15,13 +17,13 @@ import {
   SentryEventSchema,
   type SentryIssue,
   SentryIssueSchema,
+  type SentryLog,
   type SentryOrganization,
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
   type SentryUser,
   SentryUserSchema,
-  type TraceResponse,
   type TraceSpan,
   type UserRegionsResponse,
   UserRegionsResponseSchema,
@@ -31,6 +33,7 @@ import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { ApiError, AuthError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
+import { isAllDigits } from "./utils.js";
 
 /**
  * Control silo URL - handles OAuth, user accounts, and region routing.
@@ -617,6 +620,75 @@ export async function findProjectsBySlug(
 }
 
 /**
+ * Escape special regex characters in a string.
+ * Uses native RegExp.escape if available (Node.js 23.6+, Bun), otherwise polyfills.
+ */
+const escapeRegex: (str: string) => string =
+  typeof RegExp.escape === "function"
+    ? RegExp.escape
+    : (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Check if two strings match with word-boundary semantics (bidirectional).
+ *
+ * Returns true if either:
+ * - `a` appears in `b` at a word boundary
+ * - `b` appears in `a` at a word boundary
+ *
+ * @example
+ * matchesWordBoundary("cli", "cli-website")  // true: "cli" in "cli-website"
+ * matchesWordBoundary("sentry-docs", "docs") // true: "docs" in "sentry-docs"
+ * matchesWordBoundary("cli", "eclipse")      // false: no word boundary
+ *
+ * @internal Exported for testing
+ */
+export function matchesWordBoundary(a: string, b: string): boolean {
+  const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
+  const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
+  return aInB.test(b) || bInA.test(a);
+}
+
+/**
+ * Find projects matching a pattern with bidirectional word-boundary matching.
+ * Used for directory name inference when DSN detection fails.
+ *
+ * Uses `\b` regex word boundary, which matches:
+ * - Start/end of string
+ * - Between word char (`\w`) and non-word char (like "-")
+ *
+ * Matching is bidirectional:
+ * - Directory name in project slug: dir "cli" matches project "cli-website"
+ * - Project slug in directory name: project "docs" matches dir "sentry-docs"
+ *
+ * @param pattern - Directory name to match against project slugs
+ * @returns Array of matching projects with their org context
+ */
+export async function findProjectsByPattern(
+  pattern: string
+): Promise<ProjectWithOrg[]> {
+  const orgs = await listOrganizations();
+
+  const searchResults = await Promise.all(
+    orgs.map(async (org) => {
+      try {
+        const projects = await listProjects(org.slug);
+        return projects
+          .filter((p) => matchesWordBoundary(pattern, p.slug))
+          .map((p) => ({ ...p, orgSlug: org.slug }));
+      } catch (error) {
+        if (error instanceof AuthError) {
+          throw error;
+        }
+        // Skip orgs where user lacks access (permission errors, etc.)
+        return [];
+      }
+    })
+  );
+
+  return searchResults.flat();
+}
+
+/**
  * Find a project by DSN public key.
  *
  * Uses the /api/0/projects/ endpoint with query=dsn:<key> to search
@@ -805,24 +877,6 @@ export function getEvent(
 }
 
 /**
- * Get trace data including all transactions and spans.
- * Returns the full trace tree for visualization.
- * Uses region-aware routing for multi-region support.
- *
- * @param orgSlug - Organization slug
- * @param traceId - The trace ID (from event.contexts.trace.trace_id)
- * @returns Trace response with transactions array and orphan_errors
- */
-export function getTrace(
-  orgSlug: string,
-  traceId: string
-): Promise<TraceResponse> {
-  return orgScopedRequest<TraceResponse>(
-    `/organizations/${orgSlug}/events-trace/${traceId}/`
-  );
-}
-
-/**
  * Get detailed trace with nested children structure.
  * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
  * Uses region-aware routing for multi-region support.
@@ -942,4 +996,75 @@ export function getCurrentUser(): Promise<SentryUser> {
   return apiRequest<SentryUser>("/users/me/", {
     schema: SentryUserSchema,
   });
+}
+
+/** Fields to request from the logs API */
+const LOG_FIELDS = [
+  "sentry.item_id",
+  "trace",
+  "severity",
+  "timestamp",
+  "timestamp_precise",
+  "message",
+];
+
+type ListLogsOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of log entries to return */
+  limit?: number;
+  /** Time period for logs (e.g., "90d", "10m") */
+  statsPeriod?: string;
+  /** Only return logs after this timestamp_precise value (for streaming) */
+  afterTimestamp?: number;
+};
+
+/**
+ * List logs for an organization/project.
+ * Uses the Explore/Events API with dataset=logs.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, statsPeriod)
+ * @returns Array of log entries
+ */
+export async function listLogs(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListLogsOptions = {}
+): Promise<SentryLog[]> {
+  // API only accepts numeric project IDs as param, slugs go in query
+  const isNumericProject = isAllDigits(projectSlug);
+
+  // Build query parts
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const timestampFilter = options.afterTimestamp
+    ? `timestamp_precise:>${options.afterTimestamp}`
+    : "";
+
+  const fullQuery = [projectFilter, options.query, timestampFilter]
+    .filter(Boolean)
+    .join(" ");
+
+  const response = await orgScopedRequest<LogsResponse>(
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "logs",
+        field: LOG_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit || 100,
+        statsPeriod: options.statsPeriod ?? "7d",
+        sort: "-timestamp",
+      },
+      schema: LogsResponseSchema,
+    }
+  );
+
+  return response.data;
 }

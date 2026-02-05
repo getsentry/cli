@@ -256,6 +256,7 @@ Generate a solution plan using Seer AI
 **Flags:**
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+- `--force - Force new plan even if one exists`
 
 **Examples:**
 
@@ -279,7 +280,7 @@ View details of a specific issue
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree with N levels of nesting depth`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -308,7 +309,7 @@ View details of a specific event
 - `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree from the event's trace`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -389,6 +390,13 @@ CLI-related commands
 
 Send feedback about the CLI
 
+#### `sentry cli fix`
+
+Diagnose and repair CLI database issues
+
+**Flags:**
+- `--dry-run - Show what would be fixed without making changes`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
@@ -396,6 +404,20 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
 
 ## Output Formats
 

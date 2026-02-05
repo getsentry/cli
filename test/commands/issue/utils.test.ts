@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   buildCommandHint,
+  ensureRootCauseAnalysis,
   pollAutofixState,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
@@ -50,7 +51,10 @@ let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-issue-utils-");
+  // Use isolateProjectRoot to prevent DSN detection from scanning the real project
+  testConfigDir = await createTestConfigDir("test-issue-utils-", {
+    isolateProjectRoot: true,
+  });
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
@@ -840,5 +844,371 @@ describe("pollAutofixState", () => {
 
     expect(result.status).toBe("COMPLETED");
     expect(fetchCount).toBe(2);
+  });
+});
+
+describe("ensureRootCauseAnalysis", () => {
+  const mockStderr = {
+    write: () => {
+      // Intentionally empty - suppress output in tests
+    },
+  };
+
+  test("returns immediately when state is COMPLETED", async () => {
+    let fetchCount = 0;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 12_345,
+            status: "COMPLETED",
+            steps: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(fetchCount).toBe(1); // Only one fetch to check state
+  });
+
+  test("returns immediately when state is WAITING_FOR_USER_RESPONSE", async () => {
+    let fetchCount = 0;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 12_345,
+            status: "WAITING_FOR_USER_RESPONSE",
+            steps: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
+
+    expect(result.status).toBe("WAITING_FOR_USER_RESPONSE");
+    expect(fetchCount).toBe(1);
+  });
+
+  test("triggers new analysis when no state exists", async () => {
+    let triggerCalled = false;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // First call: getAutofixState returns null
+      if (url.includes("/autofix/") && req.method === "GET") {
+        // After trigger, return COMPLETED
+        if (triggerCalled) {
+          return new Response(
+            JSON.stringify({
+              autofix: {
+                run_id: 12_345,
+                status: "COMPLETED",
+                steps: [],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+        // Before trigger, return null
+        return new Response(JSON.stringify({ autofix: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Trigger RCA endpoint
+      if (url.includes("/autofix/") && req.method === "POST") {
+        triggerCalled = true;
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(triggerCalled).toBe(true);
+  });
+
+  test("retries when existing analysis has ERROR status", async () => {
+    let triggerCalled = false;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // getAutofixState
+      if (url.includes("/autofix/") && req.method === "GET") {
+        // First call returns ERROR, subsequent calls return COMPLETED
+        if (!triggerCalled) {
+          return new Response(
+            JSON.stringify({
+              autofix: {
+                run_id: 12_345,
+                status: "ERROR",
+                steps: [],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_346,
+              status: "COMPLETED",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Trigger RCA endpoint
+      if (url.includes("/autofix/") && req.method === "POST") {
+        triggerCalled = true;
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(triggerCalled).toBe(true); // Should have retried
+  });
+
+  test("polls until complete when state is PROCESSING", async () => {
+    let fetchCount = 0;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+
+      if (req.method === "GET") {
+        fetchCount += 1;
+
+        // First call returns PROCESSING, second returns COMPLETED
+        if (fetchCount === 1) {
+          return new Response(
+            JSON.stringify({
+              autofix: {
+                run_id: 12_345,
+                status: "PROCESSING",
+                steps: [],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: 12_345,
+              status: "COMPLETED",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(fetchCount).toBeGreaterThan(1); // Polled multiple times
+  });
+
+  test("forces new analysis when force flag is true", async () => {
+    let triggerCalled = false;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // getAutofixState - would return COMPLETED, but force should skip this
+      if (url.includes("/autofix/") && req.method === "GET") {
+        // After trigger, return new COMPLETED state
+        return new Response(
+          JSON.stringify({
+            autofix: {
+              run_id: triggerCalled ? 99_999 : 12_345,
+              status: "COMPLETED",
+              steps: [],
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // Trigger RCA endpoint
+      if (url.includes("/autofix/") && req.method === "POST") {
+        triggerCalled = true;
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: mockStderr,
+      json: true,
+      force: true,
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(triggerCalled).toBe(true); // Should trigger even though state exists
+  });
+
+  test("writes progress messages to stderr when not in JSON mode", async () => {
+    let stderrOutput = "";
+    let triggerCalled = false;
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/autofix/") && req.method === "GET") {
+        if (triggerCalled) {
+          return new Response(
+            JSON.stringify({
+              autofix: {
+                run_id: 12_345,
+                status: "COMPLETED",
+                steps: [],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+        return new Response(JSON.stringify({ autofix: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/autofix/") && req.method === "POST") {
+        triggerCalled = true;
+        return new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const stderrMock = {
+      write: (s: string) => {
+        stderrOutput += s;
+      },
+    };
+
+    await ensureRootCauseAnalysis({
+      org: "test-org",
+      issueId: "123456789",
+      stderr: stderrMock,
+      json: false, // Not JSON mode, should output progress
+    });
+
+    expect(stderrOutput).toContain("root cause analysis");
   });
 });

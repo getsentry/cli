@@ -17,8 +17,8 @@ const DEFAULT_POLL_INTERVAL_MS = 1000;
 /** Animation interval for spinner updates (independent of polling) */
 const ANIMATION_INTERVAL_MS = 80;
 
-/** Default timeout in milliseconds (3 minutes) */
-const DEFAULT_TIMEOUT_MS = 180_000;
+/** Default timeout in milliseconds (6 minutes) */
+const DEFAULT_TIMEOUT_MS = 360_000;
 
 /**
  * Options for the generic poll function.
@@ -36,7 +36,7 @@ export type PollOptions<T> = {
   json?: boolean;
   /** Poll interval in ms (default: 1000) */
   pollIntervalMs?: number;
-  /** Timeout in ms (default: 180000 / 3 min) */
+  /** Timeout in ms (default: 360000 / 6 min) */
   timeoutMs?: number;
   /** Custom timeout message */
   timeoutMessage?: string;
@@ -64,8 +64,8 @@ export type PollOptions<T> = {
  *   getProgressMessage: (state) => state.message ?? "Processing...",
  *   stderr: process.stderr,
  *   json: false,
- *   timeoutMs: 180_000,
- *   timeoutMessage: "Operation timed out after 3 minutes.",
+ *   timeoutMs: 360_000,
+ *   timeoutMessage: "Operation timed out after 6 minutes.",
  * });
  * ```
  */
@@ -78,7 +78,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
     json = false,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    timeoutMessage = "Operation timed out after 3 minutes. Try again or check the Sentry web UI.",
+    timeoutMessage = "Operation timed out after 6 minutes. Try again or check the Sentry web UI.",
     initialMessage = "Waiting for operation to start...",
   } = options;
 

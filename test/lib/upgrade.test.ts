@@ -7,9 +7,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
+  fetchLatestVersion,
   parseInstallationMethod,
+  versionExists,
 } from "../../src/lib/upgrade.js";
 
 // Store original fetch for restoration
@@ -217,5 +220,166 @@ describe("UpgradeError", () => {
     const error = new UpgradeError("network_error", "Custom error message");
     expect(error.reason).toBe("network_error");
     expect(error.message).toBe("Custom error message");
+  });
+});
+
+describe("fetchLatestVersion", () => {
+  test("uses GitHub for curl method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ tag_name: "v2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("curl");
+    expect(version).toBe("2.0.0");
+  });
+
+  test("uses npm for npm method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: "2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("npm");
+    expect(version).toBe("2.0.0");
+  });
+
+  test("uses npm for pnpm method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: "2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("pnpm");
+    expect(version).toBe("2.0.0");
+  });
+
+  test("uses npm for bun method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: "2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("bun");
+    expect(version).toBe("2.0.0");
+  });
+
+  test("uses npm for yarn method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: "2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("yarn");
+    expect(version).toBe("2.0.0");
+  });
+
+  test("uses npm for unknown method", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: "2.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const version = await fetchLatestVersion("unknown");
+    expect(version).toBe("2.0.0");
+  });
+});
+
+describe("versionExists", () => {
+  test("checks GitHub for curl method - version exists", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 200 });
+
+    const exists = await versionExists("curl", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks GitHub for curl method - version does not exist", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 404 });
+
+    const exists = await versionExists("curl", "99.99.99");
+    expect(exists).toBe(false);
+  });
+
+  test("checks npm for npm method - version exists", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 200 });
+
+    const exists = await versionExists("npm", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks npm for npm method - version does not exist", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 404 });
+
+    const exists = await versionExists("npm", "99.99.99");
+    expect(exists).toBe(false);
+  });
+
+  test("checks npm for pnpm method", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 200 });
+
+    const exists = await versionExists("pnpm", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks npm for bun method", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 200 });
+
+    const exists = await versionExists("bun", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks npm for yarn method", async () => {
+    globalThis.fetch = async () => new Response(null, { status: 200 });
+
+    const exists = await versionExists("yarn", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("throws on network failure", async () => {
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    await expect(versionExists("curl", "1.0.0")).rejects.toThrow(UpgradeError);
+    await expect(versionExists("curl", "1.0.0")).rejects.toThrow(
+      "Failed to connect to GitHub"
+    );
+  });
+
+  test("throws on network failure for npm", async () => {
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+
+    await expect(versionExists("npm", "1.0.0")).rejects.toThrow(UpgradeError);
+    await expect(versionExists("npm", "1.0.0")).rejects.toThrow(
+      "Failed to connect to npm registry"
+    );
+  });
+});
+
+describe("executeUpgrade", () => {
+  test("throws UpgradeError for unknown installation method", () => {
+    // executeUpgrade throws synchronously for unknown method
+    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(UpgradeError);
+    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(
+      "Could not detect installation method"
+    );
+  });
+
+  test("throws UpgradeError with unknown_method reason", () => {
+    try {
+      executeUpgrade("unknown", "1.0.0");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      expect((error as UpgradeError).reason).toBe("unknown_method");
+    }
   });
 });

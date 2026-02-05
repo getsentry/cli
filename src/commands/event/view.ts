@@ -6,17 +6,14 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getEvent, getTrace } from "../../lib/api-client.js";
+import { getEvent } from "../../lib/api-client.js";
+import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
-import {
-  formatEventDetails,
-  formatSpanTree,
-  muted,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
+import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
 
 type ViewFlags = {
@@ -24,7 +21,7 @@ type ViewFlags = {
   readonly project?: string;
   readonly json: boolean;
   readonly web: boolean;
-  readonly spans?: number;
+  readonly spans: number;
 };
 
 type HumanOutputOptions = {
@@ -102,13 +99,7 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
-      spans: {
-        kind: "parsed",
-        parse: (input: string) => Number(input === "" ? 1 : input),
-        brief: "Show span tree from the event's trace",
-        optional: true,
-        inferEmpty: true,
-      },
+      ...spansFlag,
     },
     aliases: { w: "web" },
   },
@@ -144,31 +135,25 @@ export const viewCommand = buildCommand({
 
     const event = await getEvent(target.org, target.project, eventId);
 
-    let spanTreeLines: string[] | undefined;
-    if (flags.spans !== undefined && event.contexts?.trace?.trace_id) {
-      try {
-        const traceEvents = await getTrace(
-          target.org,
-          event.contexts.trace.trace_id
-        );
-        spanTreeLines = formatSpanTree(traceEvents);
-      } catch {
-        // Non-fatal: trace data may not be available for all events
-        spanTreeLines = [muted("\nUnable to fetch span tree for this event.")];
-      }
-    } else if (flags.spans !== undefined && !event.contexts?.trace?.trace_id) {
-      spanTreeLines = [muted("\nNo trace data available for this event.")];
-    }
+    // Fetch span tree data (for both JSON and human output)
+    // Skip when spans=0 (disabled via --spans no or --spans 0)
+    const spanTreeResult =
+      flags.spans > 0
+        ? await getSpanTreeLines(target.org, event, flags.spans)
+        : undefined;
 
     if (flags.json) {
-      writeJson(stdout, event);
+      const trace = spanTreeResult?.success
+        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+        : null;
+      writeJson(stdout, { event, trace });
       return;
     }
 
     writeHumanOutput(stdout, {
       event,
       detectedFrom: target.detectedFrom,
-      spanTreeLines,
+      spanTreeLines: spanTreeResult?.lines,
     });
   },
 });

@@ -10,6 +10,7 @@ import notFoundFixture from "../fixtures/errors/not-found.json";
 import eventFixture from "../fixtures/event.json";
 import issueFixture from "../fixtures/issue.json";
 import issuesFixture from "../fixtures/issues.json";
+import logsFixture from "../fixtures/logs.json";
 import organizationFixture from "../fixtures/organization.json";
 import organizationsFixture from "../fixtures/organizations.json";
 import projectFixture from "../fixtures/project.json";
@@ -181,6 +182,18 @@ export const apiRoutes: MockRoute[] = [
         params.eventId === TEST_EVENT_ID
       ) {
         return { body: eventFixture };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+
+  // Logs (Events API with dataset=logs)
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/events/",
+    response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG) {
+        return { body: logsFixture };
       }
       return { status: 404, body: notFoundFixture };
     },

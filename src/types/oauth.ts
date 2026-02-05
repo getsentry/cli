@@ -6,9 +6,7 @@
 
 import { z } from "zod";
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Device Code Response (Step 1 of Device Flow)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const DeviceCodeResponseSchema = z
   .object({
@@ -23,9 +21,7 @@ export const DeviceCodeResponseSchema = z
 
 export type DeviceCodeResponse = z.infer<typeof DeviceCodeResponseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Token Response (Successful authorization)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const TokenResponseSchema = z
   .object({
@@ -48,9 +44,7 @@ export const TokenResponseSchema = z
 
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Token Error Response (OAuth error during polling)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const TokenErrorResponseSchema = z
   .object({

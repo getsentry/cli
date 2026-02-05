@@ -1,75 +1,22 @@
 /**
  * Tests for issue ID parsing utilities
+ *
+ * Note: Core invariants (isAllDigits, isShortSuffix, isShortId, expandToFullShortId)
+ * are tested via property-based tests in issue-id.property.test.ts. These tests
+ * focus on parseAliasSuffix edge cases and integration flow documentation.
  */
 
 import { describe, expect, test } from "bun:test";
 import {
   expandToFullShortId,
-  isNumericId,
   isShortId,
   isShortSuffix,
   parseAliasSuffix,
 } from "../../src/lib/issue-id.js";
 
-describe("isNumericId", () => {
-  test("returns true for pure numeric strings", () => {
-    expect(isNumericId("123456789")).toBe(true);
-    expect(isNumericId("0")).toBe(true);
-    expect(isNumericId("12345")).toBe(true);
-  });
-
-  test("returns false for alphanumeric strings", () => {
-    expect(isNumericId("G")).toBe(false);
-    expect(isNumericId("4Y")).toBe(false);
-    expect(isNumericId("a123")).toBe(false);
-    expect(isNumericId("123a")).toBe(false);
-  });
-
-  test("returns false for strings with hyphens", () => {
-    expect(isNumericId("123-456")).toBe(false);
-    expect(isNumericId("CLI-G")).toBe(false);
-  });
-
-  test("returns false for empty string", () => {
-    expect(isNumericId("")).toBe(false);
-  });
-});
-
-describe("isShortSuffix", () => {
-  test("returns true for simple alphanumeric suffixes", () => {
-    expect(isShortSuffix("G")).toBe(true);
-    expect(isShortSuffix("4Y")).toBe(true);
-    expect(isShortSuffix("abc")).toBe(true);
-    expect(isShortSuffix("A3B")).toBe(true);
-    expect(isShortSuffix("1a2")).toBe(true);
-  });
-
-  test("returns true for pure numeric strings (valid short ID suffixes)", () => {
-    // Pure numbers like "12" are valid suffixes (e.g., CRAFT-12)
-    // The command logic handles fallback to numeric ID when no project context
-    expect(isShortSuffix("12")).toBe(true);
-    expect(isShortSuffix("0")).toBe(true);
-    expect(isShortSuffix("12345")).toBe(true);
-  });
-
-  test("returns false for strings with hyphens", () => {
-    expect(isShortSuffix("e-4y")).toBe(false);
-    expect(isShortSuffix("CRAFT-G")).toBe(false);
-    expect(isShortSuffix("spotlight-electron-4y")).toBe(false);
-  });
-
-  test("returns false for empty string", () => {
-    expect(isShortSuffix("")).toBe(false);
-  });
-
-  test("returns false for strings with special characters", () => {
-    expect(isShortSuffix("a_b")).toBe(false);
-    expect(isShortSuffix("a.b")).toBe(false);
-    expect(isShortSuffix("a b")).toBe(false);
-  });
-});
-
 describe("parseAliasSuffix", () => {
+  // These tests document specific parsing behaviors and edge cases
+
   test("parses simple alias-suffix format", () => {
     const result = parseAliasSuffix("e-4y");
     expect(result).toEqual({ alias: "e", suffix: "4Y" });
@@ -108,7 +55,9 @@ describe("parseAliasSuffix", () => {
   });
 });
 
-describe("expandToFullShortId", () => {
+describe("expandToFullShortId representative examples", () => {
+  // Representative examples for documentation (invariants covered by property tests)
+
   test("expands suffix with project slug", () => {
     expect(expandToFullShortId("G", "craft")).toBe("CRAFT-G");
     expect(expandToFullShortId("4y", "spotlight-electron")).toBe(
@@ -116,38 +65,14 @@ describe("expandToFullShortId", () => {
     );
   });
 
-  test("handles already uppercase input", () => {
-    expect(expandToFullShortId("4Y", "CRAFT")).toBe("CRAFT-4Y");
-  });
-
   test("handles mixed case input", () => {
     expect(expandToFullShortId("aB", "Project")).toBe("PROJECT-AB");
   });
 });
 
-describe("isShortId", () => {
-  test("returns true for valid short IDs", () => {
-    expect(isShortId("CRAFT-G")).toBe(true);
-    expect(isShortId("SPOTLIGHT-ELECTRON-4Y")).toBe(true);
-    expect(isShortId("Project-123")).toBe(true);
-  });
-
-  test("returns false for numeric IDs", () => {
-    expect(isShortId("12345")).toBe(false);
-  });
-
-  test("returns true for plain suffixes with letters", () => {
-    expect(isShortId("4Y")).toBe(true);
-    expect(isShortId("G")).toBe(true);
-  });
-
-  test("returns true for strings with letters anywhere", () => {
-    expect(isShortId("123-ABC")).toBe(true);
-  });
-});
-
 describe("short ID resolution flow", () => {
-  // Simulate the resolution logic from issue view command
+  // Integration test simulating the resolution logic from issue view command.
+  // This documents the expected behavior when combining multiple functions.
 
   const mockAliasCache: Record<
     string,

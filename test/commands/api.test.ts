@@ -17,9 +17,7 @@ import {
   normalizeEndpoint,
   parseFieldKey,
   parseFields,
-  parseFieldValue,
   parseHeaders,
-  parseMethod,
   prepareRequestOptions,
   readStdin,
   setNestedValue,
@@ -53,30 +51,11 @@ function createMockStdin(content: string): NodeJS.ReadStream & { fd: 0 } {
   return readable as unknown as NodeJS.ReadStream & { fd: 0 };
 }
 
-describe("normalizeEndpoint", () => {
-  test("adds trailing slash when missing", () => {
-    expect(normalizeEndpoint("organizations")).toBe("organizations/");
-    expect(normalizeEndpoint("issues/123")).toBe("issues/123/");
-    expect(normalizeEndpoint("projects/my-org/my-project")).toBe(
-      "projects/my-org/my-project/"
-    );
-  });
+// Note: Basic behavior for normalizeEndpoint, parseMethod, parseFieldValue, parseFieldKey,
+// and setNestedValue is tested via property-based tests in api.property.test.ts.
+// The tests below focus on specific edge cases and error message verification.
 
-  test("preserves existing trailing slash", () => {
-    expect(normalizeEndpoint("organizations/")).toBe("organizations/");
-    expect(normalizeEndpoint("issues/123/")).toBe("issues/123/");
-  });
-
-  test("removes leading slash", () => {
-    expect(normalizeEndpoint("/organizations")).toBe("organizations/");
-    expect(normalizeEndpoint("/organizations/")).toBe("organizations/");
-    expect(normalizeEndpoint("/issues/123")).toBe("issues/123/");
-  });
-
-  test("handles both leading and trailing slash", () => {
-    expect(normalizeEndpoint("/organizations/")).toBe("organizations/");
-  });
-
+describe("normalizeEndpoint edge cases", () => {
   test("handles empty string", () => {
     expect(normalizeEndpoint("")).toBe("/");
   });
@@ -84,103 +63,9 @@ describe("normalizeEndpoint", () => {
   test("handles just a slash", () => {
     expect(normalizeEndpoint("/")).toBe("/");
   });
-
-  test("preserves query string and adds trailing slash to path", () => {
-    expect(normalizeEndpoint("organizations?limit=10")).toBe(
-      "organizations/?limit=10"
-    );
-    expect(normalizeEndpoint("issues/123?status=resolved")).toBe(
-      "issues/123/?status=resolved"
-    );
-  });
-
-  test("preserves query string when path already has trailing slash", () => {
-    expect(normalizeEndpoint("organizations/?limit=10")).toBe(
-      "organizations/?limit=10"
-    );
-  });
-
-  test("handles query string with leading slash", () => {
-    expect(normalizeEndpoint("/organizations?limit=10")).toBe(
-      "organizations/?limit=10"
-    );
-  });
-
-  test("handles complex query strings", () => {
-    expect(
-      normalizeEndpoint("issues?status=resolved&limit=10&query=is:unresolved")
-    ).toBe("issues/?status=resolved&limit=10&query=is:unresolved");
-  });
 });
 
-describe("parseMethod", () => {
-  test("accepts valid uppercase methods", () => {
-    expect(parseMethod("GET")).toBe("GET");
-    expect(parseMethod("POST")).toBe("POST");
-    expect(parseMethod("PUT")).toBe("PUT");
-    expect(parseMethod("DELETE")).toBe("DELETE");
-    expect(parseMethod("PATCH")).toBe("PATCH");
-  });
-
-  test("normalizes lowercase methods to uppercase", () => {
-    expect(parseMethod("get")).toBe("GET");
-    expect(parseMethod("post")).toBe("POST");
-    expect(parseMethod("delete")).toBe("DELETE");
-  });
-
-  test("normalizes mixed case methods", () => {
-    expect(parseMethod("Get")).toBe("GET");
-    expect(parseMethod("pOsT")).toBe("POST");
-  });
-
-  test("throws for invalid methods", () => {
-    expect(() => parseMethod("INVALID")).toThrow(/Invalid method/);
-    expect(() => parseMethod("HEAD")).toThrow(/Invalid method/);
-    expect(() => parseMethod("OPTIONS")).toThrow(/Invalid method/);
-    expect(() => parseMethod("")).toThrow(/Invalid method/);
-  });
-});
-
-describe("parseFieldValue", () => {
-  test("parses valid JSON values", () => {
-    expect(parseFieldValue('"hello"')).toBe("hello");
-    expect(parseFieldValue("123")).toBe(123);
-    expect(parseFieldValue("3.14")).toBe(3.14);
-    expect(parseFieldValue("true")).toBe(true);
-    expect(parseFieldValue("false")).toBe(false);
-    expect(parseFieldValue("null")).toBe(null);
-    expect(parseFieldValue("[1,2,3]")).toEqual([1, 2, 3]);
-    expect(parseFieldValue('{"a":1}')).toEqual({ a: 1 });
-  });
-
-  test("returns raw string for non-JSON values", () => {
-    expect(parseFieldValue("hello")).toBe("hello");
-    expect(parseFieldValue("hello world")).toBe("hello world");
-    expect(parseFieldValue("")).toBe("");
-  });
-});
-
-describe("parseFieldKey", () => {
-  test("parses simple key", () => {
-    expect(parseFieldKey("name")).toEqual(["name"]);
-  });
-
-  test("parses single bracket", () => {
-    expect(parseFieldKey("user[name]")).toEqual(["user", "name"]);
-  });
-
-  test("parses multiple brackets", () => {
-    expect(parseFieldKey("a[b][c]")).toEqual(["a", "b", "c"]);
-  });
-
-  test("parses array push syntax (empty bracket)", () => {
-    expect(parseFieldKey("tags[]")).toEqual(["tags", ""]);
-  });
-
-  test("parses nested array push syntax", () => {
-    expect(parseFieldKey("user[tags][]")).toEqual(["user", "tags", ""]);
-  });
-
+describe("parseFieldKey error cases", () => {
   test("throws for invalid format with unmatched brackets", () => {
     expect(() => parseFieldKey("user[name")).toThrow(
       /Invalid field key format/
@@ -196,14 +81,6 @@ describe("parseFieldKey", () => {
     );
   });
 
-  test("throws for key starting with bracket", () => {
-    expect(() => parseFieldKey("[name]")).toThrow(/Invalid field key format/);
-  });
-
-  test("throws for empty key", () => {
-    expect(() => parseFieldKey("")).toThrow(/Invalid field key format/);
-  });
-
   test("parses key with multiple consecutive empty brackets", () => {
     // This is valid syntax: creates path ["a", "", ""]
     // But validatePathSegments will reject it for having [] not at end
@@ -212,82 +89,8 @@ describe("parseFieldKey", () => {
   });
 });
 
-describe("setNestedValue", () => {
-  test("sets top-level value", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "key", "value");
-    expect(obj).toEqual({ key: "value" });
-  });
-
-  test("sets nested value with bracket notation", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "a[b][c]", "value");
-    expect(obj).toEqual({ a: { b: { c: "value" } } });
-  });
-
-  test("preserves existing nested structure", () => {
-    const obj: Record<string, unknown> = { a: { existing: true } };
-    setNestedValue(obj, "a[new]", "value");
-    expect(obj).toEqual({ a: { existing: true, new: "value" } });
-  });
-
-  test("overwrites existing value", () => {
-    const obj: Record<string, unknown> = { key: "old" };
-    setNestedValue(obj, "key", "new");
-    expect(obj).toEqual({ key: "new" });
-  });
-
-  test("handles array push syntax", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "tags[]", "foo");
-    setNestedValue(obj, "tags[]", "bar");
-    expect(obj).toEqual({ tags: ["foo", "bar"] });
-  });
-
-  test("handles empty array initialization", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "tags[]", undefined);
-    expect(obj).toEqual({ tags: [] });
-  });
-
-  test("handles nested array push", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "user[tags][]", "admin");
-    setNestedValue(obj, "user[tags][]", "editor");
-    expect(obj).toEqual({ user: { tags: ["admin", "editor"] } });
-  });
-
-  test("throws for __proto__ key (prototype pollution prevention)", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "__proto__[evil]", true)).toThrow(
-      /Invalid field key: "__proto__" is not allowed/
-    );
-    // Verify no pollution occurred
-    expect(({} as Record<string, unknown>).evil).toBeUndefined();
-  });
-
-  test("throws for nested __proto__ key", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "foo[__proto__][bar]", true)).toThrow(
-      /Invalid field key: "__proto__" is not allowed/
-    );
-  });
-
-  test("throws for constructor key", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() =>
-      setNestedValue(obj, "constructor[prototype][x]", true)
-    ).toThrow(/Invalid field key: "constructor" is not allowed/);
-  });
-
-  test("throws for prototype key", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "prototype[y]", true)).toThrow(
-      /Invalid field key: "prototype" is not allowed/
-    );
-  });
-
-  // Type conflict tests (matching gh api behavior)
+describe("setNestedValue type conflicts", () => {
+  // Type conflict tests verify specific error messages (matching gh api behavior)
   test("throws when traversing into string (simple then nested)", () => {
     const obj: Record<string, unknown> = {};
     setNestedValue(obj, "user", "John");
@@ -335,29 +138,6 @@ describe("setNestedValue", () => {
     expect(obj).toEqual({ user: "John" });
   });
 
-  // Invalid bracket position tests (prevents silent data loss)
-  test("throws for empty brackets in middle of path (a[][b])", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "a[][b]", "value")).toThrow(
-      /empty brackets \[\] can only appear at the end/
-    );
-  });
-
-  test("throws for deeply nested empty brackets in middle", () => {
-    const obj: Record<string, unknown> = {};
-    expect(() => setNestedValue(obj, "a[b][][c]", "value")).toThrow(
-      /empty brackets \[\] can only appear at the end/
-    );
-  });
-
-  test("allows empty brackets at end with nested path", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "a[b][]", "value1");
-    setNestedValue(obj, "a[b][]", "value2");
-    expect(obj).toEqual({ a: { b: ["value1", "value2"] } });
-  });
-
-  // Additional edge cases for internal function coverage
   test("throws when traversing into boolean", () => {
     const obj: Record<string, unknown> = {};
     setNestedValue(obj, "flag", true);
@@ -404,18 +184,6 @@ describe("setNestedValue", () => {
     expect(() => setNestedValue(obj, "a[b][key]", "value")).toThrow(
       /expected map type under "a\[b\]", got array/
     );
-  });
-
-  test("handles simple key with undefined value", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "key", undefined);
-    expect(obj).toEqual({ key: undefined });
-  });
-
-  test("handles nested key with null value", () => {
-    const obj: Record<string, unknown> = {};
-    setNestedValue(obj, "a[b]", null);
-    expect(obj).toEqual({ a: { b: null } });
   });
 });
 
