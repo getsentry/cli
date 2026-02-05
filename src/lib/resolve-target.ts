@@ -334,12 +334,9 @@ async function resolveDsnToTarget(
 /** Minimum directory name length for inference (avoids matching too broadly) */
 const MIN_DIR_NAME_LENGTH = 2;
 
-/** Regex to match dot-only directory names like ".", ".." */
-const DOT_ONLY_REGEX = /^\.+$/;
-
 /**
  * Check if a directory name is valid for project inference.
- * Rejects empty strings, dot-only names, and names that are too short.
+ * Rejects empty strings, hidden directories, and names that are too short.
  *
  * @internal Exported for testing
  */
@@ -347,8 +344,8 @@ export function isValidDirNameForInference(dirName: string): boolean {
   if (!dirName || dirName.length < MIN_DIR_NAME_LENGTH) {
     return false;
   }
-  // Reject dot-only names like ".", ".."
-  if (DOT_ONLY_REGEX.test(dirName)) {
+  // Reject hidden directories (starting with .) - includes ".", "..", ".git", ".env"
+  if (dirName.startsWith(".")) {
     return false;
   }
   return true;
