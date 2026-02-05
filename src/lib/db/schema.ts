@@ -232,6 +232,8 @@ export function generateTableDDL(
 /**
  * Generate CREATE TABLE DDL excluding columns added in migrations.
  * Useful for testing schema repair by creating "pre-migration" tables.
+ *
+ * @throws Error if table has no base columns (all columns were added in migrations)
  */
 export function generatePreMigrationTableDDL(tableName: string): string {
   const schema = TABLE_SCHEMAS[tableName];
@@ -242,6 +244,12 @@ export function generatePreMigrationTableDDL(tableName: string): string {
   const baseColumns = Object.entries(schema.columns).filter(
     ([, col]) => col.addedInVersion === undefined
   );
+
+  if (baseColumns.length === 0) {
+    throw new Error(
+      `Table ${tableName} has no base columns (all columns were added in migrations)`
+    );
+  }
 
   return columnDefsToDDL(tableName, baseColumns);
 }
@@ -466,6 +474,7 @@ export function tryRepairAndRetry<T>(
   }
 
   isRepairing = true;
+  let repairSucceeded = false;
   try {
     // Dynamic imports to avoid circular dependencies with db/index.js
     const { getRawDatabase } = require("./index.js") as {
@@ -477,12 +486,18 @@ export function tryRepairAndRetry<T>(
 
     if (fixed.length > 0) {
       console.error(`Auto-repaired database: ${fixed.join(", ")}`);
-      return operation();
+      repairSucceeded = true;
     }
   } catch {
     // Repair failed - caller will re-throw original error
   } finally {
     isRepairing = false;
+  }
+
+  // Retry operation AFTER try-catch so any new error from operation() propagates
+  // instead of being swallowed and replaced with the original error
+  if (repairSucceeded) {
+    return operation();
   }
 
   return;

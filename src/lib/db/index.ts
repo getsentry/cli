@@ -72,6 +72,7 @@ export function getDatabase(): Database {
   if (db && dbOpenedPath !== dbPath) {
     db.close();
     db = null;
+    rawDb = null;
     dbOpenedPath = null;
   }
 
