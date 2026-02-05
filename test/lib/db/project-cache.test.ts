@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { closeDatabase } from "../../../src/lib/db/index.js";
 import {
   clearProjectCache,
   getCachedProject,
@@ -22,6 +23,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Close database to release file handles before cleanup
+  closeDatabase();
   delete process.env.SENTRY_CONFIG_DIR;
   await cleanupTestDir(testConfigDir);
 });
