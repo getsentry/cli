@@ -154,25 +154,23 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view [<org>/<project>]`
+#### `sentry project view <project>`
 
 View details of a project
 
 **Flags:**
+- `--org <value> - Organization slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
 **Examples:**
 
 ```bash
-# With explicit org/project
-sentry project view my-org/frontend
+sentry project view <project-slug>
 
-# Auto-detect from DSN or config
-sentry project view
+sentry project view frontend --org my-org
 
-# Open in browser
-sentry project view my-org/frontend -w
+sentry project view frontend -w
 ```
 
 ### Issue
@@ -304,7 +302,7 @@ sentry issue view FRONT-ABC -w
 
 View Sentry events
 
-#### `sentry event view [<org>/<project>] <event-id>`
+#### `sentry event view <args...>`
 
 View details of a specific event
 
@@ -316,13 +314,10 @@ View details of a specific event
 **Examples:**
 
 ```bash
-# With explicit org/project
-sentry event view my-org/frontend abc123def456
+sentry event view <event-id>
 
-# Auto-detect from DSN or config
 sentry event view abc123def456
 
-# Open in browser
 sentry event view abc123def456 -w
 ```
 
@@ -416,7 +411,7 @@ List transactions with profiling data
 - `-n, --limit <value> - Maximum number of transactions to return - (default: "20")`
 - `--json - Output as JSON`
 
-#### `sentry profile view [<org>/<project>] <transaction>`
+#### `sentry profile view <args...>`
 
 View CPU profiling analysis for a transaction
 
