@@ -10,6 +10,7 @@ import * as Sentry from "@sentry/bun";
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError } from "../../lib/errors.js";
 import {
   formatLogRow,
@@ -17,10 +18,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import {
-  parseOrgProjectArg,
-  resolveOrgAndProject,
-} from "../../lib/resolve-target.js";
+import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
 
