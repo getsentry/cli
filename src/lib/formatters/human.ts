@@ -529,7 +529,7 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
         lines.push(`Release:    ${firstReleaseVersion}`);
       } else {
         lines.push(
-          `Releases:   ${firstReleaseVersion} → ${lastReleaseVersion}`
+          `Releases:   ${firstReleaseVersion} -> ${lastReleaseVersion}`
         );
       }
     } else if (lastReleaseVersion) {
@@ -703,11 +703,11 @@ function formatBreadcrumb(breadcrumb: Breadcrumb): string {
     const data = breadcrumb.data as Record<string, unknown>;
     if (data.url && data.method) {
       // HTTP request breadcrumb
-      const status = data.status_code ? ` → ${data.status_code}` : "";
+      const status = data.status_code ? ` -> ${data.status_code}` : "";
       message = `${data.method} ${data.url}${status}`;
     } else if (data.from && data.to) {
       // Navigation breadcrumb
-      message = `${data.from} → ${data.to}`;
+      message = `${data.from} -> ${data.to}`;
     } else if (data.arguments && Array.isArray(data.arguments)) {
       // Console breadcrumb
       message = String(data.arguments[0] || "").slice(0, 60);
