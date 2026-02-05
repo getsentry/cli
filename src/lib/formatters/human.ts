@@ -364,6 +364,8 @@ export type FormatShortIdOptions = {
  * Only highlights the specific characters that form the alias:
  * - CLI-25 with alias "c" → **C**LI-**25**
  * - CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4**
+ * - API-APP-5 with alias "ap" → API-**AP**P-**5** (searches backwards to find correct part)
+ * - X-AB-5 with alias "x-a" → **X-A**B-**5** (handles aliases with embedded dashes)
  *
  * @returns Formatted string if alias matches, null otherwise (to fall back to default)
  */
@@ -381,30 +383,44 @@ function formatShortIdWithAlias(
   }
 
   const parts = upperShortId.split("-");
-  const aliasUpper = aliasProjectPart.toUpperCase();
-  const aliasLen = aliasUpper.length;
-
-  // Find the part that starts with the alias
-  const matchIndex = parts.findIndex((part) => part.startsWith(aliasUpper));
-  if (matchIndex < 0 || parts.length < 2) {
+  if (parts.length < 2) {
     return null;
   }
 
-  // Build result: highlight alias prefix in matching part + highlight last part (issue suffix)
-  const lastIndex = parts.length - 1;
-  const result = parts.map((part, i) => {
-    if (i === matchIndex) {
-      // Highlight the alias prefix, keep the rest plain
-      return boldUnderline(part.slice(0, aliasLen)) + part.slice(aliasLen);
-    }
-    if (i === lastIndex) {
-      // Highlight the issue suffix (last part)
-      return boldUnderline(part);
-    }
-    return part;
-  });
+  const aliasUpper = aliasProjectPart.toUpperCase();
+  const aliasLen = aliasUpper.length;
+  const projectParts = parts.slice(0, -1);
+  const issueSuffix = parts.at(-1) ?? "";
 
-  return result.join("-");
+  // Method 1: For aliases without dashes, search backwards through project parts
+  // This handles cases like "api-app" where alias "ap" should match "APP" not "API"
+  if (!aliasUpper.includes("-")) {
+    for (let i = projectParts.length - 1; i >= 0; i--) {
+      const part = projectParts[i];
+      if (part?.startsWith(aliasUpper)) {
+        // Found match - highlight alias prefix in this part and the issue suffix
+        const result = projectParts.map((p, idx) => {
+          if (idx === i) {
+            return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
+          }
+          return p;
+        });
+        return `${result.join("-")}-${boldUnderline(issueSuffix)}`;
+      }
+    }
+  }
+
+  // Method 2: For aliases with dashes (or if Method 1 found no match),
+  // match against the joined project portion
+  const projectPortion = projectParts.join("-");
+  if (projectPortion.startsWith(aliasUpper)) {
+    // Highlight first aliasLen chars of project portion, plus issue suffix
+    const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
+    const rest = projectPortion.slice(aliasLen);
+    return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
+  }
+
+  return null;
 }
 
 /**
