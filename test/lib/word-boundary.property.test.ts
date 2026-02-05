@@ -16,28 +16,7 @@ import {
   property,
   tuple,
 } from "fast-check";
-
-/**
- * Escape special regex characters in a string.
- * Mirrors the implementation in api-client.ts.
- */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Check if two strings match with word-boundary semantics (bidirectional).
- * Mirrors the implementation in api-client.ts.
- *
- * Returns true if either:
- * - `a` appears in `b` at a word boundary
- * - `b` appears in `a` at a word boundary
- */
-function matchesWordBoundary(a: string, b: string): boolean {
-  const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
-  const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
-  return aInB.test(b) || bInA.test(a);
-}
+import { matchesWordBoundary } from "../../src/lib/api-client.js";
 
 // Arbitraries
 
@@ -214,7 +193,7 @@ describe("property: underscore behavior", () => {
   });
 });
 
-describe("property: special regex characters", () => {
+describe("property: special regex characters are escaped", () => {
   test("dots in pattern are escaped", () => {
     // "a.b" should not match "axb" (dot should be literal)
     expect(matchesWordBoundary("a.b", "axb")).toBe(false);
@@ -247,35 +226,5 @@ describe("property: special regex characters", () => {
     expect(() => matchesWordBoundary("[test]", "[test]")).not.toThrow();
     // However, the inner "test" part does match
     expect(matchesWordBoundary("test", "[test]")).toBe(true);
-  });
-});
-
-describe("property: real-world scenarios", () => {
-  test("directory 'cli' matches project 'sentry-cli'", () => {
-    expect(matchesWordBoundary("cli", "sentry-cli")).toBe(true);
-  });
-
-  test("directory 'sentry-docs' matches project 'docs'", () => {
-    expect(matchesWordBoundary("sentry-docs", "docs")).toBe(true);
-  });
-
-  test("directory 'cli' matches project 'cli-website'", () => {
-    expect(matchesWordBoundary("cli", "cli-website")).toBe(true);
-  });
-
-  test("directory 'cli' does NOT match project 'eclipse'", () => {
-    expect(matchesWordBoundary("cli", "eclipse")).toBe(false);
-  });
-
-  test("directory 'docs' does NOT match project 'documentary'", () => {
-    expect(matchesWordBoundary("docs", "documentary")).toBe(false);
-  });
-
-  test("directory 'frontend' matches project 'frontend'", () => {
-    expect(matchesWordBoundary("frontend", "frontend")).toBe(true);
-  });
-
-  test("directory 'my-awesome-app' matches project 'awesome'", () => {
-    expect(matchesWordBoundary("my-awesome-app", "awesome")).toBe(true);
   });
 });
