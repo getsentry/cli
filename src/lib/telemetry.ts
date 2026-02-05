@@ -12,6 +12,7 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+import { tryRepairAndRetry } from "./db/schema.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
@@ -356,87 +357,6 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
 
 /** Methods on SQLite Statement that execute queries and should be traced */
 const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
-
-// =============================================================================
-// Auto-Repair for Schema Errors
-// =============================================================================
-
-/** Track if we're currently repairing to prevent infinite loops */
-let isRepairing = false;
-
-/** Environment variable to disable auto-repair */
-const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
-
-/**
- * Check if an error is a schema-related SQLite error.
- * These errors indicate missing tables or columns that can potentially be repaired.
- */
-function isSchemaError(error: unknown): boolean {
-  if (error instanceof Error && error.name === "SQLiteError") {
-    const msg = error.message.toLowerCase();
-    return (
-      msg.includes("no such column") ||
-      msg.includes("no such table") ||
-      msg.includes("has no column named")
-    );
-  }
-  return false;
-}
-
-/**
- * Attempt to repair the database schema and retry an operation.
- * Returns undefined if repair should not be attempted, otherwise returns the retry result.
- */
-function tryRepairAndRetry<T>(
-  operation: () => T,
-  error: unknown
-): T | undefined {
-  // Don't repair if disabled via env var
-  if (process.env[NO_AUTO_REPAIR_ENV] === "1") {
-    return;
-  }
-
-  // Don't repair if not a schema error
-  if (!isSchemaError(error)) {
-    return;
-  }
-
-  // Don't repair if already repairing (prevents infinite loops)
-  if (isRepairing) {
-    return;
-  }
-
-  isRepairing = true;
-  try {
-    // Dynamic imports to avoid circular dependencies
-    // These must be synchronous requires since we're in a sync context
-    const { getRawDatabase } = require("./db/index.js") as {
-      getRawDatabase: () => import("bun:sqlite").Database;
-    };
-    const { repairSchema } = require("./db/schema.js") as {
-      repairSchema: (db: import("bun:sqlite").Database) => {
-        fixed: string[];
-        failed: string[];
-      };
-    };
-
-    const rawDb = getRawDatabase();
-    const { fixed } = repairSchema(rawDb);
-
-    if (fixed.length > 0) {
-      // Log to stderr so it doesn't break JSON output
-      console.error(`Auto-repaired database: ${fixed.join(", ")}`);
-      // Retry the operation
-      return operation();
-    }
-  } catch {
-    // Repair failed, will throw original error
-  } finally {
-    isRepairing = false;
-  }
-
-  return;
-}
 
 /**
  * Wrap a SQLite Statement to automatically trace query execution.
