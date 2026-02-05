@@ -947,10 +947,6 @@ export function getCurrentUser(): Promise<SentryUser> {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Logs
-// ─────────────────────────────────────────────────────────────────────────────
-
 /** Fields to request from the logs API */
 const LOG_FIELDS = [
   "sentry.item_id",

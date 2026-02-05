@@ -679,10 +679,6 @@ export const ProjectKeySchema = z
 
 export type ProjectKey = z.infer<typeof ProjectKeySchema>;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Logs
-// ─────────────────────────────────────────────────────────────────────────────
-
 /** Log severity levels (similar to issue levels but includes trace) */
 export const LOG_SEVERITIES = [
   "fatal",
