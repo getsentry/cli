@@ -381,6 +381,28 @@ sentry api /organizations/ --include
 sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
+### Init
+
+Initialize Sentry in your project
+
+#### `sentry init`
+
+Initialize Sentry in your project
+
+**Flags:**
+- `-i, --integration <value> - Integration to setup (nextjs, reactNative, flutter, etc.)`
+- `--org <value> - Sentry organization slug`
+- `--project <value> - Sentry project slug`
+- `-u, --url <value> - Sentry URL (for self-hosted)`
+- `--debug - Enable verbose logging`
+- `--uninstall - Revert project setup`
+- `--quiet - Don't prompt for input`
+- `--skip-connect - Skip connecting to Sentry server`
+- `--saas - Skip self-hosted/SaaS selection`
+- `-s, --signup - Redirect to signup if not logged in`
+- `--disable-telemetry - Don't send telemetry to Sentry`
+- `--no-auth - Don't pass existing CLI auth to wizard (force browser login)`
+
 ### Cli
 
 CLI-related commands

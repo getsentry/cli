@@ -9,6 +9,31 @@
 import { spawn } from "node:child_process";
 
 /**
+ * Pre-selected project data for non-interactive wizard mode.
+ * When provided, the wizard skips browser login and project selection.
+ */
+export type PreSelectedProject = {
+  /** Valid Sentry auth token */
+  authToken: string;
+  /** Whether the Sentry instance is self-hosted */
+  selfHosted: boolean;
+  /** Project's public DSN */
+  dsn: string;
+  /** Numeric Sentry project ID */
+  id: string;
+  /** Sentry project slug */
+  projectSlug: string;
+  /** Sentry project display name */
+  projectName: string;
+  /** Numeric Sentry organization ID */
+  orgId: string;
+  /** Sentry organization display name */
+  orgName: string;
+  /** Sentry organization slug */
+  orgSlug: string;
+};
+
+/**
  * Options for running the Sentry Wizard.
  * These map to our CLI's interface, not the wizard's flags directly.
  */
@@ -35,6 +60,8 @@ export type WizardOptions = {
   signup?: boolean;
   /** Don't send telemetry data to Sentry */
   disableTelemetry?: boolean;
+  /** Pre-selected project data to skip wizard login flow */
+  preSelectedProject?: PreSelectedProject;
 };
 
 /**
@@ -76,6 +103,31 @@ function buildWizardArgs(options: WizardOptions): string[] {
   }
   if (options.disableTelemetry) {
     args.push("--disable-telemetry");
+  }
+
+  // Pre-selected project data bypasses wizard login flow
+  if (options.preSelectedProject) {
+    const p = options.preSelectedProject;
+    args.push(
+      "--preSelectedProject.authToken",
+      p.authToken,
+      "--preSelectedProject.selfHosted",
+      String(p.selfHosted),
+      "--preSelectedProject.dsn",
+      p.dsn,
+      "--preSelectedProject.id",
+      p.id,
+      "--preSelectedProject.projectSlug",
+      p.projectSlug,
+      "--preSelectedProject.projectName",
+      p.projectName,
+      "--preSelectedProject.orgId",
+      p.orgId,
+      "--preSelectedProject.orgName",
+      p.orgName,
+      "--preSelectedProject.orgSlug",
+      p.orgSlug
+    );
   }
 
   return args;

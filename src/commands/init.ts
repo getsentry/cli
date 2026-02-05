@@ -8,8 +8,67 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../context.js";
-import { getDefaultOrganization } from "../lib/db/defaults.js";
-import { runWizard, type WizardOptions } from "../lib/wizard.js";
+import {
+  getOrganization,
+  getProject,
+  getProjectKeys,
+} from "../lib/api-client.js";
+import { getAuthToken } from "../lib/db/auth.js";
+import {
+  getDefaultOrganization,
+  getDefaultProject,
+} from "../lib/db/defaults.js";
+import { getSentryBaseUrl, isSentrySaasUrl } from "../lib/sentry-urls.js";
+import {
+  type PreSelectedProject,
+  runWizard,
+  type WizardOptions,
+} from "../lib/wizard.js";
+
+/**
+ * Try to build preSelectedProject data from existing CLI auth.
+ * Returns undefined if not authenticated or data fetch fails.
+ */
+async function tryBuildPreSelectedProject(
+  orgSlug: string,
+  projectSlug: string,
+  urlOverride?: string
+): Promise<PreSelectedProject | undefined> {
+  const token = getAuthToken();
+  if (!token) {
+    return;
+  }
+
+  try {
+    const [org, project, keys] = await Promise.all([
+      getOrganization(orgSlug),
+      getProject(orgSlug, projectSlug),
+      getProjectKeys(orgSlug, projectSlug),
+    ]);
+
+    const dsn = keys[0]?.dsn?.public;
+    if (!dsn) {
+      return;
+    }
+
+    const baseUrl = urlOverride ?? getSentryBaseUrl();
+    const selfHosted = !isSentrySaasUrl(baseUrl);
+
+    return {
+      authToken: token,
+      selfHosted,
+      dsn,
+      id: project.id,
+      projectSlug: project.slug,
+      projectName: project.name,
+      orgId: org.id,
+      orgName: org.name,
+      orgSlug: org.slug,
+    };
+  } catch {
+    return;
+  }
+}
 
 type InitFlags = {
   readonly integration?: string;
@@ -23,6 +82,7 @@ type InitFlags = {
   readonly saas: boolean;
   readonly signup: boolean;
   readonly "disable-telemetry": boolean;
+  readonly "no-auth": boolean;
 };
 
 export const initCommand = buildCommand({
@@ -103,6 +163,11 @@ export const initCommand = buildCommand({
         brief: "Don't send telemetry to Sentry",
         default: false,
       },
+      "no-auth": {
+        kind: "boolean",
+        brief: "Don't pass existing CLI auth to wizard (force browser login)",
+        default: false,
+      },
     },
     aliases: { i: "integration", u: "url", s: "signup" },
   },
@@ -124,12 +189,30 @@ export const initCommand = buildCommand({
       disableTelemetry: flags["disable-telemetry"],
     };
 
-    // Auto-populate org from CLI config if not provided and user is authenticated
+    // Auto-populate org from CLI config if not provided
     if (!options.org) {
-      const defaultOrg = await getDefaultOrganization();
-      if (defaultOrg) {
-        options.org = defaultOrg;
-        stdout.write(`Using organization: ${defaultOrg}\n`);
+      options.org = (await getDefaultOrganization()) ?? undefined;
+    }
+
+    // Auto-populate project from CLI config if not provided
+    const projectSlug = options.project ?? (await getDefaultProject());
+
+    // Try to share auth with wizard (unless --no-auth is set)
+    if (!flags["no-auth"] && options.org && projectSlug) {
+      const preSelected = await tryBuildPreSelectedProject(
+        options.org,
+        projectSlug,
+        flags.url
+      );
+      if (preSelected) {
+        options.preSelectedProject = preSelected;
+        stdout.write(
+          `Using existing Sentry auth for ${preSelected.orgSlug}/${preSelected.projectSlug}\n`
+        );
+      } else if (flags.debug) {
+        stdout.write(
+          "Could not fetch project data, wizard will prompt for login\n"
+        );
       }
     }
 

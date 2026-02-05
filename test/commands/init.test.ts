@@ -10,10 +10,14 @@ import { _buildWizardArgs, type WizardOptions } from "../../src/lib/wizard.js";
 // Track runWizard calls for assertions
 let runWizardCalls: WizardOptions[] = [];
 let mockGetDefaultOrg: (() => Promise<string | null>) | null = null;
+let mockGetDefaultProject: (() => Promise<string | null>) | null = null;
+let mockGetAuthToken: (() => string | undefined) | null = null;
 
 beforeEach(() => {
   runWizardCalls = [];
   mockGetDefaultOrg = null;
+  mockGetDefaultProject = null;
+  mockGetAuthToken = null;
 
   // Mock runWizard to avoid spawning the wizard process
   mock.module("../../src/lib/wizard.js", () => ({
@@ -23,7 +27,7 @@ beforeEach(() => {
     _buildWizardArgs,
   }));
 
-  // Mock getDefaultOrganization
+  // Mock defaults
   mock.module("../../src/lib/db/defaults.js", () => ({
     getDefaultOrganization: async () => {
       if (mockGetDefaultOrg) {
@@ -31,6 +35,45 @@ beforeEach(() => {
       }
       return null;
     },
+    getDefaultProject: async () => {
+      if (mockGetDefaultProject) {
+        return mockGetDefaultProject();
+      }
+      return null;
+    },
+  }));
+
+  // Mock auth
+  mock.module("../../src/lib/db/auth.js", () => ({
+    getAuthToken: () => {
+      if (mockGetAuthToken) {
+        return mockGetAuthToken();
+      }
+      return;
+    },
+  }));
+
+  // Mock API client - return empty/mock data
+  mock.module("../../src/lib/api-client.js", () => ({
+    getOrganization: async (orgSlug: string) => ({
+      id: "123",
+      slug: orgSlug,
+      name: "Test Org",
+    }),
+    getProject: async (_orgSlug: string, projectSlug: string) => ({
+      id: "456",
+      slug: projectSlug,
+      name: "Test Project",
+    }),
+    getProjectKeys: async () => [
+      { dsn: { public: "https://key@o123.ingest.sentry.io/456" } },
+    ],
+  }));
+
+  // Mock sentry-urls
+  mock.module("../../src/lib/sentry-urls.js", () => ({
+    getSentryBaseUrl: () => "https://sentry.io",
+    isSentrySaasUrl: () => true,
   }));
 });
 
@@ -165,6 +208,43 @@ describe("buildWizardArgs", () => {
     expect(args).toContain("--disable-telemetry");
     expect(args).toHaveLength(7);
   });
+
+  test("maps preSelectedProject to wizard flags", () => {
+    const options: WizardOptions = {
+      preSelectedProject: {
+        authToken: "test-token",
+        selfHosted: false,
+        dsn: "https://key@o123.ingest.sentry.io/456",
+        id: "456",
+        projectSlug: "my-project",
+        projectName: "My Project",
+        orgId: "123",
+        orgName: "My Org",
+        orgSlug: "my-org",
+      },
+    };
+
+    const args = _buildWizardArgs(options);
+
+    expect(args).toContain("--preSelectedProject.authToken");
+    expect(args).toContain("test-token");
+    expect(args).toContain("--preSelectedProject.selfHosted");
+    expect(args).toContain("false");
+    expect(args).toContain("--preSelectedProject.dsn");
+    expect(args).toContain("https://key@o123.ingest.sentry.io/456");
+    expect(args).toContain("--preSelectedProject.id");
+    expect(args).toContain("456");
+    expect(args).toContain("--preSelectedProject.projectSlug");
+    expect(args).toContain("my-project");
+    expect(args).toContain("--preSelectedProject.projectName");
+    expect(args).toContain("My Project");
+    expect(args).toContain("--preSelectedProject.orgId");
+    expect(args).toContain("123");
+    expect(args).toContain("--preSelectedProject.orgName");
+    expect(args).toContain("My Org");
+    expect(args).toContain("--preSelectedProject.orgSlug");
+    expect(args).toContain("my-org");
+  });
 });
 
 describe("initCommand.func", () => {
@@ -190,6 +270,7 @@ describe("initCommand.func", () => {
       saas: true,
       signup: false,
       "disable-telemetry": true,
+      "no-auth": true, // Skip auth sharing for basic flag mapping test
     };
 
     await func.call(mockContext, flags);
@@ -230,15 +311,13 @@ describe("initCommand.func", () => {
       saas: false,
       signup: false,
       "disable-telemetry": false,
+      "no-auth": true, // Skip auth sharing
     };
 
     await func.call(mockContext, flags);
 
     expect(runWizardCalls).toHaveLength(1);
     expect(runWizardCalls[0].org).toBe("my-default-org");
-    expect(stdoutWrite).toHaveBeenCalledWith(
-      "Using organization: my-default-org\n"
-    );
   });
 
   test("does not override org when explicitly provided", async () => {
@@ -262,19 +341,16 @@ describe("initCommand.func", () => {
       saas: false,
       signup: false,
       "disable-telemetry": false,
+      "no-auth": true, // Skip auth sharing
     };
 
     await func.call(mockContext, flags);
 
     expect(runWizardCalls).toHaveLength(1);
     expect(runWizardCalls[0].org).toBe("explicit-org");
-    // Should not write "Using organization" when org is explicitly provided
-    expect(stdoutWrite).not.toHaveBeenCalledWith(
-      expect.stringContaining("Using organization:")
-    );
   });
 
-  test("does not write 'Using organization' when no default org", async () => {
+  test("org is undefined when no default org", async () => {
     mockGetDefaultOrg = async () => null;
 
     const { initCommand } = await import("../../src/commands/init.js");
@@ -294,16 +370,13 @@ describe("initCommand.func", () => {
       saas: false,
       signup: false,
       "disable-telemetry": false,
+      "no-auth": true, // Skip auth sharing
     };
 
     await func.call(mockContext, flags);
 
     expect(runWizardCalls).toHaveLength(1);
     expect(runWizardCalls[0].org).toBeUndefined();
-    // Should not write "Using organization" when no default org
-    expect(stdoutWrite).not.toHaveBeenCalledWith(
-      expect.stringContaining("Using organization:")
-    );
   });
 
   test("writes 'Starting Sentry Wizard...' to stdout", async () => {
@@ -324,6 +397,7 @@ describe("initCommand.func", () => {
       saas: false,
       signup: false,
       "disable-telemetry": false,
+      "no-auth": true, // Skip auth sharing
     };
 
     await func.call(mockContext, flags);
@@ -350,6 +424,7 @@ describe("initCommand.func", () => {
       saas: true,
       signup: true,
       "disable-telemetry": true,
+      "no-auth": true, // Skip auth sharing
     };
 
     await func.call(mockContext, flags);
@@ -365,5 +440,81 @@ describe("initCommand.func", () => {
       signup: true,
       disableTelemetry: true,
     });
+  });
+
+  test("shares auth with wizard when authenticated with org and project", async () => {
+    mockGetDefaultOrg = async () => "my-org";
+    mockGetDefaultProject = async () => "my-project";
+    mockGetAuthToken = () => "test-token-123";
+
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+      "no-auth": false, // Enable auth sharing
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0].preSelectedProject).toBeDefined();
+    expect(runWizardCalls[0].preSelectedProject?.authToken).toBe(
+      "test-token-123"
+    );
+    expect(runWizardCalls[0].preSelectedProject?.orgSlug).toBe("my-org");
+    expect(runWizardCalls[0].preSelectedProject?.projectSlug).toBe(
+      "my-project"
+    );
+    expect(runWizardCalls[0].preSelectedProject?.selfHosted).toBe(false);
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "Using existing Sentry auth for my-org/my-project\n"
+    );
+  });
+
+  test("skips auth sharing when --no-auth flag is set", async () => {
+    mockGetDefaultOrg = async () => "my-org";
+    mockGetDefaultProject = async () => "my-project";
+    mockGetAuthToken = () => "test-token-123";
+
+    const { initCommand } = await import("../../src/commands/init.js");
+    const func = await initCommand.loader();
+
+    const stdoutWrite = mock(() => true);
+    const mockContext = {
+      stdout: { write: stdoutWrite },
+      stderr: { write: mock(() => true) },
+    };
+
+    const flags = {
+      debug: false,
+      uninstall: false,
+      quiet: false,
+      "skip-connect": false,
+      saas: false,
+      signup: false,
+      "disable-telemetry": false,
+      "no-auth": true, // Disable auth sharing
+    };
+
+    await func.call(mockContext, flags);
+
+    expect(runWizardCalls).toHaveLength(1);
+    expect(runWizardCalls[0].preSelectedProject).toBeUndefined();
+    expect(stdoutWrite).not.toHaveBeenCalledWith(
+      expect.stringContaining("Using existing Sentry auth")
+    );
   });
 });
