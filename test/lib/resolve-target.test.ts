@@ -4,6 +4,36 @@
 
 import { describe, expect, test } from "bun:test";
 import { parseOrgProjectArg } from "../../src/lib/arg-parsing.js";
+import { isValidDirNameForInference } from "../../src/lib/resolve-target.js";
+
+describe("isValidDirNameForInference", () => {
+  test("rejects empty string", () => {
+    expect(isValidDirNameForInference("")).toBe(false);
+  });
+
+  test("rejects single character", () => {
+    expect(isValidDirNameForInference("a")).toBe(false);
+    expect(isValidDirNameForInference("1")).toBe(false);
+  });
+
+  test("rejects dot-only names", () => {
+    expect(isValidDirNameForInference(".")).toBe(false);
+    expect(isValidDirNameForInference("..")).toBe(false);
+    expect(isValidDirNameForInference("...")).toBe(false);
+  });
+
+  test("accepts valid directory names", () => {
+    expect(isValidDirNameForInference("ab")).toBe(true);
+    expect(isValidDirNameForInference("cli")).toBe(true);
+    expect(isValidDirNameForInference("my-project")).toBe(true);
+    expect(isValidDirNameForInference("sentry-cli")).toBe(true);
+  });
+
+  test("accepts names starting with dot but having more chars", () => {
+    expect(isValidDirNameForInference(".env")).toBe(true);
+    expect(isValidDirNameForInference(".git")).toBe(true);
+  });
+});
 
 describe("parseOrgProjectArg", () => {
   test("returns auto-detect for undefined", () => {

@@ -616,8 +616,11 @@ export async function findProjectsBySlug(
   return searchResults.filter((r): r is ProjectWithOrg => r !== null);
 }
 
-/** Escape special regex characters in a string */
-function escapeRegex(str: string): string {
+/**
+ * Escape special regex characters in a string.
+ * @internal Exported for testing
+ */
+export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -632,8 +635,10 @@ function escapeRegex(str: string): string {
  * matchesWordBoundary("cli", "cli-website")  // true: "cli" in "cli-website"
  * matchesWordBoundary("sentry-docs", "docs") // true: "docs" in "sentry-docs"
  * matchesWordBoundary("cli", "eclipse")      // false: no word boundary
+ *
+ * @internal Exported for testing
  */
-function matchesWordBoundary(a: string, b: string): boolean {
+export function matchesWordBoundary(a: string, b: string): boolean {
   const aInB = new RegExp(`\\b${escapeRegex(a)}\\b`, "i");
   const bInA = new RegExp(`\\b${escapeRegex(b)}\\b`, "i");
   return aInB.test(b) || bInA.test(a);

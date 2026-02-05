@@ -340,8 +340,10 @@ const DOT_ONLY_REGEX = /^\.+$/;
 /**
  * Check if a directory name is valid for project inference.
  * Rejects empty strings, dot-only names, and names that are too short.
+ *
+ * @internal Exported for testing
  */
-function isValidDirNameForInference(dirName: string): boolean {
+export function isValidDirNameForInference(dirName: string): boolean {
   if (!dirName || dirName.length < MIN_DIR_NAME_LENGTH) {
     return false;
   }
