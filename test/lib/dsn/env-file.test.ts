@@ -189,202 +189,205 @@ SENTRY_DSN=https://correct@sentry.io/456`;
 // Integration Tests for File-Based Detection
 // ============================================================================
 
-let testDir: string;
+describe("integration: file-based detection", () => {
+  let testDir: string;
 
-beforeEach(async () => {
-  testDir = await createTestConfigDir("test-env-file-");
-  process.env.SENTRY_CLI_CONFIG_DIR = testDir;
-});
-
-afterEach(async () => {
-  delete process.env.SENTRY_CLI_CONFIG_DIR;
-  await cleanupTestDir(testDir);
-});
-
-describe("detectFromEnvFiles", () => {
-  test("returns null when no .env files exist", async () => {
-    const result = await detectFromEnvFiles(testDir);
-    expect(result).toBeNull();
+  beforeEach(async () => {
+    testDir = await createTestConfigDir("test-env-file-");
   });
 
-  test("detects DSN from .env file", async () => {
-    writeFileSync(
-      join(testDir, ".env"),
-      "SENTRY_DSN=https://key@sentry.io/123"
-    );
-
-    const result = await detectFromEnvFiles(testDir);
-    expect(result).not.toBeNull();
-    expect(result?.raw).toBe("https://key@sentry.io/123");
-    expect(result?.source).toBe("env_file");
+  afterEach(async () => {
+    await cleanupTestDir(testDir);
   });
 
-  test("detects DSN from .env.local with higher priority", async () => {
-    writeFileSync(
-      join(testDir, ".env"),
-      "SENTRY_DSN=https://default@sentry.io/1"
-    );
-    writeFileSync(
-      join(testDir, ".env.local"),
-      "SENTRY_DSN=https://local@sentry.io/2"
-    );
+  describe("detectFromEnvFiles", () => {
+    test("returns null when no .env files exist", async () => {
+      const result = await detectFromEnvFiles(testDir);
+      expect(result).toBeNull();
+    });
 
-    const result = await detectFromEnvFiles(testDir);
-    expect(result).not.toBeNull();
-    // .env.local has higher priority than .env
-    expect(result?.raw).toBe("https://local@sentry.io/2");
+    test("detects DSN from .env file", async () => {
+      writeFileSync(
+        join(testDir, ".env"),
+        "SENTRY_DSN=https://key@sentry.io/123"
+      );
+
+      const result = await detectFromEnvFiles(testDir);
+      expect(result).not.toBeNull();
+      expect(result?.raw).toBe("https://key@sentry.io/123");
+      expect(result?.source).toBe("env_file");
+    });
+
+    test("detects DSN from .env.local with higher priority", async () => {
+      writeFileSync(
+        join(testDir, ".env"),
+        "SENTRY_DSN=https://default@sentry.io/1"
+      );
+      writeFileSync(
+        join(testDir, ".env.local"),
+        "SENTRY_DSN=https://local@sentry.io/2"
+      );
+
+      const result = await detectFromEnvFiles(testDir);
+      expect(result).not.toBeNull();
+      // .env.local has higher priority than .env
+      expect(result?.raw).toBe("https://local@sentry.io/2");
+    });
+
+    test("returns null when .env exists but has no DSN", async () => {
+      writeFileSync(join(testDir, ".env"), "OTHER_VAR=value");
+
+      const result = await detectFromEnvFiles(testDir);
+      expect(result).toBeNull();
+    });
+
+    test("returns null when .env contains invalid DSN", async () => {
+      writeFileSync(join(testDir, ".env"), "SENTRY_DSN=not-a-valid-dsn");
+
+      const result = await detectFromEnvFiles(testDir);
+      // Invalid DSN should be parsed but createDetectedDsn may return null
+      // depending on DSN validation
+      // For this test, we just verify it doesn't crash
+      expect(result === null || result?.raw === "not-a-valid-dsn").toBe(true);
+    });
+
+    test("respects ENV_FILES priority order", async () => {
+      // Create multiple files
+      writeFileSync(
+        join(testDir, ".env.development"),
+        "SENTRY_DSN=https://dev@sentry.io/3"
+      );
+      writeFileSync(
+        join(testDir, ".env.local"),
+        "SENTRY_DSN=https://local@sentry.io/2"
+      );
+
+      const result = await detectFromEnvFiles(testDir);
+      // .env.local should be checked before .env.development
+      expect(result?.raw).toBe("https://local@sentry.io/2");
+    });
   });
 
-  test("returns null when .env exists but has no DSN", async () => {
-    writeFileSync(join(testDir, ".env"), "OTHER_VAR=value");
+  describe("detectFromAllEnvFiles", () => {
+    test("returns empty result when no .env files exist", async () => {
+      const result = await detectFromAllEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(0);
+      expect(Object.keys(result.sourceMtimes)).toHaveLength(0);
+    });
 
-    const result = await detectFromEnvFiles(testDir);
-    expect(result).toBeNull();
+    test("detects multiple DSNs from different .env files", async () => {
+      writeFileSync(
+        join(testDir, ".env"),
+        "SENTRY_DSN=https://default@sentry.io/1"
+      );
+      writeFileSync(
+        join(testDir, ".env.local"),
+        "SENTRY_DSN=https://local@sentry.io/2"
+      );
+
+      const result = await detectFromAllEnvFiles(testDir);
+      // Should find DSNs in both files (not stop at first)
+      expect(result.dsns).toHaveLength(2);
+
+      const rawDsns = result.dsns.map((d) => d.raw).sort();
+      expect(rawDsns).toContain("https://default@sentry.io/1");
+      expect(rawDsns).toContain("https://local@sentry.io/2");
+    });
+
+    test("includes source mtimes for caching", async () => {
+      writeFileSync(
+        join(testDir, ".env"),
+        "SENTRY_DSN=https://key@sentry.io/123"
+      );
+
+      const result = await detectFromAllEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(Object.keys(result.sourceMtimes)).toHaveLength(1);
+      expect(result.sourceMtimes[".env"]).toBeGreaterThan(0);
+    });
   });
 
-  test("returns null when .env contains invalid DSN", async () => {
-    writeFileSync(join(testDir, ".env"), "SENTRY_DSN=not-a-valid-dsn");
+  describe("detectFromMonorepoEnvFiles", () => {
+    test("returns empty result when no monorepo dirs exist", async () => {
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(0);
+    });
 
-    const result = await detectFromEnvFiles(testDir);
-    // Invalid DSN should be parsed but createDetectedDsn may return null
-    // depending on DSN validation
-    // For this test, we just verify it doesn't crash
-    expect(result === null || result?.raw === "not-a-valid-dsn").toBe(true);
+    test("detects DSN in packages/ subdirectory", async () => {
+      const pkgDir = join(testDir, "packages", "frontend");
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(
+        join(pkgDir, ".env"),
+        "SENTRY_DSN=https://frontend@sentry.io/1"
+      );
+
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0].raw).toBe("https://frontend@sentry.io/1");
+      expect(result.dsns[0].packagePath).toBe("packages/frontend");
+    });
+
+    test("detects DSN in apps/ subdirectory", async () => {
+      const appDir = join(testDir, "apps", "web");
+      mkdirSync(appDir, { recursive: true });
+      writeFileSync(join(appDir, ".env"), "SENTRY_DSN=https://web@sentry.io/2");
+
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0].raw).toBe("https://web@sentry.io/2");
+      expect(result.dsns[0].packagePath).toBe("apps/web");
+    });
+
+    test("detects DSNs from multiple monorepo packages", async () => {
+      // Create packages/
+      const pkg1 = join(testDir, "packages", "frontend");
+      const pkg2 = join(testDir, "packages", "backend");
+      mkdirSync(pkg1, { recursive: true });
+      mkdirSync(pkg2, { recursive: true });
+      writeFileSync(
+        join(pkg1, ".env"),
+        "SENTRY_DSN=https://frontend@sentry.io/1"
+      );
+      writeFileSync(
+        join(pkg2, ".env"),
+        "SENTRY_DSN=https://backend@sentry.io/2"
+      );
+
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(2);
+
+      const rawDsns = result.dsns.map((d) => d.raw).sort();
+      expect(rawDsns).toContain("https://frontend@sentry.io/1");
+      expect(rawDsns).toContain("https://backend@sentry.io/2");
+    });
+
+    test("ignores packages without .env files", async () => {
+      const pkg1 = join(testDir, "packages", "with-dsn");
+      const pkg2 = join(testDir, "packages", "without-dsn");
+      mkdirSync(pkg1, { recursive: true });
+      mkdirSync(pkg2, { recursive: true });
+      writeFileSync(join(pkg1, ".env"), "SENTRY_DSN=https://key@sentry.io/1");
+      writeFileSync(join(pkg2, "package.json"), "{}"); // No .env file
+
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0].packagePath).toBe("packages/with-dsn");
+    });
+
+    test("ignores files in monorepo root (only scans subdirs)", async () => {
+      mkdirSync(join(testDir, "packages"), { recursive: true });
+      // This file should be ignored (not in a package subdir)
+      writeFileSync(
+        join(testDir, "packages", ".env"),
+        "SENTRY_DSN=https://root@sentry.io/0"
+      );
+
+      const result = await detectFromMonorepoEnvFiles(testDir);
+      // Should not detect the .env in packages/ root
+      expect(result.dsns).toHaveLength(0);
+    });
   });
-
-  test("respects ENV_FILES priority order", async () => {
-    // Create multiple files
-    writeFileSync(
-      join(testDir, ".env.development"),
-      "SENTRY_DSN=https://dev@sentry.io/3"
-    );
-    writeFileSync(
-      join(testDir, ".env.local"),
-      "SENTRY_DSN=https://local@sentry.io/2"
-    );
-
-    const result = await detectFromEnvFiles(testDir);
-    // .env.local should be checked before .env.development
-    expect(result?.raw).toBe("https://local@sentry.io/2");
-  });
-});
-
-describe("detectFromAllEnvFiles", () => {
-  test("returns empty result when no .env files exist", async () => {
-    const result = await detectFromAllEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(0);
-    expect(Object.keys(result.sourceMtimes)).toHaveLength(0);
-  });
-
-  test("detects multiple DSNs from different .env files", async () => {
-    writeFileSync(
-      join(testDir, ".env"),
-      "SENTRY_DSN=https://default@sentry.io/1"
-    );
-    writeFileSync(
-      join(testDir, ".env.local"),
-      "SENTRY_DSN=https://local@sentry.io/2"
-    );
-
-    const result = await detectFromAllEnvFiles(testDir);
-    // Should find DSNs in both files (not stop at first)
-    expect(result.dsns).toHaveLength(2);
-
-    const rawDsns = result.dsns.map((d) => d.raw).sort();
-    expect(rawDsns).toContain("https://default@sentry.io/1");
-    expect(rawDsns).toContain("https://local@sentry.io/2");
-  });
-
-  test("includes source mtimes for caching", async () => {
-    writeFileSync(
-      join(testDir, ".env"),
-      "SENTRY_DSN=https://key@sentry.io/123"
-    );
-
-    const result = await detectFromAllEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(1);
-    expect(Object.keys(result.sourceMtimes)).toHaveLength(1);
-    expect(result.sourceMtimes[".env"]).toBeGreaterThan(0);
-  });
-});
-
-describe("detectFromMonorepoEnvFiles", () => {
-  test("returns empty result when no monorepo dirs exist", async () => {
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(0);
-  });
-
-  test("detects DSN in packages/ subdirectory", async () => {
-    const pkgDir = join(testDir, "packages", "frontend");
-    mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(
-      join(pkgDir, ".env"),
-      "SENTRY_DSN=https://frontend@sentry.io/1"
-    );
-
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(1);
-    expect(result.dsns[0].raw).toBe("https://frontend@sentry.io/1");
-    expect(result.dsns[0].packagePath).toBe("packages/frontend");
-  });
-
-  test("detects DSN in apps/ subdirectory", async () => {
-    const appDir = join(testDir, "apps", "web");
-    mkdirSync(appDir, { recursive: true });
-    writeFileSync(join(appDir, ".env"), "SENTRY_DSN=https://web@sentry.io/2");
-
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(1);
-    expect(result.dsns[0].raw).toBe("https://web@sentry.io/2");
-    expect(result.dsns[0].packagePath).toBe("apps/web");
-  });
-
-  test("detects DSNs from multiple monorepo packages", async () => {
-    // Create packages/
-    const pkg1 = join(testDir, "packages", "frontend");
-    const pkg2 = join(testDir, "packages", "backend");
-    mkdirSync(pkg1, { recursive: true });
-    mkdirSync(pkg2, { recursive: true });
-    writeFileSync(
-      join(pkg1, ".env"),
-      "SENTRY_DSN=https://frontend@sentry.io/1"
-    );
-    writeFileSync(join(pkg2, ".env"), "SENTRY_DSN=https://backend@sentry.io/2");
-
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(2);
-
-    const rawDsns = result.dsns.map((d) => d.raw).sort();
-    expect(rawDsns).toContain("https://frontend@sentry.io/1");
-    expect(rawDsns).toContain("https://backend@sentry.io/2");
-  });
-
-  test("ignores packages without .env files", async () => {
-    const pkg1 = join(testDir, "packages", "with-dsn");
-    const pkg2 = join(testDir, "packages", "without-dsn");
-    mkdirSync(pkg1, { recursive: true });
-    mkdirSync(pkg2, { recursive: true });
-    writeFileSync(join(pkg1, ".env"), "SENTRY_DSN=https://key@sentry.io/1");
-    writeFileSync(join(pkg2, "package.json"), "{}"); // No .env file
-
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    expect(result.dsns).toHaveLength(1);
-    expect(result.dsns[0].packagePath).toBe("packages/with-dsn");
-  });
-
-  test("ignores files in monorepo root (only scans subdirs)", async () => {
-    mkdirSync(join(testDir, "packages"), { recursive: true });
-    // This file should be ignored (not in a package subdir)
-    writeFileSync(
-      join(testDir, "packages", ".env"),
-      "SENTRY_DSN=https://root@sentry.io/0"
-    );
-
-    const result = await detectFromMonorepoEnvFiles(testDir);
-    // Should not detect the .env in packages/ root
-    expect(result.dsns).toHaveLength(0);
-  });
-});
+}); // end integration: file-based detection
 
 describe("ENV_FILES constant", () => {
   test("contains expected file names", () => {

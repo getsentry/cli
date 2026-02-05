@@ -18,11 +18,11 @@ let testConfigDir: string;
 
 beforeEach(async () => {
   testConfigDir = await createTestConfigDir("test-project-cache-");
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
+  process.env.SENTRY_CONFIG_DIR = testConfigDir;
 });
 
 afterEach(async () => {
-  delete process.env.SENTRY_CLI_CONFIG_DIR;
+  delete process.env.SENTRY_CONFIG_DIR;
   await cleanupTestDir(testConfigDir);
 });
 
