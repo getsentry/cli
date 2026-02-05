@@ -104,7 +104,10 @@ export const viewCommand = buildCommand({
       },
       spans: {
         kind: "parsed",
-        parse: Number,
+        parse: (input: string) => {
+          const n = Number(input);
+          return Number.isNaN(n) ? 3 : n;
+        },
         brief: "Span tree nesting depth (0 for unlimited)",
         default: "3",
       },
@@ -161,6 +164,8 @@ export const viewCommand = buildCommand({
       }
     } else if (!traceId) {
       spanTreeLines = [muted("\nNo trace data available for this event.")];
+    } else if (!timestamp) {
+      spanTreeLines = [muted("\nNo timestamp available to fetch span tree.")];
     }
 
     if (flags.json) {
