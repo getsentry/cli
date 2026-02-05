@@ -31,6 +31,27 @@ export {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "./oauth.js";
+// Profile types
+export type {
+  Flamegraph,
+  FlamegraphFrame,
+  FlamegraphFrameInfo,
+  FlamegraphProfile,
+  FlamegraphProfileMetadata,
+  HotPath,
+  ProfileAnalysis,
+  ProfileFunctionRow,
+  ProfileFunctionsResponse,
+} from "./profile.js";
+export {
+  FlamegraphFrameInfoSchema,
+  FlamegraphFrameSchema,
+  FlamegraphProfileMetadataSchema,
+  FlamegraphProfileSchema,
+  FlamegraphSchema,
+  ProfileFunctionRowSchema,
+  ProfileFunctionsResponseSchema,
+} from "./profile.js";
 export type {
   AutofixResponse,
   AutofixState,
@@ -78,7 +99,6 @@ export type {
   UserGeo,
   UserRegionsResponse,
 } from "./sentry.js";
-
 export {
   BreadcrumbSchema,
   BreadcrumbsEntrySchema,

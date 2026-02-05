@@ -104,3 +104,36 @@ export function buildBillingUrl(orgSlug: string, product?: string): string {
   const base = `${getSentryBaseUrl()}/settings/${orgSlug}/billing/overview/`;
   return product ? `${base}?product=${product}` : base;
 }
+
+// Profiling URLs
+
+/**
+ * Build URL to the profiling flamegraph view for a transaction.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param transactionName - Transaction name to view profiles for
+ * @returns Full URL to the profiling flamegraph view
+ */
+export function buildProfileUrl(
+  orgSlug: string,
+  projectSlug: string,
+  transactionName: string
+): string {
+  const encodedTransaction = encodeURIComponent(transactionName);
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/profile/${projectSlug}/flamegraph/?query=transaction%3A${encodedTransaction}`;
+}
+
+/**
+ * Build URL to the profiling summary page for a project.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Full URL to the profiling summary page
+ */
+export function buildProfilingSummaryUrl(
+  orgSlug: string,
+  projectSlug: string
+): string {
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/?project=${projectSlug}`;
+}
