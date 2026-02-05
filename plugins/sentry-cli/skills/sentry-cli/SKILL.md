@@ -412,10 +412,9 @@ View Sentry logs
 List logs from a project
 
 **Flags:**
-- `-n, --tail <value> - Number of log entries (1-1000) - (default: "100")`
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
-- `-f, --follow - Stream logs in real-time`
-- `--pollInterval <value> - Poll interval in seconds (only with --follow) - (default: "2")`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--json - Output as JSON`
 
 ## Output Formats

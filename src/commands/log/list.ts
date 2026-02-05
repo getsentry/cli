@@ -25,50 +25,53 @@ import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
 
 type ListFlags = {
-  readonly tail: number;
+  readonly limit: number;
   readonly query?: string;
-  readonly follow: boolean;
-  readonly pollInterval: number;
+  readonly follow?: number;
   readonly json: boolean;
 };
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log list <org>/<project>";
 
-/** Maximum allowed value for --tail flag */
-const MAX_ROWS = 1000;
+/** Maximum allowed value for --limit flag */
+const MAX_LIMIT = 1000;
 
-/** Minimum allowed value for --tail flag */
-const MIN_ROWS = 1;
+/** Minimum allowed value for --limit flag */
+const MIN_LIMIT = 1;
 
 /** Default number of log entries to show */
-const DEFAULT_TAIL = 100;
+const DEFAULT_LIMIT = 100;
 
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
 
 /**
- * Validate that --tail value is within allowed range.
+ * Validate that --limit value is within allowed range.
  *
- * @throws Error if value is outside MIN_ROWS..MAX_ROWS range
+ * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
  */
-function validateTail(value: string): number {
+function validateLimit(value: string): number {
   const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < MIN_ROWS || num > MAX_ROWS) {
-    throw new Error(`--tail must be between ${MIN_ROWS} and ${MAX_ROWS}`);
+  if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
+    throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
   }
   return num;
 }
 
 /**
- * Validate that --poll-interval is a positive number.
+ * Parse --follow flag value.
+ * Supports: -f (empty string → default interval), -f 10 (explicit interval)
  *
- * @throws Error if value is not a positive number
+ * @throws Error if value is not a positive integer
  */
-function validatePollInterval(value: string): number {
+function parseFollow(value: string): number {
+  if (value === "") {
+    return DEFAULT_POLL_INTERVAL;
+  }
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < 1) {
-    throw new Error("--poll-interval must be a positive integer");
+    throw new Error("--follow interval must be a positive integer");
   }
   return num;
 }
@@ -99,7 +102,7 @@ async function executeSingleFetch(
 ): Promise<void> {
   const logs = await listLogs(org, project, {
     query: flags.query,
-    limit: flags.tail,
+    limit: flags.limit,
     statsPeriod: "90d",
   });
 
@@ -122,9 +125,9 @@ async function executeSingleFetch(
   }
 
   // Show footer with tip if we hit the limit
-  const hasMore = logs.length >= flags.tail;
+  const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
-  const tip = hasMore ? " Use --tail to show more, or -f to follow." : "";
+  const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
   writeFooter(stdout, `${countText}${tip}`);
 }
 
@@ -146,10 +149,11 @@ type FollowModeOptions = {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: streaming loop with error handling
 async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   const { stdout, stderr, org, project, flags } = options;
-  const pollIntervalMs = flags.pollInterval * 1000;
+  const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
+  const pollIntervalMs = pollInterval * 1000;
 
   if (!flags.json) {
-    stderr.write(`Streaming logs... (poll interval: ${flags.pollInterval}s)\n`);
+    stderr.write(`Streaming logs... (poll interval: ${pollInterval}s)\n`);
     stderr.write("Press Ctrl+C to stop.\n");
 
     // Show update notification before streaming (since we'll never reach the normal exit)
@@ -166,7 +170,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
   const initialLogs = await listLogs(org, project, {
     query: flags.query,
-    limit: flags.tail,
+    limit: flags.limit,
     statsPeriod: "1m",
   });
 
@@ -193,7 +197,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     try {
       const newLogs = await listLogs(org, project, {
         query: flags.query,
-        limit: flags.tail,
+        limit: flags.limit,
         statsPeriod: "10m",
         afterTimestamp: lastTimestamp,
       });
@@ -313,10 +317,10 @@ export const listCommand = buildCommand({
       "  sentry log list <project>     # find project across all orgs\n\n" +
       "Examples:\n" +
       "  sentry log list                    # List last 100 logs\n" +
-      "  sentry log list -f                 # Stream logs in real-time\n" +
-      "  sentry log list --tail 50          # Show last 50 logs\n" +
-      "  sentry log list -q 'level:error'   # Filter to errors only\n" +
-      "  sentry log list -f --tail 200      # Show last 200, then stream",
+      "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
+      "  sentry log list -f 5               # Stream logs (5s poll interval)\n" +
+      "  sentry log list --limit 50         # Show last 50 logs\n" +
+      "  sentry log list -q 'level:error'   # Filter to errors only",
   },
   parameters: {
     positional: {
@@ -331,11 +335,11 @@ export const listCommand = buildCommand({
       ],
     },
     flags: {
-      tail: {
+      limit: {
         kind: "parsed",
-        parse: validateTail,
-        brief: `Number of log entries (${MIN_ROWS}-${MAX_ROWS})`,
-        default: String(DEFAULT_TAIL),
+        parse: validateLimit,
+        brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
+        default: String(DEFAULT_LIMIT),
       },
       query: {
         kind: "parsed",
@@ -344,15 +348,11 @@ export const listCommand = buildCommand({
         optional: true,
       },
       follow: {
-        kind: "boolean",
-        brief: "Stream logs in real-time",
-        default: false,
-      },
-      pollInterval: {
         kind: "parsed",
-        parse: validatePollInterval,
-        brief: "Poll interval in seconds (only with --follow)",
-        default: String(DEFAULT_POLL_INTERVAL),
+        parse: parseFollow,
+        brief: "Stream logs (optionally specify poll interval in seconds)",
+        optional: true,
+        inferEmpty: true,
       },
       json: {
         kind: "boolean",
@@ -361,7 +361,7 @@ export const listCommand = buildCommand({
       },
     },
     aliases: {
-      n: "tail",
+      n: "limit",
       q: "query",
       f: "follow",
     },

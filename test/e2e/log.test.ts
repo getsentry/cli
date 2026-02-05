@@ -85,33 +85,59 @@ describe("sentry log list", () => {
     expect(Array.isArray(data)).toBe(true);
   });
 
-  test("supports --tail flag", async () => {
+  test("supports --limit flag", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "log",
       "list",
       `${TEST_ORG}/${TEST_PROJECT}`,
-      "--tail",
+      "--limit",
       "5",
     ]);
 
     expect(result.exitCode).toBe(0);
   });
 
-  test("validates --tail range", async () => {
+  test("supports -n alias for --limit", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
     const result = await ctx.run([
       "log",
       "list",
       `${TEST_ORG}/${TEST_PROJECT}`,
-      "--tail",
+      "-n",
+      "5",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("validates --limit range", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "list",
+      `${TEST_ORG}/${TEST_PROJECT}`,
+      "--limit",
       "9999",
     ]);
 
     // Stricli uses exit code 252 for parse errors
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr + result.stdout).toMatch(/must be between|1.*1000/i);
+  });
+
+  test("supports -f flag for follow mode", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    // We can't actually test follow mode in e2e since it runs forever,
+    // but we can verify the flag is accepted by checking --help
+    const result = await ctx.run(["log", "list", "--help"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/-f.*--follow/);
+    expect(result.stdout).toMatch(/poll interval/i);
   });
 });
