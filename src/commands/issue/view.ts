@@ -7,6 +7,7 @@
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getLatestEvent } from "../../lib/api-client.js";
+import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
   formatEventDetails,
@@ -102,15 +103,7 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
-      spans: {
-        kind: "parsed",
-        parse: (input: string) => {
-          const n = Number(input);
-          return Number.isNaN(n) ? 3 : n;
-        },
-        brief: "Span tree nesting depth (0 for unlimited)",
-        default: "3",
-      },
+      ...spansFlag,
     },
     aliases: { w: "web" },
   },
@@ -144,18 +137,27 @@ export const viewCommand = buildCommand({
       ? await tryGetLatestEvent(orgSlug, issue.id)
       : undefined;
 
+    // Fetch span tree data (for both JSON and human output)
+    let spanTreeResult:
+      | Awaited<ReturnType<typeof getSpanTreeLines>>
+      | undefined;
+    if (orgSlug && event) {
+      spanTreeResult = await getSpanTreeLines(orgSlug, event, flags.spans);
+    }
+
     if (flags.json) {
-      const output = event ? { issue, event } : { issue };
+      const trace = spanTreeResult?.success
+        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+        : null;
+      const output = event ? { issue, event, trace } : { issue, trace };
       writeJson(stdout, output);
       return;
     }
 
-    // Fetch span tree lines
+    // Prepare span tree lines for human output
     let spanTreeLines: string[] | undefined;
-    if (orgSlug && event) {
-      const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
-      const result = await getSpanTreeLines(orgSlug, event, depth);
-      spanTreeLines = result.lines;
+    if (spanTreeResult) {
+      spanTreeLines = spanTreeResult.lines;
     } else if (!orgSlug) {
       spanTreeLines = [
         muted("\nOrganization context required to fetch span tree."),

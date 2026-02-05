@@ -4,35 +4,66 @@
  * Shared helper for fetching and formatting span trees from trace data.
  */
 
-import type { SentryEvent } from "../types/index.js";
+import type { SentryEvent, TraceSpan } from "../types/index.js";
 import { getDetailedTrace } from "./api-client.js";
 import { formatSimpleSpanTree, muted } from "./formatters/index.js";
 
 /**
- * Result from fetching span tree lines.
+ * Truncate a span tree to a maximum depth.
+ * Returns a new array with children beyond maxDepth removed.
+ *
+ * @param spans - Array of spans to truncate
+ * @param maxDepth - Maximum depth to keep (1 = root only)
+ * @param currentDepth - Current depth in recursion (internal use)
+ * @returns New array with truncated children
  */
-type SpanTreeResult = {
-  /** Formatted lines ready for display */
+function truncateSpanTree(
+  spans: TraceSpan[],
+  maxDepth: number,
+  currentDepth = 1
+): TraceSpan[] {
+  if (currentDepth > maxDepth) {
+    return [];
+  }
+
+  return spans.map((span) => ({
+    ...span,
+    children: span.children
+      ? truncateSpanTree(span.children, maxDepth, currentDepth + 1)
+      : undefined,
+  }));
+}
+
+/**
+ * Result from fetching span tree data.
+ * Contains both formatted lines for human output and raw spans for JSON output.
+ */
+export type SpanTreeResult = {
+  /** Formatted lines ready for display (human output) */
   lines: string[];
+  /** Raw span data for JSON output (null if fetch failed) */
+  spans: TraceSpan[] | null;
+  /** Trace ID for context (null if not available) */
+  traceId: string | null;
   /** Whether the fetch was successful */
   success: boolean;
 };
 
 /**
- * Fetch and format span tree lines for an event.
- * Returns formatted lines ready for display, with error messages for failure cases.
+ * Fetch and format span tree data for an event.
+ * Returns both formatted lines for human output and raw spans for JSON output.
  *
  * @param orgSlug - Organization slug for API routing
  * @param event - The event to get trace from
- * @param maxDepth - Maximum nesting depth to display
- * @returns Formatted lines and success status
+ * @param maxDepth - Maximum nesting depth to display (for formatted lines)
+ * @returns Formatted lines, raw spans, trace ID, and success status
  */
 export async function getSpanTreeLines(
   orgSlug: string,
   event: SentryEvent,
   maxDepth: number
 ): Promise<SpanTreeResult> {
-  const traceId = event.contexts?.trace?.trace_id;
+  const traceId = event.contexts?.trace?.trace_id ?? null;
   const dateCreated = (event as { dateCreated?: string }).dateCreated;
   const timestamp = dateCreated
     ? new Date(dateCreated).getTime() / 1000
@@ -41,12 +72,16 @@ export async function getSpanTreeLines(
   if (!traceId) {
     return {
       lines: [muted("\nNo trace data available for this event.")],
+      spans: null,
+      traceId: null,
       success: false,
     };
   }
   if (!timestamp) {
     return {
       lines: [muted("\nNo timestamp available to fetch span tree.")],
+      spans: null,
+      traceId,
       success: false,
     };
   }
@@ -54,10 +89,17 @@ export async function getSpanTreeLines(
   try {
     const spans = await getDetailedTrace(orgSlug, traceId, timestamp);
     const lines = formatSimpleSpanTree(traceId, spans, maxDepth);
-    return { lines, success: true };
+    // Truncate spans to match depth limit for JSON output
+    const truncatedSpans =
+      maxDepth === Number.POSITIVE_INFINITY
+        ? spans
+        : truncateSpanTree(spans, maxDepth);
+    return { lines, spans: truncatedSpans, traceId, success: true };
   } catch {
     return {
       lines: [muted("\nUnable to fetch span tree for this event.")],
+      spans: null,
+      traceId,
       success: false,
     };
   }

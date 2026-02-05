@@ -8,6 +8,60 @@
 
 import { isNumericId } from "./issue-id.js";
 
+/** Default span depth when no value is provided */
+const DEFAULT_SPAN_DEPTH = 3;
+
+/**
+ * Parse span depth flag value.
+ *
+ * Supports:
+ * - Numeric values (e.g., "3", "5")
+ * - "all" for unlimited depth (returns Infinity)
+ * - "0" for unlimited depth (returns Infinity)
+ * - Invalid values fall back to default depth (3)
+ *
+ * @param input - Raw input string from CLI flag
+ * @returns Parsed depth as number (Infinity for unlimited)
+ *
+ * @example
+ * parseSpanDepth("3")    // 3
+ * parseSpanDepth("all")  // Infinity
+ * parseSpanDepth("0")    // Infinity
+ * parseSpanDepth("foo")  // 3 (default)
+ */
+export function parseSpanDepth(input: string): number {
+  if (input.toLowerCase() === "all") {
+    return Number.POSITIVE_INFINITY;
+  }
+  const n = Number(input);
+  if (Number.isNaN(n)) {
+    return DEFAULT_SPAN_DEPTH;
+  }
+  // 0 means unlimited
+  return n === 0 ? Number.POSITIVE_INFINITY : n;
+}
+
+/**
+ * Shared --spans flag definition for Stricli commands.
+ * Use this in command parameters to avoid duplication.
+ *
+ * @example
+ * parameters: {
+ *   flags: {
+ *     ...spansFlag,
+ *     // other flags
+ *   }
+ * }
+ */
+export const spansFlag = {
+  spans: {
+    kind: "parsed" as const,
+    parse: parseSpanDepth,
+    brief: 'Span tree depth limit (number or "all" for unlimited)',
+    default: String(DEFAULT_SPAN_DEPTH),
+  },
+};
+
 /**
  * Type constants for project specification patterns.
  * Use these constants instead of string literals for type safety.

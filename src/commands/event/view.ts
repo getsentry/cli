@@ -7,6 +7,7 @@
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getEvent } from "../../lib/api-client.js";
+import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
@@ -98,15 +99,7 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
-      spans: {
-        kind: "parsed",
-        parse: (input: string) => {
-          const n = Number(input);
-          return Number.isNaN(n) ? 3 : n;
-        },
-        brief: "Span tree nesting depth (0 for unlimited)",
-        default: "3",
-      },
+      ...spansFlag,
     },
     aliases: { w: "web" },
   },
@@ -142,23 +135,25 @@ export const viewCommand = buildCommand({
 
     const event = await getEvent(target.org, target.project, eventId);
 
-    // Fetch span tree lines
-    const depth = flags.spans > 0 ? flags.spans : Number.MAX_SAFE_INTEGER;
-    const { lines: spanTreeLines } = await getSpanTreeLines(
+    // Fetch span tree data (for both JSON and human output)
+    const spanTreeResult = await getSpanTreeLines(
       target.org,
       event,
-      depth
+      flags.spans
     );
 
     if (flags.json) {
-      writeJson(stdout, event);
+      const trace = spanTreeResult.success
+        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+        : null;
+      writeJson(stdout, { event, trace });
       return;
     }
 
     writeHumanOutput(stdout, {
       event,
       detectedFrom: target.detectedFrom,
-      spanTreeLines,
+      spanTreeLines: spanTreeResult.lines,
     });
   },
 });

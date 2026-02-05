@@ -279,7 +279,7 @@ View details of a specific issue
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Span tree nesting depth (0 for unlimited) - (default: "3")`
+- `--spans <value> - Span tree depth limit (number or "all" for unlimited) - (default: "3")`
 
 **Examples:**
 
@@ -308,7 +308,7 @@ View details of a specific event
 - `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Span tree nesting depth (0 for unlimited) - (default: "3")`
+- `--spans <value> - Span tree depth limit (number or "all" for unlimited) - (default: "3")`
 
 **Examples:**
 
