@@ -13,7 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -193,6 +193,21 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       ttl_expires_at: { type: "INTEGER", notNull: true },
     },
   },
+  transaction_aliases: {
+    columns: {
+      idx: { type: "INTEGER", notNull: true },
+      alias: { type: "TEXT", notNull: true },
+      transaction_name: { type: "TEXT", notNull: true },
+      org_slug: { type: "TEXT", notNull: true },
+      project_slug: { type: "TEXT", notNull: true },
+      fingerprint: { type: "TEXT", notNull: true },
+      cached_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
 };
 
 /** Generate CREATE TABLE DDL from column definitions */
@@ -357,8 +372,33 @@ export type RepairResult = {
   failed: string[];
 };
 
+/** Tables that require custom DDL (not auto-generated from TABLE_SCHEMAS) */
+const CUSTOM_DDL_TABLES = new Set(["transaction_aliases"]);
+
+function repairTransactionAliasesTable(
+  db: Database,
+  result: RepairResult
+): void {
+  if (tableExists(db, "transaction_aliases")) {
+    return;
+  }
+  try {
+    db.exec(TRANSACTION_ALIASES_DDL);
+    db.exec(TRANSACTION_ALIASES_INDEX);
+    result.fixed.push("Created table transaction_aliases");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    result.failed.push(`Failed to create table transaction_aliases: ${msg}`);
+  }
+}
+
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
+    // Skip tables that need custom DDL
+    if (CUSTOM_DDL_TABLES.has(tableName)) {
+      continue;
+    }
+
     if (tableExists(db, tableName)) {
       continue;
     }
@@ -370,6 +410,9 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
+
+  // Handle tables with custom DDL
+  repairTransactionAliasesTable(db, result);
 }
 
 function repairMissingColumns(db: Database, result: RepairResult): void {
@@ -508,10 +551,39 @@ export function tryRepairAndRetry<T>(
   return { attempted: false };
 }
 
+/**
+ * Custom DDL for transaction_aliases table with composite primary key.
+ * TABLE_SCHEMAS doesn't support composite primary keys, so we handle this specially.
+ */
+const TRANSACTION_ALIASES_DDL = `
+  CREATE TABLE IF NOT EXISTS transaction_aliases (
+    idx INTEGER NOT NULL,
+    alias TEXT NOT NULL,
+    transaction_name TEXT NOT NULL,
+    org_slug TEXT NOT NULL,
+    project_slug TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    cached_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    PRIMARY KEY (fingerprint, idx)
+  )
+`;
+
+const TRANSACTION_ALIASES_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_txn_alias_lookup 
+  ON transaction_aliases(alias, fingerprint)
+`;
+
 export function initSchema(db: Database): void {
-  // Generate combined DDL from all table schemas
-  const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
+  // Generate combined DDL from all table schemas (except transaction_aliases which has custom DDL)
+  const ddlStatements = Object.entries(EXPECTED_TABLES)
+    .filter(([name]) => name !== "transaction_aliases")
+    .map(([, ddl]) => ddl)
+    .join(";\n\n");
   db.exec(ddlStatements);
+
+  // Add transaction_aliases with composite primary key
+  db.exec(TRANSACTION_ALIASES_DDL);
+  db.exec(TRANSACTION_ALIASES_INDEX);
 
   const versionRow = db
     .query("SELECT version FROM schema_version LIMIT 1")
@@ -567,6 +639,13 @@ export function runMigrations(db: Database): void {
     addColumnIfMissing(db, "dsn_cache", "ttl_expires_at", "INTEGER");
 
     db.exec(EXPECTED_TABLES.project_root_cache as string);
+  }
+
+  // Migration 4 -> 5: Add transaction_aliases table for profile commands
+  // Note: Uses custom DDL because TABLE_SCHEMAS doesn't support composite primary keys
+  if (currentVersion < 5) {
+    db.exec(TRANSACTION_ALIASES_DDL);
+    db.exec(TRANSACTION_ALIASES_INDEX);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

@@ -10,4 +10,5 @@ export * from "./human.js";
 export * from "./json.js";
 export * from "./log.js";
 export * from "./output.js";
+export * from "./profile.js";
 export * from "./seer.js";
