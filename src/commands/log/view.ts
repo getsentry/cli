@@ -97,7 +97,7 @@ export async function resolveFromProjectSearch(
     throw new ValidationError(
       `Project "${projectSlug}" exists in multiple organizations.\n\n` +
         `Specify the organization:\n${orgList}\n\n` +
-        `Example: sentry log view ${projectSlug} ${logId}`
+        `Example: sentry log view <org>/${projectSlug} ${logId}`
     );
   }
   // Safe assertion: length is exactly 1 after the checks above

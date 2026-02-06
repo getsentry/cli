@@ -171,7 +171,7 @@ describe("resolveFromProjectSearch", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
         const message = (error as ValidationError).message;
-        expect(message).toContain("Example: sentry log view api abc123");
+        expect(message).toContain("Example: sentry log view <org>/api abc123");
       }
     });
   });

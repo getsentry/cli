@@ -113,7 +113,10 @@ export function formatLogDetails(
 
   // Header
   const headerText = `Log ${logId.slice(0, 12)}...`;
-  const separatorWidth = Math.max(MIN_HEADER_WIDTH, Math.min(80, 40));
+  const separatorWidth = Math.max(
+    MIN_HEADER_WIDTH,
+    Math.min(80, headerText.length)
+  );
   lines.push(headerText);
   lines.push(muted("═".repeat(separatorWidth)));
   lines.push("");
@@ -153,7 +156,10 @@ export function formatLogDetails(
   if (sdkName || sdkVersion) {
     lines.push(muted("─── SDK ───"));
     lines.push("");
-    const sdkInfo = sdkVersion ? `${sdkName} ${sdkVersion}` : sdkName;
+    const sdkInfo =
+      sdkName && sdkVersion
+        ? `${sdkName} ${sdkVersion}`
+        : sdkName || sdkVersion;
     lines.push(`SDK:          ${sdkInfo}`);
     lines.push("");
   }
