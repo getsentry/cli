@@ -7,7 +7,6 @@
 import { spawn } from "node:child_process";
 import {
   chmodSync,
-  existsSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -98,20 +97,22 @@ export function getCurlInstallPaths(): {
 }
 
 /**
- * Clean up leftover files from previous upgrades.
- * Called on CLI startup to remove .old files (Windows upgrades) and
- * .download files (interrupted downloads). Fire-and-forget, non-blocking.
+ * Clean up leftover .old files from previous upgrades.
+ * Called on CLI startup to remove .old files left over from Windows upgrades
+ * (where the running binary is renamed to .old before replacement).
+ *
+ * Note: We intentionally do NOT clean up .download files here because an
+ * upgrade may be in progress in another process. The .download cleanup is
+ * handled inside executeUpgradeCurl() under the exclusive lock.
+ *
+ * Fire-and-forget, non-blocking.
  */
 export function cleanupOldBinary(): void {
-  const { oldPath, tempPath } = getCurlInstallPaths();
+  const { oldPath } = getCurlInstallPaths();
   // Fire-and-forget: don't await, just let cleanup run in background
-  const cleanup = (path: string): void => {
-    unlink(path).catch(() => {
-      // Intentionally ignore errors - file may not exist
-    });
-  };
-  cleanup(oldPath);
-  cleanup(tempPath);
+  unlink(oldPath).catch(() => {
+    // Intentionally ignore errors - file may not exist
+  });
 }
 
 /**
@@ -128,28 +129,60 @@ export function isProcessRunning(pid: number): boolean {
 
 /**
  * Acquire an exclusive lock for the upgrade process.
- * Uses a lock file with PID to detect stale locks from crashed processes.
+ * Uses atomic file creation with 'wx' flag to prevent race conditions.
+ * If lock exists, checks if owning process is still alive (stale lock detection).
  *
  * @param lockPath - Path to the lock file
  * @throws {UpgradeError} If another upgrade is already in progress
  */
 export function acquireUpgradeLock(lockPath: string): void {
-  if (existsSync(lockPath)) {
-    const content = readFileSync(lockPath, "utf-8").trim();
-    const existingPid = Number.parseInt(content, 10);
-
-    if (!Number.isNaN(existingPid) && isProcessRunning(existingPid)) {
-      throw new UpgradeError(
-        "execution_failed",
-        "Another upgrade is already in progress"
-      );
+  try {
+    // Try atomic exclusive creation - fails if file exists
+    writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+    // Lock acquired successfully
+  } catch (error) {
+    // If error is not "file exists", re-throw
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
     }
-    // Stale lock from dead process - clean it up
-    unlinkSync(lockPath);
+    // File exists - check if it's a stale lock
+    handleExistingLock(lockPath);
+  }
+}
+
+/**
+ * Handle an existing lock file by checking if it's stale.
+ * If stale, removes it and retries acquisition. If active, throws.
+ */
+function handleExistingLock(lockPath: string): void {
+  // Lock file exists - read and check if owner process is still alive
+  let content: string;
+  try {
+    content = readFileSync(lockPath, "utf-8").trim();
+  } catch {
+    // Lock file disappeared between our check and read - retry acquisition
+    acquireUpgradeLock(lockPath);
+    return;
   }
 
-  // Create lock file with our PID
-  writeFileSync(lockPath, String(process.pid));
+  const existingPid = Number.parseInt(content, 10);
+
+  if (!Number.isNaN(existingPid) && isProcessRunning(existingPid)) {
+    throw new UpgradeError(
+      "execution_failed",
+      "Another upgrade is already in progress"
+    );
+  }
+
+  // Stale lock from dead process - remove and retry
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Someone else removed it - that's fine
+  }
+
+  // Retry acquisition (recursive call handles race with other processes)
+  acquireUpgradeLock(lockPath);
 }
 
 /**

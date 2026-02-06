@@ -668,12 +668,6 @@ describe("executeUpgrade with curl method", () => {
 describe("cleanupOldBinary", () => {
   const suffix = process.platform === "win32" ? ".exe" : "";
   const oldPath = join(homedir(), ".sentry", "bin", `sentry${suffix}.old`);
-  const tempPath = join(
-    homedir(),
-    ".sentry",
-    "bin",
-    `sentry${suffix}.download`
-  );
   const binDir = join(homedir(), ".sentry", "bin");
 
   test("removes .old file if it exists", async () => {
@@ -692,21 +686,9 @@ describe("cleanupOldBinary", () => {
     expect(await Bun.file(oldPath).exists()).toBe(false);
   });
 
-  test("removes .download file if it exists", async () => {
-    // Create the directory and file
-    mkdirSync(binDir, { recursive: true });
-    writeFileSync(tempPath, "partial download");
-
-    // Verify file exists
-    expect(await Bun.file(tempPath).exists()).toBe(true);
-
-    // Clean up is fire-and-forget async, so we need to wait a bit
-    cleanupOldBinary();
-    await Bun.sleep(50);
-
-    // File should be gone
-    expect(await Bun.file(tempPath).exists()).toBe(false);
-  });
+  // Note: cleanupOldBinary intentionally does NOT clean up .download files
+  // because an upgrade may be in progress in another process. The .download
+  // cleanup is handled inside executeUpgradeCurl() under the exclusive lock.
 
   test("does not throw if files do not exist", () => {
     // Ensure files don't exist by attempting cleanup first
