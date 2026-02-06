@@ -117,12 +117,22 @@ export function cleanupOldBinary(): void {
 
 /**
  * Check if a process with the given PID is still running.
+ *
+ * On Unix, process.kill(pid, 0) throws:
+ * - ESRCH: Process does not exist (not running)
+ * - EPERM: Process exists but we lack permission to signal it (IS running)
  */
 export function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0); // Signal 0 just checks if process exists
     return true;
-  } catch {
+  } catch (error) {
+    // EPERM means process exists but we can't signal it (different user)
+    // This is still a running process, so return true
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      return true;
+    }
+    // ESRCH or other errors mean process is not running
     return false;
   }
 }
