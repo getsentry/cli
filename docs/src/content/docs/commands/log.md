@@ -92,6 +92,95 @@ sentry log list -n 500
 sentry log list my-org/backend -f -q 'level:error'
 ```
 
+### `sentry log view`
+
+View details of a specific log entry.
+
+```bash
+# Auto-detect from DSN or config
+sentry log view <log-id>
+
+# Explicit org and project
+sentry log view <org>/<project> <log-id>
+
+# Search for project across all accessible orgs
+sentry log view <project> <log-id>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `<log-id>` | The 32-character hexadecimal log ID |
+| `<org>/<project>` | Explicit organization and project (e.g., `my-org/backend`) |
+| `<project>` | Search for project by name across all accessible organizations |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-w, --web` | Open in browser |
+| `--json` | Output as JSON |
+
+**Example:**
+
+```bash
+sentry log view 968c763c740cfda8b6728f27fb9e9b01
+```
+
+```
+Log 968c763c740c...
+════════════════════
+
+ID:         968c763c740cfda8b6728f27fb9e9b01
+Timestamp:  2024-01-20 14:22:05
+Severity:   ERROR
+
+Message:
+  Database connection timeout after 30s
+
+─── Context ───
+
+Project:      backend
+Environment:  production
+Release:      1.2.3
+
+─── SDK ───
+
+SDK:          sentry.python 1.40.0
+
+─── Trace ───
+
+Trace ID:     abc123def456abc123def456abc12345
+Span ID:      1234567890abcdef
+Link:         https://sentry.io/organizations/my-org/explore/traces/abc123...
+
+─── Source Location ───
+
+Function:     connect_to_database
+File:         src/db/connection.py:142
+```
+
+**Open in browser:**
+
+```bash
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
+```
+
+**With explicit project:**
+
+```bash
+sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
+```
+
+## Finding Log IDs
+
+Log IDs can be found:
+
+1. In the output of `sentry log list` (shown as trace IDs in brackets)
+2. In the Sentry UI when viewing log entries
+3. In the `sentry.item_id` field of JSON output
+
 ## JSON Output
 
 Use `--json` for machine-readable output:
