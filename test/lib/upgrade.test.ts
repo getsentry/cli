@@ -485,7 +485,13 @@ describe("isProcessRunning", () => {
 });
 
 describe("acquireUpgradeLock", () => {
-  const testLockPath = join(homedir(), ".sentry", "bin", "test-upgrade.lock");
+  const binDir = join(homedir(), ".sentry", "bin");
+  const testLockPath = join(binDir, "test-upgrade.lock");
+
+  beforeEach(() => {
+    // Ensure directory exists
+    mkdirSync(binDir, { recursive: true });
+  });
 
   afterEach(() => {
     // Clean up test lock file
