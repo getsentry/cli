@@ -357,7 +357,7 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
     return stored.method;
   }
 
-  // 2. Legacy detection for existing installs (pre-record-install)
+  // 2. Legacy detection for existing installs (pre-setup command)
   const legacyMethod = await detectLegacyInstallationMethod();
 
   // 3. Auto-save detected method for future runs
