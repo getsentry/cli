@@ -1,0 +1,36 @@
+## Implementation Plan
+
+### Problem
+`sentry cli upgrade --method curl` failed with:
+```
+Error: TODO: stream.Readable stdio @ 0
+```
+
+This occurred because the code used `node:child_process.spawn` to pipe
+curl's stdout to bash's stdin, and Bun's Node.js compatibility layer
+doesn't support passing `stream.Readable` to `stdio` options.
+
+### Solution
+Replace the shell-based approach with direct binary download:
+
+1. **Download URL builder**: `getBinaryDownloadUrl(version)` constructs
+   the GitHub release URL for the platform-specific binary
+
+2. **Direct download**: Use `fetch()` to download the binary, write with
+   `Bun.write()` to a temp file
+
+3. **Atomic replacement**:
+   - Unix: `renameSync()` atomically overwrites the target
+   - Windows: Rename running exe to `.old`, then rename temp to target
+
+4. **Cleanup on startup**: `cleanupOldBinary()` removes leftover `.old`
+   files from previous Windows upgrades
+
+5. **Polyfill extension**: Extended `Bun.write()` polyfill to handle
+   `Response`, `ArrayBuffer`, and `Uint8Array` types
+
+### Files Changed
+- `src/lib/upgrade.ts` - Main implementation
+- `src/bin.ts` - Call cleanupOldBinary() on startup
+- `script/node-polyfills.ts` - Extend Bun.write() polyfill
+- `test/lib/upgrade.test.ts` - Add tests for cleanupOldBinary()
