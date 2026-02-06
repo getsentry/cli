@@ -432,6 +432,20 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
 
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
 ### Releases
 
 Manage releases on Sentry
@@ -583,19 +597,6 @@ Send an envelope to Sentry
 #### `sentry send-envelope <args...>`
 
 Send an envelope to Sentry
-### Log
-
-View Sentry logs
-
-#### `sentry log list <target>`
-
-List logs from a project
-
-**Flags:**
-- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
-- `-q, --query <value> - Filter query (Sentry search syntax)`
-- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `--json - Output as JSON`
 
 ## Output Formats
 
