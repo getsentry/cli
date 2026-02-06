@@ -22,7 +22,13 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const JITTER_FACTOR = 0.2;
 
 /** Commands/flags that should not show update notifications */
-const SUPPRESSED_ARGS = new Set(["upgrade", "--version", "-V", "--json"]);
+const SUPPRESSED_ARGS = new Set([
+  "upgrade",
+  "--version",
+  "-V",
+  "--json",
+  "token",
+]);
 
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;

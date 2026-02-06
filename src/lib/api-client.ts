@@ -991,6 +991,9 @@ export function triggerSolutionPlanning(
 /**
  * Get the currently authenticated user's information.
  * Used for setting user context in telemetry.
+ *
+ * Note: This endpoint may not work with OAuth App tokens, but works with
+ * manually created API tokens. Callers should handle failures gracefully.
  */
 export function getCurrentUser(): Promise<SentryUser> {
   return apiRequest<SentryUser>("/users/me/", {
