@@ -391,6 +391,12 @@ describe("executeUpgrade", () => {
 describe("cleanupOldBinary", () => {
   const suffix = process.platform === "win32" ? ".exe" : "";
   const oldPath = join(homedir(), ".sentry", "bin", `sentry${suffix}.old`);
+  const tempPath = join(
+    homedir(),
+    ".sentry",
+    "bin",
+    `sentry${suffix}.download`
+  );
   const binDir = join(homedir(), ".sentry", "bin");
 
   test("removes .old file if it exists", async () => {
@@ -401,15 +407,32 @@ describe("cleanupOldBinary", () => {
     // Verify file exists
     expect(await Bun.file(oldPath).exists()).toBe(true);
 
-    // Clean up should remove it
+    // Clean up is fire-and-forget async, so we need to wait a bit
     cleanupOldBinary();
+    await Bun.sleep(50);
 
     // File should be gone
     expect(await Bun.file(oldPath).exists()).toBe(false);
   });
 
-  test("does not throw if .old file does not exist", () => {
-    // Ensure file doesn't exist by attempting cleanup first
+  test("removes .download file if it exists", async () => {
+    // Create the directory and file
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(tempPath, "partial download");
+
+    // Verify file exists
+    expect(await Bun.file(tempPath).exists()).toBe(true);
+
+    // Clean up is fire-and-forget async, so we need to wait a bit
+    cleanupOldBinary();
+    await Bun.sleep(50);
+
+    // File should be gone
+    expect(await Bun.file(tempPath).exists()).toBe(false);
+  });
+
+  test("does not throw if files do not exist", () => {
+    // Ensure files don't exist by attempting cleanup first
     cleanupOldBinary();
 
     // Should not throw when called again

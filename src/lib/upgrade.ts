@@ -5,7 +5,15 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, renameSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getUserAgent } from "./constants.js";
@@ -71,12 +79,13 @@ function getBinaryDownloadUrl(version: string): string {
 /**
  * Get file paths for curl-installed binary.
  *
- * @returns Object with install, temp, and old file paths
+ * @returns Object with install, temp, old, and lock file paths
  */
 function getCurlInstallPaths(): {
   installPath: string;
   tempPath: string;
   oldPath: string;
+  lockPath: string;
 } {
   const suffix = process.platform === "win32" ? ".exe" : "";
   const installPath = join(homedir(), ".sentry", "bin", `sentry${suffix}`);
@@ -84,19 +93,75 @@ function getCurlInstallPaths(): {
     installPath,
     tempPath: `${installPath}.download`,
     oldPath: `${installPath}.old`,
+    lockPath: `${installPath}.lock`,
   };
 }
 
 /**
- * Clean up old binary from previous upgrade.
- * Called on CLI startup to remove .old files left from Windows upgrades.
+ * Clean up leftover files from previous upgrades.
+ * Called on CLI startup to remove .old files (Windows upgrades) and
+ * .download files (interrupted downloads). Fire-and-forget, non-blocking.
  */
 export function cleanupOldBinary(): void {
-  const { oldPath } = getCurlInstallPaths();
+  const { oldPath, tempPath } = getCurlInstallPaths();
+  // Fire-and-forget: don't await, just let cleanup run in background
+  const cleanup = (path: string): void => {
+    unlink(path).catch(() => {
+      // Intentionally ignore errors - file may not exist
+    });
+  };
+  cleanup(oldPath);
+  cleanup(tempPath);
+}
+
+/**
+ * Check if a process with the given PID is still running.
+ */
+function isProcessRunning(pid: number): boolean {
   try {
-    unlinkSync(oldPath);
+    process.kill(pid, 0); // Signal 0 just checks if process exists
+    return true;
   } catch {
-    // File doesn't exist or can't be deleted - ignore
+    return false;
+  }
+}
+
+/**
+ * Acquire an exclusive lock for the upgrade process.
+ * Uses a lock file with PID to detect stale locks from crashed processes.
+ *
+ * @param lockPath - Path to the lock file
+ * @throws {UpgradeError} If another upgrade is already in progress
+ */
+function acquireUpgradeLock(lockPath: string): void {
+  if (existsSync(lockPath)) {
+    const content = readFileSync(lockPath, "utf-8").trim();
+    const existingPid = Number.parseInt(content, 10);
+
+    if (!Number.isNaN(existingPid) && isProcessRunning(existingPid)) {
+      throw new UpgradeError(
+        "execution_failed",
+        "Another upgrade is already in progress"
+      );
+    }
+    // Stale lock from dead process - clean it up
+    unlinkSync(lockPath);
+  }
+
+  // Create lock file with our PID
+  writeFileSync(lockPath, String(process.pid));
+}
+
+/**
+ * Release the upgrade lock.
+ *
+ * @param lockPath - Path to the lock file
+ */
+function releaseUpgradeLock(lockPath: string): void {
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Ignore errors - file might already be gone
   }
 }
 
@@ -333,61 +398,77 @@ export async function versionExists(
  * Execute upgrade by downloading binary directly from GitHub releases.
  * Downloads the platform-specific binary and replaces the current installation.
  *
+ * Uses a PID-based lock file to prevent concurrent upgrades.
+ *
  * On Windows, the running executable cannot be overwritten directly, so we:
  * 1. Rename the current binary to .old
  * 2. Write the new binary to the original path
  * 3. The .old file is cleaned up on next CLI startup via cleanupOldBinary()
  *
  * @param version - Target version to install
- * @throws {UpgradeError} When download or installation fails
+ * @throws {UpgradeError} When download or installation fails, or if another upgrade is running
  */
 async function executeUpgradeCurl(version: string): Promise<void> {
   const url = getBinaryDownloadUrl(version);
-  const { installPath, tempPath, oldPath } = getCurlInstallPaths();
+  const { installPath, tempPath, oldPath, lockPath } = getCurlInstallPaths();
   const isWindows = process.platform === "win32";
 
-  // Download binary
-  const response = await fetchWithUpgradeError(
-    url,
-    { headers: getGitHubHeaders() },
-    "GitHub"
-  );
+  // Acquire exclusive lock to prevent concurrent upgrades
+  acquireUpgradeLock(lockPath);
 
-  if (!response.ok) {
-    throw new UpgradeError(
-      "execution_failed",
-      `Failed to download binary: HTTP ${response.status}`
-    );
-  }
-
-  // Write to temp file
-  await Bun.write(tempPath, response);
-
-  // Set executable permission (Unix only)
-  if (!isWindows) {
-    chmodSync(tempPath, 0o755);
-  }
-
-  // Replace the binary
-  if (isWindows) {
-    // Windows: Can't overwrite running exe, but CAN rename it
-    // Rename current -> .old, then rename temp -> current
+  try {
+    // Clean up any leftover temp file from interrupted download
     try {
-      renameSync(installPath, oldPath);
+      unlinkSync(tempPath);
     } catch {
-      // Current binary might not exist (fresh install) or .old already exists
-      // Try to remove .old first, then retry
+      // Ignore if doesn't exist
+    }
+
+    // Download binary
+    const response = await fetchWithUpgradeError(
+      url,
+      { headers: getGitHubHeaders() },
+      "GitHub"
+    );
+
+    if (!response.ok) {
+      throw new UpgradeError(
+        "execution_failed",
+        `Failed to download binary: HTTP ${response.status}`
+      );
+    }
+
+    // Write to temp file
+    await Bun.write(tempPath, response);
+
+    // Set executable permission (Unix only)
+    if (!isWindows) {
+      chmodSync(tempPath, 0o755);
+    }
+
+    // Replace the binary
+    if (isWindows) {
+      // Windows: Can't overwrite running exe, but CAN rename it
+      // Rename current -> .old, then rename temp -> current
       try {
-        unlinkSync(oldPath);
         renameSync(installPath, oldPath);
       } catch {
-        // If still failing, current binary doesn't exist - that's fine
+        // Current binary might not exist (fresh install) or .old already exists
+        // Try to remove .old first, then retry
+        try {
+          unlinkSync(oldPath);
+          renameSync(installPath, oldPath);
+        } catch {
+          // If still failing, current binary doesn't exist - that's fine
+        }
       }
+      renameSync(tempPath, installPath);
+    } else {
+      // Unix: Atomic rename overwrites target
+      renameSync(tempPath, installPath);
     }
-    renameSync(tempPath, installPath);
-  } else {
-    // Unix: Atomic rename overwrites target
-    renameSync(tempPath, installPath);
+  } finally {
+    releaseUpgradeLock(lockPath);
   }
 }
 
