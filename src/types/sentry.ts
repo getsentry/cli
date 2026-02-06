@@ -670,3 +670,63 @@ export const LogsResponseSchema = z.object({
 });
 
 export type LogsResponse = z.infer<typeof LogsResponseSchema>;
+
+/**
+ * Detailed log entry with all available fields from the logs dataset.
+ * Used by the `log view` command for comprehensive log display.
+ */
+export const DetailedSentryLogSchema = z
+  .object({
+    /** Unique identifier for deduplication */
+    "sentry.item_id": z.string(),
+    /** ISO timestamp of the log entry */
+    timestamp: z.string(),
+    /** Nanosecond-precision timestamp for accurate ordering */
+    timestamp_precise: z.number(),
+    /** Log message content */
+    message: z.string().nullable().optional(),
+    /** Log severity level (error, warning, info, debug, etc.) */
+    severity: z.string().nullable().optional(),
+    /** Trace ID for correlation with traces */
+    trace: z.string().nullable().optional(),
+    /** Project slug */
+    project: z.string().nullable().optional(),
+    /** Environment name */
+    environment: z.string().nullable().optional(),
+    /** Release version */
+    release: z.string().nullable().optional(),
+    /** SDK name */
+    "sdk.name": z.string().nullable().optional(),
+    /** SDK version */
+    "sdk.version": z.string().nullable().optional(),
+    /** Span ID for correlation with spans */
+    span_id: z.string().nullable().optional(),
+    /** Function name where log was emitted */
+    "code.function": z.string().nullable().optional(),
+    /** File path where log was emitted */
+    "code.file.path": z.string().nullable().optional(),
+    /** Line number where log was emitted */
+    "code.line.number": z.string().nullable().optional(),
+    /** OpenTelemetry span kind */
+    "sentry.otel.kind": z.string().nullable().optional(),
+    /** OpenTelemetry status code */
+    "sentry.otel.status_code": z.string().nullable().optional(),
+    /** OpenTelemetry instrumentation scope name */
+    "sentry.otel.instrumentation_scope.name": z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type DetailedSentryLog = z.infer<typeof DetailedSentryLogSchema>;
+
+/** Response from the detailed log query endpoint */
+export const DetailedLogsResponseSchema = z.object({
+  data: z.array(DetailedSentryLogSchema),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
