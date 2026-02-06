@@ -402,6 +402,16 @@ Diagnose and repair CLI database issues
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
 
+#### `sentry cli setup`
+
+Configure shell integration
+
+**Flags:**
+- `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
+- `--noModifyPath - Skip PATH modification`
+- `--noCompletions - Skip shell completion installation`
+- `--quiet - Suppress output (for scripted usage)`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version

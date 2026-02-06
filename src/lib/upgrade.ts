@@ -15,7 +15,8 @@ import {
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getUserAgent } from "./constants.js";
+import { CLI_VERSION, getUserAgent } from "./constants.js";
+import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import { UpgradeError } from "./errors.js";
 
 // Types
@@ -76,7 +77,29 @@ export function getBinaryDownloadUrl(version: string): string {
 }
 
 /**
+ * Build paths object from an install path.
+ */
+function buildPaths(installPath: string): {
+  installPath: string;
+  tempPath: string;
+  oldPath: string;
+  lockPath: string;
+} {
+  return {
+    installPath,
+    tempPath: `${installPath}.download`,
+    oldPath: `${installPath}.old`,
+    lockPath: `${installPath}.lock`,
+  };
+}
+
+/**
  * Get file paths for curl-installed binary.
+ *
+ * Priority for determining install path:
+ * 1. Stored install path from DB (if method is curl)
+ * 2. process.execPath if it's in a known curl install location
+ * 3. Default to ~/.sentry/bin/sentry (fallback for fresh installs)
  *
  * @returns Object with install, temp, old, and lock file paths
  */
@@ -86,14 +109,23 @@ export function getCurlInstallPaths(): {
   oldPath: string;
   lockPath: string;
 } {
+  // Check stored install path
+  const stored = getInstallInfo();
+  if (stored?.path && stored.method === "curl") {
+    return buildPaths(stored.path);
+  }
+
+  // Check if we're running from a known curl install location
+  for (const dir of KNOWN_CURL_PATHS) {
+    if (process.execPath.startsWith(dir)) {
+      return buildPaths(process.execPath);
+    }
+  }
+
+  // Fallback to default path (for fresh installs or non-curl runs like tests)
   const suffix = process.platform === "win32" ? ".exe" : "";
-  const installPath = join(homedir(), ".sentry", "bin", `sentry${suffix}`);
-  return {
-    installPath,
-    tempPath: `${installPath}.download`,
-    oldPath: `${installPath}.old`,
-    lockPath: `${installPath}.lock`,
-  };
+  const defaultPath = join(homedir(), ".sentry", "bin", `sentry${suffix}`);
+  return buildPaths(defaultPath);
 }
 
 /**
@@ -273,16 +305,27 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
 }
 
 /**
- * Detect how the CLI was installed by checking executable path and package managers.
+ * Known directories where the curl installer may place the binary.
+ * Used for legacy detection (when no install info is stored).
+ */
+const KNOWN_CURL_PATHS = [
+  join(homedir(), ".local", "bin"),
+  join(homedir(), "bin"),
+  join(homedir(), ".sentry", "bin"),
+];
+
+/**
+ * Legacy detection for existing installs that don't have stored install info.
+ * Checks known curl install paths and package managers.
  *
  * @returns Detected installation method, or "unknown" if unable to determine
  */
-export async function detectInstallationMethod(): Promise<InstallationMethod> {
-  const sentryBinPath = join(homedir(), ".sentry", "bin");
-
-  // curl installer places binary in ~/.sentry/bin
-  if (process.execPath.startsWith(sentryBinPath)) {
-    return "curl";
+async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
+  // Check known curl install paths
+  for (const dir of KNOWN_CURL_PATHS) {
+    if (process.execPath.startsWith(dir)) {
+      return "curl";
+    }
   }
 
   // Check package managers in order of popularity
@@ -295,6 +338,38 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
   }
 
   return "unknown";
+}
+
+/**
+ * Detect how the CLI was installed.
+ *
+ * Priority:
+ * 1. Check stored install info in DB (fast path)
+ * 2. Fall back to legacy detection for existing installs
+ * 3. Auto-save detected method for future runs
+ *
+ * @returns Detected installation method, or "unknown" if unable to determine
+ */
+export async function detectInstallationMethod(): Promise<InstallationMethod> {
+  // 1. Check stored info (fast path)
+  const stored = getInstallInfo();
+  if (stored?.method) {
+    return stored.method;
+  }
+
+  // 2. Legacy detection for existing installs (pre-setup command)
+  const legacyMethod = await detectLegacyInstallationMethod();
+
+  // 3. Auto-save detected method for future runs
+  if (legacyMethod !== "unknown") {
+    setInstallInfo({
+      method: legacyMethod,
+      path: process.execPath,
+      version: CLI_VERSION,
+    });
+  }
+
+  return legacyMethod;
 }
 
 // Version Fetching
@@ -518,6 +593,13 @@ async function executeUpgradeCurl(version: string): Promise<void> {
       // Unix: Atomic rename overwrites target
       renameSync(tempPath, installPath);
     }
+
+    // Update stored install info with new version
+    setInstallInfo({
+      method: "curl",
+      path: installPath,
+      version,
+    });
   } finally {
     releaseUpgradeLock(lockPath);
   }
@@ -544,6 +626,12 @@ function executeUpgradePackageManager(
 
     proc.on("close", (code) => {
       if (code === 0) {
+        // Update stored install info with new version
+        setInstallInfo({
+          method: pm,
+          path: process.execPath,
+          version,
+        });
         resolve();
       } else {
         reject(
