@@ -419,6 +419,158 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
 
+### Releases
+
+Manage releases on Sentry
+
+#### `sentry releases new <args...>`
+
+Create a new release
+
+#### `sentry releases finalize <args...>`
+
+Finalize a release
+
+#### `sentry releases list <args...>`
+
+List releases
+
+#### `sentry releases info <args...>`
+
+Show release info
+
+#### `sentry releases delete <args...>`
+
+Delete a release
+
+#### `sentry releases archive <args...>`
+
+Archive a release
+
+#### `sentry releases restore <args...>`
+
+Restore an archived release
+
+#### `sentry releases set-commits <args...>`
+
+Associate commits with a release
+
+#### `sentry releases propose-version <args...>`
+
+Propose a version string
+
+### Sourcemaps
+
+Manage sourcemaps for Sentry releases
+
+#### `sentry sourcemaps upload <args...>`
+
+Upload sourcemaps
+
+#### `sentry sourcemaps inject <args...>`
+
+Inject debug IDs into source files
+
+#### `sentry sourcemaps resolve <args...>`
+
+Resolve minified source locations
+
+### Debug-files
+
+Locate, analyze or upload debug information files
+
+#### `sentry debug-files upload <args...>`
+
+Upload debug information files
+
+#### `sentry debug-files check <args...>`
+
+Check debug files for issues
+
+#### `sentry debug-files find <args...>`
+
+Find debug information files
+
+#### `sentry debug-files bundle-sources <args...>`
+
+Bundle source files
+
+#### `sentry debug-files bundle-jvm <args...>`
+
+Bundle JVM debug files
+
+#### `sentry debug-files print-sources <args...>`
+
+Print embedded source files
+
+### Deploys
+
+Manage deployments for Sentry releases
+
+#### `sentry deploys list <args...>`
+
+List deployments
+
+#### `sentry deploys new <args...>`
+
+Create a new deployment
+
+### Monitors
+
+Manage cron monitors on Sentry
+
+#### `sentry monitors list <args...>`
+
+List cron monitors
+
+#### `sentry monitors run <args...>`
+
+Run a command and report to a cron monitor
+
+### Repos
+
+Manage repositories on Sentry
+
+#### `sentry repos list <args...>`
+
+List repositories
+
+### Build
+
+Manage builds
+
+#### `sentry build upload <args...>`
+
+Upload build artifacts
+
+### React-native
+
+Upload build artifacts for React Native projects
+
+#### `sentry react-native gradle <args...>`
+
+Upload React Native Android build artifacts
+
+#### `sentry react-native xcode <args...>`
+
+Upload React Native iOS build artifacts
+
+### Send-event
+
+Send an event to Sentry
+
+#### `sentry send-event <args...>`
+
+Send an event to Sentry
+
+### Send-envelope
+
+Send an envelope to Sentry
+
+#### `sentry send-envelope <args...>`
+
+Send an envelope to Sentry
+
 ## Output Formats
 
 ### JSON Output
