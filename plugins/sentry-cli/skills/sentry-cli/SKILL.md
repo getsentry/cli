@@ -90,6 +90,10 @@ View authentication status
 sentry auth status
 ```
 
+#### `sentry auth token`
+
+Print the stored authentication token
+
 ### Org
 
 Work with Sentry organizations
