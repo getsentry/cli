@@ -60,8 +60,11 @@ export function extractTransactionSegment(transaction: string): string {
     return segment.replace(/[-_]/g, "").toLowerCase();
   }
 
-  // Fallback: use first non-empty segment if no meaningful one found
-  const firstSegment = segments.find((s) => s.length > 0);
+  // Fallback: use first non-empty, non-numeric segment if no meaningful one found
+  const firstSegment = segments.find(
+    (s) =>
+      s.length > 0 && !NUMERIC_PATTERN.test(s) && !PLACEHOLDER_PATTERN.test(s)
+  );
   return firstSegment?.replace(/[-_]/g, "").toLowerCase() ?? "txn";
 }
 
