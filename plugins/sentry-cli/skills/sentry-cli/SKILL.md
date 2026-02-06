@@ -424,6 +424,59 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--json - Output as JSON`
 
+### Issues
+
+List issues in a project
+
+#### `sentry issues <target>`
+
+List issues in a project
+
+**Flags:**
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `--json - Output as JSON`
+
+### Orgs
+
+List organizations
+
+#### `sentry orgs`
+
+List organizations
+
+**Flags:**
+- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `--json - Output JSON`
+
+### Projects
+
+List projects
+
+#### `sentry projects <org>`
+
+List projects
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
+- `--json - Output JSON`
+- `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+
+### Logs
+
+List logs from a project
+
+#### `sentry logs <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
 ## Output Formats
 
 ### JSON Output
