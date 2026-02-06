@@ -198,8 +198,10 @@ export const apiRoutes: MockRoute[] = [
         const url = new URL(req.url);
         const query = url.searchParams.get("query");
         // If query contains sentry.item_id filter, return detailed log
+        // Query format: "project:${projectSlug} sentry.item_id:${logId}"
         if (query?.includes("sentry.item_id:")) {
-          const logId = query.replace("sentry.item_id:", "").trim();
+          const logIdMatch = query.match(/sentry\.item_id:(\S+)/);
+          const logId = logIdMatch?.[1];
           if (logId === TEST_LOG_ID) {
             return { body: logDetailFixture };
           }

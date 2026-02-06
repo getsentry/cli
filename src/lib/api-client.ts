@@ -1102,20 +1102,24 @@ const DETAILED_LOG_FIELDS = [
  * Uses the Explore/Events API with dataset=logs and a filter query.
  *
  * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug for filtering
  * @param logId - The sentry.item_id of the log entry
  * @returns The detailed log entry, or null if not found
  */
 export async function getLog(
   orgSlug: string,
+  projectSlug: string,
   logId: string
 ): Promise<DetailedSentryLog | null> {
+  const query = `project:${projectSlug} sentry.item_id:${logId}`;
+
   const response = await orgScopedRequest<DetailedLogsResponse>(
     `/organizations/${orgSlug}/events/`,
     {
       params: {
         dataset: "logs",
         field: DETAILED_LOG_FIELDS,
-        query: `sentry.item_id:${logId}`,
+        query,
         per_page: 1,
         statsPeriod: "90d",
       },

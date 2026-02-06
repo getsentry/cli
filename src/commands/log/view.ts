@@ -219,11 +219,10 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch the log entry
-    const log = await getLog(target.org, logId);
+    const log = await getLog(target.org, target.project, logId);
 
     if (!log) {
-      throw new ContextError(
-        `Log "${logId}"`,
+      throw new ValidationError(
         `No log found with ID "${logId}" in ${target.org}/${target.project}.\n\n` +
           "Make sure the log ID is correct and the log was sent within the last 90 days."
       );
