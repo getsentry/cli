@@ -12,6 +12,8 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+import { tryRepairAndRetry } from "./db/schema.js";
+import { AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
@@ -84,10 +86,16 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    Sentry.captureException(e);
-    const session = Sentry.getCurrentScope().getSession();
-    if (session) {
-      session.status = "crashed";
+    // Don't capture or mark as crashed for expected auth state
+    // AuthError("not_authenticated") is re-thrown from app.ts for auto-login flow
+    const isExpectedAuthState =
+      e instanceof AuthError && e.reason === "not_authenticated";
+    if (!isExpectedAuthState) {
+      Sentry.captureException(e);
+      const session = Sentry.getCurrentScope().getSession();
+      if (session) {
+        session.status = "crashed";
+      }
     }
     throw e;
   } finally {
@@ -388,7 +396,7 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
         return value.bind(target);
       }
 
-      // Traced methods get wrapped with Sentry span
+      // Traced methods get wrapped with Sentry span and auto-repair
       return (...args: unknown[]) =>
         Sentry.startSpan(
           {
@@ -400,7 +408,22 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
             },
             onlyIfParent: true,
           },
-          () => (value as (...a: unknown[]) => unknown).apply(target, args)
+          () => {
+            const execute = () =>
+              (value as (...a: unknown[]) => unknown).apply(target, args);
+
+            try {
+              return execute();
+            } catch (error) {
+              // Attempt auto-repair for schema errors
+              const repairResult = tryRepairAndRetry(execute, error);
+              if (repairResult.attempted) {
+                return repairResult.result;
+              }
+              // Re-throw if repair didn't help or wasn't applicable
+              throw error;
+            }
+          }
         );
     },
   }) as T;
@@ -434,7 +457,22 @@ export function createTracedDatabase<T extends QueryableDatabase>(db: T): T {
     get(target, prop) {
       if (prop === "query") {
         return (sql: string) => {
-          const stmt = originalQuery(sql);
+          // Try to prepare the statement, with auto-repair on schema errors
+          const prepareStatement = () => originalQuery(sql);
+
+          let stmt: unknown;
+          try {
+            stmt = prepareStatement();
+          } catch (error) {
+            // Attempt auto-repair for schema errors during statement preparation
+            const repairResult = tryRepairAndRetry(prepareStatement, error);
+            if (repairResult.attempted) {
+              stmt = repairResult.result;
+            } else {
+              throw error;
+            }
+          }
+
           return createTracedStatement(stmt, sql);
         };
       }

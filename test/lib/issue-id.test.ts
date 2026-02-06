@@ -1,7 +1,7 @@
 /**
  * Tests for issue ID parsing utilities
  *
- * Note: Core invariants (isNumericId, isShortSuffix, isShortId, expandToFullShortId)
+ * Note: Core invariants (isAllDigits, isShortSuffix, isShortId, expandToFullShortId)
  * are tested via property-based tests in issue-id.property.test.ts. These tests
  * focus on parseAliasSuffix edge cases and integration flow documentation.
  */

@@ -17,11 +17,11 @@ import {
 } from "fast-check";
 import {
   expandToFullShortId,
-  isNumericId,
   isShortId,
   isShortSuffix,
   parseAliasSuffix,
 } from "../../src/lib/issue-id.js";
+import { isAllDigits } from "../../src/lib/utils.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 // Arbitraries
@@ -76,13 +76,13 @@ const aliasSuffixFormatArb = tuple(
   shortSuffixArb
 ).map(([aliasChars, suffix]) => `${aliasChars.join("")}-${suffix}`);
 
-// Properties for isNumericId
+// Properties for isAllDigits
 
-describe("property: isNumericId", () => {
+describe("property: isAllDigits", () => {
   test("returns true for all pure digit strings", () => {
     fcAssert(
       property(numericArb, (digits) => {
-        expect(isNumericId(digits)).toBe(true);
+        expect(isAllDigits(digits)).toBe(true);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -91,7 +91,7 @@ describe("property: isNumericId", () => {
   test("returns false for strings containing letters", () => {
     fcAssert(
       property(alphanumericWithLetterArb, (str) => {
-        expect(isNumericId(str)).toBe(false);
+        expect(isAllDigits(str)).toBe(false);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -101,20 +101,20 @@ describe("property: isNumericId", () => {
     fcAssert(
       property(tuple(numericArb, numericArb), ([a, b]) => {
         const withHyphen = `${a}-${b}`;
-        expect(isNumericId(withHyphen)).toBe(false);
+        expect(isAllDigits(withHyphen)).toBe(false);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
   test("empty string returns false", () => {
-    expect(isNumericId("")).toBe(false);
+    expect(isAllDigits("")).toBe(false);
   });
 
   test("nat() values converted to string are always numeric", () => {
     fcAssert(
       property(nat(999_999_999), (n) => {
-        expect(isNumericId(String(n))).toBe(true);
+        expect(isAllDigits(String(n))).toBe(true);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -187,7 +187,7 @@ describe("property: isShortId", () => {
     );
   });
 
-  test("isShortId and isNumericId are mutually exclusive for non-empty alphanumeric strings", () => {
+  test("isShortId and isAllDigits are mutually exclusive for non-empty alphanumeric strings", () => {
     fcAssert(
       property(
         tuple(shortSuffixArb, constantFrom(true, false)),
@@ -198,7 +198,7 @@ describe("property: isShortId", () => {
 
           // At most one can be true
           const isShort = isShortId(str);
-          const isNumeric = isNumericId(str);
+          const isNumeric = isAllDigits(str);
           expect(isShort && isNumeric).toBe(false);
         }
       ),
@@ -368,7 +368,7 @@ describe("property: cross-function invariants", () => {
         tuple(shortSuffixArb, projectSlugArb),
         ([suffix, projectSlug]) => {
           // Skip if suffix is pure numeric (would make the whole thing numeric)
-          if (isNumericId(suffix)) return;
+          if (isAllDigits(suffix)) return;
 
           const expanded = expandToFullShortId(suffix, projectSlug);
           expect(isShortId(expanded)).toBe(true);
@@ -398,11 +398,11 @@ describe("property: cross-function invariants", () => {
     fcAssert(
       property(string({ minLength: 1, maxLength: 50 }), (input) => {
         // Every non-empty string should be categorized into at most one type:
-        // - isNumericId (pure digits)
+        // - isAllDigits (pure digits)
         // - isShortId (contains letters)
         // - neither (empty, which we filter out)
 
-        const numeric = isNumericId(input);
+        const numeric = isAllDigits(input);
         const short = isShortId(input);
 
         // Can't be both

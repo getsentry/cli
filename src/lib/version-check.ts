@@ -22,7 +22,13 @@ const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const JITTER_FACTOR = 0.2;
 
 /** Commands/flags that should not show update notifications */
-const SUPPRESSED_ARGS = new Set(["upgrade", "--version", "-V", "--json"]);
+const SUPPRESSED_ARGS = new Set([
+  "upgrade",
+  "--version",
+  "-V",
+  "--json",
+  "token",
+]);
 
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;
@@ -133,7 +139,7 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} → ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);

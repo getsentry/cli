@@ -466,14 +466,14 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
  * and returns a footer message for display.
  *
  * Resolution priority:
- * 1. CLI flags (--org and --project) - returns single target
+ * 1. Explicit org and project - returns single target
  * 2. Config defaults - returns single target
  * 3. DSN auto-detection - may return multiple targets
  * 4. Directory name inference - matches project slugs with word boundaries
  *
- * @param options - Resolution options with flags and cwd
+ * @param options - Resolution options with org, project, and cwd
  * @returns All resolved targets and optional footer message
- * @throws Error if only one of org/project flags is provided
+ * @throws Error if only one of org/project is provided
  */
 export async function resolveAllTargets(
   options: ResolveOptions
@@ -498,7 +498,7 @@ export async function resolveAllTargets(
   if (org || project) {
     throw new ContextError(
       "Organization and project",
-      options.usageHint ?? "sentry <command> --org <org> --project <project>"
+      options.usageHint ?? "sentry <command> <org>/<project>"
     );
   }
 
@@ -573,14 +573,14 @@ export async function resolveAllTargets(
  * Resolve organization and project from multiple sources.
  *
  * Resolution priority:
- * 1. CLI flags (--org and --project) - both must be provided together
+ * 1. Explicit org and project - both must be provided together
  * 2. Config defaults
  * 3. DSN auto-detection
  * 4. Directory name inference - matches project slugs with word boundaries
  *
- * @param options - Resolution options with flags and cwd
+ * @param options - Resolution options with org, project, and cwd
  * @returns Resolved target, or null if resolution failed
- * @throws Error if only one of org/project flags is provided
+ * @throws Error if only one of org/project is provided
  */
 export async function resolveOrgAndProject(
   options: ResolveOptions
@@ -601,7 +601,7 @@ export async function resolveOrgAndProject(
   if (org || project) {
     throw new ContextError(
       "Organization and project",
-      options.usageHint ?? "sentry <command> --org <org> --project <project>"
+      options.usageHint ?? "sentry <command> <org>/<project>"
     );
   }
 

@@ -40,7 +40,7 @@ function buildContextError(skippedSelfHosted?: number): ContextError {
       "Organization and project",
       `${usageHint}\n\n` +
         `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
-        "You may not have access to these projects, or you can specify --org and --project explicitly."
+        "You may not have access to these projects, or specify the target explicitly."
     );
   }
 

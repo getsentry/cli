@@ -103,8 +103,20 @@ const BunPolyfill = {
     };
   },
 
-  async write(path: string, content: string): Promise<void> {
-    await writeFile(path, content, "utf-8");
+  async write(
+    path: string,
+    content: string | Response | ArrayBuffer | Uint8Array
+  ): Promise<void> {
+    if (content instanceof Response) {
+      const buffer = await content.arrayBuffer();
+      await writeFile(path, Buffer.from(buffer));
+    } else if (content instanceof ArrayBuffer) {
+      await writeFile(path, Buffer.from(content));
+    } else if (content instanceof Uint8Array) {
+      await writeFile(path, content);
+    } else {
+      await writeFile(path, content, "utf-8");
+    }
   },
 
   which(command: string): string | null {

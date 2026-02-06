@@ -10,6 +10,8 @@ import { z } from "zod";
 import {
   type Flamegraph,
   FlamegraphSchema,
+  type LogsResponse,
+  LogsResponseSchema,
   type ProfileFunctionsResponse,
   ProfileFunctionsResponseSchema,
   type ProjectKey,
@@ -19,13 +21,13 @@ import {
   SentryEventSchema,
   type SentryIssue,
   SentryIssueSchema,
+  type SentryLog,
   type SentryOrganization,
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
   type SentryUser,
   SentryUserSchema,
-  type TraceResponse,
   type TraceSpan,
   type UserRegionsResponse,
   UserRegionsResponseSchema,
@@ -35,6 +37,7 @@ import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { ApiError, AuthError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
+import { isAllDigits } from "./utils.js";
 
 /**
  * Control silo URL - handles OAuth, user accounts, and region routing.
@@ -878,24 +881,6 @@ export function getEvent(
 }
 
 /**
- * Get trace data including all transactions and spans.
- * Returns the full trace tree for visualization.
- * Uses region-aware routing for multi-region support.
- *
- * @param orgSlug - Organization slug
- * @param traceId - The trace ID (from event.contexts.trace.trace_id)
- * @returns Trace response with transactions array and orphan_errors
- */
-export function getTrace(
-  orgSlug: string,
-  traceId: string
-): Promise<TraceResponse> {
-  return orgScopedRequest<TraceResponse>(
-    `/organizations/${orgSlug}/events-trace/${traceId}/`
-  );
-}
-
-/**
  * Get detailed trace with nested children structure.
  * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
  * Uses region-aware routing for multi-region support.
@@ -1010,6 +995,9 @@ export function triggerSolutionPlanning(
 /**
  * Get the currently authenticated user's information.
  * Used for setting user context in telemetry.
+ *
+ * Note: This endpoint may not work with OAuth App tokens, but works with
+ * manually created API tokens. Callers should handle failures gracefully.
  */
 export function getCurrentUser(): Promise<SentryUser> {
   return apiRequest<SentryUser>("/users/me/", {
@@ -1089,4 +1077,77 @@ export function listProfiledTransactions(
       schema: ProfileFunctionsResponseSchema,
     }
   );
+}
+
+// Logs API
+
+/** Fields to request from the logs API */
+const LOG_FIELDS = [
+  "sentry.item_id",
+  "trace",
+  "severity",
+  "timestamp",
+  "timestamp_precise",
+  "message",
+];
+
+type ListLogsOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of log entries to return */
+  limit?: number;
+  /** Time period for logs (e.g., "90d", "10m") */
+  statsPeriod?: string;
+  /** Only return logs after this timestamp_precise value (for streaming) */
+  afterTimestamp?: number;
+};
+
+/**
+ * List logs for an organization/project.
+ * Uses the Explore/Events API with dataset=logs.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, statsPeriod)
+ * @returns Array of log entries
+ */
+export async function listLogs(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListLogsOptions = {}
+): Promise<SentryLog[]> {
+  // API only accepts numeric project IDs as param, slugs go in query
+  const isNumericProject = isAllDigits(projectSlug);
+
+  // Build query parts
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const timestampFilter = options.afterTimestamp
+    ? `timestamp_precise:>${options.afterTimestamp}`
+    : "";
+
+  const fullQuery = [projectFilter, options.query, timestampFilter]
+    .filter(Boolean)
+    .join(" ");
+
+  const response = await orgScopedRequest<LogsResponse>(
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "logs",
+        field: LOG_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit || 100,
+        statsPeriod: options.statsPeriod ?? "7d",
+        sort: "-timestamp",
+      },
+      schema: LogsResponseSchema,
+    }
+  );
+
+  return response.data;
 }

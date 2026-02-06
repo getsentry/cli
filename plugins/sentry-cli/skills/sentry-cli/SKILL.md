@@ -90,6 +90,10 @@ View authentication status
 sentry auth status
 ```
 
+#### `sentry auth token`
+
+Print the stored authentication token
+
 ### Org
 
 Work with Sentry organizations
@@ -239,11 +243,11 @@ sentry issue explain <issue-id>
 # By numeric issue ID
 sentry issue explain 123456789
 
-# By short ID
-sentry issue explain MYPROJECT-ABC --org my-org
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
 
-# By short suffix (requires project context)
-sentry issue explain G --org my-org --project my-project
+# By project-suffix format
+sentry issue explain myproject-G
 
 # Force a fresh analysis
 sentry issue explain 123456789 --force
@@ -256,6 +260,7 @@ Generate a solution plan using Seer AI
 **Flags:**
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+- `--force - Force new plan even if one exists`
 
 **Examples:**
 
@@ -268,8 +273,11 @@ sentry issue plan 123456789
 # Specify which root cause to plan for (if multiple were found)
 sentry issue plan 123456789 --cause 0
 
-# By short ID
-sentry issue plan MYPROJECT-ABC --org my-org --cause 1
+# By short ID with org prefix
+sentry issue plan my-org/MYPROJECT-ABC --cause 1
+
+# By project-suffix format
+sentry issue plan myproject-G --cause 0
 ```
 
 #### `sentry issue view <issue>`
@@ -279,7 +287,7 @@ View details of a specific issue
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree with N levels of nesting depth`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -299,16 +307,14 @@ sentry issue view FRONT-ABC -w
 
 View Sentry events
 
-#### `sentry event view <event-id>`
+#### `sentry event view <args...>`
 
 View details of a specific event
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--spans <value> - Show span tree from the event's trace`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
 **Examples:**
 
@@ -389,6 +395,13 @@ CLI-related commands
 
 Send feedback about the CLI
 
+#### `sentry cli fix`
+
+Diagnose and repair CLI database issues
+
+**Flags:**
+- `--dry-run - Show what would be fixed without making changes`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
@@ -422,6 +435,112 @@ View CPU profiling analysis for a transaction
 - `--allFrames - Include library/system frames (default: user code only)`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log list
+
+# Explicit org and project
+sentry log list <org>/<project>
+
+# Search for project across all accessible orgs
+sentry log list <project>
+
+# List last 100 logs (default)
+sentry log list
+
+# Stream with default 2-second poll interval
+sentry log list -f
+
+# Stream with custom 5-second poll interval
+sentry log list -f 5
+
+# Show only error logs
+sentry log list -q 'level:error'
+
+# Filter by message content
+sentry log list -q 'database'
+
+# Show last 50 logs
+sentry log list --limit 50
+
+# Show last 500 logs
+sentry log list -n 500
+
+# Stream error logs from a specific project
+sentry log list my-org/backend -f -q 'level:error'
+
+sentry log list --json | jq '.[] | select(.level == "error")'
+```
+
+### Issues
+
+List issues in a project
+
+#### `sentry issues <target>`
+
+List issues in a project
+
+**Flags:**
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `--json - Output as JSON`
+
+### Orgs
+
+List organizations
+
+#### `sentry orgs`
+
+List organizations
+
+**Flags:**
+- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `--json - Output JSON`
+
+### Projects
+
+List projects
+
+#### `sentry projects <org>`
+
+List projects
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
+- `--json - Output JSON`
+- `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+
+### Logs
+
+List logs from a project
+
+#### `sentry logs <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
 
 ## Output Formats
 

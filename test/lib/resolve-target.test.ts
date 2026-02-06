@@ -1,15 +1,19 @@
 /**
- * Property-Based Tests for resolve-target utilities
+ * Tests for resolve-target utilities
  *
- * Tests the directory name validation logic used for project inference.
- * Uses fast-check to verify properties that should always hold true.
+ * Property-based and unit tests for pure functions in the resolve-target module.
+ * Integration tests for async resolution functions are in e2e tests due to
+ * the complexity of mocking module dependencies in Bun's test environment.
  */
 
 import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+
 import { isValidDirNameForInference } from "../../src/lib/resolve-target.js";
 
-// Arbitraries
+// ============================================================================
+// Arbitraries for Property-Based Testing
+// ============================================================================
 
 /** Characters valid in directory names (no leading dot) */
 const dirNameChars = "abcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -23,7 +27,9 @@ const validDirNameArb = array(constantFrom(...dirNameChars.split("")), {
 /** Generate single characters */
 const singleCharArb = constantFrom(...dirNameChars.split(""));
 
-// Property tests
+// ============================================================================
+// Property Tests for isValidDirNameForInference
+// ============================================================================
 
 describe("property: isValidDirNameForInference", () => {
   test("rejects empty string", () => {
@@ -61,7 +67,9 @@ describe("property: isValidDirNameForInference", () => {
   });
 });
 
-// Example-based tests for edge cases and documentation
+// ============================================================================
+// Example-Based Tests for Edge Cases and Documentation
+// ============================================================================
 
 describe("isValidDirNameForInference edge cases", () => {
   test("real-world valid names", () => {

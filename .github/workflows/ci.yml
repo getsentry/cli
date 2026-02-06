@@ -116,6 +116,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -127,7 +128,7 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
       - name: Unit Tests
-        run: bun run test:unit --coverage --coverage-reporter=lcov
+        run: bun run test:unit
       - name: Upload Coverage
         uses: getsentry/codecov-action@main
         with:
@@ -234,7 +235,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ["22", "24"]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -261,7 +262,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: npm-package
-          path: '*.tgz'
+          path: "*.tgz"
 
   build-docs:
     name: Build Docs

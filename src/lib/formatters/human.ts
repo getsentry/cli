@@ -16,10 +16,7 @@ import type {
   SentryIssue,
   SentryOrganization,
   SentryProject,
-  Span,
   StackFrame,
-  TraceEvent,
-  TraceResponse,
   TraceSpan,
 } from "../../types/index.js";
 import { withSerializeSpan } from "../telemetry.js";
@@ -50,16 +47,12 @@ const STATUS_LABELS: Record<IssueStatus, string> = {
 /** Maximum features to display before truncating with "... and N more" */
 const MAX_DISPLAY_FEATURES = 10;
 
-// String Utilities
-
 /**
  * Capitalize the first letter of a string
  */
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
-
-// Event Entry Extraction
 
 /** Map of entry type strings to their TypeScript types */
 type EntryTypeMap = {
@@ -367,15 +360,78 @@ export type FormatShortIdOptions = {
 };
 
 /**
- * Format a short ID with the unique suffix highlighted with underline.
+ * Format short ID for multi-project mode by highlighting the alias characters.
+ * Only highlights the specific characters that form the alias:
+ * - CLI-25 with alias "c" → **C**LI-**25**
+ * - CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4**
+ * - API-APP-5 with alias "ap" → API-**AP**P-**5** (searches backwards to find correct part)
+ * - X-AB-5 with alias "x-a" → **X-A**B-**5** (handles aliases with embedded dashes)
  *
- * Single project mode: "CRAFT-G" → "CRAFT-_G_" (suffix underlined)
- * Multi-project mode: "DASHBOARD-A3" → "DASHBOARD-_A3_" (just suffix underlined,
- *   alias is shown in separate ALIAS column)
+ * @returns Formatted string if alias matches, null otherwise (to fall back to default)
+ */
+function formatShortIdWithAlias(
+  upperShortId: string,
+  projectAlias: string
+): string | null {
+  // Extract project part of alias (handle "o1/d" format for collision cases)
+  const aliasProjectPart = projectAlias.includes("/")
+    ? projectAlias.split("/").pop()
+    : projectAlias;
+
+  if (!aliasProjectPart) {
+    return null;
+  }
+
+  const parts = upperShortId.split("-");
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const aliasUpper = aliasProjectPart.toUpperCase();
+  const aliasLen = aliasUpper.length;
+  const projectParts = parts.slice(0, -1);
+  const issueSuffix = parts.at(-1) ?? "";
+
+  // Method 1: For aliases without dashes, search backwards through project parts
+  // This handles cases like "api-app" where alias "ap" should match "APP" not "API"
+  if (!aliasUpper.includes("-")) {
+    for (let i = projectParts.length - 1; i >= 0; i--) {
+      const part = projectParts[i];
+      if (part?.startsWith(aliasUpper)) {
+        // Found match - highlight alias prefix in this part and the issue suffix
+        const result = projectParts.map((p, idx) => {
+          if (idx === i) {
+            return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
+          }
+          return p;
+        });
+        return `${result.join("-")}-${boldUnderline(issueSuffix)}`;
+      }
+    }
+  }
+
+  // Method 2: For aliases with dashes (or if Method 1 found no match),
+  // match against the joined project portion
+  const projectPortion = projectParts.join("-");
+  if (projectPortion.startsWith(aliasUpper)) {
+    // Highlight first aliasLen chars of project portion, plus issue suffix
+    const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
+    const rest = projectPortion.slice(aliasLen);
+    return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
+  }
+
+  return null;
+}
+
+/**
+ * Format a short ID with highlighting to show what the user can type as shorthand.
  *
- * @param shortId - Full short ID (e.g., "CRAFT-G", "SPOTLIGHT-WEBSITE-A3")
+ * - Single project: CLI-25 → CLI-**25** (suffix highlighted)
+ * - Multi-project: CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4** (alias chars highlighted)
+ *
+ * @param shortId - Full short ID (e.g., "CLI-25", "CLI-WEBSITE-4")
  * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
- * @returns Formatted short ID with underline highlights
+ * @returns Formatted short ID with highlights
  */
 export function formatShortId(
   shortId: string,
@@ -385,27 +441,27 @@ export function formatShortId(
   const opts: FormatShortIdOptions =
     typeof options === "string" ? { projectSlug: options } : (options ?? {});
 
-  const { projectSlug } = opts;
-
-  // Extract suffix from shortId (the part after PROJECT-)
+  const { projectSlug, projectAlias, isMultiProject } = opts;
   const upperShortId = shortId.toUpperCase();
-  let suffix = shortId;
-  if (projectSlug) {
-    const prefix = `${projectSlug.toUpperCase()}-`;
-    if (upperShortId.startsWith(prefix)) {
-      suffix = shortId.slice(prefix.length);
+
+  // In multi-project mode with an alias, highlight the part that the alias represents
+  if (isMultiProject && projectAlias) {
+    const formatted = formatShortIdWithAlias(upperShortId, projectAlias);
+    if (formatted) {
+      return formatted;
     }
   }
 
-  // Show full shortId with suffix highlighted
+  // Single-project mode or fallback: highlight just the issue suffix
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
+      const suffix = shortId.slice(prefix.length);
       return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
     }
   }
 
-  return shortId.toUpperCase();
+  return upperShortId;
 }
 
 /**
@@ -536,7 +592,7 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
         lines.push(`Release:    ${firstReleaseVersion}`);
       } else {
         lines.push(
-          `Releases:   ${firstReleaseVersion} → ${lastReleaseVersion}`
+          `Releases:   ${firstReleaseVersion} -> ${lastReleaseVersion}`
         );
       }
     } else if (lastReleaseVersion) {
@@ -710,11 +766,11 @@ function formatBreadcrumb(breadcrumb: Breadcrumb): string {
     const data = breadcrumb.data as Record<string, unknown>;
     if (data.url && data.method) {
       // HTTP request breadcrumb
-      const status = data.status_code ? ` → ${data.status_code}` : "";
+      const status = data.status_code ? ` -> ${data.status_code}` : "";
       message = `${data.method} ${data.url}${status}`;
     } else if (data.from && data.to) {
       // Navigation breadcrumb
-      message = `${data.from} → ${data.to}`;
+      message = `${data.from} -> ${data.to}`;
     } else if (data.arguments && Array.isArray(data.arguments)) {
       // Console breadcrumb
       message = String(data.arguments[0] || "").slice(0, 60);
@@ -787,198 +843,6 @@ function formatRequest(requestEntry: RequestEntry): string[] {
 
 // Span Tree Formatting
 
-/** Maximum length for span descriptions before truncation */
-const SPAN_DESCRIPTION_MAX_LENGTH = 50;
-
-/** Node in the span tree structure */
-type SpanNode = {
-  /** The span data */
-  span: Span;
-  /** Child spans */
-  children: SpanNode[];
-};
-
-/**
- * Format duration in milliseconds to human-readable format.
- *
- * @param startTs - Start timestamp (seconds with fractional ms)
- * @param endTs - End timestamp (seconds with fractional ms)
- * @returns Formatted duration (e.g., "120ms", "1.50s"), or "?" if timestamps are invalid
- */
-function formatSpanDuration(startTs: number, endTs: number): string {
-  if (!(Number.isFinite(startTs) && Number.isFinite(endTs))) {
-    return "?";
-  }
-  const durationMs = Math.max(0, Math.round((endTs - startTs) * 1000));
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  }
-  return `${(durationMs / 1000).toFixed(2)}s`;
-}
-
-/**
- * Build a tree structure from flat spans using parent_span_id.
- * Sorts children by start_timestamp for chronological display.
- * Spans without a found parent are treated as roots (handles orphans gracefully).
- *
- * @param spans - Flat array of spans
- * @returns Array of root-level span nodes with nested children
- */
-function buildSpanTree(spans: Span[]): SpanNode[] {
-  const spanMap = new Map<string, SpanNode>();
-  const roots: SpanNode[] = [];
-
-  for (const span of spans) {
-    spanMap.set(span.span_id, { span, children: [] });
-  }
-
-  for (const span of spans) {
-    const node = spanMap.get(span.span_id);
-    if (!node) {
-      continue;
-    }
-
-    const parentId = span.parent_span_id;
-    const parentNode = parentId ? spanMap.get(parentId) : undefined;
-    if (parentNode) {
-      parentNode.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-
-  const sortChildren = (node: SpanNode): void => {
-    node.children.sort(
-      (a, b) => a.span.start_timestamp - b.span.start_timestamp
-    );
-    for (const child of node.children) {
-      sortChildren(child);
-    }
-  };
-  for (const root of roots) {
-    sortChildren(root);
-  }
-
-  roots.sort((a, b) => a.span.start_timestamp - b.span.start_timestamp);
-
-  return roots;
-}
-
-/**
- * Recursively format a span node and its children as tree lines.
- *
- * @param node - The span node to format
- * @param prefix - Current line prefix (for tree structure)
- * @param isLast - Whether this is the last sibling
- * @returns Array of formatted lines
- */
-function formatSpanNode(
-  node: SpanNode,
-  prefix: string,
-  isLast: boolean
-): string[] {
-  const lines: string[] = [];
-  const { span } = node;
-
-  const duration = formatSpanDuration(span.start_timestamp, span.timestamp);
-  const op = span.op || "unknown";
-  const description = span.description || "(no description)";
-
-  const truncatedDesc =
-    description.length > SPAN_DESCRIPTION_MAX_LENGTH
-      ? `${description.slice(0, SPAN_DESCRIPTION_MAX_LENGTH - 3)}...`
-      : description;
-
-  const branch = isLast ? "└─" : "├─";
-  const childPrefix = prefix + (isLast ? "   " : "│  ");
-
-  const durationMs = (span.timestamp - span.start_timestamp) * 1000;
-  let durationText = duration;
-  if (durationMs > 5000) {
-    durationText = red(duration);
-  } else if (durationMs > 1000) {
-    durationText = yellow(duration);
-  }
-
-  lines.push(
-    `${prefix}${branch} [${durationText}] ${truncatedDesc} ${muted(`(${op})`)}`
-  );
-
-  const childCount = node.children.length;
-  node.children.forEach((child, i) => {
-    const childIsLast = i === childCount - 1;
-    lines.push(...formatSpanNode(child, childPrefix, childIsLast));
-  });
-
-  return lines;
-}
-
-/**
- * Format a trace event (transaction) as a span tree root.
- *
- * @param traceEvent - The trace event containing transaction info and spans
- * @returns Array of formatted lines
- */
-function formatTraceEventAsTree(traceEvent: TraceEvent): string[] {
-  const lines: string[] = [];
-
-  const txName = traceEvent.transaction || "(unnamed transaction)";
-  const op = traceEvent["transaction.op"] || "unknown";
-  const durationMs = traceEvent["transaction.duration"];
-  const duration = durationMs !== undefined ? `${durationMs}ms` : "?";
-
-  lines.push(`[${duration}] ${txName} ${muted(`(${op})`)}`);
-
-  const spans = traceEvent.spans ?? [];
-  if (spans.length > 0) {
-    const tree = buildSpanTree(spans);
-    const treeLength = tree.length;
-    tree.forEach((root, i) => {
-      const isLast = i === treeLength - 1;
-      lines.push(...formatSpanNode(root, "  ", isLast));
-    });
-  }
-
-  return lines;
-}
-
-/**
- * Format trace data as a visual span tree structure.
- * Shows the hierarchy of transactions and spans with durations.
- *
- * @param traceResponse - Response from the events-trace API containing transactions
- * @returns Array of formatted lines ready for display
- */
-export function formatSpanTree(traceResponse: TraceResponse): string[] {
-  return withSerializeSpan("formatSpanTree", () => {
-    const traceEvents = traceResponse.transactions;
-
-    if (traceEvents.length === 0) {
-      return [muted("\nNo span data available.")];
-    }
-
-    const lines: string[] = [];
-    lines.push("");
-    lines.push(muted("─── Span Tree ───"));
-    lines.push("");
-
-    const sorted = [...traceEvents].sort((a, b) => {
-      const aStart = a.start_timestamp ?? 0;
-      const bStart = b.start_timestamp ?? 0;
-      return aStart - bStart;
-    });
-
-    for (const traceEvent of sorted) {
-      lines.push(...formatTraceEventAsTree(traceEvent));
-      lines.push("");
-    }
-
-    return lines;
-  });
-}
-
-// Simple Span Tree Formatting (for --spans flag)
-
 type FormatSpanOptions = {
   lines: string[];
   prefix: string;
@@ -1022,7 +886,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
  *
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
- * @param maxDepth - Maximum nesting depth to display (default: unlimited). Values <= 0 show unlimited depth.
+ * @param maxDepth - Maximum nesting depth to display (default: unlimited). 0 = disabled, Infinity = unlimited.
  * @returns Array of formatted lines ready for display
  */
 export function formatSimpleSpanTree(
@@ -1031,13 +895,20 @@ export function formatSimpleSpanTree(
   maxDepth = Number.MAX_SAFE_INTEGER
 ): string[] {
   return withSerializeSpan("formatSimpleSpanTree", () => {
-    if (spans.length === 0) {
-      return [muted("No span data available.")];
+    // maxDepth = 0 means disabled (caller should skip, but handle gracefully)
+    if (maxDepth === 0 || spans.length === 0) {
+      return [];
     }
 
-    const effectiveMaxDepth = maxDepth > 0 ? maxDepth : Number.MAX_SAFE_INTEGER;
+    // Infinity or large numbers = unlimited depth
+    const effectiveMaxDepth = Number.isFinite(maxDepth)
+      ? maxDepth
+      : Number.MAX_SAFE_INTEGER;
 
     const lines: string[] = [];
+    lines.push("");
+    lines.push(muted("─── Span Tree ───"));
+    lines.push("");
     lines.push(`${muted("Trace —")} ${traceId}`);
 
     const spanCount = spans.length;

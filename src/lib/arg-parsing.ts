@@ -6,7 +6,66 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
-import { isNumericId } from "./issue-id.js";
+import { isAllDigits } from "./utils.js";
+
+/** Default span depth when no value is provided */
+const DEFAULT_SPAN_DEPTH = 3;
+
+/**
+ * Parse span depth flag value.
+ *
+ * Supports:
+ * - Numeric values (e.g., "3", "5") - depth limit
+ * - "all" for unlimited depth (returns Infinity)
+ * - "no" or "0" to disable span tree (returns 0)
+ * - Invalid values fall back to default depth (3)
+ *
+ * @param input - Raw input string from CLI flag
+ * @returns Parsed depth as number (0 = disabled, Infinity = unlimited)
+ *
+ * @example
+ * parseSpanDepth("3")    // 3
+ * parseSpanDepth("all")  // Infinity
+ * parseSpanDepth("no")   // 0
+ * parseSpanDepth("0")    // 0
+ * parseSpanDepth("foo")  // 3 (default)
+ */
+export function parseSpanDepth(input: string): number {
+  const lower = input.toLowerCase();
+  if (lower === "all") {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (lower === "no") {
+    return 0;
+  }
+  const n = Number(input);
+  if (Number.isNaN(n)) {
+    return DEFAULT_SPAN_DEPTH;
+  }
+  return n;
+}
+
+/**
+ * Shared --spans flag definition for Stricli commands.
+ * Use this in command parameters to avoid duplication.
+ *
+ * @example
+ * parameters: {
+ *   flags: {
+ *     ...spansFlag,
+ *     // other flags
+ *   }
+ * }
+ */
+export const spansFlag = {
+  spans: {
+    kind: "parsed" as const,
+    parse: parseSpanDepth,
+    brief:
+      'Span tree depth limit (number, "all" for unlimited, "no" to disable)',
+    default: String(DEFAULT_SPAN_DEPTH),
+  },
+};
 
 /**
  * Type constants for project specification patterns.
@@ -146,7 +205,7 @@ function parseAfterSlash(
   org: string,
   rest: string
 ): ParsedIssueArg {
-  if (isNumericId(rest)) {
+  if (isAllDigits(rest)) {
     // "my-org/123456789" → explicit org + numeric ID
     return { type: "explicit-org-numeric", org, numericId: rest };
   }
@@ -229,7 +288,7 @@ function parseWithDash(arg: string): ParsedIssueArg {
 
 export function parseIssueArg(arg: string): ParsedIssueArg {
   // 1. Pure numeric → direct fetch by ID
-  if (isNumericId(arg)) {
+  if (isAllDigits(arg)) {
     return { type: "numeric", id: arg };
   }
 

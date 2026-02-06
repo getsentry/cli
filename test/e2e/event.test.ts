@@ -47,14 +47,12 @@ afterEach(async () => {
 
 describe("sentry event view", () => {
   test("requires authentication", async () => {
+    // Use positional arg format: <org>/<project> <event-id>
     const result = await ctx.run([
       "event",
       "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
       "abc123",
-      "--org",
-      TEST_ORG,
-      "--project",
-      TEST_PROJECT,
     ]);
 
     expect(result.exitCode).toBe(1);
@@ -73,14 +71,12 @@ describe("sentry event view", () => {
   test("handles non-existent event", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
+    // Use positional arg format: <org>/<project> <event-id>
     const result = await ctx.run([
       "event",
       "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
       "nonexistent123",
-      "--org",
-      TEST_ORG,
-      "--project",
-      TEST_PROJECT,
     ]);
 
     expect(result.exitCode).toBe(1);
