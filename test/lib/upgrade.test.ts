@@ -4,7 +4,7 @@
  * Tests for upgrade detection and logic.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
@@ -481,6 +481,36 @@ describe("isProcessRunning", () => {
     // Use a very high PID that's unlikely to exist
     // PID 4194304 is above typical max PID on most systems
     expect(isProcessRunning(4_194_304)).toBe(false);
+  });
+
+  test("returns true on EPERM (process exists but owned by different user)", () => {
+    // Mock process.kill to throw EPERM
+    const epermError = Object.assign(new Error("EPERM"), { code: "EPERM" });
+    const spy = spyOn(process, "kill").mockImplementation(() => {
+      throw epermError;
+    });
+
+    try {
+      // EPERM means the process exists, we just can't signal it
+      expect(isProcessRunning(12_345)).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("returns false on ESRCH (process does not exist)", () => {
+    // Mock process.kill to throw ESRCH
+    const esrchError = Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+    const spy = spyOn(process, "kill").mockImplementation(() => {
+      throw esrchError;
+    });
+
+    try {
+      // ESRCH means the process does not exist
+      expect(isProcessRunning(12_345)).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
