@@ -1,0 +1,30 @@
+Implementation Plan for Preferred Install Locations
+
+## Goals
+1. Prefer user-local bin folders (~/.local/bin, ~/bin) when they exist and are in PATH
+2. Fall back to ~/.sentry/bin only when necessary
+3. Record installation metadata so upgrades work correctly
+
+## Changes Made
+
+### New Files
+- src/lib/db/install-info.ts - DB operations for install metadata
+- src/commands/cli/record-install.ts - CLI command to record install info
+- test/lib/db/install-info.test.ts - Unit tests
+
+### Modified Files
+- src/commands/cli/index.ts - Added record-install route
+- src/commands/cli/upgrade.ts - Added resolveMethod() helper
+- src/lib/upgrade.ts - Updated detection and path resolution
+- docs/public/install & install - Updated install script
+
+## Install Priority Order
+1. $SENTRY_INSTALL_DIR (if set and writable)
+2. ~/.local/bin (if exists AND in $PATH)
+3. ~/bin (if exists AND in $PATH)
+4. ~/.sentry/bin (fallback, modifies PATH)
+
+## Technical Details
+- detectInstallationMethod() checks DB first, then legacy detection
+- getCurlInstallPaths() uses stored path when available
+- Install script calls 'sentry cli record-install --method curl' after download
