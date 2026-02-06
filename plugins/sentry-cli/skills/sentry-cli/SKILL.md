@@ -459,8 +459,6 @@ sentry log list -n 500
 
 # Stream error logs from a specific project
 sentry log list my-org/backend -f -q 'level:error'
-
-sentry log list --json | jq '.[] | select(.level == "error")'
 ```
 
 #### `sentry log view <args...>`
@@ -470,6 +468,27 @@ View details of a specific log entry
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log view <log-id>
+
+# Explicit org and project
+sentry log view <org>/<project> <log-id>
+
+# Search for project across all accessible orgs
+sentry log view <project> <log-id>
+
+sentry log view 968c763c740cfda8b6728f27fb9e9b01
+
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
+
+sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
+
+sentry log list --json | jq '.[] | select(.level == "error")'
+```
 
 ### Issues
 
