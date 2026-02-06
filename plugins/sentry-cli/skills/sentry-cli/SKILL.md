@@ -471,6 +471,31 @@ View details of a specific log entry
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log view <log-id>
+
+# Explicit org and project
+sentry log view <org>/<project> <log-id>
+
+# Search for project across all accessible orgs
+sentry log view <project> <log-id>
+
+# View a specific log entry
+sentry log view 968c763c740cfda8b6728f27fb9e9b01
+
+# With explicit project
+sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
+
+# Open in browser
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
+
+# Output as JSON
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 --json
+```
+
 ### Issues
 
 List issues in a project
