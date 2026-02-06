@@ -372,8 +372,33 @@ export type RepairResult = {
   failed: string[];
 };
 
+/** Tables that require custom DDL (not auto-generated from TABLE_SCHEMAS) */
+const CUSTOM_DDL_TABLES = new Set(["transaction_aliases"]);
+
+function repairTransactionAliasesTable(
+  db: Database,
+  result: RepairResult
+): void {
+  if (tableExists(db, "transaction_aliases")) {
+    return;
+  }
+  try {
+    db.exec(TRANSACTION_ALIASES_DDL);
+    db.exec(TRANSACTION_ALIASES_INDEX);
+    result.fixed.push("Created table transaction_aliases");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    result.failed.push(`Failed to create table transaction_aliases: ${msg}`);
+  }
+}
+
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
+    // Skip tables that need custom DDL
+    if (CUSTOM_DDL_TABLES.has(tableName)) {
+      continue;
+    }
+
     if (tableExists(db, tableName)) {
       continue;
     }
@@ -385,6 +410,9 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
+
+  // Handle tables with custom DDL
+  repairTransactionAliasesTable(db, result);
 }
 
 function repairMissingColumns(db: Database, result: RepairResult): void {

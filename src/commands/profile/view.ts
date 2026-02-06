@@ -92,7 +92,7 @@ export const viewCommand = buildCommand({
         kind: "parsed",
         parse: parsePeriod,
         brief: "Stats period: 1h, 24h, 7d, 14d, 30d",
-        default: "7d",
+        default: "24h",
       },
       limit: {
         kind: "parsed",

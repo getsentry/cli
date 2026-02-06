@@ -9,6 +9,7 @@ import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getProject, listProfiledTransactions } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import { openInBrowser } from "../../lib/browser.js";
 import {
   buildTransactionFingerprint,
   setTransactionAliases,
@@ -23,6 +24,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { buildProfilingSummaryUrl } from "../../lib/sentry-urls.js";
 import { buildTransactionAliases } from "../../lib/transaction-alias.js";
 import type { TransactionAliasEntry, Writer } from "../../types/index.js";
 
@@ -30,6 +32,7 @@ type ListFlags = {
   readonly period: string;
   readonly limit: number;
   readonly json: boolean;
+  readonly web: boolean;
 };
 
 /** Valid period values */
@@ -101,8 +104,13 @@ export const listCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
     },
-    aliases: { n: "limit" },
+    aliases: { n: "limit", w: "web" },
   },
   async func(
     this: SentryContext,
@@ -146,6 +154,16 @@ export const listCommand = buildCommand({
 
     // Set telemetry context
     setContext([resolvedTarget.org], [resolvedTarget.project]);
+
+    // Open in browser if requested
+    if (flags.web) {
+      await openInBrowser(
+        stdout,
+        buildProfilingSummaryUrl(resolvedTarget.org, resolvedTarget.project),
+        "profiling"
+      );
+      return;
+    }
 
     // Get project to retrieve numeric ID (required for profile API)
     const project = await getProject(

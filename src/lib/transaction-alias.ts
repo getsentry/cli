@@ -79,8 +79,35 @@ type TransactionInput = {
 };
 
 /**
+ * Disambiguate duplicate segments by appending numeric suffixes.
+ * e.g., ["issues", "events", "issues"] → ["issues", "events", "issues2"]
+ *
+ * @param segments - Array of extracted segments (may contain duplicates)
+ * @returns Array of unique segments with numeric suffixes for duplicates
+ */
+function disambiguateSegments(segments: string[]): string[] {
+  const seen = new Map<string, number>();
+  const result: string[] = [];
+
+  for (const segment of segments) {
+    const count = seen.get(segment) ?? 0;
+    seen.set(segment, count + 1);
+
+    if (count === 0) {
+      result.push(segment);
+    } else {
+      // Append numeric suffix for duplicates (issues2, issues3, etc.)
+      result.push(`${segment}${count + 1}`);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Build aliases for a list of transactions.
  * Uses shortest unique prefix algorithm on extracted segments.
+ * Handles duplicate segments by appending numeric suffixes.
  *
  * @param transactions - Array of transaction inputs with org/project context
  * @returns Array of TransactionAliasEntry with idx, alias, and transaction
@@ -94,6 +121,17 @@ type TransactionInput = {
  * //   { idx: 1, alias: "i", transaction: "/api/0/organizations/{org}/issues/", ... },
  * //   { idx: 2, alias: "e", transaction: "/api/0/projects/{org}/{proj}/events/", ... },
  * // ]
+ *
+ * @example
+ * // Duplicate segments get numeric suffixes
+ * buildTransactionAliases([
+ *   { transaction: "/api/v1/issues/", ... },
+ *   { transaction: "/api/v2/issues/", ... },
+ * ])
+ * // => [
+ * //   { idx: 1, alias: "i", ... },   // from "issues"
+ * //   { idx: 2, alias: "is", ... },  // from "issues2" (disambiguated)
+ * // ]
  */
 export function buildTransactionAliases(
   transactions: TransactionInput[]
@@ -103,11 +141,14 @@ export function buildTransactionAliases(
   }
 
   // Extract segments from each transaction
-  const segments = transactions.map((t) =>
+  const rawSegments = transactions.map((t) =>
     extractTransactionSegment(t.transaction)
   );
 
-  // Find shortest unique prefixes for the segments
+  // Disambiguate duplicate segments with numeric suffixes
+  const segments = disambiguateSegments(rawSegments);
+
+  // Find shortest unique prefixes for the disambiguated segments
   const prefixMap = findShortestUniquePrefixes(segments);
 
   // Build result with 1-based indices
