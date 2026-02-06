@@ -424,6 +424,45 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--json - Output as JSON`
 
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log list
+
+# Explicit org and project
+sentry log list <org>/<project>
+
+# Search for project across all accessible orgs
+sentry log list <project>
+
+# List last 100 logs (default)
+sentry log list
+
+# Stream with default 2-second poll interval
+sentry log list -f
+
+# Stream with custom 5-second poll interval
+sentry log list -f 5
+
+# Show only error logs
+sentry log list -q 'level:error'
+
+# Filter by message content
+sentry log list -q 'database'
+
+# Show last 50 logs
+sentry log list --limit 50
+
+# Show last 500 logs
+sentry log list -n 500
+
+# Stream error logs from a specific project
+sentry log list my-org/backend -f -q 'level:error'
+
+sentry log list --json | jq '.[] | select(.level == "error")'
+```
+
 ### Issues
 
 List issues in a project
