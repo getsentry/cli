@@ -15,6 +15,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`project`](./project/) | Project operations |
 | [`issue`](./issue/) | Issue tracking |
 | [`event`](./event/) | Event inspection |
+| [`log`](./log/) | Log viewing and streaming |
 | [`api`](./api/) | Direct API access |
 
 ## Global Options
