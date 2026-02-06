@@ -1,0 +1,19 @@
+## Implementation Plan
+
+### Task 1: Add `sentry auth token` command
+- Create `src/commands/auth/token.ts` with a simple command that:
+  - Retrieves the stored token using `getAuthToken()`
+  - Throws `AuthError` if not authenticated
+  - Prints the raw token to stdout
+  - Omits trailing newline when piped (for scripting)
+- Register the command in `src/commands/auth/index.ts`
+
+### Task 2: Update token validation and user info fetching
+- Use `/users/me/regions/` for token validation (works with all token types)
+- After successful validation, try to get user info via `/users/me/`
+- `getCurrentUser()` now returns `null` on failure instead of throwing
+- This works with manual API tokens but gracefully handles OAuth App tokens
+
+### Task 3: Suppress upgrade notification
+- Add "token" to `SUPPRESSED_ARGS` in `src/lib/version-check.ts`
+- Ensures clean output when `auth token` is used in scripts/pipes
