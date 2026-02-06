@@ -6,7 +6,11 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
+import { recordInstallCommand } from "../../src/commands/cli/record-install.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
+import { closeDatabase } from "../../src/lib/db/index.js";
+import { getInstallInfo } from "../../src/lib/db/install-info.js";
+import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 describe("feedbackCommand.func", () => {
   test("throws ValidationError for empty message", async () => {
@@ -81,6 +85,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -106,6 +111,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -127,6 +133,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -149,6 +156,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -180,6 +188,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -188,5 +197,81 @@ describe("upgradeCommand.func", () => {
     await expect(
       func.call(mockContext, { check: false, method: "curl" }, "999.0.0")
     ).rejects.toThrow("Version 999.0.0 not found");
+  });
+});
+
+// Test the record-install command func
+describe("recordInstallCommand.func", () => {
+  let testConfigDir: string;
+
+  beforeEach(async () => {
+    testConfigDir = await createTestConfigDir("test-record-install-");
+    process.env.SENTRY_CONFIG_DIR = testConfigDir;
+  });
+
+  afterEach(async () => {
+    closeDatabase();
+    delete process.env.SENTRY_CONFIG_DIR;
+    await cleanupTestDir(testConfigDir);
+  });
+
+  test("records curl install info", async () => {
+    const func = await recordInstallCommand.loader();
+    const mockContext = {
+      process: { execPath: "/home/user/.local/bin/sentry" },
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+    };
+
+    func.call(mockContext, { method: "curl" });
+
+    const info = getInstallInfo();
+    expect(info?.method).toBe("curl");
+    expect(info?.path).toBe("/home/user/.local/bin/sentry");
+  });
+
+  test("records npm install info", async () => {
+    const func = await recordInstallCommand.loader();
+    const mockContext = {
+      process: { execPath: "/usr/local/bin/sentry" },
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+    };
+
+    func.call(mockContext, { method: "npm" });
+
+    const info = getInstallInfo();
+    expect(info?.method).toBe("npm");
+  });
+
+  test("uses provided path over execPath", async () => {
+    const func = await recordInstallCommand.loader();
+    const mockContext = {
+      process: { execPath: "/default/path" },
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+    };
+
+    func.call(mockContext, { method: "curl", path: "/custom/path/sentry" });
+
+    const info = getInstallInfo();
+    expect(info?.path).toBe("/custom/path/sentry");
+  });
+
+  test("overwrites existing install info", async () => {
+    const func = await recordInstallCommand.loader();
+    const mockContext = {
+      process: { execPath: "/path1" },
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+    };
+
+    func.call(mockContext, { method: "curl" });
+    expect(getInstallInfo()?.method).toBe("curl");
+
+    mockContext.process.execPath = "/path2";
+    func.call(mockContext, { method: "npm" });
+    expect(getInstallInfo()?.method).toBe("npm");
+    expect(getInstallInfo()?.path).toBe("/path2");
   });
 });
