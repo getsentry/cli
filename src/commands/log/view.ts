@@ -27,7 +27,9 @@ const USAGE_HINT = "sentry log view <org>/<project> <log-id>";
  * Parse positional arguments for log view.
  * Handles: `<log-id>` or `<target> <log-id>`
  *
+ * @param args - Positional arguments from CLI
  * @returns Parsed log ID and optional target arg
+ * @throws {ContextError} If no arguments provided
  */
 export function parsePositionalArgs(args: string[]): {
   logId: string;
@@ -49,7 +51,6 @@ export function parsePositionalArgs(args: string[]): {
 
   const second = args[1];
   if (second === undefined) {
-    // Should not happen given length check, but TypeScript needs this
     return { logId: first, targetArg: undefined };
   }
 
@@ -106,6 +107,11 @@ async function resolveFromProjectSearch(
 
 /**
  * Write human-readable log output to stdout.
+ *
+ * @param stdout - Output stream
+ * @param log - The log entry to display
+ * @param orgSlug - Organization slug for trace URLs
+ * @param detectedFrom - Optional context detection source to display
  */
 function writeHumanOutput(
   stdout: Writer,
