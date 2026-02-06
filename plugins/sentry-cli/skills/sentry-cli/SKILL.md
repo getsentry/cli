@@ -463,6 +463,14 @@ sentry log list my-org/backend -f -q 'level:error'
 sentry log list --json | jq '.[] | select(.level == "error")'
 ```
 
+#### `sentry log view <args...>`
+
+View details of a specific log entry
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+
 ### Issues
 
 List issues in a project
