@@ -1,0 +1,19 @@
+## Implementation Plan
+
+### Task 1: Add `sentry auth token` command
+- Create `src/commands/auth/token.ts` with a simple command that:
+  - Retrieves the stored token using `getAuthToken()`
+  - Throws `AuthError` if not authenticated
+  - Prints the raw token to stdout
+  - Omits trailing newline when piped (for scripting)
+- Register the command in `src/commands/auth/index.ts`
+
+### Task 2: Remove `/users/me/` endpoint calls
+- The `/users/me/` endpoint doesn't work with OAuth App tokens
+- The `/users/me/regions/` endpoint still works and is needed for multi-region support
+- Remove `getCurrentUser()` function from `src/lib/api-client.ts`
+- Update `src/commands/auth/login.ts` to validate tokens using `getUserRegions()` instead
+
+### Task 3: Suppress upgrade notification
+- Add "token" to `SUPPRESSED_ARGS` in `src/lib/version-check.ts`
+- Ensures clean output when `auth token` is used in scripts/pipes
