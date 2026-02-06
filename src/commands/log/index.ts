@@ -6,17 +6,20 @@
 
 import { buildRouteMap } from "@stricli/core";
 import { listCommand } from "./list.js";
+import { viewCommand } from "./view.js";
 
 export const logRoute = buildRouteMap({
   routes: {
     list: listCommand,
+    view: viewCommand,
   },
   docs: {
     brief: "View Sentry logs",
     fullDescription:
       "View and stream logs from your Sentry projects.\n\n" +
       "Commands:\n" +
-      "  list     List or stream logs from a project",
+      "  list     List or stream logs from a project\n" +
+      "  view     View details of a specific log entry",
     hideRoute: {},
   },
 });

@@ -8,6 +8,9 @@
 import kyHttpClient, { type KyInstance } from "ky";
 import { z } from "zod";
 import {
+  type DetailedLogsResponse,
+  DetailedLogsResponseSchema,
+  type DetailedSentryLog,
   type LogsResponse,
   LogsResponseSchema,
   type ProjectKey,
@@ -1070,4 +1073,59 @@ export async function listLogs(
   );
 
   return response.data;
+}
+
+/** All fields to request for detailed log view */
+const DETAILED_LOG_FIELDS = [
+  "sentry.item_id",
+  "timestamp",
+  "timestamp_precise",
+  "message",
+  "severity",
+  "trace",
+  "project",
+  "environment",
+  "release",
+  "sdk.name",
+  "sdk.version",
+  "span_id",
+  "code.function",
+  "code.file.path",
+  "code.line.number",
+  "sentry.otel.kind",
+  "sentry.otel.status_code",
+  "sentry.otel.instrumentation_scope.name",
+];
+
+/**
+ * Get a single log entry by its item ID.
+ * Uses the Explore/Events API with dataset=logs and a filter query.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug for filtering
+ * @param logId - The sentry.item_id of the log entry
+ * @returns The detailed log entry, or null if not found
+ */
+export async function getLog(
+  orgSlug: string,
+  projectSlug: string,
+  logId: string
+): Promise<DetailedSentryLog | null> {
+  const query = `project:${projectSlug} sentry.item_id:${logId}`;
+
+  const response = await orgScopedRequest<DetailedLogsResponse>(
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "logs",
+        field: DETAILED_LOG_FIELDS,
+        query,
+        per_page: 1,
+        statsPeriod: "90d",
+      },
+      schema: DetailedLogsResponseSchema,
+    }
+  );
+
+  return response.data[0] ?? null;
 }
