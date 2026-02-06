@@ -60,7 +60,7 @@ export const VERSION_PREFIX_REGEX = /^v/;
  * @param version - Version to download (without 'v' prefix)
  * @returns Download URL for the binary
  */
-function getBinaryDownloadUrl(version: string): string {
+export function getBinaryDownloadUrl(version: string): string {
   let os: string;
   if (process.platform === "darwin") {
     os = "darwin";
@@ -81,7 +81,7 @@ function getBinaryDownloadUrl(version: string): string {
  *
  * @returns Object with install, temp, old, and lock file paths
  */
-function getCurlInstallPaths(): {
+export function getCurlInstallPaths(): {
   installPath: string;
   tempPath: string;
   oldPath: string;
@@ -117,7 +117,7 @@ export function cleanupOldBinary(): void {
 /**
  * Check if a process with the given PID is still running.
  */
-function isProcessRunning(pid: number): boolean {
+export function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0); // Signal 0 just checks if process exists
     return true;
@@ -133,7 +133,7 @@ function isProcessRunning(pid: number): boolean {
  * @param lockPath - Path to the lock file
  * @throws {UpgradeError} If another upgrade is already in progress
  */
-function acquireUpgradeLock(lockPath: string): void {
+export function acquireUpgradeLock(lockPath: string): void {
   if (existsSync(lockPath)) {
     const content = readFileSync(lockPath, "utf-8").trim();
     const existingPid = Number.parseInt(content, 10);
@@ -157,7 +157,7 @@ function acquireUpgradeLock(lockPath: string): void {
  *
  * @param lockPath - Path to the lock file
  */
-function releaseUpgradeLock(lockPath: string): void {
+export function releaseUpgradeLock(lockPath: string): void {
   try {
     unlinkSync(lockPath);
   } catch {
