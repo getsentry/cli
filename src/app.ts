@@ -8,13 +8,24 @@ import {
 } from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
+import { buildCommandRoute } from "./commands/build/index.js";
 import { cliRoute } from "./commands/cli/index.js";
+import { debugFilesRoute } from "./commands/debug-files/index.js";
+import { deploysRoute } from "./commands/deploys/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
+import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { logRoute } from "./commands/log/index.js";
+import { monitorsRoute } from "./commands/monitors/index.js";
 import { orgRoute } from "./commands/org/index.js";
 import { projectRoute } from "./commands/project/index.js";
+import { reactNativeRoute } from "./commands/react-native/index.js";
+import { releasesRoute } from "./commands/releases/index.js";
+import { reposRoute } from "./commands/repos/index.js";
+import { sendEnvelopeCommand } from "./commands/send-envelope.js";
+import { sendEventCommand } from "./commands/send-event.js";
+import { sourcemapsRoute } from "./commands/sourcemaps/index.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import { AuthError, CliError, getExitCode } from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
@@ -23,6 +34,7 @@ import { error as errorColor } from "./lib/formatters/colors.js";
 export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
+    init: initCommand,
     auth: authRoute,
     cli: cliRoute,
     org: orgRoute,
@@ -31,6 +43,16 @@ export const routes = buildRouteMap({
     event: eventRoute,
     log: logRoute,
     api: apiCommand,
+    releases: releasesRoute,
+    sourcemaps: sourcemapsRoute,
+    "debug-files": debugFilesRoute,
+    deploys: deploysRoute,
+    monitors: monitorsRoute,
+    repos: reposRoute,
+    build: buildCommandRoute,
+    "react-native": reactNativeRoute,
+    "send-event": sendEventCommand,
+    "send-envelope": sendEnvelopeCommand,
   },
   defaultCommand: "help",
   docs: {
