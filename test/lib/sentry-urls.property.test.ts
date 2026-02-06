@@ -17,10 +17,12 @@ import {
 import {
   buildBillingUrl,
   buildEventSearchUrl,
+  buildLogsUrl,
   buildOrgSettingsUrl,
   buildOrgUrl,
   buildProjectUrl,
   buildSeerSettingsUrl,
+  buildTraceUrl,
   getSentryBaseUrl,
   isSentrySaasUrl,
 } from "../../src/lib/sentry-urls.js";
@@ -55,6 +57,12 @@ const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
 
 /** Valid event IDs (32-char hex) */
 const eventIdArb = stringMatching(/^[a-f0-9]{32}$/);
+
+/** Valid log IDs (32-char hex, same format as event IDs) */
+const logIdArb = stringMatching(/^[a-f0-9]{32}$/);
+
+/** Valid trace IDs (32-char hex) */
+const traceIdArb = stringMatching(/^[a-f0-9]{32}$/);
 
 /** Common Sentry regions */
 const sentryRegionArb = constantFrom("us", "de", "eu", "staging");
@@ -356,6 +364,92 @@ describe("buildBillingUrl properties", () => {
       property(slugArb, (orgSlug) => {
         const result = buildBillingUrl(orgSlug);
         expect(result).toContain("/billing/overview/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("buildLogsUrl properties", () => {
+  test("without logId, output has no query string", async () => {
+    await fcAssert(
+      property(slugArb, (orgSlug) => {
+        const result = buildLogsUrl(orgSlug);
+        expect(result.includes("?")).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("with logId, output contains query parameter with log ID", async () => {
+    await fcAssert(
+      property(tuple(slugArb, logIdArb), ([orgSlug, logId]) => {
+        const result = buildLogsUrl(orgSlug, logId);
+        expect(result).toContain(`?query=sentry.item_id:${logId}`);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains /explore/logs/ path", async () => {
+    await fcAssert(
+      property(slugArb, (orgSlug) => {
+        const result = buildLogsUrl(orgSlug);
+        expect(result).toContain("/explore/logs/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(tuple(slugArb, logIdArb), ([orgSlug, logId]) => {
+        expect(() => new URL(buildLogsUrl(orgSlug))).not.toThrow();
+        expect(() => new URL(buildLogsUrl(orgSlug, logId))).not.toThrow();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("buildTraceUrl properties", () => {
+  test("output contains /traces/ path with trace ID", async () => {
+    await fcAssert(
+      property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
+        const result = buildTraceUrl(orgSlug, traceId);
+        expect(result).toContain(`/traces/${traceId}/`);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains the org slug", async () => {
+    await fcAssert(
+      property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
+        const result = buildTraceUrl(orgSlug, traceId);
+        expect(result).toContain(orgSlug);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
+        const result = buildTraceUrl(orgSlug, traceId);
+        expect(() => new URL(result)).not.toThrow();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output follows expected pattern", async () => {
+    await fcAssert(
+      property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
+        const result = buildTraceUrl(orgSlug, traceId);
+        expect(result).toBe(
+          `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`
+        );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
