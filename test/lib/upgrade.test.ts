@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
   fetchLatestVersion,
@@ -360,5 +361,25 @@ describe("versionExists", () => {
     await expect(versionExists("npm", "1.0.0")).rejects.toThrow(
       "Failed to connect to npm registry"
     );
+  });
+});
+
+describe("executeUpgrade", () => {
+  test("throws UpgradeError for unknown installation method", () => {
+    // executeUpgrade throws synchronously for unknown method
+    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(UpgradeError);
+    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(
+      "Could not detect installation method"
+    );
+  });
+
+  test("throws UpgradeError with unknown_method reason", () => {
+    try {
+      executeUpgrade("unknown", "1.0.0");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      expect((error as UpgradeError).reason).toBe("unknown_method");
+    }
   });
 });

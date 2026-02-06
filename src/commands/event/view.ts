@@ -6,10 +6,14 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getEvent } from "../../lib/api-client.js";
-import { spansFlag } from "../../lib/arg-parsing.js";
+import { findProjectsBySlug, getEvent } from "../../lib/api-client.js";
+import {
+  ProjectSpecificationType,
+  parseOrgProjectArg,
+  spansFlag,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
-import { ContextError } from "../../lib/errors.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
@@ -17,8 +21,6 @@ import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
 
 type ViewFlags = {
-  readonly org?: string;
-  readonly project?: string;
   readonly json: boolean;
   readonly web: boolean;
   readonly spans: number;
@@ -54,41 +56,118 @@ function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
   }
 }
 
+/** Usage hint for ContextError messages */
+const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
+
+/**
+ * Parse positional arguments for event view.
+ * Handles: `<event-id>` or `<target> <event-id>`
+ *
+ * @returns Parsed event ID and optional target arg
+ */
+export function parsePositionalArgs(args: string[]): {
+  eventId: string;
+  targetArg: string | undefined;
+} {
+  if (args.length === 0) {
+    throw new ContextError("Event ID", USAGE_HINT);
+  }
+
+  const first = args[0];
+  if (first === undefined) {
+    throw new ContextError("Event ID", USAGE_HINT);
+  }
+
+  if (args.length === 1) {
+    // Single arg - must be event ID
+    return { eventId: first, targetArg: undefined };
+  }
+
+  const second = args[1];
+  if (second === undefined) {
+    // Should not happen given length check, but TypeScript needs this
+    return { eventId: first, targetArg: undefined };
+  }
+
+  // Two or more args - first is target, second is event ID
+  return { eventId: second, targetArg: first };
+}
+
+/**
+ * Resolved target type for event commands.
+ * @internal Exported for testing
+ */
+export type ResolvedEventTarget = {
+  org: string;
+  project: string;
+  orgDisplay: string;
+  projectDisplay: string;
+  detectedFrom?: string;
+};
+
+/**
+ * Resolve target from a project search result.
+ *
+ * Searches for a project by slug across all accessible organizations.
+ * Throws if no project found or if multiple projects found in different orgs.
+ *
+ * @param projectSlug - Project slug to search for
+ * @param eventId - Event ID (used in error messages)
+ * @returns Resolved target with org and project info
+ * @throws {ContextError} If no project found
+ * @throws {ValidationError} If project exists in multiple organizations
+ *
+ * @internal Exported for testing
+ */
+export async function resolveFromProjectSearch(
+  projectSlug: string,
+  eventId: string
+): Promise<ResolvedEventTarget> {
+  const found = await findProjectsBySlug(projectSlug);
+  if (found.length === 0) {
+    throw new ContextError(`Project "${projectSlug}"`, USAGE_HINT, [
+      "Check that you have access to a project with this slug",
+    ]);
+  }
+  if (found.length > 1) {
+    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
+    throw new ValidationError(
+      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+        `Specify the organization:\n${orgList}\n\n` +
+        `Example: sentry event view <org>/${projectSlug} ${eventId}`
+    );
+  }
+  // Safe assertion: length is exactly 1 after the checks above
+  const foundProject = found[0] as (typeof found)[0];
+  return {
+    org: foundProject.orgSlug,
+    project: foundProject.slug,
+    orgDisplay: foundProject.orgSlug,
+    projectDisplay: foundProject.slug,
+  };
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific event",
     fullDescription:
       "View detailed information about a Sentry event by its ID.\n\n" +
-      "The organization and project are resolved from:\n" +
-      "  1. --org and --project flags\n" +
-      "  2. Config defaults\n" +
-      "  3. SENTRY_DSN environment variable or source code detection",
+      "Target specification:\n" +
+      "  sentry event view <event-id>              # auto-detect from DSN or config\n" +
+      "  sentry event view <org>/<proj> <event-id> # explicit org and project\n" +
+      "  sentry event view <project> <event-id>    # find project across all orgs",
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "event-id",
-          brief:
-            "Event ID (hexadecimal, e.g., 9999aaaaca8b46d797c23c6077c6ff01)",
-          parse: String,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        placeholder: "args",
+        brief:
+          "[<org>/<project>] <event-id> - Target (optional) and event ID (required)",
+        parse: String,
+      },
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief: "Project slug",
-        optional: true,
-      },
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -106,22 +185,44 @@ export const viewCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ViewFlags,
-    eventId: string
+    ...args: string[]
   ): Promise<void> {
     const { stdout, cwd } = this;
 
-    const target = await resolveOrgAndProject({
-      org: flags.org,
-      project: flags.project,
-      cwd,
-      usageHint: `sentry event view ${eventId} --org <org> --project <project>`,
-    });
+    // Parse positional args
+    const { eventId, targetArg } = parsePositionalArgs(args);
+    const parsed = parseOrgProjectArg(targetArg);
+
+    let target: ResolvedEventTarget | null = null;
+
+    switch (parsed.type) {
+      case ProjectSpecificationType.Explicit:
+        target = {
+          org: parsed.org,
+          project: parsed.project,
+          orgDisplay: parsed.org,
+          projectDisplay: parsed.project,
+        };
+        break;
+
+      case ProjectSpecificationType.ProjectSearch:
+        target = await resolveFromProjectSearch(parsed.projectSlug, eventId);
+        break;
+
+      case ProjectSpecificationType.OrgAll:
+        throw new ContextError("Specific project", USAGE_HINT);
+
+      case ProjectSpecificationType.AutoDetect:
+        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+        break;
+
+      default:
+        // Exhaustive check - should never reach here
+        throw new ValidationError("Invalid target specification");
+    }
 
     if (!target) {
-      throw new ContextError(
-        "Organization and project",
-        `sentry event view ${eventId} --org <org-slug> --project <project-slug>`
-      );
+      throw new ContextError("Organization and project", USAGE_HINT);
     }
 
     if (flags.web) {

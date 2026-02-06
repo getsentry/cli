@@ -6,10 +6,6 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  getAutofixState,
-  triggerRootCauseAnalysis,
-} from "../../lib/api-client.js";
 import { ApiError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {
@@ -18,8 +14,8 @@ import {
 } from "../../lib/formatters/seer.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
+  ensureRootCauseAnalysis,
   issueIdPositional,
-  pollAutofixState,
   resolveOrgAndIssueId,
 } from "./utils.js";
 
@@ -86,38 +82,16 @@ export const explainCommand = buildCommand({
       });
       resolvedOrg = org;
 
-      // 1. Check for existing analysis (skip if --force)
-      let state = flags.force ? null : await getAutofixState(org, numericId);
+      // Ensure root cause analysis exists (triggers if needed)
+      const state = await ensureRootCauseAnalysis({
+        org,
+        issueId: numericId,
+        stderr,
+        json: flags.json,
+        force: flags.force,
+      });
 
-      // Handle error status, we are gonna retry the analysis
-      if (state?.status === "ERROR") {
-        stderr.write("Root cause analysis failed, retrying...\n");
-        state = null;
-      }
-
-      // 2. Trigger new analysis if none exists or forced
-      if (!state) {
-        if (!flags.json) {
-          const prefix = flags.force ? "Forcing fresh" : "Starting";
-          stderr.write(
-            `${prefix} root cause analysis, it can take several minutes...\n`
-          );
-        }
-        await triggerRootCauseAnalysis(org, numericId);
-      }
-
-      // 3. Poll until complete (if not already completed)
-      if (!state || state.status !== "COMPLETED") {
-        state = await pollAutofixState({
-          orgSlug: org,
-          issueId: numericId,
-          stderr,
-          json: flags.json,
-          stopOnWaitingForUser: true,
-        });
-      }
-
-      // 4. Extract root causes from steps
+      // Extract root causes from steps
       const causes = extractRootCauses(state);
       if (causes.length === 0) {
         throw new Error(
@@ -126,7 +100,7 @@ export const explainCommand = buildCommand({
         );
       }
 
-      // 5. Output results
+      // Output results
       if (flags.json) {
         writeJson(stdout, causes);
         return;

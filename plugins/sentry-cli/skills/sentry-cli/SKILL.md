@@ -90,6 +90,10 @@ View authentication status
 sentry auth status
 ```
 
+#### `sentry auth token`
+
+Print the stored authentication token
+
 ### Org
 
 Work with Sentry organizations
@@ -239,11 +243,11 @@ sentry issue explain <issue-id>
 # By numeric issue ID
 sentry issue explain 123456789
 
-# By short ID
-sentry issue explain MYPROJECT-ABC --org my-org
+# By short ID with org prefix
+sentry issue explain my-org/MYPROJECT-ABC
 
-# By short suffix (requires project context)
-sentry issue explain G --org my-org --project my-project
+# By project-suffix format
+sentry issue explain myproject-G
 
 # Force a fresh analysis
 sentry issue explain 123456789 --force
@@ -256,6 +260,7 @@ Generate a solution plan using Seer AI
 **Flags:**
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
+- `--force - Force new plan even if one exists`
 
 **Examples:**
 
@@ -268,8 +273,11 @@ sentry issue plan 123456789
 # Specify which root cause to plan for (if multiple were found)
 sentry issue plan 123456789 --cause 0
 
-# By short ID
-sentry issue plan MYPROJECT-ABC --org my-org --cause 1
+# By short ID with org prefix
+sentry issue plan my-org/MYPROJECT-ABC --cause 1
+
+# By project-suffix format
+sentry issue plan myproject-G --cause 0
 ```
 
 #### `sentry issue view <issue>`
@@ -299,13 +307,11 @@ sentry issue view FRONT-ABC -w
 
 View Sentry events
 
-#### `sentry event view <event-id>`
+#### `sentry event view <args...>`
 
 View details of a specific event
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
@@ -410,6 +416,13 @@ CLI-related commands
 #### `sentry cli feedback <message...>`
 
 Send feedback about the CLI
+
+#### `sentry cli fix`
+
+Diagnose and repair CLI database issues
+
+**Flags:**
+- `--dry-run - Show what would be fixed without making changes`
 
 #### `sentry cli upgrade <version>`
 
@@ -570,6 +583,19 @@ Send an envelope to Sentry
 #### `sentry send-envelope <args...>`
 
 Send an envelope to Sentry
+### Log
+
+View Sentry logs
+
+#### `sentry log list <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
 
 ## Output Formats
 

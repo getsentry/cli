@@ -17,6 +17,9 @@ Guidelines for AI agents working in this codebase.
 ### Key Features
 
 - **DSN Auto-Detection** - Scans `.env` files and source code (JS, Python, Go, Java, Ruby, PHP) to find Sentry DSNs
+- **Project Root Detection** - Walks up from CWD to find project boundaries using VCS, language, and build markers
+- **Directory Name Inference** - Fallback project matching using bidirectional word boundary matching
+- **Multi-Region Support** - Automatic region detection with fan-out to regional APIs (us.sentry.io, de.sentry.io)
 - **Monorepo Support** - Generates short aliases for multiple projects
 - **Seer AI Integration** - `issue explain` and `issue plan` commands for AI analysis
 - **OAuth Device Flow** - Secure authentication without browser redirects
@@ -104,20 +107,36 @@ cli/
 │   │   └── help.ts         # Help command
 │   ├── lib/                # Shared utilities
 │   │   ├── api-client.ts   # Sentry API client (ky-based)
+│   │   ├── region.ts       # Multi-region resolution
+│   │   ├── telemetry.ts    # Sentry SDK instrumentation
+│   │   ├── sentry-urls.ts  # URL builders for Sentry
 │   │   ├── db/             # SQLite database layer
-│   │   │   ├── instance.ts # Database singleton
-│   │   │   ├── schema.ts   # Table definitions
-│   │   │   ├── auth.ts     # Token storage
+│   │   │   ├── instance.ts     # Database singleton
+│   │   │   ├── schema.ts       # Table definitions
+│   │   │   ├── migration.ts    # Schema migrations
+│   │   │   ├── utils.ts        # SQL helpers (upsert)
+│   │   │   ├── auth.ts         # Token storage
+│   │   │   ├── user.ts         # User info cache
+│   │   │   ├── regions.ts      # Org→region URL cache
+│   │   │   ├── defaults.ts     # Default org/project
 │   │   │   ├── dsn-cache.ts    # DSN resolution cache
-│   │   │   ├── project-cache.ts # Project data cache
-│   │   │   └── project-aliases.ts # Monorepo alias mappings
+│   │   │   ├── project-cache.ts    # Project data cache
+│   │   │   ├── project-root-cache.ts # Project root cache
+│   │   │   ├── project-aliases.ts  # Monorepo alias mappings
+│   │   │   └── version-check.ts    # Version check cache
 │   │   ├── dsn/            # DSN detection system
-│   │   │   ├── scanner.ts  # File scanning logic
-│   │   │   ├── resolver.ts # DSN to org/project resolution
-│   │   │   ├── detector.ts # High-level detection API
-│   │   │   ├── env.ts      # Environment variable detection
-│   │   │   ├── env-file.ts # .env file parsing
-│   │   │   └── languages/  # Per-language DSN extractors
+│   │   │   ├── detector.ts     # High-level detection API
+│   │   │   ├── scanner.ts      # File scanning logic
+│   │   │   ├── code-scanner.ts # Code file DSN extraction
+│   │   │   ├── project-root.ts # Project root detection
+│   │   │   ├── parser.ts       # DSN parsing utilities
+│   │   │   ├── resolver.ts     # DSN to org/project resolution
+│   │   │   ├── fs-utils.ts     # File system helpers
+│   │   │   ├── env.ts          # Environment variable detection
+│   │   │   ├── env-file.ts     # .env file parsing
+│   │   │   ├── errors.ts       # DSN-specific errors
+│   │   │   ├── types.ts        # Type definitions
+│   │   │   └── languages/      # Per-language DSN extractors
 │   │   │       ├── javascript.ts
 │   │   │       ├── python.ts
 │   │   │       ├── go.ts
@@ -127,13 +146,23 @@ cli/
 │   │   ├── formatters/     # Output formatting
 │   │   │   ├── human.ts    # Human-readable output
 │   │   │   ├── json.ts     # JSON output
+│   │   │   ├── output.ts   # Output utilities
 │   │   │   ├── seer.ts     # Seer AI response formatting
 │   │   │   └── colors.ts   # Terminal colors
-│   │   ├── oauth.ts        # OAuth device flow
-│   │   ├── errors.ts       # Error classes
+│   │   ├── oauth.ts            # OAuth device flow
+│   │   ├── errors.ts           # Error classes
 │   │   ├── resolve-target.ts   # Org/project resolution
 │   │   ├── resolve-issue.ts    # Issue ID resolution
-│   │   └── browser.ts      # Open URLs in browser
+│   │   ├── issue-id.ts         # Issue ID parsing utilities
+│   │   ├── arg-parsing.ts      # Argument parsing helpers
+│   │   ├── alias.ts            # Alias generation
+│   │   ├── promises.ts         # Promise utilities
+│   │   ├── polling.ts          # Polling utilities
+│   │   ├── upgrade.ts          # CLI upgrade functionality
+│   │   ├── version-check.ts    # Version checking
+│   │   ├── browser.ts          # Open URLs in browser
+│   │   ├── clipboard.ts        # Clipboard access
+│   │   └── qrcode.ts           # QR code generation
 │   └── types/              # TypeScript types and Zod schemas
 │       ├── sentry.ts       # Sentry API types
 │       ├── config.ts       # Configuration types
@@ -141,8 +170,17 @@ cli/
 │       └── seer.ts         # Seer AI types
 ├── test/                   # Test files (mirrors src/ structure)
 │   ├── lib/                # Unit tests for lib/
+│   │   ├── *.test.ts           # Standard unit tests
+│   │   ├── *.property.test.ts  # Property-based tests
+│   │   └── db/
+│   │       ├── *.test.ts           # DB unit tests
+│   │       └── *.model-based.test.ts # Model-based tests
+│   ├── model-based/        # Model-based testing helpers
+│   │   └── helpers.ts      # Isolated DB context, constants
 │   ├── commands/           # Unit tests for commands/
-│   └── e2e/                # End-to-end tests
+│   ├── e2e/                # End-to-end tests
+│   ├── fixtures/           # Test fixtures
+│   └── mocks/              # Test mocks
 ├── docs/                   # Documentation site (Astro + Starlight)
 ├── script/                 # Build and utility scripts
 ├── .cursor/rules/          # Cursor AI rules (read these!)
@@ -209,6 +247,29 @@ if (result.success) {
 - Re-export from `src/types/index.ts`
 - Use `type` imports: `import type { MyType } from "../types/index.js"`
 
+### SQL Utilities
+
+Use the `upsert()` helper from `src/lib/db/utils.ts` to reduce SQL boilerplate:
+
+```typescript
+import { upsert, runUpsert } from "../db/utils.js";
+
+// Generate UPSERT statement
+const { sql, values } = upsert("table", { id: 1, name: "foo" }, ["id"]);
+db.query(sql).run(...values);
+
+// Or use convenience wrapper
+runUpsert(db, "table", { id: 1, name: "foo" }, ["id"]);
+
+// Exclude columns from update
+const { sql, values } = upsert(
+  "users",
+  { id: 1, name: "Bob", created_at: now },
+  ["id"],
+  { excludeFromUpdate: ["created_at"] }
+);
+```
+
 ### Error Handling
 
 All CLI errors extend the `CliError` base class from `src/lib/errors.ts`:
@@ -221,12 +282,15 @@ CliError (base)
 ├── ConfigError (configuration - suggestion?)
 ├── ContextError (missing context - resource, command, alternatives)
 ├── ValidationError (input validation - field?)
-└── DeviceFlowError (OAuth flow - code)
+├── DeviceFlowError (OAuth flow - code)
+├── SeerError (Seer AI - reason: 'not_enabled' | 'no_budget' | 'ai_disabled')
+└── UpgradeError (upgrade - reason: 'unknown_method' | 'network_error' | 'execution_failed' | 'version_not_found')
 
 // Usage: throw specific error types
-import { ApiError, AuthError } from "../lib/errors.js";
+import { ApiError, AuthError, SeerError } from "../lib/errors.js";
 throw new AuthError("not_authenticated");
 throw new ApiError("Request failed", 404, "Not found");
+throw new SeerError("not_enabled", orgSlug); // Includes actionable URL
 
 // In commands: let errors propagate to central handler
 // The bin.ts entry point catches and formats all errors consistently
@@ -298,23 +362,192 @@ await deleteUserData(userId)
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 
-## Testing (bun:test)
+## Testing (bun:test + fast-check)
 
-**Test files go in `test/`**, not alongside source files.
-- Name test files: `*.test.ts`
-- Mirror source structure: `test/lib/config.test.ts` tests `src/lib/config.ts`
-- E2E tests go in `test/e2e/`
+**Prefer property-based and model-based testing** over traditional unit tests. These approaches find edge cases automatically and provide better coverage with less code.
+
+**fast-check Documentation**: https://fast-check.dev/docs/core-blocks/arbitraries/
+
+### Testing Hierarchy (in order of preference)
+
+1. **Model-Based Tests** - For stateful systems (database, caches, state machines)
+2. **Property-Based Tests** - For pure functions, parsing, validation, transformations
+3. **Unit Tests** - Only for trivial cases or when properties are hard to express
+
+### Test File Naming
+
+| Type | Pattern | Location |
+|------|---------|----------|
+| Property-based | `*.property.test.ts` | `test/lib/` |
+| Model-based | `*.model-based.test.ts` | `test/lib/db/` |
+| Unit tests | `*.test.ts` | `test/` (mirrors `src/`) |
+| E2E tests | `*.test.ts` | `test/e2e/` |
+
+### Property-Based Testing
+
+Use property-based tests when verifying invariants that should hold for **any valid input**.
+
+```typescript
+import { describe, expect, test } from "bun:test";
+import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
+import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
+
+// Define arbitraries (random data generators)
+const slugArb = array(constantFrom(..."abcdefghijklmnopqrstuvwxyz0123456789".split("")), {
+  minLength: 1,
+  maxLength: 15,
+}).map((chars) => chars.join(""));
+
+describe("property: myFunction", () => {
+  test("is symmetric", () => {
+    fcAssert(
+      property(slugArb, slugArb, (a, b) => {
+        // Properties should always hold regardless of input
+        expect(myFunction(a, b)).toBe(myFunction(b, a));
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("round-trip: encode then decode returns original", () => {
+    fcAssert(
+      property(validInputArb, (input) => {
+        const encoded = encode(input);
+        const decoded = decode(encoded);
+        expect(decoded).toEqual(input);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+```
+
+**Good candidates for property-based testing:**
+- Parsing functions (DSN, issue IDs, aliases)
+- Encoding/decoding (round-trip invariant)
+- Symmetric operations (a op b = b op a)
+- Idempotent operations (f(f(x)) = f(x))
+- Validation functions (valid inputs accepted, invalid rejected)
+
+**See examples:** `test/lib/dsn.property.test.ts`, `test/lib/alias.property.test.ts`, `test/lib/issue-id.property.test.ts`
+
+### Model-Based Testing
+
+Use model-based tests for **stateful systems** where sequences of operations should maintain invariants.
+
+```typescript
+import { describe, expect, test } from "bun:test";
+import {
+  type AsyncCommand,
+  asyncModelRun,
+  asyncProperty,
+  commands,
+  assert as fcAssert,
+} from "fast-check";
+import { createIsolatedDbContext, DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
+
+// Define a simplified model of expected state
+type DbModel = {
+  entries: Map<string, string>;
+};
+
+// Define commands that operate on both model and real system
+class SetCommand implements AsyncCommand<DbModel, RealDb> {
+  constructor(readonly key: string, readonly value: string) {}
+  
+  check = () => true;
+  
+  async run(model: DbModel, real: RealDb): Promise<void> {
+    // Apply to real system
+    await realSet(this.key, this.value);
+    
+    // Update model
+    model.entries.set(this.key, this.value);
+  }
+  
+  toString = () => `set("${this.key}", "${this.value}")`;
+}
+
+class GetCommand implements AsyncCommand<DbModel, RealDb> {
+  constructor(readonly key: string) {}
+  
+  check = () => true;
+  
+  async run(model: DbModel, real: RealDb): Promise<void> {
+    const realValue = await realGet(this.key);
+    const expectedValue = model.entries.get(this.key);
+    
+    // Verify real system matches model
+    expect(realValue).toBe(expectedValue);
+  }
+  
+  toString = () => `get("${this.key}")`;
+}
+
+describe("model-based: database", () => {
+  test("random sequences maintain consistency", () => {
+    fcAssert(
+      asyncProperty(commands(allCommandArbs), async (cmds) => {
+        const cleanup = createIsolatedDbContext();
+        try {
+          await asyncModelRun(
+            () => ({ model: { entries: new Map() }, real: {} }),
+            cmds
+          );
+        } finally {
+          cleanup();
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+```
+
+**Good candidates for model-based testing:**
+- Database operations (auth, caches, regions)
+- Stateful caches with invalidation
+- Systems with cross-cutting invariants (e.g., clearAuth also clears regions)
+
+**See examples:** `test/lib/db/model-based.test.ts`, `test/lib/db/dsn-cache.model-based.test.ts`
+
+### Test Helpers
+
+Use `test/model-based/helpers.ts` for shared utilities:
+
+```typescript
+import { createIsolatedDbContext, DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
+
+// Create isolated DB for each test run (prevents interference)
+const cleanup = createIsolatedDbContext();
+try {
+  // ... test code
+} finally {
+  cleanup();
+}
+
+// Use consistent number of runs across tests
+fcAssert(property(...), { numRuns: DEFAULT_NUM_RUNS }); // 50 runs
+```
+
+### When to Use Unit Tests
+
+Use traditional unit tests only when:
+- Testing trivial logic with obvious expected values
+- Properties are difficult to express or would be tautological
+- Testing error messages or specific output formatting
+- Integration with external systems (E2E tests)
 
 ```typescript
 import { describe, expect, test, mock } from "bun:test";
 
 describe("feature", () => {
-  test("should work", async () => {
-    expect(await someFunction()).toBe(expected);
+  test("should return specific value", async () => {
+    expect(await someFunction("input")).toBe("expected output");
   });
 });
 
-// Mock modules
+// Mock modules when needed
 mock.module("./some-module", () => ({
   default: () => "mocked",
 }));
@@ -330,6 +563,11 @@ mock.module("./some-module", () => ({
 | Add Seer types | `src/types/seer.ts` |
 | Add utility | `src/lib/` |
 | Add DSN language support | `src/lib/dsn/languages/` |
+| Add DB operations | `src/lib/db/` |
 | Build scripts | `script/` |
-| Add tests | `test/` (mirror `src/` structure) |
+| Add property tests | `test/lib/<name>.property.test.ts` |
+| Add model-based tests | `test/lib/db/<name>.model-based.test.ts` |
+| Add unit tests | `test/` (mirror `src/` structure) |
+| Add E2E tests | `test/e2e/` |
+| Test helpers | `test/model-based/helpers.ts` |
 | Add documentation | `docs/src/content/docs/` |
