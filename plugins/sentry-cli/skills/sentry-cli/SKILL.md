@@ -410,32 +410,6 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
 
-### Profile
-
-Analyze CPU profiling data
-
-#### `sentry profile list <target>`
-
-List transactions with profiling data
-
-**Flags:**
-- `--period <value> - Time period: 1h, 24h, 7d, 14d, 30d - (default: "24h")`
-- `-n, --limit <value> - Maximum number of transactions to return - (default: "20")`
-- `--json - Output as JSON`
-
-#### `sentry profile view <transaction>`
-
-View CPU profiling analysis for a transaction
-
-**Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
-- `--period <value> - Stats period: 1h, 24h, 7d, 14d, 30d - (default: "7d")`
-- `-n, --limit <value> - Number of hot paths to show (max 20) - (default: "10")`
-- `--allFrames - Include library/system frames (default: user code only)`
-- `--json - Output as JSON`
-- `-w, --web - Open in browser`
-
 ### Log
 
 View Sentry logs
@@ -488,6 +462,32 @@ sentry log list my-org/backend -f -q 'level:error'
 
 sentry log list --json | jq '.[] | select(.level == "error")'
 ```
+
+### Profile
+
+Analyze CPU profiling data
+
+#### `sentry profile list <target>`
+
+List transactions with profiling data
+
+**Flags:**
+- `--period <value> - Time period: 1h, 24h, 7d, 14d, 30d - (default: "24h")`
+- `-n, --limit <value> - Maximum number of transactions to return - (default: "20")`
+- `--json - Output as JSON`
+
+#### `sentry profile view <transaction>`
+
+View CPU profiling analysis for a transaction
+
+**Flags:**
+- `--org <value> - Organization slug`
+- `--project <value> - Project slug`
+- `--period <value> - Stats period: 1h, 24h, 7d, 14d, 30d - (default: "7d")`
+- `-n, --limit <value> - Number of hot paths to show (max 20) - (default: "10")`
+- `--allFrames - Include library/system frames (default: user code only)`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
 
 ### Issues
 
