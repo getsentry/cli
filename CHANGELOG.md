@@ -1,6 +1,25 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.8.0
+
+### New Features ✨
+
+- (auth) Add token command and remove /users/me/ dependency by @BYK in [#207](https://github.com/getsentry/cli/pull/207)
+
+### Bug Fixes 🐛
+
+- (alias) Fix alias generation and highlighting for prefix-related slugs by @BYK in [#203](https://github.com/getsentry/cli/pull/203)
+
+### Internal Changes 🔧
+
+- (commands) Replace --org/--project flags with positional args for event view by @BYK in [#205](https://github.com/getsentry/cli/pull/205)
+
+### Other
+
+- test: add tests for resolveFromProjectSearch to increase coverage by @BYK in [#206](https://github.com/getsentry/cli/pull/206)
+- test: add tests for project-cache and env-file modules by @BYK in [#200](https://github.com/getsentry/cli/pull/200)
+
 ## 0.7.0
 
 ### New Features ✨
