@@ -60,8 +60,9 @@ export function parsePositionalArgs(args: string[]): {
 
 /**
  * Resolved target type for log commands.
+ * @internal Exported for testing
  */
-type ResolvedLogTarget = {
+export type ResolvedLogTarget = {
   org: string;
   project: string;
   detectedFrom?: string;
@@ -78,8 +79,10 @@ type ResolvedLogTarget = {
  * @returns Resolved target with org and project info
  * @throws {ContextError} If no project found
  * @throws {ValidationError} If project exists in multiple organizations
+ *
+ * @internal Exported for testing
  */
-async function resolveFromProjectSearch(
+export async function resolveFromProjectSearch(
   projectSlug: string,
   logId: string
 ): Promise<ResolvedLogTarget> {

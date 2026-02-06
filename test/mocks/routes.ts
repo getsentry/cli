@@ -10,6 +10,7 @@ import notFoundFixture from "../fixtures/errors/not-found.json";
 import eventFixture from "../fixtures/event.json";
 import issueFixture from "../fixtures/issue.json";
 import issuesFixture from "../fixtures/issues.json";
+import logDetailFixture from "../fixtures/log-detail.json";
 import logsFixture from "../fixtures/logs.json";
 import organizationFixture from "../fixtures/organization.json";
 import organizationsFixture from "../fixtures/organizations.json";
@@ -26,6 +27,7 @@ export const TEST_ISSUE_ID = "400001";
 export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
+export const TEST_LOG_ID = "log-detail-001";
 
 const projectKeysFixture = [
   {
@@ -191,8 +193,19 @@ export const apiRoutes: MockRoute[] = [
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/events/",
-    response: (_req, params) => {
+    response: (req, params) => {
       if (params.orgSlug === TEST_ORG) {
+        const url = new URL(req.url);
+        const query = url.searchParams.get("query");
+        // If query contains sentry.item_id filter, return detailed log
+        if (query?.includes("sentry.item_id:")) {
+          const logId = query.replace("sentry.item_id:", "").trim();
+          if (logId === TEST_LOG_ID) {
+            return { body: logDetailFixture };
+          }
+          // Return empty data for non-existent log
+          return { body: { data: [], meta: { fields: {} } } };
+        }
         return { body: logsFixture };
       }
       return { status: 404, body: notFoundFixture };
