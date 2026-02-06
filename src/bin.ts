@@ -6,6 +6,7 @@ import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
 import { withTelemetry } from "./lib/telemetry.js";
+import { cleanupOldBinary } from "./lib/upgrade.js";
 import {
   abortPendingVersionCheck,
   getUpdateNotification,
@@ -69,6 +70,9 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Clean up old binary from previous Windows upgrade (no-op if file doesn't exist)
+  cleanupOldBinary();
+
   const args = process.argv.slice(2);
   const suppressNotification = shouldSuppressNotification(args);
 

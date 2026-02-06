@@ -5,6 +5,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { chmodSync, renameSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getUserAgent } from "./constants.js";
@@ -32,9 +33,6 @@ const GITHUB_RELEASES_URL =
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 
-/** Sentry CLI install script URL */
-const INSTALL_SCRIPT_URL = "https://cli.sentry.dev/install";
-
 /** Build headers for GitHub API requests */
 function getGitHubHeaders() {
   return {
@@ -45,6 +43,62 @@ function getGitHubHeaders() {
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
+
+// Curl Binary Helpers
+
+/**
+ * Build the download URL for a platform-specific binary from GitHub releases.
+ *
+ * @param version - Version to download (without 'v' prefix)
+ * @returns Download URL for the binary
+ */
+function getBinaryDownloadUrl(version: string): string {
+  let os: string;
+  if (process.platform === "darwin") {
+    os = "darwin";
+  } else if (process.platform === "win32") {
+    os = "windows";
+  } else {
+    os = "linux";
+  }
+
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const suffix = process.platform === "win32" ? ".exe" : "";
+
+  return `https://github.com/getsentry/cli/releases/download/${version}/sentry-${os}-${arch}${suffix}`;
+}
+
+/**
+ * Get file paths for curl-installed binary.
+ *
+ * @returns Object with install, temp, and old file paths
+ */
+function getCurlInstallPaths(): {
+  installPath: string;
+  tempPath: string;
+  oldPath: string;
+} {
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const installPath = join(homedir(), ".sentry", "bin", `sentry${suffix}`);
+  return {
+    installPath,
+    tempPath: `${installPath}.download`,
+    oldPath: `${installPath}.old`,
+  };
+}
+
+/**
+ * Clean up old binary from previous upgrade.
+ * Called on CLI startup to remove .old files left from Windows upgrades.
+ */
+export function cleanupOldBinary(): void {
+  const { oldPath } = getCurlInstallPaths();
+  try {
+    unlinkSync(oldPath);
+  } catch {
+    // File doesn't exist or can't be deleted - ignore
+  }
+}
 
 // Detection
 
@@ -276,64 +330,65 @@ export async function versionExists(
 // Upgrade Execution
 
 /**
- * Execute upgrade via curl installer script.
- * Downloads and runs the install script with the specified version.
+ * Execute upgrade by downloading binary directly from GitHub releases.
+ * Downloads the platform-specific binary and replaces the current installation.
+ *
+ * On Windows, the running executable cannot be overwritten directly, so we:
+ * 1. Rename the current binary to .old
+ * 2. Write the new binary to the original path
+ * 3. The .old file is cleaned up on next CLI startup via cleanupOldBinary()
  *
  * @param version - Target version to install
- * @throws {UpgradeError} When installation fails
+ * @throws {UpgradeError} When download or installation fails
  */
-function executeUpgradeCurl(version: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let curlFailed = false;
+async function executeUpgradeCurl(version: string): Promise<void> {
+  const url = getBinaryDownloadUrl(version);
+  const { installPath, tempPath, oldPath } = getCurlInstallPaths();
+  const isWindows = process.platform === "win32";
 
-    const curl = spawn("curl", ["-fsSL", INSTALL_SCRIPT_URL], {
-      stdio: ["ignore", "pipe", "inherit"],
-    });
+  // Download binary
+  const response = await fetchWithUpgradeError(
+    url,
+    { headers: getGitHubHeaders() },
+    "GitHub"
+  );
 
-    const bash = spawn("bash", ["-s", "--", "--version", version], {
-      stdio: [curl.stdout, "inherit", "inherit"],
-    });
+  if (!response.ok) {
+    throw new UpgradeError(
+      "execution_failed",
+      `Failed to download binary: HTTP ${response.status}`
+    );
+  }
 
-    curl.on("close", (code) => {
-      if (code !== 0) {
-        curlFailed = true;
-        bash.kill();
-        reject(
-          new UpgradeError(
-            "execution_failed",
-            `curl failed with exit code ${code}`
-          )
-        );
+  // Write to temp file
+  await Bun.write(tempPath, response);
+
+  // Set executable permission (Unix only)
+  if (!isWindows) {
+    chmodSync(tempPath, 0o755);
+  }
+
+  // Replace the binary
+  if (isWindows) {
+    // Windows: Can't overwrite running exe, but CAN rename it
+    // Rename current -> .old, then rename temp -> current
+    try {
+      renameSync(installPath, oldPath);
+    } catch {
+      // Current binary might not exist (fresh install) or .old already exists
+      // Try to remove .old first, then retry
+      try {
+        unlinkSync(oldPath);
+        renameSync(installPath, oldPath);
+      } catch {
+        // If still failing, current binary doesn't exist - that's fine
       }
-    });
-
-    bash.on("close", (code) => {
-      if (curlFailed) {
-        return; // Already rejected by curl handler
-      }
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(
-          new UpgradeError(
-            "execution_failed",
-            `Upgrade failed with exit code ${code}`
-          )
-        );
-      }
-    });
-
-    bash.on("error", (err) => {
-      reject(new UpgradeError("execution_failed", err.message));
-    });
-
-    curl.on("error", (err) => {
-      curlFailed = true;
-      reject(
-        new UpgradeError("execution_failed", `curl failed: ${err.message}`)
-      );
-    });
-  });
+    }
+    renameSync(tempPath, installPath);
+  } else {
+    // Unix: Atomic rename overwrites target
+    renameSync(tempPath, installPath);
+  }
 }
 
 /**

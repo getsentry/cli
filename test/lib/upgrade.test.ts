@@ -5,8 +5,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  cleanupOldBinary,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
@@ -381,5 +385,34 @@ describe("executeUpgrade", () => {
       expect(error).toBeInstanceOf(UpgradeError);
       expect((error as UpgradeError).reason).toBe("unknown_method");
     }
+  });
+});
+
+describe("cleanupOldBinary", () => {
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const oldPath = join(homedir(), ".sentry", "bin", `sentry${suffix}.old`);
+  const binDir = join(homedir(), ".sentry", "bin");
+
+  test("removes .old file if it exists", async () => {
+    // Create the directory and file
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(oldPath, "test content");
+
+    // Verify file exists
+    expect(await Bun.file(oldPath).exists()).toBe(true);
+
+    // Clean up should remove it
+    cleanupOldBinary();
+
+    // File should be gone
+    expect(await Bun.file(oldPath).exists()).toBe(false);
+  });
+
+  test("does not throw if .old file does not exist", () => {
+    // Ensure file doesn't exist by attempting cleanup first
+    cleanupOldBinary();
+
+    // Should not throw when called again
+    expect(() => cleanupOldBinary()).not.toThrow();
   });
 });
