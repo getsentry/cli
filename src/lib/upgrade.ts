@@ -159,10 +159,14 @@ function handleExistingLock(lockPath: string): void {
   let content: string;
   try {
     content = readFileSync(lockPath, "utf-8").trim();
-  } catch {
-    // Lock file disappeared between our check and read - retry acquisition
-    acquireUpgradeLock(lockPath);
-    return;
+  } catch (error) {
+    // Only retry if file disappeared (ENOENT) - race condition with another process
+    // For other errors (EACCES, etc.), re-throw to avoid infinite recursion
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      acquireUpgradeLock(lockPath);
+      return;
+    }
+    throw error;
   }
 
   const existingPid = Number.parseInt(content, 10);
@@ -177,8 +181,12 @@ function handleExistingLock(lockPath: string): void {
   // Stale lock from dead process - remove and retry
   try {
     unlinkSync(lockPath);
-  } catch {
-    // Someone else removed it - that's fine
+  } catch (error) {
+    // Only proceed if file already gone (ENOENT) - someone else removed it
+    // For other errors (EACCES, etc.), re-throw to avoid infinite recursion
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 
   // Retry acquisition (recursive call handles race with other processes)

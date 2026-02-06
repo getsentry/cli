@@ -5,9 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
@@ -547,6 +547,27 @@ describe("acquireUpgradeLock", () => {
     // Lock should now contain our PID
     const content = readFileSync(testLockPath, "utf-8").trim();
     expect(content).toBe(String(process.pid));
+  });
+
+  test("throws on permission error instead of infinite recursion", () => {
+    // Skip on Windows - chmod doesn't work the same way
+    if (platform() === "win32") {
+      return;
+    }
+
+    // Create a lock file with a stale PID
+    writeFileSync(testLockPath, "4194304"); // High PID unlikely to exist
+
+    // Make file unreadable
+    chmodSync(testLockPath, 0o000);
+
+    try {
+      // Should throw a permission error, not recurse infinitely
+      expect(() => acquireUpgradeLock(testLockPath)).toThrow();
+    } finally {
+      // Restore permissions so cleanup can work
+      chmodSync(testLockPath, 0o644);
+    }
   });
 });
 
