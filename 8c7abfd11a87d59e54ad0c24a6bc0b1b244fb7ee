@@ -1,0 +1,43 @@
+# Binary Optimization Plan
+
+> **Status:** Done — applied `minify: true` only
+> **File modified:** `script/build.ts`
+> **Reference:** https://bun.sh/docs/bundler/executables
+
+## Result
+
+Added `minify: true` to `Bun.build()` in `buildTarget()`. All other flags were benchmarked
+and rejected — see results below.
+
+## Benchmark Results
+
+Tested on linux-x64 with `hyperfine --warmup 5 --min-runs 50` for startup,
+`/usr/bin/time` (30 runs, median) for peak RSS.
+
+| Config                 |   Size |  Δ Size | Startup (mean ± σ) | Δ Startup | Peak RSS    |  Δ RSS |
+| ---------------------- | -----: | ------: | -----------------: | --------: | ----------: | -----: |
+| baseline               | 99.2MB |       — |   337.0 ± 17.1 ms |         — | 94,080 KB   |      — |
+| **minify**             | 98.2MB | **-1%** |   316.7 ± 14.0 ms |  **-6%**  | 90,624 KB   | **-4%**|
+| minify+smol            | 98.2MB |     -1% |   315.2 ± 12.4 ms |      -6%  | 90,624 KB   |    -4% |
+| minify+sourcemap       |100.3MB |     +1% |   311.6 ±  9.2 ms |      -8%  | 92,672 KB   |    -1% |
+| minify+sourcemap+smol  |100.3MB |     +1% |   318.9 ± 10.4 ms |      -5%  | 92,800 KB   |    -1% |
+
+Not shown: `bytecode: true` variants all added +9–11% binary size (+10 MB) with no meaningful
+startup improvement — bytecode representation is larger than minified source text.
+
+## Decisions
+
+| Flag | Decision | Reason |
+|------|----------|--------|
+| `minify: true` | **Applied** | Smaller binary, faster startup, less memory. No trade-off. |
+| `bytecode: true` | Rejected | +10 MB binary size for negligible startup gain. |
+| `sourcemap: "linked"` | Not now | +2 MB for readable stack traces. Worth revisiting later. |
+| `execArgv: ["--smol"]` | Rejected | Zero measurable effect for a short-lived CLI process. |
+| Sourcemap upload | N/A | Compiled executables don't produce external `.map` files. `"linked"` embeds them in-binary. |
+
+## Notes
+
+- `sourcemap: "external"` does **not** produce `.map` files for `--compile` executables — only `"linked"` works (embeds zstd-compressed sourcemap inside the binary)
+- `--smol` uses a smaller GC, but CLIs exit before the GC runs, so it has no effect
+- `bytecode` pre-compiles JS to bytecode but the bytecode representation is larger than minified source, negating any startup savings with extra I/O
+- The `bundle.ts` (npm CJS bundle) already uses `minify: true` via esbuild and uploads sourcemaps via `@sentry/esbuild-plugin`
