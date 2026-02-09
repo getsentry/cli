@@ -9,20 +9,22 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import {
+  acquireLock,
+  getBinaryDownloadUrl,
+  isProcessRunning,
+  releaseLock,
+} from "../../src/lib/binary.js";
 import { clearInstallInfo } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
-  acquireUpgradeLock,
-  cleanupOldBinary,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
   fetchLatestVersion,
-  getBinaryDownloadUrl,
   getCurlInstallPaths,
-  isProcessRunning,
   parseInstallationMethod,
-  releaseUpgradeLock,
+  startCleanupOldBinary,
   versionExists,
 } from "../../src/lib/upgrade.js";
 
@@ -411,17 +413,18 @@ describe("versionExists", () => {
 });
 
 describe("executeUpgrade", () => {
-  test("throws UpgradeError for unknown installation method", () => {
-    // executeUpgrade throws synchronously for unknown method
-    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(UpgradeError);
-    expect(() => executeUpgrade("unknown", "1.0.0")).toThrow(
+  test("throws UpgradeError for unknown installation method", async () => {
+    await expect(executeUpgrade("unknown", "1.0.0")).rejects.toThrow(
+      UpgradeError
+    );
+    await expect(executeUpgrade("unknown", "1.0.0")).rejects.toThrow(
       "Could not detect installation method"
     );
   });
 
-  test("throws UpgradeError with unknown_method reason", () => {
+  test("throws UpgradeError with unknown_method reason", async () => {
     try {
-      executeUpgrade("unknown", "1.0.0");
+      await executeUpgrade("unknown", "1.0.0");
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(UpgradeError);
@@ -515,7 +518,7 @@ describe("isProcessRunning", () => {
   });
 });
 
-describe("acquireUpgradeLock", () => {
+describe("acquireLock", () => {
   const binDir = join(homedir(), ".sentry", "bin");
   const testLockPath = join(binDir, "test-upgrade.lock");
 
@@ -527,7 +530,7 @@ describe("acquireUpgradeLock", () => {
   afterEach(() => {
     // Clean up test lock file
     try {
-      releaseUpgradeLock(testLockPath);
+      releaseLock(testLockPath);
     } catch {
       // Ignore
     }
@@ -535,10 +538,10 @@ describe("acquireUpgradeLock", () => {
 
   test("creates lock file with current PID", () => {
     // Ensure lock doesn't exist
-    releaseUpgradeLock(testLockPath);
+    releaseLock(testLockPath);
 
     // Acquire lock
-    acquireUpgradeLock(testLockPath);
+    acquireLock(testLockPath);
 
     // Verify lock file exists and contains our PID
     const content = readFileSync(testLockPath, "utf-8").trim();
@@ -550,8 +553,8 @@ describe("acquireUpgradeLock", () => {
     writeFileSync(testLockPath, String(process.pid));
 
     // Trying to acquire should fail
-    expect(() => acquireUpgradeLock(testLockPath)).toThrow(UpgradeError);
-    expect(() => acquireUpgradeLock(testLockPath)).toThrow(
+    expect(() => acquireLock(testLockPath)).toThrow(UpgradeError);
+    expect(() => acquireLock(testLockPath)).toThrow(
       "Another upgrade is already in progress"
     );
   });
@@ -561,7 +564,7 @@ describe("acquireUpgradeLock", () => {
     writeFileSync(testLockPath, "4194304"); // Very high PID unlikely to exist
 
     // Acquiring should succeed after cleaning up stale lock
-    acquireUpgradeLock(testLockPath);
+    acquireLock(testLockPath);
 
     // Lock should now contain our PID
     const content = readFileSync(testLockPath, "utf-8").trim();
@@ -573,7 +576,7 @@ describe("acquireUpgradeLock", () => {
     writeFileSync(testLockPath, "not-a-number");
 
     // Should treat as stale and acquire successfully
-    acquireUpgradeLock(testLockPath);
+    acquireLock(testLockPath);
 
     // Lock should now contain our PID
     const content = readFileSync(testLockPath, "utf-8").trim();
@@ -594,7 +597,7 @@ describe("acquireUpgradeLock", () => {
 
     try {
       // Should throw a permission error, not recurse infinitely
-      expect(() => acquireUpgradeLock(testLockPath)).toThrow();
+      expect(() => acquireLock(testLockPath)).toThrow();
     } finally {
       // Restore permissions so cleanup can work
       chmodSync(testLockPath, 0o644);
@@ -602,7 +605,7 @@ describe("acquireUpgradeLock", () => {
   });
 });
 
-describe("releaseUpgradeLock", () => {
+describe("releaseLock", () => {
   const testLockPath = join(homedir(), ".sentry", "bin", "test-release.lock");
 
   test("removes lock file", async () => {
@@ -614,7 +617,7 @@ describe("releaseUpgradeLock", () => {
     expect(Bun.file(testLockPath).size).toBeGreaterThan(0);
 
     // Release lock
-    releaseUpgradeLock(testLockPath);
+    releaseLock(testLockPath);
 
     // File should be gone
     expect(await Bun.file(testLockPath).exists()).toBe(false);
@@ -622,7 +625,7 @@ describe("releaseUpgradeLock", () => {
 
   test("does not throw if lock file does not exist", () => {
     // Should not throw
-    expect(() => releaseUpgradeLock(testLockPath)).not.toThrow();
+    expect(() => releaseLock(testLockPath)).not.toThrow();
   });
 });
 
@@ -659,23 +662,26 @@ describe("executeUpgrade with curl method", () => {
     }
   });
 
-  test("executeUpgrade curl downloads and installs binary", async () => {
+  test("executeUpgrade curl downloads binary to temp path", async () => {
     const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic bytes
 
     // Mock fetch to return our fake binary
     mockFetch(async () => new Response(mockBinaryContent, { status: 200 }));
 
-    // Run the actual executeUpgrade with curl method
-    await executeUpgrade("curl", "1.0.0");
+    // Run the actual executeUpgrade with curl method — returns DownloadResult
+    const result = await executeUpgrade("curl", "1.0.0");
 
-    // Verify the binary was installed - get paths fresh after upgrade
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("tempBinaryPath");
+    expect(result).toHaveProperty("lockPath");
+
+    // Verify the binary was downloaded to the temp path
     const paths = getTestPaths();
-    expect(await Bun.file(paths.installPath).exists()).toBe(true);
-    const content = await Bun.file(paths.installPath).arrayBuffer();
+    expect(result!.tempBinaryPath).toBe(paths.tempPath);
+    expect(result!.lockPath).toBe(paths.lockPath);
+    expect(await Bun.file(result!.tempBinaryPath).exists()).toBe(true);
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
-
-    // Lock should be released
-    expect(await Bun.file(paths.lockPath).exists()).toBe(false);
   });
 
   test("executeUpgrade curl throws on HTTP error", async () => {
@@ -700,18 +706,6 @@ describe("executeUpgrade with curl method", () => {
     );
   });
 
-  test("executeUpgrade curl cleans up temp file on success", async () => {
-    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
-
-    mockFetch(async () => new Response(mockBinaryContent, { status: 200 }));
-
-    await executeUpgrade("curl", "1.0.0");
-
-    // Temp file should not exist after successful install
-    const paths = getTestPaths();
-    expect(await Bun.file(paths.tempPath).exists()).toBe(false);
-  });
-
   test("executeUpgrade curl releases lock on failure", async () => {
     mockFetch(async () => new Response("Server Error", { status: 500 }));
 
@@ -727,8 +721,8 @@ describe("executeUpgrade with curl method", () => {
   });
 });
 
-describe("cleanupOldBinary", () => {
-  // Get paths fresh to match what cleanupOldBinary() uses
+describe("startCleanupOldBinary", () => {
+  // Get paths fresh to match what startCleanupOldBinary() uses
   function getOldPath() {
     return getCurlInstallPaths().oldPath;
   }
@@ -748,7 +742,7 @@ describe("cleanupOldBinary", () => {
     expect(await Bun.file(oldPath).exists()).toBe(true);
 
     // Clean up is fire-and-forget async, so we need to wait a bit
-    cleanupOldBinary();
+    startCleanupOldBinary();
     await Bun.sleep(50);
 
     // File should be gone
@@ -757,13 +751,13 @@ describe("cleanupOldBinary", () => {
 
   // Note: cleanupOldBinary intentionally does NOT clean up .download files
   // because an upgrade may be in progress in another process. The .download
-  // cleanup is handled inside executeUpgradeCurl() under the exclusive lock.
+  // cleanup is handled inside the upgrade flow under the exclusive lock.
 
   test("does not throw if files do not exist", () => {
     // Ensure files don't exist by attempting cleanup first
-    cleanupOldBinary();
+    startCleanupOldBinary();
 
     // Should not throw when called again
-    expect(() => cleanupOldBinary()).not.toThrow();
+    expect(() => startCleanupOldBinary()).not.toThrow();
   });
 });
