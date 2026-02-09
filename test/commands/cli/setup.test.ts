@@ -5,11 +5,21 @@
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
+
+/** Store original fetch for restoration */
+let originalFetch: typeof globalThis.fetch;
+
+/** Helper to mock fetch without TypeScript errors about missing Bun-specific properties */
+function mockFetch(
+  fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>
+): void {
+  globalThis.fetch = fn as typeof globalThis.fetch;
+}
 
 /** Create a mock SentryContext for testing */
 function createMockContext(
@@ -97,7 +107,14 @@ describe("sentry cli setup", () => {
 
     await run(
       app,
-      ["cli", "setup", "--quiet", "--no-modify-path", "--no-completions"],
+      [
+        "cli",
+        "setup",
+        "--quiet",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
       context
     );
 
@@ -110,7 +127,13 @@ describe("sentry cli setup", () => {
 
     await run(
       app,
-      ["cli", "setup", "--no-modify-path", "--no-completions"],
+      [
+        "cli",
+        "setup",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
       context
     );
 
@@ -130,6 +153,7 @@ describe("sentry cli setup", () => {
         "curl",
         "--no-modify-path",
         "--no-completions",
+        "--no-agent-skills",
       ],
       context
     );
@@ -152,7 +176,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-completions"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-completions", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("PATH:");
@@ -171,7 +199,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-completions"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-completions", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("already in PATH");
@@ -186,7 +218,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-completions"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-completions", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("No shell config file found");
@@ -206,7 +242,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-modify-path"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("Completions:");
@@ -222,7 +262,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-modify-path"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("fpath=");
@@ -243,7 +287,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-completions"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-completions", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("GITHUB_PATH");
@@ -259,7 +307,11 @@ describe("sentry cli setup", () => {
       },
     });
 
-    await run(app, ["cli", "setup", "--no-modify-path"], context);
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
 
     const combined = output.join("");
     expect(combined).toContain("Not supported for");
@@ -271,11 +323,142 @@ describe("sentry cli setup", () => {
     // Verify kebab-case works (--no-modify-path instead of --noModifyPath)
     await run(
       app,
-      ["cli", "setup", "--no-modify-path", "--no-completions", "--quiet"],
+      [
+        "cli",
+        "setup",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+        "--quiet",
+      ],
       context
     );
 
     // Should not error
     expect(output.join("")).toBe("");
+  });
+
+  describe("agent skills", () => {
+    beforeEach(() => {
+      originalFetch = globalThis.fetch;
+      mockFetch(
+        async () =>
+          new Response("# Sentry CLI Skill\nTest content", { status: 200 })
+      );
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    test("installs agent skills when Claude Code is detected", async () => {
+      // Create ~/.claude to simulate Claude Code being installed
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Agent skills:");
+      expect(combined).toContain("Installed to");
+
+      // Verify the file was actually written
+      const skillPath = join(
+        testDir,
+        ".claude",
+        "skills",
+        "sentry-cli",
+        "SKILL.md"
+      );
+      expect(existsSync(skillPath)).toBe(true);
+    });
+
+    test("silently skips when Claude Code is not detected", async () => {
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).not.toContain("Agent skills:");
+    });
+
+    test("skips when --no-agent-skills is set", async () => {
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+
+      await run(
+        app,
+        [
+          "cli",
+          "setup",
+          "--no-modify-path",
+          "--no-completions",
+          "--no-agent-skills",
+        ],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).not.toContain("Agent skills:");
+    });
+
+    test("does not break setup on network failure", async () => {
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      mockFetch(async () => {
+        throw new Error("Network error");
+      });
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      // Setup should still complete successfully
+      const combined = output.join("");
+      expect(combined).toContain("Setup complete!");
+      expect(combined).not.toContain("Agent skills:");
+    });
   });
 });
