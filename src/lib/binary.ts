@@ -6,15 +6,13 @@
  */
 
 import {
-  chmodSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { chmod, mkdir, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { getUserAgent } from "./constants.js";
 import { UpgradeError } from "./errors.js";
@@ -156,6 +154,10 @@ export async function fetchWithUpgradeError(
 /**
  * Replace the binary at the install path, handling platform differences.
  *
+ * Intentionally synchronous: the multi-step rename sequence (especially on
+ * Windows where old→.old then temp→install) must be uninterruptible to avoid
+ * leaving the install path in a broken state between steps.
+ *
  * - Unix: Atomic rename overwrites the target (safe even if the old binary is running)
  * - Windows: Rename old binary to .old first (Windows allows renaming running exes
  *   but not deleting/overwriting them), then rename the temp file into place.
@@ -164,7 +166,7 @@ export async function fetchWithUpgradeError(
  * @param tempPath - Path to the new binary (temp download location)
  * @param installPath - Target path to install the binary to
  */
-export function replaceBinary(tempPath: string, installPath: string): void {
+export function replaceBinarySync(tempPath: string, installPath: string): void {
   if (process.platform === "win32") {
     const oldPath = `${installPath}.old`;
     // Windows: Can't overwrite running exe, but CAN rename it
@@ -326,7 +328,7 @@ export async function installBinary(
   sourcePath: string,
   installDir: string
 ): Promise<string> {
-  mkdirSync(installDir, { recursive: true, mode: 0o755 });
+  await mkdir(installDir, { recursive: true, mode: 0o755 });
 
   const installPath = join(installDir, getBinaryFilename());
   const { tempPath, lockPath } = getBinaryPaths(installPath);
@@ -340,7 +342,7 @@ export async function installBinary(
     if (resolve(sourcePath) !== resolve(tempPath)) {
       // Clean up any leftover temp file from interrupted operation
       try {
-        unlinkSync(tempPath);
+        await unlink(tempPath);
       } catch {
         // Ignore if doesn't exist
       }
@@ -350,12 +352,12 @@ export async function installBinary(
 
       // Set executable permission (Unix only)
       if (process.platform !== "win32") {
-        chmodSync(tempPath, 0o755);
+        await chmod(tempPath, 0o755);
       }
     }
 
     // Atomically replace (handles Windows .old rename)
-    replaceBinary(tempPath, installPath);
+    replaceBinarySync(tempPath, installPath);
   } finally {
     releaseLock(lockPath);
   }

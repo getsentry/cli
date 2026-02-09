@@ -111,8 +111,8 @@ async function runSetupOnNewBinary(
     : undefined;
 
   const proc = Bun.spawn([binaryPath, ...args], {
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
     env,
   });
   const exitCode = await proc.exited;

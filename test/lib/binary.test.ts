@@ -23,7 +23,7 @@ import {
   getBinaryPaths,
   installBinary,
   releaseLock,
-  replaceBinary,
+  replaceBinarySync,
 } from "../../src/lib/binary.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 
@@ -240,7 +240,7 @@ describe("fetchWithUpgradeError", () => {
   });
 });
 
-describe("replaceBinary", () => {
+describe("replaceBinarySync", () => {
   let testDir: string;
 
   beforeEach(() => {
@@ -266,7 +266,7 @@ describe("replaceBinary", () => {
     // Write new binary to temp location
     await Bun.write(tempPath, "new binary");
 
-    replaceBinary(tempPath, installPath);
+    replaceBinarySync(tempPath, installPath);
 
     // New content should be at install path
     const content = await Bun.file(installPath).text();
@@ -285,7 +285,7 @@ describe("replaceBinary", () => {
     // Only write temp, no existing binary
     await Bun.write(tempPath, "fresh binary");
 
-    replaceBinary(tempPath, installPath);
+    replaceBinarySync(tempPath, installPath);
 
     const content = await Bun.file(installPath).text();
     expect(content).toBe("fresh binary");
