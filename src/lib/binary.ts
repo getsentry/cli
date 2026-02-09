@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { getUserAgent } from "./constants.js";
 import { UpgradeError } from "./errors.js";
 
@@ -91,7 +91,7 @@ export function determineInstallDir(
   homeDir: string,
   env: NodeJS.ProcessEnv
 ): string {
-  const pathDirs = (env.PATH ?? "").split(":");
+  const pathDirs = (env.PATH ?? "").split(delimiter);
 
   // 1. Explicit override via environment variable
   if (env.SENTRY_INSTALL_DIR) {
@@ -269,6 +269,14 @@ function handleExistingLock(lockPath: string): void {
   const existingPid = Number.parseInt(content, 10);
 
   if (!Number.isNaN(existingPid) && isProcessRunning(existingPid)) {
+    // If the lock holder is our parent process (upgrade command spawned
+    // setup --install), take over the lock instead of failing. This allows
+    // the download→install pipeline to stay locked against concurrent upgrades
+    // while handing off from parent to child.
+    if (existingPid === process.ppid) {
+      writeFileSync(lockPath, String(process.pid));
+      return;
+    }
     throw new UpgradeError(
       "execution_failed",
       "Another upgrade is already in progress"
@@ -326,19 +334,24 @@ export async function installBinary(
   acquireLock(lockPath);
 
   try {
-    // Clean up any leftover temp file from interrupted operation
-    try {
-      unlinkSync(tempPath);
-    } catch {
-      // Ignore if doesn't exist
-    }
+    // When upgrade spawns setup --install, the child's execPath IS the
+    // .download file (sourcePath === tempPath). In that case skip the
+    // unlink+copy — the file is already where we need it.
+    if (resolve(sourcePath) !== resolve(tempPath)) {
+      // Clean up any leftover temp file from interrupted operation
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Ignore if doesn't exist
+      }
 
-    // Copy source binary to temp path next to install location
-    await Bun.write(tempPath, Bun.file(sourcePath));
+      // Copy source binary to temp path next to install location
+      await Bun.write(tempPath, Bun.file(sourcePath));
 
-    // Set executable permission (Unix only)
-    if (process.platform !== "win32") {
-      chmodSync(tempPath, 0o755);
+      // Set executable permission (Unix only)
+      if (process.platform !== "win32") {
+        chmodSync(tempPath, 0o755);
+      }
     }
 
     // Atomically replace (handles Windows .old rename)

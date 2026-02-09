@@ -329,15 +329,34 @@ export async function versionExists(
 
 // Upgrade Execution
 
+/** Result from downloadBinaryToTemp — includes both the binary path and lock path */
+export type DownloadResult = {
+  /** Path to the downloaded temporary binary */
+  tempBinaryPath: string;
+  /** Path to the lock file held during download (caller must release after child exits) */
+  lockPath: string;
+};
+
 /**
  * Download the new binary to a temporary path and return its location.
  * Used by the upgrade command to download before spawning setup --install.
  *
+ * The lock is held on success so concurrent upgrades are blocked during the
+ * download→spawn→install pipeline. The caller MUST release the lock after the
+ * child process exits (the child may use a different install directory and
+ * therefore a different lock file, so it cannot reliably release this one).
+ *
+ * If the child resolves to the same install path, it takes over the lock via
+ * process.ppid recognition in acquireLock — the parent's subsequent release
+ * is then a harmless no-op.
+ *
  * @param version - Target version to download
- * @returns Path to the downloaded temporary binary
+ * @returns The downloaded binary path and lock path to release
  * @throws {UpgradeError} When download fails
  */
-export async function downloadBinaryToTemp(version: string): Promise<string> {
+export async function downloadBinaryToTemp(
+  version: string
+): Promise<DownloadResult> {
   const url = getBinaryDownloadUrl(version);
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -373,19 +392,11 @@ export async function downloadBinaryToTemp(version: string): Promise<string> {
       chmodSync(tempPath, 0o755);
     }
 
-    return tempPath;
+    return { tempBinaryPath: tempPath, lockPath };
   } catch (error) {
     releaseLock(lockPath);
     throw error;
   }
-
-  // Note: lock is intentionally NOT released here on success.
-  // The caller (upgrade command) will spawn setup --install which uses
-  // installBinary() with its own lock. The lock for the temp download
-  // path is released when installBinary completes the replacement.
-  // In practice, getCurlInstallPaths and installBinary use different
-  // lock files (the temp download lock vs the install path lock),
-  // so this is safe.
 }
 
 /**
@@ -431,8 +442,9 @@ function executeUpgradePackageManager(
 /**
  * Execute the upgrade using the appropriate method.
  *
- * For curl installs, downloads the new binary to a temp path and returns it.
- * The caller should then spawn `setup --install` on the new binary.
+ * For curl installs, downloads the new binary to a temp path and returns a
+ * DownloadResult with the binary path and lock path. The caller should spawn
+ * `setup --install` on the new binary, then release the lock.
  *
  * For package manager installs, runs the package manager's global install
  * command (which replaces the binary in-place). The caller should then
@@ -440,13 +452,13 @@ function executeUpgradePackageManager(
  *
  * @param method - How the CLI was installed
  * @param version - Target version to install
- * @returns Path to the downloaded temp binary (curl), or null (package manager)
+ * @returns Download result with paths (curl), or null (package manager)
  * @throws {UpgradeError} When method is unknown or installation fails
  */
 export async function executeUpgrade(
   method: InstallationMethod,
   version: string
-): Promise<string | null> {
+): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
       return downloadBinaryToTemp(version);

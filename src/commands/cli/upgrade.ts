@@ -7,6 +7,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
+import { releaseLock } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { getInstallInfo } from "../../lib/db/install-info.js";
@@ -104,7 +105,13 @@ async function runSetupOnNewBinary(
     stdout: "ignore",
     stderr: "ignore",
   });
-  await proc.exited;
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new UpgradeError(
+      "execution_failed",
+      `Setup failed with exit code ${exitCode}`
+    );
+  }
 }
 
 export const upgradeCommand = buildCommand({
@@ -175,13 +182,19 @@ export const upgradeCommand = buildCommand({
 
     // Execute upgrade: downloads new binary (curl) or installs via package manager
     stdout.write(`\nUpgrading to ${target}...\n`);
-    const tempBinaryPath = await executeUpgrade(method, target);
+    const downloadResult = await executeUpgrade(method, target);
 
     // Run setup on the new binary to update completions, agent skills,
     // and record installation metadata.
-    if (tempBinaryPath) {
-      // Curl: new binary is at temp path, setup --install will place it
-      await runSetupOnNewBinary(tempBinaryPath, method, true);
+    if (downloadResult) {
+      // Curl: new binary is at temp path, setup --install will place it.
+      // Release the download lock after the child exits — if the child used
+      // the same lock path (ppid takeover), this is a harmless no-op.
+      try {
+        await runSetupOnNewBinary(downloadResult.tempBinaryPath, method, true);
+      } finally {
+        releaseLock(downloadResult.lockPath);
+      }
     } else {
       // Package manager: binary already in place, just run setup
       const storedInfo = getInstallInfo();

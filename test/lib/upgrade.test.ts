@@ -668,17 +668,19 @@ describe("executeUpgrade with curl method", () => {
     // Mock fetch to return our fake binary
     mockFetch(async () => new Response(mockBinaryContent, { status: 200 }));
 
-    // Run the actual executeUpgrade with curl method — returns temp path
-    const tempPath = await executeUpgrade("curl", "1.0.0");
+    // Run the actual executeUpgrade with curl method — returns DownloadResult
+    const result = await executeUpgrade("curl", "1.0.0");
 
-    expect(tempPath).not.toBeNull();
-    expect(typeof tempPath).toBe("string");
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("tempBinaryPath");
+    expect(result).toHaveProperty("lockPath");
 
     // Verify the binary was downloaded to the temp path
     const paths = getTestPaths();
-    expect(tempPath).toBe(paths.tempPath);
-    expect(await Bun.file(tempPath!).exists()).toBe(true);
-    const content = await Bun.file(tempPath!).arrayBuffer();
+    expect(result!.tempBinaryPath).toBe(paths.tempPath);
+    expect(result!.lockPath).toBe(paths.lockPath);
+    expect(await Bun.file(result!.tempBinaryPath).exists()).toBe(true);
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 

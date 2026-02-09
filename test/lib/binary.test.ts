@@ -6,15 +6,23 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
+  acquireLock,
   determineInstallDir,
   fetchWithUpgradeError,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   installBinary,
+  releaseLock,
   replaceBinary,
 } from "../../src/lib/binary.js";
 import { UpgradeError } from "../../src/lib/errors.js";
@@ -367,5 +375,87 @@ describe("installBinary", () => {
 
     const content = await Bun.file(existingPath).text();
     expect(content).toBe("new content");
+  });
+
+  test("handles sourcePath === tempPath (upgrade spawn case)", async () => {
+    if (process.platform === "win32") return;
+
+    // Simulate the upgrade flow: the source binary IS already the .download file
+    // (this happens when upgrade downloads to installPath.download, then spawns
+    // setup --install where execPath is that .download file)
+    mkdirSync(installDir, { recursive: true });
+    const tempPath = join(installDir, `${getBinaryFilename()}.download`);
+    await Bun.write(tempPath, "upgraded binary");
+    chmodSync(tempPath, 0o755);
+
+    const result = await installBinary(tempPath, installDir);
+
+    expect(result).toBe(join(installDir, getBinaryFilename()));
+    const content = await Bun.file(result).text();
+    expect(content).toBe("upgraded binary");
+  });
+});
+
+describe("acquireLock", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `lock-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("creates lock file with current PID", () => {
+    const lockPath = join(testDir, "test.lock");
+    acquireLock(lockPath);
+
+    const content = readFileSync(lockPath, "utf-8").trim();
+    expect(content).toBe(String(process.pid));
+
+    releaseLock(lockPath);
+  });
+
+  test("throws when lock held by another running process", () => {
+    const lockPath = join(testDir, "test.lock");
+    // PID 1 (init/systemd) is always running
+    writeFileSync(lockPath, "1");
+
+    expect(() => acquireLock(lockPath)).toThrow(
+      "Another upgrade is already in progress"
+    );
+  });
+
+  test("takes over stale lock from dead process", () => {
+    const lockPath = join(testDir, "test.lock");
+    // Use an absurdly high PID that won't exist
+    writeFileSync(lockPath, "999999999");
+
+    acquireLock(lockPath);
+
+    const content = readFileSync(lockPath, "utf-8").trim();
+    expect(content).toBe(String(process.pid));
+
+    releaseLock(lockPath);
+  });
+
+  test("allows child process to take over parent lock via process.ppid", () => {
+    const lockPath = join(testDir, "test.lock");
+    // Write the current process's parent PID — simulates the upgrade command
+    // holding the lock when the child (setup --install) tries to acquire it
+    writeFileSync(lockPath, String(process.ppid));
+
+    // Should NOT throw — recognizes parent PID and takes over
+    acquireLock(lockPath);
+
+    const content = readFileSync(lockPath, "utf-8").trim();
+    expect(content).toBe(String(process.pid));
+
+    releaseLock(lockPath);
   });
 });
