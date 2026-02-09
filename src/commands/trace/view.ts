@@ -120,8 +120,9 @@ export async function resolveFromProjectSearch(
  *
  * @param stdout - Output stream
  * @param options - Output options
+ * @internal Exported for testing
  */
-function writeHumanOutput(
+export function writeHumanOutput(
   stdout: Writer,
   options: {
     summaryLines: string[];

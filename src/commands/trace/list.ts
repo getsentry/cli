@@ -45,8 +45,9 @@ const DEFAULT_LIMIT = 20;
  * Validate that --limit value is within allowed range.
  *
  * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
+ * @internal Exported for testing
  */
-function validateLimit(value: string): number {
+export function validateLimit(value: string): number {
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
     throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
@@ -58,8 +59,9 @@ function validateLimit(value: string): number {
  * Parse and validate sort flag value.
  *
  * @throws Error if value is not "date" or "duration"
+ * @internal Exported for testing
  */
-function parseSort(value: string): SortValue {
+export function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
     throw new Error(
       `Invalid sort value. Must be one of: ${VALID_SORT_VALUES.join(", ")}`
@@ -83,8 +85,9 @@ type ResolvedTraceTarget = {
  * - auto-detect: no input -> use DSN detection or config defaults
  *
  * @throws {ContextError} When target cannot be resolved
+ * @internal Exported for testing
  */
-async function resolveTraceTarget(
+export async function resolveTraceTarget(
   target: string | undefined,
   cwd: string
 ): Promise<ResolvedTraceTarget> {
