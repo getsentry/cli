@@ -321,10 +321,17 @@ describe("extractTransactionSegment edge cases", () => {
 // Integration properties
 
 describe("property: alias lookup invariants", () => {
-  test("alias is a prefix of the extracted segment", () => {
+  test("alias is a prefix of the extracted segment (unique transactions)", () => {
+    // Use uniqueArray to avoid duplicate transactions, since disambiguateSegments
+    // appends numeric suffixes to duplicates which breaks the prefix relationship
+    // with the raw extracted segment.
     fcAssert(
       property(
-        array(transactionInputArb, { minLength: 1, maxLength: 10 }),
+        uniqueArray(transactionInputArb, {
+          minLength: 1,
+          maxLength: 10,
+          comparator: (a, b) => a.transaction === b.transaction,
+        }),
         (inputs) => {
           const aliases = buildTransactionAliases(inputs);
 
