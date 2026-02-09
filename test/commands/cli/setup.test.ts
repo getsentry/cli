@@ -338,6 +338,132 @@ describe("sentry cli setup", () => {
     expect(output.join("")).toBe("");
   });
 
+  describe("--install flag", () => {
+    test("installs binary from temp location and shows welcome message", async () => {
+      // Create a fake source binary to "install"
+      const sourceDir = join(testDir, "tmp");
+      mkdirSync(sourceDir, { recursive: true });
+      const sourcePath = join(sourceDir, "sentry-download");
+      writeFileSync(sourcePath, "#!/bin/sh\necho test-binary");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(sourcePath, 0o755);
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: sourcePath,
+        env: {
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/bash",
+          SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
+        },
+      });
+
+      await run(
+        app,
+        [
+          "cli",
+          "setup",
+          "--install",
+          "--method",
+          "curl",
+          "--no-modify-path",
+          "--no-completions",
+          "--no-agent-skills",
+        ],
+        context
+      );
+
+      const combined = output.join("");
+
+      // Should show welcome message, not "Setup complete!"
+      expect(combined).toContain("Installed sentry v");
+      expect(combined).toContain("Get started:");
+      expect(combined).toContain("sentry login");
+      expect(combined).toContain("sentry --help");
+      expect(combined).toContain("cli.sentry.dev");
+      expect(combined).not.toContain("Setup complete!");
+
+      // Should install binary to the target directory
+      const installedPath = join(testDir, "install-dir", "sentry");
+      expect(existsSync(installedPath)).toBe(true);
+    });
+
+    test("does not log 'Recorded installation method' with --install", async () => {
+      const sourceDir = join(testDir, "tmp");
+      mkdirSync(sourceDir, { recursive: true });
+      const sourcePath = join(sourceDir, "sentry-download");
+      writeFileSync(sourcePath, "binary-content");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(sourcePath, 0o755);
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: sourcePath,
+        env: {
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/bash",
+          SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
+        },
+      });
+
+      await run(
+        app,
+        [
+          "cli",
+          "setup",
+          "--install",
+          "--method",
+          "curl",
+          "--no-modify-path",
+          "--no-completions",
+          "--no-agent-skills",
+        ],
+        context
+      );
+
+      const combined = output.join("");
+      // With --install, the "Recorded installation method" log is suppressed
+      expect(combined).not.toContain("Recorded installation method");
+    });
+
+    test("--install with --quiet suppresses all output", async () => {
+      const sourceDir = join(testDir, "tmp");
+      mkdirSync(sourceDir, { recursive: true });
+      const sourcePath = join(sourceDir, "sentry-download");
+      writeFileSync(sourcePath, "binary-content");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(sourcePath, 0o755);
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: sourcePath,
+        env: {
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/bash",
+          SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
+        },
+      });
+
+      await run(
+        app,
+        [
+          "cli",
+          "setup",
+          "--install",
+          "--method",
+          "curl",
+          "--no-modify-path",
+          "--no-completions",
+          "--no-agent-skills",
+          "--quiet",
+        ],
+        context
+      );
+
+      expect(output.join("")).toBe("");
+    });
+  });
+
   describe("agent skills", () => {
     beforeEach(() => {
       originalFetch = globalThis.fetch;

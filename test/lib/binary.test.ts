@@ -10,11 +10,14 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   determineInstallDir,
+  fetchWithUpgradeError,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   installBinary,
+  replaceBinary,
 } from "../../src/lib/binary.js";
+import { UpgradeError } from "../../src/lib/errors.js";
 
 describe("getBinaryDownloadUrl", () => {
   test("builds correct URL for current platform", () => {
@@ -155,6 +158,129 @@ describe("determineInstallDir", () => {
     });
 
     expect(result).toBe(customDir);
+  });
+});
+
+describe("fetchWithUpgradeError", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns response on success", async () => {
+    globalThis.fetch = (async () =>
+      new Response("ok", { status: 200 })) as typeof globalThis.fetch;
+
+    const response = await fetchWithUpgradeError(
+      "https://example.com",
+      {},
+      "Test"
+    );
+    expect(response.status).toBe(200);
+  });
+
+  test("re-throws AbortError as-is", async () => {
+    globalThis.fetch = (async () => {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }) as typeof globalThis.fetch;
+
+    try {
+      await fetchWithUpgradeError("https://example.com", {}, "Test");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).toBe("AbortError");
+      expect(error).not.toBeInstanceOf(UpgradeError);
+    }
+  });
+
+  test("wraps network errors as UpgradeError", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as typeof globalThis.fetch;
+
+    try {
+      await fetchWithUpgradeError("https://example.com", {}, "GitHub");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      expect((error as UpgradeError).message).toContain("GitHub");
+      expect((error as UpgradeError).message).toContain("ECONNREFUSED");
+    }
+  });
+
+  test("wraps non-Error thrown values as UpgradeError", async () => {
+    globalThis.fetch = (async () => {
+      // biome-ignore lint/style/useThrowOnlyError: intentionally testing non-Error throw
+      throw { toString: () => "custom thrown value" };
+    }) as typeof globalThis.fetch;
+
+    try {
+      await fetchWithUpgradeError("https://example.com", {}, "Service");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UpgradeError);
+      expect((error as UpgradeError).message).toContain("custom thrown value");
+    }
+  });
+});
+
+describe("replaceBinary", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `replace-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("replaces existing binary atomically on Unix", async () => {
+    if (process.platform === "win32") return;
+
+    const installPath = join(testDir, "sentry");
+    const tempPath = join(testDir, "sentry.download");
+
+    // Write existing binary
+    await Bun.write(installPath, "old binary");
+    // Write new binary to temp location
+    await Bun.write(tempPath, "new binary");
+
+    replaceBinary(tempPath, installPath);
+
+    // New content should be at install path
+    const content = await Bun.file(installPath).text();
+    expect(content).toBe("new binary");
+
+    // Temp file should no longer exist (it was renamed)
+    expect(await Bun.file(tempPath).exists()).toBe(false);
+  });
+
+  test("works when no existing binary (fresh install)", async () => {
+    if (process.platform === "win32") return;
+
+    const installPath = join(testDir, "sentry");
+    const tempPath = join(testDir, "sentry.download");
+
+    // Only write temp, no existing binary
+    await Bun.write(tempPath, "fresh binary");
+
+    replaceBinary(tempPath, installPath);
+
+    const content = await Bun.file(installPath).text();
+    expect(content).toBe("fresh binary");
   });
 });
 
