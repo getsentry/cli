@@ -1,13 +1,18 @@
-minVersion: '2.19.0'
+minVersion: '2.21.1'
 changelog:
   policy: auto
 versioning:
   policy: auto
 preReleaseCommand: node --experimental-strip-types script/bump-version.ts --pre
 postReleaseCommand: node --experimental-strip-types script/bump-version.ts --post
-requireNames:
-  - /^sentry-.+$/
-  - /^sentry-.*\.tgz$/
+artifactProvider:
+  name: github
+  config:
+    artifacts:
+      ci.yml:
+        - 'sentry-*'
+        - 'npm-package'
+        - 'gh-pages'
 targets:
   - name: npm
   - name: github
