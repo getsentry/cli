@@ -39,7 +39,7 @@ const MAX_LIMIT = 1000;
 const MIN_LIMIT = 1;
 
 /** Default number of traces to show */
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 20;
 
 /**
  * Validate that --limit value is within allowed range.
