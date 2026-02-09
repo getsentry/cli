@@ -135,10 +135,10 @@ chmod +x "$install_path"
 # Run setup command to configure PATH, completions, and record install info
 setup_args="--method curl"
 if [[ "$no_modify_path" == "true" ]]; then
-  setup_args="$setup_args --noModifyPath"
+  setup_args="$setup_args --no-modify-path"
 fi
 if [[ "$no_completions" == "true" ]]; then
-  setup_args="$setup_args --noCompletions"
+  setup_args="$setup_args --no-completions"
 fi
 
 # shellcheck disable=SC2086
