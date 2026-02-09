@@ -82,7 +82,7 @@ sentry auth refresh
 View authentication status
 
 **Flags:**
-- `--showToken - Show the stored token (masked by default)`
+- `--show-token - Show the stored token (masked by default)`
 
 **Examples:**
 
@@ -408,9 +408,9 @@ Configure shell integration
 
 **Flags:**
 - `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
-- `--noModifyPath - Skip PATH modification`
-- `--noCompletions - Skip shell completion installation`
-- `--noAgentSkills - Skip agent skill installation for AI coding assistants`
+- `--no-modify-path - Skip PATH modification`
+- `--no-completions - Skip shell completion installation`
+- `--no-agent-skills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
 
 #### `sentry cli upgrade <version>`

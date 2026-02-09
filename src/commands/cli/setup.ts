@@ -27,9 +27,9 @@ import {
 
 type SetupFlags = {
   readonly method?: InstallationMethod;
-  readonly noModifyPath: boolean;
-  readonly noCompletions: boolean;
-  readonly noAgentSkills: boolean;
+  readonly "no-modify-path": boolean;
+  readonly "no-completions": boolean;
+  readonly "no-agent-skills": boolean;
   readonly quiet: boolean;
 };
 
@@ -145,17 +145,17 @@ export const setupCommand = buildCommand({
         placeholder: "method",
         optional: true,
       },
-      noModifyPath: {
+      "no-modify-path": {
         kind: "boolean",
         brief: "Skip PATH modification",
         default: false,
       },
-      noCompletions: {
+      "no-completions": {
         kind: "boolean",
         brief: "Skip shell completion installation",
         default: false,
       },
-      noAgentSkills: {
+      "no-agent-skills": {
         kind: "boolean",
         brief: "Skip agent skill installation for AI coding assistants",
         default: false,
@@ -196,17 +196,17 @@ export const setupCommand = buildCommand({
     }
 
     // 2. Handle PATH modification
-    if (!flags.noModifyPath) {
+    if (!flags["no-modify-path"]) {
       await handlePathModification(binaryDir, shell, process.env, log);
     }
 
     // 3. Install shell completions
-    if (!flags.noCompletions) {
+    if (!flags["no-completions"]) {
       await handleCompletions(shell, homeDir, process.env.XDG_DATA_HOME, log);
     }
 
     // 4. Install agent skills (auto-detected, silent when no agent found)
-    if (!flags.noAgentSkills) {
+    if (!flags["no-agent-skills"]) {
       await handleAgentSkills(homeDir, log);
     }
 

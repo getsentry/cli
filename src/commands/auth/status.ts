@@ -28,7 +28,7 @@ import {
 import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
-  readonly showToken: boolean;
+  readonly "show-token": boolean;
 };
 
 /**
@@ -126,7 +126,7 @@ export const statusCommand = buildCommand({
   },
   parameters: {
     flags: {
-      showToken: {
+      "show-token": {
         kind: "boolean",
         brief: "Show the stored token (masked by default)",
         default: false,
@@ -152,7 +152,7 @@ export const statusCommand = buildCommand({
     writeUserInfo(stdout);
     stdout.write("\n");
 
-    writeTokenInfo(stdout, auth, flags.showToken);
+    writeTokenInfo(stdout, auth, flags["show-token"]);
     await writeDefaults(stdout);
     await verifyCredentials(stdout, stderr);
   },
