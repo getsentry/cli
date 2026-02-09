@@ -501,6 +501,29 @@ sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
 sentry log list --json | jq '.[] | select(.level == "error")'
 ```
 
+### Trace
+
+View distributed traces
+
+#### `sentry trace list <target>`
+
+List recent traces in a project
+
+**Flags:**
+- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `--json - Output as JSON`
+
+#### `sentry trace view <args...>`
+
+View details of a specific trace
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+
 ### Issues
 
 List issues in a project
@@ -552,6 +575,20 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
+### Traces
+
+List recent traces in a project
+
+#### `sentry traces <target>`
+
+List recent traces in a project
+
+**Flags:**
+- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `--json - Output as JSON`
 
 ## Output Formats
