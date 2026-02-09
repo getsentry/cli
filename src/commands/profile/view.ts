@@ -103,7 +103,7 @@ type ResolvedProfileTarget = {
 /**
  * Resolve target from a project search result.
  */
-async function resolveFromProjectSearch(
+export async function resolveFromProjectSearch(
   projectSlug: string,
   transactionRef: string
 ): Promise<ResolvedProfileTarget> {
