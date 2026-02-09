@@ -477,13 +477,11 @@ List transactions with profiling data
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
-#### `sentry profile view <transaction>`
+#### `sentry profile view <args...>`
 
 View CPU profiling analysis for a transaction
 
 **Flags:**
-- `--org <value> - Organization slug`
-- `--project <value> - Project slug`
 - `--period <value> - Stats period: 1h, 24h, 7d, 14d, 30d - (default: "24h")`
 - `-n, --limit <value> - Number of hot paths to show (max 20) - (default: "10")`
 - `--allFrames - Include library/system frames (default: user code only)`

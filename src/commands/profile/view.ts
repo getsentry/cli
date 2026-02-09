@@ -7,7 +7,15 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getFlamegraph, getProject } from "../../lib/api-client.js";
+import {
+  findProjectsBySlug,
+  getFlamegraph,
+  getProject,
+} from "../../lib/api-client.js";
+import {
+  ProjectSpecificationType,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError } from "../../lib/errors.js";
 import {
@@ -24,8 +32,6 @@ import { resolveTransaction } from "../../lib/resolve-transaction.js";
 import { buildProfileUrl } from "../../lib/sentry-urls.js";
 
 type ViewFlags = {
-  readonly org?: string;
-  readonly project?: string;
   readonly period: string;
   readonly limit: number;
   readonly allFrames: boolean;
@@ -35,6 +41,9 @@ type ViewFlags = {
 
 /** Valid period values */
 const VALID_PERIODS = ["1h", "24h", "7d", "14d", "30d"];
+
+/** Usage hint for ContextError messages */
+const USAGE_HINT = "sentry profile view <org>/<project> <transaction>";
 
 /**
  * Parse and validate the stats period.
@@ -48,6 +57,91 @@ function parsePeriod(value: string): string {
   return value;
 }
 
+/**
+ * Parse positional arguments for profile view.
+ * Handles: `<transaction>` or `<target> <transaction>`
+ *
+ * @returns Parsed transaction and optional target arg
+ */
+export function parsePositionalArgs(args: string[]): {
+  transactionRef: string;
+  targetArg: string | undefined;
+} {
+  if (args.length === 0) {
+    throw new ContextError("Transaction name or alias", USAGE_HINT);
+  }
+
+  const first = args[0];
+  if (first === undefined) {
+    throw new ContextError("Transaction name or alias", USAGE_HINT);
+  }
+
+  if (args.length === 1) {
+    // Single arg - must be transaction reference
+    return { transactionRef: first, targetArg: undefined };
+  }
+
+  const second = args[1];
+  if (second === undefined) {
+    // Should not happen given length check, but TypeScript needs this
+    return { transactionRef: first, targetArg: undefined };
+  }
+
+  // Two or more args - first is target, second is transaction
+  return { transactionRef: second, targetArg: first };
+}
+
+/** Resolved target type for internal use */
+type ResolvedProfileTarget = {
+  org: string;
+  project: string;
+  orgDisplay: string;
+  projectDisplay: string;
+  detectedFrom?: string;
+};
+
+/**
+ * Resolve target from a project search result.
+ */
+async function resolveFromProjectSearch(
+  projectSlug: string,
+  transactionRef: string
+): Promise<ResolvedProfileTarget> {
+  const found = await findProjectsBySlug(projectSlug);
+  if (found.length === 0) {
+    throw new ContextError(`Project "${projectSlug}"`, USAGE_HINT, [
+      "Check that you have access to a project with this slug",
+    ]);
+  }
+  if (found.length > 1) {
+    const alternatives = found.map(
+      (p) => `${p.organization?.slug ?? "unknown"}/${p.slug}`
+    );
+    throw new ContextError(
+      `Project "${projectSlug}" exists in multiple organizations`,
+      `sentry profile view <org>/${projectSlug} ${transactionRef}`,
+      alternatives
+    );
+  }
+  const foundProject = found[0];
+  if (!foundProject) {
+    throw new ContextError(`Project "${projectSlug}" not found`, USAGE_HINT);
+  }
+  const orgSlug = foundProject.organization?.slug;
+  if (!orgSlug) {
+    throw new ContextError(
+      `Could not determine organization for project "${projectSlug}"`,
+      USAGE_HINT
+    );
+  }
+  return {
+    org: orgSlug,
+    project: foundProject.slug,
+    orgDisplay: orgSlug,
+    projectDisplay: foundProject.slug,
+  };
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View CPU profiling analysis for a transaction",
@@ -58,36 +152,22 @@ export const viewCommand = buildCommand({
       "  - Hot paths (functions consuming the most CPU time)\n" +
       "  - Recommendations for optimization\n\n" +
       "By default, only user application code is shown. Use --all-frames to include library code.\n\n" +
-      "The organization and project are resolved from:\n" +
-      "  1. --org and --project flags\n" +
-      "  2. Config defaults\n" +
-      "  3. SENTRY_DSN environment variable or source code detection",
+      "Target specification:\n" +
+      "  sentry profile view <transaction>                  # auto-detect from DSN or config\n" +
+      "  sentry profile view <org>/<proj> <transaction>     # explicit org and project\n" +
+      "  sentry profile view <project> <transaction>        # find project across all orgs",
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "transaction",
-          brief:
-            'Transaction: index (1), alias (i), or full name ("/api/users")',
-          parse: String,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        placeholder: "args",
+        brief:
+          '[<org>/<project>] <transaction> - Target (optional) and transaction (required). Transaction can be index (1), alias (i), or full name ("/api/users")',
+        parse: String,
+      },
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
-      project: {
-        kind: "parsed",
-        parse: String,
-        brief: "Project slug",
-        optional: true,
-      },
       period: {
         kind: "parsed",
         parse: parsePeriod,
@@ -121,23 +201,50 @@ export const viewCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ViewFlags,
-    transactionRef: string
+    ...args: string[]
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
 
-    // Resolve org and project from flags or detection
-    const target = await resolveOrgAndProject({
-      org: flags.org,
-      project: flags.project,
-      cwd,
-      usageHint: `sentry profile view "${transactionRef}" --org <org> --project <project>`,
-    });
+    // Parse positional args
+    const { transactionRef, targetArg } = parsePositionalArgs(args);
+    const parsed = parseOrgProjectArg(targetArg);
+
+    let target: ResolvedProfileTarget | null = null;
+
+    switch (parsed.type) {
+      case ProjectSpecificationType.Explicit:
+        target = {
+          org: parsed.org,
+          project: parsed.project,
+          orgDisplay: parsed.org,
+          projectDisplay: parsed.project,
+        };
+        break;
+
+      case ProjectSpecificationType.ProjectSearch:
+        target = await resolveFromProjectSearch(
+          parsed.projectSlug,
+          transactionRef
+        );
+        break;
+
+      case ProjectSpecificationType.OrgAll:
+        throw new ContextError(
+          "A specific project is required for profile view",
+          USAGE_HINT
+        );
+
+      case ProjectSpecificationType.AutoDetect:
+        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+        break;
+
+      default:
+        // Exhaustive check - should never reach here
+        throw new ContextError("Invalid target specification", USAGE_HINT);
+    }
 
     if (!target) {
-      throw new ContextError(
-        "Organization and project",
-        `sentry profile view "${transactionRef}" --org <org-slug> --project <project-slug>`
-      );
+      throw new ContextError("Organization and project", USAGE_HINT);
     }
 
     // Resolve transaction reference (alias, index, or full name)
