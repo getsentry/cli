@@ -120,7 +120,7 @@ function mockGitHubVersion(version: string): void {
     }
 
     // npm registry fallback
-    if (urlStr.includes("registry.npmjs.org")) {
+    if (new URL(urlStr).hostname === "registry.npmjs.org") {
       return new Response(JSON.stringify({ version }), {
         status: 200,
         headers: { "content-type": "application/json" },
