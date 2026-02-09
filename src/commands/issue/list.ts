@@ -5,7 +5,6 @@
  * Supports monorepos with multiple detected projects.
  */
 
-import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
@@ -14,6 +13,7 @@ import {
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearProjectAliases,
   setProjectAliases,

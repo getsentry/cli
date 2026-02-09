@@ -81,6 +81,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -106,6 +107,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -127,6 +129,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -149,6 +152,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };
@@ -180,6 +184,7 @@ describe("upgradeCommand.func", () => {
     const func = await upgradeCommand.loader();
     const stdoutWrite = mock(() => true);
     const mockContext = {
+      process: { execPath: "/test/path/sentry" },
       stdout: { write: stdoutWrite },
       stderr: { write: mock(() => true) },
     };

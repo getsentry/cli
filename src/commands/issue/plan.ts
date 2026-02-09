@@ -5,9 +5,9 @@
  * Automatically runs root cause analysis if not already done.
  */
 
-import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { writeJson } from "../../lib/formatters/index.js";

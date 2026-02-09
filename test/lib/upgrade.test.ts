@@ -9,6 +9,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { clearInstallInfo } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   acquireUpgradeLock,
@@ -627,16 +628,23 @@ describe("releaseUpgradeLock", () => {
 
 describe("executeUpgrade with curl method", () => {
   const binDir = join(homedir(), ".sentry", "bin");
-  const paths = getCurlInstallPaths();
+
+  // Compute paths fresh for each test to avoid stale database state issues
+  function getTestPaths() {
+    return getCurlInstallPaths();
+  }
 
   beforeEach(() => {
+    // Clear any stored install info to ensure we use default paths
+    clearInstallInfo();
     // Ensure directory exists
     mkdirSync(binDir, { recursive: true });
   });
 
   afterEach(async () => {
     globalThis.fetch = originalFetch;
-    // Clean up test files
+    // Clean up test files - get fresh paths in case DB changed
+    const paths = getTestPaths();
     for (const path of [
       paths.installPath,
       paths.tempPath,
@@ -660,7 +668,8 @@ describe("executeUpgrade with curl method", () => {
     // Run the actual executeUpgrade with curl method
     await executeUpgrade("curl", "1.0.0");
 
-    // Verify the binary was installed
+    // Verify the binary was installed - get paths fresh after upgrade
+    const paths = getTestPaths();
     expect(await Bun.file(paths.installPath).exists()).toBe(true);
     const content = await Bun.file(paths.installPath).arrayBuffer();
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
@@ -699,6 +708,7 @@ describe("executeUpgrade with curl method", () => {
     await executeUpgrade("curl", "1.0.0");
 
     // Temp file should not exist after successful install
+    const paths = getTestPaths();
     expect(await Bun.file(paths.tempPath).exists()).toBe(false);
   });
 
@@ -712,18 +722,26 @@ describe("executeUpgrade with curl method", () => {
     }
 
     // Lock should be released even on failure
+    const paths = getTestPaths();
     expect(await Bun.file(paths.lockPath).exists()).toBe(false);
   });
 });
 
 describe("cleanupOldBinary", () => {
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  const oldPath = join(homedir(), ".sentry", "bin", `sentry${suffix}.old`);
-  const binDir = join(homedir(), ".sentry", "bin");
+  // Get paths fresh to match what cleanupOldBinary() uses
+  function getOldPath() {
+    return getCurlInstallPaths().oldPath;
+  }
+
+  beforeEach(() => {
+    // Clear any stored install info to ensure we use default paths
+    clearInstallInfo();
+  });
 
   test("removes .old file if it exists", async () => {
+    const oldPath = getOldPath();
     // Create the directory and file
-    mkdirSync(binDir, { recursive: true });
+    mkdirSync(join(oldPath, ".."), { recursive: true });
     writeFileSync(oldPath, "test content");
 
     // Verify file exists

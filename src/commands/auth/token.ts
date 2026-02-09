@@ -5,8 +5,8 @@
  * Useful for piping to other commands or scripts.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { getAuthToken } from "../../lib/db/auth.js";
 import { AuthError } from "../../lib/errors.js";
 

@@ -1,6 +1,6 @@
-import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getCurrentUser, getUserRegions } from "../../lib/api-client.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { setUserInfo } from "../../lib/db/user.js";

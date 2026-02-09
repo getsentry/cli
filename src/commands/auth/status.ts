@@ -4,9 +4,9 @@
  * Display authentication status and verify credentials.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
+import { buildCommand } from "../../lib/command.js";
 import {
   type AuthConfig,
   getAuthConfig,
