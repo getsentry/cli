@@ -8,6 +8,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -325,7 +326,6 @@ export async function installBinary(
   sourcePath: string,
   installDir: string
 ): Promise<string> {
-  const { mkdirSync } = await import("node:fs");
   mkdirSync(installDir, { recursive: true, mode: 0o755 });
 
   const installPath = join(installDir, getBinaryFilename());

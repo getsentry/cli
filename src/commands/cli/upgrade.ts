@@ -10,7 +10,6 @@ import type { SentryContext } from "../../context.js";
 import { releaseLock } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
-import { getInstallInfo } from "../../lib/db/install-info.js";
 import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
@@ -196,10 +195,10 @@ export const upgradeCommand = buildCommand({
         releaseLock(downloadResult.lockPath);
       }
     } else {
-      // Package manager: binary already in place, just run setup
-      const storedInfo = getInstallInfo();
-      const newBinaryPath = storedInfo?.path ?? this.process.execPath;
-      await runSetupOnNewBinary(newBinaryPath, method, false);
+      // Package manager: binary already in place, just run setup.
+      // Always use execPath — storedInfo?.path could reference a stale
+      // binary from a different installation method.
+      await runSetupOnNewBinary(this.process.execPath, method, false);
     }
 
     stdout.write(`\nSuccessfully upgraded to ${target}.\n`);
