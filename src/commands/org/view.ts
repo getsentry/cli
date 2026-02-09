@@ -4,10 +4,10 @@
  * View detailed information about a Sentry organization.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getOrganization } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails, writeOutput } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";

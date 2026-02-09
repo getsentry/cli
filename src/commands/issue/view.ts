@@ -4,11 +4,11 @@
  * View detailed information about a Sentry issue.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getLatestEvent } from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import {
   formatEventDetails,
   formatIssueDetails,

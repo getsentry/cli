@@ -4,9 +4,9 @@
  * List organizations the user has access to.
  */
 
-import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import {

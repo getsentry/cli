@@ -5,10 +5,10 @@
  * Supports monorepos with multiple detected projects.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getProject, getProjectKeys } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   divider,

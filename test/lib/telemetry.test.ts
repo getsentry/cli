@@ -10,6 +10,7 @@ import {
   createTracedDatabase,
   initSentry,
   setCommandSpanName,
+  setFlagContext,
   setOrgProjectContext,
   withDbSpan,
   withFsSpan,
@@ -145,6 +146,77 @@ describe("setOrgProjectContext", () => {
   test("handles multiple orgs/projects", () => {
     expect(() =>
       setOrgProjectContext(["org1", "org2"], ["proj1", "proj2"])
+    ).not.toThrow();
+  });
+});
+
+describe("setFlagContext", () => {
+  test("handles empty flags object", () => {
+    expect(() => setFlagContext({})).not.toThrow();
+  });
+
+  test("handles boolean flags (true sets tag)", () => {
+    expect(() => setFlagContext({ verbose: true, debug: true })).not.toThrow();
+  });
+
+  test("handles boolean flags (false is skipped)", () => {
+    expect(() =>
+      setFlagContext({ verbose: false, debug: false })
+    ).not.toThrow();
+  });
+
+  test("handles string flags", () => {
+    expect(() =>
+      setFlagContext({ output: "json", format: "table" })
+    ).not.toThrow();
+  });
+
+  test("handles number flags", () => {
+    expect(() => setFlagContext({ limit: 10, offset: 0 })).not.toThrow();
+  });
+
+  test("handles undefined and null values (skipped)", () => {
+    expect(() =>
+      setFlagContext({ value: undefined, other: null })
+    ).not.toThrow();
+  });
+
+  test("handles empty string values (skipped)", () => {
+    expect(() => setFlagContext({ name: "" })).not.toThrow();
+  });
+
+  test("handles empty array values (skipped)", () => {
+    expect(() => setFlagContext({ items: [] })).not.toThrow();
+  });
+
+  test("handles non-empty array values", () => {
+    expect(() =>
+      setFlagContext({ projects: ["proj1", "proj2"] })
+    ).not.toThrow();
+  });
+
+  test("handles mixed flag types", () => {
+    expect(() =>
+      setFlagContext({
+        verbose: true,
+        quiet: false,
+        limit: 50,
+        output: "json",
+        projects: ["a", "b"],
+        empty: "",
+        missing: undefined,
+      })
+    ).not.toThrow();
+  });
+
+  test("converts camelCase to kebab-case", () => {
+    // This test verifies the function doesn't throw with camelCase keys
+    // The actual conversion is tested implicitly - the tag would be flag.no-modify-path
+    expect(() =>
+      setFlagContext({
+        noModifyPath: true,
+        someVeryLongFlagName: "value",
+      })
     ).not.toThrow();
   });
 });

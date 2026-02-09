@@ -4,8 +4,8 @@
  * Diagnose and repair CLI database issues.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { getDbPath, getRawDatabase } from "../../lib/db/index.js";
 import {
   CURRENT_SCHEMA_VERSION,

@@ -4,8 +4,8 @@
  * Clear stored authentication credentials.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { clearAuth, isAuthenticated } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { success } from "../../lib/formatters/colors.js";

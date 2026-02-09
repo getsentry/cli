@@ -6,8 +6,8 @@
  */
 
 import { dirname } from "node:path";
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { installCompletions } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";

@@ -4,8 +4,8 @@
  * Get root cause analysis for a Sentry issue using Seer AI.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {

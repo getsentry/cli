@@ -4,8 +4,8 @@
  * Self-update the Sentry CLI to the latest or a specific version.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import { UpgradeError } from "../../lib/errors.js";
