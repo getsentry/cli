@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   acquireLock,
   cleanupOldBinary,
@@ -56,8 +56,12 @@ export const VERSION_PREFIX_REGEX = /^v/;
  * Known directories where the curl installer may place the binary.
  * Resolved at runtime against the user's home directory.
  * Used for legacy detection (when no install info is stored).
+ * Trailing separator ensures startsWith matches a directory boundary
+ * (e.g. ~/.local/bin/ won't match ~/.local/binaries/).
  */
-const KNOWN_CURL_PATHS = KNOWN_CURL_DIRS.map((dir) => join(homedir(), dir));
+const KNOWN_CURL_PATHS = KNOWN_CURL_DIRS.map(
+  (dir) => join(homedir(), dir) + sep
+);
 
 /**
  * Get file paths for curl-installed binary.
