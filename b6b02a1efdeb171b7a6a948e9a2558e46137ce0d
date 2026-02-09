@@ -1,0 +1,27 @@
+## Implementation Plan
+
+### Context
+Craft 2.21.1 introduces several improvements:
+- PR #709: artifactProvider.config.artifacts - filter artifacts by workflow and name patterns
+- PR #739: noMerge config option with auto-detection for GitHub Actions
+- PR #707: Automatic version bumping from configured targets
+
+### Changes Made
+
+#### .craft.yml
+- minVersion: 2.19.0 → 2.21.1
+- Removed requireNames (two regex patterns)
+- Added artifactProvider with workflow-specific artifact filtering:
+  - ci.yml workflow
+  - Patterns: sentry-*, npm-package, gh-pages
+
+#### .github/workflows/ci.yml
+- Removed merge-artifacts job (downloaded all artifacts and re-uploaded as single SHA-named artifact)
+- Updated ci-status job:
+  - Dependencies: [changes, check-skill, merge-artifacts] → [changes, check-skill, build-binary, build-npm, build-docs, test-e2e]
+  - Status checking logic now references test-e2e instead of merge-artifacts
+
+### Benefits
+1. Faster CI - eliminates redundant download/upload step
+2. Cleaner config - artifact filtering at provider level
+3. Leverages Craft 2.21.1 improvements
