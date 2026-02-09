@@ -16,7 +16,6 @@ import {
 } from "bun:test";
 import {
   parsePositionalArgs,
-  resolveFromProjectSearch,
   viewCommand,
 } from "../../../src/commands/profile/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
@@ -24,9 +23,10 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTransactionMod from "../../../src/lib/resolve-transaction.js";
 import type { Flamegraph } from "../../../src/types/index.js";
@@ -125,10 +125,12 @@ describe("parsePositionalArgs", () => {
   });
 });
 
-// resolveFromProjectSearch tests
+// resolveProjectBySlug tests (profile context)
 
-describe("resolveFromProjectSearch", () => {
+describe("resolveProjectBySlug (profile context)", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+
+  const USAGE_HINT = "sentry profile view <org>/<project> <transaction>";
 
   beforeEach(() => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
@@ -143,7 +145,10 @@ describe("resolveFromProjectSearch", () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       await expect(
-        resolveFromProjectSearch("my-project", "/api/users")
+        resolveProjectBySlug("my-project", {
+          usageHint: USAGE_HINT,
+          contextValue: "/api/users",
+        })
       ).rejects.toThrow(ContextError);
     });
 
@@ -151,7 +156,10 @@ describe("resolveFromProjectSearch", () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       try {
-        await resolveFromProjectSearch("frontend", "/api/users");
+        await resolveProjectBySlug("frontend", {
+          usageHint: USAGE_HINT,
+          contextValue: "/api/users",
+        });
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
@@ -161,25 +169,28 @@ describe("resolveFromProjectSearch", () => {
   });
 
   describe("multiple projects found", () => {
-    test("throws ContextError when project exists in multiple orgs", async () => {
+    test("throws ValidationError when project exists in multiple orgs", async () => {
       findProjectsBySlugSpy.mockResolvedValue([
         {
           slug: "frontend",
           id: "1",
           name: "Frontend",
-          organization: { id: "10", slug: "org-a", name: "Org A" },
+          orgSlug: "org-a",
         },
         {
           slug: "frontend",
           id: "2",
           name: "Frontend",
-          organization: { id: "20", slug: "org-b", name: "Org B" },
+          orgSlug: "org-b",
         },
       ] as ProjectWithOrg[]);
 
       await expect(
-        resolveFromProjectSearch("frontend", "/api/users")
-      ).rejects.toThrow(ContextError);
+        resolveProjectBySlug("frontend", {
+          usageHint: USAGE_HINT,
+          contextValue: "/api/users",
+        })
+      ).rejects.toThrow(ValidationError);
     });
 
     test("includes org alternatives in error", async () => {
@@ -188,57 +199,50 @@ describe("resolveFromProjectSearch", () => {
           slug: "api",
           id: "1",
           name: "API",
-          organization: { id: "10", slug: "acme", name: "Acme" },
+          orgSlug: "acme",
         },
         {
           slug: "api",
           id: "2",
           name: "API",
-          organization: { id: "20", slug: "beta", name: "Beta" },
+          orgSlug: "beta",
         },
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveFromProjectSearch("api", "/api/users");
+        await resolveProjectBySlug("api", {
+          usageHint: USAGE_HINT,
+          contextValue: "/api/users",
+        });
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        const msg = (error as ContextError).message;
+        expect(error).toBeInstanceOf(ValidationError);
+        const msg = (error as ValidationError).message;
         expect(msg).toContain("multiple organizations");
       }
     });
   });
 
   describe("single project found", () => {
-    test("returns resolved target", async () => {
+    test("returns resolved target using orgSlug", async () => {
       findProjectsBySlugSpy.mockResolvedValue([
         {
           slug: "backend",
           id: "42",
           name: "Backend",
-          organization: { id: "10", slug: "my-company", name: "My Company" },
+          orgSlug: "my-company",
         },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("backend", "/api/users");
+      const result = await resolveProjectBySlug("backend", {
+        usageHint: USAGE_HINT,
+        contextValue: "/api/users",
+      });
 
       expect(result.org).toBe("my-company");
       expect(result.project).toBe("backend");
-    });
-
-    test("throws ContextError when project has no organization slug", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        {
-          slug: "backend",
-          id: "42",
-          name: "Backend",
-          // organization without slug
-        },
-      ] as ProjectWithOrg[]);
-
-      await expect(
-        resolveFromProjectSearch("backend", "/api/users")
-      ).rejects.toThrow(ContextError);
+      expect(result.orgDisplay).toBe("my-company");
+      expect(result.projectDisplay).toBe("backend");
     });
   });
 });

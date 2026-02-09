@@ -15,6 +15,7 @@ import { basename } from "node:path";
 import {
   findProjectByDsnKey,
   findProjectsByPattern,
+  findProjectsBySlug,
   getProject,
 } from "./api-client.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
@@ -33,7 +34,7 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
-import { AuthError, ContextError } from "./errors.js";
+import { AuthError, ContextError, ValidationError } from "./errors.js";
 
 /**
  * Resolved organization and project target for API calls.
@@ -679,4 +680,68 @@ export async function resolveOrg(
   } catch {
     return null;
   }
+}
+
+/**
+ * Options for resolving a project by slug.
+ */
+export type ResolveProjectBySlugOptions = {
+  /** Usage hint shown in error messages */
+  usageHint: string;
+  /** Additional context for error messages (e.g., event ID, log ID) */
+  contextValue?: string;
+};
+
+/**
+ * Resolve a project by slug across all accessible organizations.
+ *
+ * Searches for a project by slug. Throws if no project found or if
+ * multiple projects with the same slug exist in different organizations.
+ *
+ * @param projectSlug - Project slug to search for
+ * @param options - Resolution options with usage hint and optional context
+ * @returns Resolved target with org and project info
+ * @throws {ContextError} If no project found
+ * @throws {ValidationError} If project exists in multiple organizations
+ *
+ * @example
+ * ```typescript
+ * const target = await resolveProjectBySlug("my-project", {
+ *   usageHint: "sentry event view <org>/<project> <event-id>",
+ *   contextValue: eventId,
+ * });
+ * ```
+ */
+export async function resolveProjectBySlug(
+  projectSlug: string,
+  options: ResolveProjectBySlugOptions
+): Promise<ResolvedTarget> {
+  const { usageHint, contextValue } = options;
+
+  const found = await findProjectsBySlug(projectSlug);
+
+  if (found.length === 0) {
+    throw new ContextError(`Project "${projectSlug}"`, usageHint, [
+      "Check that you have access to a project with this slug",
+    ]);
+  }
+
+  if (found.length > 1) {
+    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
+    const contextSuffix = contextValue ? ` ${contextValue}` : "";
+    throw new ValidationError(
+      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+        `Specify the organization:\n${orgList}\n\n` +
+        `Example: sentry <command> <org>/${projectSlug}${contextSuffix}`
+    );
+  }
+
+  // Safe assertion: length is exactly 1 after the checks above
+  const foundProject = found[0] as (typeof found)[0];
+  return {
+    org: foundProject.orgSlug,
+    project: foundProject.slug,
+    orgDisplay: foundProject.orgSlug,
+    projectDisplay: foundProject.slug,
+  };
 }

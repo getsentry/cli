@@ -7,7 +7,11 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { getProject, listProfiledTransactions } from "../../lib/api-client.js";
+import {
+  findProjectsBySlug,
+  getProject,
+  listProfiledTransactions,
+} from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
@@ -27,6 +31,7 @@ import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildProfilingSummaryUrl } from "../../lib/sentry-urls.js";
 import { buildTransactionAliases } from "../../lib/transaction-alias.js";
 import type { TransactionAliasEntry, Writer } from "../../types/index.js";
+import { parsePeriod } from "./shared.js";
 
 type ListFlags = {
   readonly period: string;
@@ -35,22 +40,88 @@ type ListFlags = {
   readonly web: boolean;
 };
 
-/** Valid period values */
-const VALID_PERIODS = ["1h", "24h", "7d", "14d", "30d"];
-
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry profile list <org>/<project>";
 
+/** Resolved org and project for profile list */
+type ResolvedListTarget = {
+  org: string;
+  project: string;
+  detectedFrom?: string;
+};
+
 /**
- * Parse and validate the stats period.
+ * Resolve org/project from parsed argument or auto-detection.
+ *
+ * @throws {ContextError} When target cannot be resolved
  */
-function parsePeriod(value: string): string {
-  if (!VALID_PERIODS.includes(value)) {
-    throw new Error(
-      `Invalid period. Must be one of: ${VALID_PERIODS.join(", ")}`
-    );
+async function resolveListTarget(
+  target: string | undefined,
+  cwd: string
+): Promise<ResolvedListTarget> {
+  const parsed = parseOrgProjectArg(target);
+
+  switch (parsed.type) {
+    case "org-all":
+      throw new ContextError(
+        "Project",
+        "Profile listing requires a specific project.\n\n" +
+          "Usage: sentry profile list <org>/<project>"
+      );
+
+    case "explicit": {
+      const resolved = await resolveOrgAndProject({
+        org: parsed.org,
+        project: parsed.project,
+        cwd,
+        usageHint: USAGE_HINT,
+      });
+      if (!resolved) {
+        throw new ContextError("Organization and project", USAGE_HINT);
+      }
+      return resolved;
+    }
+
+    case "project-search": {
+      const matches = await findProjectsBySlug(parsed.projectSlug);
+      if (matches.length === 0) {
+        throw new ContextError(`Project "${parsed.projectSlug}"`, USAGE_HINT, [
+          "Check that you have access to a project with this slug",
+        ]);
+      }
+      if (matches.length > 1) {
+        const alternatives = matches.map(
+          (m) => `sentry profile list ${m.orgSlug}/${m.slug}`
+        );
+        throw new ContextError(
+          `Project "${parsed.projectSlug}" exists in multiple organizations`,
+          `sentry profile list <org>/${parsed.projectSlug}`,
+          alternatives
+        );
+      }
+      const match = matches[0] as (typeof matches)[0];
+      return { org: match.orgSlug, project: match.slug };
+    }
+
+    case "auto-detect": {
+      const resolved = await resolveOrgAndProject({
+        cwd,
+        usageHint: USAGE_HINT,
+      });
+      if (!resolved) {
+        throw new ContextError("Organization and project", USAGE_HINT);
+      }
+      return resolved;
+    }
+
+    default: {
+      const _exhaustiveCheck: never = parsed;
+      throw new ContextError(
+        `Unexpected target type: ${_exhaustiveCheck}`,
+        USAGE_HINT
+      );
+    }
   }
-  return value;
 }
 
 /**
@@ -119,38 +190,8 @@ export const listCommand = buildCommand({
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
 
-    // Parse positional argument to determine resolution strategy
-    const parsed = parseOrgProjectArg(target);
-
-    // For profile list, we need both org and project
-    // We don't support org-wide profile listing (too expensive)
-    if (parsed.type === "org-all") {
-      throw new ContextError(
-        "Project",
-        "Profile listing requires a specific project.\n\n" +
-          "Usage: sentry profile list <org>/<project>"
-      );
-    }
-
-    // Determine project slug based on parsed type
-    let projectSlug: string | undefined;
-    if (parsed.type === "explicit") {
-      projectSlug = parsed.project;
-    } else if (parsed.type === "project-search") {
-      projectSlug = parsed.projectSlug;
-    }
-
-    // Resolve org and project
-    const resolvedTarget = await resolveOrgAndProject({
-      org: parsed.type === "explicit" ? parsed.org : undefined,
-      project: projectSlug,
-      cwd,
-      usageHint: USAGE_HINT,
-    });
-
-    if (!resolvedTarget) {
-      throw new ContextError("Organization and project", USAGE_HINT);
-    }
+    // Resolve org and project from positional arg or auto-detection
+    const resolvedTarget = await resolveListTarget(target, cwd);
 
     // Set telemetry context
     setContext([resolvedTarget.org], [resolvedTarget.project]);

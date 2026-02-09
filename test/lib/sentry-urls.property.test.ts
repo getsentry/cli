@@ -513,14 +513,17 @@ describe("buildProfileUrl properties", () => {
     );
   });
 
-  test("output contains flamegraph and transaction query", async () => {
+  test("output contains flamegraph and quoted transaction query", async () => {
     await fcAssert(
       property(
         tuple(slugArb, slugArb, transactionNameArb),
         ([orgSlug, projectSlug, transaction]) => {
           const result = buildProfileUrl(orgSlug, projectSlug, transaction);
           expect(result).toContain("/flamegraph/");
-          expect(result).toContain("query=transaction");
+          // Transaction should be wrapped in encoded quotes (%22) for Sentry search syntax
+          expect(result).toContain(
+            `query=transaction%3A%22${encodeURIComponent(transaction)}%22`
+          );
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }

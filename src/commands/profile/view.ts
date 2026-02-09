@@ -7,11 +7,7 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  findProjectsBySlug,
-  getFlamegraph,
-  getProject,
-} from "../../lib/api-client.js";
+import { getFlamegraph, getProject } from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -27,9 +23,14 @@ import {
   analyzeFlamegraph,
   hasProfileData,
 } from "../../lib/profile/analyzer.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  type ResolvedTarget,
+  resolveOrgAndProject,
+  resolveProjectBySlug,
+} from "../../lib/resolve-target.js";
 import { resolveTransaction } from "../../lib/resolve-transaction.js";
 import { buildProfileUrl } from "../../lib/sentry-urls.js";
+import { parsePeriod } from "./shared.js";
 
 type ViewFlags = {
   readonly period: string;
@@ -39,23 +40,8 @@ type ViewFlags = {
   readonly web: boolean;
 };
 
-/** Valid period values */
-const VALID_PERIODS = ["1h", "24h", "7d", "14d", "30d"];
-
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry profile view <org>/<project> <transaction>";
-
-/**
- * Parse and validate the stats period.
- */
-function parsePeriod(value: string): string {
-  if (!VALID_PERIODS.includes(value)) {
-    throw new Error(
-      `Invalid period. Must be one of: ${VALID_PERIODS.join(", ")}`
-    );
-  }
-  return value;
-}
 
 /**
  * Parse positional arguments for profile view.
@@ -92,55 +78,7 @@ export function parsePositionalArgs(args: string[]): {
 }
 
 /** Resolved target type for internal use */
-type ResolvedProfileTarget = {
-  org: string;
-  project: string;
-  orgDisplay: string;
-  projectDisplay: string;
-  detectedFrom?: string;
-};
-
-/**
- * Resolve target from a project search result.
- */
-export async function resolveFromProjectSearch(
-  projectSlug: string,
-  transactionRef: string
-): Promise<ResolvedProfileTarget> {
-  const found = await findProjectsBySlug(projectSlug);
-  if (found.length === 0) {
-    throw new ContextError(`Project "${projectSlug}"`, USAGE_HINT, [
-      "Check that you have access to a project with this slug",
-    ]);
-  }
-  if (found.length > 1) {
-    const alternatives = found.map(
-      (p) => `${p.organization?.slug ?? "unknown"}/${p.slug}`
-    );
-    throw new ContextError(
-      `Project "${projectSlug}" exists in multiple organizations`,
-      `sentry profile view <org>/${projectSlug} ${transactionRef}`,
-      alternatives
-    );
-  }
-  const foundProject = found[0];
-  if (!foundProject) {
-    throw new ContextError(`Project "${projectSlug}" not found`, USAGE_HINT);
-  }
-  const orgSlug = foundProject.organization?.slug;
-  if (!orgSlug) {
-    throw new ContextError(
-      `Could not determine organization for project "${projectSlug}"`,
-      USAGE_HINT
-    );
-  }
-  return {
-    org: orgSlug,
-    project: foundProject.slug,
-    orgDisplay: orgSlug,
-    projectDisplay: foundProject.slug,
-  };
-}
+type ResolvedProfileTarget = ResolvedTarget;
 
 export const viewCommand = buildCommand({
   docs: {
@@ -222,10 +160,10 @@ export const viewCommand = buildCommand({
         break;
 
       case ProjectSpecificationType.ProjectSearch:
-        target = await resolveFromProjectSearch(
-          parsed.projectSlug,
-          transactionRef
-        );
+        target = await resolveProjectBySlug(parsed.projectSlug, {
+          usageHint: USAGE_HINT,
+          contextValue: transactionRef,
+        });
         break;
 
       case ProjectSpecificationType.OrgAll:

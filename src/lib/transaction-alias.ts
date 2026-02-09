@@ -82,22 +82,31 @@ type TransactionInput = {
  * Disambiguate duplicate segments by appending numeric suffixes.
  * e.g., ["issues", "events", "issues"] → ["issues", "events", "issues2"]
  *
+ * Handles edge case where a suffixed name collides with an existing raw segment:
+ * e.g., ["issues", "issues2", "issues"] → ["issues", "issues2", "issues3"]
+ *
  * @param segments - Array of extracted segments (may contain duplicates)
  * @returns Array of unique segments with numeric suffixes for duplicates
  */
 function disambiguateSegments(segments: string[]): string[] {
-  const seen = new Map<string, number>();
   const result: string[] = [];
+  const resultSet = new Set<string>();
 
   for (const segment of segments) {
-    const count = seen.get(segment) ?? 0;
-    seen.set(segment, count + 1);
-
-    if (count === 0) {
-      result.push(segment);
+    if (resultSet.has(segment)) {
+      // Need a suffixed version - find next available
+      let suffix = 2;
+      let candidate = `${segment}${suffix}`;
+      while (resultSet.has(candidate)) {
+        suffix += 1;
+        candidate = `${segment}${suffix}`;
+      }
+      result.push(candidate);
+      resultSet.add(candidate);
     } else {
-      // Append numeric suffix for duplicates (issues2, issues3, etc.)
-      result.push(`${segment}${count + 1}`);
+      // Raw segment name is available
+      result.push(segment);
+      resultSet.add(segment);
     }
   }
 

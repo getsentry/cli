@@ -290,6 +290,65 @@ describe("property: buildTransactionAliases", () => {
   });
 });
 
+// Edge cases for disambiguateSegments (internal function tested via buildTransactionAliases)
+
+describe("disambiguateSegments collision handling", () => {
+  test("handles suffixed name colliding with raw segment", () => {
+    // ["issues", "issues2", "issues"] would produce collision if not handled:
+    // - "issues" → "issues"
+    // - "issues2" → "issues2" (raw)
+    // - "issues" (2nd) → would try "issues2" but it's taken → should use "issues3"
+    const inputs = [
+      { transaction: "/api/issues/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/api/issues2/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/v2/issues/", orgSlug: "org", projectSlug: "proj" },
+    ];
+
+    const aliases = buildTransactionAliases(inputs);
+    const aliasValues = aliases.map((a) => a.alias);
+    const uniqueAliases = new Set(aliasValues);
+
+    // All aliases must be unique
+    expect(uniqueAliases.size).toBe(aliasValues.length);
+  });
+
+  test("handles multiple collision levels", () => {
+    // Multiple segments that would collide: issues, issues2, issues3, issues
+    const inputs = [
+      { transaction: "/a/issues/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/b/issues2/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/c/issues3/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/d/issues/", orgSlug: "org", projectSlug: "proj" },
+    ];
+
+    const aliases = buildTransactionAliases(inputs);
+    const aliasValues = aliases.map((a) => a.alias);
+    const uniqueAliases = new Set(aliasValues);
+
+    // All aliases must be unique
+    expect(uniqueAliases.size).toBe(aliasValues.length);
+  });
+
+  test("property: disambiguated segments are always unique", () => {
+    fcAssert(
+      property(
+        array(transactionInputArb, { minLength: 1, maxLength: 15 }),
+        (inputs) => {
+          const aliases = buildTransactionAliases(inputs);
+          // The internal disambiguateSegments should produce unique segments
+          // which means aliases should be unique (by the uniqueness of prefixes)
+          // Note: aliases could still collide if two different segments share a prefix,
+          // but the segments themselves should all be unique
+          const aliasSet = new Set(aliases.map((a) => a.alias));
+          // With unique segments, findShortestUniquePrefixes guarantees unique aliases
+          expect(aliasSet.size).toBe(aliases.length);
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 // Edge cases for extractTransactionSegment
 
 describe("extractTransactionSegment edge cases", () => {

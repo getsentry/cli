@@ -15,6 +15,7 @@ import {
   test,
 } from "bun:test";
 import { listCommand } from "../../../src/commands/profile/list.js";
+import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -57,6 +58,7 @@ const defaultFlags = {
 let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let listProfiledTransactionsSpy: ReturnType<typeof spyOn>;
+let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 let openInBrowserSpy: ReturnType<typeof spyOn>;
 let setTransactionAliasesSpy: ReturnType<typeof spyOn>;
 
@@ -64,6 +66,7 @@ beforeEach(() => {
   resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
   getProjectSpy = spyOn(apiClient, "getProject");
   listProfiledTransactionsSpy = spyOn(apiClient, "listProfiledTransactions");
+  findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
   openInBrowserSpy = spyOn(browser, "openInBrowser");
   setTransactionAliasesSpy = spyOn(
     transactionAliasesDb,
@@ -75,6 +78,7 @@ afterEach(() => {
   resolveOrgAndProjectSpy.mockRestore();
   getProjectSpy.mockRestore();
   listProfiledTransactionsSpy.mockRestore();
+  findProjectsBySlugSpy.mockRestore();
   openInBrowserSpy.mockRestore();
   setTransactionAliasesSpy.mockRestore();
 });
@@ -152,16 +156,51 @@ describe("listCommand.func", () => {
       );
     });
 
-    test("resolves project-only target", async () => {
+    test("resolves project-only target via findProjectsBySlug", async () => {
       const ctx = createMockContext();
-      setupResolvedTarget();
+      findProjectsBySlugSpy.mockResolvedValue([
+        {
+          slug: "backend",
+          id: "42",
+          name: "Backend",
+          orgSlug: "my-org",
+        },
+      ] as ProjectWithOrg[]);
+      getProjectSpy.mockResolvedValue({
+        id: "12345",
+        slug: "backend",
+        name: "Backend",
+      });
       listProfiledTransactionsSpy.mockResolvedValue({ data: [] });
       const func = await loadListFunc();
 
       await func.call(ctx, defaultFlags, "backend");
 
-      expect(resolveOrgAndProjectSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ project: "backend" })
+      expect(findProjectsBySlugSpy).toHaveBeenCalledWith("backend");
+      // Should NOT call resolveOrgAndProject for project-search
+      expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
+    });
+
+    test("throws ContextError when project-only search finds nothing", async () => {
+      const ctx = createMockContext();
+      findProjectsBySlugSpy.mockResolvedValue([]);
+      const func = await loadListFunc();
+
+      await expect(func.call(ctx, defaultFlags, "nonexistent")).rejects.toThrow(
+        ContextError
+      );
+    });
+
+    test("throws ContextError when project-only search finds multiple orgs", async () => {
+      const ctx = createMockContext();
+      findProjectsBySlugSpy.mockResolvedValue([
+        { slug: "backend", id: "1", name: "Backend", orgSlug: "org-a" },
+        { slug: "backend", id: "2", name: "Backend", orgSlug: "org-b" },
+      ] as ProjectWithOrg[]);
+      const func = await loadListFunc();
+
+      await expect(func.call(ctx, defaultFlags, "backend")).rejects.toThrow(
+        ContextError
       );
     });
 

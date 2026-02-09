@@ -6,14 +6,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  parsePositionalArgs,
-  resolveFromProjectSearch,
-} from "../../../src/commands/log/view.js";
+import { parsePositionalArgs } from "../../../src/commands/log/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 describe("parsePositionalArgs", () => {
   describe("single argument (log ID only)", () => {
@@ -91,8 +89,10 @@ describe("parsePositionalArgs", () => {
   });
 });
 
-describe("resolveFromProjectSearch", () => {
+describe("resolveProjectBySlug (log context)", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+
+  const USAGE_HINT = "sentry log view <org>/<project> <log-id>";
 
   beforeEach(() => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
@@ -107,7 +107,10 @@ describe("resolveFromProjectSearch", () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       await expect(
-        resolveFromProjectSearch("my-project", "log-123")
+        resolveProjectBySlug("my-project", {
+          usageHint: USAGE_HINT,
+          contextValue: "log-123",
+        })
       ).rejects.toThrow(ContextError);
     });
 
@@ -115,7 +118,10 @@ describe("resolveFromProjectSearch", () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       try {
-        await resolveFromProjectSearch("frontend", "log-123");
+        await resolveProjectBySlug("frontend", {
+          usageHint: USAGE_HINT,
+          contextValue: "log-123",
+        });
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
@@ -135,7 +141,10 @@ describe("resolveFromProjectSearch", () => {
       ] as ProjectWithOrg[]);
 
       await expect(
-        resolveFromProjectSearch("frontend", "log-123")
+        resolveProjectBySlug("frontend", {
+          usageHint: USAGE_HINT,
+          contextValue: "log-123",
+        })
       ).rejects.toThrow(ValidationError);
     });
 
@@ -146,7 +155,10 @@ describe("resolveFromProjectSearch", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveFromProjectSearch("frontend", "log-456");
+        await resolveProjectBySlug("frontend", {
+          usageHint: USAGE_HINT,
+          contextValue: "log-456",
+        });
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
@@ -154,7 +166,7 @@ describe("resolveFromProjectSearch", () => {
         expect(message).toContain("exists in multiple organizations");
         expect(message).toContain("acme-corp/frontend");
         expect(message).toContain("beta-inc/frontend");
-        expect(message).toContain("log-456"); // Log ID in example
+        expect(message).toContain("log-456"); // Context value in example
       }
     });
 
@@ -166,12 +178,16 @@ describe("resolveFromProjectSearch", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveFromProjectSearch("api", "abc123");
+        await resolveProjectBySlug("api", {
+          usageHint: USAGE_HINT,
+          contextValue: "abc123",
+        });
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
         const message = (error as ValidationError).message;
-        expect(message).toContain("Example: sentry log view <org>/api abc123");
+        // The shared function uses a generic example format
+        expect(message).toContain("Example: sentry <command> <org>/api abc123");
       }
     });
   });
@@ -182,12 +198,16 @@ describe("resolveFromProjectSearch", () => {
         { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("backend", "log-xyz");
-
-      expect(result).toEqual({
-        org: "my-company",
-        project: "backend",
+      const result = await resolveProjectBySlug("backend", {
+        usageHint: USAGE_HINT,
+        contextValue: "log-xyz",
       });
+
+      // resolveProjectBySlug returns full ResolvedTarget
+      expect(result.org).toBe("my-company");
+      expect(result.project).toBe("backend");
+      expect(result.orgDisplay).toBe("my-company");
+      expect(result.projectDisplay).toBe("backend");
     });
 
     test("uses orgSlug from project result", async () => {
@@ -200,7 +220,10 @@ describe("resolveFromProjectSearch", () => {
         },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("mobile-app", "log-001");
+      const result = await resolveProjectBySlug("mobile-app", {
+        usageHint: USAGE_HINT,
+        contextValue: "log-001",
+      });
 
       expect(result.org).toBe("acme-industries");
     });
@@ -210,7 +233,10 @@ describe("resolveFromProjectSearch", () => {
         { slug: "web-frontend", orgSlug: "org", id: "1", name: "Web Frontend" },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("web-frontend", "log123");
+      const result = await resolveProjectBySlug("web-frontend", {
+        usageHint: USAGE_HINT,
+        contextValue: "log123",
+      });
 
       expect(result.project).toBe("web-frontend");
     });

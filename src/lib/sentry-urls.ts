@@ -121,7 +121,7 @@ export function buildProfileUrl(
   transactionName: string
 ): string {
   const encodedTransaction = encodeURIComponent(transactionName);
-  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/profile/${projectSlug}/flamegraph/?query=transaction%3A${encodedTransaction}`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/profile/${projectSlug}/flamegraph/?query=transaction%3A%22${encodedTransaction}%22`;
 }
 
 /**
