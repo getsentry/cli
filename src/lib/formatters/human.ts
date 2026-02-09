@@ -878,8 +878,9 @@ function formatSpanDuration(ms: number): string {
   if (ms < 60_000) {
     return `${(ms / 1000).toFixed(2)}s`;
   }
-  const mins = Math.floor(ms / 60_000);
-  const secs = Math.round((ms % 60_000) / 1000);
+  const totalSecs = Math.round(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
   return `${mins}m ${secs}s`;
 }
 

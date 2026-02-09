@@ -136,6 +136,17 @@ describe("formatSimpleSpanTree", () => {
       expect(output).not.toMatch(/\(\d+\.\d+s\)/);
     });
 
+    test("correctly rolls over seconds to minutes at boundary", () => {
+      // 119500ms = 1m 59.5s -> should round to "2m 0s", not "1m 60s"
+      const spans = [
+        makeTraceSpan("http.server", "GET /api", [], { duration: 119_500 }),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("(2m 0s)");
+      expect(output).not.toContain("60s");
+    });
+
     test("handles missing op gracefully", () => {
       const spans: TraceSpan[] = [
         {
