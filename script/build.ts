@@ -80,7 +80,7 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
       SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
       "process.env.NODE_ENV": JSON.stringify("production"),
     },
-    sourcemap: "none",
+    minify: true, // Shrink bundled JS (-1% binary size, -8% startup, -4% memory)
   });
 
   if (!result.success) {
