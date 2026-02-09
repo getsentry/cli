@@ -76,11 +76,11 @@ describe("formatSimpleSpanTree", () => {
     });
 
     test("shows duration computed from timestamps", () => {
-      // start=1000.0, timestamp=1001.0 -> 1000ms -> "1.00s"
+      // start=1000.0, timestamp=1001.0 -> 1000ms -> "1s"
       const spans = [makeTraceSpan("db.query", "SELECT * FROM users")];
       const result = formatSimpleSpanTree("trace-123", spans);
       const output = stripAnsi(result.join("\n"));
-      expect(output).toContain("(1.00s)");
+      expect(output).toContain("(1s)");
     });
 
     test("shows duration from API-provided duration field", () => {
@@ -134,17 +134,6 @@ describe("formatSimpleSpanTree", () => {
       const output = stripAnsi(result.join("\n"));
       expect(output).not.toMatch(/\(\d+ms\)/);
       expect(output).not.toMatch(/\(\d+\.\d+s\)/);
-    });
-
-    test("correctly rolls over seconds to minutes at boundary", () => {
-      // 119500ms = 1m 59.5s -> should round to "2m 0s", not "1m 60s"
-      const spans = [
-        makeTraceSpan("http.server", "GET /api", [], { duration: 119_500 }),
-      ];
-      const result = formatSimpleSpanTree("trace-123", spans);
-      const output = stripAnsi(result.join("\n"));
-      expect(output).toContain("(2m 0s)");
-      expect(output).not.toContain("60s");
     });
 
     test("handles missing op gracefully", () => {

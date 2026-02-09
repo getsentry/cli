@@ -5,6 +5,7 @@
  * Follows gh cli patterns for alignment and presentation.
  */
 
+import prettyMs from "pretty-ms";
 import type {
   Breadcrumb,
   BreadcrumbsEntry,
@@ -861,29 +862,6 @@ function computeSpanDurationMs(span: TraceSpan): number | undefined {
   return;
 }
 
-/**
- * Format a duration in milliseconds to a compact human-readable string.
- *
- * - < 1s: "245ms"
- * - < 60s: "1.24s"
- * - >= 60s: "2m 15s"
- */
-function formatSpanDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) {
-    return "—";
-  }
-  if (ms < 1000) {
-    return `${Math.round(ms)}ms`;
-  }
-  if (ms < 60_000) {
-    return `${(ms / 1000).toFixed(2)}s`;
-  }
-  const totalSecs = Math.round(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  return `${mins}m ${secs}s`;
-}
-
 type FormatSpanOptions = {
   lines: string[];
   prefix: string;
@@ -909,7 +887,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
 
   const durationMs = computeSpanDurationMs(span);
   if (durationMs !== undefined) {
-    line += `  ${muted(`(${formatSpanDuration(durationMs)})`)}`;
+    line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
   }
 
   lines.push(line);
