@@ -12,7 +12,7 @@ import {
   buildCommand as stricliCommand,
   numberParser as stricliNumberParser,
 } from "@stricli/core";
-import { setFlagContext } from "./telemetry.js";
+import { setArgsContext, setFlagContext } from "./telemetry.js";
 
 /**
  * Parse a string input as a number.
@@ -73,7 +73,7 @@ export function buildCommand<
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
 
-  // Wrap the function to capture flags before execution
+  // Wrap the function to capture flags and args before execution
   const wrappedFunc = function (
     this: CONTEXT,
     flags: FLAGS,
@@ -81,6 +81,11 @@ export function buildCommand<
   ): ReturnType<typeof originalFunc> {
     // Capture flag values as telemetry tags
     setFlagContext(flags as Record<string, unknown>);
+
+    // Capture positional arguments as context
+    if (args.length > 0) {
+      setArgsContext(args);
+    }
 
     // Call the original function with the same context and arguments
     return originalFunc.call(this, flags, ...args);

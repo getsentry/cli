@@ -5,10 +5,13 @@
  */
 
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as Sentry from "@sentry/bun";
 import {
   createTracedDatabase,
   initSentry,
+  setArgsContext,
   setCommandSpanName,
   setFlagContext,
   setOrgProjectContext,
@@ -151,73 +154,139 @@ describe("setOrgProjectContext", () => {
 });
 
 describe("setFlagContext", () => {
-  test("handles empty flags object", () => {
-    expect(() => setFlagContext({})).not.toThrow();
+  let setTagSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    setTagSpy = spyOn(Sentry, "setTag");
   });
 
-  test("handles boolean flags (true sets tag)", () => {
-    expect(() => setFlagContext({ verbose: true, debug: true })).not.toThrow();
+  afterEach(() => {
+    setTagSpy.mockRestore();
   });
 
-  test("handles boolean flags (false is skipped)", () => {
-    expect(() =>
-      setFlagContext({ verbose: false, debug: false })
-    ).not.toThrow();
+  test("does not set tags for empty flags object", () => {
+    setFlagContext({});
+    expect(setTagSpy).not.toHaveBeenCalled();
   });
 
-  test("handles string flags", () => {
-    expect(() =>
-      setFlagContext({ output: "json", format: "table" })
-    ).not.toThrow();
+  test("sets tags for boolean flags when true", () => {
+    setFlagContext({ verbose: true, debug: true });
+    expect(setTagSpy).toHaveBeenCalledTimes(2);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.verbose", "true");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.debug", "true");
   });
 
-  test("handles number flags", () => {
-    expect(() => setFlagContext({ limit: 10, offset: 0 })).not.toThrow();
+  test("does not set tags for boolean flags when false", () => {
+    setFlagContext({ verbose: false, debug: false });
+    expect(setTagSpy).not.toHaveBeenCalled();
   });
 
-  test("handles undefined and null values (skipped)", () => {
-    expect(() =>
-      setFlagContext({ value: undefined, other: null })
-    ).not.toThrow();
+  test("sets tags for string flags with values", () => {
+    setFlagContext({ output: "json", format: "table" });
+    expect(setTagSpy).toHaveBeenCalledTimes(2);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.output", "json");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.format", "table");
   });
 
-  test("handles empty string values (skipped)", () => {
-    expect(() => setFlagContext({ name: "" })).not.toThrow();
+  test("sets tags for number flags", () => {
+    setFlagContext({ limit: 10, offset: 5 });
+    expect(setTagSpy).toHaveBeenCalledTimes(2);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.limit", "10");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.offset", "5");
   });
 
-  test("handles empty array values (skipped)", () => {
-    expect(() => setFlagContext({ items: [] })).not.toThrow();
+  test("does not set tags for undefined or null values", () => {
+    setFlagContext({ value: undefined, other: null });
+    expect(setTagSpy).not.toHaveBeenCalled();
   });
 
-  test("handles non-empty array values", () => {
-    expect(() =>
-      setFlagContext({ projects: ["proj1", "proj2"] })
-    ).not.toThrow();
+  test("does not set tags for empty string values", () => {
+    setFlagContext({ name: "" });
+    expect(setTagSpy).not.toHaveBeenCalled();
   });
 
-  test("handles mixed flag types", () => {
-    expect(() =>
-      setFlagContext({
-        verbose: true,
-        quiet: false,
-        limit: 50,
-        output: "json",
-        projects: ["a", "b"],
-        empty: "",
-        missing: undefined,
-      })
-    ).not.toThrow();
+  test("does not set tags for empty array values", () => {
+    setFlagContext({ items: [] });
+    expect(setTagSpy).not.toHaveBeenCalled();
+  });
+
+  test("sets tags for non-empty array values", () => {
+    setFlagContext({ projects: ["proj1", "proj2"] });
+    expect(setTagSpy).toHaveBeenCalledTimes(1);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.projects", "proj1,proj2");
+  });
+
+  test("only sets tags for meaningful values in mixed flags", () => {
+    setFlagContext({
+      verbose: true,
+      quiet: false,
+      limit: 50,
+      output: "json",
+      projects: ["a", "b"],
+      empty: "",
+      missing: undefined,
+    });
+    // Should set: verbose, limit, output, projects (4 tags)
+    // Should skip: quiet (false), empty (""), missing (undefined)
+    expect(setTagSpy).toHaveBeenCalledTimes(4);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.verbose", "true");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.limit", "50");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.output", "json");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.projects", "a,b");
   });
 
   test("converts camelCase to kebab-case", () => {
-    // This test verifies the function doesn't throw with camelCase keys
-    // The actual conversion is tested implicitly - the tag would be flag.no-modify-path
-    expect(() =>
-      setFlagContext({
-        noModifyPath: true,
-        someVeryLongFlagName: "value",
-      })
-    ).not.toThrow();
+    setFlagContext({
+      noModifyPath: true,
+      someVeryLongFlagName: "value",
+    });
+    expect(setTagSpy).toHaveBeenCalledTimes(2);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.no-modify-path", "true");
+    expect(setTagSpy).toHaveBeenCalledWith(
+      "flag.some-very-long-flag-name",
+      "value"
+    );
+  });
+
+  test("truncates long string values to 200 characters", () => {
+    const longValue = "x".repeat(250);
+    setFlagContext({ longFlag: longValue });
+    expect(setTagSpy).toHaveBeenCalledTimes(1);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.long-flag", "x".repeat(200));
+  });
+});
+
+describe("setArgsContext", () => {
+  let setContextSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    setContextSpy = spyOn(Sentry, "setContext");
+  });
+
+  afterEach(() => {
+    setContextSpy.mockRestore();
+  });
+
+  test("does not set context for empty args", () => {
+    setArgsContext([]);
+    expect(setContextSpy).not.toHaveBeenCalled();
+  });
+
+  test("sets context for string args", () => {
+    setArgsContext(["PROJECT-123", "my-org"]);
+    expect(setContextSpy).toHaveBeenCalledTimes(1);
+    expect(setContextSpy).toHaveBeenCalledWith("args", {
+      values: ["PROJECT-123", "my-org"],
+      count: 2,
+    });
+  });
+
+  test("converts non-string args to JSON", () => {
+    setArgsContext([123, { key: "value" }]);
+    expect(setContextSpy).toHaveBeenCalledWith("args", {
+      values: ["123", '{"key":"value"}'],
+      count: 2,
+    });
   });
 });
 

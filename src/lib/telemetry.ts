@@ -271,6 +271,27 @@ export function setFlagContext(flags: Record<string, unknown>): void {
 }
 
 /**
+ * Set positional arguments as Sentry context.
+ *
+ * Stores positional arguments in a structured context for debugging.
+ * Unlike tags, context is not indexed but provides richer data.
+ *
+ * @param args - The positional arguments passed to the command
+ */
+export function setArgsContext(args: readonly unknown[]): void {
+  if (args.length === 0) {
+    return;
+  }
+
+  Sentry.setContext("args", {
+    values: args.map((arg) =>
+      typeof arg === "string" ? arg : JSON.stringify(arg)
+    ),
+    count: args.length,
+  });
+}
+
+/**
  * Wrap an operation with a Sentry span for tracing.
  *
  * Creates a child span under the current active span to track
