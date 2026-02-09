@@ -1,0 +1,42 @@
+## Implementation Plan: Auto-Install Agent Skills During Setup
+
+### Problem
+AI coding agents like Claude Code need a SKILL.md file to know how to use the
+Sentry CLI. Installation was manual (`npx skills add`). We can automate this
+during `sentry cli setup` since we already auto-install shell completions there.
+
+### Version Mismatch Protection
+Fetching from cli.sentry.dev always serves the latest SKILL.md, which may
+document commands that do not exist in the installed binary. Solution: fetch from
+raw.githubusercontent.com using the CLI version tag (e.g., /0.8.0/...SKILL.md).
+For dev builds (0.0.0-dev, etc.), fall back to cli.sentry.dev since exact tags
+do not exist.
+
+### Detection Strategy
+- Auto-detect: check if ~/.claude/ directory exists (created by Claude Code)
+- Opt-out: --no-agent-skills flag (matching --no-completions pattern)
+- Silent when no agent detected — no noise for non-Claude users
+
+### Fetch Strategy
+1. Build URL: raw.githubusercontent.com/getsentry/cli/{version}/plugins/sentry-cli/skills/sentry-cli/SKILL.md
+2. If versioned URL returns non-200, fall back to cli.sentry.dev/.well-known/skills/sentry-cli/SKILL.md
+3. For dev versions, go directly to fallback (skip step 1)
+4. Network failures return null — never throw, setup continues
+
+### Setup Flow (4 steps, was 3)
+1. Record install metadata (if --method)
+2. Add binary to PATH (unless --no-modify-path)
+3. Install shell completions (unless --no-completions)
+4. Install agent skills (NEW — unless --no-agent-skills or no agent detected)
+
+### Files Changed
+- NEW: src/lib/agent-skills.ts — detection, URL construction, fetch with fallback, install
+- MOD: src/commands/cli/setup.ts — step 4 + --no-agent-skills flag
+- NEW: test/lib/agent-skills.test.ts — 18 unit tests
+- MOD: test/commands/cli/setup.test.ts — 4 new integration tests + --no-agent-skills on existing
+- AUTO: plugins/sentry-cli/skills/sentry-cli/SKILL.md — regenerated for new flag
+
+### What Stays Unchanged
+- script/generate-skill.ts — still generates SKILL.md at build time
+- docs/public/.well-known/skills/ — still serves for npx skills add
+- plugins/ directory — still works for the npx skills flow
