@@ -152,14 +152,14 @@ export type Flamegraph = z.infer<typeof FlamegraphSchema>;
  */
 export const ProfileFunctionRowSchema = z
   .object({
-    /** Transaction name */
-    transaction: z.string().optional(),
+    /** Transaction name (null when transaction data is missing) */
+    transaction: z.string().nullish(),
     /** Number of profiles/samples */
-    "count()": z.number().optional(),
+    "count()": z.number().nullish(),
     /** 75th percentile duration */
-    "p75(function.duration)": z.number().optional(),
+    "p75(function.duration)": z.number().nullish(),
     /** 95th percentile duration */
-    "p95(function.duration)": z.number().optional(),
+    "p95(function.duration)": z.number().nullish(),
   })
   .passthrough();
 
@@ -168,15 +168,17 @@ export type ProfileFunctionRow = z.infer<typeof ProfileFunctionRowSchema>;
 /**
  * Response from the Explore Events API for profile_functions dataset.
  */
-export const ProfileFunctionsResponseSchema = z.object({
-  data: z.array(ProfileFunctionRowSchema),
-  meta: z
-    .object({
-      fields: z.record(z.string()).optional(),
-    })
-    .passthrough()
-    .optional(),
-});
+export const ProfileFunctionsResponseSchema = z
+  .object({
+    data: z.array(ProfileFunctionRowSchema),
+    meta: z
+      .object({
+        fields: z.record(z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 export type ProfileFunctionsResponse = z.infer<
   typeof ProfileFunctionsResponseSchema
