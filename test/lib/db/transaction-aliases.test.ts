@@ -241,8 +241,9 @@ describe("getTransactionByAlias", () => {
 // =============================================================================
 
 describe("stale detection", () => {
-  test("getStaleFingerprint returns fingerprint when alias exists elsewhere", () => {
+  test("getStaleFingerprint returns fingerprint when alias exists in different context", () => {
     const oldFp = "old-org:old-project:7d";
+    const currentFp = "new-org:new-project:24h";
     setTransactionAliases(
       [
         {
@@ -256,17 +257,39 @@ describe("stale detection", () => {
       oldFp
     );
 
-    const stale = getStaleFingerprint("issues");
+    const stale = getStaleFingerprint("issues", currentFp);
     expect(stale).toBe(oldFp);
   });
 
-  test("getStaleFingerprint returns null when alias doesn't exist", () => {
-    const stale = getStaleFingerprint("nonexistent");
+  test("getStaleFingerprint excludes current fingerprint", () => {
+    clearTransactionAliases();
+    const fp = "my-org:my-project:7d";
+    setTransactionAliases(
+      [
+        {
+          idx: 1,
+          alias: "issues",
+          transaction: "/api/issues/",
+          orgSlug: "my-org",
+          projectSlug: "my-project",
+        },
+      ],
+      fp
+    );
+
+    // Searching with the same fingerprint should return null (not stale)
+    const stale = getStaleFingerprint("issues", fp);
     expect(stale).toBeNull();
   });
 
-  test("getStaleIndexFingerprint returns fingerprint when index exists elsewhere", () => {
+  test("getStaleFingerprint returns null when alias doesn't exist", () => {
+    const stale = getStaleFingerprint("nonexistent", "any:fp:here");
+    expect(stale).toBeNull();
+  });
+
+  test("getStaleIndexFingerprint returns fingerprint when index exists in different context", () => {
     const oldFp = "old-org:old-project:7d";
+    const currentFp = "new-org:new-project:24h";
     setTransactionAliases(
       [
         {
@@ -280,12 +303,33 @@ describe("stale detection", () => {
       oldFp
     );
 
-    const stale = getStaleIndexFingerprint(5);
+    const stale = getStaleIndexFingerprint(5, currentFp);
     expect(stale).toBe(oldFp);
   });
 
+  test("getStaleIndexFingerprint excludes current fingerprint", () => {
+    clearTransactionAliases();
+    const fp = "my-org:my-project:7d";
+    setTransactionAliases(
+      [
+        {
+          idx: 5,
+          alias: "test",
+          transaction: "/api/test/",
+          orgSlug: "my-org",
+          projectSlug: "my-project",
+        },
+      ],
+      fp
+    );
+
+    // Searching with the same fingerprint should return null (not stale)
+    const stale = getStaleIndexFingerprint(5, fp);
+    expect(stale).toBeNull();
+  });
+
   test("getStaleIndexFingerprint returns null when index doesn't exist", () => {
-    const stale = getStaleIndexFingerprint(999);
+    const stale = getStaleIndexFingerprint(999, "any:fp:here");
     expect(stale).toBeNull();
   });
 });

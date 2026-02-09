@@ -155,30 +155,48 @@ export function getTransactionAliases(
 
 /**
  * Check if an alias exists for a different fingerprint (stale check).
- * Returns the stale fingerprint if found, null otherwise.
+ * Excludes the current fingerprint so we only find entries from other contexts.
+ *
+ * @param alias - The alias to look up
+ * @param currentFingerprint - The fingerprint to exclude from results
+ * @returns The stale fingerprint if found, null otherwise
  */
-export function getStaleFingerprint(alias: string): string | null {
+export function getStaleFingerprint(
+  alias: string,
+  currentFingerprint: string
+): string | null {
   const db = getDatabase();
 
   const row = db
     .query(
-      "SELECT fingerprint FROM transaction_aliases WHERE alias = ? LIMIT 1"
+      "SELECT fingerprint FROM transaction_aliases WHERE alias = ? AND fingerprint != ? LIMIT 1"
     )
-    .get(alias.toLowerCase()) as { fingerprint: string } | undefined;
+    .get(alias.toLowerCase(), currentFingerprint) as
+    | { fingerprint: string }
+    | undefined;
 
   return row?.fingerprint ?? null;
 }
 
 /**
  * Check if an index exists for a different fingerprint (stale check).
- * Returns the stale fingerprint if found, null otherwise.
+ * Excludes the current fingerprint so we only find entries from other contexts.
+ *
+ * @param idx - The numeric index to look up
+ * @param currentFingerprint - The fingerprint to exclude from results
+ * @returns The stale fingerprint if found, null otherwise
  */
-export function getStaleIndexFingerprint(idx: number): string | null {
+export function getStaleIndexFingerprint(
+  idx: number,
+  currentFingerprint: string
+): string | null {
   const db = getDatabase();
 
   const row = db
-    .query("SELECT fingerprint FROM transaction_aliases WHERE idx = ? LIMIT 1")
-    .get(idx) as { fingerprint: string } | undefined;
+    .query(
+      "SELECT fingerprint FROM transaction_aliases WHERE idx = ? AND fingerprint != ? LIMIT 1"
+    )
+    .get(idx, currentFingerprint) as { fingerprint: string } | undefined;
 
   return row?.fingerprint ?? null;
 }

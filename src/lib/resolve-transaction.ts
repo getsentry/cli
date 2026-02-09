@@ -178,8 +178,8 @@ export function resolveTransaction(
       };
     }
 
-    // Check if there's a stale entry for this index
-    const staleFingerprint = getStaleIndexFingerprint(idx);
+    // Check if there's a stale entry for this index in a different context
+    const staleFingerprint = getStaleIndexFingerprint(idx, currentFingerprint);
     if (staleFingerprint) {
       throw buildStaleAliasError(input, staleFingerprint, currentFingerprint);
     }
@@ -199,8 +199,8 @@ export function resolveTransaction(
       };
     }
 
-    // Check if there's a stale entry for this alias
-    const staleFingerprint = getStaleFingerprint(input);
+    // Check if there's a stale entry for this alias in a different context
+    const staleFingerprint = getStaleFingerprint(input, currentFingerprint);
     if (staleFingerprint) {
       throw buildStaleAliasError(input, staleFingerprint, currentFingerprint);
     }
