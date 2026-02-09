@@ -57,7 +57,11 @@ export function extractTransactionSegment(transaction: string): string {
     }
 
     // Normalize: remove hyphens/underscores, lowercase
-    return segment.replace(/[-_]/g, "").toLowerCase();
+    const normalized = segment.replace(/[-_]/g, "").toLowerCase();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+    // Segment was entirely hyphens/underscores (e.g. "---"), skip it
   }
 
   // Fallback: use first non-empty, non-numeric segment if no meaningful one found
@@ -65,7 +69,8 @@ export function extractTransactionSegment(transaction: string): string {
     (s) =>
       s.length > 0 && !NUMERIC_PATTERN.test(s) && !PLACEHOLDER_PATTERN.test(s)
   );
-  return firstSegment?.replace(/[-_]/g, "").toLowerCase() ?? "txn";
+  const fallback = firstSegment?.replace(/[-_]/g, "").toLowerCase();
+  return fallback && fallback.length > 0 ? fallback : "txn";
 }
 
 /** Input for alias generation */

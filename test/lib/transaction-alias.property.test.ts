@@ -375,6 +375,22 @@ describe("extractTransactionSegment edge cases", () => {
   test("handles single dot", () => {
     expect(extractTransactionSegment(".")).toBe("txn");
   });
+
+  test("returns 'txn' fallback for hyphen-only segment", () => {
+    expect(extractTransactionSegment("/-/")).toBe("txn");
+  });
+
+  test("returns 'txn' fallback for underscore-only segment", () => {
+    expect(extractTransactionSegment("/_/")).toBe("txn");
+  });
+
+  test("returns 'txn' fallback for mixed hyphens and underscores", () => {
+    expect(extractTransactionSegment("/-_--__-/")).toBe("txn");
+  });
+
+  test("skips hyphen-only segments and finds next meaningful one", () => {
+    expect(extractTransactionSegment("/---/users/")).toBe("users");
+  });
 });
 
 // Integration properties
