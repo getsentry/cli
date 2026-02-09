@@ -1,0 +1,26 @@
+# Binary Optimization Plan
+
+> **Status:** Done — applied `minify: true` only
+> **Reference:** https://bun.sh/docs/bundler/executables
+
+## Benchmark Results (hyperfine, 50 runs, 5 warmup, linux-x64)
+
+| Config                 |   Size |  Δ Size | Startup (mean ± σ) | Δ Startup | Peak RSS    |  Δ RSS |
+| ---------------------- | -----: | ------: | -----------------: | --------: | ----------: | -----: |
+| baseline               | 99.2MB |       — |   337.0 ± 17.1 ms |         — | 94,080 KB   |      — |
+| **minify**             | 98.2MB | **-1%** |   316.7 ± 14.0 ms |  **-6%**  | 90,624 KB   | **-4%**|
+| minify+smol            | 98.2MB |     -1% |   315.2 ± 12.4 ms |      -6%  | 90,624 KB   |    -4% |
+| minify+sourcemap       |100.3MB |     +1% |   311.6 ±  9.2 ms |      -8%  | 92,672 KB   |    -1% |
+| minify+sourcemap+smol  |100.3MB |     +1% |   318.9 ± 10.4 ms |      -5%  | 92,800 KB   |    -1% |
+
+bytecode: true variants all added +9–11% binary size (+10 MB) with no meaningful startup improvement.
+
+## Decisions
+
+| Flag | Decision | Reason |
+|------|----------|--------|
+| `minify: true` | **Applied** | Smaller binary, faster startup, less memory. No trade-off. |
+| `bytecode: true` | Rejected | +10 MB binary size for negligible startup gain. |
+| `sourcemap: "linked"` | Not now | +2 MB for readable stack traces. Worth revisiting later. |
+| `execArgv: ["--smol"]` | Rejected | Zero measurable effect for a short-lived CLI process. |
+| Sourcemap upload | N/A | Compiled executables don't produce external `.map` files. |
