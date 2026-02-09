@@ -129,3 +129,13 @@ export function buildLogsUrl(orgSlug: string, logId?: string): string {
 export function buildTraceUrl(orgSlug: string, traceId: string): string {
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
 }
+
+/**
+ * Build URL to the traces explorer in Sentry.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Full URL to the traces explorer
+ */
+export function buildTracesUrl(orgSlug: string): string {
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/`;
+}

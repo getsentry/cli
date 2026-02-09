@@ -881,8 +881,18 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
 }
 
 /**
+ * Maximum number of root-level spans to display before truncating.
+ * Prevents overwhelming output when traces have thousands of flat root spans
+ * (common in projects with very high span volume or flat hierarchies).
+ */
+const MAX_ROOT_SPANS = 50;
+
+/**
  * Format trace as simple tree (op — description).
  * No durations, just hierarchy like Sentry's dashboard.
+ *
+ * Root spans are capped at {@link MAX_ROOT_SPANS} to prevent terminal flooding
+ * when traces contain thousands of flat spans.
  *
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
@@ -911,16 +921,27 @@ export function formatSimpleSpanTree(
     lines.push("");
     lines.push(`${muted("Trace —")} ${traceId}`);
 
-    const spanCount = spans.length;
-    spans.forEach((span, i) => {
+    const totalRootSpans = spans.length;
+    const truncated = totalRootSpans > MAX_ROOT_SPANS;
+    const displaySpans = truncated ? spans.slice(0, MAX_ROOT_SPANS) : spans;
+    const displayCount = displaySpans.length;
+
+    displaySpans.forEach((span, i) => {
       formatSpanSimple(span, {
         lines,
         prefix: "",
-        isLast: i === spanCount - 1,
+        isLast: !truncated && i === displayCount - 1,
         currentDepth: 1,
         maxDepth: effectiveMaxDepth,
       });
     });
+
+    if (truncated) {
+      const remaining = totalRootSpans - MAX_ROOT_SPANS;
+      lines.push(
+        `└─ ${muted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
+      );
+    }
 
     return lines;
   });
