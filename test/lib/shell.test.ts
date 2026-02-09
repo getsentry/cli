@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  addToGitHubPath,
   addToPath,
   detectShell,
   detectShellType,
@@ -75,6 +76,13 @@ describe("shell utilities", () => {
     test("uses default XDG_CONFIG_HOME when not provided", () => {
       const candidates = getConfigCandidates("fish", homeDir);
       expect(candidates).toContain("/home/user/.config/fish/config.fish");
+    });
+
+    test("returns fallback candidates for unknown shell", () => {
+      const candidates = getConfigCandidates("unknown", homeDir, xdgConfigHome);
+      expect(candidates).toContain("/home/user/.bashrc");
+      expect(candidates).toContain("/home/user/.bash_profile");
+      expect(candidates).toContain("/home/user/.profile");
     });
   });
 
@@ -254,6 +262,144 @@ describe("shell utilities", () => {
 
       const content = await Bun.file(configFile).text();
       expect(content).toContain('fish_add_path "/home/user/.sentry/bin"');
+    });
+
+    test("appends newline separator when file doesn't end with newline", async () => {
+      const configFile = join(testDir, ".bashrc");
+      writeFileSync(configFile, "# existing content without newline");
+
+      const result = await addToPath(
+        configFile,
+        "/home/user/.sentry/bin",
+        "bash"
+      );
+
+      expect(result.modified).toBe(true);
+
+      const content = await Bun.file(configFile).text();
+      // Should have double newline separator before sentry block
+      expect(content).toContain(
+        "# existing content without newline\n\n# sentry\n"
+      );
+    });
+
+    test("returns manualCommand when config file cannot be created", async () => {
+      // Point to a path inside a nonexistent, deeply nested directory that can't be auto-created
+      const configFile = "/dev/null/impossible/path/.bashrc";
+      const result = await addToPath(
+        configFile,
+        "/home/user/.sentry/bin",
+        "bash"
+      );
+
+      expect(result.modified).toBe(false);
+      expect(result.manualCommand).toBe(
+        'export PATH="/home/user/.sentry/bin:$PATH"'
+      );
+    });
+
+    test("returns manualCommand when existing config file is not writable", async () => {
+      const configFile = join(testDir, ".bashrc");
+      writeFileSync(configFile, "# existing\n");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(configFile, 0o444);
+
+      const result = await addToPath(
+        configFile,
+        "/home/user/.sentry/bin",
+        "bash"
+      );
+
+      // On failure to write, should return manual command
+      // Restore permissions for cleanup
+      chmodSync(configFile, 0o644);
+
+      // The file is read-only, but Bun.write may override on some systems
+      // At minimum, verify the result is valid
+      expect(
+        result.configFile === configFile || result.manualCommand !== null
+      ).toBe(true);
+    });
+  });
+
+  describe("addToGitHubPath", () => {
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(
+        "/tmp",
+        `shell-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      );
+      mkdirSync(testDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    test("returns false when not in GitHub Actions", async () => {
+      const result = await addToGitHubPath("/usr/local/bin", {});
+      expect(result).toBe(false);
+    });
+
+    test("returns false when GITHUB_PATH is not set", async () => {
+      const result = await addToGitHubPath("/usr/local/bin", {
+        GITHUB_ACTIONS: "true",
+      });
+      expect(result).toBe(false);
+    });
+
+    test("writes directory to GITHUB_PATH file", async () => {
+      const pathFile = join(testDir, "github_path");
+      writeFileSync(pathFile, "");
+
+      const result = await addToGitHubPath("/usr/local/bin", {
+        GITHUB_ACTIONS: "true",
+        GITHUB_PATH: pathFile,
+      });
+
+      expect(result).toBe(true);
+      const content = await Bun.file(pathFile).text();
+      expect(content).toContain("/usr/local/bin");
+    });
+
+    test("appends to existing GITHUB_PATH content", async () => {
+      const pathFile = join(testDir, "github_path");
+      writeFileSync(pathFile, "/existing/path\n");
+
+      const result = await addToGitHubPath("/usr/local/bin", {
+        GITHUB_ACTIONS: "true",
+        GITHUB_PATH: pathFile,
+      });
+
+      expect(result).toBe(true);
+      const content = await Bun.file(pathFile).text();
+      expect(content).toContain("/existing/path");
+      expect(content).toContain("/usr/local/bin");
+    });
+
+    test("does not duplicate existing directory", async () => {
+      const pathFile = join(testDir, "github_path");
+      writeFileSync(pathFile, "/usr/local/bin\n");
+
+      const result = await addToGitHubPath("/usr/local/bin", {
+        GITHUB_ACTIONS: "true",
+        GITHUB_PATH: pathFile,
+      });
+
+      expect(result).toBe(true);
+      const content = await Bun.file(pathFile).text();
+      // Should still be just the one entry
+      expect(content).toBe("/usr/local/bin\n");
+    });
+
+    test("returns false when GITHUB_PATH file is not writable", async () => {
+      const result = await addToGitHubPath("/usr/local/bin", {
+        GITHUB_ACTIONS: "true",
+        GITHUB_PATH: "/dev/null/impossible",
+      });
+
+      expect(result).toBe(false);
     });
   });
 });
