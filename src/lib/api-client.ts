@@ -1025,7 +1025,7 @@ export function getFlamegraph(
   orgSlug: string,
   projectId: string | number,
   transactionName: string,
-  statsPeriod = "7d"
+  statsPeriod = "24h"
 ): Promise<Flamegraph> {
   // Escape special characters in transaction name for query
   const escapedTransaction = transactionName

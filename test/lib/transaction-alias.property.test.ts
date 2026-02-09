@@ -290,6 +290,34 @@ describe("property: buildTransactionAliases", () => {
   });
 });
 
+// Edge cases for extractTransactionSegment
+
+describe("extractTransactionSegment edge cases", () => {
+  test("returns 'txn' fallback for empty string", () => {
+    expect(extractTransactionSegment("")).toBe("txn");
+  });
+
+  test("returns 'txn' fallback for placeholder-only transaction", () => {
+    expect(extractTransactionSegment("/{org}/{project}/")).toBe("txn");
+  });
+
+  test("returns 'txn' fallback for purely numeric transaction", () => {
+    expect(extractTransactionSegment("/0/1/2/")).toBe("txn");
+  });
+
+  test("returns 'txn' fallback for mixed placeholders and numerics", () => {
+    expect(extractTransactionSegment("/{org}/0/{project}/1/")).toBe("txn");
+  });
+
+  test("handles single slash", () => {
+    expect(extractTransactionSegment("/")).toBe("txn");
+  });
+
+  test("handles single dot", () => {
+    expect(extractTransactionSegment(".")).toBe("txn");
+  });
+});
+
 // Integration properties
 
 describe("property: alias lookup invariants", () => {

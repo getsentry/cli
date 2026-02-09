@@ -155,21 +155,21 @@ export const listCommand = buildCommand({
     // Set telemetry context
     setContext([resolvedTarget.org], [resolvedTarget.project]);
 
-    // Open in browser if requested
-    if (flags.web) {
-      await openInBrowser(
-        stdout,
-        buildProfilingSummaryUrl(resolvedTarget.org, resolvedTarget.project),
-        "profiling"
-      );
-      return;
-    }
-
-    // Get project to retrieve numeric ID (required for profile API)
+    // Get project to retrieve numeric ID (required for profile API and web URLs)
     const project = await getProject(
       resolvedTarget.org,
       resolvedTarget.project
     );
+
+    // Open in browser if requested
+    if (flags.web) {
+      await openInBrowser(
+        stdout,
+        buildProfilingSummaryUrl(resolvedTarget.org, project.id),
+        "profiling"
+      );
+      return;
+    }
 
     // Fetch profiled transactions
     const response = await listProfiledTransactions(

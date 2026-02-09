@@ -128,14 +128,14 @@ export function buildProfileUrl(
  * Build URL to the profiling summary page for a project.
  *
  * @param orgSlug - Organization slug
- * @param projectSlug - Project slug
+ * @param projectId - Numeric project ID (Sentry frontend requires numeric ID for ?project= param)
  * @returns Full URL to the profiling summary page
  */
 export function buildProfilingSummaryUrl(
   orgSlug: string,
-  projectSlug: string
+  projectId: string | number
 ): string {
-  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/?project=${projectSlug}`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/?project=${projectId}`;
 }
 
 // Logs URLs
