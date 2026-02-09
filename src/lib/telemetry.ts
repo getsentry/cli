@@ -215,6 +215,83 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 }
 
 /**
+ * Set command flags as telemetry tags.
+ *
+ * Converts flag names from camelCase to kebab-case and sets them as tags
+ * with the `flag.` prefix (e.g., `flag.no-modify-path`).
+ *
+ * Only sets tags for flags with non-default/meaningful values:
+ * - Boolean flags: only when true
+ * - String/number flags: only when defined and non-empty
+ * - Array flags: only when non-empty
+ *
+ * Call this at the start of command func() to instrument flag usage.
+ *
+ * @param flags - The parsed flags object from Stricli
+ *
+ * @example
+ * ```ts
+ * async func(this: SentryContext, flags: MyFlags): Promise<void> {
+ *   setFlagContext(flags);
+ *   // ... command implementation
+ * }
+ * ```
+ */
+export function setFlagContext(flags: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(flags)) {
+    // Skip undefined/null values
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    // Skip false booleans (default state)
+    if (value === false) {
+      continue;
+    }
+
+    // Skip empty strings
+    if (value === "") {
+      continue;
+    }
+
+    // Skip empty arrays
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    // Convert camelCase to kebab-case for consistency with CLI flag names
+    const kebabKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+
+    // Set the tag with flag. prefix
+    // For booleans, just set "true"; for other types, convert to string
+    const tagValue =
+      typeof value === "boolean" ? "true" : String(value).slice(0, 200); // Truncate long values
+    Sentry.setTag(`flag.${kebabKey}`, tagValue);
+  }
+}
+
+/**
+ * Set positional arguments as Sentry context.
+ *
+ * Stores positional arguments in a structured context for debugging.
+ * Unlike tags, context is not indexed but provides richer data.
+ *
+ * @param args - The positional arguments passed to the command
+ */
+export function setArgsContext(args: readonly unknown[]): void {
+  if (args.length === 0) {
+    return;
+  }
+
+  Sentry.setContext("args", {
+    values: args.map((arg) =>
+      typeof arg === "string" ? arg : JSON.stringify(arg)
+    ),
+    count: args.length,
+  });
+}
+
+/**
  * Wrap an operation with a Sentry span for tracing.
  *
  * Creates a child span under the current active span to track

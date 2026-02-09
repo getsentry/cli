@@ -10,8 +10,8 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { ValidationError } from "../../lib/errors.js";
 
 export const feedbackCommand = buildCommand({

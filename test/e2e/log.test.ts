@@ -17,6 +17,7 @@ import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
   createSentryMockServer,
+  TEST_LOG_ID,
   TEST_ORG,
   TEST_PROJECT,
   TEST_TOKEN,
@@ -139,5 +140,73 @@ describe("sentry log list", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toMatch(/-f.*--follow/);
     expect(result.stdout).toMatch(/poll interval/i);
+  });
+});
+
+describe("sentry log view", () => {
+  test("requires authentication", async () => {
+    const result = await ctx.run([
+      "log",
+      "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
+      TEST_LOG_ID,
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
+  });
+
+  test("requires org and project without DSN", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["log", "view", TEST_LOG_ID]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr + result.stdout).toMatch(/organization|project/i);
+  });
+
+  test("fetches log with valid auth", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
+      TEST_LOG_ID,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Log");
+    expect(result.stdout).toContain(TEST_LOG_ID);
+  });
+
+  test("supports --json output", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
+      TEST_LOG_ID,
+      "--json",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout);
+    expect(data["sentry.item_id"]).toBe(TEST_LOG_ID);
+  });
+
+  test("handles non-existent log", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "view",
+      `${TEST_ORG}/${TEST_PROJECT}`,
+      "nonexistent-log-id-12345",
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr + result.stdout).toMatch(/not found|no log/i);
   });
 });

@@ -87,6 +87,9 @@ export const app = buildApplication(routes, {
   versionInfo: {
     currentVersion: CLI_VERSION,
   },
+  scanner: {
+    caseStyle: "allow-kebab-for-camel",
+  },
   determineExitCode: getExitCode,
   localization: {
     loadText: () => customText,

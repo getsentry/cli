@@ -4,9 +4,10 @@
  * Self-update the Sentry CLI to the latest or a specific version.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
+import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
+import { setInstallInfo } from "../../lib/db/install-info.js";
 import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
@@ -22,6 +23,28 @@ type UpgradeFlags = {
   readonly check: boolean;
   readonly method?: InstallationMethod;
 };
+
+/**
+ * Resolve installation method: use user-specified method or detect automatically.
+ * When user specifies method, persist it for future upgrades.
+ */
+async function resolveMethod(
+  flags: UpgradeFlags,
+  execPath: string
+): Promise<InstallationMethod> {
+  const method = flags.method ?? (await detectInstallationMethod());
+
+  // Persist user-specified method for future upgrades
+  if (flags.method) {
+    setInstallInfo({
+      method: flags.method,
+      path: execPath,
+      version: CLI_VERSION,
+    });
+  }
+
+  return method;
+}
 
 export const upgradeCommand = buildCommand({
   docs: {
@@ -69,8 +92,8 @@ export const upgradeCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
-    // Detect or use specified installation method
-    const method = flags.method ?? (await detectInstallationMethod());
+    // Resolve installation method (detects or uses user-specified, persists if specified)
+    const method = await resolveMethod(flags, this.process.execPath);
 
     if (method === "unknown") {
       throw new UpgradeError("unknown_method");

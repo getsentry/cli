@@ -4,9 +4,9 @@
  * List projects in an organization.
  */
 
-import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listOrganizations, listProjects } from "../../lib/api-client.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import { AuthError } from "../../lib/errors.js";
 import {

@@ -137,3 +137,28 @@ export function buildProfilingSummaryUrl(
 ): string {
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/?project=${projectSlug}`;
 }
+
+// Logs URLs
+
+/**
+ * Build URL to the Logs explorer, optionally filtered to a specific log entry.
+ *
+ * @param orgSlug - Organization slug
+ * @param logId - Optional log item ID to filter to
+ * @returns Full URL to the Logs explorer
+ */
+export function buildLogsUrl(orgSlug: string, logId?: string): string {
+  const base = `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/logs/`;
+  return logId ? `${base}?query=sentry.item_id:${logId}` : base;
+}
+
+/**
+ * Build URL to view a trace in Sentry.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - Trace ID (32-character hex string)
+ * @returns Full URL to the trace view
+ */
+export function buildTraceUrl(orgSlug: string, traceId: string): string {
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
+}
