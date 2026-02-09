@@ -66,13 +66,22 @@ describe("formatTraceDuration", () => {
   test("formats seconds with two decimal places", () => {
     expect(formatTraceDuration(1000)).toBe("1.00s");
     expect(formatTraceDuration(1240)).toBe("1.24s");
-    expect(formatTraceDuration(59_999)).toBe("60.00s");
+    expect(formatTraceDuration(59_995)).toBe("59.99s");
   });
 
   test("formats minutes and seconds for >= 60s", () => {
     expect(formatTraceDuration(60_000)).toBe("1m 0s");
     expect(formatTraceDuration(135_000)).toBe("2m 15s");
     expect(formatTraceDuration(3_600_000)).toBe("60m 0s");
+  });
+
+  test("handles seconds rollover (never produces '60s')", () => {
+    // 119500ms = 1m 59.5s, rounds to 2m 0s (not 1m 60s)
+    expect(formatTraceDuration(119_500)).toBe("2m 0s");
+    // 179500ms = 2m 59.5s, rounds to 3m 0s (not 2m 60s)
+    expect(formatTraceDuration(179_500)).toBe("3m 0s");
+    // 59500ms is < 60000 so uses seconds format
+    expect(formatTraceDuration(59_500)).toBe("59.50s");
   });
 
   test("returns dash for invalid values", () => {
@@ -218,6 +227,21 @@ describe("computeTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", []);
     expect(Number.isNaN(summary.duration)).toBe(true);
     expect(summary.spanCount).toBe(0);
+  });
+
+  test("falls back to timestamp when end_timestamp is 0", () => {
+    // end_timestamp: 0 should be treated as missing, falling back to timestamp
+    const spans: TraceSpan[] = [
+      makeSpan({
+        start_timestamp: 1000.0,
+        end_timestamp: 0,
+        timestamp: 1002.5,
+      }),
+    ];
+    const summary = computeTraceSummary("trace-id", spans);
+    // Should use timestamp (1002.5), not end_timestamp (0)
+    // Duration: (1002.5 - 1000.0) * 1000 = 2500ms
+    expect(summary.duration).toBe(2500);
   });
 });
 

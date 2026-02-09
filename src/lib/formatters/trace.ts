@@ -26,10 +26,17 @@ export function formatTraceDuration(ms: number): string {
     return `${Math.round(ms)}ms`;
   }
   if (ms < 60_000) {
-    return `${(ms / 1000).toFixed(2)}s`;
+    // Check if toFixed(2) would round up to 60.00s
+    const secs = Number((ms / 1000).toFixed(2));
+    if (secs < 60) {
+      return `${secs.toFixed(2)}s`;
+    }
+    // Fall through to minutes format
   }
-  const mins = Math.floor(ms / 60_000);
-  const secs = Math.round((ms % 60_000) / 1000);
+  // Round total seconds first, then split into mins/secs to avoid "Xm 60s"
+  const totalSecs = Math.round(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
   return `${mins}m ${secs}s`;
 }
 
@@ -125,8 +132,9 @@ function walkSpanTree(
   }
 
   // The API may return `end_timestamp` instead of `timestamp` depending on
-  // the span source. Prefer `end_timestamp` when present, fall back to `timestamp`.
-  const endTs = span.end_timestamp ?? span.timestamp;
+  // the span source. Prefer `end_timestamp` when present and non-zero,
+  // fall back to `timestamp`. Use || so that 0 (invalid) falls through.
+  const endTs = span.end_timestamp || span.timestamp;
   if (endTs !== undefined && isValidTimestamp(endTs)) {
     state.maxEnd = Math.max(state.maxEnd, endTs);
   }
