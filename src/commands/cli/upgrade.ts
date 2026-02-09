@@ -6,6 +6,7 @@
  * completions, agent skills, and record installation metadata.
  */
 
+import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { releaseLock } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
@@ -15,6 +16,7 @@ import {
   detectInstallationMethod,
   executeUpgrade,
   fetchLatestVersion,
+  getCurlInstallPaths,
   type InstallationMethod,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
@@ -81,7 +83,9 @@ async function resolveTargetVersion(
  * and record installation metadata.
  *
  * For curl upgrades with --install: the new binary places itself at the install
- * path, then runs setup steps.
+ * path, then runs setup steps. SENTRY_INSTALL_DIR is set in the child's
+ * environment to pin the install directory, preventing `determineInstallDir()`
+ * from relocating the binary to a different directory.
  *
  * For package manager upgrades: the binary is already in place, so setup only
  * updates completions, agent skills, and records metadata.
@@ -89,20 +93,27 @@ async function resolveTargetVersion(
  * @param binaryPath - Path to the new binary to spawn
  * @param method - Installation method to pass through to setup
  * @param install - Whether setup should handle binary placement (curl only)
+ * @param installDir - Pin the install directory (prevents relocation during upgrade)
  */
 async function runSetupOnNewBinary(
   binaryPath: string,
   method: InstallationMethod,
-  install: boolean
+  install: boolean,
+  installDir?: string
 ): Promise<void> {
   const args = ["cli", "setup", "--method", method, "--no-modify-path"];
   if (install) {
     args.push("--install");
   }
 
+  const env = installDir
+    ? { ...process.env, SENTRY_INSTALL_DIR: installDir }
+    : undefined;
+
   const proc = Bun.spawn([binaryPath, ...args], {
     stdout: "ignore",
     stderr: "ignore",
+    env,
   });
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
@@ -187,10 +198,18 @@ export const upgradeCommand = buildCommand({
     // and record installation metadata.
     if (downloadResult) {
       // Curl: new binary is at temp path, setup --install will place it.
+      // Pin the install directory via SENTRY_INSTALL_DIR so the child's
+      // determineInstallDir() doesn't relocate to a different directory.
       // Release the download lock after the child exits — if the child used
       // the same lock path (ppid takeover), this is a harmless no-op.
+      const currentInstallDir = dirname(getCurlInstallPaths().installPath);
       try {
-        await runSetupOnNewBinary(downloadResult.tempBinaryPath, method, true);
+        await runSetupOnNewBinary(
+          downloadResult.tempBinaryPath,
+          method,
+          true,
+          currentInstallDir
+        );
       } finally {
         releaseLock(downloadResult.lockPath);
       }
