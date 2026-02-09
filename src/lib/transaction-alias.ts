@@ -84,14 +84,20 @@ type TransactionInput = {
 };
 
 /**
- * Disambiguate duplicate segments by appending numeric suffixes.
- * e.g., ["issues", "events", "issues"] → ["issues", "events", "issues2"]
+ * Disambiguate duplicate segments by prepending "x" characters.
+ * e.g., ["issues", "events", "issues"] → ["issues", "events", "xissues"]
  *
- * Handles edge case where a suffixed name collides with an existing raw segment:
- * e.g., ["issues", "issues2", "issues"] → ["issues", "issues2", "issues3"]
+ * Uses a prefix ("x", "xx", "xxx", ...) instead of a numeric suffix to avoid
+ * creating prefix relationships between the original and disambiguated strings.
+ * A numeric suffix like "issues2" shares a prefix with "issues", which causes
+ * findShortestUniquePrefixes to degrade both to full-length strings. Prepending
+ * "x" breaks the prefix relationship, enabling short aliases (e.g., "i" and "x").
+ *
+ * Handles edge case where a prefixed name collides with an existing raw segment:
+ * e.g., ["issues", "xissues", "issues"] → ["issues", "xissues", "xxissues"]
  *
  * @param segments - Array of extracted segments (may contain duplicates)
- * @returns Array of unique segments with numeric suffixes for duplicates
+ * @returns Array of unique segments with "x" prefixes for duplicates
  */
 function disambiguateSegments(segments: string[]): string[] {
   const result: string[] = [];
@@ -99,12 +105,12 @@ function disambiguateSegments(segments: string[]): string[] {
 
   for (const segment of segments) {
     if (resultSet.has(segment)) {
-      // Need a suffixed version - find next available
-      let suffix = 2;
-      let candidate = `${segment}${suffix}`;
+      // Need a prefixed version - find next available
+      let prefix = "x";
+      let candidate = `${prefix}${segment}`;
       while (resultSet.has(candidate)) {
-        suffix += 1;
-        candidate = `${segment}${suffix}`;
+        prefix += "x";
+        candidate = `${prefix}${segment}`;
       }
       result.push(candidate);
       resultSet.add(candidate);
@@ -137,14 +143,14 @@ function disambiguateSegments(segments: string[]): string[] {
  * // ]
  *
  * @example
- * // Duplicate segments get numeric suffixes
+ * // Duplicate segments get "x" prefix for disambiguation
  * buildTransactionAliases([
  *   { transaction: "/api/v1/issues/", ... },
  *   { transaction: "/api/v2/issues/", ... },
  * ])
  * // => [
  * //   { idx: 1, alias: "i", ... },   // from "issues"
- * //   { idx: 2, alias: "is", ... },  // from "issues2" (disambiguated)
+ * //   { idx: 2, alias: "x", ... },   // from "xissues" (disambiguated)
  * // ]
  */
 export function buildTransactionAliases(

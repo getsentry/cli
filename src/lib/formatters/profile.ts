@@ -207,9 +207,11 @@ export function formatProfileListRow(
   alias?: TransactionAliasEntry
 ): string {
   const count = `${row["count()"] ?? 0}`.padStart(10);
-  const p75Ms = row["p75(function.duration)"]
-    ? formatDurationMs(row["p75(function.duration)"] / 1_000_000) // ns to ms
-    : "-";
+  const rawP75 = row["p75(function.duration)"];
+  const p75Ms =
+    rawP75 !== null && rawP75 !== undefined
+      ? formatDurationMs(rawP75 / 1_000_000) // ns to ms
+      : "-";
   const p75 = p75Ms.padStart(10);
 
   if (alias) {

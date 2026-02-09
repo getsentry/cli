@@ -293,14 +293,30 @@ describe("property: buildTransactionAliases", () => {
 // Edge cases for disambiguateSegments (internal function tested via buildTransactionAliases)
 
 describe("disambiguateSegments collision handling", () => {
-  test("handles suffixed name colliding with raw segment", () => {
-    // ["issues", "issues2", "issues"] would produce collision if not handled:
+  test("duplicate segments produce short aliases (no prefix overlap)", () => {
+    // This is the core fix: before, ["issues", "issues2"] had a prefix relationship
+    // causing findShortestUniquePrefixes to return full strings.
+    // With "x" prefix: ["issues", "xissues"] have no prefix relationship.
+    const inputs = [
+      { transaction: "/api/v1/issues/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/api/v2/issues/", orgSlug: "org", projectSlug: "proj" },
+    ];
+
+    const aliases = buildTransactionAliases(inputs);
+
+    // First "issues" → alias "i", disambiguated "xissues" → alias "x"
+    expect(aliases[0]?.alias).toBe("i");
+    expect(aliases[1]?.alias).toBe("x");
+  });
+
+  test("handles prefixed name colliding with raw segment", () => {
+    // ["issues", "xissues", "issues"] would produce collision if not handled:
     // - "issues" → "issues"
-    // - "issues2" → "issues2" (raw)
-    // - "issues" (2nd) → would try "issues2" but it's taken → should use "issues3"
+    // - "xissues" → "xissues" (raw)
+    // - "issues" (2nd) → would try "xissues" but it's taken → should use "xxissues"
     const inputs = [
       { transaction: "/api/issues/", orgSlug: "org", projectSlug: "proj" },
-      { transaction: "/api/issues2/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/api/xissues/", orgSlug: "org", projectSlug: "proj" },
       { transaction: "/v2/issues/", orgSlug: "org", projectSlug: "proj" },
     ];
 
@@ -313,11 +329,11 @@ describe("disambiguateSegments collision handling", () => {
   });
 
   test("handles multiple collision levels", () => {
-    // Multiple segments that would collide: issues, issues2, issues3, issues
+    // Multiple segments that would collide: issues, xissues, xxissues, issues
     const inputs = [
       { transaction: "/a/issues/", orgSlug: "org", projectSlug: "proj" },
-      { transaction: "/b/issues2/", orgSlug: "org", projectSlug: "proj" },
-      { transaction: "/c/issues3/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/b/xissues/", orgSlug: "org", projectSlug: "proj" },
+      { transaction: "/c/xxissues/", orgSlug: "org", projectSlug: "proj" },
       { transaction: "/d/issues/", orgSlug: "org", projectSlug: "proj" },
     ];
 
@@ -398,8 +414,8 @@ describe("extractTransactionSegment edge cases", () => {
 describe("property: alias lookup invariants", () => {
   test("alias is a prefix of the extracted segment (unique transactions)", () => {
     // Use uniqueArray to avoid duplicate transactions, since disambiguateSegments
-    // appends numeric suffixes to duplicates which breaks the prefix relationship
-    // with the raw extracted segment.
+    // prepends "x" prefixes to duplicates which changes the string relative to
+    // the raw extracted segment.
     fcAssert(
       property(
         uniqueArray(transactionInputArb, {
