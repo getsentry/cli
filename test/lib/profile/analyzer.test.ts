@@ -138,6 +138,18 @@ describe("formatDurationMs", () => {
     expect(formatDurationMs(0.000_001)).toBe("1ns");
   });
 
+  test("handles boundary rounding: 999.5ms promotes to seconds", () => {
+    // Math.round(999.5) = 1000, which should display as "1.0s" not "1000ms"
+    expect(formatDurationMs(999.5)).toBe("1.0s");
+    expect(formatDurationMs(999.9)).toBe("1.0s");
+  });
+
+  test("handles boundary rounding: 99.95ms promotes to whole ms", () => {
+    // (99.95).toFixed(1) = "100.0", which should display as "100ms" not "100.0ms"
+    expect(formatDurationMs(99.95)).toBe("100ms");
+    expect(formatDurationMs(99.99)).toBe("100ms");
+  });
+
   test("property: output always contains a unit", () => {
     fcAssert(
       property(double({ min: 0.000_001, max: 100_000, noNaN: true }), (ms) => {

@@ -96,6 +96,39 @@ describe("full transaction name pass-through", () => {
 
     expect(result.projectSlug).toBe("");
   });
+
+  test("underscored bare names pass through unchanged", () => {
+    const result = resolveTransaction("process_request", defaultOptions);
+    expect(result.transaction).toBe("process_request");
+  });
+
+  test("hyphenated bare names pass through unchanged", () => {
+    const result = resolveTransaction("handle-webhook", defaultOptions);
+    expect(result.transaction).toBe("handle-webhook");
+  });
+
+  test("uppercase bare names pass through unchanged", () => {
+    const result = resolveTransaction("GET /users", defaultOptions);
+    expect(result.transaction).toBe("GET /users");
+  });
+
+  test("mixed-case bare names pass through unchanged", () => {
+    const result = resolveTransaction("ProcessEvent", defaultOptions);
+    expect(result.transaction).toBe("ProcessEvent");
+  });
+
+  test("names with spaces pass through unchanged", () => {
+    const result = resolveTransaction(
+      "send email notification",
+      defaultOptions
+    );
+    expect(result.transaction).toBe("send email notification");
+  });
+
+  test("names with colons pass through unchanged", () => {
+    const result = resolveTransaction("worker:process_job", defaultOptions);
+    expect(result.transaction).toBe("worker:process_job");
+  });
 });
 
 // =============================================================================

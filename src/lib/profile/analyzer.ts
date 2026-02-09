@@ -35,10 +35,20 @@ export function formatDurationMs(ms: number): string {
     return `${(ms / 1000).toFixed(1)}s`;
   }
   if (ms >= 100) {
-    return `${Math.round(ms)}ms`;
+    const rounded = Math.round(ms);
+    // Rounding can push past the 1000ms boundary (e.g. 999.5 → 1000)
+    if (rounded >= 1000) {
+      return `${(ms / 1000).toFixed(1)}s`;
+    }
+    return `${rounded}ms`;
   }
   if (ms >= 10) {
-    return `${ms.toFixed(1)}ms`;
+    const formatted = ms.toFixed(1);
+    // toFixed(1) can push past 100ms boundary (e.g. 99.95 → "100.0")
+    if (Number.parseFloat(formatted) >= 100) {
+      return `${Math.round(ms)}ms`;
+    }
+    return `${formatted}ms`;
   }
   if (ms >= 1) {
     return `${ms.toFixed(2)}ms`;
