@@ -1,0 +1,35 @@
+## Implementation Plan
+
+### Design
+Move install logic from the bash install script into `sentry cli setup --install`,
+creating a single code path for binary placement shared by fresh installs (curl)
+and upgrades.
+
+### Key Decisions
+1. Bash script downloads binary to $TMPDIR, then delegates to `setup --install` —
+   bash only handles OS/arch detection, version resolution, and download
+   (chicken-and-egg problem). Everything else moves into TypeScript.
+
+2. Upgrade command spawns the NEW binary with `setup --install` — after downloading
+   to temp, upgrade spawns `$tmpBinary cli setup --install --method curl --no-modify-path`.
+   On Windows, setup renames the old binary to .old (allows renaming running exes).
+
+3. `setInstallInfo` removed from upgrade — setup is now the single place where
+   install info is recorded, since upgrade always calls setup afterward.
+
+4. `executeUpgrade` return type changed — for curl: returns `string` (temp binary path).
+   For package managers: returns `null` (binary already placed by npm/pnpm/etc).
+
+### Extracted Module: src/lib/binary.ts
+Shared helpers extracted from upgrade.ts:
+- `determineInstallDir(homeDir, env)` — priority: $SENTRY_INSTALL_DIR > ~/.local/bin > ~/bin > ~/.sentry/bin
+- `getBinaryDownloadUrl(version)`, `getBinaryFilename()`, `getBinaryPaths(installPath)`
+- `replaceBinary(tempPath, installPath)` — atomic rename on Unix, .old trick on Windows
+- `installBinary(sourcePath, installDir)` — full install: mkdir, copy, chmod, lock, replace
+- `acquireLock`/`releaseLock` — PID-based lock file mechanism
+- `isProcessRunning(pid)`, `cleanupOldBinary(oldPath)`
+
+### Test Coverage
+- 17 new tests in test/lib/binary.test.ts
+- Updated test/lib/upgrade.test.ts for new imports and return types
+- All 87 relevant tests pass; 14 pre-existing failures in model-based/concurrent tests unrelated
