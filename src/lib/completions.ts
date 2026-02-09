@@ -1,12 +1,13 @@
 /**
  * Shell completion script generation.
  *
- * Generates completion scripts for bash, zsh, and fish shells.
- * These scripts enable tab-completion for sentry CLI commands.
+ * Dynamically generates completion scripts from the Stricli route map.
+ * When commands are added or removed, completions update automatically.
  */
 
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { routes } from "../app.js";
 import type { ShellType } from "./shell.js";
 
 /** Where completions are installed */
@@ -17,23 +18,115 @@ export type CompletionLocation = {
   created: boolean;
 };
 
+/** A command with its description */
+type CommandEntry = { name: string; brief: string };
+
+/** A command group (route map) containing subcommands */
+type CommandGroup = {
+  name: string;
+  brief: string;
+  subcommands: CommandEntry[];
+};
+
+/** Extracted command tree from the Stricli route map */
+type CommandTree = {
+  /** Command groups with subcommands (auth, issue, org, etc.) */
+  groups: CommandGroup[];
+  /** Standalone top-level commands (api, help, version, etc.) */
+  standalone: CommandEntry[];
+};
+
+/**
+ * Check if a routing target is a route map (has subcommands).
+ *
+ * Stricli route maps have an `getAllEntries()` method while commands don't.
+ */
+function isRouteMap(target: unknown): target is {
+  getAllEntries: () => readonly {
+    name: Record<string, string>;
+    target: { brief: string };
+    hidden: boolean;
+  }[];
+} & {
+  brief: string;
+} {
+  return (
+    typeof target === "object" &&
+    target !== null &&
+    typeof (target as Record<string, unknown>).getAllEntries === "function"
+  );
+}
+
+/**
+ * Extract the command tree from the Stricli route map.
+ *
+ * Walks the route map recursively to build a structured command tree
+ * that can be used to generate completion scripts for any shell.
+ */
+export function extractCommandTree(): CommandTree {
+  const groups: CommandGroup[] = [];
+  const standalone: CommandEntry[] = [];
+
+  for (const entry of routes.getAllEntries()) {
+    const name = entry.name.original;
+    if (entry.hidden) {
+      continue;
+    }
+
+    if (isRouteMap(entry.target)) {
+      const subcommands: CommandEntry[] = [];
+      for (const sub of entry.target.getAllEntries()) {
+        if (!sub.hidden) {
+          subcommands.push({
+            name: sub.name.original,
+            brief: sub.target.brief,
+          });
+        }
+      }
+      groups.push({ name, brief: entry.target.brief, subcommands });
+    } else {
+      standalone.push({ name, brief: entry.target.brief });
+    }
+  }
+
+  return { groups, standalone };
+}
+
 /**
  * Generate bash completion script.
  */
 export function generateBashCompletion(binaryName: string): string {
+  const { groups, standalone } = extractCommandTree();
+
+  const allTopLevel = [
+    ...groups.map((g) => g.name),
+    ...standalone.map((s) => s.name),
+  ];
+
+  // Build subcommand variables
+  const subVars = groups
+    .map((g) => {
+      const subs = g.subcommands.map((s) => s.name).join(" ");
+      return `  local ${g.name}_commands="${subs}"`;
+    })
+    .join("\n");
+
+  // Build case branches for subcommand completion
+  const caseBranches = groups
+    .map(
+      (g) =>
+        `        ${g.name})\n          COMPREPLY=($(compgen -W "\${${g.name}_commands}" -- "\${cur}"))\n          ;;`
+    )
+    .join("\n");
+
   return `# bash completion for ${binaryName}
-# Install: ${binaryName} cli setup
+# Auto-generated from command definitions
 _${binaryName}_completions() {
   local cur prev words cword
   _init_completion || return
 
-  local commands="auth api event issue org project cli help version"
-  local auth_commands="login logout status refresh"
-  local cli_commands="feedback fix setup upgrade"
-  local event_commands="view"
-  local issue_commands="list view explain plan"
-  local org_commands="list view"
-  local project_commands="list view"
+  local commands="${allTopLevel.join(" ")}"
+${subVars}
 
   case "\${COMP_CWORD}" in
     1)
@@ -41,24 +134,7 @@ _${binaryName}_completions() {
       ;;
     2)
       case "\${prev}" in
-        auth)
-          COMPREPLY=($(compgen -W "\${auth_commands}" -- "\${cur}"))
-          ;;
-        cli)
-          COMPREPLY=($(compgen -W "\${cli_commands}" -- "\${cur}"))
-          ;;
-        event)
-          COMPREPLY=($(compgen -W "\${event_commands}" -- "\${cur}"))
-          ;;
-        issue)
-          COMPREPLY=($(compgen -W "\${issue_commands}" -- "\${cur}"))
-          ;;
-        org)
-          COMPREPLY=($(compgen -W "\${org_commands}" -- "\${cur}"))
-          ;;
-        project)
-          COMPREPLY=($(compgen -W "\${project_commands}" -- "\${cur}"))
-          ;;
+${caseBranches}
       esac
       ;;
   esac
@@ -72,64 +148,43 @@ complete -F _${binaryName}_completions ${binaryName}
  * Generate zsh completion script.
  */
 export function generateZshCompletion(binaryName: string): string {
+  const { groups, standalone } = extractCommandTree();
+
+  // Build top-level commands array
+  const topLevelItems = [
+    ...groups.map((g) => `    '${g.name}:${g.brief}'`),
+    ...standalone.map((s) => `    '${s.name}:${s.brief}'`),
+  ].join("\n");
+
+  // Build subcommand arrays
+  const subArrays = groups
+    .map((g) => {
+      const items = g.subcommands
+        .map((s) => `    '${s.name}:${s.brief}'`)
+        .join("\n");
+      return `  local -a ${g.name}_commands\n  ${g.name}_commands=(\n${items}\n  )`;
+    })
+    .join("\n\n");
+
+  // Build case branches
+  const caseBranches = groups
+    .map(
+      (g) =>
+        `        ${g.name})\n          _describe -t commands '${g.name} command' ${g.name}_commands\n          ;;`
+    )
+    .join("\n");
+
   return `#compdef ${binaryName}
 # zsh completion for ${binaryName}
-# Install: ${binaryName} cli setup
+# Auto-generated from command definitions
 
 _${binaryName}() {
   local -a commands
   commands=(
-    'auth:Authentication commands'
-    'api:Make authenticated API requests'
-    'event:Event-related commands'
-    'issue:Issue-related commands'
-    'org:Organization commands'
-    'project:Project commands'
-    'cli:CLI management commands'
-    'help:Show help'
-    'version:Show version'
+${topLevelItems}
   )
 
-  local -a auth_commands
-  auth_commands=(
-    'login:Authenticate with Sentry'
-    'logout:Clear stored credentials'
-    'status:Check authentication status'
-    'refresh:Refresh access token'
-  )
-
-  local -a cli_commands
-  cli_commands=(
-    'feedback:Send feedback'
-    'fix:Repair local database'
-    'setup:Configure shell integration'
-    'upgrade:Upgrade to latest version'
-  )
-
-  local -a issue_commands
-  issue_commands=(
-    'list:List issues'
-    'view:View issue details'
-    'explain:AI explanation of issue'
-    'plan:AI fix plan for issue'
-  )
-
-  local -a org_commands
-  org_commands=(
-    'list:List organizations'
-    'view:View organization details'
-  )
-
-  local -a project_commands
-  project_commands=(
-    'list:List projects'
-    'view:View project details'
-  )
-
-  local -a event_commands
-  event_commands=(
-    'view:View event details'
-  )
+${subArrays}
 
   _arguments -C \\
     '1: :->command' \\
@@ -142,24 +197,7 @@ _${binaryName}() {
       ;;
     subcommand)
       case "$words[1]" in
-        auth)
-          _describe -t commands 'auth command' auth_commands
-          ;;
-        cli)
-          _describe -t commands 'cli command' cli_commands
-          ;;
-        event)
-          _describe -t commands 'event command' event_commands
-          ;;
-        issue)
-          _describe -t commands 'issue command' issue_commands
-          ;;
-        org)
-          _describe -t commands 'org command' org_commands
-          ;;
-        project)
-          _describe -t commands 'project command' project_commands
-          ;;
+${caseBranches}
       esac
       ;;
   esac
@@ -173,51 +211,42 @@ _${binaryName}
  * Generate fish completion script.
  */
 export function generateFishCompletion(binaryName: string): string {
+  const { groups, standalone } = extractCommandTree();
+
+  // Top-level command completions
+  const topLevelLines = [
+    ...groups.map(
+      (g) =>
+        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${g.name}" -d "${g.brief}"`
+    ),
+    ...standalone.map(
+      (s) =>
+        `complete -c ${binaryName} -n "__fish_use_subcommand" -a "${s.name}" -d "${s.brief}"`
+    ),
+  ].join("\n");
+
+  // Subcommand completions
+  const subLines = groups
+    .map((g) => {
+      const lines = g.subcommands
+        .map(
+          (s) =>
+            `complete -c ${binaryName} -n "__fish_seen_subcommand_from ${g.name}" -a "${s.name}" -d "${s.brief}"`
+        )
+        .join("\n");
+      return `\n# ${g.name} subcommands\n${lines}`;
+    })
+    .join("\n");
+
   return `# fish completion for ${binaryName}
-# Install: ${binaryName} cli setup
+# Auto-generated from command definitions
 
 # Disable file completion by default
 complete -c ${binaryName} -f
 
 # Top-level commands
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "auth" -d "Authentication commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "api" -d "Make authenticated API requests"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "event" -d "Event-related commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "issue" -d "Issue-related commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "org" -d "Organization commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "project" -d "Project commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "cli" -d "CLI management commands"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "help" -d "Show help"
-complete -c ${binaryName} -n "__fish_use_subcommand" -a "version" -d "Show version"
-
-# auth subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from auth" -a "login" -d "Authenticate with Sentry"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from auth" -a "logout" -d "Clear stored credentials"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from auth" -a "status" -d "Check authentication status"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from auth" -a "refresh" -d "Refresh access token"
-
-# cli subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from cli" -a "feedback" -d "Send feedback"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from cli" -a "fix" -d "Repair local database"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from cli" -a "setup" -d "Configure shell integration"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from cli" -a "upgrade" -d "Upgrade to latest version"
-
-# event subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from event" -a "view" -d "View event details"
-
-# issue subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from issue" -a "list" -d "List issues"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from issue" -a "view" -d "View issue details"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from issue" -a "explain" -d "AI explanation of issue"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from issue" -a "plan" -d "AI fix plan for issue"
-
-# org subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from org" -a "list" -d "List organizations"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from org" -a "view" -d "View organization details"
-
-# project subcommands
-complete -c ${binaryName} -n "__fish_seen_subcommand_from project" -a "list" -d "List projects"
-complete -c ${binaryName} -n "__fish_seen_subcommand_from project" -a "view" -d "View project details"
+${topLevelLines}
+${subLines}
 `;
 }
 
