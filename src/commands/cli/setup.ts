@@ -2,12 +2,15 @@
  * sentry cli setup
  *
  * Configure shell integration: PATH, completions, and install metadata.
- * This command is called by the install script and can also be run manually.
+ * With --install, also handles binary placement (used by the install script
+ * and the upgrade command for curl-based installs).
  */
 
+import { unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
+import { determineInstallDir, installBinary } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { installCompletions } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
@@ -26,6 +29,7 @@ import {
 } from "../../lib/upgrade.js";
 
 type SetupFlags = {
+  readonly install: boolean;
   readonly method?: InstallationMethod;
   readonly "no-modify-path": boolean;
   readonly "no-completions": boolean;
@@ -34,6 +38,43 @@ type SetupFlags = {
 };
 
 type Logger = (msg: string) => void;
+
+/**
+ * Handle binary installation from a temp location.
+ *
+ * Determines the target install directory, copies the running binary
+ * (which is at a temp path) to the install location, then cleans up
+ * the temp binary on Posix (safe because the running process's inode
+ * stays alive until exit).
+ *
+ * On Windows, the temp binary cannot be deleted while running. It will
+ * be cleaned up by the OS when the temp directory is purged.
+ *
+ * @returns The absolute path of the installed binary and its directory
+ */
+async function handleInstall(
+  execPath: string,
+  homeDir: string,
+  env: NodeJS.ProcessEnv,
+  log: Logger
+): Promise<{ binaryPath: string; binaryDir: string }> {
+  const installDir = determineInstallDir(homeDir, env);
+  const binaryPath = await installBinary(execPath, installDir);
+  const binaryDir = dirname(binaryPath);
+
+  log(`Binary: Installed to ${binaryPath}`);
+
+  // Clean up temp binary (Posix only — the inode stays alive for the running process)
+  if (process.platform !== "win32") {
+    try {
+      unlinkSync(execPath);
+    } catch {
+      // Ignore — temp file may already be gone or we lack permissions
+    }
+  }
+
+  return { binaryPath, binaryDir };
+}
 
 /**
  * Handle PATH modification for a directory.
@@ -118,6 +159,24 @@ async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
   }
 }
 
+/**
+ * Print a rich welcome message after fresh install.
+ */
+function printWelcomeMessage(
+  log: Logger,
+  version: string,
+  binaryPath: string
+): void {
+  log("");
+  log(`Installed sentry v${version} to ${binaryPath}`);
+  log("");
+  log("Get started:");
+  log("  sentry login       Authenticate with Sentry");
+  log("  sentry --help      See all available commands");
+  log("");
+  log("https://cli.sentry.dev");
+}
+
 export const setupCommand = buildCommand({
   docs: {
     brief: "Configure shell integration",
@@ -127,17 +186,25 @@ export const setupCommand = buildCommand({
       "- Installs shell completions (bash, zsh, fish)\n" +
       "- Installs agent skills for AI coding assistants (e.g., Claude Code)\n" +
       "- Records installation metadata for upgrades\n\n" +
+      "With --install, also handles binary placement from a temporary\n" +
+      "download location (used by the install script and upgrade command).\n\n" +
       "This command is called automatically by the install script,\n" +
       "but can also be run manually after downloading the binary.\n\n" +
       "Examples:\n" +
       "  sentry cli setup                    # Auto-detect and configure\n" +
       "  sentry cli setup --method curl      # Record install method\n" +
+      "  sentry cli setup --install          # Place binary and configure\n" +
       "  sentry cli setup --no-modify-path   # Skip PATH modification\n" +
       "  sentry cli setup --no-completions   # Skip shell completions\n" +
       "  sentry cli setup --no-agent-skills  # Skip agent skill installation",
   },
   parameters: {
     flags: {
+      install: {
+        kind: "boolean",
+        brief: "Install the binary from a temp location to the system path",
+        default: false,
+      },
       method: {
         kind: "parsed",
         parse: parseInstallationMethod,
@@ -177,8 +244,21 @@ export const setupCommand = buildCommand({
       }
     };
 
-    const binaryPath = process.execPath;
-    const binaryDir = dirname(binaryPath);
+    let binaryPath = process.execPath;
+    let binaryDir = dirname(binaryPath);
+
+    // 0. Install binary from temp location (when --install is set)
+    if (flags.install) {
+      const result = await handleInstall(
+        process.execPath,
+        homeDir,
+        process.env,
+        log
+      );
+      binaryPath = result.binaryPath;
+      binaryDir = result.binaryDir;
+    }
+
     const shell = detectShell(
       process.env.SHELL,
       homeDir,
@@ -192,7 +272,9 @@ export const setupCommand = buildCommand({
         path: binaryPath,
         version: CLI_VERSION,
       });
-      log(`Recorded installation method: ${flags.method}`);
+      if (!flags.install) {
+        log(`Recorded installation method: ${flags.method}`);
+      }
     }
 
     // 2. Handle PATH modification
@@ -210,8 +292,13 @@ export const setupCommand = buildCommand({
       await handleAgentSkills(homeDir, log);
     }
 
+    // 5. Print welcome message (fresh install) or completion message
     if (!flags.quiet) {
-      stdout.write("\nSetup complete!\n");
+      if (flags.install) {
+        printWelcomeMessage(log, CLI_VERSION, binaryPath);
+      } else {
+        stdout.write("\nSetup complete!\n");
+      }
     }
   },
 });

@@ -2,12 +2,14 @@
  * sentry cli upgrade
  *
  * Self-update the Sentry CLI to the latest or a specific version.
+ * After upgrading, spawns the NEW binary with `cli setup` to update
+ * completions, agent skills, and record installation metadata.
  */
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
-import { setInstallInfo } from "../../lib/db/install-info.js";
+import { getInstallInfo } from "../../lib/db/install-info.js";
 import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
@@ -25,25 +27,84 @@ type UpgradeFlags = {
 };
 
 /**
- * Resolve installation method: use user-specified method or detect automatically.
- * When user specifies method, persist it for future upgrades.
+ * Resolve the target version and handle check-only mode.
+ *
+ * @returns The target version string, or null if no upgrade should proceed
+ *          (check-only mode or already up to date).
  */
-async function resolveMethod(
-  flags: UpgradeFlags,
-  execPath: string
-): Promise<InstallationMethod> {
-  const method = flags.method ?? (await detectInstallationMethod());
+async function resolveTargetVersion(
+  method: InstallationMethod,
+  version: string | undefined,
+  stdout: { write: (s: string) => void },
+  check: boolean
+): Promise<string | null> {
+  const latest = await fetchLatestVersion(method);
+  const target = version?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
-  // Persist user-specified method for future upgrades
-  if (flags.method) {
-    setInstallInfo({
-      method: flags.method,
-      path: execPath,
-      version: CLI_VERSION,
-    });
+  stdout.write(`Latest version: ${latest}\n`);
+  if (version) {
+    stdout.write(`Target version: ${target}\n`);
   }
 
-  return method;
+  if (check) {
+    if (CLI_VERSION === target) {
+      stdout.write("\nYou are already on the target version.\n");
+    } else {
+      const cmd = version
+        ? `sentry cli upgrade ${target}`
+        : "sentry cli upgrade";
+      stdout.write(`\nRun '${cmd}' to update.\n`);
+    }
+    return null;
+  }
+
+  if (CLI_VERSION === target) {
+    stdout.write("\nAlready up to date.\n");
+    return null;
+  }
+
+  if (version) {
+    const exists = await versionExists(method, target);
+    if (!exists) {
+      throw new UpgradeError(
+        "version_not_found",
+        `Version ${target} not found`
+      );
+    }
+  }
+
+  return target;
+}
+
+/**
+ * Spawn the new binary with `cli setup` to update completions, agent skills,
+ * and record installation metadata.
+ *
+ * For curl upgrades with --install: the new binary places itself at the install
+ * path, then runs setup steps.
+ *
+ * For package manager upgrades: the binary is already in place, so setup only
+ * updates completions, agent skills, and records metadata.
+ *
+ * @param binaryPath - Path to the new binary to spawn
+ * @param method - Installation method to pass through to setup
+ * @param install - Whether setup should handle binary placement (curl only)
+ */
+async function runSetupOnNewBinary(
+  binaryPath: string,
+  method: InstallationMethod,
+  install: boolean
+): Promise<void> {
+  const args = ["cli", "setup", "--method", method, "--no-modify-path"];
+  if (install) {
+    args.push("--install");
+  }
+
+  const proc = Bun.spawn([binaryPath, ...args], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  await proc.exited;
 }
 
 export const upgradeCommand = buildCommand({
@@ -92,8 +153,8 @@ export const upgradeCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
-    // Resolve installation method (detects or uses user-specified, persists if specified)
-    const method = await resolveMethod(flags, this.process.execPath);
+    // Resolve installation method (detects or uses user-specified)
+    const method = flags.method ?? (await detectInstallationMethod());
 
     if (method === "unknown") {
       throw new UpgradeError("unknown_method");
@@ -102,49 +163,31 @@ export const upgradeCommand = buildCommand({
     stdout.write(`Installation method: ${method}\n`);
     stdout.write(`Current version: ${CLI_VERSION}\n`);
 
-    // Fetch latest version
-    const latest = await fetchLatestVersion(method);
-    const target = version?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
-
-    stdout.write(`Latest version: ${latest}\n`);
-
-    if (version) {
-      stdout.write(`Target version: ${target}\n`);
-    }
-
-    // Check-only mode
-    if (flags.check) {
-      if (CLI_VERSION === target) {
-        stdout.write("\nYou are already on the target version.\n");
-      } else {
-        const cmd = version
-          ? `sentry cli upgrade ${target}`
-          : "sentry cli upgrade";
-        stdout.write(`\nRun '${cmd}' to update.\n`);
-      }
+    const target = await resolveTargetVersion(
+      method,
+      version,
+      stdout,
+      flags.check
+    );
+    if (!target) {
       return;
     }
 
-    // Already up to date
-    if (CLI_VERSION === target) {
-      stdout.write("\nAlready up to date.\n");
-      return;
-    }
-
-    // Validate version exists (only for user-specified versions)
-    if (version) {
-      const exists = await versionExists(method, target);
-      if (!exists) {
-        throw new UpgradeError(
-          "version_not_found",
-          `Version ${target} not found`
-        );
-      }
-    }
-
-    // Execute upgrade
+    // Execute upgrade: downloads new binary (curl) or installs via package manager
     stdout.write(`\nUpgrading to ${target}...\n`);
-    await executeUpgrade(method, target);
+    const tempBinaryPath = await executeUpgrade(method, target);
+
+    // Run setup on the new binary to update completions, agent skills,
+    // and record installation metadata.
+    if (tempBinaryPath) {
+      // Curl: new binary is at temp path, setup --install will place it
+      await runSetupOnNewBinary(tempBinaryPath, method, true);
+    } else {
+      // Package manager: binary already in place, just run setup
+      const storedInfo = getInstallInfo();
+      const newBinaryPath = storedInfo?.path ?? this.process.execPath;
+      await runSetupOnNewBinary(newBinaryPath, method, false);
+    }
 
     stdout.write(`\nSuccessfully upgraded to ${target}.\n`);
   },
