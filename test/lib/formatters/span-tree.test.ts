@@ -26,11 +26,13 @@ function stripAnsi(str: string): string {
  * @param op - Operation name (e.g., "http.server", "db.query")
  * @param description - Human-readable description of the span
  * @param children - Nested child spans (already in tree form)
+ * @param overrides - Optional field overrides for timestamps, duration, etc.
  */
 function makeTraceSpan(
   op: string,
   description: string,
-  children: TraceSpan[] = []
+  children: TraceSpan[] = [],
+  overrides?: Partial<TraceSpan>
 ): TraceSpan {
   return {
     span_id: `span-${op}`,
@@ -39,6 +41,7 @@ function makeTraceSpan(
     start_timestamp: 1000.0,
     timestamp: 1001.0,
     children,
+    ...overrides,
   };
 }
 
@@ -72,13 +75,65 @@ describe("formatSimpleSpanTree", () => {
       expect(output).toContain("GET /api/users");
     });
 
-    test("does not show durations", () => {
+    test("shows duration computed from timestamps", () => {
+      // start=1000.0, timestamp=1001.0 -> 1000ms -> "1.00s"
       const spans = [makeTraceSpan("db.query", "SELECT * FROM users")];
       const result = formatSimpleSpanTree("trace-123", spans);
       const output = stripAnsi(result.join("\n"));
-      // Should not contain any duration patterns like "100ms" or "1.00s"
-      expect(output).not.toMatch(/\d+ms/);
-      expect(output).not.toMatch(/\d+\.\d+s/);
+      expect(output).toContain("(1.00s)");
+    });
+
+    test("shows duration from API-provided duration field", () => {
+      const spans = [
+        makeTraceSpan("http.server", "GET /api", [], { duration: 245 }),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("(245ms)");
+    });
+
+    test("prefers API duration over computed duration", () => {
+      // API says 500ms, timestamps would give 1000ms - API wins
+      const spans = [
+        makeTraceSpan("http.server", "GET /api", [], {
+          start_timestamp: 1000.0,
+          timestamp: 1001.0,
+          duration: 500,
+        }),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("(500ms)");
+    });
+
+    test("uses end_timestamp over timestamp for duration", () => {
+      // end_timestamp=1000.250 -> 250ms
+      const spans = [
+        makeTraceSpan("db.query", "SELECT 1", [], {
+          start_timestamp: 1000.0,
+          timestamp: 1001.0,
+          end_timestamp: 1000.25,
+        }),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("(250ms)");
+    });
+
+    test("omits duration when no timestamps available", () => {
+      const spans: TraceSpan[] = [
+        {
+          span_id: "1",
+          op: "db.query",
+          description: "SELECT * FROM users",
+          start_timestamp: 1000.0,
+          // no timestamp, no end_timestamp, no duration
+        },
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).not.toMatch(/\(\d+ms\)/);
+      expect(output).not.toMatch(/\(\d+\.\d+s\)/);
     });
 
     test("handles missing op gracefully", () => {
@@ -173,6 +228,28 @@ describe("formatSimpleSpanTree", () => {
 
       expect(output).toContain("http.server — POST /api");
       expect(output).toContain("db.query — SELECT *");
+    });
+
+    test("shows durations on nested children", () => {
+      const spans = [
+        makeTraceSpan(
+          "http.server",
+          "GET /api",
+          [
+            makeTraceSpan("db.query", "SELECT *", [], {
+              start_timestamp: 1000.0,
+              timestamp: 1000.05,
+            }),
+          ],
+          { start_timestamp: 1000.0, timestamp: 1000.5 }
+        ),
+      ];
+      const result = formatSimpleSpanTree("trace-123", spans);
+      const output = stripAnsi(result.join("\n"));
+      expect(output).toContain("GET /api");
+      expect(output).toContain("(500ms)");
+      expect(output).toContain("SELECT *");
+      expect(output).toContain("(50ms)");
     });
 
     test("handles deeply nested spans (3+ levels)", () => {

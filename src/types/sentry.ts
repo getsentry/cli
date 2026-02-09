@@ -310,7 +310,12 @@ export type TraceSpan = {
   op?: string;
   description?: string | null;
   start_timestamp: number;
-  timestamp: number;
+  /** End timestamp in seconds (legacy field, prefer end_timestamp) */
+  timestamp?: number;
+  /** End timestamp in seconds (preferred over timestamp) */
+  end_timestamp?: number;
+  /** Duration in milliseconds (when provided by the API) */
+  duration?: number;
   transaction?: string;
   "transaction.op"?: string;
   project_slug?: string;
