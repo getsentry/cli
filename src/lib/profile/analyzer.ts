@@ -24,10 +24,13 @@ export function nsToMs(ns: number): number {
 }
 
 /**
- * Format duration in milliseconds to a human-readable string.
+ * Format duration in milliseconds to a compact human-readable string.
  * Shows appropriate precision based on magnitude.
+ *
+ * Named `formatDurationMs` to distinguish from `formatDuration` in
+ * `formatters/human.ts` which takes seconds and returns verbose strings.
  */
-export function formatDuration(ms: number): string {
+export function formatDurationMs(ms: number): string {
   if (ms >= 1000) {
     return `${(ms / 1000).toFixed(1)}s`;
   }

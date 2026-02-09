@@ -11,7 +11,7 @@ import {
   analyzeFlamegraph,
   analyzeHotPaths,
   calculatePercentiles,
-  formatDuration,
+  formatDurationMs,
   hasProfileData,
   nsToMs,
 } from "../../../src/lib/profile/analyzer.js";
@@ -103,45 +103,45 @@ describe("nsToMs", () => {
 
 // formatDuration
 
-describe("formatDuration", () => {
+describe("formatDurationMs", () => {
   test("formats seconds for values >= 1000ms", () => {
-    expect(formatDuration(1000)).toBe("1.0s");
-    expect(formatDuration(1500)).toBe("1.5s");
-    expect(formatDuration(12_345)).toBe("12.3s");
+    expect(formatDurationMs(1000)).toBe("1.0s");
+    expect(formatDurationMs(1500)).toBe("1.5s");
+    expect(formatDurationMs(12_345)).toBe("12.3s");
   });
 
   test("formats whole milliseconds for values >= 100ms", () => {
-    expect(formatDuration(100)).toBe("100ms");
-    expect(formatDuration(999)).toBe("999ms");
-    expect(formatDuration(500)).toBe("500ms");
+    expect(formatDurationMs(100)).toBe("100ms");
+    expect(formatDurationMs(999)).toBe("999ms");
+    expect(formatDurationMs(500)).toBe("500ms");
   });
 
   test("formats 1 decimal place for values >= 10ms", () => {
-    expect(formatDuration(10)).toBe("10.0ms");
-    expect(formatDuration(55.5)).toBe("55.5ms");
-    expect(formatDuration(99.9)).toBe("99.9ms");
+    expect(formatDurationMs(10)).toBe("10.0ms");
+    expect(formatDurationMs(55.5)).toBe("55.5ms");
+    expect(formatDurationMs(99.9)).toBe("99.9ms");
   });
 
   test("formats 2 decimal places for values >= 1ms", () => {
-    expect(formatDuration(1)).toBe("1.00ms");
-    expect(formatDuration(5.55)).toBe("5.55ms");
-    expect(formatDuration(9.99)).toBe("9.99ms");
+    expect(formatDurationMs(1)).toBe("1.00ms");
+    expect(formatDurationMs(5.55)).toBe("5.55ms");
+    expect(formatDurationMs(9.99)).toBe("9.99ms");
   });
 
   test("formats microseconds for sub-millisecond values", () => {
-    expect(formatDuration(0.5)).toBe("500\u00B5s");
-    expect(formatDuration(0.001)).toBe("1\u00B5s");
+    expect(formatDurationMs(0.5)).toBe("500\u00B5s");
+    expect(formatDurationMs(0.001)).toBe("1\u00B5s");
   });
 
   test("formats nanoseconds for sub-microsecond values", () => {
-    expect(formatDuration(0.0001)).toBe("100ns");
-    expect(formatDuration(0.000_001)).toBe("1ns");
+    expect(formatDurationMs(0.0001)).toBe("100ns");
+    expect(formatDurationMs(0.000_001)).toBe("1ns");
   });
 
   test("property: output always contains a unit", () => {
     fcAssert(
       property(double({ min: 0.000_001, max: 100_000, noNaN: true }), (ms) => {
-        const result = formatDuration(ms);
+        const result = formatDurationMs(ms);
         const hasUnit =
           result.endsWith("s") ||
           result.endsWith("ms") ||
@@ -156,7 +156,7 @@ describe("formatDuration", () => {
   test("property: output is non-empty for positive values", () => {
     fcAssert(
       property(double({ min: 0.000_001, max: 100_000, noNaN: true }), (ms) => {
-        expect(formatDuration(ms).length).toBeGreaterThan(0);
+        expect(formatDurationMs(ms).length).toBeGreaterThan(0);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

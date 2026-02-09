@@ -7,11 +7,7 @@
 
 import { buildCommand, numberParser } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  findProjectsBySlug,
-  getProject,
-  listProfiledTransactions,
-} from "../../lib/api-client.js";
+import { getProject, listProfiledTransactions } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import {
@@ -27,7 +23,10 @@ import {
   formatProfileListTableHeader,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  resolveOrgAndProject,
+  resolveProjectBySlug,
+} from "../../lib/resolve-target.js";
 import { buildProfilingSummaryUrl } from "../../lib/sentry-urls.js";
 import { buildTransactionAliases } from "../../lib/transaction-alias.js";
 import type { TransactionAliasEntry, Writer } from "../../types/index.js";
@@ -82,26 +81,10 @@ async function resolveListTarget(
       return resolved;
     }
 
-    case "project-search": {
-      const matches = await findProjectsBySlug(parsed.projectSlug);
-      if (matches.length === 0) {
-        throw new ContextError(`Project "${parsed.projectSlug}"`, USAGE_HINT, [
-          "Check that you have access to a project with this slug",
-        ]);
-      }
-      if (matches.length > 1) {
-        const alternatives = matches.map(
-          (m) => `sentry profile list ${m.orgSlug}/${m.slug}`
-        );
-        throw new ContextError(
-          `Project "${parsed.projectSlug}" exists in multiple organizations`,
-          `sentry profile list <org>/${parsed.projectSlug}`,
-          alternatives
-        );
-      }
-      const match = matches[0] as (typeof matches)[0];
-      return { org: match.orgSlug, project: match.slug };
-    }
+    case "project-search":
+      return await resolveProjectBySlug(parsed.projectSlug, {
+        usageHint: USAGE_HINT,
+      });
 
     case "auto-detect": {
       const resolved = await resolveOrgAndProject({

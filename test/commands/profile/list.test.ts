@@ -22,7 +22,7 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import * as browser from "../../../src/lib/browser.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as transactionAliasesDb from "../../../src/lib/db/transaction-aliases.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
@@ -191,7 +191,7 @@ describe("listCommand.func", () => {
       );
     });
 
-    test("throws ContextError when project-only search finds multiple orgs", async () => {
+    test("throws ValidationError when project-only search finds multiple orgs", async () => {
       const ctx = createMockContext();
       findProjectsBySlugSpy.mockResolvedValue([
         { slug: "backend", id: "1", name: "Backend", orgSlug: "org-a" },
@@ -200,7 +200,7 @@ describe("listCommand.func", () => {
       const func = await loadListFunc();
 
       await expect(func.call(ctx, defaultFlags, "backend")).rejects.toThrow(
-        ContextError
+        ValidationError
       );
     });
 

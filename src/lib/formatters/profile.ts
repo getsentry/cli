@@ -10,7 +10,7 @@ import type {
   ProfileFunctionRow,
   TransactionAliasEntry,
 } from "../../types/index.js";
-import { formatDuration } from "../profile/analyzer.js";
+import { formatDurationMs } from "../profile/analyzer.js";
 import { bold, muted, yellow } from "./colors.js";
 
 /** Minimum width for header separator line */
@@ -46,9 +46,9 @@ function formatPercentiles(analysis: ProfileAnalysis): string[] {
   lines.push("");
   lines.push(bold("Performance Percentiles"));
   lines.push(
-    `  p75: ${formatDuration(percentiles.p75)}    ` +
-      `p95: ${formatDuration(percentiles.p95)}    ` +
-      `p99: ${formatDuration(percentiles.p99)}`
+    `  p75: ${formatDurationMs(percentiles.p75)}    ` +
+      `p95: ${formatDurationMs(percentiles.p95)}    ` +
+      `p99: ${formatDurationMs(percentiles.p99)}`
   );
 
   return lines;
@@ -208,7 +208,7 @@ export function formatProfileListRow(
 ): string {
   const count = `${row["count()"] ?? 0}`.padStart(10);
   const p75Ms = row["p75(function.duration)"]
-    ? formatDuration(row["p75(function.duration)"] / 1_000_000) // ns to ms
+    ? formatDurationMs(row["p75(function.duration)"] / 1_000_000) // ns to ms
     : "-";
   const p75 = p75Ms.padStart(10);
 
