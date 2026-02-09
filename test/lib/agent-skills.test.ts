@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   detectClaudeCode,
@@ -228,6 +228,18 @@ describe("agent-skills", () => {
 
       const result = await installAgentSkills(testDir, "0.8.0");
       expect(result).toBeNull();
+    });
+
+    test("returns null on filesystem error without throwing", async () => {
+      // Create .claude as a read-only directory so mkdirSync for the
+      // skills subdirectory fails with EACCES
+      mkdirSync(join(testDir, ".claude"), { recursive: true, mode: 0o444 });
+
+      const result = await installAgentSkills(testDir, "0.8.0");
+      expect(result).toBeNull();
+
+      // Restore write permission so afterEach cleanup can remove it
+      chmodSync(join(testDir, ".claude"), 0o755);
     });
   });
 });

@@ -144,18 +144,22 @@ export async function installAgentSkills(
     return null;
   }
 
-  const path = getSkillInstallPath(homeDir);
-  const dir = dirname(path);
+  try {
+    const path = getSkillInstallPath(homeDir);
+    const dir = dirname(path);
 
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o755 });
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o755 });
+    }
+
+    const alreadyExists = existsSync(path);
+    await Bun.write(path, content);
+
+    return {
+      path,
+      created: !alreadyExists,
+    };
+  } catch {
+    return null;
   }
-
-  const alreadyExists = existsSync(path);
-  await Bun.write(path, content);
-
-  return {
-    path,
-    created: !alreadyExists,
-  };
 }
