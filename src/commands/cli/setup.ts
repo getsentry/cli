@@ -7,6 +7,7 @@
 
 import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
+import { installAgentSkills } from "../../lib/agent-skills.js";
 import { buildCommand } from "../../lib/command.js";
 import { installCompletions } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
@@ -28,6 +29,7 @@ type SetupFlags = {
   readonly method?: InstallationMethod;
   readonly noModifyPath: boolean;
   readonly noCompletions: boolean;
+  readonly noAgentSkills: boolean;
   readonly quiet: boolean;
 };
 
@@ -101,6 +103,21 @@ async function handleCompletions(
   }
 }
 
+/**
+ * Handle agent skill installation for AI coding assistants.
+ *
+ * Detects supported agents (currently Claude Code) and installs the
+ * version-pinned skill file. Silent when no agent is detected.
+ */
+async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
+  const location = await installAgentSkills(homeDir, CLI_VERSION);
+
+  if (location) {
+    const action = location.created ? "Installed to" : "Updated";
+    log(`Agent skills: ${action} ${location.path}`);
+  }
+}
+
 export const setupCommand = buildCommand({
   docs: {
     brief: "Configure shell integration",
@@ -108,6 +125,7 @@ export const setupCommand = buildCommand({
       "Sets up shell integration for the Sentry CLI:\n\n" +
       "- Adds binary directory to PATH (if not already in PATH)\n" +
       "- Installs shell completions (bash, zsh, fish)\n" +
+      "- Installs agent skills for AI coding assistants (e.g., Claude Code)\n" +
       "- Records installation metadata for upgrades\n\n" +
       "This command is called automatically by the install script,\n" +
       "but can also be run manually after downloading the binary.\n\n" +
@@ -115,7 +133,8 @@ export const setupCommand = buildCommand({
       "  sentry cli setup                    # Auto-detect and configure\n" +
       "  sentry cli setup --method curl      # Record install method\n" +
       "  sentry cli setup --no-modify-path   # Skip PATH modification\n" +
-      "  sentry cli setup --no-completions   # Skip shell completions",
+      "  sentry cli setup --no-completions   # Skip shell completions\n" +
+      "  sentry cli setup --no-agent-skills  # Skip agent skill installation",
   },
   parameters: {
     flags: {
@@ -134,6 +153,11 @@ export const setupCommand = buildCommand({
       noCompletions: {
         kind: "boolean",
         brief: "Skip shell completion installation",
+        default: false,
+      },
+      noAgentSkills: {
+        kind: "boolean",
+        brief: "Skip agent skill installation for AI coding assistants",
         default: false,
       },
       quiet: {
@@ -179,6 +203,11 @@ export const setupCommand = buildCommand({
     // 3. Install shell completions
     if (!flags.noCompletions) {
       await handleCompletions(shell, homeDir, process.env.XDG_DATA_HOME, log);
+    }
+
+    // 4. Install agent skills (auto-detected, silent when no agent found)
+    if (!flags.noAgentSkills) {
+      await handleAgentSkills(homeDir, log);
     }
 
     if (!flags.quiet) {

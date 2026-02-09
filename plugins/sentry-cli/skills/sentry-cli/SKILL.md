@@ -410,6 +410,7 @@ Configure shell integration
 - `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
 - `--noModifyPath - Skip PATH modification`
 - `--noCompletions - Skip shell completion installation`
+- `--noAgentSkills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
 
 #### `sentry cli upgrade <version>`
