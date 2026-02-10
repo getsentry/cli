@@ -560,34 +560,11 @@ function extractOrgSlugFromEndpoint(endpoint: string): string | null {
 }
 
 /**
- * Make an org-scoped API request, automatically resolving the correct region.
- * This is the preferred way to make org-scoped requests.
+ * Make an org-scoped API request that returns pagination metadata.
+ * Used for single-page fetches where the caller needs cursor info.
  *
  * The endpoint must contain the org slug in the path (e.g., `/organizations/{slug}/...`).
  * The org slug is extracted to look up the correct region URL.
- *
- * @param endpoint - API endpoint path containing the org slug
- * @param options - Request options
- */
-async function orgScopedRequest<T>(
-  endpoint: string,
-  options: ApiRequestOptions<T> = {}
-): Promise<T> {
-  const orgSlug = extractOrgSlugFromEndpoint(endpoint);
-  if (!orgSlug) {
-    throw new Error(
-      `Cannot extract org slug from endpoint: ${endpoint}. ` +
-        "Endpoint must match /organizations/{slug}/..."
-    );
-  }
-  const { resolveOrgRegion } = await import("./region.js");
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  return apiRequestToRegion(regionUrl, endpoint, options);
-}
-
-/**
- * Make an org-scoped API request that returns pagination metadata.
- * Used for single-page fetches where the caller needs cursor info.
  *
  * @param endpoint - API endpoint path containing the org slug
  * @param options - Request options
@@ -613,6 +590,23 @@ async function orgScopedRequestPaginated<T>(
   );
   const { nextCursor, hasMore } = parseLinkHeader(headers.get("link"));
   return { data, nextCursor, hasMore };
+}
+
+/**
+ * Make an org-scoped API request, automatically resolving the correct region.
+ * This is the preferred way to make org-scoped requests.
+ *
+ * Delegates to {@link orgScopedRequestPaginated} and discards pagination metadata.
+ *
+ * @param endpoint - API endpoint path containing the org slug
+ * @param options - Request options
+ */
+async function orgScopedRequest<T>(
+  endpoint: string,
+  options: ApiRequestOptions<T> = {}
+): Promise<T> {
+  const { data } = await orgScopedRequestPaginated<T>(endpoint, options);
+  return data;
 }
 
 /**
