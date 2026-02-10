@@ -1,0 +1,26 @@
+## Implementation Plan
+
+### Problem
+Three packages (ignore, p-limit, pretty-ms) leaked into the dependencies
+field of package.json. The CLI goal is zero install-time dependencies —
+everything is bundled at build time via esbuild (npm package) and
+Bun.build (standalone binaries).
+
+### Steps
+1. Move ignore, p-limit, pretty-ms from dependencies to devDependencies
+2. Remove the now-empty dependencies field from package.json
+3. Run bun install to update bun.lock
+4. Add script/check-no-deps.ts — CI script that reads package.json and
+   exits non-zero if any runtime dependencies exist
+5. Add check:deps npm script and wire it into the CI lint job
+   (.github/workflows/ci.yml) alongside lint and typecheck
+6. Add test/package.test.ts — unit test asserting package.json has no
+   dependencies field, catches regressions locally before push
+
+### Verification
+- bun run typecheck — passes
+- bun run lint — passes
+- bun run check:deps — passes
+- bun run bundle — produces working dist/bin.cjs (1030.5 KB)
+- node dist/bin.cjs --help — works
+- bun test test/package.test.ts — passes
