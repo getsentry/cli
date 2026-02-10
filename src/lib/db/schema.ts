@@ -13,7 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -135,6 +135,14 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
         notNull: true,
         default: "(unixepoch() * 1000)",
       },
+    },
+  },
+  pagination_cursors: {
+    columns: {
+      command_key: { type: "TEXT", notNull: true },
+      cursor: { type: "TEXT", notNull: true },
+      context: { type: "TEXT", notNull: true },
+      expires_at: { type: "INTEGER", notNull: true },
     },
   },
   metadata: {
@@ -357,8 +365,31 @@ export type RepairResult = {
   failed: string[];
 };
 
+/** Tables that require custom DDL (not auto-generated from TABLE_SCHEMAS) */
+const CUSTOM_DDL_TABLES = new Set(["pagination_cursors"]);
+
+function repairPaginationCursorsTable(
+  db: Database,
+  result: RepairResult
+): void {
+  if (tableExists(db, "pagination_cursors")) {
+    return;
+  }
+  try {
+    db.exec(PAGINATION_CURSORS_DDL);
+    result.fixed.push("Created table pagination_cursors");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    result.failed.push(`Failed to create table pagination_cursors: ${msg}`);
+  }
+}
+
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
+    // Skip tables that need custom DDL
+    if (CUSTOM_DDL_TABLES.has(tableName)) {
+      continue;
+    }
     if (tableExists(db, tableName)) {
       continue;
     }
@@ -370,6 +401,9 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
+
+  // Handle tables with custom DDL
+  repairPaginationCursorsTable(db, result);
 }
 
 function repairMissingColumns(db: Database, result: RepairResult): void {
@@ -508,10 +542,31 @@ export function tryRepairAndRetry<T>(
   return { attempted: false };
 }
 
+/**
+ * Custom DDL for pagination_cursors table with composite primary key.
+ * Uses (command_key, context) so different contexts (e.g., different orgs)
+ * can each store their own cursor independently.
+ */
+const PAGINATION_CURSORS_DDL = `
+  CREATE TABLE IF NOT EXISTS pagination_cursors (
+    command_key TEXT NOT NULL,
+    context TEXT NOT NULL,
+    cursor TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (command_key, context)
+  )
+`;
+
 export function initSchema(db: Database): void {
-  // Generate combined DDL from all table schemas
-  const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
+  // Generate combined DDL from all table schemas (except those with custom DDL)
+  const ddlStatements = Object.entries(EXPECTED_TABLES)
+    .filter(([name]) => !CUSTOM_DDL_TABLES.has(name))
+    .map(([, ddl]) => ddl)
+    .join(";\n\n");
   db.exec(ddlStatements);
+
+  // Add tables with composite primary keys
+  db.exec(PAGINATION_CURSORS_DDL);
 
   const versionRow = db
     .query("SELECT version FROM schema_version LIMIT 1")
@@ -567,6 +622,12 @@ export function runMigrations(db: Database): void {
     addColumnIfMissing(db, "dsn_cache", "ttl_expires_at", "INTEGER");
 
     db.exec(EXPECTED_TABLES.project_root_cache as string);
+  }
+
+  // Migration 4 -> 5: Add pagination_cursors table for --cursor last support
+  // Uses custom DDL for composite primary key (command_key, context)
+  if (currentVersion < 5) {
+    db.exec(PAGINATION_CURSORS_DDL);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
