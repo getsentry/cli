@@ -100,7 +100,7 @@ Work with Sentry organizations
 
 #### `sentry org list`
 
-List organizations (test auto-commit)
+List organizations
 
 **Flags:**
 - `--limit <value> - Maximum number of organizations to list - (default: "30")`
@@ -518,11 +518,11 @@ List issues in a project
 
 ### Orgs
 
-List organizations (test auto-commit)
+List organizations
 
 #### `sentry orgs`
 
-List organizations (test auto-commit)
+List organizations
 
 **Flags:**
 - `--limit <value> - Maximum number of organizations to list - (default: "30")`
