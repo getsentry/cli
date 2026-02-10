@@ -22,7 +22,8 @@
     "test:isolated": "bun test test/isolated",
     "test:e2e": "bun test test/e2e",
     "generate:skill": "bun run script/generate-skill.ts",
-    "check:skill": "bun run script/check-skill.ts"
+    "check:skill": "bun run script/check-skill.ts",
+    "check:deps": "bun run script/check-no-deps.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
@@ -38,7 +39,10 @@
     "chalk": "^5.6.2",
     "esbuild": "^0.25.0",
     "fast-check": "^4.5.3",
+    "ignore": "^7.0.5",
     "ky": "^1.14.2",
+    "p-limit": "^7.2.0",
+    "pretty-ms": "^9.3.0",
     "qrcode-terminal": "^0.12.0",
     "semver": "^7.7.3",
     "tinyglobby": "^0.2.15",
@@ -59,10 +63,5 @@
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
     "@sentry/core@10.38.0": "patches/@sentry%2Fcore@10.38.0.patch"
-  },
-  "dependencies": {
-    "ignore": "^7.0.5",
-    "p-limit": "^7.2.0",
-    "pretty-ms": "^9.3.0"
   }
 }
