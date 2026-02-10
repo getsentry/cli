@@ -25,6 +25,8 @@ import {
   SentryOrganizationSchema,
   type SentryProject,
   SentryProjectSchema,
+  type SentryRepository,
+  SentryRepositorySchema,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -583,6 +585,19 @@ export type ProjectWithOrg = SentryProject & {
   /** Organization slug the project belongs to */
   orgSlug: string;
 };
+
+/**
+ * List repositories in an organization.
+ * Uses region-aware routing for multi-region support.
+ */
+export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
+  return orgScopedRequest<SentryRepository[]>(
+    `/organizations/${orgSlug}/repos/`,
+    {
+      schema: z.array(SentryRepositorySchema),
+    }
+  );
+}
 
 /**
  * Search for projects matching a slug across all accessible organizations.

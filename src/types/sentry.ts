@@ -735,3 +735,32 @@ export const DetailedLogsResponseSchema = z.object({
 });
 
 export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
+
+// Repository
+
+/** Repository provider (e.g., GitHub, GitLab) */
+export const RepositoryProviderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export type RepositoryProvider = z.infer<typeof RepositoryProviderSchema>;
+
+/** A repository connected to a Sentry organization */
+export const SentryRepositorySchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    name: z.string(),
+    url: z.string().nullable(),
+    provider: RepositoryProviderSchema,
+    status: z.string(),
+    // Optional metadata
+    dateCreated: z.string().optional(),
+    integrationId: z.string().optional(),
+    externalSlug: z.string().nullable().optional(),
+    externalId: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
