@@ -59,7 +59,7 @@ function getRegionDisplayName(regionUrl: string): string {
 
 export const listCommand = buildCommand({
   docs: {
-    brief: "List organizations",
+    brief: "List organizations (test auto-commit)",
     fullDescription:
       "List organizations that you have access to.\n\n" +
       "Examples:\n" +
