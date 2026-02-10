@@ -158,7 +158,7 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view [<org>/<project>]`
+#### `sentry project view <target>`
 
 View details of a project
 
@@ -173,12 +173,13 @@ View details of a project
 sentry project view
 
 # Explicit org and project
-sentry project view my-org/frontend
+sentry project view <org>/<project>
 
 # Find project across all orgs
-sentry project view frontend
+sentry project view <project>
 
-# Open in browser
+sentry project view my-org/frontend
+
 sentry project view my-org/frontend -w
 ```
 
