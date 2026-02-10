@@ -798,22 +798,18 @@ export async function findProjectsBySlug(
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
 
-  // Search in parallel for performance
+  // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
     orgs.map(async (org) => {
       try {
-        const projects = await listProjects(org.slug);
-        const match = projects.find((p) => p.slug === projectSlug);
-        if (match) {
-          return { ...match, orgSlug: org.slug };
-        }
-        return null;
+        const project = await getProject(org.slug, projectSlug);
+        return { ...project, orgSlug: org.slug };
       } catch (error) {
         // Re-throw auth errors - user needs to login
         if (error instanceof AuthError) {
           throw error;
         }
-        // Skip orgs where user lacks access (permission errors, etc.)
+        // 404 or permission errors — project doesn't exist in this org
         return null;
       }
     })
