@@ -158,23 +158,29 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <project>`
+#### `sentry project view <target>`
 
 View details of a project
 
 **Flags:**
-- `--org <value> - Organization slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
 **Examples:**
 
 ```bash
-sentry project view <project-slug>
+# Auto-detect from DSN or config
+sentry project view
 
-sentry project view frontend --org my-org
+# Explicit org and project
+sentry project view <org>/<project>
 
-sentry project view frontend -w
+# Find project across all orgs
+sentry project view <project>
+
+sentry project view my-org/frontend
+
+sentry project view my-org/frontend -w
 ```
 
 ### Issue

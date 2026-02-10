@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, getEvent } from "../../lib/api-client.js";
+import { getEvent } from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -13,9 +13,12 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import { ContextError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  resolveOrgAndProject,
+  resolveProjectBySlug,
+} from "../../lib/resolve-target.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
@@ -105,48 +108,6 @@ export type ResolvedEventTarget = {
   detectedFrom?: string;
 };
 
-/**
- * Resolve target from a project search result.
- *
- * Searches for a project by slug across all accessible organizations.
- * Throws if no project found or if multiple projects found in different orgs.
- *
- * @param projectSlug - Project slug to search for
- * @param eventId - Event ID (used in error messages)
- * @returns Resolved target with org and project info
- * @throws {ContextError} If no project found
- * @throws {ValidationError} If project exists in multiple organizations
- *
- * @internal Exported for testing
- */
-export async function resolveFromProjectSearch(
-  projectSlug: string,
-  eventId: string
-): Promise<ResolvedEventTarget> {
-  const found = await findProjectsBySlug(projectSlug);
-  if (found.length === 0) {
-    throw new ContextError(`Project "${projectSlug}"`, USAGE_HINT, [
-      "Check that you have access to a project with this slug",
-    ]);
-  }
-  if (found.length > 1) {
-    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
-    throw new ValidationError(
-      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
-        `Specify the organization:\n${orgList}\n\n` +
-        `Example: sentry event view <org>/${projectSlug} ${eventId}`
-    );
-  }
-  // Safe assertion: length is exactly 1 after the checks above
-  const foundProject = found[0] as (typeof found)[0];
-  return {
-    org: foundProject.orgSlug,
-    project: foundProject.slug,
-    orgDisplay: foundProject.orgSlug,
-    projectDisplay: foundProject.slug,
-  };
-}
-
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific event",
@@ -205,9 +166,19 @@ export const viewCommand = buildCommand({
         };
         break;
 
-      case ProjectSpecificationType.ProjectSearch:
-        target = await resolveFromProjectSearch(parsed.projectSlug, eventId);
+      case ProjectSpecificationType.ProjectSearch: {
+        const resolved = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry event view <org>/${parsed.projectSlug} ${eventId}`
+        );
+        target = {
+          ...resolved,
+          orgDisplay: resolved.org,
+          projectDisplay: resolved.project,
+        };
         break;
+      }
 
       case ProjectSpecificationType.OrgAll:
         throw new ContextError("Specific project", USAGE_HINT);
@@ -218,7 +189,7 @@ export const viewCommand = buildCommand({
 
       default:
         // Exhaustive check - should never reach here
-        throw new ValidationError("Invalid target specification");
+        throw new ContextError("Organization and project", USAGE_HINT);
     }
 
     if (!target) {

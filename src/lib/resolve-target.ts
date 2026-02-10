@@ -15,6 +15,7 @@ import { basename } from "node:path";
 import {
   findProjectByDsnKey,
   findProjectsByPattern,
+  findProjectsBySlug,
   getProject,
 } from "./api-client.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
@@ -33,7 +34,7 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
-import { AuthError, ContextError } from "./errors.js";
+import { AuthError, ContextError, ValidationError } from "./errors.js";
 
 /**
  * Resolved organization and project target for API calls.
@@ -81,9 +82,9 @@ export type ResolvedOrg = {
  * Options for resolving org and project.
  */
 export type ResolveOptions = {
-  /** Organization slug from CLI flag */
+  /** Organization slug */
   org?: string;
-  /** Project slug from CLI flag */
+  /** Project slug */
   project?: string;
   /** Current working directory for DSN detection */
   cwd: string;
@@ -95,7 +96,7 @@ export type ResolveOptions = {
  * Options for resolving org only.
  */
 export type ResolveOrgOptions = {
-  /** Organization slug from CLI flag */
+  /** Organization slug */
   org?: string;
   /** Current working directory for DSN detection */
   cwd: string;
@@ -650,7 +651,7 @@ export async function resolveOrgAndProject(
  * Resolve organization only from multiple sources.
  *
  * Resolution priority:
- * 1. CLI flag (--org)
+ * 1. Positional argument
  * 2. Config defaults
  * 3. DSN auto-detection
  *
@@ -679,4 +680,46 @@ export async function resolveOrg(
   } catch {
     return null;
   }
+}
+
+/**
+ * Search for a project by slug across all accessible organizations.
+ *
+ * Common resolution step used by commands that accept a bare project slug
+ * (e.g., `sentry event view frontend <id>`). Throws helpful errors when
+ * the project isn't found or exists in multiple orgs.
+ *
+ * @param projectSlug - Project slug to search for
+ * @param usageHint - Usage example shown in error messages
+ * @param disambiguationExample - Example command for multi-org disambiguation (e.g., "sentry event view <org>/frontend abc123")
+ * @returns Resolved org and project slugs
+ * @throws {ContextError} If no project found
+ * @throws {ValidationError} If project exists in multiple organizations
+ */
+export async function resolveProjectBySlug(
+  projectSlug: string,
+  usageHint: string,
+  disambiguationExample?: string
+): Promise<{ org: string; project: string }> {
+  const found = await findProjectsBySlug(projectSlug);
+  if (found.length === 0) {
+    throw new ContextError(`Project "${projectSlug}"`, usageHint, [
+      "Check that you have access to a project with this slug",
+    ]);
+  }
+  if (found.length > 1) {
+    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
+    const example = disambiguationExample
+      ? `\n\nExample: ${disambiguationExample}`
+      : "";
+    throw new ValidationError(
+      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
+        `Specify the organization:\n${orgList}${example}`
+    );
+  }
+  const foundProject = found[0] as (typeof found)[0];
+  return {
+    org: foundProject.orgSlug,
+    project: foundProject.slug,
+  };
 }

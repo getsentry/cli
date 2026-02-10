@@ -6,14 +6,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  parsePositionalArgs,
-  resolveFromProjectSearch,
-} from "../../../src/commands/trace/view.js";
+import { parsePositionalArgs } from "../../../src/commands/trace/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 describe("parsePositionalArgs", () => {
   describe("single argument (trace ID only)", () => {
@@ -79,7 +77,8 @@ describe("parsePositionalArgs", () => {
   });
 });
 
-describe("resolveFromProjectSearch", () => {
+describe("resolveProjectBySlug", () => {
+  const HINT = "sentry trace view <org>/<project> <trace-id>";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -94,16 +93,16 @@ describe("resolveFromProjectSearch", () => {
     test("throws ContextError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
-      await expect(
-        resolveFromProjectSearch("my-project", "trace-123")
-      ).rejects.toThrow(ContextError);
+      await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
+        ContextError
+      );
     });
 
     test("includes project name in error message", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       try {
-        await resolveFromProjectSearch("frontend", "trace-123");
+        await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
@@ -122,9 +121,9 @@ describe("resolveFromProjectSearch", () => {
         { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
       ] as ProjectWithOrg[]);
 
-      await expect(
-        resolveFromProjectSearch("frontend", "trace-123")
-      ).rejects.toThrow(ValidationError);
+      await expect(resolveProjectBySlug("frontend", HINT)).rejects.toThrow(
+        ValidationError
+      );
     });
 
     test("includes all orgs and trace ID in error message", async () => {
@@ -134,7 +133,11 @@ describe("resolveFromProjectSearch", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveFromProjectSearch("frontend", "trace-456");
+        await resolveProjectBySlug(
+          "frontend",
+          HINT,
+          "sentry trace view <org>/frontend trace-456"
+        );
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
@@ -153,7 +156,7 @@ describe("resolveFromProjectSearch", () => {
         { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("backend", "trace-xyz");
+      const result = await resolveProjectBySlug("backend", HINT);
 
       expect(result).toEqual({
         org: "my-company",
@@ -171,7 +174,7 @@ describe("resolveFromProjectSearch", () => {
         },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveFromProjectSearch("mobile-app", "trace-001");
+      const result = await resolveProjectBySlug("mobile-app", HINT);
 
       expect(result.org).toBe("acme-industries");
       expect(result.project).toBe("mobile-app");
