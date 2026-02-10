@@ -1177,7 +1177,8 @@ describe("handleAutoDetect", () => {
 
     const text = output();
     expect(text).toContain("Showing 2 projects (more available)");
-    expect(text).toContain("--limit");
+    expect(text).toContain("sentry project list test-org/");
+    expect(text).not.toContain("--limit");
   });
 
   test("slow path: uses full fetch when platform filter is active", async () => {

@@ -22,6 +22,12 @@ import {
   tableExists,
 } from "../../../src/lib/db/schema.js";
 
+/** Hand-written DDL for pagination_cursors with composite PK (matches production) */
+const PAGINATION_CURSORS_DDL = `CREATE TABLE IF NOT EXISTS pagination_cursors (
+  command_key TEXT NOT NULL, context TEXT NOT NULL, cursor TEXT NOT NULL,
+  expires_at INTEGER NOT NULL, PRIMARY KEY (command_key, context)
+)`;
+
 /**
  * Create a database with all tables but some missing (for testing repair).
  */
@@ -31,9 +37,13 @@ function createDatabaseWithMissingTables(
 ): void {
   const statements: string[] = [];
   for (const tableName of Object.keys(EXPECTED_TABLES)) {
-    if (!missingTables.includes(tableName)) {
-      statements.push(EXPECTED_TABLES[tableName] as string);
-    }
+    if (missingTables.includes(tableName)) continue;
+    // pagination_cursors needs custom DDL with composite PK
+    if (tableName === "pagination_cursors") continue;
+    statements.push(EXPECTED_TABLES[tableName] as string);
+  }
+  if (!missingTables.includes("pagination_cursors")) {
+    statements.push(PAGINATION_CURSORS_DDL);
   }
   db.exec(statements.join(";\n"));
   db.query("INSERT INTO schema_version (version) VALUES (?)").run(
@@ -51,12 +61,15 @@ function createPreMigrationDatabase(
 ): void {
   const statements: string[] = [];
   for (const tableName of Object.keys(EXPECTED_TABLES)) {
+    // pagination_cursors needs custom DDL with composite PK
+    if (tableName === "pagination_cursors") continue;
     if (preMigrationTables.includes(tableName)) {
       statements.push(generatePreMigrationTableDDL(tableName));
     } else {
       statements.push(EXPECTED_TABLES[tableName] as string);
     }
   }
+  statements.push(PAGINATION_CURSORS_DDL);
   db.exec(statements.join(";\n"));
   db.query("INSERT INTO schema_version (version) VALUES (?)").run(
     CURRENT_SCHEMA_VERSION

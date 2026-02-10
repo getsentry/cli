@@ -326,9 +326,17 @@ export async function handleAutoDetect(
   displayProjectTable(stdout, limited);
 
   if (filtered.length > limited.length || hasMore) {
-    stdout.write(
-      `\nShowing ${limited.length} projects (more available). Use --limit to show more.\n`
-    );
+    if (hasMore && orgsToFetch.length === 1) {
+      const org = orgsToFetch[0] as string;
+      stdout.write(
+        `\nShowing ${limited.length} projects (more available). ` +
+          `Use 'sentry project list ${org}/' for paginated results.\n`
+      );
+    } else {
+      stdout.write(
+        `\nShowing ${limited.length} projects (more available). Use --limit to show more.\n`
+      );
+    }
   }
 
   if (footer) {
