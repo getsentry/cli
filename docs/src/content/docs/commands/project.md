@@ -49,27 +49,33 @@ my-org      mobile-ios     cocoa         mobile-team
 View details of a specific project.
 
 ```bash
-sentry project view <project-slug>
+# Auto-detect from DSN or config
+sentry project view
+
+# Explicit org and project
+sentry project view <org>/<project>
+
+# Find project across all orgs
+sentry project view <project>
 ```
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `<project-slug>` | The project slug |
+| `[target]` | Optional: `<org>/<project>`, `<project>`, or omit for auto-detect |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
-| `--org <org-slug>` | Organization slug (if not specified, uses default) |
 | `-w, --web` | Open in browser |
 | `--json` | Output as JSON |
 
 **Example:**
 
 ```bash
-sentry project view frontend --org my-org
+sentry project view my-org/frontend
 ```
 
 ```
@@ -83,5 +89,5 @@ DSN: https://abc123@sentry.io/123456
 **Open in browser:**
 
 ```bash
-sentry project view frontend -w
+sentry project view my-org/frontend -w
 ```
