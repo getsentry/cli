@@ -25,7 +25,6 @@ export type {
   TokenErrorResponse,
   TokenResponse,
 } from "./oauth.js";
-// OAuth types and schemas
 export {
   DeviceCodeResponseSchema,
   TokenErrorResponseSchema,
@@ -45,6 +44,7 @@ export {
   SolutionArtifactSchema,
   TERMINAL_STATUSES,
 } from "./seer.js";
+// Sentry API types (SDK-derived + internal)
 export type {
   Breadcrumb,
   BreadcrumbsEntry,
@@ -55,13 +55,9 @@ export type {
   ExceptionEntry,
   ExceptionValue,
   IssueLevel,
-  IssuePriority,
   IssueStatus,
-  IssueSubstatus,
-  LogSeverity,
   LogsResponse,
   Mechanism,
-  OrganizationLinks,
   OsContext,
   ProjectKey,
   Region,
@@ -72,40 +68,22 @@ export type {
   SentryOrganization,
   SentryProject,
   SentryUser,
-  Span,
   StackFrame,
   Stacktrace,
   TraceContext,
   TraceSpan,
-  UserGeo,
   UserRegionsResponse,
 } from "./sentry.js";
 
 export {
-  BreadcrumbSchema,
-  BreadcrumbsEntrySchema,
-  BrowserContextSchema,
   DetailedLogsResponseSchema,
   DetailedSentryLogSchema,
-  DeviceContextSchema,
-  ExceptionEntrySchema,
-  ExceptionValueSchema,
   ISSUE_LEVELS,
-  ISSUE_PRIORITIES,
   ISSUE_STATUSES,
-  LOG_SEVERITIES,
   LogsResponseSchema,
-  MechanismSchema,
-  OsContextSchema,
   RegionSchema,
-  RequestEntrySchema,
   SentryLogSchema,
   SentryUserSchema,
-  SpanSchema,
-  StackFrameSchema,
-  StacktraceSchema,
-  TraceContextSchema,
-  UserGeoSchema,
   UserRegionsResponseSchema,
 } from "./sentry.js";
 

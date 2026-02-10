@@ -8,8 +8,9 @@
  * This keeps all SDK-documented fields available with correct types while making
  * non-core fields optional for flexibility (test mocks, partial API responses).
  *
- * Internal types (Region, User, logs, event entries, traces) that are not covered
- * by the SDK use Zod schemas for runtime validation.
+ * Internal types not covered by the SDK (Region, User, logs) use Zod schemas
+ * for runtime validation. Event entry types (exceptions, breadcrumbs, etc.)
+ * are plain TypeScript interfaces since they are only used for type annotations.
  */
 
 import type {
@@ -24,15 +25,6 @@ import { z } from "zod";
 // SDK-derived types
 
 // Organization
-
-/**
- * Organization links with region URL for multi-region support.
- * Derived from the SDK's organization `links` field.
- */
-export type OrganizationLinks = {
-  organizationUrl: string;
-  regionUrl: string;
-};
 
 /**
  * A Sentry organization.
@@ -74,7 +66,7 @@ export type SentryProject = Partial<SdkProjectListItem> & {
   status?: string;
 };
 
-// Issue Status & Level Constants
+// Issue Constants
 
 export const ISSUE_STATUSES = ["resolved", "unresolved", "ignored"] as const;
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
@@ -87,20 +79,6 @@ export const ISSUE_LEVELS = [
   "debug",
 ] as const;
 export type IssueLevel = (typeof ISSUE_LEVELS)[number];
-
-export const ISSUE_PRIORITIES = ["high", "medium", "low"] as const;
-export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];
-
-export const ISSUE_SUBSTATUSES = [
-  "ongoing",
-  "escalating",
-  "regressed",
-  "new",
-  "archived_until_escalating",
-  "archived_until_condition_met",
-  "archived_forever",
-] as const;
-export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
 // Issue
 
@@ -206,7 +184,7 @@ export type ProjectKey = Partial<SdkProjectKey> & {
   };
 };
 
-// Internal types (not in @sentry/api SDK)
+// Internal types with Zod schemas (runtime-validated, not in @sentry/api)
 
 // Region
 
@@ -229,9 +207,7 @@ export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
 
 export const SentryUserSchema = z
   .object({
-    // Core identifiers (required)
     id: z.string(),
-    // Optional user info
     email: z.string().optional(),
     username: z.string().optional(),
     name: z.string().optional(),
@@ -240,42 +216,47 @@ export const SentryUserSchema = z
 
 export type SentryUser = z.infer<typeof SentryUserSchema>;
 
-// Trace Context
+// Plain TypeScript interfaces (type annotations only, no runtime validation)
 
-export const TraceContextSchema = z
-  .object({
-    trace_id: z.string().optional(),
-    span_id: z.string().optional(),
-    parent_span_id: z.string().nullable().optional(),
-    op: z.string().optional(),
-    status: z.string().optional(),
-    description: z.string().nullable().optional(),
-  })
-  .passthrough();
+// Event Contexts
 
-export type TraceContext = z.infer<typeof TraceContextSchema>;
+/** Trace context from event.contexts.trace */
+export type TraceContext = {
+  trace_id?: string;
+  span_id?: string;
+  parent_span_id?: string | null;
+  op?: string;
+  status?: string;
+  description?: string | null;
+  [key: string]: unknown;
+};
 
-// Span (for trace tree display)
+/** Browser context from event.contexts.browser */
+export type BrowserContext = {
+  name?: string;
+  version?: string;
+  type?: "browser";
+  [key: string]: unknown;
+};
 
-/** A single span in a trace */
-export const SpanSchema = z
-  .object({
-    span_id: z.string(),
-    parent_span_id: z.string().nullable().optional(),
-    trace_id: z.string().optional(),
-    op: z.string().optional(),
-    description: z.string().nullable().optional(),
-    /** Start time as Unix timestamp (seconds with fractional ms) */
-    start_timestamp: z.number(),
-    /** End time as Unix timestamp (seconds with fractional ms) */
-    timestamp: z.number(),
-    status: z.string().optional(),
-    data: z.record(z.unknown()).optional(),
-    tags: z.record(z.string()).optional(),
-  })
-  .passthrough();
+/** Operating system context from event.contexts.os */
+export type OsContext = {
+  name?: string;
+  version?: string;
+  type?: "os";
+  [key: string]: unknown;
+};
 
-export type Span = z.infer<typeof SpanSchema>;
+/** Device context from event.contexts.device */
+export type DeviceContext = {
+  family?: string;
+  model?: string;
+  brand?: string;
+  type?: "device";
+  [key: string]: unknown;
+};
+
+// Trace Spans
 
 /**
  * Span from /trace/{traceId}/ endpoint with nested children.
@@ -304,215 +285,115 @@ export type TraceSpan = {
 // Stack Frame & Exception Entry
 
 /** A single frame in a stack trace */
-export const StackFrameSchema = z
-  .object({
-    filename: z.string().nullable().optional(),
-    absPath: z.string().nullable().optional(),
-    module: z.string().nullable().optional(),
-    package: z.string().nullable().optional(),
-    platform: z.string().nullable().optional(),
-    function: z.string().nullable().optional(),
-    rawFunction: z.string().nullable().optional(),
-    symbol: z.string().nullable().optional(),
-    lineNo: z.number().nullable().optional(),
-    colNo: z.number().nullable().optional(),
-    /** Whether this frame is in the user's application code */
-    inApp: z.boolean().nullable().optional(),
-    /** Surrounding code lines: [[lineNo, code], ...] */
-    context: z
-      .array(z.tuple([z.number(), z.string()]))
-      .nullable()
-      .optional(),
-    vars: z.record(z.unknown()).nullable().optional(),
-    instructionAddr: z.string().nullable().optional(),
-    symbolAddr: z.string().nullable().optional(),
-    trust: z.string().nullable().optional(),
-    errors: z.array(z.unknown()).nullable().optional(),
-  })
-  .passthrough();
-
-export type StackFrame = z.infer<typeof StackFrameSchema>;
+export type StackFrame = {
+  filename?: string | null;
+  absPath?: string | null;
+  module?: string | null;
+  package?: string | null;
+  platform?: string | null;
+  function?: string | null;
+  rawFunction?: string | null;
+  symbol?: string | null;
+  lineNo?: number | null;
+  colNo?: number | null;
+  /** Whether this frame is in the user's application code */
+  inApp?: boolean | null;
+  /** Surrounding code lines: [[lineNo, code], ...] */
+  context?: [number, string][] | null;
+  vars?: Record<string, unknown> | null;
+  instructionAddr?: string | null;
+  symbolAddr?: string | null;
+  trust?: string | null;
+  errors?: unknown[] | null;
+  [key: string]: unknown;
+};
 
 /** Stack trace containing frames */
-export const StacktraceSchema = z
-  .object({
-    frames: z.array(StackFrameSchema).optional(),
-    framesOmitted: z.array(z.number()).nullable().optional(),
-    registers: z.record(z.string()).nullable().optional(),
-    hasSystemFrames: z.boolean().optional(),
-  })
-  .passthrough();
-
-export type Stacktrace = z.infer<typeof StacktraceSchema>;
+export type Stacktrace = {
+  frames?: StackFrame[];
+  framesOmitted?: number[] | null;
+  registers?: Record<string, string> | null;
+  hasSystemFrames?: boolean;
+  [key: string]: unknown;
+};
 
 /** Exception mechanism (how the error was captured) */
-export const MechanismSchema = z
-  .object({
-    type: z.string().optional(),
-    handled: z.boolean().optional(),
-    synthetic: z.boolean().optional(),
-    description: z.string().nullable().optional(),
-    data: z.record(z.unknown()).optional(),
-  })
-  .passthrough();
-
-export type Mechanism = z.infer<typeof MechanismSchema>;
+export type Mechanism = {
+  type?: string;
+  handled?: boolean;
+  synthetic?: boolean;
+  description?: string | null;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+};
 
 /** A single exception value in the exception entry */
-export const ExceptionValueSchema = z
-  .object({
-    type: z.string().nullable().optional(),
-    value: z.string().nullable().optional(),
-    module: z.string().nullable().optional(),
-    threadId: z.union([z.string(), z.number()]).nullable().optional(),
-    mechanism: MechanismSchema.nullable().optional(),
-    stacktrace: StacktraceSchema.nullable().optional(),
-    rawStacktrace: StacktraceSchema.nullable().optional(),
-  })
-  .passthrough();
-
-export type ExceptionValue = z.infer<typeof ExceptionValueSchema>;
+export type ExceptionValue = {
+  type?: string | null;
+  value?: string | null;
+  module?: string | null;
+  threadId?: string | number | null;
+  mechanism?: Mechanism | null;
+  stacktrace?: Stacktrace | null;
+  rawStacktrace?: Stacktrace | null;
+  [key: string]: unknown;
+};
 
 /** Exception entry in event.entries */
-export const ExceptionEntrySchema = z.object({
-  type: z.literal("exception"),
-  data: z
-    .object({
-      values: z.array(ExceptionValueSchema).optional(),
-      excOmitted: z.array(z.number()).nullable().optional(),
-      hasSystemFrames: z.boolean().optional(),
-    })
-    .passthrough(),
-});
-
-export type ExceptionEntry = z.infer<typeof ExceptionEntrySchema>;
+export type ExceptionEntry = {
+  type: "exception";
+  data: {
+    values?: ExceptionValue[];
+    excOmitted?: number[] | null;
+    hasSystemFrames?: boolean;
+    [key: string]: unknown;
+  };
+};
 
 // Breadcrumbs Entry
 
 /** A single breadcrumb */
-export const BreadcrumbSchema = z
-  .object({
-    type: z.string().optional(),
-    category: z.string().nullable().optional(),
-    level: z.string().optional(),
-    message: z.string().nullable().optional(),
-    timestamp: z.string().optional(),
-    event_id: z.string().nullable().optional(),
-    data: z.record(z.unknown()).nullable().optional(),
-  })
-  .passthrough();
-
-export type Breadcrumb = z.infer<typeof BreadcrumbSchema>;
+export type Breadcrumb = {
+  type?: string;
+  category?: string | null;
+  level?: string;
+  message?: string | null;
+  timestamp?: string;
+  event_id?: string | null;
+  data?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
 
 /** Breadcrumbs entry in event.entries */
-export const BreadcrumbsEntrySchema = z.object({
-  type: z.literal("breadcrumbs"),
-  data: z
-    .object({
-      values: z.array(BreadcrumbSchema).optional(),
-    })
-    .passthrough(),
-});
-
-export type BreadcrumbsEntry = z.infer<typeof BreadcrumbsEntrySchema>;
+export type BreadcrumbsEntry = {
+  type: "breadcrumbs";
+  data: {
+    values?: Breadcrumb[];
+    [key: string]: unknown;
+  };
+};
 
 // Request Entry
 
 /** HTTP request entry in event.entries */
-export const RequestEntrySchema = z.object({
-  type: z.literal("request"),
-  data: z
-    .object({
-      url: z.string().nullable().optional(),
-      method: z.string().nullable().optional(),
-      fragment: z.string().nullable().optional(),
-      query: z
-        .union([
-          z.array(z.tuple([z.string(), z.string()])),
-          z.string(),
-          z.record(z.string()),
-        ])
-        .nullable()
-        .optional(),
-      data: z.unknown().nullable().optional(),
-      headers: z
-        .array(z.tuple([z.string(), z.string()]))
-        .nullable()
-        .optional(),
-      cookies: z
-        .union([
-          z.array(z.tuple([z.string(), z.string()])),
-          z.record(z.string()),
-        ])
-        .nullable()
-        .optional(),
-      env: z.record(z.string()).nullable().optional(),
-      inferredContentType: z.string().nullable().optional(),
-      apiTarget: z.string().nullable().optional(),
-    })
-    .passthrough(),
-});
+export type RequestEntry = {
+  type: "request";
+  data: {
+    url?: string | null;
+    method?: string | null;
+    fragment?: string | null;
+    query?: [string, string][] | string | Record<string, string> | null;
+    data?: unknown;
+    headers?: [string, string][] | null;
+    cookies?: [string, string][] | Record<string, string> | null;
+    env?: Record<string, string> | null;
+    inferredContentType?: string | null;
+    apiTarget?: string | null;
+    [key: string]: unknown;
+  };
+};
 
-export type RequestEntry = z.infer<typeof RequestEntrySchema>;
-
-// Event Contexts
-
-/** Browser context */
-export const BrowserContextSchema = z
-  .object({
-    name: z.string().optional(),
-    version: z.string().optional(),
-    type: z.literal("browser").optional(),
-  })
-  .passthrough();
-
-export type BrowserContext = z.infer<typeof BrowserContextSchema>;
-
-/** Operating system context */
-export const OsContextSchema = z
-  .object({
-    name: z.string().optional(),
-    version: z.string().optional(),
-    type: z.literal("os").optional(),
-  })
-  .passthrough();
-
-export type OsContext = z.infer<typeof OsContextSchema>;
-
-/** Device context */
-export const DeviceContextSchema = z
-  .object({
-    family: z.string().optional(),
-    model: z.string().optional(),
-    brand: z.string().optional(),
-    type: z.literal("device").optional(),
-  })
-  .passthrough();
-
-export type DeviceContext = z.infer<typeof DeviceContextSchema>;
-
-/** User geo information */
-export const UserGeoSchema = z
-  .object({
-    country_code: z.string().optional(),
-    city: z.string().optional(),
-    region: z.string().optional(),
-  })
-  .passthrough();
-
-export type UserGeo = z.infer<typeof UserGeoSchema>;
-
-/** Log severity levels (similar to issue levels but includes trace) */
-export const LOG_SEVERITIES = [
-  "fatal",
-  "error",
-  "warning",
-  "warn",
-  "info",
-  "debug",
-  "trace",
-] as const;
-export type LogSeverity = (typeof LOG_SEVERITIES)[number];
+// Log types (runtime-validated, internal explore API)
 
 /**
  * Individual log entry from the logs dataset.
