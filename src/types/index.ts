@@ -78,6 +78,8 @@ export type {
   Stacktrace,
   TraceContext,
   TraceSpan,
+  TransactionListItem,
+  TransactionsResponse,
   UserGeo,
   UserRegionsResponse,
 } from "./sentry.js";
@@ -113,6 +115,8 @@ export {
   StackFrameSchema,
   StacktraceSchema,
   TraceContextSchema,
+  TransactionListItemSchema,
+  TransactionsResponseSchema,
   UserGeoSchema,
   UserRegionsResponseSchema,
 } from "./sentry.js";
