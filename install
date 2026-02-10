@@ -15,15 +15,21 @@ Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.2.0)
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
+        --no-completions    Don't install shell completions
+
+Environment Variables:
+    SENTRY_INSTALL_DIR      Override the installation directory
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
+    SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
 }
 
 requested_version=""
 no_modify_path=false
+no_completions=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -38,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-modify-path)
       no_modify_path=true
+      shift
+      ;;
+    --no-completions)
+      no_completions=true
       shift
       ;;
     *) shift ;;
@@ -86,104 +96,30 @@ version="${version#v}"
 filename="sentry-${os}-${arch}${suffix}"
 url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
 
-# Install
-install_dir="$HOME/.sentry/bin"
-install_path="${install_dir}/sentry${suffix}"
+# Download binary to a temp location
+tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
 
-mkdir -p "$install_dir"
+# Clean up temp binary on failure (setup handles cleanup on success)
+trap 'rm -f "$tmp_binary"' EXIT
+
 echo -e "${MUTED}Downloading sentry v${version}...${NC}"
-curl -fsSL --progress-bar "$url" -o "$install_path"
-chmod +x "$install_path"
+curl -fsSL --progress-bar "$url" -o "$tmp_binary"
+chmod +x "$tmp_binary"
 
-# Add to PATH
-add_to_path() {
-  local config_file=$1
-  local command=$2
-
-  if grep -Fxq "$command" "$config_file"; then
-    echo -e "${MUTED}PATH already configured in ${NC}$config_file"
-  elif [[ -w $config_file ]]; then
-    echo -e "\n# sentry" >> "$config_file"
-    echo "$command" >> "$config_file"
-    echo -e "${MUTED}Added ${NC}sentry ${MUTED}to PATH in ${NC}$config_file"
-  else
-    echo -e "${MUTED}Manually add the directory to $config_file (or similar):${NC}"
-    echo "  $command"
-  fi
-}
-
-XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
-
-current_shell=$(basename "${SHELL:-sh}")
-case $current_shell in
-  fish)
-    config_files=("$XDG_CONFIG_HOME/fish/config.fish")
-    ;;
-  zsh)
-    config_files=("$HOME/.zshrc" "$HOME/.zshenv" "$XDG_CONFIG_HOME/zsh/.zshrc" "$XDG_CONFIG_HOME/zsh/.zshenv")
-    ;;
-  bash)
-    config_files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile" "$XDG_CONFIG_HOME/bash/.bash_profile" "$XDG_CONFIG_HOME/bash/.bashrc")
-    ;;
-  ash|sh)
-    config_files=("$HOME/.profile" "/etc/profile")
-    ;;
-  *)
-    config_files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile")
-    ;;
-esac
-
-if [[ "$no_modify_path" != "true" ]]; then
-  config_file=""
-  for file in "${config_files[@]}"; do
-    if [[ -f $file ]]; then
-      config_file=$file
-      break
-    fi
-  done
-
-  if [[ -z $config_file ]]; then
-    echo -e "${MUTED}No config file found. Manually add to PATH:${NC}"
-    case $current_shell in
-      fish)
-        echo "  fish_add_path \"$install_dir\""
-        ;;
-      *)
-        echo "  export PATH=\"$install_dir\":\$PATH"
-        ;;
-    esac
-  else
-    case $current_shell in
-      fish)
-        add_to_path "$config_file" "fish_add_path \"$install_dir\""
-        ;;
-      *)
-        add_to_path "$config_file" "export PATH=\"$install_dir\":\$PATH"
-        ;;
-    esac
-  fi
-else
-  echo -e "${MUTED}Skipping PATH modification. Manually add to your shell config:${NC}"
-  case $current_shell in
-    fish)
-      echo "  fish_add_path \"$install_dir\""
-      ;;
-    *)
-      echo "  export PATH=\"$install_dir\":\$PATH"
-      ;;
-  esac
+# Delegate installation and configuration to the binary itself.
+# setup --install handles: directory selection, binary placement, PATH,
+# completions, agent skills, and the welcome message.
+setup_args="--install --method curl"
+if [[ "$no_modify_path" == "true" ]]; then
+  setup_args="$setup_args --no-modify-path"
+fi
+if [[ "$no_completions" == "true" ]]; then
+  setup_args="$setup_args --no-completions"
 fi
 
-if [[ -n "${GITHUB_ACTIONS:-}" ]] && [[ "${GITHUB_ACTIONS}" == "true" ]] && [[ -n "${GITHUB_PATH:-}" ]]; then
-  echo "$install_dir" >> "$GITHUB_PATH"
-  echo -e "${MUTED}Added to \$GITHUB_PATH${NC}"
-fi
+# Remove trap — setup will handle temp cleanup on success
+trap - EXIT
 
-# Success message
-echo ""
-echo -e "Installed ${NC}sentry v${version}${MUTED} to ${NC}${install_path}"
-echo ""
-echo -e "${MUTED}Get started (restart your shell or open a new terminal):${NC}"
-echo "  sentry --help"
-echo ""
-echo -e "${MUTED}https://cli.sentry.dev${NC}"
+# shellcheck disable=SC2086
+"$tmp_binary" cli setup $setup_args

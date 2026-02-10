@@ -82,7 +82,7 @@ sentry auth refresh
 View authentication status
 
 **Flags:**
-- `--showToken - Show the stored token (masked by default)`
+- `--show-token - Show the stored token (masked by default)`
 
 **Examples:**
 
@@ -158,23 +158,29 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <project>`
+#### `sentry project view <target>`
 
 View details of a project
 
 **Flags:**
-- `--org <value> - Organization slug`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
 **Examples:**
 
 ```bash
-sentry project view <project-slug>
+# Auto-detect from DSN or config
+sentry project view
 
-sentry project view frontend --org my-org
+# Explicit org and project
+sentry project view <org>/<project>
 
-sentry project view frontend -w
+# Find project across all orgs
+sentry project view <project>
+
+sentry project view my-org/frontend
+
+sentry project view my-org/frontend -w
 ```
 
 ### Issue
@@ -402,6 +408,18 @@ Diagnose and repair CLI database issues
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
 
+#### `sentry cli setup`
+
+Configure shell integration
+
+**Flags:**
+- `--install - Install the binary from a temp location to the system path`
+- `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
+- `--no-modify-path - Skip PATH modification`
+- `--no-completions - Skip shell completion installation`
+- `--no-agent-skills - Skip agent skill installation for AI coding assistants`
+- `--quiet - Suppress output (for scripted usage)`
+
 #### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
@@ -409,6 +427,18 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+
+### Repo
+
+Work with Sentry repositories
+
+#### `sentry repo list <org>`
+
+List repositories
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `--json - Output JSON`
 
 ### Log
 
@@ -422,6 +452,174 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log list
+
+# Explicit org and project
+sentry log list <org>/<project>
+
+# Search for project across all accessible orgs
+sentry log list <project>
+
+# List last 100 logs (default)
+sentry log list
+
+# Stream with default 2-second poll interval
+sentry log list -f
+
+# Stream with custom 5-second poll interval
+sentry log list -f 5
+
+# Show only error logs
+sentry log list -q 'level:error'
+
+# Filter by message content
+sentry log list -q 'database'
+
+# Show last 50 logs
+sentry log list --limit 50
+
+# Show last 500 logs
+sentry log list -n 500
+
+# Stream error logs from a specific project
+sentry log list my-org/backend -f -q 'level:error'
+```
+
+#### `sentry log view <args...>`
+
+View details of a specific log entry
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+# Auto-detect from DSN or config
+sentry log view <log-id>
+
+# Explicit org and project
+sentry log view <org>/<project> <log-id>
+
+# Search for project across all accessible orgs
+sentry log view <project> <log-id>
+
+sentry log view 968c763c740cfda8b6728f27fb9e9b01
+
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
+
+sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
+
+sentry log list --json | jq '.[] | select(.level == "error")'
+```
+
+### Trace
+
+View distributed traces
+
+#### `sentry trace list <target>`
+
+List recent traces in a project
+
+**Flags:**
+- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `--json - Output as JSON`
+
+#### `sentry trace view <args...>`
+
+View details of a specific trace
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+
+### Issues
+
+List issues in a project
+
+#### `sentry issues <target>`
+
+List issues in a project
+
+**Flags:**
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `--json - Output as JSON`
+
+### Orgs
+
+List organizations
+
+#### `sentry orgs`
+
+List organizations
+
+**Flags:**
+- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `--json - Output JSON`
+
+### Projects
+
+List projects
+
+#### `sentry projects <org>`
+
+List projects
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
+- `--json - Output JSON`
+- `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+
+### Repos
+
+List repositories
+
+#### `sentry repos <org>`
+
+List repositories
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `--json - Output JSON`
+
+### Logs
+
+List logs from a project
+
+#### `sentry logs <target>`
+
+List logs from a project
+
+**Flags:**
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Filter query (Sentry search syntax)`
+- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--json - Output as JSON`
+
+### Traces
+
+List recent traces in a project
+
+#### `sentry traces <target>`
+
+List recent traces in a project
+
+**Flags:**
+- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
+- `-q, --query <value> - Search query (Sentry search syntax)`
+- `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `--json - Output as JSON`
 
 ## Output Formats
