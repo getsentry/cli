@@ -219,7 +219,7 @@ export function resolveCursor(
 }
 
 /** Result of resolving organizations to fetch projects from */
-export type OrgResolution = {
+type OrgResolution = {
   orgs: string[];
   footer?: string;
   skippedSelfHosted?: number;
@@ -229,9 +229,7 @@ export type OrgResolution = {
  * Resolve which organizations to fetch projects from (auto-detect mode).
  * Uses config defaults or DSN auto-detection.
  */
-export async function resolveOrgsForAutoDetect(
-  cwd: string
-): Promise<OrgResolution> {
+async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
   // 1. Check config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
