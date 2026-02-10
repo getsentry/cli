@@ -405,7 +405,7 @@ export type PaginatedResponse<T> = {
  * @param header - Raw Link header string
  * @returns Parsed pagination info with next cursor if available
  */
-function parseLinkHeader(header: string | null): {
+export function parseLinkHeader(header: string | null): {
   nextCursor?: string;
   hasMore: boolean;
 } {

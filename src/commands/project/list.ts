@@ -41,7 +41,7 @@ import { resolveAllTargets } from "../../lib/resolve-target.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
-const PAGINATION_KEY = "project-list";
+export const PAGINATION_KEY = "project-list";
 
 type ListFlags = {
   readonly limit: number;
@@ -113,7 +113,7 @@ async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
  * @param platform - Platform substring to match (e.g., "javascript", "python")
  * @returns Filtered projects, or all projects if no platform specified
  */
-function filterByPlatform(
+export function filterByPlatform(
   projects: ProjectWithOrg[],
   platform?: string
 ): ProjectWithOrg[] {
@@ -129,7 +129,7 @@ function filterByPlatform(
 /**
  * Write the column header row for project list output.
  */
-function writeHeader(
+export function writeHeader(
   stdout: Writer,
   orgWidth: number,
   slugWidth: number,
@@ -141,7 +141,7 @@ function writeHeader(
   stdout.write(`${org}  ${project}  ${name}  PLATFORM\n`);
 }
 
-type WriteRowsOptions = {
+export type WriteRowsOptions = {
   stdout: Writer;
   projects: ProjectWithOrg[];
   orgWidth: number;
@@ -152,7 +152,7 @@ type WriteRowsOptions = {
 /**
  * Write formatted project rows to stdout.
  */
-function writeRows(options: WriteRowsOptions): void {
+export function writeRows(options: WriteRowsOptions): void {
   const { stdout, projects, orgWidth, slugWidth, nameWidth } = options;
   for (const project of projects) {
     stdout.write(
@@ -166,7 +166,7 @@ function writeRows(options: WriteRowsOptions): void {
  * Captures the query parameters that affect result ordering,
  * so cursors from different queries are not accidentally reused.
  */
-function buildContextKey(
+export function buildContextKey(
   parsed: ParsedOrgProject,
   flags: { platform?: string }
 ): string {
@@ -191,7 +191,7 @@ function buildContextKey(
  * Resolve the cursor value from --cursor flag.
  * Handles the magic "last" value by looking up the cached cursor.
  */
-function resolveCursor(
+export function resolveCursor(
   cursorFlag: string | undefined,
   contextKey: string
 ): string | undefined {
@@ -319,7 +319,7 @@ async function handleAutoDetect(
  * Handle explicit org/project targeting (e.g., sentry/sentry).
  * Fetches the specific project directly via the API.
  */
-async function handleExplicit(
+export async function handleExplicit(
   stdout: Writer,
   org: string,
   projectSlug: string,
@@ -368,7 +368,7 @@ async function handleExplicit(
   );
 }
 
-type OrgAllOptions = {
+export type OrgAllOptions = {
   stdout: Writer;
   org: string;
   flags: ListFlags;
@@ -380,7 +380,7 @@ type OrgAllOptions = {
  * Handle org-all mode (e.g., sentry/).
  * Uses cursor pagination for efficient page-by-page listing.
  */
-async function handleOrgAll(options: OrgAllOptions): Promise<void> {
+export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   const { stdout, org, flags, contextKey, cursor } = options;
   const response: PaginatedResponse<SentryProject[]> =
     await listProjectsPaginated(org, {
@@ -440,7 +440,7 @@ async function handleOrgAll(options: OrgAllOptions): Promise<void> {
  * Handle project-search mode (bare slug, e.g., "sentry").
  * Searches for the project across all accessible organizations.
  */
-async function handleProjectSearch(
+export async function handleProjectSearch(
   stdout: Writer,
   projectSlug: string,
   flags: ListFlags
@@ -480,7 +480,7 @@ async function handleProjectSearch(
 }
 
 /** Write self-hosted DSN warning if applicable */
-function writeSelfHostedWarning(
+export function writeSelfHostedWarning(
   stdout: Writer,
   skippedSelfHosted: number | undefined
 ): void {
