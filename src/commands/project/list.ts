@@ -51,7 +51,7 @@ type ListFlags = {
 };
 
 /** Project with its organization context for display */
-type ProjectWithOrg = SentryProject & { orgSlug?: string };
+export type ProjectWithOrg = SentryProject & { orgSlug?: string };
 
 /**
  * Fetch projects for a single organization (all pages).
@@ -59,7 +59,9 @@ type ProjectWithOrg = SentryProject & { orgSlug?: string };
  * @param orgSlug - Organization slug to fetch projects from
  * @returns Projects with org context attached
  */
-async function fetchOrgProjects(orgSlug: string): Promise<ProjectWithOrg[]> {
+export async function fetchOrgProjects(
+  orgSlug: string
+): Promise<ProjectWithOrg[]> {
   const projects = await listProjects(orgSlug);
   return projects.map((p) => ({ ...p, orgSlug }));
 }
@@ -68,7 +70,7 @@ async function fetchOrgProjects(orgSlug: string): Promise<ProjectWithOrg[]> {
  * Fetch projects for a single org, returning empty array on non-auth errors.
  * Auth errors propagate so user sees "please log in" message.
  */
-async function fetchOrgProjectsSafe(
+export async function fetchOrgProjectsSafe(
   orgSlug: string
 ): Promise<ProjectWithOrg[]> {
   try {
@@ -87,7 +89,7 @@ async function fetchOrgProjectsSafe(
  *
  * @returns Combined list of projects from all accessible orgs
  */
-async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
+export async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
   const results: ProjectWithOrg[] = [];
 
@@ -212,7 +214,7 @@ export function resolveCursor(
 }
 
 /** Result of resolving organizations to fetch projects from */
-type OrgResolution = {
+export type OrgResolution = {
   orgs: string[];
   footer?: string;
   skippedSelfHosted?: number;
@@ -222,7 +224,9 @@ type OrgResolution = {
  * Resolve which organizations to fetch projects from (auto-detect mode).
  * Uses config defaults or DSN auto-detection.
  */
-async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
+export async function resolveOrgsForAutoDetect(
+  cwd: string
+): Promise<OrgResolution> {
   // 1. Check config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
@@ -251,7 +255,10 @@ async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
 }
 
 /** Display projects in table format with header and rows */
-function displayProjectTable(stdout: Writer, projects: ProjectWithOrg[]): void {
+export function displayProjectTable(
+  stdout: Writer,
+  projects: ProjectWithOrg[]
+): void {
   const { orgWidth, slugWidth, nameWidth } =
     calculateProjectColumnWidths(projects);
   writeHeader(stdout, orgWidth, slugWidth, nameWidth);
@@ -262,7 +269,7 @@ function displayProjectTable(stdout: Writer, projects: ProjectWithOrg[]): void {
  * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
  * apply client-side filtering and limiting.
  */
-async function handleAutoDetect(
+export async function handleAutoDetect(
   stdout: Writer,
   cwd: string,
   flags: ListFlags

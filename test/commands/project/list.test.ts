@@ -17,7 +17,12 @@ import {
 } from "fast-check";
 import {
   buildContextKey,
+  displayProjectTable,
+  fetchAllOrgProjects,
+  fetchOrgProjects,
+  fetchOrgProjectsSafe,
   filterByPlatform,
+  handleAutoDetect,
   handleExplicit,
   handleOrgAll,
   handleProjectSearch,
@@ -29,14 +34,14 @@ import {
 } from "../../../src/commands/project/list.js";
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
-import { setAuthToken } from "../../../src/lib/db/auth.js";
+import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   getPaginationCursor,
   setPaginationCursor,
 } from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { AuthError, ContextError } from "../../../src/lib/errors.js";
 import type { SentryProject, Writer } from "../../../src/types/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
@@ -831,5 +836,295 @@ describe("handleProjectSearch", () => {
 
     const text = output();
     expect(text).toContain("frontend");
+  });
+});
+
+// ─── displayProjectTable ────────────────────────────────────────
+
+describe("displayProjectTable", () => {
+  test("outputs header and rows", () => {
+    const { writer, output } = createCapture();
+    const projects = [
+      makeProject({
+        slug: "web",
+        name: "Web App",
+        platform: "javascript",
+        orgSlug: "acme",
+      }),
+      makeProject({
+        slug: "api",
+        name: "API",
+        platform: "python",
+        orgSlug: "acme",
+      }),
+    ];
+
+    displayProjectTable(writer, projects);
+    const text = output();
+
+    // Header row
+    expect(text).toContain("ORG");
+    expect(text).toContain("PROJECT");
+    expect(text).toContain("NAME");
+    expect(text).toContain("PLATFORM");
+
+    // Data rows
+    expect(text).toContain("web");
+    expect(text).toContain("api");
+    expect(text).toContain("Web App");
+    expect(text).toContain("API");
+  });
+
+  test("handles single project", () => {
+    const { writer, output } = createCapture();
+    displayProjectTable(writer, [
+      makeProject({ slug: "solo", orgSlug: "org" }),
+    ]);
+    expect(output()).toContain("solo");
+  });
+});
+
+// ─── fetchOrgProjects ───────────────────────────────────────────
+
+describe("fetchOrgProjects", () => {
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("myorg", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns projects with orgSlug attached", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const result = await fetchOrgProjects("myorg");
+
+    expect(result).toHaveLength(2);
+    for (const p of result) {
+      expect(p.orgSlug).toBe("myorg");
+    }
+    expect(result[0].slug).toBe("frontend");
+    expect(result[1].slug).toBe("backend");
+  });
+
+  test("returns empty array when org has no projects", async () => {
+    globalThis.fetch = mockProjectFetch([]);
+    const result = await fetchOrgProjects("myorg");
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe("fetchOrgProjectsSafe", () => {
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("myorg", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns projects on success", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const result = await fetchOrgProjectsSafe("myorg");
+    expect(result).toHaveLength(2);
+  });
+
+  test("returns empty array on non-auth error", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Forbidden" }), {
+        status: 403,
+      });
+    const result = await fetchOrgProjectsSafe("myorg");
+    expect(result).toHaveLength(0);
+  });
+
+  test("propagates AuthError when not authenticated", async () => {
+    // Clear auth token so the API client throws AuthError before making any request
+    clearAuth();
+
+    await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
+  });
+});
+
+// ─── fetchAllOrgProjects ────────────────────────────────────────
+
+describe("fetchAllOrgProjects", () => {
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("fetches projects from all orgs", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const result = await fetchAllOrgProjects();
+
+    // mockProjectFetch returns 1 org (test-org) with sampleProjects
+    expect(result).toHaveLength(2);
+    for (const p of result) {
+      expect(p.orgSlug).toBe("test-org");
+    }
+  });
+
+  test("skips orgs with access errors", async () => {
+    let callCount = 0;
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listOrganizations
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "org1", name: "Org 1" },
+            { id: "2", slug: "org2", name: "Org 2" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      // projects - first org succeeds, second fails with 403
+      if (url.includes("/projects/")) {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Response(JSON.stringify(sampleProjects), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<url>; rel="next"; results="false"; cursor="0:0:0"',
+            },
+          });
+        }
+        return new Response(JSON.stringify({ detail: "Forbidden" }), {
+          status: 403,
+        });
+      }
+
+      return new Response("Not found", { status: 404 });
+    };
+
+    await setOrgRegion("org1", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org2", DEFAULT_SENTRY_URL);
+
+    const result = await fetchAllOrgProjects();
+    // Only org1's projects should be returned
+    expect(result).toHaveLength(2);
+  });
+});
+
+// ─── handleAutoDetect ───────────────────────────────────────────
+
+describe("handleAutoDetect", () => {
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("shows projects from all orgs when no default org", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: false,
+    });
+
+    const text = output();
+    // Should display table with projects
+    expect(text).toContain("ORG");
+    expect(text).toContain("frontend");
+    expect(text).toContain("backend");
+  });
+
+  test("--json outputs array", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
+  });
+
+  test("empty results shows no projects message", async () => {
+    globalThis.fetch = mockProjectFetch([]);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: false,
+    });
+
+    expect(output()).toContain("No projects found");
+  });
+
+  test("respects --limit flag", async () => {
+    const manyProjects = Array.from({ length: 5 }, (_, i) =>
+      makeProject({ id: String(i), slug: `proj-${i}`, name: `Project ${i}` })
+    );
+    globalThis.fetch = mockProjectFetch(manyProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 2,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed).toHaveLength(2);
+  });
+
+  test("respects --platform flag", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+      platform: "python",
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].platform).toBe("python");
+  });
+
+  test("shows limit message when more projects exist", async () => {
+    const manyProjects = Array.from({ length: 5 }, (_, i) =>
+      makeProject({ id: String(i), slug: `proj-${i}`, name: `Project ${i}` })
+    );
+    globalThis.fetch = mockProjectFetch(manyProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 2,
+      json: false,
+    });
+
+    const text = output();
+    expect(text).toContain("Showing 2 of 5 projects");
+    expect(text).toContain("--limit");
   });
 });
