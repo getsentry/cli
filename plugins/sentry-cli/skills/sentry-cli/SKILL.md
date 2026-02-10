@@ -422,6 +422,18 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
 
+### Repo
+
+Work with Sentry repositories
+
+#### `sentry repo list <org>`
+
+List repositories
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `--json - Output JSON`
+
 ### Log
 
 View Sentry logs
@@ -540,6 +552,18 @@ List projects
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+
+### Repos
+
+List repositories
+
+#### `sentry repos <org>`
+
+List repositories
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `--json - Output JSON`
 
 ### Logs
 
