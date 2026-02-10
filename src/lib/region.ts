@@ -29,15 +29,14 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
   // 2. Try to fetch org details to get region
   // Import dynamically to avoid circular dependency
   const { apiRequestToRegion } = await import("./api-client.js");
-  const { SentryOrganizationSchema } = await import("../types/sentry.js");
+  type OrgWithLinks = { links?: { regionUrl?: string } };
 
   try {
     // First try the default URL - it may route correctly
     const baseUrl = getSentryBaseUrl();
-    const org = await apiRequestToRegion(
+    const org = await apiRequestToRegion<OrgWithLinks>(
       baseUrl,
-      `/organizations/${orgSlug}/`,
-      { schema: SentryOrganizationSchema }
+      `/organizations/${orgSlug}/`
     );
 
     const regionUrl = org.links?.regionUrl ?? baseUrl;

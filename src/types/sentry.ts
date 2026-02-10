@@ -2,125 +2,77 @@
  * Sentry API Types
  *
  * Types representing Sentry API resources.
- * Zod schemas provide runtime validation, types are inferred from schemas.
- * Schemas are lenient to handle API variations - only core identifiers are required.
+ *
+ * SDK-backed types (Organization, Project, Issue, Event, ProjectKey) are derived
+ * from `@sentry/api` response types using `Partial<SdkType> & RequiredCore`.
+ * This keeps all SDK-documented fields available with correct types while making
+ * non-core fields optional for flexibility (test mocks, partial API responses).
+ *
+ * Internal types (Region, User, logs, event entries, traces) that are not covered
+ * by the SDK use Zod schemas for runtime validation.
  */
 
+import type {
+  IssueEventDetailsResponse,
+  RetrieveAnIssueResponse as SdkIssueDetail,
+  ListOrganizations as SdkOrganizationList,
+  ProjectKey as SdkProjectKey,
+  OrganizationProjectResponseDict as SdkProjectList,
+} from "@sentry/api";
 import { z } from "zod";
 
-// Region
-
-/** A Sentry region (e.g., US, EU) */
-export const RegionSchema = z.object({
-  name: z.string(),
-  url: z.string().url(),
-});
-
-export type Region = z.infer<typeof RegionSchema>;
-
-/** Response from /api/0/users/me/regions/ endpoint */
-export const UserRegionsResponseSchema = z.object({
-  regions: z.array(RegionSchema),
-});
-
-export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
+// SDK-derived types
 
 // Organization
 
-/** Organization links with region URL for multi-region support */
-export const OrganizationLinksSchema = z.object({
-  organizationUrl: z.string(),
-  regionUrl: z.string(),
-});
+/**
+ * Organization links with region URL for multi-region support.
+ * Derived from the SDK's organization `links` field.
+ */
+export type OrganizationLinks = {
+  organizationUrl: string;
+  regionUrl: string;
+};
 
-export type OrganizationLinks = z.infer<typeof OrganizationLinksSchema>;
-
-export const SentryOrganizationSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    slug: z.string(),
-    name: z.string(),
-    // Optional metadata
-    dateCreated: z.string().optional(),
-    isEarlyAdopter: z.boolean().optional(),
-    require2FA: z.boolean().optional(),
-    avatar: z
-      .object({
-        avatarType: z.string(),
-        avatarUuid: z.string().nullable(),
-      })
-      .passthrough()
-      .optional(),
-    features: z.array(z.string()).optional(),
-    // Multi-region support: links contain the region URL for this org
-    links: OrganizationLinksSchema.optional(),
-  })
-  .passthrough();
-
-export type SentryOrganization = z.infer<typeof SentryOrganizationSchema>;
-
-// User
-
-export const SentryUserSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    // Optional user info
-    email: z.string().optional(),
-    username: z.string().optional(),
-    name: z.string().optional(),
-  })
-  .passthrough();
-
-export type SentryUser = z.infer<typeof SentryUserSchema>;
+/**
+ * A Sentry organization.
+ *
+ * Based on the `@sentry/api` list-organizations response type.
+ * Core identifiers are required; other SDK fields are available but optional,
+ * allowing test mocks and list-endpoint responses to omit them.
+ */
+export type SentryOrganization = Partial<SdkOrganizationList[number]> & {
+  id: string;
+  slug: string;
+  name: string;
+};
 
 // Project
 
-export const SentryProjectSchema = z
-  .object({
-    // Core identifiers (required)
-    id: z.string(),
-    slug: z.string(),
-    name: z.string(),
-    // Optional metadata
-    platform: z.string().nullable().optional(),
-    dateCreated: z.string().optional(),
-    isBookmarked: z.boolean().optional(),
-    isMember: z.boolean().optional(),
-    features: z.array(z.string()).optional(),
-    firstEvent: z.string().nullable().optional(),
-    firstTransactionEvent: z.boolean().optional(),
-    access: z.array(z.string()).optional(),
-    hasAccess: z.boolean().optional(),
-    hasMinifiedStackTrace: z.boolean().optional(),
-    hasMonitors: z.boolean().optional(),
-    hasProfiles: z.boolean().optional(),
-    hasReplays: z.boolean().optional(),
-    hasSessions: z.boolean().optional(),
-    isInternal: z.boolean().optional(),
-    isPublic: z.boolean().optional(),
-    avatar: z
-      .object({
-        avatarType: z.string(),
-        avatarUuid: z.string().nullable(),
-      })
-      .passthrough()
-      .optional(),
-    color: z.string().optional(),
-    status: z.string().optional(),
-    organization: z
-      .object({
-        id: z.string(),
-        slug: z.string(),
-        name: z.string(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
+/** Element type of the SDK's list-projects response */
+type SdkProjectListItem = SdkProjectList[number];
 
-export type SentryProject = z.infer<typeof SentryProjectSchema>;
+/**
+ * A Sentry project.
+ *
+ * Based on the `@sentry/api` list-projects response type.
+ * The `organization` field is present in detail responses but absent in list responses,
+ * so it is declared as an optional extension.
+ */
+export type SentryProject = Partial<SdkProjectListItem> & {
+  id: string;
+  slug: string;
+  name: string;
+  /** Organization context (present in detail responses, absent in list) */
+  organization?: {
+    id: string;
+    slug: string;
+    name: string;
+    [key: string]: unknown;
+  };
+  /** Project status (returned by API but not in the OpenAPI spec) */
+  status?: string;
+};
 
 // Issue Status & Level Constants
 
@@ -150,118 +102,143 @@ export const ISSUE_SUBSTATUSES = [
 ] as const;
 export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
 
-// Release (embedded in Issue)
-
-export const ReleaseSchema = z
-  .object({
-    id: z.number().optional(),
-    version: z.string(),
-    shortVersion: z.string().optional(),
-    status: z.string().optional(),
-    dateCreated: z.string().optional(),
-    dateReleased: z.string().nullable().optional(),
-    ref: z.string().nullable().optional(),
-    url: z.string().nullable().optional(),
-    commitCount: z.number().optional(),
-    deployCount: z.number().optional(),
-    authors: z.array(z.unknown()).optional(),
-    projects: z
-      .array(
-        z
-          .object({
-            id: z.union([z.string(), z.number()]),
-            slug: z.string(),
-            name: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
-
-export type Release = z.infer<typeof ReleaseSchema>;
-
 // Issue
 
-export const SentryIssueSchema = z
+/**
+ * A Sentry issue.
+ *
+ * Based on the `@sentry/api` retrieve-issue response type.
+ * Core identifiers are required; other SDK fields are available but optional.
+ * Includes extensions for fields returned by the API but not in the OpenAPI spec.
+ *
+ * The `metadata` field is overridden from the SDK's discriminated union to a single
+ * object with all optional fields, matching how the API actually returns data.
+ */
+export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
+  id: string;
+  shortId: string;
+  title: string;
+  /** Issue metadata (value, filename, function, etc.) */
+  metadata?: {
+    value?: string;
+    type?: string;
+    filename?: string;
+    function?: string;
+    title?: string;
+    display_title_with_tree_label?: boolean;
+    [key: string]: unknown;
+  };
+  /** Issue substatus (not in OpenAPI spec) */
+  substatus?: string | null;
+  /** Issue priority (not in OpenAPI spec) */
+  priority?: string;
+  /** Whether the issue is unhandled (not in OpenAPI spec) */
+  isUnhandled?: boolean;
+  /** Platform of the issue (not in OpenAPI spec) */
+  platform?: string;
+};
+
+// Event
+
+/**
+ * A Sentry event.
+ *
+ * Based on the `@sentry/api` IssueEventDetailsResponse type.
+ * Core identifier (eventID) is required; other SDK fields are available but optional.
+ *
+ * The `contexts` field is overridden from the SDK's generic `Record<string,unknown>`
+ * to include typed sub-contexts (trace, browser, os, device) that our formatters access.
+ * Additional fields not in the OpenAPI spec are also included.
+ */
+export type SentryEvent = Omit<
+  Partial<IssueEventDetailsResponse>,
+  "contexts"
+> & {
+  eventID: string;
+  /** Event contexts with typed sub-contexts */
+  contexts?: {
+    trace?: TraceContext;
+    browser?: BrowserContext;
+    os?: OsContext;
+    device?: DeviceContext;
+    [key: string]: unknown;
+  } | null;
+  /** Date the event was created (not in OpenAPI spec) */
+  dateCreated?: string;
+  /** Event fingerprints (not in OpenAPI spec) */
+  fingerprints?: string[];
+  /** Release associated with the event (not in OpenAPI spec) */
+  release?: {
+    version: string;
+    shortVersion?: string;
+    dateCreated?: string;
+    dateReleased?: string | null;
+    [key: string]: unknown;
+  } | null;
+  /** SDK update suggestions (not in OpenAPI spec) */
+  sdkUpdates?: Array<{
+    type?: string;
+    sdkName?: string;
+    newSdkVersion?: string;
+    sdkUrl?: string;
+    [key: string]: unknown;
+  }>;
+  /** URL/function where the error occurred (not in OpenAPI spec for events) */
+  culprit?: string | null;
+};
+
+// Project Keys (DSN)
+
+/**
+ * A Sentry project key (DSN).
+ *
+ * Based on the `@sentry/api` ProjectKey type.
+ * Core fields are required; other SDK fields are available but optional.
+ */
+export type ProjectKey = Partial<SdkProjectKey> & {
+  id: string;
+  name: string;
+  isActive: boolean;
+  dsn: {
+    public: string;
+    secret: string;
+    [key: string]: unknown;
+  };
+};
+
+// Internal types (not in @sentry/api SDK)
+
+// Region
+
+/** A Sentry region (e.g., US, EU) */
+export const RegionSchema = z.object({
+  name: z.string(),
+  url: z.string().url(),
+});
+
+export type Region = z.infer<typeof RegionSchema>;
+
+/** Response from /api/0/users/me/regions/ endpoint */
+export const UserRegionsResponseSchema = z.object({
+  regions: z.array(RegionSchema),
+});
+
+export type UserRegionsResponse = z.infer<typeof UserRegionsResponseSchema>;
+
+// User
+
+export const SentryUserSchema = z
   .object({
     // Core identifiers (required)
     id: z.string(),
-    shortId: z.string(),
-    title: z.string(),
-    // Optional metadata
-    culprit: z.string().optional(),
-    permalink: z.string().optional(),
-    logger: z.string().nullable().optional(),
-    level: z.string().optional(),
-    status: z.enum(ISSUE_STATUSES).optional(),
-    statusDetails: z.record(z.unknown()).optional(),
-    substatus: z.string().optional().nullable(),
-    priority: z.string().optional(),
-    isPublic: z.boolean().optional(),
-    platform: z.string().optional(),
-    project: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        slug: z.string(),
-        platform: z.string().nullable().optional(),
-      })
-      .passthrough()
-      .optional(),
-    type: z.string().optional(),
-    metadata: z
-      .object({
-        value: z.string().optional(),
-        type: z.string().optional(),
-        filename: z.string().optional(),
-        function: z.string().optional(),
-        display_title_with_tree_label: z.boolean().optional(),
-      })
-      .passthrough()
-      .optional(),
-    numComments: z.number().optional(),
-    assignedTo: z
-      .object({
-        id: z.string(),
-        name: z.string(),
-        type: z.string(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    isBookmarked: z.boolean().optional(),
-    isSubscribed: z.boolean().optional(),
-    subscriptionDetails: z
-      .object({
-        reason: z.string().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    hasSeen: z.boolean().optional(),
-    annotations: z
-      .array(
-        z
-          .object({
-            displayName: z.string(),
-            url: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
-    isUnhandled: z.boolean().optional(),
-    count: z.string().optional(),
-    userCount: z.number().optional(),
-    firstSeen: z.string().datetime({ offset: true }).optional(),
-    lastSeen: z.string().datetime({ offset: true }).optional(),
-    // Release information
-    firstRelease: ReleaseSchema.nullable().optional(),
-    lastRelease: ReleaseSchema.nullable().optional(),
+    // Optional user info
+    email: z.string().optional(),
+    username: z.string().optional(),
+    name: z.string().optional(),
   })
   .passthrough();
 
-export type SentryIssue = z.infer<typeof SentryIssueSchema>;
+export type SentryUser = z.infer<typeof SentryUserSchema>;
 
 // Trace Context
 
@@ -524,109 +501,6 @@ export const UserGeoSchema = z
   .passthrough();
 
 export type UserGeo = z.infer<typeof UserGeoSchema>;
-
-// Event
-
-export const SentryEventSchema = z
-  .object({
-    // Core identifier (required)
-    eventID: z.string(),
-    // Optional metadata
-    id: z.string().optional(),
-    projectID: z.string().optional(),
-    context: z.record(z.unknown()).optional(),
-    contexts: z
-      .object({
-        trace: TraceContextSchema.optional(),
-        browser: BrowserContextSchema.optional(),
-        os: OsContextSchema.optional(),
-        device: DeviceContextSchema.optional(),
-      })
-      .passthrough()
-      .optional(),
-    dateCreated: z.string().optional(),
-    dateReceived: z.string().optional(),
-    /** Event entries: exception, breadcrumbs, request, spans, etc. */
-    entries: z.array(z.unknown()).optional(),
-    errors: z.array(z.unknown()).optional(),
-    fingerprints: z.array(z.string()).optional(),
-    groupID: z.string().optional(),
-    message: z.string().optional(),
-    metadata: z.record(z.unknown()).optional(),
-    platform: z.string().optional(),
-    /** File location where the error occurred */
-    location: z.string().nullable().optional(),
-    /** URL where the event occurred */
-    culprit: z.string().nullable().optional(),
-    sdk: z
-      .object({
-        name: z.string().nullable().optional(),
-        version: z.string().nullable().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    tags: z
-      .array(
-        z.object({
-          key: z.string(),
-          value: z.string(),
-        })
-      )
-      .optional(),
-    title: z.string().optional(),
-    type: z.string().optional(),
-    user: z
-      .object({
-        id: z.string().nullable().optional(),
-        email: z.string().nullable().optional(),
-        username: z.string().nullable().optional(),
-        ip_address: z.string().nullable().optional(),
-        name: z.string().nullable().optional(),
-        geo: UserGeoSchema.nullable().optional(),
-        data: z.record(z.unknown()).nullable().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
-    /** Release information for this event */
-    release: ReleaseSchema.nullable().optional(),
-    /** SDK update suggestions */
-    sdkUpdates: z
-      .array(
-        z
-          .object({
-            type: z.string().optional(),
-            sdkName: z.string().optional(),
-            newSdkVersion: z.string().optional(),
-            sdkUrl: z.string().optional(),
-          })
-          .passthrough()
-      )
-      .optional(),
-  })
-  .passthrough();
-
-export type SentryEvent = z.infer<typeof SentryEventSchema>;
-
-// Project Keys (DSN)
-
-export const ProjectKeyDsnSchema = z.object({
-  public: z.string(),
-  secret: z.string().optional(),
-});
-
-export const ProjectKeySchema = z
-  .object({
-    id: z.string(),
-    name: z.string(),
-    dsn: ProjectKeyDsnSchema,
-    isActive: z.boolean(),
-    dateCreated: z.string().optional(),
-  })
-  .passthrough();
-
-export type ProjectKey = z.infer<typeof ProjectKeySchema>;
 
 /** Log severity levels (similar to issue levels but includes trace) */
 export const LOG_SEVERITIES = [
