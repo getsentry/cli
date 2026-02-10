@@ -35,6 +35,7 @@ import {
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
+import { setDefaults } from "../../../src/lib/db/defaults.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   getPaginationCursor,
@@ -1126,5 +1127,40 @@ describe("handleAutoDetect", () => {
     const text = output();
     expect(text).toContain("Showing 2 of 5 projects");
     expect(text).toContain("--limit");
+  });
+
+  test("fast path: uses single-page fetch for single org without platform filter", async () => {
+    // Set default org to trigger single-org resolution
+    await setDefaults("test-org");
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
+    // Verify orgSlug is attached
+    expect(parsed[0].orgSlug).toBe("test-org");
+  });
+
+  test("slow path: uses full fetch when platform filter is active", async () => {
+    // Set default org — but platform filter forces slow path
+    await setDefaults("test-org");
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+      platform: "python",
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].platform).toBe("python");
   });
 });

@@ -268,6 +268,10 @@ export function displayProjectTable(
 /**
  * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
  * apply client-side filtering and limiting.
+ *
+ * Optimization: when targeting a single org without platform filter, uses
+ * single-page pagination (`perPage=limit`) to avoid fetching all projects.
+ * Multi-org or filtered queries still require full fetch + client-side slicing.
  */
 export async function handleAutoDetect(
   stdout: Writer,
@@ -281,7 +285,17 @@ export async function handleAutoDetect(
   } = await resolveOrgsForAutoDetect(cwd);
 
   let allProjects: ProjectWithOrg[];
-  if (orgsToFetch.length > 0) {
+
+  // Fast path: single org, no platform filter — fetch only one page
+  const canUsePaginated = orgsToFetch.length === 1 && !flags.platform;
+
+  if (canUsePaginated) {
+    const org = orgsToFetch[0] as string;
+    const response = await listProjectsPaginated(org, {
+      perPage: flags.limit,
+    });
+    allProjects = response.data.map((p) => ({ ...p, orgSlug: org }));
+  } else if (orgsToFetch.length > 0) {
     const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
     allProjects = results.flat();
   } else {
@@ -452,11 +466,7 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags
 ): Promise<void> {
-  const matches = await findProjectsBySlug(projectSlug);
-  const projects: ProjectWithOrg[] = matches.map((m) => ({
-    ...m,
-    orgSlug: m.orgSlug,
-  }));
+  const projects: ProjectWithOrg[] = await findProjectsBySlug(projectSlug);
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (flags.json) {
