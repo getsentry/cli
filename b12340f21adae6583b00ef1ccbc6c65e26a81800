@@ -1,0 +1,27 @@
+## Implementation Plan
+
+### Problem
+Publishing with craft fails with:
+  Error: No artifacts matching filters found for revision "..." (tries: 3)
+
+### Root Cause
+Craft's GitHubArtifactProvider.filterWorkflowRuns() matches the artifact
+config keys against workflow run.name (the workflow's `name:` field in YAML),
+not the workflow filename. Our .craft.yml used `ci.yml` (the filename) but
+the workflow declares `name: CI`.
+
+The filter `ci.yml` becomes regex /^ci\.yml$/ which never matches "CI",
+so all workflow runs are filtered out, no artifacts are found, and craft
+fails after 3 retries.
+
+### Fix
+Change the artifact filter key from `ci.yml` to `CI` to match the
+workflow's declared name.
+
+### Verification
+- Confirmed in craft source: src/artifact_providers/github.ts line 315
+  uses run.name for matching
+- Confirmed in craft source: src/utils/filters.ts line 40-44 converts
+  non-regex strings to exact match patterns
+- The error message says "No artifacts matching filters" (not "No workflow
+  runs found"), confirming runs exist but are filtered out
