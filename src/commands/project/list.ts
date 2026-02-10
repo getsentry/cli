@@ -482,12 +482,11 @@ export async function handleProjectSearch(
   const projects: ProjectWithOrg[] = await findProjectsBySlug(projectSlug);
   const filtered = filterByPlatform(projects, flags.platform);
 
-  if (flags.json) {
-    writeJson(stdout, filtered);
-    return;
-  }
-
   if (filtered.length === 0) {
+    if (flags.json) {
+      writeJson(stdout, []);
+      return;
+    }
     if (projects.length > 0 && flags.platform) {
       stdout.write(
         `No project '${projectSlug}' found matching platform '${flags.platform}'.\n`
@@ -501,11 +500,22 @@ export async function handleProjectSearch(
     );
   }
 
-  displayProjectTable(stdout, filtered);
+  const limited = filtered.slice(0, flags.limit);
 
-  if (filtered.length > 1) {
+  if (flags.json) {
+    writeJson(stdout, limited);
+    return;
+  }
+
+  displayProjectTable(stdout, limited);
+
+  if (filtered.length > limited.length) {
     stdout.write(
-      `\nFound '${projectSlug}' in ${filtered.length} organizations\n`
+      `\nShowing ${limited.length} of ${filtered.length} matches. Use --limit to show more.\n`
+    );
+  } else if (limited.length > 1) {
+    stdout.write(
+      `\nFound '${projectSlug}' in ${limited.length} organizations\n`
     );
   }
 

@@ -853,6 +853,117 @@ describe("handleProjectSearch", () => {
     expect(text).toContain("matching platform 'rust'");
     expect(text).not.toContain("not found");
   });
+
+  test("respects --limit flag", async () => {
+    await setOrgRegion("org-a", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-b", DEFAULT_SENTRY_URL);
+
+    const project: SentryProject = {
+      id: "1",
+      slug: "frontend",
+      name: "Frontend",
+      platform: "javascript",
+      dateCreated: "2024-01-01T00:00:00Z",
+      status: "active",
+    };
+
+    // Mock that returns 2 orgs, each with the same project slug
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.match(/\/projects\/[^/]+\/[^/]+\//)) {
+        return new Response(JSON.stringify(project), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "org-a", name: "Org A" },
+            { id: "2", slug: "org-b", name: "Org B" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const { writer, output } = createCapture();
+
+    await handleProjectSearch(writer, "frontend", {
+      limit: 1,
+      json: false,
+    });
+
+    const text = output();
+    // Should show truncation message since 2 matches but limit is 1
+    expect(text).toContain("Showing 1 of 2 matches");
+    expect(text).toContain("--limit");
+  });
+
+  test("--limit also applies to JSON output", async () => {
+    await setOrgRegion("org-a", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-b", DEFAULT_SENTRY_URL);
+
+    const project: SentryProject = {
+      id: "1",
+      slug: "frontend",
+      name: "Frontend",
+      platform: "javascript",
+      dateCreated: "2024-01-01T00:00:00Z",
+      status: "active",
+    };
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.match(/\/projects\/[^/]+\/[^/]+\//)) {
+        return new Response(JSON.stringify(project), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "org-a", name: "Org A" },
+            { id: "2", slug: "org-b", name: "Org B" },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const { writer, output } = createCapture();
+
+    await handleProjectSearch(writer, "frontend", {
+      limit: 1,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed).toHaveLength(1);
+  });
 });
 
 // ─── displayProjectTable ────────────────────────────────────────
