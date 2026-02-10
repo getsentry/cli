@@ -1,0 +1,349 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-hero class="astro-bguv2lll"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>The CLI for developers and agents | Sentry CLI</title><link rel="canonical" href="https://cli.sentry.dev/pr-preview/pr-223"/><link rel="sitemap" href="/pr-preview/pr-223/sitemap-index.xml"/><script>
+            (function() {
+              let overscrollEl;
+              let pullDistance = 0;
+              let touchStartY = 0;
+              let isAtBottom = false;
+              
+              function isLandingPage() {
+                const path = window.location.pathname;
+                // Works with both / (prod) and /pr-preview/pr-XX (preview)
+                return path === '/' || 
+                       /^\/pr-preview\/pr-\d+\/?$/.test(path);
+              }
+              
+              function checkAtBottom() {
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = document.documentElement.clientHeight;
+                return scrollTop + clientHeight >= scrollHeight - 5;
+              }
+              
+              function createOverscrollMessage() {
+                if (!isLandingPage()) return;
+                overscrollEl = document.createElement('div');
+                overscrollEl.className = 'overscroll-message';
+                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code>npx sentry@latest</code></span>';
+                document.body.appendChild(overscrollEl);
+              }
+              
+              function updateOverscroll(distance) {
+                if (!overscrollEl) return;
+                const clampedDistance = Math.min(Math.max(distance, 0), 50);
+                const opacity = Math.min(clampedDistance / 15, 1);
+                const translateY = Math.min(clampedDistance * 2.5, 120);
+                overscrollEl.style.opacity = opacity;
+                overscrollEl.style.transform = 'translateX(-50%) translateY(-' + translateY + 'px)';
+              }
+              
+              function handleTouchStart(e) {
+                if (!isLandingPage()) return;
+                touchStartY = e.touches[0].clientY;
+                isAtBottom = checkAtBottom();
+              }
+              
+              function handleTouchMove(e) {
+                if (!isLandingPage() || !isAtBottom) return;
+                const touchY = e.touches[0].clientY;
+                pullDistance = touchStartY - touchY;
+                if (pullDistance > 0 && checkAtBottom()) {
+                  updateOverscroll(pullDistance);
+                }
+              }
+              
+              function handleTouchEnd() {
+                pullDistance = 0;
+                updateOverscroll(0);
+              }
+              
+              function handleWheel(e) {
+                if (!isLandingPage()) return;
+                if (checkAtBottom() && e.deltaY > 0) {
+                  pullDistance = Math.min(pullDistance + e.deltaY * 0.8, 50);
+                  updateOverscroll(pullDistance);
+                  clearTimeout(window.overscrollTimeout);
+                  window.overscrollTimeout = setTimeout(function() {
+                    pullDistance = 0;
+                    updateOverscroll(0);
+                  }, 5000);
+                } else if (e.deltaY < 0) {
+                  clearTimeout(window.overscrollTimeout);
+                  pullDistance = 0;
+                  updateOverscroll(0);
+                }
+              }
+              
+              document.addEventListener('DOMContentLoaded', function() {
+                createOverscrollMessage();
+                document.addEventListener('touchstart', handleTouchStart, { passive: true });
+                document.addEventListener('touchmove', handleTouchMove, { passive: true });
+                document.addEventListener('touchend', handleTouchEnd, { passive: true });
+                document.addEventListener('wheel', handleWheel, { passive: true });
+              });
+            })();
+          </script><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="true"/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"/><link rel="shortcut icon" href="/pr-preview/pr-223/favicon.png" type="image/png"/><meta name="generator" content="Astro v5.16.15"/><meta name="generator" content="Starlight v0.31.1"/><meta property="og:title" content="The CLI for developers and agents"/><meta property="og:type" content="article"/><meta property="og:url" content="https://cli.sentry.dev/pr-preview/pr-223"/><meta property="og:locale" content="en"/><meta property="og:description" content="A CLI for developers and agents"/><meta property="og:site_name" content="Sentry CLI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="A CLI for developers and agents"/><meta property="og:image" content="https://cli.sentry.dev/og-image.png"/><meta name="twitter:image" content="https://cli.sentry.dev/og-image-twitter.png"/><script>
+	window.StarlightThemeProvider = (() => {
+		// Always force dark mode, ignore localStorage and system preference
+		document.documentElement.dataset.theme = 'dark';
+		// Clear any stored theme preference to prevent future interference
+		if (typeof localStorage !== 'undefined') {
+			localStorage.removeItem('starlight-theme');
+		}
+		return {
+			updatePickers() {
+				// No-op: theme picker is hidden, no updates needed
+			},
+		};
+	})();
+</script><template id="theme-icons"></template><link rel="stylesheet" href="/pr-preview/pr-223/_astro/print.BJ0teN4y.css" media="print"><link rel="stylesheet" href="/pr-preview/pr-223/_astro/index.Rug9Xkb9.css">
+<style>:root{--sl-badge-default-border: var(--sl-color-accent);--sl-badge-default-bg: var(--sl-color-accent-low);--sl-badge-default-text: #fff;--sl-badge-note-border: var(--sl-color-blue);--sl-badge-note-bg: var(--sl-color-blue-low);--sl-badge-note-text: #fff;--sl-badge-danger-border: var(--sl-color-red);--sl-badge-danger-bg: var(--sl-color-red-low);--sl-badge-danger-text: #fff;--sl-badge-success-border: var(--sl-color-green);--sl-badge-success-bg: var(--sl-color-green-low);--sl-badge-success-text: #fff;--sl-badge-caution-border: var(--sl-color-orange);--sl-badge-caution-bg: var(--sl-color-orange-low);--sl-badge-caution-text: #fff;--sl-badge-tip-border: var(--sl-color-purple);--sl-badge-tip-bg: var(--sl-color-purple-low);--sl-badge-tip-text: #fff}[data-theme=light]:root{--sl-badge-default-bg: var(--sl-color-accent-high);--sl-badge-note-bg: var(--sl-color-blue-high);--sl-badge-danger-bg: var(--sl-color-red-high);--sl-badge-success-bg: var(--sl-color-green-high);--sl-badge-caution-bg: var(--sl-color-orange-high);--sl-badge-tip-bg: var(--sl-color-purple-high)}.sl-badge:where(.astro-avdet4wd){display:inline-block;border:1px solid var(--sl-color-border-badge);border-radius:.25rem;font-family:var(--sl-font-system-mono);line-height:normal;color:var(--sl-color-text-badge);background-color:var(--sl-color-bg-badge);overflow-wrap:anywhere}.sidebar-content .sl-badge:where(.astro-avdet4wd){line-height:1;font-size:var(--sl-text-xs);padding:.125rem .375rem}.sidebar-content a[aria-current=page]>.sl-badge:where(.astro-avdet4wd){--sl-color-bg-badge: transparent;--sl-color-border-badge: currentColor;color:inherit}.default:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-default-bg);--sl-color-border-badge: var(--sl-badge-default-border);--sl-color-text-badge: var(--sl-badge-default-text)}.note:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-note-bg);--sl-color-border-badge: var(--sl-badge-note-border);--sl-color-text-badge: var(--sl-badge-note-text)}.danger:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-danger-bg);--sl-color-border-badge: var(--sl-badge-danger-border);--sl-color-text-badge: var(--sl-badge-danger-text)}.success:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-success-bg);--sl-color-border-badge: var(--sl-badge-success-border);--sl-color-text-badge: var(--sl-badge-success-text)}.tip:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-tip-bg);--sl-color-border-badge: var(--sl-badge-tip-border);--sl-color-text-badge: var(--sl-badge-tip-text)}.caution:where(.astro-avdet4wd){--sl-color-bg-badge: var(--sl-badge-caution-bg);--sl-color-border-badge: var(--sl-badge-caution-border);--sl-color-text-badge: var(--sl-badge-caution-text)}.small:where(.astro-avdet4wd){font-size:var(--sl-text-xs);padding:.125rem .25rem}.medium:where(.astro-avdet4wd){font-size:var(--sl-text-sm);padding:.175rem .35rem}.large:where(.astro-avdet4wd){font-size:var(--sl-text-base);padding:.225rem .45rem}.sl-markdown-content :is(h1,h2,h3,h4,h5,h6) .sl-badge:where(.astro-avdet4wd){vertical-align:middle}
+svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-size, 1em);width:1em;height:1em}
+.sl-steps{--bullet-size: calc(var(--sl-line-height) * 1rem);--bullet-margin: .375rem;list-style:none;counter-reset:steps-counter var(--sl-steps-start, 0);padding-inline-start:0}.sl-steps>li{counter-increment:steps-counter;position:relative;padding-inline-start:calc(var(--bullet-size) + 1rem);padding-bottom:1px;min-height:calc(var(--bullet-size) + var(--bullet-margin))}.sl-steps>li+li{margin-top:0}.sl-steps>li:before{content:counter(steps-counter);position:absolute;top:0;inset-inline-start:0;width:var(--bullet-size);height:var(--bullet-size);line-height:var(--bullet-size);font-size:var(--sl-text-xs);font-weight:600;text-align:center;color:var(--sl-color-white);background-color:var(--sl-color-gray-6);border-radius:99rem;box-shadow:inset 0 0 0 1px var(--sl-color-gray-5)}.sl-steps>li:after{--guide-width: 1px;content:"";position:absolute;top:calc(var(--bullet-size) + var(--bullet-margin));bottom:var(--bullet-margin);inset-inline-start:calc((var(--bullet-size) - var(--guide-width)) / 2);width:var(--guide-width);background-color:var(--sl-color-hairline-light)}.sl-steps>li>:first-child{--lh: calc(1em * var(--sl-line-height));--shift-y: calc(.5 * (var(--bullet-size) - var(--lh)));transform:translateY(var(--shift-y));margin-bottom:var(--shift-y)}.sl-steps>li>:first-child:where(h1,h2,h3,h4,h5,h6){--lh: calc(1em * var(--sl-line-height-headings))}@supports (--prop: 1lh){.sl-steps>li>:first-child{--lh: 1lh}}
+.sl-link-button:where(.astro-xwgiixxa){align-items:center;border:1px solid transparent;border-radius:999rem;display:inline-flex;font-size:var(--sl-text-sm);gap:.5em;line-height:1.1875;outline-offset:.25rem;padding:.4375rem 1.125rem;text-decoration:none}.sl-link-button:where(.astro-xwgiixxa).primary{background:var(--sl-color-text-accent);border-color:var(--sl-color-text-accent);color:var(--sl-color-black)}.sl-link-button:where(.astro-xwgiixxa).primary:hover{color:var(--sl-color-black)}.sl-link-button:where(.astro-xwgiixxa).secondary{border-color:inherit;color:var(--sl-color-white)}.sl-link-button:where(.astro-xwgiixxa).minimal{color:var(--sl-color-white);padding-inline:0}.sl-link-button:where(.astro-xwgiixxa) svg{flex-shrink:0}@media(min-width:50rem){.sl-link-button:where(.astro-xwgiixxa){font-size:var(--sl-text-base);padding:.9375rem 1.25rem}}.sl-markdown-content .sl-link-button:where(.astro-xwgiixxa){margin-inline-end:1rem}.sl-markdown-content .sl-link-button:where(.astro-xwgiixxa):not(:where(p *)){margin-block:1rem}
+</style><script type="module" src="/pr-preview/pr-223/_astro/page.RZEKYUvP.js"></script><style>.install-selector:where(.astro-at6jrrhn){position:relative;width:fit-content}.install-box:where(.astro-at6jrrhn){display:flex;align-items:stretch;position:relative;background:#ffffff0d;border:1px solid rgba(255,255,255,.1);border-radius:9999px}.dropdown-trigger:where(.astro-at6jrrhn){display:flex;align-items:center;gap:.5rem;background:#ffffff0a;border:none;border-radius:9999px 0 0 9999px;padding:.6rem 1rem;font-family:inherit;font-size:.9rem;font-weight:500;color:#ffffffb3;cursor:pointer;transition:background-color .2s ease;white-space:nowrap;position:relative;z-index:1}.dropdown-trigger:where(.astro-at6jrrhn):hover{background:#ffffff14}.chevron:where(.astro-at6jrrhn){transition:transform .2s ease;opacity:.6}.install-box:where(.astro-at6jrrhn).open .chevron:where(.astro-at6jrrhn){transform:rotate(180deg)}.command-area:where(.astro-at6jrrhn){display:flex;align-items:center;gap:.75rem;background:transparent;border:none;padding:.6rem 1rem;font-family:JetBrains Mono,monospace;font-size:.875rem;line-height:1}.command-text:where(.astro-at6jrrhn){white-space:nowrap;background:transparent;min-width:47ch}.command-text:where(.astro-at6jrrhn) span{background:transparent!important}.copy-btn:where(.astro-at6jrrhn){background:none;border:none;color:#fff6;cursor:pointer;padding:0;transition:color .2s ease;flex-shrink:0;width:16px;height:16px;display:grid;place-items:center}.copy-btn:where(.astro-at6jrrhn):hover{color:#fff}.copy-btn:where(.astro-at6jrrhn) .copy-icon:where(.astro-at6jrrhn),.copy-btn:where(.astro-at6jrrhn) .check-icon:where(.astro-at6jrrhn){grid-area:1 / 1;pointer-events:none;transition:opacity .15s ease}.copy-btn:where(.astro-at6jrrhn) .check-icon:where(.astro-at6jrrhn){opacity:0;color:#22c55e;transform:translateY(-6px)}.copy-btn:where(.astro-at6jrrhn).copied .copy-icon:where(.astro-at6jrrhn){opacity:0}.copy-btn:where(.astro-at6jrrhn).copied .check-icon:where(.astro-at6jrrhn){opacity:1}.dropdown-menu:where(.astro-at6jrrhn){position:absolute;top:90%;left:0;background:#1a1a1f;border:1px solid rgba(255,255,255,.1);border-radius:.75rem;padding:.5rem!important;list-style:none;margin:0;box-shadow:0 10px 40px #00000080;opacity:0;visibility:hidden;transform:translateY(-8px);transition:all .2s ease;z-index:100;min-width:120px}.install-box:where(.astro-at6jrrhn).open .dropdown-menu:where(.astro-at6jrrhn){opacity:1;visibility:visible;transform:translateY(0)}.dropdown-menu:where(.astro-at6jrrhn) li:where(.astro-at6jrrhn){margin:0;padding:0}.dropdown-option:where(.astro-at6jrrhn){width:100%;margin-bottom:0!important;display:block;padding:.5rem .75rem;background:none;border:none;border-radius:.5rem;font-family:inherit;font-size:.875rem;color:#fffc;cursor:pointer;text-align:left;transition:background-color .15s ease}.dropdown-option:where(.astro-at6jrrhn):hover{background:#ffffff14}.dropdown-option:where(.astro-at6jrrhn).selected{background:#ffffff1a;font-weight:500}.dropdown-option:where(.astro-at6jrrhn):focus{outline:none;background:#ffffff1f}.dropdown-option:where(.astro-at6jrrhn):focus-visible{outline:2px solid rgba(255,255,255,.4);outline-offset:-2px}@media(max-width:640px){.install-selector:where(.astro-at6jrrhn){width:100%}.install-box:where(.astro-at6jrrhn){width:100%}.command-text:where(.astro-at6jrrhn){min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch}.command-area:where(.astro-at6jrrhn){flex:1;min-width:0;justify-content:space-between}.dropdown-menu:where(.astro-at6jrrhn){min-width:100px}}
+</style><style>.terminal-wrapper:where(.astro-eqg5l7fp){position:relative;margin:0 0 4rem;padding:3rem 3.5rem;background:linear-gradient(135deg,#581c874d,#0f172acc,#1e3a8a4d);border-radius:16px;overflow:hidden}.terminal-wrapper:where(.astro-eqg5l7fp):before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 20% 20%,rgba(139,92,246,.15) 0%,transparent 50%),radial-gradient(ellipse at 80% 80%,rgba(59,130,246,.15) 0%,transparent 50%);pointer-events:none}.terminal-wrapper:where(.astro-eqg5l7fp).bg-custom{background:var(--bg-image) center / cover}.terminal-wrapper:where(.astro-eqg5l7fp).bg-custom:before{background:none}.terminal:where(.astro-eqg5l7fp){position:relative;background:#0a0a0ffc;border-radius:8px;border:1px solid rgba(255,255,255,.1);overflow:hidden;box-shadow:0 25px 50px -12px #00000080,0 0 0 1px #ffffff0d}.terminal-header:where(.astro-eqg5l7fp){display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem}.terminal-dots:where(.astro-eqg5l7fp){display:flex;gap:8px}.terminal-dots-placeholder:where(.astro-eqg5l7fp){width:52px}.dot:where(.astro-eqg5l7fp){width:12px;height:12px;border-radius:50%;background:#ffffff26}.terminal-title:where(.astro-eqg5l7fp){color:#ffffff40;font-size:.8rem;font-weight:500}.terminal-body:where(.astro-eqg5l7fp){padding:0 1.5rem 1.25rem;font-family:JetBrains Mono,monospace;font-size:.8rem;line-height:1.6}.line:where(.astro-eqg5l7fp){display:flex;gap:.5rem;align-items:baseline}.line:where(.astro-eqg5l7fp).spacer{height:1rem}.line:where(.astro-eqg5l7fp).spacer-sm{height:.35rem}.line:where(.astro-eqg5l7fp).output{color:#ffffffd9}.line:where(.astro-eqg5l7fp).indent{padding-left:3.5rem}.prompt:where(.astro-eqg5l7fp){color:#fff6;user-select:none}.command:where(.astro-eqg5l7fp){color:#fff}.icon:where(.astro-eqg5l7fp){font-size:.7rem}.icon:where(.astro-eqg5l7fp).blue{color:#3b82f6}.icon:where(.astro-eqg5l7fp).green{color:#22c55e}.icon:where(.astro-eqg5l7fp).yellow{color:#eab308}.highlight:where(.astro-eqg5l7fp){color:#22d3ee}.accent:where(.astro-eqg5l7fp){color:#a78bfa}.dimmed:where(.astro-eqg5l7fp){color:#fff6}.small:where(.astro-eqg5l7fp){font-size:.75rem}.green-text:where(.astro-eqg5l7fp){color:#22c55e}.yellow-text:where(.astro-eqg5l7fp){color:#eab308}.red-text:where(.astro-eqg5l7fp){color:#ef4444}.header-line:where(.astro-eqg5l7fp){color:#fff;font-weight:600}.header-border:where(.astro-eqg5l7fp){color:#ffffff4d}.cause-label:where(.astro-eqg5l7fp){color:#f472b6;font-weight:500;margin-right:.25rem}.code:where(.astro-eqg5l7fp){color:#22d3ee;background:#22d3ee1a;padding:.1rem .3rem;border-radius:3px}.table-header:where(.astro-eqg5l7fp){color:#fff6;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;padding-bottom:.25rem;border-bottom:1px solid rgba(255,255,255,.1)}.table-row:where(.astro-eqg5l7fp){font-size:.72rem}.col-shortid:where(.astro-eqg5l7fp){min-width:95px}.col-alias:where(.astro-eqg5l7fp){min-width:45px}.col-title:where(.astro-eqg5l7fp){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ffffffb3}.col-count:where(.astro-eqg5l7fp){min-width:40px;text-align:right;color:#ffffff80}.col-fix:where(.astro-eqg5l7fp){min-width:35px;text-align:right;font-weight:500}@media(max-width:640px){.terminal-wrapper:where(.astro-eqg5l7fp){margin:0 0 3rem;padding:1rem;border-radius:12px}.terminal-body:where(.astro-eqg5l7fp){padding:0 1rem 1rem;font-size:.7rem}.col-shortid:where(.astro-eqg5l7fp){display:none}.col-alias:where(.astro-eqg5l7fp){min-width:40px}}
+</style><style>.feature-terminal:where(.astro-53qds6q7){background:#0a0a0ffc;border-radius:8px;overflow:hidden;box-shadow:0 25px 50px -12px #00000080,0 0 0 1px #ffffff0d;border:1px solid rgba(255,255,255,.1);width:100%;font-size:.75rem}.feature-terminal-header:where(.astro-53qds6q7){display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem}.feature-terminal-dots:where(.astro-53qds6q7){display:flex;gap:8px}.dot:where(.astro-53qds6q7){width:12px;height:12px;border-radius:50%;background:#ffffff26}.feature-terminal-title:where(.astro-53qds6q7){color:#ffffff40;font-size:.8rem;font-weight:500}.feature-terminal-spacer:where(.astro-53qds6q7){width:52px}.feature-terminal-body:where(.astro-53qds6q7){padding:0 1.5rem 1.25rem;font-family:JetBrains Mono,ui-monospace,monospace;line-height:1.6;color:#ffffffd9}.feature-terminal-body:where(.astro-53qds6q7) .prompt{color:#fff6;user-select:none}.feature-terminal-body:where(.astro-53qds6q7) .command{color:#fff}.feature-terminal-body:where(.astro-53qds6q7) .dimmed{color:#fff6}.feature-terminal-body:where(.astro-53qds6q7) .success{color:#22c55e}.feature-terminal-body:where(.astro-53qds6q7) .highlight{color:#22d3ee}.feature-terminal-body:where(.astro-53qds6q7) .line{display:flex;gap:.5rem;align-items:baseline;margin-bottom:.25rem}.feature-terminal-body:where(.astro-53qds6q7) .line:last-child{margin-bottom:0}.feature-terminal-body:where(.astro-53qds6q7) .spacer{height:.75rem}.feature-terminal-body:where(.astro-53qds6q7) .table-header{color:#fff6;font-size:.7rem;text-transform:uppercase;letter-spacing:.03em;padding-bottom:.25rem;border-bottom:1px solid rgba(255,255,255,.1)}.feature-terminal-body:where(.astro-53qds6q7) .table-row{font-size:.78rem}.feature-terminal-body:where(.astro-53qds6q7) .col-id{min-width:70px}.feature-terminal-body:where(.astro-53qds6q7) .col-title{flex:1;color:#ffffffb3}.feature-terminal-body:where(.astro-53qds6q7) .col-count{min-width:45px;text-align:right;color:#ffffff80}@media(max-width:640px){.feature-terminal:where(.astro-53qds6q7){max-width:100%;width:100%;font-size:.7rem}.feature-terminal-body:where(.astro-53qds6q7){padding:0 1rem 1rem}}
+</style></head> <body class="astro-bguv2lll"> <a href="#_top" class="astro-7q3lir66">Skip to content</a>  <div class="page sl-flex astro-vrdttmbt"> <header class="header astro-vrdttmbt"><div class="header sl-flex astro-3ef6ksr2"> <div class="sl-flex header-left astro-3ef6ksr2"> <a href="/pr-preview/pr-223/" class="site-title sl-flex astro-m46x6ez3">  <img class="astro-m46x6ez3" alt src="/pr-preview/pr-223/_astro/logo.BfKlEpbf.svg" width="1235" height="367">  <span class="sr-only astro-m46x6ez3" translate="no"> Sentry CLI </span> </a>  </div> <div class="sl-flex header-right astro-3ef6ksr2">  <a href="/pr-preview/pr-223/getting-started/" class="header-nav-link astro-3ef6ksr2">Docs</a> <a href="https://github.com/getsentry/cli" rel="me" class="sl-flex astro-wy4te6ga"><span class="sr-only astro-wy4te6ga">GitHub</span><svg aria-hidden="true" class="astro-wy4te6ga astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </a> </div> </div> </header>  <div class="main-frame astro-vrdttmbt">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-67yu43on">  <div class="main-pane astro-67yu43on">  <main data-pagefind-body class="astro-bguv2lll" lang="en" dir="ltr">   <div class="content-panel astro-7nkwcw3z"> <div class="sl-container astro-7nkwcw3z"> <div class="hero astro-jbfsktt5">    <div class="sl-flex stack astro-jbfsktt5"> <div class="sl-flex copy astro-jbfsktt5"> <h1 id="_top" data-page-title class="astro-jbfsktt5">The CLI for
+developers and agents
+</h1> <div class="tagline astro-jbfsktt5">No more flags. No more guessing. Just type what you mean and let the CLI figure out the rest. Built by humans and agents, for humans and agents.</div> </div>  </div> </div>  <div class="sl-markdown-content"> <div class="hero-command"><div class="install-selector astro-at6jrrhn"> <div class="install-box astro-at6jrrhn"> <button class="dropdown-trigger astro-at6jrrhn" aria-expanded="false" aria-haspopup="listbox"> <span class="dropdown-label astro-at6jrrhn">curl</span> <svg class="chevron astro-at6jrrhn" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="m6 9 6 6 6-6" class="astro-at6jrrhn"></path> </svg> </button> <div class="command-area astro-at6jrrhn" style="margin-top:0"> <code class="command-text astro-at6jrrhn" style="background-color:transparent" data-command="curl https://cli.sentry.dev/install -fsS | bash"><span style="color: #B392F0">curl</span><span style="color: #E1E4E8"> </span><span style="color: #9ECBFF">https://cli.sentry.dev/install</span><span style="color: #E1E4E8"> </span><span style="color: #79B8FF">-fsS</span><span style="color: #E1E4E8"> </span><span style="color: #F97583">|</span><span style="color: #E1E4E8"> </span><span style="color: #B392F0">bash</span></code> <button class="copy-btn astro-at6jrrhn" data-command="curl https://cli.sentry.dev/install -fsS | bash" aria-label="Copy to clipboard"> <svg class="copy-icon astro-at6jrrhn" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <rect width="14" height="14" x="8" y="8" rx="2" ry="2" class="astro-at6jrrhn"></rect> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" class="astro-at6jrrhn"></path> </svg> <svg class="check-icon astro-at6jrrhn" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="M20 6 9 17l-5-5" class="astro-at6jrrhn"></path> </svg> </button> </div> <ul class="dropdown-menu astro-at6jrrhn" role="listbox" aria-label="Installation method"> <li class="astro-at6jrrhn"> <button class="dropdown-option selected astro-at6jrrhn" data-label="curl" data-command="curl https://cli.sentry.dev/install -fsS | bash" data-highlighted="<span style=&#34;color: #B392F0&#34;>curl</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>https://cli.sentry.dev/install</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #79B8FF&#34;>-fsS</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #F97583&#34;>|</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #B392F0&#34;>bash</span>" role="option" aria-selected="true"> curl </button> </li><li class="astro-at6jrrhn"> <button class="dropdown-option  astro-at6jrrhn" data-label="npx" data-command="npx sentry@latest" data-highlighted="<span style=&#34;color: #B392F0&#34;>npx</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>sentry@latest</span>" role="option" aria-selected="false"> npx </button> </li><li class="astro-at6jrrhn"> <button class="dropdown-option  astro-at6jrrhn" data-label="npm" data-command="npm install -g sentry" data-highlighted="<span style=&#34;color: #B392F0&#34;>npm</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>install</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #79B8FF&#34;>-g</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>sentry</span>" role="option" aria-selected="false"> npm </button> </li><li class="astro-at6jrrhn"> <button class="dropdown-option  astro-at6jrrhn" data-label="pnpm" data-command="pnpm add -g sentry" data-highlighted="<span style=&#34;color: #B392F0&#34;>pnpm</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>add</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #79B8FF&#34;>-g</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>sentry</span>" role="option" aria-selected="false"> pnpm </button> </li><li class="astro-at6jrrhn"> <button class="dropdown-option  astro-at6jrrhn" data-label="bun" data-command="bun add -g sentry" data-highlighted="<span style=&#34;color: #B392F0&#34;>bun</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>add</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #79B8FF&#34;>-g</span><span style=&#34;color: #E1E4E8&#34;> </span><span style=&#34;color: #9ECBFF&#34;>sentry</span>" role="option" aria-selected="false"> bun </button> </li> </ul> </div> </div>  <script>
+  (function() {
+    function initInstallSelector() {
+      document.querySelectorAll('.install-selector').forEach(function(selector) {
+        const installBox = selector.querySelector('.install-box');
+        const trigger = selector.querySelector('.dropdown-trigger');
+        const label = selector.querySelector('.dropdown-label');
+        const commandText = selector.querySelector('.command-text');
+        const copyBtn = selector.querySelector('.copy-btn');
+        const options = selector.querySelectorAll('.dropdown-option');
+        const optionsArray = Array.from(options);
+
+        if (!trigger || !installBox) return;
+
+        /**
+         * Selects an option: updates UI, closes dropdown, returns focus to trigger.
+         */
+        function selectOption(option) {
+          const newLabel = option.getAttribute('data-label');
+          const newCommand = option.getAttribute('data-command');
+          const newHighlighted = option.getAttribute('data-highlighted');
+          
+          if (label && newLabel) label.textContent = newLabel;
+          if (commandText && newHighlighted) {
+            commandText.innerHTML = newHighlighted;
+          }
+          if (commandText && newCommand) {
+            commandText.setAttribute('data-command', newCommand);
+          }
+          if (copyBtn && newCommand) {
+            copyBtn.setAttribute('data-command', newCommand);
+          }
+          
+          // Update selected state
+          options.forEach(function(opt) {
+            opt.classList.remove('selected');
+            opt.setAttribute('aria-selected', 'false');
+          });
+          option.classList.add('selected');
+          option.setAttribute('aria-selected', 'true');
+
+          // Track install method selection with Sentry metrics
+          try {
+            if (typeof Sentry !== 'undefined' && Sentry.metrics && newLabel) {
+              Sentry.metrics.count('hero_install_method_selected', 1, {
+                attributes: { install_method: newLabel },
+              });
+            }
+          } catch (e) {
+            // Sentry not available, ignore
+          }
+
+          // Close dropdown and return focus
+          installBox.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        }
+
+        /**
+         * Opens the dropdown and focuses the selected or first option.
+         */
+        function openDropdown() {
+          // Close all other dropdowns first
+          document.querySelectorAll('.install-box.open').forEach(function(box) {
+            if (box !== installBox) box.classList.remove('open');
+          });
+          
+          installBox.classList.add('open');
+          trigger.setAttribute('aria-expanded', 'true');
+          
+          // Focus the currently selected option, or first option
+          const selectedOption = selector.querySelector('.dropdown-option.selected') || options[0];
+          if (selectedOption) selectedOption.focus();
+        }
+
+        /**
+         * Closes the dropdown and returns focus to trigger.
+         */
+        function closeDropdown() {
+          installBox.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+          trigger.focus();
+        }
+
+        // Toggle dropdown on click
+        trigger.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const isOpen = installBox.classList.contains('open');
+          
+          if (isOpen) {
+            closeDropdown();
+          } else {
+            openDropdown();
+          }
+        });
+
+        // Keyboard navigation on trigger
+        trigger.addEventListener('keydown', function(e) {
+          const isOpen = installBox.classList.contains('open');
+          
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!isOpen) {
+              openDropdown();
+            } else {
+              // Focus first or last option based on direction
+              const targetOption = e.key === 'ArrowDown' ? options[0] : options[options.length - 1];
+              if (targetOption) targetOption.focus();
+            }
+          }
+          
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (!isOpen) {
+              openDropdown();
+            }
+          }
+          
+          if (e.key === 'Home' && isOpen) {
+            e.preventDefault();
+            if (options[0]) options[0].focus();
+          }
+          
+          if (e.key === 'End' && isOpen) {
+            e.preventDefault();
+            if (options[options.length - 1]) options[options.length - 1].focus();
+          }
+        });
+
+        // Handle option click and keyboard navigation
+        options.forEach(function(option, index) {
+          option.addEventListener('click', function() {
+            selectOption(option);
+          });
+          
+          option.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              const nextIndex = index < optionsArray.length - 1 ? index + 1 : 0;
+              optionsArray[nextIndex].focus();
+            }
+            
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              const prevIndex = index > 0 ? index - 1 : optionsArray.length - 1;
+              optionsArray[prevIndex].focus();
+            }
+            
+            if (e.key === 'Home') {
+              e.preventDefault();
+              options[0].focus();
+            }
+            
+            if (e.key === 'End') {
+              e.preventDefault();
+              options[options.length - 1].focus();
+            }
+            
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              selectOption(option);
+            }
+            
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              closeDropdown();
+            }
+            
+            if (e.key === 'Tab') {
+              // Close dropdown when tabbing away
+              closeDropdown();
+            }
+          });
+        });
+
+        // Copy functionality
+        if (copyBtn) {
+          copyBtn.addEventListener('click', async function() {
+            const command = copyBtn.getAttribute('data-command');
+            if (command) {
+              await navigator.clipboard.writeText(command);
+              copyBtn.classList.add('copied');
+              setTimeout(function() { copyBtn.classList.remove('copied'); }, 2000);
+
+              // Track copy event with Sentry metrics
+              try {
+                if (typeof Sentry !== 'undefined' && Sentry.metrics) {
+                  const installMethod = label ? label.textContent : 'unknown';
+                  Sentry.metrics.count('hero_command_copied', 1, {
+                    attributes: { install_method: installMethod },
+                  });
+                }
+              } catch (e) {
+                // Sentry not available, ignore
+              }
+            }
+          });
+        }
+      });
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', function(e) {
+        if (!e.target.closest('.install-selector')) {
+          document.querySelectorAll('.install-box.open').forEach(function(box) {
+            box.classList.remove('open');
+            const trigger = box.querySelector('.dropdown-trigger');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+          });
+        }
+      });
+
+      // Close on escape (global handler for when focus is elsewhere)
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('.install-box.open').forEach(function(box) {
+            box.classList.remove('open');
+            const trigger = box.querySelector('.dropdown-trigger');
+            if (trigger) {
+              trigger.setAttribute('aria-expanded', 'false');
+              trigger.focus();
+            }
+          });
+        }
+      });
+    }
+
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initInstallSelector);
+    } else {
+      initInstallSelector();
+    }
+
+    // Re-run after Astro page transitions
+    document.addEventListener('astro:after-swap', initInstallSelector);
+  })();
+</script><a href="./getting-started/" class="hero-docs-link">Or read the <span class="underline">documentation.</span></a></div>
+<div class="terminal-wrapper bg-custom astro-eqg5l7fp" style="--bg-image: url('/pr-preview/pr-223/bg.png');"> <div class="terminal astro-eqg5l7fp"> <div class="terminal-header astro-eqg5l7fp"> <div class="terminal-dots astro-eqg5l7fp"> <span class="dot astro-eqg5l7fp"></span> <span class="dot astro-eqg5l7fp"></span> <span class="dot astro-eqg5l7fp"></span> </div> <span class="terminal-title astro-eqg5l7fp">Terminal</span> <div class="terminal-dots-placeholder astro-eqg5l7fp"></div> </div> <div class="terminal-body astro-eqg5l7fp"> <div class="line astro-eqg5l7fp"> <span class="prompt astro-eqg5l7fp">$</span> <span class="command astro-eqg5l7fp">sentry auth login</span> </div> <div class="line output astro-eqg5l7fp"> <span class="icon blue astro-eqg5l7fp">●</span> <span class="astro-eqg5l7fp">Opening browser for authentication...</span> </div> <div class="line output astro-eqg5l7fp"> <span class="icon green astro-eqg5l7fp">✓</span> <span class="astro-eqg5l7fp">Authenticated as <span class="highlight astro-eqg5l7fp">john@example.com</span></span> </div> <div class="line spacer astro-eqg5l7fp"></div> <div class="line astro-eqg5l7fp"> <span class="prompt astro-eqg5l7fp">$</span> <span class="command astro-eqg5l7fp">sentry issue list</span> </div> <div class="line output dimmed small astro-eqg5l7fp">Issues from 3 projects:</div> <div class="line spacer-sm astro-eqg5l7fp"></div> <div class="line output table-header astro-eqg5l7fp"> <span class="col-shortid astro-eqg5l7fp">SHORT ID</span> <span class="col-alias astro-eqg5l7fp">ALIAS</span> <span class="col-title astro-eqg5l7fp">TITLE</span> <span class="col-count astro-eqg5l7fp">COUNT</span> <span class="col-fix astro-eqg5l7fp">FIX</span> </div> <div class="line output table-row astro-eqg5l7fp"> <span class="col-shortid dimmed astro-eqg5l7fp">FRONTEND-79</span> <span class="col-alias accent astro-eqg5l7fp">f-79</span> <span class="col-title astro-eqg5l7fp">TypeError: Cannot read property 'map'...</span> <span class="col-count astro-eqg5l7fp">2.4k</span> <span class="col-fix green-text astro-eqg5l7fp">92%</span> </div> <div class="line output table-row astro-eqg5l7fp"> <span class="col-shortid dimmed astro-eqg5l7fp">API-2F</span> <span class="col-alias accent astro-eqg5l7fp">a-2f</span> <span class="col-title astro-eqg5l7fp">ReferenceError: user is not defined</span> <span class="col-count astro-eqg5l7fp">891</span> <span class="col-fix yellow-text astro-eqg5l7fp">67%</span> </div> <div class="line output table-row astro-eqg5l7fp"> <span class="col-shortid dimmed astro-eqg5l7fp">MOBILE-4D</span> <span class="col-alias accent astro-eqg5l7fp">m-4d</span> <span class="col-title astro-eqg5l7fp">NetworkError: Failed to fetch</span> <span class="col-count astro-eqg5l7fp">456</span> <span class="col-fix red-text astro-eqg5l7fp">23%</span> </div> <div class="line spacer astro-eqg5l7fp"></div> <div class="line astro-eqg5l7fp"> <span class="prompt astro-eqg5l7fp">$</span> <span class="command astro-eqg5l7fp">sentry issue explain f-79</span> </div> <div class="line spacer-sm astro-eqg5l7fp"></div> <div class="line output header-line astro-eqg5l7fp">Root Cause Analysis Complete</div> <div class="line output header-border astro-eqg5l7fp">══════════════════════════════</div> <div class="line spacer-sm astro-eqg5l7fp"></div> <div class="line output astro-eqg5l7fp"> <span class="cause-label astro-eqg5l7fp">Cause:</span> <span class="astro-eqg5l7fp">The <span class="code astro-eqg5l7fp">userData</span> response from <span class="code astro-eqg5l7fp">/api/users</span> returns</span> </div> <div class="line output indent astro-eqg5l7fp"> <span class="astro-eqg5l7fp"><span class="code astro-eqg5l7fp">null</span> when user session expires, but the component</span> </div> <div class="line output indent astro-eqg5l7fp"> <span class="astro-eqg5l7fp">assumes it's always an array and calls <span class="code astro-eqg5l7fp">.map()</span> directly.</span> </div> <div class="line spacer-sm astro-eqg5l7fp"></div> <div class="line output dimmed small astro-eqg5l7fp"> <span class="icon yellow astro-eqg5l7fp">→</span> <span class="astro-eqg5l7fp">Add null check before mapping: <span class="code astro-eqg5l7fp">userData?.map()</span></span> </div> </div> </div> </div> 
+
+<section class="feature-section"><div class="feature-section-inner"><div class="feature-text"><h3>It Knows Your Project</h3><p>No config files. No flags. The CLI reads your <code>.env</code>, detects your project from the codebase, and just works. Monorepos, multiple orgs, complex setups — all handled automatically.</p><p>Stop memorizing project slugs and DSNs. Start typing commands that make sense.</p></div><div class="feature-visual" style="background-image: url('/pr-preview/pr-223/section-bg-1.png');"><div class="feature-terminal astro-53qds6q7"> <div class="feature-terminal-header astro-53qds6q7"> <div class="feature-terminal-dots astro-53qds6q7"> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> </div> <span class="feature-terminal-title astro-53qds6q7">Terminal</span> <div class="feature-terminal-spacer astro-53qds6q7"></div> </div> <div class="feature-terminal-body astro-53qds6q7"> <div class="line"><span class="prompt">$</span> <span class="command">sentry issue list</span></div><div class="line dimmed">Detected project: my-app (from .env)</div><div class="spacer"></div><div class="line table-header"><span class="col-id">SHORT ID</span><span class="col-title">TITLE</span><span class="col-count">COUNT</span></div><div class="line table-row"><span class="col-id highlight">WQ</span><span class="col-title">TypeError: Cannot read property ‘map’…</span><span class="col-count">142</span></div><div class="line table-row"><span class="col-id highlight">X3</span><span class="col-title">Failed to fetch user data from API</span><span class="col-count">89</span></div><div class="line table-row"><span class="col-id highlight">R7</span><span class="col-title">Connection timeout after 30s</span><span class="col-count">34</span></div> </div> </div> </div></div></section>
+<section class="feature-section"><div class="feature-section-inner reverse"><div class="feature-text"><h3>Ask Seer Why</h3><p>Get AI-powered root cause analysis right in your terminal. Seer analyzes stack traces, related events, and your codebase to explain exactly what went wrong and why.</p><p>Then run <code>sentry issue plan</code> to get a step-by-step fix you can apply immediately.</p></div><div class="feature-visual" style="background-image: url('/pr-preview/pr-223/section-bg-2.png');"><div class="feature-terminal astro-53qds6q7"> <div class="feature-terminal-header astro-53qds6q7"> <div class="feature-terminal-dots astro-53qds6q7"> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> </div> <span class="feature-terminal-title astro-53qds6q7">Terminal</span> <div class="feature-terminal-spacer astro-53qds6q7"></div> </div> <div class="feature-terminal-body astro-53qds6q7"> <div class="line"><span class="prompt">$</span> <span class="command">sentry issue explain WQ</span></div><div class="line dimmed">Analyzing MYAPP-WQ…</div><div class="spacer"></div><div class="line"><span class="success">Root Cause:</span> The user object is undefined when</div><div class="line">accessed before the auth check completes in useEffect.</div><div class="spacer"></div><div class="line dimmed">Affected: src/hooks/useUser.ts:42</div><div class="line dimmed">Run <code dir="auto">sentry issue plan</code> for a fix.</div> </div> </div> </div></div></section>
+<section class="feature-section"><div class="feature-section-inner"><div class="feature-text"><h3>Works With Everything</h3><p>Structured JSON output for scripts and pipelines. Open issues directly in your browser. Pipe to <code>jq</code>, <code>fzf</code>, or your favorite tools.</p><p>Built for humans and AI agents alike — every command is predictable, composable, and automation-ready.</p></div><div class="feature-visual" style="background-image: url('/pr-preview/pr-223/section-bg-3.png');"><div class="feature-terminal astro-53qds6q7"> <div class="feature-terminal-header astro-53qds6q7"> <div class="feature-terminal-dots astro-53qds6q7"> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> <span class="dot astro-53qds6q7"></span> </div> <span class="feature-terminal-title astro-53qds6q7">Terminal</span> <div class="feature-terminal-spacer astro-53qds6q7"></div> </div> <div class="feature-terminal-body astro-53qds6q7"> <div class="line"><span class="prompt">$</span> <span class="command">sentry org list —json | jq ’.[0]’</span></div><div class="spacer"></div><div class="line">{</div><div class="line">  <span class="highlight">“slug”</span>: “my-org”,</div><div class="line">  <span class="highlight">“name”</span>: “My Organization”,</div><div class="line">  <span class="highlight">“projects”</span>: 12,</div><div class="line">  <span class="highlight">“members”</span>: 8</div><div class="line">}</div> </div> </div> </div></div></section> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr">   </div>   </footer>  </div> </div>  </main> </div> </div>  </div> </div>  </body></html>
