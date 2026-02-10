@@ -112,11 +112,11 @@ describe("ContextError", () => {
 
   test("format() includes custom alternatives", () => {
     const err = new ContextError("Project", "sentry project list", [
-      "Specify --project flag",
+      "Specify project in <org>/<project> format",
     ]);
     const formatted = err.format();
     expect(formatted).toContain("Project is required.");
-    expect(formatted).toContain("Specify --project flag");
+    expect(formatted).toContain("Specify project in <org>/<project> format");
     expect(formatted).not.toContain("SENTRY_DSN");
   });
 
