@@ -854,7 +854,7 @@ function computeSpanDurationMs(span: TraceSpan): number | undefined {
   if (span.duration !== undefined && Number.isFinite(span.duration)) {
     return span.duration;
   }
-  const endTs = span.end_timestamp ?? span.timestamp;
+  const endTs = span.end_timestamp || span.timestamp;
   if (endTs !== undefined && Number.isFinite(endTs)) {
     const ms = (endTs - span.start_timestamp) * 1000;
     return ms >= 0 ? ms : undefined;
