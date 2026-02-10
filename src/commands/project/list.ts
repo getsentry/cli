@@ -50,8 +50,13 @@ type ListFlags = {
   readonly platform?: string;
 };
 
-/** Project with its organization context for display */
-export type ProjectWithOrg = SentryProject & { orgSlug?: string };
+/**
+ * Project with optional organization context for display.
+ * Uses optional orgSlug since some internal functions (e.g., filterByPlatform)
+ * operate on projects before org context is attached.
+ * The canonical exported type with required orgSlug lives in api-client.ts.
+ */
+type ProjectWithOrg = SentryProject & { orgSlug?: string };
 
 /**
  * Fetch projects for a single organization (all pages).
@@ -285,6 +290,7 @@ export async function handleAutoDetect(
   } = await resolveOrgsForAutoDetect(cwd);
 
   let allProjects: ProjectWithOrg[];
+  let hasMore = false;
 
   // Fast path: single org, no platform filter — fetch only one page
   const canUsePaginated = orgsToFetch.length === 1 && !flags.platform;
@@ -295,6 +301,7 @@ export async function handleAutoDetect(
       perPage: flags.limit,
     });
     allProjects = response.data.map((p) => ({ ...p, orgSlug: org }));
+    hasMore = response.hasMore;
   } else if (orgsToFetch.length > 0) {
     const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
     allProjects = results.flat();
@@ -320,9 +327,9 @@ export async function handleAutoDetect(
 
   displayProjectTable(stdout, limited);
 
-  if (filtered.length > limited.length) {
+  if (filtered.length > limited.length || hasMore) {
     stdout.write(
-      `\nShowing ${limited.length} of ${filtered.length} projects. Use --limit to show more.\n`
+      `\nShowing ${limited.length} projects (more available). Use --limit to show more.\n`
     );
   }
 

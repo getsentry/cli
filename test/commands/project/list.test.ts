@@ -1125,7 +1125,7 @@ describe("handleAutoDetect", () => {
     });
 
     const text = output();
-    expect(text).toContain("Showing 2 of 5 projects");
+    expect(text).toContain("Showing 2 projects (more available)");
     expect(text).toContain("--limit");
   });
 
@@ -1145,6 +1145,24 @@ describe("handleAutoDetect", () => {
     expect(parsed).toHaveLength(2);
     // Verify orgSlug is attached
     expect(parsed[0].orgSlug).toBe("test-org");
+  });
+
+  test("fast path: shows truncation message when server has more results", async () => {
+    await setDefaults("test-org");
+    globalThis.fetch = mockProjectFetch(sampleProjects, {
+      hasMore: true,
+      nextCursor: "1735689600000:0:0",
+    });
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: false,
+    });
+
+    const text = output();
+    expect(text).toContain("Showing 2 projects (more available)");
+    expect(text).toContain("--limit");
   });
 
   test("slow path: uses full fetch when platform filter is active", async () => {
