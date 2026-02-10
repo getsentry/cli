@@ -330,18 +330,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for my-org
-      if (url.includes("organizations/my-org/projects/")) {
+      // getProject for my-org/craft - found
+      if (url.includes("/projects/my-org/craft/")) {
         return new Response(
-          JSON.stringify([
-            { id: "123", slug: "craft", name: "Craft", platform: "javascript" },
-            {
-              id: "456",
-              slug: "other-project",
-              name: "Other",
-              platform: "python",
-            },
-          ]),
+          JSON.stringify({
+            id: "123",
+            slug: "craft",
+            name: "Craft",
+            platform: "javascript",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -472,17 +469,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for org1 - has "common" project
-      if (url.includes("organizations/org1/projects/")) {
+      // getProject for org1/common - found
+      if (url.includes("/projects/org1/common/")) {
         return new Response(
-          JSON.stringify([
-            {
-              id: "123",
-              slug: "common",
-              name: "Common",
-              platform: "javascript",
-            },
-          ]),
+          JSON.stringify({
+            id: "123",
+            slug: "common",
+            name: "Common",
+            platform: "javascript",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -490,12 +485,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for org2 - also has "common" project
-      if (url.includes("organizations/org2/projects/")) {
+      // getProject for org2/common - also found
+      if (url.includes("/projects/org2/common/")) {
         return new Response(
-          JSON.stringify([
-            { id: "456", slug: "common", name: "Common", platform: "python" },
-          ]),
+          JSON.stringify({
+            id: "456",
+            slug: "common",
+            name: "Common",
+            platform: "python",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
