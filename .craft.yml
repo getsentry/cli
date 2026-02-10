@@ -9,7 +9,7 @@ artifactProvider:
   name: github
   config:
     artifacts:
-      ci.yml:
+      Build:
         - 'sentry-*'
         - 'npm-package'
         - 'gh-pages'
