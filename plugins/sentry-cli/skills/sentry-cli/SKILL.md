@@ -407,6 +407,7 @@ Diagnose and repair CLI database issues
 Configure shell integration
 
 **Flags:**
+- `--install - Install the binary from a temp location to the system path`
 - `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
 - `--no-modify-path - Skip PATH modification`
 - `--no-completions - Skip shell completion installation`

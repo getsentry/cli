@@ -313,9 +313,9 @@ export type TraceSpan = {
   op?: string;
   description?: string | null;
   start_timestamp: number;
-  /** End time in seconds. Some spans use this field instead of `end_timestamp`. */
+  /** End timestamp in seconds (legacy field, prefer end_timestamp) */
   timestamp?: number;
-  /** End time in seconds. Preferred over `timestamp` when present. */
+  /** End timestamp in seconds (preferred over timestamp) */
   end_timestamp?: number;
   /** Duration in milliseconds (when provided by the API) */
   duration?: number;

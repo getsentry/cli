@@ -5,6 +5,7 @@
  * Follows gh cli patterns for alignment and presentation.
  */
 
+import prettyMs from "pretty-ms";
 import type {
   Breadcrumb,
   BreadcrumbsEntry,
@@ -843,6 +844,24 @@ function formatRequest(requestEntry: RequestEntry): string[] {
 
 // Span Tree Formatting
 
+/**
+ * Compute the duration of a span in milliseconds.
+ * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
+ *
+ * @returns Duration in milliseconds, or undefined if not computable
+ */
+function computeSpanDurationMs(span: TraceSpan): number | undefined {
+  if (span.duration !== undefined && Number.isFinite(span.duration)) {
+    return span.duration;
+  }
+  const endTs = span.end_timestamp ?? span.timestamp;
+  if (endTs !== undefined && Number.isFinite(endTs)) {
+    const ms = (endTs - span.start_timestamp) * 1000;
+    return ms >= 0 ? ms : undefined;
+  }
+  return;
+}
+
 type FormatSpanOptions = {
   lines: string[];
   prefix: string;
@@ -853,7 +872,8 @@ type FormatSpanOptions = {
 
 /**
  * Recursively format a span and its children as simple tree lines.
- * Uses "op — description" format without durations.
+ * Uses "op — description (duration)" format.
+ * Duration is omitted when unavailable.
  */
 function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const { lines, prefix, isLast, currentDepth, maxDepth } = opts;
@@ -863,7 +883,14 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  lines.push(`${prefix}${branch} ${muted(op)} — ${desc}`);
+  let line = `${prefix}${branch} ${muted(op)} — ${desc}`;
+
+  const durationMs = computeSpanDurationMs(span);
+  if (durationMs !== undefined) {
+    line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
+  }
+
+  lines.push(line);
 
   if (currentDepth < maxDepth) {
     const children = span.children ?? [];
@@ -888,8 +915,8 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
 const MAX_ROOT_SPANS = 50;
 
 /**
- * Format trace as simple tree (op — description).
- * No durations, just hierarchy like Sentry's dashboard.
+ * Format trace as a simple tree with "op — description (duration)" per span.
+ * Durations are shown when available, omitted otherwise.
  *
  * Root spans are capped at {@link MAX_ROOT_SPANS} to prevent terminal flooding
  * when traces contain thousands of flat spans.
