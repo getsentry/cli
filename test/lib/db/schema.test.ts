@@ -282,6 +282,7 @@ describe("EXPECTED_TABLES", () => {
       "user_info",
       "instance_info",
       "project_root_cache",
+      "pagination_cursors",
     ];
 
     for (const table of expectedTableNames) {

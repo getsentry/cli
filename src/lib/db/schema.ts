@@ -140,8 +140,8 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
   pagination_cursors: {
     columns: {
       command_key: { type: "TEXT", notNull: true },
-      cursor: { type: "TEXT", notNull: true },
       context: { type: "TEXT", notNull: true },
+      cursor: { type: "TEXT", notNull: true },
       expires_at: { type: "INTEGER", notNull: true },
     },
   },
