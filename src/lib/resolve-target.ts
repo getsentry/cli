@@ -81,9 +81,9 @@ export type ResolvedOrg = {
  * Options for resolving org and project.
  */
 export type ResolveOptions = {
-  /** Organization slug from CLI flag */
+  /** Organization slug */
   org?: string;
-  /** Project slug from CLI flag */
+  /** Project slug */
   project?: string;
   /** Current working directory for DSN detection */
   cwd: string;
@@ -95,7 +95,7 @@ export type ResolveOptions = {
  * Options for resolving org only.
  */
 export type ResolveOrgOptions = {
-  /** Organization slug from CLI flag */
+  /** Organization slug */
   org?: string;
   /** Current working directory for DSN detection */
   cwd: string;
@@ -650,7 +650,7 @@ export async function resolveOrgAndProject(
  * Resolve organization only from multiple sources.
  *
  * Resolution priority:
- * 1. CLI flag (--org)
+ * 1. Positional argument
  * 2. Config defaults
  * 3. DSN auto-detection
  *

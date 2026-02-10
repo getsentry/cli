@@ -26,9 +26,9 @@ import { resolveOrg, resolveOrgAndProject } from "./resolve-target.js";
  * Options for resolving an issue ID.
  */
 export type ResolveIssueOptions = {
-  /** Organization slug from --org flag */
+  /** Organization slug */
   org?: string;
-  /** Project slug from --project flag (needed for short suffix resolution) */
+  /** Project slug (needed for short suffix resolution) */
   project?: string;
   /** Current working directory for DSN detection and alias cache */
   cwd: string;
@@ -135,7 +135,7 @@ async function resolveWithOrgContext(
  *
  * @param input - User-provided issue ID in any supported format
  * @param options - Resolution options with org/project flags and cwd
- * @param commandHint - Command example for error messages (e.g., "sentry issue view ID --org <org>")
+ * @param commandHint - Command example for error messages (e.g., "sentry issue view <org>/ID")
  * @returns Resolved organization and issue ID
  * @throws {ContextError} When required context (org/project) cannot be resolved
  *
