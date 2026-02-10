@@ -838,6 +838,21 @@ describe("handleProjectSearch", () => {
     const text = output();
     expect(text).toContain("frontend");
   });
+
+  test("found but filtered by platform shows platform message, not 'not found'", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { writer, output } = createCapture();
+
+    await handleProjectSearch(writer, "frontend", {
+      limit: 30,
+      json: false,
+      platform: "rust",
+    });
+
+    const text = output();
+    expect(text).toContain("matching platform 'rust'");
+    expect(text).not.toContain("not found");
+  });
 });
 
 // ─── displayProjectTable ────────────────────────────────────────

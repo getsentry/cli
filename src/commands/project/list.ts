@@ -482,6 +482,12 @@ export async function handleProjectSearch(
   }
 
   if (filtered.length === 0) {
+    if (projects.length > 0 && flags.platform) {
+      stdout.write(
+        `No project '${projectSlug}' found matching platform '${flags.platform}'.\n`
+      );
+      return;
+    }
     throw new ContextError(
       "Project",
       `No project '${projectSlug}' found in any accessible organization.\n\n` +
