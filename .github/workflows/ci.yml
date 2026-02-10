@@ -49,13 +49,15 @@ jobs:
     steps:
       - name: Get auth token
         id: token
+        # Fork PRs don't have access to secrets, so this step is skipped
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         uses: actions/create-github-app-token@v2.2.1
         with:
           app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
-          token: ${{ steps.token.outputs.token }}
+          token: ${{ steps.token.outputs.token || github.token }}
           ref: ${{ github.head_ref || github.ref_name }}
       - uses: oven-sh/setup-bun@v2
       - uses: actions/cache@v4
@@ -69,14 +71,19 @@ jobs:
         id: check
         run: bun run check:skill
         continue-on-error: true
-      - name: Commit regenerated SKILL.md
-        if: steps.check.outcome == 'failure'
+      - name: Auto-commit regenerated SKILL.md
+        if: steps.check.outcome == 'failure' && steps.token.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add plugins/sentry-cli/skills/sentry-cli/SKILL.md
           git commit -m "chore: regenerate SKILL.md"
           git push
+      - name: Fail for fork PRs with stale SKILL.md
+        if: steps.check.outcome == 'failure' && steps.token.outcome != 'success'
+        run: |
+          echo "::error::SKILL.md is out of date. Run 'bun run generate:skill' locally and commit the result."
+          exit 1
 
   lint:
     name: Lint & Typecheck
