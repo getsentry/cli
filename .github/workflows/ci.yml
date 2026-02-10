@@ -47,11 +47,12 @@ jobs:
     if: needs.changes.outputs.skill == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: getsentry/action-github-app-token@d4b5da6c5e37703f8c3b3e43abb5705b46e159cc # v3.0.0
+      - name: Get auth token
         id: token
+        uses: actions/create-github-app-token@v2.2.1
         with:
-          app_id: ${{ vars.SENTRY_INTERNAL_APP_ID }}
-          private_key: ${{ secrets.SENTRY_INTERNAL_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
           token: ${{ steps.token.outputs.token }}
