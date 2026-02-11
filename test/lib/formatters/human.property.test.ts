@@ -7,15 +7,21 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  constant,
+  double,
   assert as fcAssert,
+  oneof,
   property,
   stringMatching,
   tuple,
 } from "fast-check";
 import {
+  formatFixability,
+  formatFixabilityDetail,
   formatIssueListHeader,
   formatShortId,
   formatUserIdentity,
+  getSeerFixabilityLabel,
 } from "../../../src/lib/formatters/human.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
@@ -246,7 +252,14 @@ describe("formatIssueListHeader properties", () => {
   });
 
   test("both modes include essential columns", async () => {
-    const essentialColumns = ["LEVEL", "SHORT ID", "COUNT", "SEEN", "TITLE"];
+    const essentialColumns = [
+      "LEVEL",
+      "SHORT ID",
+      "COUNT",
+      "SEEN",
+      "FIXABILITY",
+      "TITLE",
+    ];
 
     for (const isMultiProject of [true, false]) {
       const header = formatIssueListHeader(isMultiProject);
@@ -254,5 +267,100 @@ describe("formatIssueListHeader properties", () => {
         expect(header).toContain(col);
       }
     }
+  });
+});
+
+// Fixability Formatting Properties
+
+/** Score in valid API range [0, 1] */
+const scoreArb = double({ min: 0, max: 1, noNaN: true });
+
+/** Score or null/undefined (full input space for formatFixability) */
+const nullableScoreArb = oneof(
+  scoreArb,
+  constant(null as null),
+  constant(undefined as undefined)
+);
+
+describe("property: getSeerFixabilityLabel", () => {
+  test("always returns one of the three valid tiers", () => {
+    fcAssert(
+      property(scoreArb, (score) => {
+        const label = getSeerFixabilityLabel(score);
+        expect(["high", "med", "low"]).toContain(label);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("is monotonic: higher scores never produce lower tiers", () => {
+    const tierRank = { low: 0, med: 1, high: 2 };
+    fcAssert(
+      property(scoreArb, scoreArb, (a, b) => {
+        if (a <= b) {
+          const rankA =
+            tierRank[getSeerFixabilityLabel(a) as keyof typeof tierRank];
+          const rankB =
+            tierRank[getSeerFixabilityLabel(b) as keyof typeof tierRank];
+          expect(rankA).toBeLessThanOrEqual(rankB);
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("property: formatFixability", () => {
+  test("matches expected pattern for valid scores", () => {
+    fcAssert(
+      property(scoreArb, (score) => {
+        const result = formatFixability(score);
+        expect(result).toMatch(/^(high|med|low)\(\d+%\)$/);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output never exceeds column width (10 chars)", () => {
+    fcAssert(
+      property(scoreArb, (score) => {
+        expect(formatFixability(score).length).toBeLessThanOrEqual(10);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("returns empty string for null or undefined", () => {
+    fcAssert(
+      property(nullableScoreArb, (score) => {
+        if (score === null || score === undefined) {
+          expect(formatFixability(score)).toBe("");
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("property: formatFixabilityDetail", () => {
+  test("matches expected pattern for valid scores", () => {
+    fcAssert(
+      property(scoreArb, (score) => {
+        const result = formatFixabilityDetail(score);
+        expect(result).toMatch(/^(High|Med|Low) \(\d+%\)$/);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("returns empty string for null or undefined", () => {
+    fcAssert(
+      property(nullableScoreArb, (score) => {
+        if (score === null || score === undefined) {
+          expect(formatFixabilityDetail(score)).toBe("");
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
   });
 });
