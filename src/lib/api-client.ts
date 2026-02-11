@@ -94,6 +94,11 @@ function throwApiError(
 /**
  * Unwrap an @sentry/api SDK result, throwing ApiError on failure.
  *
+ * When `throwOnError` is false (our default), the SDK catches errors from
+ * the fetch function and returns them in `{ error }`. This includes our
+ * AuthError from refreshToken(). We must re-throw known error types (AuthError,
+ * ApiError) directly so callers can distinguish auth failures from API errors.
+ *
  * @param result - The result from an SDK function call
  * @param context - Human-readable context for error messages
  * @returns The data from the successful response
@@ -109,6 +114,10 @@ function unwrapResult<T>(
   };
 
   if (error !== undefined) {
+    // Preserve known error types that were caught by the SDK from our fetch function
+    if (error instanceof AuthError || error instanceof ApiError) {
+      throw error;
+    }
     const response = (result as { response?: Response }).response;
     throwApiError(error, response, context);
   }
