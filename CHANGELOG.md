@@ -1,6 +1,59 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.9.1
+
+### New Features ✨
+
+#### Cli
+
+- Add setup command for shell integration by @BYK in [#213](https://github.com/getsentry/cli/pull/213)
+- Add plural command aliases for list commands by @betegon in [#209](https://github.com/getsentry/cli/pull/209)
+
+#### Other
+
+- (formatters) Display span duration in span tree by @betegon in [#219](https://github.com/getsentry/cli/pull/219)
+- (log) Add view command to display log entry details by @betegon in [#212](https://github.com/getsentry/cli/pull/212)
+- (repo) Add repo list command by @betegon in [#222](https://github.com/getsentry/cli/pull/222)
+- (setup) Auto-install Claude Code agent skill during setup by @BYK in [#216](https://github.com/getsentry/cli/pull/216)
+- (trace) Add trace list and view commands by @betegon in [#218](https://github.com/getsentry/cli/pull/218)
+
+### Bug Fixes 🐛
+
+#### Upgrade
+
+- Handle EPERM in isProcessRunning for cross-user locks by @BYK in [#211](https://github.com/getsentry/cli/pull/211)
+- Replace curl pipe with direct binary download by @BYK in [#208](https://github.com/getsentry/cli/pull/208)
+
+#### Other
+
+- (craft) Use regex pattern for binary artifact matching by @BYK in [#230](https://github.com/getsentry/cli/pull/230)
+- (deps) Move runtime dependencies to devDependencies by @BYK in [#225](https://github.com/getsentry/cli/pull/225)
+
+### Documentation 📚
+
+- (log) Add documentation for sentry log view command by @betegon in [#214](https://github.com/getsentry/cli/pull/214)
+- Add documentation for log command by @betegon in [#210](https://github.com/getsentry/cli/pull/210)
+
+### Internal Changes 🔧
+
+#### Ci
+
+- Auto-commit SKILL.md when stale by @betegon in [#224](https://github.com/getsentry/cli/pull/224)
+- Remove merge-artifacts job with Craft 2.21.1 by @BYK in [#215](https://github.com/getsentry/cli/pull/215)
+
+#### Other
+
+- (project) Replace --org flag with org/project positional by @betegon in [#223](https://github.com/getsentry/cli/pull/223)
+- (setup) Unify binary placement via setup --install by @BYK in [#217](https://github.com/getsentry/cli/pull/217)
+- Rename CI workflow to Build and fix artifact filter by @BYK in [#229](https://github.com/getsentry/cli/pull/229)
+- Handle fork PRs in SKILL.md auto-commit by @BYK in [#227](https://github.com/getsentry/cli/pull/227)
+- Enable minify for standalone binaries by @BYK in [#220](https://github.com/getsentry/cli/pull/220)
+
+### Other
+
+- release: 0.9.0 by @BYK in [1452e02c](https://github.com/getsentry/cli/commit/1452e02ca3e359388a4e84578e8dad81f63f3f2d)
+
 ## 0.9.0
 
 ### New Features ✨
