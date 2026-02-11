@@ -6,6 +6,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/bun";
 import { ApiError, AuthError } from "../../src/lib/errors.js";
@@ -14,6 +15,7 @@ import {
   initSentry,
   isClientApiError,
   recordApiErrorOnSpan,
+  resetReadonlyWarning,
   setArgsContext,
   setCommandSpanName,
   setFlagContext,
@@ -726,5 +728,106 @@ describe("createTracedDatabase", () => {
     expect(() => stmt.finalize()).not.toThrow();
 
     db.close();
+  });
+
+  describe("readonly database handling", () => {
+    let tmpDir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      resetReadonlyWarning();
+      // Create a temp directory for the test database
+      tmpDir = `${import.meta.dir}/tmp-readonly-${Date.now()}`;
+      mkdirSync(tmpDir, { recursive: true });
+      dbPath = `${tmpDir}/test.db`;
+
+      // Create a database with a table and some data
+      const setupDb = new Database(dbPath);
+      setupDb.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
+      setupDb.exec("INSERT INTO test (id, name) VALUES (1, 'Alice')");
+      setupDb.close();
+
+      // Make the database file read-only
+      chmodSync(dbPath, 0o444);
+    });
+
+    afterEach(() => {
+      // Restore permissions so we can clean up
+      try {
+        chmodSync(dbPath, 0o644);
+      } catch {
+        // May already be removed
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test("does not throw on write to readonly database", () => {
+      // Open in readonly mode (bun:sqlite won't fail on open, fails on write)
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      // Write should be silently swallowed
+      expect(() => {
+        tracedDb
+          .query("INSERT INTO test (id, name) VALUES (?, ?)")
+          .run(2, "Bob");
+      }).not.toThrow();
+
+      db.close();
+    });
+
+    test("reads still work on readonly database", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const row = tracedDb.query("SELECT * FROM test WHERE id = ?").get(1) as {
+        id: number;
+        name: string;
+      };
+      expect(row).toEqual({ id: 1, name: "Alice" });
+
+      db.close();
+    });
+
+    test("warns to stderr only once across multiple writes", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      // Multiple writes should only produce one warning
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+      tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .run(3, "Charlie");
+      tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .run(4, "Dave");
+
+      const warningCalls = stderrSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("read-only")
+      );
+      expect(warningCalls.length).toBe(1);
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("warning message includes helpful instructions", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+
+      const warning = String(stderrSpy.mock.calls[0]?.[0] ?? "");
+      expect(warning).toContain("local database");
+      expect(warning).toContain("read-only");
+      expect(warning).toContain("sentry cli fix");
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
   });
 });

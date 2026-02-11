@@ -12,7 +12,7 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
-import { tryRepairAndRetry } from "./db/schema.js";
+import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { ApiError, AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
@@ -586,6 +586,44 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
   );
 }
 
+/** Whether the readonly database warning has been shown this process */
+let readonlyWarningShown = false;
+
+/**
+ * Print a one-time warning when the local database is read-only.
+ * Uses lazy require to avoid circular dependency with db/index.ts.
+ */
+function warnReadonlyDatabaseOnce(): void {
+  if (readonlyWarningShown) {
+    return;
+  }
+  readonlyWarningShown = true;
+
+  let dbPath = "~/.sentry/cli.db";
+  try {
+    const { getDbPath } = require("./db/index.js") as {
+      getDbPath: () => string;
+    };
+    dbPath = getDbPath();
+  } catch {
+    // Fall back to default path if import fails
+  }
+
+  process.stderr.write(
+    `\nWarning: Sentry CLI local database is read-only. Caching and preferences won't persist.\n` +
+      `  Path: ${dbPath}\n` +
+      "  Fix:  sentry cli fix\n\n"
+  );
+}
+
+/**
+ * Reset the readonly warning flag (for testing).
+ * @internal
+ */
+export function resetReadonlyWarning(): void {
+  readonlyWarningShown = false;
+}
+
 /** Methods on SQLite Statement that execute queries and should be traced */
 const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
 
@@ -644,6 +682,14 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
               if (repairResult.attempted) {
                 return repairResult.result;
               }
+
+              // Handle readonly database gracefully: warn once, skip the write.
+              // The CLI still works — reads succeed, only caching/persistence is lost.
+              if (isReadonlyError(error)) {
+                warnReadonlyDatabaseOnce();
+                return;
+              }
+
               // Re-throw if repair didn't help or wasn't applicable
               throw error;
             }
