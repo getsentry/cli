@@ -1,0 +1,39 @@
+## Implementation Plan
+
+### Problem
+withTelemetry() manually managed sessions (startSession/endSession/flush in
+try/catch/finally), but this missed unhandled rejections and other exit paths
+that bypass the try/catch. The SDK's processSessionIntegration already handles
+session lifecycle more reliably.
+
+### SDK Session Lifecycle (discovered during analysis)
+1. processSessionIntegration (in @sentry/bun defaults) starts a session during
+   Sentry.init() and registers process.on('beforeExit') that calls endSession()
+   ONLY for non-OK sessions (crashed/errored). OK sessions are silently dropped
+   — intentional for crash-free rate tracking.
+2. onUncaughtExceptionIntegration and onUnhandledRejectionIntegration call
+   captureException with mechanism.handled: false, and the client's
+   _updateSessionFromEvent() automatically marks the session as crashed.
+3. closeSession() on an OK session changes status to 'exited'.
+
+### Solution
+1. Remove manual session management from withTelemetry() (startSession,
+   captureSession, endSession, flush in finally block)
+2. Add createBeforeExitHandler(client) that:
+   - Ends OK sessions the SDK handler skips (clean exit → 'exited')
+   - Flushes pending events via client.flush(3000)
+   - Has isFlushing re-entry guard (flush is async, causes beforeExit to re-fire)
+3. Extract markSessionCrashed() that checks both current scope and isolation
+   scope (processSessionIntegration stores session on isolation scope)
+4. Register the beforeExit handler in initSentry() after client init
+5. Create separate test file (telemetry-session.test.ts) because scope mocking
+   poisons Sentry's global state — tests that mock getCurrentScope/
+   getIsolationScope corrupt the SDK's internal scope machinery, causing
+   subsequent tests using setTag/startSpan/etc to fail
+
+### Key Technical Decisions
+- Extracted beforeExit logic and markSessionCrashed as testable functions to
+  avoid calling initSentry(true) in tests (which corrupts Sentry global state)
+- Session tests in separate file for Bun test worker isolation
+- client.flush() returns PromiseLike not Promise — must wrap with
+  Promise.resolve() for .catch() support
