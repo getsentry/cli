@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
+    "@sentry/api": "^0.1.0",
     "@sentry/bun": "10.38.0",
     "@sentry/esbuild-plugin": "^2.23.0",
     "@sentry/node": "10.38.0",
@@ -39,6 +40,9 @@
     "chalk": "^5.6.2",
     "esbuild": "^0.25.0",
     "fast-check": "^4.5.3",
+    "ignore": "^7.0.5",
+    "p-limit": "^7.2.0",
+    "pretty-ms": "^9.3.0",
     "qrcode-terminal": "^0.12.0",
     "semver": "^7.7.3",
     "tinyglobby": "^0.2.15",
@@ -59,11 +63,5 @@
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
     "@sentry/core@10.38.0": "patches/@sentry%2Fcore@10.38.0.patch"
-  },
-  "dependencies": {
-    "@sentry/api": "^0.1.0",
-    "ignore": "^7.0.5",
-    "p-limit": "^7.2.0",
-    "pretty-ms": "^9.3.0"
   }
 }
