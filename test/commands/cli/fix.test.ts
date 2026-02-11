@@ -82,7 +82,7 @@ describe("sentry cli fix", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No issues found");
-    expect(output).toContain("up to date");
+    expect(output).toContain("permissions are correct");
   });
 
   test("detects and reports missing columns in dry-run mode", async () => {
