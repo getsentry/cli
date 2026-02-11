@@ -166,6 +166,9 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
 ]);
 
+/** Current beforeExit handler, tracked so it can be replaced on re-init */
+let currentBeforeExitHandler: (() => void) | null = null;
+
 /**
  * Initialize Sentry for telemetry.
  *
@@ -241,7 +244,15 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     // and flushing pending events. This covers unhandled rejections and other
     // paths that bypass withTelemetry's try/catch.
     // Ref: https://nodejs.org/api/process.html#event-beforeexit
-    process.on("beforeExit", createBeforeExitHandler(client));
+    //
+    // Replace previous handler on re-init (e.g., auto-login retry calls
+    // withTelemetry → initSentry twice) to avoid duplicate handlers with
+    // independent re-entry guards and stale client references.
+    if (currentBeforeExitHandler) {
+      process.removeListener("beforeExit", currentBeforeExitHandler);
+    }
+    currentBeforeExitHandler = createBeforeExitHandler(client);
+    process.on("beforeExit", currentBeforeExitHandler);
   }
 
   return client;
