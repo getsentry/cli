@@ -7,6 +7,7 @@
 
 import { retrieveAnOrganization } from "@sentry/api";
 import { getOrgRegion, setOrgRegion } from "./db/regions.js";
+import { AuthError } from "./errors.js";
 import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
@@ -41,6 +42,10 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
     });
 
     if (result.error !== undefined) {
+      // Propagate auth errors so callers can prompt login
+      if (result.error instanceof AuthError) {
+        throw result.error;
+      }
       return baseUrl;
     }
 
@@ -50,8 +55,12 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
     await setOrgRegion(orgSlug, regionUrl);
 
     return regionUrl;
-  } catch {
-    // If fetch fails, fall back to default
+  } catch (error) {
+    // Propagate auth errors so callers can prompt login
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Other errors (network, 404, etc.) fall back to default
     // This handles self-hosted instances without multi-region
     return getSentryBaseUrl();
   }
