@@ -9,11 +9,14 @@ import { describe, expect, test } from "bun:test";
 import {
   calculateOrgSlugWidth,
   calculateProjectColumnWidths,
+  formatFixability,
+  formatFixabilityDetail,
   formatIssueDetails,
   formatOrgDetails,
   formatOrgRow,
   formatProjectDetails,
   formatProjectRow,
+  getSeerFixabilityLabel,
 } from "../../../src/lib/formatters/human.js";
 import type {
   SentryIssue,
@@ -511,5 +514,113 @@ describe("formatIssueDetails", () => {
     expect(lines.length).toBeGreaterThan(5);
     expect(lines.some((l) => l.includes("Platform:   unknown"))).toBe(true);
     expect(lines.some((l) => l.includes("Type:       unknown"))).toBe(true);
+  });
+
+  test("includes fixability with percentage when seerFixabilityScore is present", () => {
+    const issue = createMockIssue({ seerFixabilityScore: 0.7 });
+    const lines = formatIssueDetails(issue).map(stripAnsi);
+
+    expect(lines.some((l) => l.includes("Fixability: High (70%)"))).toBe(true);
+  });
+
+  test("omits fixability when seerFixabilityScore is null", () => {
+    const issue = createMockIssue({ seerFixabilityScore: null });
+    const lines = formatIssueDetails(issue).map(stripAnsi);
+
+    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+  });
+
+  test("omits fixability when seerFixabilityScore is undefined", () => {
+    const issue = createMockIssue({ seerFixabilityScore: undefined });
+    const lines = formatIssueDetails(issue).map(stripAnsi);
+
+    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+  });
+
+  test("shows med label for medium score", () => {
+    const issue = createMockIssue({ seerFixabilityScore: 0.5 });
+    const lines = formatIssueDetails(issue).map(stripAnsi);
+
+    expect(lines.some((l) => l.includes("Fixability: Med (50%)"))).toBe(true);
+  });
+
+  test("shows low label for low score", () => {
+    const issue = createMockIssue({ seerFixabilityScore: 0.1 });
+    const lines = formatIssueDetails(issue).map(stripAnsi);
+
+    expect(lines.some((l) => l.includes("Fixability: Low (10%)"))).toBe(true);
+  });
+});
+
+// Seer Fixability Tests
+
+describe("getSeerFixabilityLabel", () => {
+  test("returns high for scores above 0.66", () => {
+    expect(getSeerFixabilityLabel(0.67)).toBe("high");
+    expect(getSeerFixabilityLabel(0.99)).toBe("high");
+    expect(getSeerFixabilityLabel(0.8)).toBe("high");
+  });
+
+  test("returns med for scores between 0.33 and 0.66", () => {
+    expect(getSeerFixabilityLabel(0.66)).toBe("med");
+    expect(getSeerFixabilityLabel(0.5)).toBe("med");
+    expect(getSeerFixabilityLabel(0.34)).toBe("med");
+  });
+
+  test("returns low for scores at or below 0.33", () => {
+    expect(getSeerFixabilityLabel(0.33)).toBe("low");
+    expect(getSeerFixabilityLabel(0.1)).toBe("low");
+    expect(getSeerFixabilityLabel(0)).toBe("low");
+  });
+
+  test("handles extreme boundary values", () => {
+    expect(getSeerFixabilityLabel(1)).toBe("high");
+    expect(getSeerFixabilityLabel(0)).toBe("low");
+  });
+});
+
+describe("formatFixability", () => {
+  test("formats score as label(pct%)", () => {
+    expect(formatFixability(0.5)).toBe("med(50%)");
+    expect(formatFixability(0.8)).toBe("high(80%)");
+    expect(formatFixability(0.2)).toBe("low(20%)");
+  });
+
+  test("rounds percentage to nearest integer", () => {
+    expect(formatFixability(0.495)).toBe("med(50%)");
+    expect(formatFixability(0.333)).toBe("med(33%)");
+  });
+
+  test("handles boundary values", () => {
+    expect(formatFixability(0)).toBe("low(0%)");
+    expect(formatFixability(1)).toBe("high(100%)");
+  });
+
+  test("max output fits within column width", () => {
+    // "high(100%)" = 10 chars, matching COL_FIX
+    expect(formatFixability(1).length).toBeLessThanOrEqual(10);
+  });
+
+  test("returns empty string for null or undefined", () => {
+    expect(formatFixability(null)).toBe("");
+    expect(formatFixability(undefined)).toBe("");
+  });
+});
+
+describe("formatFixabilityDetail", () => {
+  test("formats with capitalized label and space", () => {
+    expect(formatFixabilityDetail(0.5)).toBe("Med (50%)");
+    expect(formatFixabilityDetail(0.8)).toBe("High (80%)");
+    expect(formatFixabilityDetail(0.2)).toBe("Low (20%)");
+  });
+
+  test("handles boundary values", () => {
+    expect(formatFixabilityDetail(0)).toBe("Low (0%)");
+    expect(formatFixabilityDetail(1)).toBe("High (100%)");
+  });
+
+  test("returns empty string for null or undefined", () => {
+    expect(formatFixabilityDetail(null)).toBe("");
+    expect(formatFixabilityDetail(undefined)).toBe("");
   });
 });
