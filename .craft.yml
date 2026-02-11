@@ -10,7 +10,7 @@ artifactProvider:
   config:
     artifacts:
       Build:
-        - 'sentry-*'
+        - '/^sentry-.*$/'
         - 'npm-package'
         - 'gh-pages'
 targets:
