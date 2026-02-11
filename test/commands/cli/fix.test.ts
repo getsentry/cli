@@ -4,9 +4,10 @@
 
 import { Database } from "bun:sqlite";
 import { describe, expect, mock, test } from "bun:test";
+import { chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fixCommand } from "../../../src/commands/cli/fix.js";
-import { closeDatabase } from "../../../src/lib/db/index.js";
+import { closeDatabase, getDatabase } from "../../../src/lib/db/index.js";
 import {
   EXPECTED_TABLES,
   generatePreMigrationTableDDL,
@@ -63,26 +64,38 @@ function createDatabaseWithMissingTables(
 
 const getTestDir = useTestConfigDir("fix-test-");
 
+/**
+ * Run the fix command with the given flags and return captured output.
+ * Reduces boilerplate across test cases.
+ */
+async function runFix(dryRun: boolean) {
+  const stdoutWrite = mock(() => true);
+  const stderrWrite = mock(() => true);
+  const mockContext = {
+    stdout: { write: stdoutWrite },
+    stderr: { write: stderrWrite },
+    process: { exitCode: 0 },
+  };
+
+  const func = await fixCommand.loader();
+  func.call(mockContext, { "dry-run": dryRun });
+
+  return {
+    stdout: stdoutWrite.mock.calls.map((c) => c[0]).join(""),
+    stderr: stderrWrite.mock.calls.map((c) => c[0]).join(""),
+    exitCode: mockContext.process.exitCode,
+  };
+}
+
 describe("sentry cli fix", () => {
   test("reports no issues for healthy database", async () => {
-    // Create healthy database
     const db = new Database(join(getTestDir(), "cli.db"));
     initSchema(db);
     db.close();
 
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-      process: { exitCode: 0 },
-    };
-
-    const func = await fixCommand.loader();
-    func.call(mockContext, { "dry-run": false });
-
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("No issues found");
-    expect(output).toContain("permissions are correct");
+    const { stdout } = await runFix(false);
+    expect(stdout).toContain("No issues found");
+    expect(stdout).toContain("permissions are correct");
   });
 
   test("detects and reports missing columns in dry-run mode", async () => {
@@ -188,18 +201,97 @@ describe("sentry cli fix", () => {
     initSchema(db);
     db.close();
 
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-      process: { exitCode: 0 },
-    };
+    const { stdout } = await runFix(false);
+    expect(stdout).toContain("Database:");
+    expect(stdout).toContain(getTestDir());
+  });
 
-    const func = await fixCommand.loader();
-    func.call(mockContext, { "dry-run": false });
+  test("detects permission issues on readonly database file", async () => {
+    // Warm the DB cache so getRawDatabase() won't try to reinitialize
+    // after we break permissions (PRAGMAs like WAL need write access)
+    getDatabase();
+    const dbPath = join(getTestDir(), "cli.db");
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Database:");
-    expect(output).toContain(getTestDir());
+    chmodSync(dbPath, 0o444);
+    const { stdout } = await runFix(true);
+
+    expect(stdout).toContain("permission issue(s)");
+    expect(stdout).toContain("0444");
+    expect(stdout).toContain("Run 'sentry cli fix' to apply fixes");
+
+    chmodSync(dbPath, 0o644);
+  });
+
+  test("repairs database file permissions", async () => {
+    getDatabase();
+    const dbPath = join(getTestDir(), "cli.db");
+
+    chmodSync(dbPath, 0o444);
+    const { stdout, exitCode } = await runFix(false);
+
+    expect(stdout).toContain("Repairing permissions");
+    expect(stdout).toContain("0444");
+    expect(stdout).toContain("0600");
+    expect(stdout).toContain("repaired successfully");
+    expect(exitCode).toBe(0);
+
+    // biome-ignore lint/suspicious/noBitwiseOperators: verifying permission bits
+    const repairedMode = statSync(dbPath).mode & 0o777;
+    // biome-ignore lint/suspicious/noBitwiseOperators: verifying permission bits
+    expect(repairedMode & 0o600).toBe(0o600);
+  });
+
+  test("detects directory permission issues", async () => {
+    getDatabase();
+
+    // Remove write bit from config directory — WAL/SHM files can't be created
+    chmodSync(getTestDir(), 0o500);
+    const { stdout } = await runFix(true);
+
+    expect(stdout).toContain("permission issue(s)");
+    expect(stdout).toContain("directory");
+    expect(stdout).toContain(getTestDir());
+
+    chmodSync(getTestDir(), 0o700);
+  });
+
+  test("dry-run reports permission issues without repairing", async () => {
+    getDatabase();
+    const dbPath = join(getTestDir(), "cli.db");
+
+    chmodSync(dbPath, 0o444);
+    const { stdout } = await runFix(true);
+
+    expect(stdout).toContain("permission issue(s)");
+    expect(stdout).not.toContain("Repairing");
+
+    // File should still be readonly — dry-run didn't touch it
+    // biome-ignore lint/suspicious/noBitwiseOperators: verifying permission bits
+    const mode = statSync(dbPath).mode & 0o777;
+    expect(mode).toBe(0o444);
+
+    chmodSync(dbPath, 0o644);
+  });
+
+  test("handles both permission and schema issues together", async () => {
+    // Create a pre-migration DB (missing columns) then break permissions.
+    // The fix command repairs permissions first, which unblocks schema repair.
+    const dbPath = join(getTestDir(), "cli.db");
+    const db = new Database(dbPath);
+    createPreMigrationDatabase(db);
+    db.close();
+
+    // Warm the cache with this pre-migration DB so getRawDatabase() works
+    getDatabase();
+
+    chmodSync(dbPath, 0o444);
+    const { stdout, exitCode } = await runFix(false);
+
+    expect(stdout).toContain("permission issue(s)");
+    expect(stdout).toContain("Repairing permissions");
+    expect(stdout).toContain("schema issue(s)");
+    expect(stdout).toContain("Repairing schema");
+    expect(stdout).toContain("repaired successfully");
+    expect(exitCode).toBe(0);
   });
 });
