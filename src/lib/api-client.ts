@@ -9,6 +9,7 @@
  */
 
 import {
+  listAnOrganization_sIssues,
   listAnOrganization_sProjects,
   listAProject_sClientKeys,
   queryExploreEventsInTableFormat,
@@ -680,6 +681,7 @@ export function getProjectKeys(
 
 /**
  * List issues for a project.
+ * Uses the org-scoped endpoint (the project-scoped one is deprecated).
  * Uses region-aware routing for multi-region support.
  */
 export function listIssues(
@@ -689,32 +691,32 @@ export function listIssues(
     query?: string;
     cursor?: string;
     limit?: number;
-    sort?: "date" | "new" | "priority" | "freq" | "user";
+    sort?: "date" | "new" | "freq" | "user";
     statsPeriod?: string;
   } = {}
 ): Promise<SentryIssue[]> {
-  return withHttpSpan(
-    "GET",
-    `/projects/${orgSlug}/${projectSlug}/issues/`,
-    async () => {
-      const regionUrl = await resolveOrgRegion(orgSlug);
+  return withHttpSpan("GET", `/organizations/${orgSlug}/issues/`, async () => {
+    const config = await getOrgSdkConfig(orgSlug);
 
-      // Use raw request: the SDK type doesn't support limit/sort params
-      return apiRequestToRegion<SentryIssue[]>(
-        regionUrl,
-        `/projects/${orgSlug}/${projectSlug}/issues/`,
-        {
-          params: {
-            query: options.query,
-            cursor: options.cursor,
-            limit: options.limit,
-            sort: options.sort,
-            statsPeriod: options.statsPeriod,
-          },
-        }
-      );
-    }
-  );
+    // Build query with project filter: "project:{slug}" prefix
+    const projectFilter = `project:${projectSlug}`;
+    const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+    const result = await listAnOrganization_sIssues({
+      ...config,
+      path: { organization_id_or_slug: orgSlug },
+      query: {
+        query: fullQuery,
+        cursor: options.cursor,
+        limit: options.limit,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    });
+
+    const data = unwrapResult(result, "Failed to list issues");
+    return data as unknown as SentryIssue[];
+  });
 }
 
 /**
