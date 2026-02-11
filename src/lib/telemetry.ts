@@ -162,10 +162,27 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   });
 
   if (client?.getOptions().enabled) {
-    // Tag whether running as bun binary or node (npm package)
-    // This is CLI-specific context not provided by the Context integration
-    const runtime =
-      typeof process.versions.bun !== "undefined" ? "bun" : "node";
+    const isBun = typeof process.versions.bun !== "undefined";
+    const runtime = isBun ? "bun" : "node";
+
+    // Fix runtime context: @sentry/bun v10 delegates to @sentry/node's NodeClient,
+    // which always overrides runtime to { name: 'node', version: process.version }.
+    // Under Bun, process.version returns the Node.js compat version (e.g. v24.3.0),
+    // not the Bun version. Override it so event.contexts.runtime is correct and
+    // Sentry's server-side tag promotion creates an accurate 'runtime' tag.
+    // TODO: Remove once fixed upstream: https://github.com/getsentry/sentry-javascript/issues/19269
+    if (isBun) {
+      // biome-ignore lint/suspicious/noExplicitAny: accessing internal SDK option not exposed in NodeClientOptions
+      const options = client.getOptions() as any;
+      options.runtime = {
+        name: "bun",
+        version: process.versions.bun as string,
+      };
+    }
+
+    // Tag whether running as bun binary or node (npm package).
+    // Kept alongside the SDK's promoted 'runtime' tag for explicit signaling
+    // and backward compatibility with existing dashboards/alerts.
     Sentry.setTag("cli.runtime", runtime);
 
     // Tag whether targeting self-hosted Sentry (not SaaS)
