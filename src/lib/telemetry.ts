@@ -590,8 +590,11 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
 let readonlyWarningShown = false;
 
 /**
- * Print a one-time warning when the local database is read-only.
- * Uses lazy require to avoid circular dependency with db/index.ts.
+ * Print a one-time warning to stderr when the local database is read-only.
+ * Does nothing if the warning was already shown this process.
+ *
+ * Uses lazy require for db/index.js to avoid a circular dependency
+ * (db/index.ts imports createTracedDatabase from this module).
  */
 function warnReadonlyDatabaseOnce(): void {
   if (readonlyWarningShown) {

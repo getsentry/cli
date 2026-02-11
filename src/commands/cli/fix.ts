@@ -5,7 +5,6 @@
  */
 
 import { chmodSync, statSync } from "node:fs";
-import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { getConfigDir, getDbPath, getRawDatabase } from "../../lib/db/index.js";
@@ -20,6 +19,7 @@ type FixFlags = {
   readonly "dry-run": boolean;
 };
 
+/** Format a schema issue as a human-readable string for display. */
 function formatIssue(issue: SchemaIssue): string {
   if (issue.type === "missing_table") {
     return `Missing table: ${issue.table}`;
@@ -42,7 +42,11 @@ type PermissionIssue = {
 
 /**
  * Check if a path has the required permission bits set.
- * Returns the actual mode if it lacks the expected bits, or null if OK.
+ *
+ * @param path - Filesystem path to check
+ * @param expectedMode - Bitmask of required permission bits (e.g., 0o700)
+ * @returns Object with the actual mode if permissions are insufficient, or null if OK.
+ *          Returns null if the path doesn't exist (missing files aren't a permission problem).
  */
 function checkMode(
   path: string,
@@ -64,11 +68,16 @@ function checkMode(
 
 /**
  * Check if the database file and its directory have correct permissions.
- * Returns a list of permission issues found.
+ * Inspects the config directory (needs rwx), the DB file, and SQLite's
+ * WAL/SHM journal files (need rw). Missing files are silently skipped
+ * since WAL/SHM are created on demand.
+ *
+ * @param dbPath - Absolute path to the database file
+ * @returns List of permission issues found (empty if everything is OK)
  */
 function checkPermissions(dbPath: string): PermissionIssue[] {
   const issues: PermissionIssue[] = [];
-  const configDir = dirname(dbPath);
+  const configDir = getConfigDir();
 
   // Check config directory permissions
   const dirCheck = checkMode(configDir, EXPECTED_DIR_MODE);
@@ -105,14 +114,19 @@ function checkPermissions(dbPath: string): PermissionIssue[] {
 
 /**
  * Format a permission mode as an octal string (e.g., "0644").
+ *
+ * @param mode - Unix permission bits (0-0o777)
  */
 function formatMode(mode: number): string {
   return `0${mode.toString(8)}`;
 }
 
 /**
- * Attempt to fix file/directory permissions.
- * Returns lists of what was fixed and what failed.
+ * Attempt to fix file/directory permissions via chmod.
+ * Repairs may fail if the current user doesn't own the file.
+ *
+ * @param issues - Permission issues to repair
+ * @returns Separate lists of human-readable repair successes and failures
  */
 function repairPermissions(issues: PermissionIssue[]): {
   fixed: string[];
@@ -151,7 +165,13 @@ type DiagnoseResult = {
 };
 
 /**
- * Report permission issues and optionally repair them.
+ * Diagnose permission issues and optionally repair them.
+ * Writes findings and repair results to stdout/stderr as a side effect.
+ *
+ * @param dbPath - Absolute path to the database file
+ * @param dryRun - If true, report issues without repairing
+ * @param output - Streams for user-facing output
+ * @returns Count of issues found and whether any repairs failed
  */
 function handlePermissionIssues(
   dbPath: string,
@@ -197,7 +217,13 @@ function handlePermissionIssues(
 }
 
 /**
- * Report schema issues and optionally repair them.
+ * Diagnose schema issues (missing tables/columns) and optionally repair them.
+ * Writes findings and repair results to stdout/stderr as a side effect.
+ *
+ * @param dbPath - Absolute path to the database file (used in error messages)
+ * @param dryRun - If true, report issues without repairing
+ * @param output - Streams for user-facing output
+ * @returns Count of issues found and whether any repairs failed
  */
 function handleSchemaIssues(
   dbPath: string,
@@ -239,6 +265,10 @@ function handleSchemaIssues(
   return { found: issues.length, repairFailed: failed.length > 0 };
 }
 
+/**
+ * Entry point for `sentry cli fix`. Runs permission and schema checks
+ * in sequence, repairs what it can, and reports results.
+ */
 function fixFunc(this: SentryContext, flags: FixFlags): void {
   const { stdout, process: proc } = this;
   const dbPath = getDbPath();

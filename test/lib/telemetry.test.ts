@@ -736,37 +736,33 @@ describe("createTracedDatabase", () => {
 
     beforeEach(() => {
       resetReadonlyWarning();
-      // Create a temp directory for the test database
+
       tmpDir = `${import.meta.dir}/tmp-readonly-${Date.now()}`;
       mkdirSync(tmpDir, { recursive: true });
       dbPath = `${tmpDir}/test.db`;
 
-      // Create a database with a table and some data
       const setupDb = new Database(dbPath);
       setupDb.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
       setupDb.exec("INSERT INTO test (id, name) VALUES (1, 'Alice')");
       setupDb.close();
 
-      // Make the database file read-only
       chmodSync(dbPath, 0o444);
     });
 
     afterEach(() => {
-      // Restore permissions so we can clean up
       try {
         chmodSync(dbPath, 0o644);
       } catch {
-        // May already be removed
+        // May already be cleaned up
       }
       rmSync(tmpDir, { recursive: true, force: true });
     });
 
     test("does not throw on write to readonly database", () => {
-      // Open in readonly mode (bun:sqlite won't fail on open, fails on write)
+      // bun:sqlite opens the file successfully — the error only surfaces on write
       const db = new Database(dbPath);
       const tracedDb = createTracedDatabase(db);
 
-      // Write should be silently swallowed
       expect(() => {
         tracedDb
           .query("INSERT INTO test (id, name) VALUES (?, ?)")
@@ -795,7 +791,6 @@ describe("createTracedDatabase", () => {
 
       const stderrSpy = spyOn(process.stderr, "write");
 
-      // Multiple writes should only produce one warning
       tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
       tracedDb
         .query("INSERT INTO test (id, name) VALUES (?, ?)")
