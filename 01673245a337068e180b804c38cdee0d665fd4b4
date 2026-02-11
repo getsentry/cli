@@ -1,0 +1,32 @@
+## Implementation Plan
+
+### Problem
+Two runtime tags exist in Sentry for this project:
+- `cli.runtime` — manually set, correctly shows `bun` or `node`
+- `runtime` — promoted from event.contexts.runtime, always shows `node` even for Bun
+
+### Root Cause
+@sentry/bun v10 sets runtime: { name: 'bun' } but delegates to @sentry/node's
+NodeClient, which always overrides it:
+
+    const clientOptions = {
+        ...options,           // bun's runtime gets spread here
+        runtime: { name: 'node', version: global.process.version },  // then overridden
+    };
+
+Under Bun, process.version returns Node.js compat version (v24.3.0), not Bun version.
+ServerRuntimeClient._prepareEvent() then sets event.contexts.runtime from this option,
+and Sentry server promotes contexts.runtime.name to the `runtime` tag.
+
+### Solution
+Override client.getOptions().runtime after Sentry.init() returns, before any events
+are sent. This works because ServerRuntimeClient._prepareEvent() reads from
+this._options.runtime to populate event.contexts.runtime.
+
+Note: Sentry.setContext("runtime", ...) does NOT work because _prepareEvent runs
+before scope context merging and its result takes precedence.
+
+### Alternatives Considered
+- Sentry.setContext("runtime", ...) — doesn't work due to event processing order
+- Patching @sentry/bun or @sentry/node-core — too invasive for a workaround
+- Removing cli.runtime tag — would break existing dashboards/alerts
