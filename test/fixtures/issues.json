@@ -37,7 +37,8 @@
     "count": "142",
     "userCount": 28,
     "firstSeen": "2024-01-10T14:30:00.000000Z",
-    "lastSeen": "2024-01-15T09:45:00.000000Z"
+    "lastSeen": "2024-01-15T09:45:00.000000Z",
+    "seerFixabilityScore": 0.7
   },
   {
     "id": "400002",
@@ -77,6 +78,7 @@
     "count": "53",
     "userCount": 12,
     "firstSeen": "2024-01-12T08:15:00.000000Z",
-    "lastSeen": "2024-01-14T16:20:00.000000Z"
+    "lastSeen": "2024-01-14T16:20:00.000000Z",
+    "seerFixabilityScore": 0.3
   }
 ]
