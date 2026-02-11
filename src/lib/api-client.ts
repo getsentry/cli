@@ -47,6 +47,7 @@ import {
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { ApiError, AuthError } from "./errors.js";
+import { resolveOrgRegion } from "./region.js";
 import {
   getApiBaseUrl,
   getControlSiloUrl,
@@ -162,7 +163,6 @@ export function buildSearchParams(
  * Resolves the org's region URL and returns the config.
  */
 async function getOrgSdkConfig(orgSlug: string) {
-  const { resolveOrgRegion } = await import("./region.js");
   const regionUrl = await resolveOrgRegion(orgSlug);
   return getSdkConfig(regionUrl);
 }
@@ -460,7 +460,6 @@ export type ProjectWithOrg = SentryProject & {
  */
 export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
   return withHttpSpan("GET", `/organizations/${orgSlug}/repos/`, async () => {
-    const { resolveOrgRegion } = await import("./region.js");
     const regionUrl = await resolveOrgRegion(orgSlug);
 
     return apiRequestToRegion<SentryRepository[]>(
@@ -698,7 +697,6 @@ export function listIssues(
     "GET",
     `/projects/${orgSlug}/${projectSlug}/issues/`,
     async () => {
-      const { resolveOrgRegion } = await import("./region.js");
       const regionUrl = await resolveOrgRegion(orgSlug);
 
       // Use raw request: the SDK type doesn't support limit/sort params
@@ -855,7 +853,6 @@ export function getDetailedTrace(
     "GET",
     `/organizations/${orgSlug}/trace/${traceId}/`,
     async () => {
-      const { resolveOrgRegion } = await import("./region.js");
       const regionUrl = await resolveOrgRegion(orgSlug);
 
       return apiRequestToRegion<TraceSpan[]>(
@@ -917,7 +914,6 @@ export function listTransactions(
     const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
     const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-    const { resolveOrgRegion } = await import("./region.js");
     const regionUrl = await resolveOrgRegion(orgSlug);
 
     // Use raw request: the SDK's dataset type doesn't include "transactions"
@@ -1056,7 +1052,6 @@ export function triggerSolutionPlanning(
     "POST",
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     async () => {
-      const { resolveOrgRegion } = await import("./region.js");
       const regionUrl = await resolveOrgRegion(orgSlug);
 
       return apiRequestToRegion(

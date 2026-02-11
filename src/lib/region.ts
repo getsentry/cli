@@ -5,7 +5,9 @@
  * using cached data when available or fetching from the API when needed.
  */
 
+import { retrieveAnOrganization } from "@sentry/api";
 import { getOrgRegion, setOrgRegion } from "./db/regions.js";
+import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
@@ -13,8 +15,10 @@ import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
  *
  * Resolution order:
  * 1. Check SQLite cache
- * 2. Fetch organization details to get region URL
+ * 2. Fetch organization details via SDK to get region URL
  * 3. Fall back to default URL if resolution fails
+ *
+ * Uses the SDK directly (not api-client) to avoid circular dependency.
  *
  * @param orgSlug - The organization slug
  * @returns The region URL for the organization
@@ -26,20 +30,21 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
     return cached;
   }
 
-  // 2. Try to fetch org details to get region
-  // Import dynamically to avoid circular dependency
-  const { apiRequestToRegion } = await import("./api-client.js");
-  type OrgWithLinks = { links?: { regionUrl?: string } };
+  // 2. Fetch org details via SDK to discover the region URL
+  const baseUrl = getSentryBaseUrl();
+  const config = getSdkConfig(baseUrl);
 
   try {
-    // First try the default URL - it may route correctly
-    const baseUrl = getSentryBaseUrl();
-    const org = await apiRequestToRegion<OrgWithLinks>(
-      baseUrl,
-      `/organizations/${orgSlug}/`
-    );
+    const result = await retrieveAnOrganization({
+      ...config,
+      path: { organization_id_or_slug: orgSlug },
+    });
 
-    const regionUrl = org.links?.regionUrl ?? baseUrl;
+    if (result.error !== undefined) {
+      return baseUrl;
+    }
+
+    const regionUrl = result.data?.links?.regionUrl ?? baseUrl;
 
     // Cache for future use
     await setOrgRegion(orgSlug, regionUrl);
