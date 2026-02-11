@@ -808,6 +808,23 @@ describe("createTracedDatabase", () => {
       db.close();
     });
 
+    test("all() and values() return empty arrays on readonly write", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const allResult = tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .all(2, "Bob");
+      const valuesResult = tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .values(3, "Charlie");
+
+      expect(allResult).toEqual([]);
+      expect(valuesResult).toEqual([]);
+
+      db.close();
+    });
+
     test("warning message includes helpful instructions", () => {
       const db = new Database(dbPath);
       const tracedDb = createTracedDatabase(db);

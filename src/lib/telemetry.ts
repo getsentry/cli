@@ -631,6 +631,19 @@ export function resetReadonlyWarning(): void {
 const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
 
 /**
+ * Handle a readonly database error by warning the user and returning a
+ * type-appropriate no-op value. Returns `undefined` for run/get (void / no-row)
+ * and `[]` for all/values (empty result set).
+ */
+function handleReadonlyError(method: string | symbol): unknown {
+  warnReadonlyDatabaseOnce();
+  if (method === "all" || method === "values") {
+    return [];
+  }
+  return;
+}
+
+/**
  * Wrap a SQLite Statement to automatically trace query execution.
  *
  * Intercepts get/run/all/values methods and wraps them with Sentry spans
@@ -689,8 +702,7 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
               // Handle readonly database gracefully: warn once, skip the write.
               // The CLI still works — reads succeed, only caching/persistence is lost.
               if (isReadonlyError(error)) {
-                warnReadonlyDatabaseOnce();
-                return;
+                return handleReadonlyError(prop);
               }
 
               // Re-throw if repair didn't help or wasn't applicable
