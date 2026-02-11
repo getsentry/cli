@@ -261,6 +261,9 @@ export type DeviceContext = {
 /**
  * Span from /trace/{traceId}/ endpoint with nested children.
  * This endpoint returns a hierarchical structure unlike /events-trace/.
+ *
+ * The API may return either `timestamp` or `end_timestamp` (or both) depending
+ * on the span source. Code should check both fields when reading the end time.
  */
 export type TraceSpan = {
   span_id: string;
@@ -490,3 +493,70 @@ export const DetailedLogsResponseSchema = z.object({
 });
 
 export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
+
+// Transaction (for trace listing)
+
+/**
+ * Transaction list item from the Explore/Events API (dataset=transactions).
+ * Fields match the response when querying trace, id, transaction, timestamp, etc.
+ */
+export const TransactionListItemSchema = z
+  .object({
+    /** Trace ID this transaction belongs to */
+    trace: z.string(),
+    /** Event ID of the transaction */
+    id: z.string(),
+    /** Transaction name (e.g., "GET /api/users") */
+    transaction: z.string(),
+    /** ISO timestamp of the transaction */
+    timestamp: z.string(),
+    /** Transaction duration in milliseconds */
+    "transaction.duration": z.number(),
+    /** Project slug */
+    project: z.string(),
+  })
+  .passthrough();
+
+export type TransactionListItem = z.infer<typeof TransactionListItemSchema>;
+
+/** Response from the transactions events endpoint */
+export const TransactionsResponseSchema = z.object({
+  data: z.array(TransactionListItemSchema),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+export type TransactionsResponse = z.infer<typeof TransactionsResponseSchema>;
+
+// Repository
+
+/** Repository provider (e.g., GitHub, GitLab) */
+export const RepositoryProviderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export type RepositoryProvider = z.infer<typeof RepositoryProviderSchema>;
+
+/** A repository connected to a Sentry organization */
+export const SentryRepositorySchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    name: z.string(),
+    url: z.string().nullable(),
+    provider: RepositoryProviderSchema,
+    status: z.string(),
+    // Optional metadata
+    dateCreated: z.string().optional(),
+    integrationId: z.string().optional(),
+    externalSlug: z.string().nullable().optional(),
+    externalId: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type SentryRepository = z.infer<typeof SentryRepositorySchema>;

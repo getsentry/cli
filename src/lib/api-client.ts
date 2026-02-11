@@ -34,12 +34,17 @@ import {
   type SentryLog,
   type SentryOrganization,
   type SentryProject,
+  type SentryRepository,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
+  type TransactionListItem,
+  type TransactionsResponse,
+  TransactionsResponseSchema,
   type UserRegionsResponse,
   UserRegionsResponseSchema,
 } from "../types/index.js";
+
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { ApiError, AuthError } from "./errors.js";
 import {
@@ -439,6 +444,22 @@ export type ProjectWithOrg = SentryProject & {
   /** Organization slug the project belongs to */
   orgSlug: string;
 };
+
+/**
+ * List repositories in an organization.
+ * Uses region-aware routing for multi-region support.
+ */
+export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
+  return withHttpSpan("GET", `/organizations/${orgSlug}/repos/`, async () => {
+    const { resolveOrgRegion } = await import("./region.js");
+    const regionUrl = await resolveOrgRegion(orgSlug);
+
+    return apiRequestToRegion<SentryRepository[]>(
+      regionUrl,
+      `/organizations/${orgSlug}/repos/`
+    );
+  });
+}
 
 /**
  * Search for projects matching a slug across all accessible organizations.
@@ -841,6 +862,78 @@ export function getDetailedTrace(
       );
     }
   );
+}
+
+/** Fields to request from the transactions API */
+const TRANSACTION_FIELDS = [
+  "trace",
+  "id",
+  "transaction",
+  "timestamp",
+  "transaction.duration",
+  "project",
+];
+
+type ListTransactionsOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of transactions to return */
+  limit?: number;
+  /** Sort order: "date" (newest first) or "duration" (slowest first) */
+  sort?: "date" | "duration";
+  /** Time period for transactions (e.g., "7d", "24h") */
+  statsPeriod?: string;
+};
+
+/**
+ * List recent transactions for a project.
+ * Uses the Explore/Events API with dataset=transactions.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod)
+ * @returns Array of transaction items
+ */
+export function listTransactions(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListTransactionsOptions = {}
+): Promise<TransactionListItem[]> {
+  return withHttpSpan("GET", `/organizations/${orgSlug}/events/`, async () => {
+    const isNumericProject = isAllDigits(projectSlug);
+    const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+    const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+    const { resolveOrgRegion } = await import("./region.js");
+    const regionUrl = await resolveOrgRegion(orgSlug);
+
+    // Use raw request: the SDK's dataset type doesn't include "transactions"
+    const response = await apiRequestToRegion<TransactionsResponse>(
+      regionUrl,
+      `/organizations/${orgSlug}/events/`,
+      {
+        params: {
+          dataset: "transactions",
+          field: TRANSACTION_FIELDS,
+          project: isNumericProject ? projectSlug : undefined,
+          query: fullQuery || undefined,
+          per_page: options.limit || 10,
+          statsPeriod: options.statsPeriod ?? "7d",
+          sort:
+            options.sort === "duration"
+              ? "-transaction.duration"
+              : "-timestamp",
+        },
+        schema: TransactionsResponseSchema,
+      }
+    );
+
+    return response.data;
+  });
 }
 
 // Issue update functions

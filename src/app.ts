@@ -19,6 +19,10 @@ import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
+import { repoRoute } from "./commands/repo/index.js";
+import { listCommand as repoListCommand } from "./commands/repo/list.js";
+import { traceRoute } from "./commands/trace/index.js";
+import { listCommand as traceListCommand } from "./commands/trace/list.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import { AuthError, CliError, getExitCode } from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
@@ -31,14 +35,18 @@ export const routes = buildRouteMap({
     cli: cliRoute,
     org: orgRoute,
     project: projectRoute,
+    repo: repoRoute,
     issue: issueRoute,
     event: eventRoute,
     log: logRoute,
+    trace: traceRoute,
     api: apiCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
     projects: projectListCommand,
+    repos: repoListCommand,
     logs: logListCommand,
+    traces: traceListCommand,
   },
   defaultCommand: "help",
   docs: {

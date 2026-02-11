@@ -7,6 +7,10 @@
 
 import type { SentryContext } from "../../context.js";
 import { getProject, getProjectKeys } from "../../lib/api-client.js";
+import {
+  ProjectSpecificationType,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
@@ -19,32 +23,33 @@ import {
 import {
   type ResolvedTarget,
   resolveAllTargets,
+  resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import type { ProjectKey, SentryProject } from "../../types/index.js";
 
 type ViewFlags = {
-  readonly org?: string;
   readonly json: boolean;
   readonly web: boolean;
 };
+
+/** Usage hint for ContextError messages */
+const USAGE_HINT = "sentry project view <org>/<project>";
 
 /**
  * Build an error message for missing context, with optional DSN resolution hint.
  */
 function buildContextError(skippedSelfHosted?: number): ContextError {
-  const usageHint = "sentry project view <project-slug> --org <org-slug>";
-
   if (skippedSelfHosted) {
     return new ContextError(
       "Organization and project",
-      `${usageHint}\n\n` +
+      `${USAGE_HINT}\n\n` +
         `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
         "You may not have access to these projects, or specify the target explicitly."
     );
   }
 
-  return new ContextError("Organization and project", usageHint);
+  return new ContextError("Organization and project", USAGE_HINT);
 }
 
 /**
@@ -58,7 +63,7 @@ async function handleWebView(
   if (resolvedTargets.length > 1) {
     throw new ContextError(
       "Single project",
-      "sentry project view <project-slug> --org <org-slug> -w\n\n" +
+      `${USAGE_HINT} -w\n\n` +
         `Found ${resolvedTargets.length} projects. Specify which project to open in browser.`
     );
   }
@@ -196,10 +201,10 @@ export const viewCommand = buildCommand({
     brief: "View details of a project",
     fullDescription:
       "View detailed information about Sentry projects.\n\n" +
-      "The organization and project are resolved from:\n" +
-      "  1. Positional argument <project-slug> and --org flag\n" +
-      "  2. Config defaults\n" +
-      "  3. SENTRY_DSN environment variable or source code detection\n\n" +
+      "Target specification:\n" +
+      "  sentry project view                       # auto-detect from DSN or config\n" +
+      "  sentry project view <org>/<project>       # explicit org and project\n" +
+      "  sentry project view <project>             # find project across all orgs\n\n" +
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
   parameters: {
@@ -207,20 +212,14 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "project",
-          brief: "Project slug (optional if auto-detected)",
+          placeholder: "target",
+          brief: "Target: <org>/<project>, <project>, or omit for auto-detect",
           parse: String,
           optional: true,
         },
       ],
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -237,24 +236,67 @@ export const viewCommand = buildCommand({
   async func(
     this: SentryContext,
     flags: ViewFlags,
-    projectSlug?: string
+    targetArg?: string
   ): Promise<void> {
     const { stdout, cwd } = this;
 
-    // Resolve targets (may find multiple in monorepos)
-    const {
-      targets: resolvedTargets,
-      footer,
-      skippedSelfHosted,
-    } = await resolveAllTargets({
-      org: flags.org,
-      project: projectSlug,
-      cwd,
-      usageHint: "sentry project view <project-slug> --org <org-slug>",
-    });
+    const parsed = parseOrgProjectArg(targetArg);
 
-    if (resolvedTargets.length === 0) {
-      throw buildContextError(skippedSelfHosted);
+    let resolvedTargets: ResolvedTarget[];
+    let footer: string | undefined;
+
+    switch (parsed.type) {
+      case ProjectSpecificationType.Explicit:
+        // Direct org/project - single target, no multi-target resolution
+        resolvedTargets = [
+          {
+            org: parsed.org,
+            project: parsed.project,
+            orgDisplay: parsed.org,
+            projectDisplay: parsed.project,
+          },
+        ];
+        break;
+
+      case ProjectSpecificationType.ProjectSearch: {
+        // Search for project across all orgs - single target
+        const resolved = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry project view <org>/${parsed.projectSlug}`
+        );
+        resolvedTargets = [
+          {
+            ...resolved,
+            orgDisplay: resolved.org,
+            projectDisplay: resolved.project,
+          },
+        ];
+        break;
+      }
+
+      case ProjectSpecificationType.OrgAll:
+        throw new ContextError(
+          "Specific project",
+          `${USAGE_HINT}\n\n` +
+            "Specify the full org/project target, not just the organization."
+        );
+
+      case ProjectSpecificationType.AutoDetect: {
+        // Auto-detect supports monorepo multi-target resolution
+        const result = await resolveAllTargets({ cwd });
+
+        if (result.targets.length === 0) {
+          throw buildContextError(result.skippedSelfHosted);
+        }
+
+        resolvedTargets = result.targets;
+        footer = result.footer;
+        break;
+      }
+
+      default:
+        throw new ContextError("Organization and project", USAGE_HINT);
     }
 
     if (flags.web) {

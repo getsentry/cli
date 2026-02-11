@@ -150,7 +150,7 @@ async function resolveOrgsToFetch(
   orgFlag: string | undefined,
   cwd: string
 ): Promise<OrgResolution> {
-  // 1. If --org flag provided, use it directly
+  // 1. If org positional provided, use it directly
   if (orgFlag) {
     return { orgs: [orgFlag] };
   }
@@ -309,7 +309,7 @@ export const listCommand = buildCommand({
 
     writeFooter(
       stdout,
-      "Tip: Use 'sentry project view <project> --org <org>' for details"
+      "Tip: Use 'sentry project view <org>/<project>' for details"
     );
   },
 });

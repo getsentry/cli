@@ -6,12 +6,15 @@
 
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, getLog } from "../../lib/api-client.js";
+import { getLog } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  resolveOrgAndProject,
+  resolveProjectBySlug,
+} from "../../lib/resolve-target.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import type { DetailedSentryLog, Writer } from "../../types/index.js";
 
@@ -67,46 +70,6 @@ export type ResolvedLogTarget = {
   project: string;
   detectedFrom?: string;
 };
-
-/**
- * Resolve target from a project search result.
- *
- * Searches for a project by slug across all accessible organizations.
- * Throws if no project found or if multiple projects found in different orgs.
- *
- * @param projectSlug - Project slug to search for
- * @param logId - Log ID (used in error messages)
- * @returns Resolved target with org and project info
- * @throws {ContextError} If no project found
- * @throws {ValidationError} If project exists in multiple organizations
- *
- * @internal Exported for testing
- */
-export async function resolveFromProjectSearch(
-  projectSlug: string,
-  logId: string
-): Promise<ResolvedLogTarget> {
-  const found = await findProjectsBySlug(projectSlug);
-  if (found.length === 0) {
-    throw new ContextError(`Project "${projectSlug}"`, USAGE_HINT, [
-      "Check that you have access to a project with this slug",
-    ]);
-  }
-  if (found.length > 1) {
-    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
-    throw new ValidationError(
-      `Project "${projectSlug}" exists in multiple organizations.\n\n` +
-        `Specify the organization:\n${orgList}\n\n` +
-        `Example: sentry log view <org>/${projectSlug} ${logId}`
-    );
-  }
-  // Safe assertion: length is exactly 1 after the checks above
-  const foundProject = found[0] as (typeof found)[0];
-  return {
-    org: foundProject.orgSlug,
-    project: foundProject.slug,
-  };
-}
 
 /**
  * Write human-readable log output to stdout.
@@ -187,7 +150,11 @@ export const viewCommand = buildCommand({
         break;
 
       case "project-search":
-        target = await resolveFromProjectSearch(parsed.projectSlug, logId);
+        target = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry log view <org>/${parsed.projectSlug} ${logId}`
+        );
         break;
 
       case "org-all":
