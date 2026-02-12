@@ -859,6 +859,30 @@ export function getProjectKeys(
 }
 
 /**
+ * Fetch the primary DSN for a project.
+ * Returns the public DSN of the first active key, or null on any error.
+ *
+ * Best-effort: failures are silently swallowed so callers can treat
+ * DSN display as optional (e.g., after project creation or in views).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Public DSN string, or null if unavailable
+ */
+export async function tryGetPrimaryDsn(
+  orgSlug: string,
+  projectSlug: string
+): Promise<string | null> {
+  try {
+    const keys = await getProjectKeys(orgSlug, projectSlug);
+    const activeKey = keys.find((k) => k.isActive);
+    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List issues for a project.
  * Uses region-aware routing for multi-region support.
  */
