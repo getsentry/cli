@@ -114,6 +114,11 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
   isUnhandled?: boolean;
   /** Platform of the issue (not in OpenAPI spec) */
   platform?: string;
+  /**
+   * Seer AI fixability score (0-1). Higher = easier to fix automatically.
+   * `null` when Seer has not analyzed this issue; absent when the org has Seer disabled.
+   */
+  seerFixabilityScore?: number | null;
 };
 
 // Event
@@ -256,7 +261,74 @@ export type DeviceContext = {
   [key: string]: unknown;
 };
 
-// Trace Spans
+export const ISSUE_PRIORITIES = ["high", "medium", "low"] as const;
+export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];
+
+export const ISSUE_SUBSTATUSES = [
+  "ongoing",
+  "escalating",
+  "regressed",
+  "new",
+  "archived_until_escalating",
+  "archived_until_condition_met",
+  "archived_forever",
+] as const;
+export type IssueSubstatus = (typeof ISSUE_SUBSTATUSES)[number];
+
+// Release (embedded in Issue)
+
+export const ReleaseSchema = z
+  .object({
+    id: z.number().optional(),
+    version: z.string(),
+    shortVersion: z.string().optional(),
+    status: z.string().optional(),
+    dateCreated: z.string().optional(),
+    dateReleased: z.string().nullable().optional(),
+    ref: z.string().nullable().optional(),
+    url: z.string().nullable().optional(),
+    commitCount: z.number().optional(),
+    deployCount: z.number().optional(),
+    authors: z.array(z.unknown()).optional(),
+    projects: z
+      .array(
+        z
+          .object({
+            id: z.union([z.string(), z.number()]),
+            slug: z.string(),
+            name: z.string(),
+          })
+          .passthrough()
+      )
+      .optional(),
+  })
+  .passthrough();
+
+export type Release = z.infer<typeof ReleaseSchema>;
+
+// Issue
+
+// Span (for trace tree display)
+
+/** A single span in a trace */
+export const SpanSchema = z
+  .object({
+    span_id: z.string(),
+    parent_span_id: z.string().nullable().optional(),
+    trace_id: z.string().optional(),
+    op: z.string().optional(),
+    description: z.string().nullable().optional(),
+    /** Start time as Unix timestamp (seconds with fractional ms) */
+    start_timestamp: z.number(),
+    /** End time as Unix timestamp (seconds with fractional ms) */
+    timestamp: z.number(),
+    status: z.string().optional(),
+    data: z.record(z.unknown()).optional(),
+    tags: z.record(z.string()).optional(),
+  })
+  .passthrough();
+
+export type Span = z.infer<typeof SpanSchema>;
 
 /**
  * Span from /trace/{traceId}/ endpoint with nested children.
