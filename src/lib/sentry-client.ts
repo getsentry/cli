@@ -10,6 +10,7 @@
 
 import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
+import { withHttpSpan } from "./telemetry.js";
 
 /**
  * Control silo URL - handles OAuth, user accounts, and region routing.
@@ -177,6 +178,23 @@ function handleFetchError(
   return { action: "retry" };
 }
 
+/** Extract the URL pathname for span naming */
+function extractUrlPath(input: Request | string | URL): string {
+  let raw: string;
+  if (typeof input === "string") {
+    raw = input;
+  } else if (input instanceof URL) {
+    raw = input.href;
+  } else {
+    raw = input.url;
+  }
+  try {
+    return new URL(raw).pathname;
+  } catch {
+    return raw;
+  }
+}
+
 /**
  * Create a fetch function with authentication, timeout, retry, and 401 refresh.
  *
@@ -187,6 +205,7 @@ function handleFetchError(
  * - 401 handling: force-refreshes the token and retries once
  * - Exponential backoff between retries
  * - User-Agent header for API analytics
+ * - Automatic HTTP span tracing for every request
  *
  * @returns A fetch-compatible function for use with @sentry/api SDK functions
  */
@@ -194,29 +213,39 @@ function createAuthenticatedFetch(): (
   input: Request | string | URL,
   init?: RequestInit
 ) => Promise<Response> {
-  return async function authenticatedFetch(
+  return function authenticatedFetch(
     input: Request | string | URL,
     init?: RequestInit
   ): Promise<Response> {
-    const { token } = await refreshToken();
-    const headers = prepareHeaders(init, token);
+    const method = init?.method ?? "GET";
+    const urlPath = extractUrlPath(input);
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const isLastAttempt = attempt === MAX_RETRIES;
-      const result = await executeAttempt(input, init, headers, isLastAttempt);
+    return withHttpSpan(method, urlPath, async () => {
+      const { token } = await refreshToken();
+      const headers = prepareHeaders(init, token);
 
-      if (result.action === "done") {
-        return result.response;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const isLastAttempt = attempt === MAX_RETRIES;
+        const result = await executeAttempt(
+          input,
+          init,
+          headers,
+          isLastAttempt
+        );
+
+        if (result.action === "done") {
+          return result.response;
+        }
+        if (result.action === "throw") {
+          throw result.error;
+        }
+
+        await Bun.sleep(backoffDelay(attempt));
       }
-      if (result.action === "throw") {
-        throw result.error;
-      }
 
-      await Bun.sleep(backoffDelay(attempt));
-    }
-
-    // Unreachable: the last attempt always returns 'done' or 'throw'
-    throw new Error("Exhausted all retry attempts");
+      // Unreachable: the last attempt always returns 'done' or 'throw'
+      throw new Error("Exhausted all retry attempts");
+    });
   };
 }
 

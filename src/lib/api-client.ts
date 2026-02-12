@@ -55,7 +55,6 @@ import {
   getDefaultSdkConfig,
   getSdkConfig,
 } from "./sentry-client.js";
-import { withHttpSpan } from "./telemetry.js";
 import { isAllDigits } from "./utils.js";
 
 // Helpers
@@ -246,10 +245,7 @@ export function apiRequest<T>(
   endpoint: string,
   options: ApiRequestOptions<T> = {}
 ): Promise<T> {
-  const { method = "GET" } = options;
-  return withHttpSpan(method, endpoint, () =>
-    apiRequestToRegion(getApiBaseUrl(), endpoint, options)
-  );
+  return apiRequestToRegion(getApiBaseUrl(), endpoint, options);
 }
 
 /**
@@ -262,62 +258,60 @@ export function apiRequest<T>(
  * @returns Response status, headers, and parsed body
  * @throws {AuthError} Only on authentication failure (not on API errors)
  */
-export function rawApiRequest(
+export async function rawApiRequest(
   endpoint: string,
   options: ApiRequestOptions & { headers?: Record<string, string> } = {}
 ): Promise<{ status: number; headers: Headers; body: unknown }> {
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
 
-  return withHttpSpan(method, endpoint, async () => {
-    const config = getDefaultSdkConfig();
+  const config = getDefaultSdkConfig();
 
-    const searchParams = buildSearchParams(params);
-    const normalizedEndpoint = endpoint.startsWith("/")
-      ? endpoint.slice(1)
-      : endpoint;
-    const queryString = searchParams ? `?${searchParams.toString()}` : "";
-    // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
-    const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
 
-    // Build request headers and body.
-    // String bodies: no Content-Type unless the caller explicitly provides one.
-    // Object bodies: application/json (auto-stringified).
-    const isStringBody = typeof body === "string";
-    const hasContentType = Object.keys(customHeaders).some(
-      (k) => k.toLowerCase() === "content-type"
-    );
+  // Build request headers and body.
+  // String bodies: no Content-Type unless the caller explicitly provides one.
+  // Object bodies: application/json (auto-stringified).
+  const isStringBody = typeof body === "string";
+  const hasContentType = Object.keys(customHeaders).some(
+    (k) => k.toLowerCase() === "content-type"
+  );
 
-    const headers: Record<string, string> = { ...customHeaders };
-    if (!(isStringBody || hasContentType) && body !== undefined) {
-      headers["Content-Type"] = "application/json";
-    }
+  const headers: Record<string, string> = { ...customHeaders };
+  if (!(isStringBody || hasContentType) && body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
 
-    let requestBody: string | undefined;
-    if (body !== undefined) {
-      requestBody = isStringBody ? body : JSON.stringify(body);
-    }
+  let requestBody: string | undefined;
+  if (body !== undefined) {
+    requestBody = isStringBody ? body : JSON.stringify(body);
+  }
 
-    const fetchFn = config.fetch;
-    const response = await fetchFn(url, {
-      method,
-      headers,
-      body: requestBody,
-    });
-
-    const text = await response.text();
-    let responseBody: unknown;
-    try {
-      responseBody = JSON.parse(text);
-    } catch {
-      responseBody = text;
-    }
-
-    return {
-      status: response.status,
-      headers: response.headers,
-      body: responseBody,
-    };
+  const fetchFn = config.fetch;
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: requestBody,
   });
+
+  const text = await response.text();
+  let responseBody: unknown;
+  try {
+    responseBody = JSON.parse(text);
+  } catch {
+    responseBody = text;
+  }
+
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: responseBody,
+  };
 }
 
 // Organization functions
@@ -411,18 +405,18 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
  * Get a specific organization.
  * Uses region-aware routing for multi-region support.
  */
-export function getOrganization(orgSlug: string): Promise<SentryOrganization> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/`, async () => {
-    const config = await getOrgSdkConfig(orgSlug);
+export async function getOrganization(
+  orgSlug: string
+): Promise<SentryOrganization> {
+  const config = await getOrgSdkConfig(orgSlug);
 
-    const result = await retrieveAnOrganization({
-      ...config,
-      path: { organization_id_or_slug: orgSlug },
-    });
-
-    const data = unwrapResult(result, "Failed to get organization");
-    return data as unknown as SentryOrganization;
+  const result = await retrieveAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
   });
+
+  const data = unwrapResult(result, "Failed to get organization");
+  return data as unknown as SentryOrganization;
 }
 
 // Project functions
@@ -431,22 +425,16 @@ export function getOrganization(orgSlug: string): Promise<SentryOrganization> {
  * List projects in an organization.
  * Uses region-aware routing for multi-region support.
  */
-export function listProjects(orgSlug: string): Promise<SentryProject[]> {
-  return withHttpSpan(
-    "GET",
-    `/organizations/${orgSlug}/projects/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await listAnOrganization_sProjects({
-        ...config,
-        path: { organization_id_or_slug: orgSlug },
-      });
+  const result = await listAnOrganization_sProjects({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
 
-      const data = unwrapResult(result, "Failed to list projects");
-      return data as unknown as SentryProject[];
-    }
-  );
+  const data = unwrapResult(result, "Failed to list projects");
+  return data as unknown as SentryProject[];
 }
 
 /** Project with its organization context */
@@ -459,15 +447,15 @@ export type ProjectWithOrg = SentryProject & {
  * List repositories in an organization.
  * Uses region-aware routing for multi-region support.
  */
-export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/repos/`, async () => {
-    const regionUrl = await resolveOrgRegion(orgSlug);
+export async function listRepositories(
+  orgSlug: string
+): Promise<SentryRepository[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
 
-    return apiRequestToRegion<SentryRepository[]>(
-      regionUrl,
-      `/organizations/${orgSlug}/repos/`
-    );
-  });
+  return apiRequestToRegion<SentryRepository[]>(
+    regionUrl,
+    `/organizations/${orgSlug}/repos/`
+  );
 }
 
 /**
@@ -625,56 +613,44 @@ export async function findProjectByDsnKey(
  * Get a specific project.
  * Uses region-aware routing for multi-region support.
  */
-export function getProject(
+export async function getProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<SentryProject> {
-  return withHttpSpan(
-    "GET",
-    `/projects/${orgSlug}/${projectSlug}/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await retrieveAProject({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          project_id_or_slug: projectSlug,
-        },
-      });
+  const result = await retrieveAProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
 
-      const data = unwrapResult(result, "Failed to get project");
-      return data as unknown as SentryProject;
-    }
-  );
+  const data = unwrapResult(result, "Failed to get project");
+  return data as unknown as SentryProject;
 }
 
 /**
  * Get project keys (DSNs) for a project.
  * Uses region-aware routing for multi-region support.
  */
-export function getProjectKeys(
+export async function getProjectKeys(
   orgSlug: string,
   projectSlug: string
 ): Promise<ProjectKey[]> {
-  return withHttpSpan(
-    "GET",
-    `/projects/${orgSlug}/${projectSlug}/keys/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await listAProject_sClientKeys({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          project_id_or_slug: projectSlug,
-        },
-      });
+  const result = await listAProject_sClientKeys({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
 
-      const data = unwrapResult(result, "Failed to get project keys");
-      return data as unknown as ProjectKey[];
-    }
-  );
+  const data = unwrapResult(result, "Failed to get project keys");
+  return data as unknown as ProjectKey[];
 }
 
 // Issue functions
@@ -684,7 +660,7 @@ export function getProjectKeys(
  * Uses the org-scoped endpoint (the project-scoped one is deprecated).
  * Uses region-aware routing for multi-region support.
  */
-export function listIssues(
+export async function listIssues(
   orgSlug: string,
   projectSlug: string,
   options: {
@@ -695,40 +671,36 @@ export function listIssues(
     statsPeriod?: string;
   } = {}
 ): Promise<SentryIssue[]> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/issues/`, async () => {
-    const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-    // Build query with project filter: "project:{slug}" prefix
-    const projectFilter = `project:${projectSlug}`;
-    const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+  // Build query with project filter: "project:{slug}" prefix
+  const projectFilter = `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-    const result = await listAnOrganization_sIssues({
-      ...config,
-      path: { organization_id_or_slug: orgSlug },
-      query: {
-        query: fullQuery,
-        cursor: options.cursor,
-        limit: options.limit,
-        sort: options.sort,
-        statsPeriod: options.statsPeriod,
-      },
-    });
-
-    const data = unwrapResult(result, "Failed to list issues");
-    return data as unknown as SentryIssue[];
+  const result = await listAnOrganization_sIssues({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      query: fullQuery,
+      cursor: options.cursor,
+      limit: options.limit,
+      sort: options.sort,
+      statsPeriod: options.statsPeriod,
+    },
   });
+
+  const data = unwrapResult(result, "Failed to list issues");
+  return data as unknown as SentryIssue[];
 }
 
 /**
  * Get a specific issue by numeric ID.
  */
 export function getIssue(issueId: string): Promise<SentryIssue> {
-  return withHttpSpan("GET", `/issues/${issueId}/`, () => {
-    // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
-    // but the legacy endpoint /issues/{id}/ works without org context.
-    // Use raw request for backward compatibility.
-    return apiRequest<SentryIssue>(`/issues/${issueId}/`);
-  });
+  // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
+  // but the legacy endpoint /issues/{id}/ works without org context.
+  // Use raw request for backward compatibility.
+  return apiRequest<SentryIssue>(`/issues/${issueId}/`);
 }
 
 /**
@@ -736,40 +708,33 @@ export function getIssue(issueId: string): Promise<SentryIssue> {
  * Requires organization context to resolve the short ID.
  * Uses region-aware routing for multi-region support.
  */
-export function getIssueByShortId(
+export async function getIssueByShortId(
   orgSlug: string,
   shortId: string
 ): Promise<SentryIssue> {
   const normalizedShortId = shortId.toUpperCase();
+  const config = await getOrgSdkConfig(orgSlug);
 
-  return withHttpSpan(
-    "GET",
-    `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const result = await resolveAShortId({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: normalizedShortId,
+    },
+  });
 
-      const result = await resolveAShortId({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          issue_id: normalizedShortId,
-        },
-      });
+  const data = unwrapResult(result, "Failed to resolve short ID");
 
-      const data = unwrapResult(result, "Failed to resolve short ID");
-
-      // resolveAShortId returns a ShortIdLookupResponse with a group (issue)
-      const resolved = data as unknown as { group?: SentryIssue };
-      if (!resolved.group) {
-        throw new ApiError(
-          `Short ID ${normalizedShortId} resolved but no issue group returned`,
-          404,
-          "Issue not found"
-        );
-      }
-      return resolved.group;
-    }
-  );
+  // resolveAShortId returns a ShortIdLookupResponse with a group (issue)
+  const resolved = data as unknown as { group?: SentryIssue };
+  if (!resolved.group) {
+    throw new ApiError(
+      `Short ID ${normalizedShortId} resolved but no issue group returned`,
+      404,
+      "Issue not found"
+    );
+  }
+  return resolved.group;
 }
 
 // Event functions
@@ -781,59 +746,47 @@ export function getIssueByShortId(
  * @param orgSlug - Organization slug (required for multi-region routing)
  * @param issueId - Issue ID (numeric)
  */
-export function getLatestEvent(
+export async function getLatestEvent(
   orgSlug: string,
   issueId: string
 ): Promise<SentryEvent> {
-  return withHttpSpan(
-    "GET",
-    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await retrieveAnIssueEvent({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          issue_id: Number(issueId),
-          event_id: "latest",
-        },
-      });
+  const result = await retrieveAnIssueEvent({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+      event_id: "latest",
+    },
+  });
 
-      const data = unwrapResult(result, "Failed to get latest event");
-      return data as unknown as SentryEvent;
-    }
-  );
+  const data = unwrapResult(result, "Failed to get latest event");
+  return data as unknown as SentryEvent;
 }
 
 /**
  * Get a specific event by ID.
  * Uses region-aware routing for multi-region support.
  */
-export function getEvent(
+export async function getEvent(
   orgSlug: string,
   projectSlug: string,
   eventId: string
 ): Promise<SentryEvent> {
-  return withHttpSpan(
-    "GET",
-    `/projects/${orgSlug}/${projectSlug}/events/${eventId}/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await retrieveAnEventForAProject({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          project_id_or_slug: projectSlug,
-          event_id: eventId,
-        },
-      });
+  const result = await retrieveAnEventForAProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+      event_id: eventId,
+    },
+  });
 
-      const data = unwrapResult(result, "Failed to get event");
-      return data as unknown as SentryEvent;
-    }
-  );
+  const data = unwrapResult(result, "Failed to get event");
+  return data as unknown as SentryEvent;
 }
 
 /**
@@ -846,28 +799,22 @@ export function getEvent(
  * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
  * @returns Array of root spans with nested children
  */
-export function getDetailedTrace(
+export async function getDetailedTrace(
   orgSlug: string,
   traceId: string,
   timestamp: number
 ): Promise<TraceSpan[]> {
-  return withHttpSpan(
-    "GET",
-    `/organizations/${orgSlug}/trace/${traceId}/`,
-    async () => {
-      const regionUrl = await resolveOrgRegion(orgSlug);
+  const regionUrl = await resolveOrgRegion(orgSlug);
 
-      return apiRequestToRegion<TraceSpan[]>(
-        regionUrl,
-        `/organizations/${orgSlug}/trace/${traceId}/`,
-        {
-          params: {
-            timestamp,
-            limit: 10_000,
-            project: -1,
-          },
-        }
-      );
+  return apiRequestToRegion<TraceSpan[]>(
+    regionUrl,
+    `/organizations/${orgSlug}/trace/${traceId}/`,
+    {
+      params: {
+        timestamp,
+        limit: 10_000,
+        project: -1,
+      },
     }
   );
 }
@@ -906,41 +853,37 @@ type ListTransactionsOptions = {
  * @param options - Query options (query, limit, sort, statsPeriod)
  * @returns Array of transaction items
  */
-export function listTransactions(
+export async function listTransactions(
   orgSlug: string,
   projectSlug: string,
   options: ListTransactionsOptions = {}
 ): Promise<TransactionListItem[]> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/events/`, async () => {
-    const isNumericProject = isAllDigits(projectSlug);
-    const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
-    const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+  const isNumericProject = isAllDigits(projectSlug);
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-    const regionUrl = await resolveOrgRegion(orgSlug);
+  const regionUrl = await resolveOrgRegion(orgSlug);
 
-    // Use raw request: the SDK's dataset type doesn't include "transactions"
-    const response = await apiRequestToRegion<TransactionsResponse>(
-      regionUrl,
-      `/organizations/${orgSlug}/events/`,
-      {
-        params: {
-          dataset: "transactions",
-          field: TRANSACTION_FIELDS,
-          project: isNumericProject ? projectSlug : undefined,
-          query: fullQuery || undefined,
-          per_page: options.limit || 10,
-          statsPeriod: options.statsPeriod ?? "7d",
-          sort:
-            options.sort === "duration"
-              ? "-transaction.duration"
-              : "-timestamp",
-        },
-        schema: TransactionsResponseSchema,
-      }
-    );
+  // Use raw request: the SDK's dataset type doesn't include "transactions"
+  const response = await apiRequestToRegion<TransactionsResponse>(
+    regionUrl,
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "transactions",
+        field: TRANSACTION_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit || 10,
+        statsPeriod: options.statsPeriod ?? "7d",
+        sort:
+          options.sort === "duration" ? "-transaction.duration" : "-timestamp",
+      },
+      schema: TransactionsResponseSchema,
+    }
+  );
 
-    return response.data;
-  });
+  return response.data;
 }
 
 // Issue update functions
@@ -952,13 +895,11 @@ export function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored"
 ): Promise<SentryIssue> {
-  return withHttpSpan("PUT", `/issues/${issueId}/`, () => {
-    // Use raw request - the SDK's updateAnIssue requires org slug but
-    // the legacy /issues/{id}/ endpoint works without it
-    return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
-      method: "PUT",
-      body: { status },
-    });
+  // Use raw request - the SDK's updateAnIssue requires org slug but
+  // the legacy /issues/{id}/ endpoint works without it
+  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
+    method: "PUT",
+    body: { status },
   });
 }
 
@@ -973,34 +914,25 @@ export function updateIssueStatus(
  * @returns The trigger response with run_id
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
-export function triggerRootCauseAnalysis(
+export async function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
 ): Promise<{ run_id: number }> {
-  return withHttpSpan(
-    "POST",
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await startSeerIssueFix({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          issue_id: Number(issueId),
-        },
-        body: {
-          stopping_point: "root_cause",
-        },
-      });
+  const result = await startSeerIssueFix({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+    },
+    body: {
+      stopping_point: "root_cause",
+    },
+  });
 
-      const data = unwrapResult(
-        result,
-        "Failed to trigger root cause analysis"
-      );
-      return data as unknown as { run_id: number };
-    }
-  );
+  const data = unwrapResult(result, "Failed to trigger root cause analysis");
+  return data as unknown as { run_id: number };
 }
 
 /**
@@ -1011,29 +943,23 @@ export function triggerRootCauseAnalysis(
  * @param issueId - The numeric Sentry issue ID
  * @returns The autofix state, or null if no autofix has been run
  */
-export function getAutofixState(
+export async function getAutofixState(
   orgSlug: string,
   issueId: string
 ): Promise<AutofixState | null> {
-  return withHttpSpan(
-    "GET",
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    async () => {
-      const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-      const result = await retrieveSeerIssueFixState({
-        ...config,
-        path: {
-          organization_id_or_slug: orgSlug,
-          issue_id: Number(issueId),
-        },
-      });
+  const result = await retrieveSeerIssueFixState({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+    },
+  });
 
-      const data = unwrapResult(result, "Failed to get autofix state");
-      const autofixResponse = data as unknown as AutofixResponse;
-      return autofixResponse.autofix;
-    }
-  );
+  const data = unwrapResult(result, "Failed to get autofix state");
+  const autofixResponse = data as unknown as AutofixResponse;
+  return autofixResponse.autofix;
 }
 
 /**
@@ -1045,28 +971,22 @@ export function getAutofixState(
  * @param runId - The autofix run ID
  * @returns The response from the API
  */
-export function triggerSolutionPlanning(
+export async function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
   runId: number
 ): Promise<unknown> {
-  return withHttpSpan(
-    "POST",
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    async () => {
-      const regionUrl = await resolveOrgRegion(orgSlug);
+  const regionUrl = await resolveOrgRegion(orgSlug);
 
-      return apiRequestToRegion(
-        regionUrl,
-        `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-        {
-          method: "POST",
-          body: {
-            run_id: runId,
-            step: "solution",
-          },
-        }
-      );
+  return apiRequestToRegion(
+    regionUrl,
+    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
+    {
+      method: "POST",
+      body: {
+        run_id: runId,
+        step: "solution",
+      },
     }
   );
 }
@@ -1078,11 +998,9 @@ export function triggerSolutionPlanning(
  * Uses the /users/me/ endpoint on the control silo.
  */
 export function getCurrentUser(): Promise<SentryUser> {
-  return withHttpSpan("GET", "/users/me/", () =>
-    apiRequestToRegion<SentryUser>(getControlSiloUrl(), "/users/me/", {
-      schema: SentryUserSchema,
-    })
-  );
+  return apiRequestToRegion<SentryUser>(getControlSiloUrl(), "/users/me/", {
+    schema: SentryUserSchema,
+  });
 }
 
 // Log functions
@@ -1117,43 +1035,41 @@ type ListLogsOptions = {
  * @param options - Query options (query, limit, statsPeriod)
  * @returns Array of log entries
  */
-export function listLogs(
+export async function listLogs(
   orgSlug: string,
   projectSlug: string,
   options: ListLogsOptions = {}
 ): Promise<SentryLog[]> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/events/`, async () => {
-    const isNumericProject = isAllDigits(projectSlug);
+  const isNumericProject = isAllDigits(projectSlug);
 
-    const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
-    const timestampFilter = options.afterTimestamp
-      ? `timestamp_precise:>${options.afterTimestamp}`
-      : "";
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const timestampFilter = options.afterTimestamp
+    ? `timestamp_precise:>${options.afterTimestamp}`
+    : "";
 
-    const fullQuery = [projectFilter, options.query, timestampFilter]
-      .filter(Boolean)
-      .join(" ");
+  const fullQuery = [projectFilter, options.query, timestampFilter]
+    .filter(Boolean)
+    .join(" ");
 
-    const config = await getOrgSdkConfig(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-    const result = await queryExploreEventsInTableFormat({
-      ...config,
-      path: { organization_id_or_slug: orgSlug },
-      query: {
-        dataset: "logs",
-        field: LOG_FIELDS,
-        project: isNumericProject ? [Number(projectSlug)] : undefined,
-        query: fullQuery || undefined,
-        per_page: options.limit || 100,
-        statsPeriod: options.statsPeriod ?? "7d",
-        sort: "-timestamp",
-      },
-    });
-
-    const data = unwrapResult(result, "Failed to list logs");
-    const logsResponse = LogsResponseSchema.parse(data);
-    return logsResponse.data;
+  const result = await queryExploreEventsInTableFormat({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      dataset: "logs",
+      field: LOG_FIELDS,
+      project: isNumericProject ? [Number(projectSlug)] : undefined,
+      query: fullQuery || undefined,
+      per_page: options.limit || 100,
+      statsPeriod: options.statsPeriod ?? "7d",
+      sort: "-timestamp",
+    },
   });
+
+  const data = unwrapResult(result, "Failed to list logs");
+  const logsResponse = LogsResponseSchema.parse(data);
+  return logsResponse.data;
 }
 
 /** All fields to request for detailed log view */
@@ -1187,29 +1103,27 @@ const DETAILED_LOG_FIELDS = [
  * @param logId - The sentry.item_id of the log entry
  * @returns The detailed log entry, or null if not found
  */
-export function getLog(
+export async function getLog(
   orgSlug: string,
   projectSlug: string,
   logId: string
 ): Promise<DetailedSentryLog | null> {
-  return withHttpSpan("GET", `/organizations/${orgSlug}/events/`, async () => {
-    const query = `project:${projectSlug} sentry.item_id:${logId}`;
-    const config = await getOrgSdkConfig(orgSlug);
+  const query = `project:${projectSlug} sentry.item_id:${logId}`;
+  const config = await getOrgSdkConfig(orgSlug);
 
-    const result = await queryExploreEventsInTableFormat({
-      ...config,
-      path: { organization_id_or_slug: orgSlug },
-      query: {
-        dataset: "logs",
-        field: DETAILED_LOG_FIELDS,
-        query,
-        per_page: 1,
-        statsPeriod: "90d",
-      },
-    });
-
-    const data = unwrapResult(result, "Failed to get log");
-    const logsResponse = DetailedLogsResponseSchema.parse(data);
-    return logsResponse.data[0] ?? null;
+  const result = await queryExploreEventsInTableFormat({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      dataset: "logs",
+      field: DETAILED_LOG_FIELDS,
+      query,
+      per_page: 1,
+      statsPeriod: "90d",
+    },
   });
+
+  const data = unwrapResult(result, "Failed to get log");
+  const logsResponse = DetailedLogsResponseSchema.parse(data);
+  return logsResponse.data[0] ?? null;
 }
