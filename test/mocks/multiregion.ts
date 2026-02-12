@@ -142,7 +142,32 @@ function createRegionRoutes(
         return { status: 404, body: notFoundFixture };
       },
     },
-    // Issues list for project
+    // Issues list (org-scoped endpoint used by @sentry/api SDK)
+    // Filters by project slug from the "query" search param (e.g., query=project:my-project)
+    {
+      method: "GET",
+      path: "/api/0/organizations/:orgSlug/issues/",
+      response: (req, params) => {
+        if (orgSet.has(params.orgSlug)) {
+          const url = new URL(req.url);
+          const query = url.searchParams.get("query") ?? "";
+          const projectMatch = query.match(/project:(\S+)/);
+          const projectSlug = projectMatch?.[1];
+          if (projectSlug) {
+            const issues = issuesByProject.get(projectSlug) ?? [];
+            return { body: issues };
+          }
+          // No project filter: return all issues for all projects in this org
+          const orgProjects = projectsByOrg.get(params.orgSlug) ?? [];
+          const allIssues = (orgProjects as Array<{ slug: string }>).flatMap(
+            (p) => issuesByProject.get(p.slug) ?? []
+          );
+          return { body: allIssues };
+        }
+        return { status: 404, body: notFoundFixture };
+      },
+    },
+    // Issues list (legacy project-scoped endpoint)
     {
       method: "GET",
       path: "/api/0/projects/:orgSlug/:projectSlug/issues/",

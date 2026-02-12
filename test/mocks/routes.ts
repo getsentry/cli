@@ -131,7 +131,18 @@ export const apiRoutes: MockRoute[] = [
     },
   },
 
-  // Issues
+  // Issues (org-scoped endpoint used by @sentry/api SDK)
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/issues/",
+    response: (req, params) => {
+      if (params.orgSlug === TEST_ORG) {
+        return { body: issuesFixture };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  // Issues (legacy project-scoped endpoint)
   {
     method: "GET",
     path: "/api/0/projects/:orgSlug/:projectSlug/issues/",
