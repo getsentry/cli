@@ -38,7 +38,9 @@ import {
   type SentryOrganization,
   type SentryProject,
   type SentryRepository,
+  SentryRepositorySchema,
   type SentryTeam,
+  SentryTeamSchema,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -60,7 +62,53 @@ import {
 } from "./sentry-client.js";
 import { isAllDigits } from "./utils.js";
 
+<<<<<<< HEAD
 // Helpers
+=======
+/**
+ * Control silo URL - handles OAuth, user accounts, and region routing.
+ * This is always sentry.io for SaaS, or the base URL for self-hosted.
+ */
+const CONTROL_SILO_URL = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
+
+/** Request timeout in milliseconds */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Maximum retry attempts for failed requests */
+const MAX_RETRIES = 2;
+
+/** Maximum backoff delay between retries in milliseconds */
+const MAX_BACKOFF_MS = 10_000;
+
+/** HTTP status codes that trigger automatic retry */
+const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+
+/** Regex to extract org slug from /organizations/{slug}/... endpoints */
+const ORG_ENDPOINT_REGEX = /^\/?organizations\/([^/]+)/;
+
+/** Regex to extract org slug from /projects/{org}/{project}/... endpoints */
+const PROJECT_ENDPOINT_REGEX = /^\/?projects\/([^/]+)\/[^/]+/;
+
+/** Regex to extract org slug from /teams/{org}/{team}/... endpoints */
+const TEAM_ENDPOINT_REGEX = /^\/?teams\/([^/]+)/;
+
+/**
+ * Get the Sentry API base URL.
+ * Supports self-hosted instances via SENTRY_URL env var.
+ */
+function getApiBaseUrl(): string {
+  const baseUrl = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
+  return `${baseUrl}/api/0/`;
+}
+
+/**
+ * Normalize endpoint path for use with ky's prefixUrl.
+ * Removes leading slash since ky handles URL joining.
+ */
+function normalizePath(endpoint: string): string {
+  return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
+}
+>>>>>>> 82d0ad4 (feat(api): add SentryTeam type, listTeams, and createProject endpoints)
 
 type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -478,6 +526,12 @@ function extractOrgSlugFromEndpoint(endpoint: string): string | null {
     return projectMatch[1];
   }
 
+  // Try team path: /teams/{org}/{team}/...
+  const teamMatch = endpoint.match(TEAM_ENDPOINT_REGEX);
+  if (teamMatch?.[1]) {
+    return teamMatch[1];
+  }
+
   return null;
 }
 
@@ -775,6 +829,52 @@ export function listRepositoriesPaginated(
         per_page: options.perPage ?? 25,
         cursor: options.cursor,
       },
+    }
+  );
+}
+
+/**
+ * List teams in an organization.
+ * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - The organization slug
+ * @returns Array of teams in the organization
+ */
+export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  return orgScopedRequest<SentryTeam[]>(`/organizations/${orgSlug}/teams/`, {
+    params: { detailed: "0" },
+    schema: z.array(SentryTeamSchema),
+  });
+}
+
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ * Uses region-aware routing via the /teams/ endpoint regex.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  return orgScopedRequest<SentryProject>(
+    `/teams/${orgSlug}/${teamSlug}/projects/`,
+    {
+      method: "POST",
+      body,
+      schema: SentryProjectSchema,
     }
   );
 }
