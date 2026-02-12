@@ -145,7 +145,15 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <org/project>`
+#### `sentry project create <name> <platform>`
+
+Create a new project
+
+**Flags:**
+- `-t, --team <value> - Team to create the project under`
+- `--json - Output as JSON`
+
+#### `sentry project list <org>`
 
 List projects
 
