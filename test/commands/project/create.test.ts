@@ -227,6 +227,28 @@ describe("project create", () => {
     expect(err.message).toContain("--team <team-slug>");
   });
 
+  test("handles 400 invalid platform with platform list", async () => {
+    createProjectSpy.mockRejectedValue(
+      new ApiError(
+        "API request failed: 400 Bad Request",
+        400,
+        '{"platform":["Invalid platform"]}'
+      )
+    );
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform 'node'");
+    expect(err.message).toContain("Available platforms:");
+    expect(err.message).toContain("javascript-nextjs");
+    expect(err.message).toContain("docs.sentry.io/platforms");
+  });
+
   test("wraps other API errors with context", async () => {
     createProjectSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403, "No permission")
