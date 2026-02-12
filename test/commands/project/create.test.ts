@@ -336,9 +336,9 @@ describe("project create", () => {
     const err = await func
       .call(context, { json: false }, "my-app")
       .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ContextError);
+    expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Platform is required");
-    expect(err.message).toContain("Available platforms");
+    expect(err.message).toContain("Available platforms:");
     expect(err.message).toContain("javascript-nextjs");
     expect(err.message).toContain("python");
     expect(err.message).toContain("docs.sentry.io/platforms");
