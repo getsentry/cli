@@ -162,6 +162,12 @@ async function resolveTeam(
   );
 }
 
+/** Check whether an API error is about an invalid platform value */
+function isPlatformError(error: ApiError): boolean {
+  const detail = error.detail ?? error.message;
+  return detail.includes("platform") && detail.includes("Invalid");
+}
+
 /**
  * Create a project with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
@@ -180,6 +186,17 @@ async function createProjectWithErrors(
         throw new CliError(
           `A project named '${name}' already exists in ${orgSlug}.\n\n` +
             `View it: sentry project view ${orgSlug}/${name}`
+        );
+      }
+      if (error.status === 400 && isPlatformError(error)) {
+        const list = PLATFORMS.map((p) => `  ${p}`).join("\n");
+        throw new CliError(
+          `Invalid platform '${platform}'.\n\n` +
+            "Specify it using:\n" +
+            `  sentry project create ${orgSlug}/${name} <platform>\n\n` +
+            "Or:\n" +
+            `  - Available platforms:\n\n${list}\n` +
+            "  - Full list: https://docs.sentry.io/platforms/"
         );
       }
       if (error.status === 404) {
