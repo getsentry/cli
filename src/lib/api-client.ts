@@ -526,6 +526,14 @@ export function matchesWordBoundary(a: string, b: string): boolean {
  * Find projects matching a pattern with bidirectional word-boundary matching.
  * Used for directory name inference when DSN detection fails.
  *
+ * Uses `\b` regex word boundary, which matches:
+ * - Start/end of string
+ * - Between word char (`\w`) and non-word char (like "-")
+ *
+ * Matching is bidirectional:
+ * - Directory name in project slug: dir "cli" matches project "cli-website"
+ * - Project slug in directory name: project "docs" matches dir "sentry-docs"
+ *
  * @param pattern - Directory name to match against project slugs
  * @returns Array of matching projects with their org context
  */
@@ -557,7 +565,8 @@ export async function findProjectsByPattern(
  * Find a project by DSN public key.
  *
  * Uses the /api/0/projects/ endpoint with query=dsn:<key> to search
- * across all accessible projects in all regions.
+ * across all accessible projects in all regions. This works for both
+ * SaaS and self-hosted DSNs, even when the org ID is not embedded in the DSN.
  *
  * @param publicKey - The DSN public key (username portion of DSN URL)
  * @returns The matching project, or null if not found
