@@ -21,6 +21,8 @@ import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
+import { teamRoute } from "./commands/team/index.js";
+import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
 import { listCommand as traceListCommand } from "./commands/trace/list.js";
 import { CLI_VERSION } from "./lib/constants.js";
@@ -36,6 +38,7 @@ export const routes = buildRouteMap({
     org: orgRoute,
     project: projectRoute,
     repo: repoRoute,
+    team: teamRoute,
     issue: issueRoute,
     event: eventRoute,
     log: logRoute,
@@ -45,6 +48,7 @@ export const routes = buildRouteMap({
     orgs: orgListCommand,
     projects: projectListCommand,
     repos: repoListCommand,
+    teams: teamListCommand,
     logs: logListCommand,
     traces: traceListCommand,
   },
