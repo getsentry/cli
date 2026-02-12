@@ -169,6 +169,27 @@ function isPlatformError(error: ApiError): boolean {
 }
 
 /**
+ * Build a user-friendly error message for missing or invalid platform.
+ *
+ * @param nameArg - The name arg (used in the usage example)
+ * @param platform - The invalid platform string, if provided
+ */
+function buildPlatformError(nameArg: string, platform?: string): string {
+  const list = PLATFORMS.map((p) => `  ${p}`).join("\n");
+  const heading = platform
+    ? `Invalid platform '${platform}'.`
+    : "Platform is required.";
+
+  return (
+    `${heading}\n\n` +
+    "Usage:\n" +
+    `  sentry project create ${nameArg} <platform>\n\n` +
+    `Available platforms:\n\n${list}\n\n` +
+    "Full list: https://docs.sentry.io/platforms/"
+  );
+}
+
+/**
  * Create a project with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
  */
@@ -189,15 +210,7 @@ async function createProjectWithErrors(
         );
       }
       if (error.status === 400 && isPlatformError(error)) {
-        const list = PLATFORMS.map((p) => `  ${p}`).join("\n");
-        throw new CliError(
-          `Invalid platform '${platform}'.\n\n` +
-            "Specify it using:\n" +
-            `  sentry project create ${orgSlug}/${name} <platform>\n\n` +
-            "Or:\n" +
-            `  - Available platforms:\n\n${list}\n` +
-            "  - Full list: https://docs.sentry.io/platforms/"
-        );
+        throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
         throw new CliError(
@@ -300,15 +313,7 @@ export const createCommand = buildCommand({
     }
 
     if (!platformArg) {
-      const list = PLATFORMS.map((p) => `  ${p}`).join("\n");
-      throw new ContextError(
-        "Platform",
-        `sentry project create ${nameArg} <platform>`,
-        [
-          `Available platforms:\n\n${list}`,
-          "Full list: https://docs.sentry.io/platforms/",
-        ]
-      );
+      throw new CliError(buildPlatformError(nameArg));
     }
 
     // Parse name (may include org/ prefix)
