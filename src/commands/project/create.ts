@@ -6,25 +6,25 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import {
-  createProject,
-  getProjectKeys,
-  listOrganizations,
-  listTeams,
-} from "../../lib/api-client.js";
+import { createProject, tryGetPrimaryDsn } from "../../lib/api-client.js";
+import { parseOrgPrefixedArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { buildProjectUrl, getSentryBaseUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject, SentryTeam } from "../../types/index.js";
+import { resolveTeam } from "../../lib/resolve-team.js";
+import { buildProjectUrl } from "../../lib/sentry-urls.js";
+import type { SentryProject } from "../../types/index.js";
+
+/** Usage hint template — base command without positionals */
+const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type CreateFlags = {
   readonly team?: string;
   readonly json: boolean;
 };
 
-/** Common Sentry platform strings, shown when platform arg is missing */
+/** Common Sentry platform strings, shown when platform arg is missing or invalid */
 const PLATFORMS = [
   "javascript",
   "javascript-react",
@@ -53,114 +53,6 @@ const PLATFORMS = [
   "rust",
   "elixir",
 ] as const;
-
-/**
- * Parse the name positional argument.
- * Supports `org/name` syntax for explicit org, or bare `name` for auto-detect.
- *
- * @returns Parsed org (if explicit) and project name
- */
-function parseNameArg(arg: string): { org?: string; name: string } {
-  if (arg.includes("/")) {
-    const slashIndex = arg.indexOf("/");
-    const org = arg.slice(0, slashIndex);
-    const name = arg.slice(slashIndex + 1);
-
-    if (!(org && name)) {
-      throw new ContextError(
-        "Project name",
-        "sentry project create <org>/<name> <platform>\n\n" +
-          'Both org and name are required when using "/" syntax.'
-      );
-    }
-
-    return { org, name };
-  }
-
-  return { name: arg };
-}
-
-/**
- * Resolve which team to create the project under.
- *
- * Priority:
- * 1. Explicit --team flag
- * 2. Auto-detect: if org has exactly one team, use it
- * 3. Error with list of available teams
- *
- * @param orgSlug - Organization to list teams from
- * @param teamFlag - Explicit team slug from --team flag
- * @param detectedFrom - Source of auto-detected org (shown in error messages)
- * @returns Team slug to use
- */
-async function resolveTeam(
-  orgSlug: string,
-  teamFlag?: string,
-  detectedFrom?: string
-): Promise<string> {
-  if (teamFlag) {
-    return teamFlag;
-  }
-
-  let teams: SentryTeam[];
-  try {
-    teams = await listTeams(orgSlug);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      // Try to list the user's actual orgs to help them fix the command
-      let orgHint =
-        "Specify org explicitly: sentry project create <org>/<name> <platform>";
-      try {
-        const orgs = await listOrganizations();
-        if (orgs.length > 0) {
-          const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
-          orgHint = `Your organizations:\n\n${orgList}`;
-        }
-      } catch {
-        // Best-effort — if this also fails, use the generic hint
-      }
-
-      const alternatives = [
-        `Could not list teams for org '${orgSlug}' (${error.status})`,
-      ];
-      if (detectedFrom) {
-        alternatives.push(
-          `Org '${orgSlug}' was auto-detected from ${detectedFrom}`
-        );
-      }
-      alternatives.push(orgHint);
-      throw new ContextError(
-        "Organization",
-        "sentry project create <org>/<name> <platform> --team <team-slug>",
-        alternatives
-      );
-    }
-    throw error;
-  }
-
-  if (teams.length === 0) {
-    const teamsUrl = `${getSentryBaseUrl()}/settings/${orgSlug}/teams/`;
-    throw new ContextError(
-      "Team",
-      `sentry project create ${orgSlug}/<name> <platform> --team <team-slug>`,
-      [`No teams found in org '${orgSlug}'`, `Create a team at ${teamsUrl}`]
-    );
-  }
-
-  if (teams.length === 1) {
-    return (teams[0] as SentryTeam).slug;
-  }
-
-  // Multiple teams — user must specify
-  const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
-  throw new ContextError(
-    "Team",
-    `sentry project create <name> <platform> --team ${(teams[0] as SentryTeam).slug}`,
-    [
-      `Multiple teams found in ${orgSlug}. Specify one with --team:\n\n${teamList}`,
-    ]
-  );
-}
 
 /** Check whether an API error is about an invalid platform value */
 function isPlatformError(error: ApiError): boolean {
@@ -229,19 +121,16 @@ async function createProjectWithErrors(
 }
 
 /**
- * Try to fetch the primary DSN for a newly created project.
- * Returns null on any error — DSN display is best-effort.
+ * Write key-value pairs with aligned columns.
+ * Used for human-readable output after resource creation.
  */
-async function tryGetPrimaryDsn(
-  orgSlug: string,
-  projectSlug: string
-): Promise<string | null> {
-  try {
-    const keys = await getProjectKeys(orgSlug, projectSlug);
-    const activeKey = keys.find((k) => k.isActive);
-    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
-  } catch {
-    return null;
+function writeKeyValue(
+  stdout: { write: (s: string) => void },
+  pairs: [label: string, value: string][]
+): void {
+  const maxLabel = Math.max(...pairs.map(([l]) => l.length));
+  for (const [label, value] of pairs) {
+    stdout.write(`  ${label.padEnd(maxLabel + 2)}${value}\n`);
   }
 }
 
@@ -306,7 +195,7 @@ export const createCommand = buildCommand({
         "Project name",
         "sentry project create <name> <platform>",
         [
-          "Use org/name syntax: sentry project create <org>/<name> <platform>",
+          `Use org/name syntax: ${USAGE_HINT}`,
           "Specify team: sentry project create <name> <platform> --team <slug>",
         ]
       );
@@ -316,30 +205,29 @@ export const createCommand = buildCommand({
       throw new CliError(buildPlatformError(nameArg));
     }
 
-    // Parse name (may include org/ prefix)
-    const { org: explicitOrg, name } = parseNameArg(nameArg);
+    const { org: explicitOrg, name } = parseOrgPrefixedArg(
+      nameArg,
+      "Project name",
+      USAGE_HINT
+    );
 
     // Resolve organization
     const resolved = await resolveOrg({ org: explicitOrg, cwd });
     if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry project create <org>/<name> <platform>",
-        [
-          "Include org in name: sentry project create <org>/<name> <platform>",
-          "Set a default: sentry org view <org>",
-          "Run from a directory with a Sentry DSN configured",
-        ]
-      );
+      throw new ContextError("Organization", USAGE_HINT, [
+        `Include org in name: ${USAGE_HINT}`,
+        "Set a default: sentry org view <org>",
+        "Run from a directory with a Sentry DSN configured",
+      ]);
     }
     const orgSlug = resolved.org;
 
     // Resolve team
-    const teamSlug = await resolveTeam(
-      orgSlug,
-      flags.team,
-      resolved.detectedFrom
-    );
+    const teamSlug = await resolveTeam(orgSlug, {
+      team: flags.team,
+      detectedFrom: resolved.detectedFrom,
+      usageHint: USAGE_HINT,
+    });
 
     // Create the project
     const project = await createProjectWithErrors(
@@ -349,7 +237,7 @@ export const createCommand = buildCommand({
       platformArg
     );
 
-    // Fetch DSN (best-effort, non-blocking for output)
+    // Fetch DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
 
     // JSON output
@@ -360,17 +248,20 @@ export const createCommand = buildCommand({
 
     // Human-readable output
     const url = buildProjectUrl(orgSlug, project.slug);
+    const fields: [string, string][] = [
+      ["Project", project.name],
+      ["Slug", project.slug],
+      ["Org", orgSlug],
+      ["Team", teamSlug],
+      ["Platform", project.platform || platformArg],
+    ];
+    if (dsn) {
+      fields.push(["DSN", dsn]);
+    }
+    fields.push(["URL", url]);
 
     stdout.write(`\nCreated project '${project.name}' in ${orgSlug}\n\n`);
-    stdout.write(`  Project   ${project.name}\n`);
-    stdout.write(`  Slug      ${project.slug}\n`);
-    stdout.write(`  Org       ${orgSlug}\n`);
-    stdout.write(`  Team      ${teamSlug}\n`);
-    stdout.write(`  Platform  ${project.platform || platformArg}\n`);
-    if (dsn) {
-      stdout.write(`  DSN       ${dsn}\n`);
-    }
-    stdout.write(`  URL       ${url}\n`);
+    writeKeyValue(stdout, fields);
 
     writeFooter(
       stdout,

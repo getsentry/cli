@@ -62,53 +62,7 @@ import {
 } from "./sentry-client.js";
 import { isAllDigits } from "./utils.js";
 
-<<<<<<< HEAD
 // Helpers
-=======
-/**
- * Control silo URL - handles OAuth, user accounts, and region routing.
- * This is always sentry.io for SaaS, or the base URL for self-hosted.
- */
-const CONTROL_SILO_URL = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-
-/** Request timeout in milliseconds */
-const REQUEST_TIMEOUT_MS = 30_000;
-
-/** Maximum retry attempts for failed requests */
-const MAX_RETRIES = 2;
-
-/** Maximum backoff delay between retries in milliseconds */
-const MAX_BACKOFF_MS = 10_000;
-
-/** HTTP status codes that trigger automatic retry */
-const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
-
-/** Regex to extract org slug from /organizations/{slug}/... endpoints */
-const ORG_ENDPOINT_REGEX = /^\/?organizations\/([^/]+)/;
-
-/** Regex to extract org slug from /projects/{org}/{project}/... endpoints */
-const PROJECT_ENDPOINT_REGEX = /^\/?projects\/([^/]+)\/[^/]+/;
-
-/** Regex to extract org slug from /teams/{org}/{team}/... endpoints */
-const TEAM_ENDPOINT_REGEX = /^\/?teams\/([^/]+)/;
-
-/**
- * Get the Sentry API base URL.
- * Supports self-hosted instances via SENTRY_URL env var.
- */
-function getApiBaseUrl(): string {
-  const baseUrl = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-  return `${baseUrl}/api/0/`;
-}
-
-/**
- * Normalize endpoint path for use with ky's prefixUrl.
- * Removes leading slash since ky handles URL joining.
- */
-function normalizePath(endpoint: string): string {
-  return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-}
->>>>>>> 82d0ad4 (feat(api): add SentryTeam type, listTeams, and createProject endpoints)
 
 type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -1094,6 +1048,30 @@ export async function getProjectKeys(
 }
 
 // Issue functions
+
+/**
+ * Fetch the primary DSN for a project.
+ * Returns the public DSN of the first active key, or null on any error.
+ *
+ * Best-effort: failures are silently swallowed so callers can treat
+ * DSN display as optional (e.g., after project creation or in views).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Public DSN string, or null if unavailable
+ */
+export async function tryGetPrimaryDsn(
+  orgSlug: string,
+  projectSlug: string
+): Promise<string | null> {
+  try {
+    const keys = await getProjectKeys(orgSlug, projectSlug);
+    const activeKey = keys.find((k) => k.isActive);
+    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * List issues for a project with pagination control.

@@ -63,14 +63,14 @@ function createMockContext() {
 describe("project create", () => {
   let listTeamsSpy: ReturnType<typeof spyOn>;
   let createProjectSpy: ReturnType<typeof spyOn>;
-  let getProjectKeysSpy: ReturnType<typeof spyOn>;
+  let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
   let listOrgsSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listTeamsSpy = spyOn(apiClient, "listTeams");
     createProjectSpy = spyOn(apiClient, "createProject");
-    getProjectKeysSpy = spyOn(apiClient, "getProjectKeys");
+    tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn");
     listOrgsSpy = spyOn(apiClient, "listOrganizations");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
 
@@ -78,14 +78,9 @@ describe("project create", () => {
     resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
     listTeamsSpy.mockResolvedValue([sampleTeam]);
     createProjectSpy.mockResolvedValue(sampleProject);
-    getProjectKeysSpy.mockResolvedValue([
-      {
-        id: "key1",
-        name: "Default",
-        dsn: { public: "https://abc@o123.ingest.us.sentry.io/999" },
-        isActive: true,
-      },
-    ]);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc@o123.ingest.us.sentry.io/999"
+    );
     listOrgsSpy.mockResolvedValue([
       { slug: "acme-corp", name: "Acme Corp" },
       { slug: "other-org", name: "Other Org" },
@@ -95,7 +90,7 @@ describe("project create", () => {
   afterEach(() => {
     listTeamsSpy.mockRestore();
     createProjectSpy.mockRestore();
-    getProjectKeysSpy.mockRestore();
+    tryGetPrimaryDsnSpy.mockRestore();
     listOrgsSpy.mockRestore();
     resolveOrgSpy.mockRestore();
   });
@@ -277,7 +272,7 @@ describe("project create", () => {
   });
 
   test("handles DSN fetch failure gracefully", async () => {
-    getProjectKeysSpy.mockRejectedValue(new Error("network error"));
+    tryGetPrimaryDsnSpy.mockResolvedValue(null);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await createCommand.loader();

@@ -235,6 +235,57 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   return { type: "project-search", projectSlug: trimmed };
 }
 
+/** Parsed result from an `org/name` positional argument */
+export type ParsedOrgPrefixed = {
+  /** Organization slug, if an explicit `org/` prefix was provided */
+  org?: string;
+  /** The resource name (the part after the slash, or the full arg) */
+  name: string;
+};
+
+/**
+ * Parse a positional argument that supports optional `org/name` syntax.
+ *
+ * Used by create commands where the user can either provide a bare name
+ * (and org is auto-detected) or prefix it with `org/` for explicit targeting.
+ *
+ * @param arg - Raw CLI argument (e.g., "my-app" or "acme-corp/my-app")
+ * @param resourceLabel - Human-readable resource label for error messages (e.g., "Project name")
+ * @param usageHint - Usage example shown in error (e.g., "sentry project create <org>/<name> <platform>")
+ * @returns Parsed org (if explicit) and resource name
+ * @throws {ContextError} If slash is present but org or name is empty
+ *
+ * @example
+ * parseOrgPrefixedArg("my-app", "Project name", "sentry project create <org>/<name>")
+ * // { name: "my-app" }
+ *
+ * parseOrgPrefixedArg("acme/my-app", "Project name", "sentry project create <org>/<name>")
+ * // { org: "acme", name: "my-app" }
+ */
+export function parseOrgPrefixedArg(
+  arg: string,
+  resourceLabel: string,
+  usageHint: string
+): ParsedOrgPrefixed {
+  if (!arg.includes("/")) {
+    return { name: arg };
+  }
+
+  const slashIndex = arg.indexOf("/");
+  const org = arg.slice(0, slashIndex);
+  const name = arg.slice(slashIndex + 1);
+
+  if (!(org && name)) {
+    throw new ContextError(
+      resourceLabel,
+      `${usageHint}\n\n` +
+        'Both org and name are required when using "/" syntax.'
+    );
+  }
+
+  return { org, name };
+}
+
 /**
  * Parsed issue argument types - flattened for ergonomics.
  *
