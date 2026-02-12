@@ -27,6 +27,8 @@ import {
   SentryProjectSchema,
   type SentryRepository,
   SentryRepositorySchema,
+  type SentryTeam,
+  SentryTeamSchema,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -66,6 +68,9 @@ const ORG_ENDPOINT_REGEX = /^\/?organizations\/([^/]+)/;
 
 /** Regex to extract org slug from /projects/{org}/{project}/... endpoints */
 const PROJECT_ENDPOINT_REGEX = /^\/?projects\/([^/]+)\/[^/]+/;
+
+/** Regex to extract org slug from /teams/{org}/{team}/... endpoints */
+const TEAM_ENDPOINT_REGEX = /^\/?teams\/([^/]+)/;
 
 /**
  * Get the Sentry API base URL.
@@ -478,6 +483,12 @@ function extractOrgSlugFromEndpoint(endpoint: string): string | null {
     return projectMatch[1];
   }
 
+  // Try team path: /teams/{org}/{team}/...
+  const teamMatch = endpoint.match(TEAM_ENDPOINT_REGEX);
+  if (teamMatch?.[1]) {
+    return teamMatch[1];
+  }
+
   return null;
 }
 
@@ -598,6 +609,52 @@ export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
     `/organizations/${orgSlug}/repos/`,
     {
       schema: z.array(SentryRepositorySchema),
+    }
+  );
+}
+
+/**
+ * List teams in an organization.
+ * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - The organization slug
+ * @returns Array of teams in the organization
+ */
+export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  return orgScopedRequest<SentryTeam[]>(`/organizations/${orgSlug}/teams/`, {
+    params: { detailed: "0" },
+    schema: z.array(SentryTeamSchema),
+  });
+}
+
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ * Uses region-aware routing via the /teams/ endpoint regex.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  return orgScopedRequest<SentryProject>(
+    `/teams/${orgSlug}/${teamSlug}/projects/`,
+    {
+      method: "POST",
+      body,
+      schema: SentryProjectSchema,
     }
   );
 }

@@ -75,6 +75,25 @@ export const SentryUserSchema = z
 
 export type SentryUser = z.infer<typeof SentryUserSchema>;
 
+// Team
+
+/** A Sentry team within an organization */
+export const SentryTeamSchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    slug: z.string(),
+    name: z.string(),
+    // Optional metadata
+    memberCount: z.number().optional(),
+    isMember: z.boolean().optional(),
+    teamRole: z.string().nullable().optional(),
+    dateCreated: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type SentryTeam = z.infer<typeof SentryTeamSchema>;
+
 // Project
 
 export const SentryProjectSchema = z
