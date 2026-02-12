@@ -135,7 +135,7 @@ export const apiRoutes: MockRoute[] = [
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/",
-    response: (req, params) => {
+    response: (_req, params) => {
       if (params.orgSlug === TEST_ORG) {
         return { body: issuesFixture };
       }
