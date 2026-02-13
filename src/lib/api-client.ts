@@ -27,6 +27,8 @@ import {
   SentryProjectSchema,
   type SentryRepository,
   SentryRepositorySchema,
+  type SentryTeam,
+  SentryTeamSchema,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -600,6 +602,16 @@ export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
       schema: z.array(SentryRepositorySchema),
     }
   );
+}
+
+/**
+ * List teams in an organization.
+ * Uses region-aware routing for multi-region support.
+ */
+export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  return orgScopedRequest<SentryTeam[]>(`/organizations/${orgSlug}/teams/`, {
+    schema: z.array(SentryTeamSchema),
+  });
 }
 
 /**
