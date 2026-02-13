@@ -32,6 +32,13 @@ export type ColumnDef = {
 
 export type TableSchema = {
   columns: Record<string, ColumnDef>;
+  /**
+   * Composite primary key columns. When set, the DDL generator emits a
+   * table-level `PRIMARY KEY (col1, col2, ...)` constraint instead of
+   * per-column `PRIMARY KEY` attributes. Individual columns listed here
+   * should NOT also set `primaryKey: true`.
+   */
+  compositePrimaryKey?: string[];
 };
 
 /**
@@ -144,6 +151,7 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       cursor: { type: "TEXT", notNull: true },
       expires_at: { type: "INTEGER", notNull: true },
     },
+    compositePrimaryKey: ["command_key", "context"],
   },
   metadata: {
     columns: {
@@ -206,7 +214,8 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
 /** Generate CREATE TABLE DDL from column definitions */
 function columnDefsToDDL(
   tableName: string,
-  columns: [string, ColumnDef][]
+  columns: [string, ColumnDef][],
+  compositePrimaryKey?: string[]
 ): string {
   const columnDefs = columns.map(([name, col]) => {
     const parts = [name, col.type];
@@ -225,6 +234,10 @@ function columnDefsToDDL(
     return parts.join(" ");
   });
 
+  if (compositePrimaryKey && compositePrimaryKey.length > 0) {
+    columnDefs.push(`PRIMARY KEY (${compositePrimaryKey.join(", ")})`);
+  }
+
   return `CREATE TABLE IF NOT EXISTS ${tableName} (\n    ${columnDefs.join(",\n    ")}\n  )`;
 }
 
@@ -233,7 +246,11 @@ export function generateTableDDL(
   tableName: string,
   schema: TableSchema
 ): string {
-  return columnDefsToDDL(tableName, Object.entries(schema.columns));
+  return columnDefsToDDL(
+    tableName,
+    Object.entries(schema.columns),
+    schema.compositePrimaryKey
+  );
 }
 
 /**
@@ -258,7 +275,7 @@ export function generatePreMigrationTableDDL(tableName: string): string {
     );
   }
 
-  return columnDefsToDDL(tableName, baseColumns);
+  return columnDefsToDDL(tableName, baseColumns, schema.compositePrimaryKey);
 }
 
 /** Generated DDL statements for all tables (used for repair and init) */
@@ -365,38 +382,8 @@ export type RepairResult = {
   failed: string[];
 };
 
-/**
- * Tables that require hand-written DDL instead of auto-generation from TABLE_SCHEMAS.
- *
- * The auto-generation via `columnDefsToDDL` only supports single-column primary keys
- * (via `primaryKey: true` on a column). Tables with composite primary keys (like
- * `pagination_cursors` with `PRIMARY KEY (command_key, context)`) need custom DDL
- * because SQLite requires composite PKs as a table-level constraint, not a column attribute.
- */
-const CUSTOM_DDL_TABLES = new Set(["pagination_cursors"]);
-
-function repairPaginationCursorsTable(
-  db: Database,
-  result: RepairResult
-): void {
-  if (tableExists(db, "pagination_cursors")) {
-    return;
-  }
-  try {
-    db.exec(PAGINATION_CURSORS_DDL);
-    result.fixed.push("Created table pagination_cursors");
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    result.failed.push(`Failed to create table pagination_cursors: ${msg}`);
-  }
-}
-
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
-    // Skip tables that need custom DDL
-    if (CUSTOM_DDL_TABLES.has(tableName)) {
-      continue;
-    }
     if (tableExists(db, tableName)) {
       continue;
     }
@@ -408,9 +395,6 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
-
-  // Handle tables with custom DDL
-  repairPaginationCursorsTable(db, result);
 }
 
 function repairMissingColumns(db: Database, result: RepairResult): void {
@@ -549,31 +533,9 @@ export function tryRepairAndRetry<T>(
   return { attempted: false };
 }
 
-/**
- * Custom DDL for pagination_cursors table with composite primary key.
- * Uses (command_key, context) so different contexts (e.g., different orgs)
- * can each store their own cursor independently.
- */
-const PAGINATION_CURSORS_DDL = `
-  CREATE TABLE IF NOT EXISTS pagination_cursors (
-    command_key TEXT NOT NULL,
-    context TEXT NOT NULL,
-    cursor TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    PRIMARY KEY (command_key, context)
-  )
-`;
-
 export function initSchema(db: Database): void {
-  // Generate combined DDL from all table schemas (except those with custom DDL)
-  const ddlStatements = Object.entries(EXPECTED_TABLES)
-    .filter(([name]) => !CUSTOM_DDL_TABLES.has(name))
-    .map(([, ddl]) => ddl)
-    .join(";\n\n");
+  const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
   db.exec(ddlStatements);
-
-  // Add tables with composite primary keys
-  db.exec(PAGINATION_CURSORS_DDL);
 
   const versionRow = db
     .query("SELECT version FROM schema_version LIMIT 1")
@@ -632,9 +594,8 @@ export function runMigrations(db: Database): void {
   }
 
   // Migration 4 -> 5: Add pagination_cursors table for --cursor last support
-  // Uses custom DDL for composite primary key (command_key, context)
   if (currentVersion < 5) {
-    db.exec(PAGINATION_CURSORS_DDL);
+    db.exec(EXPECTED_TABLES.pagination_cursors as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {
