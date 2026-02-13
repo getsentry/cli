@@ -59,6 +59,20 @@ const PLATFORMS = [
   "elixir",
 ] as const;
 
+/**
+ * Convert a project name to its expected Sentry slug.
+ * Sentry slugs are lowercase, with non-alphanumeric runs replaced by hyphens.
+ *
+ * @example slugify("My Cool App") // "my-cool-app"
+ * @example slugify("my-app")      // "my-app"
+ */
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 /** Check whether an API error is about an invalid platform value */
 function isPlatformError(error: ApiError): boolean {
   const detail = error.detail ?? error.message;
@@ -150,9 +164,10 @@ async function createProjectWithErrors(
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 409) {
+        const slug = slugify(name);
         throw new CliError(
           `A project named '${name}' already exists in ${orgSlug}.\n\n` +
-            `View it: sentry project view ${orgSlug}/${name}`
+            `View it: sentry project view ${orgSlug}/${slug}`
         );
       }
       if (error.status === 400 && isPlatformError(error)) {
