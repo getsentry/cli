@@ -15,7 +15,12 @@ import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import {
+  cleanupTestDir,
+  createTestConfigDir,
+  lockConfigDir,
+  lockFetch,
+} from "../../helpers.js";
 
 describe("buildCommandHint", () => {
   test("suggests <org>/ID for numeric IDs", () => {
@@ -50,6 +55,8 @@ describe("buildCommandHint", () => {
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 let savedConfigDir: string | undefined;
+let unlockEnv: (() => void) | undefined;
+let unlockFetchFn: (() => void) | undefined;
 
 beforeEach(async () => {
   savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
@@ -58,6 +65,11 @@ beforeEach(async () => {
     isolateProjectRoot: true,
   });
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+
+  // Lock the env var so concurrent test files cannot change it during our test.
+  // This prevents the DB singleton from auto-invalidating mid-test.
+  unlockEnv = lockConfigDir(testConfigDir);
+
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
@@ -68,7 +80,12 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // Unlock fetch first (if locked by this test)
+  unlockFetchFn?.();
+  unlockFetchFn = undefined;
   globalThis.fetch = originalFetch;
+  // Unlock env var, then restore
+  unlockEnv?.();
   if (savedConfigDir !== undefined) {
     process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
   } else {
@@ -79,8 +96,7 @@ afterEach(async () => {
 
 describe("resolveOrgAndIssueId", () => {
   test("throws for numeric ID (org cannot be resolved)", async () => {
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -107,7 +123,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     // Numeric IDs don't have org context, so resolveOrgAndIssueId should throw
     await expect(
@@ -120,8 +136,7 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves explicit org prefix (org/ISSUE-ID)", async () => {
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -147,7 +162,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueArg: "my-org/PROJECT-ABC",
@@ -172,8 +187,7 @@ describe("resolveOrgAndIssueId", () => {
       ""
     );
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -199,7 +213,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueArg: "f-g",
@@ -212,8 +226,7 @@ describe("resolveOrgAndIssueId", () => {
   });
 
   test("resolves explicit org prefix with project-suffix (e.g., 'org1/dashboard-4y')", async () => {
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -240,7 +253,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueArg: "org1/dashboard-4y",
@@ -256,8 +269,7 @@ describe("resolveOrgAndIssueId", () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -283,7 +295,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueArg: "G",
@@ -317,8 +329,7 @@ describe("resolveOrgAndIssueId", () => {
     );
     await clearProjectAliases();
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -378,7 +389,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     const result = await resolveOrgAndIssueId({
       issueArg: "craft-g",
@@ -396,8 +407,7 @@ describe("resolveOrgAndIssueId", () => {
     );
     await clearProjectAliases();
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -437,7 +447,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     await expect(
       resolveOrgAndIssueId({
@@ -456,8 +466,7 @@ describe("resolveOrgAndIssueId", () => {
 
     await setOrgRegion("org2", DEFAULT_SENTRY_URL);
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    unlockFetchFn = lockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
@@ -513,7 +522,7 @@ describe("resolveOrgAndIssueId", () => {
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
-    };
+    });
 
     await expect(
       resolveOrgAndIssueId({
@@ -528,11 +537,12 @@ describe("resolveOrgAndIssueId", () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "Unauthorized" }), {
-        status: 401,
-      });
+    unlockFetchFn = lockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Unauthorized" }), {
+          status: 401,
+        })
+    );
 
     // Auth errors should propagate
     await expect(
@@ -548,11 +558,12 @@ describe("resolveOrgAndIssueId", () => {
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
     await setDefaults("my-org", "my-project");
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ detail: "Internal Server Error" }), {
-        status: 500,
-      });
+    unlockFetchFn = lockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+          status: 500,
+        })
+    );
 
     // Server errors should propagate
     await expect(

@@ -9,19 +9,28 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import {
+  cleanupTestDir,
+  createTestConfigDir,
+  lockConfigDir,
+} from "../helpers.js";
 
 // Test config directory
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 let savedConfigDir: string | undefined;
 let savedClientId: string | undefined;
+let unlockEnv: (() => void) | undefined;
 
 beforeEach(async () => {
   savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   savedClientId = process.env.SENTRY_CLIENT_ID;
   testConfigDir = await createTestConfigDir("test-api-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+
+  // Lock the env var so concurrent test files cannot change it during our test.
+  // This prevents the DB singleton from auto-invalidating mid-test.
+  unlockEnv = lockConfigDir(testConfigDir);
 
   // Set required env var for OAuth refresh
   process.env.SENTRY_CLIENT_ID = "test-client-id";
@@ -37,7 +46,8 @@ afterEach(async () => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
 
-  // Restore env vars
+  // Unlock env var first, then restore
+  unlockEnv?.();
   if (savedConfigDir !== undefined) {
     process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
   } else {
@@ -52,18 +62,14 @@ afterEach(async () => {
   await cleanupTestDir(testConfigDir);
 });
 
-afterEach(async () => {
-  // Restore original fetch
-  globalThis.fetch = originalFetch;
-
-  await cleanupTestDir(testConfigDir);
-});
-
 /**
  * Creates a mock fetch that handles API requests.
  * Uses rawApiRequest which goes to control silo (no region resolution needed).
  *
  * The `apiRequestHandler` is called for each API request.
+ *
+ * The mock re-pins itself on every call so that another test file's
+ * afterEach cannot replace it between async boundaries.
  */
 function createMockFetch(
   requests: RequestLog[],
@@ -77,7 +83,13 @@ function createMockFetch(
 ): typeof globalThis.fetch {
   let apiRequestCount = 0;
 
-  return async (input: RequestInfo | URL, init?: RequestInit) => {
+  const mock = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    // Re-pin this mock — another test file's afterEach may have replaced it
+    globalThis.fetch = mock as unknown as typeof fetch;
+
     const req = new Request(input, init);
     requests.push({
       url: req.url,
@@ -109,6 +121,7 @@ function createMockFetch(
     apiRequestCount += 1;
     return apiRequestHandler(req, apiRequestCount);
   };
+  return mock as unknown as typeof globalThis.fetch;
 }
 
 describe("401 retry behavior", () => {

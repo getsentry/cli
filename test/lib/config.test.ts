@@ -38,6 +38,7 @@ import {
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "../../src/lib/db/project-cache.js";
+import { lockConfigDir } from "../helpers.js";
 
 /**
  * Test isolation: Each test gets its own config directory within
@@ -49,6 +50,7 @@ import {
  * process exit by preload.ts.
  */
 let savedConfigDir: string | undefined;
+let unlockEnv: (() => void) | undefined;
 
 beforeEach(() => {
   // Close any previous database connection
@@ -66,12 +68,17 @@ beforeEach(() => {
   );
   mkdirSync(testConfigDir, { recursive: true });
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+
+  // Lock the env var so concurrent test files cannot change it during our test.
+  // This prevents the DB singleton from auto-invalidating mid-test.
+  unlockEnv = lockConfigDir(testConfigDir);
 });
 
 afterEach(() => {
   // Close database to release file handles
   closeDatabase();
-  // Restore the original config dir set by preload.ts
+  // Unlock env var first, then restore
+  unlockEnv?.();
   if (savedConfigDir !== undefined) {
     process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
   } else {
