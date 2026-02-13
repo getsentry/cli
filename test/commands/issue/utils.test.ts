@@ -306,17 +306,13 @@ describe("resolveOrgAndIssueId", () => {
     );
     await clearProjectAliases();
 
-    const fetchLog: string[] = [];
-
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
-      fetchLog.push(`FETCH: ${req.method} ${url}`);
 
       // getUserRegions - return empty regions to use fallback path
       if (url.includes("/users/me/regions/")) {
-        fetchLog.push("  → matched: /users/me/regions/");
         return new Response(JSON.stringify({ regions: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -329,7 +325,6 @@ describe("resolveOrgAndIssueId", () => {
         !url.includes("/projects/") &&
         !url.includes("/issues/")
       ) {
-        fetchLog.push("  → matched: listOrganizations");
         return new Response(
           JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
           {
@@ -341,7 +336,6 @@ describe("resolveOrgAndIssueId", () => {
 
       // listProjects for my-org
       if (url.includes("organizations/my-org/projects/")) {
-        fetchLog.push("  → matched: listProjects for my-org");
         return new Response(
           JSON.stringify([
             { id: "123", slug: "craft", name: "Craft", platform: "javascript" },
@@ -360,7 +354,6 @@ describe("resolveOrgAndIssueId", () => {
       }
 
       if (url.includes("organizations/my-org/issues/CRAFT-G")) {
-        fetchLog.push("  → matched: issue CRAFT-G");
         return new Response(
           JSON.stringify({
             id: "777888999",
@@ -379,43 +372,19 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      fetchLog.push("  → NO MATCH (returning 404)");
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
     };
 
-    // Debug: Check DB state before calling
-    const { getDatabase: getDb } = await import("../../../src/lib/db/index.js");
-    const testDb = getDb();
-    const authRow = testDb
-      .query("SELECT * FROM auth WHERE id = 1")
-      .get() as Record<string, unknown> | null;
-    const aliasRows = testDb
-      .query("SELECT * FROM project_aliases")
-      .all() as Record<string, unknown>[];
-    const regionRows = testDb
-      .query("SELECT * FROM org_regions")
-      .all() as Record<string, unknown>[];
-    console.error("DEBUG: auth =", JSON.stringify(authRow));
-    console.error("DEBUG: aliases =", JSON.stringify(aliasRows));
-    console.error("DEBUG: regions =", JSON.stringify(regionRows));
-    console.error("DEBUG: SENTRY_CONFIG_DIR =", process.env.SENTRY_CONFIG_DIR);
-    console.error("DEBUG: cwd =", getConfigDir());
+    const result = await resolveOrgAndIssueId({
+      issueArg: "craft-g",
+      cwd: getConfigDir(),
+      command: "explain",
+    });
 
-    try {
-      const result = await resolveOrgAndIssueId({
-        issueArg: "craft-g",
-        cwd: getConfigDir(),
-        command: "explain",
-      });
-
-      expect(result.org).toBe("my-org");
-      expect(result.issueId).toBe("777888999");
-    } catch (error) {
-      console.error("FETCH LOG:", fetchLog.join("\n"));
-      throw error;
-    }
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("777888999");
   });
 
   test("throws when project not found in any org", async () => {
@@ -492,17 +461,13 @@ describe("resolveOrgAndIssueId", () => {
 
     await setOrgRegion("org2", DEFAULT_SENTRY_URL);
 
-    const fetchLog: string[] = [];
-
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
-      fetchLog.push(`FETCH: ${req.method} ${url}`);
 
       // getUserRegions - return empty regions to use fallback path
       if (url.includes("/users/me/regions/")) {
-        fetchLog.push("  → matched: /users/me/regions/");
         return new Response(JSON.stringify({ regions: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -515,7 +480,6 @@ describe("resolveOrgAndIssueId", () => {
         !url.includes("/projects/") &&
         !url.includes("/issues/")
       ) {
-        fetchLog.push("  → matched: listOrganizations");
         return new Response(
           JSON.stringify([
             { id: "1", slug: "org1", name: "Org 1" },
@@ -530,7 +494,6 @@ describe("resolveOrgAndIssueId", () => {
 
       // listProjects for org1 - has "common" project
       if (url.includes("organizations/org1/projects/")) {
-        fetchLog.push("  → matched: listProjects for org1");
         return new Response(
           JSON.stringify([
             {
@@ -549,7 +512,6 @@ describe("resolveOrgAndIssueId", () => {
 
       // listProjects for org2 - also has "common" project
       if (url.includes("organizations/org2/projects/")) {
-        fetchLog.push("  → matched: listProjects for org2");
         return new Response(
           JSON.stringify([
             { id: "456", slug: "common", name: "Common", platform: "python" },
@@ -561,29 +523,18 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      fetchLog.push("  → NO MATCH (returning 404)");
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
     };
 
-    try {
-      await resolveOrgAndIssueId({
+    await expect(
+      resolveOrgAndIssueId({
         issueArg: "common-g",
         cwd: getConfigDir(),
         command: "explain",
-      });
-      // If we get here, the function didn't throw — log and fail
-      console.error("FETCH LOG (no throw):", fetchLog.join("\n"));
-      throw new Error("Expected resolveOrgAndIssueId to throw but it resolved");
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (!msg.includes("multiple organizations")) {
-        console.error("FETCH LOG (wrong error):", fetchLog.join("\n"));
-        console.error("Actual error:", msg);
-      }
-      expect(msg).toContain("multiple organizations");
-    }
+      })
+    ).rejects.toThrow("multiple organizations");
   });
 
   test("short suffix auth error (401) propagates", async () => {
