@@ -48,8 +48,10 @@ describe("shouldSuppressNotification", () => {
 describe("getUpdateNotification", () => {
   let testConfigDir: string;
   let savedNoUpdateCheck: string | undefined;
+  let savedConfigDir: string | undefined;
 
   beforeEach(async () => {
+    savedConfigDir = process.env.SENTRY_CONFIG_DIR;
     testConfigDir = await createTestConfigDir("test-version-notif-");
     process.env.SENTRY_CONFIG_DIR = testConfigDir;
     // Save and clear the env var to test real implementation
@@ -58,7 +60,11 @@ describe("getUpdateNotification", () => {
   });
 
   afterEach(async () => {
-    delete process.env.SENTRY_CONFIG_DIR;
+    if (savedConfigDir !== undefined) {
+      process.env.SENTRY_CONFIG_DIR = savedConfigDir;
+    } else {
+      delete process.env.SENTRY_CONFIG_DIR;
+    }
     // Restore the env var
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
@@ -117,8 +123,10 @@ describe("abortPendingVersionCheck", () => {
 describe("maybeCheckForUpdateInBackground", () => {
   let testConfigDir: string;
   let savedNoUpdateCheck: string | undefined;
+  let savedConfigDir: string | undefined;
 
   beforeEach(async () => {
+    savedConfigDir = process.env.SENTRY_CONFIG_DIR;
     testConfigDir = await createTestConfigDir("test-version-bg-");
     process.env.SENTRY_CONFIG_DIR = testConfigDir;
     // Save and clear the env var to test real implementation
@@ -129,7 +137,11 @@ describe("maybeCheckForUpdateInBackground", () => {
   afterEach(async () => {
     // Abort any pending check to clean up
     abortPendingVersionCheck();
-    delete process.env.SENTRY_CONFIG_DIR;
+    if (savedConfigDir !== undefined) {
+      process.env.SENTRY_CONFIG_DIR = savedConfigDir;
+    } else {
+      delete process.env.SENTRY_CONFIG_DIR;
+    }
     // Restore the env var
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
