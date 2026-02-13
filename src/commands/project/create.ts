@@ -6,7 +6,12 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { createProject, tryGetPrimaryDsn } from "../../lib/api-client.js";
+import {
+  createProject,
+  listOrganizations,
+  listTeams,
+  tryGetPrimaryDsn,
+} from "../../lib/api-client.js";
 import { parseOrgPrefixedArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
@@ -82,6 +87,55 @@ function buildPlatformError(nameArg: string, platform?: string): string {
 }
 
 /**
+ * Disambiguate a 404 from the create project endpoint.
+ *
+ * The `/teams/{org}/{team}/projects/` endpoint returns 404 for both
+ * a bad org and a bad team. This helper calls `listTeams` to determine
+ * which is wrong, then throws an actionable error.
+ *
+ * Only called on the error path — no cost to the happy path.
+ */
+async function handleCreateProject404(
+  orgSlug: string,
+  teamSlug: string,
+  name: string,
+  platform: string
+): Promise<never> {
+  // If listTeams succeeds, the org is valid and the team is wrong
+  const teams = await listTeams(orgSlug).catch(() => null);
+
+  if (teams !== null) {
+    if (teams.length > 0) {
+      const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
+      throw new CliError(
+        `Team '${teamSlug}' not found in ${orgSlug}.\n\n` +
+          `Available teams:\n\n${teamList}\n\n` +
+          "Try:\n" +
+          `  sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`
+      );
+    }
+    throw new CliError(
+      `No teams found in ${orgSlug}.\n\n` +
+        "Create a team first, then try again."
+    );
+  }
+
+  // listTeams also failed — org is likely wrong
+  let orgHint = `Specify org explicitly: ${USAGE_HINT}`;
+  try {
+    const orgs = await listOrganizations();
+    if (orgs.length > 0) {
+      const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
+      orgHint = `Your organizations:\n\n${orgList}`;
+    }
+  } catch {
+    // Best-effort — if this also fails, use the generic hint
+  }
+
+  throw new CliError(`Organization '${orgSlug}' not found.\n\n${orgHint}`);
+}
+
+/**
  * Create a project with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
  */
@@ -105,11 +159,7 @@ async function createProjectWithErrors(
         throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
-        throw new CliError(
-          `Team '${teamSlug}' not found in ${orgSlug}.\n\n` +
-            "Check the team slug and try again:\n" +
-            `  sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`
-        );
+        await handleCreateProject404(orgSlug, teamSlug, name, platform);
       }
       throw new CliError(
         `Failed to create project '${name}' in ${orgSlug}.\n\n` +
