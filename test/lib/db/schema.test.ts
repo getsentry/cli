@@ -3,13 +3,8 @@
  */
 
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import {
-  CONFIG_DIR_ENV_VAR,
-  closeDatabase,
-} from "../../../src/lib/db/index.js";
 import {
   CURRENT_SCHEMA_VERSION,
   EXPECTED_COLUMNS,
@@ -21,6 +16,7 @@ import {
   repairSchema,
   tableExists,
 } from "../../../src/lib/db/schema.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 /**
  * Create a database with all tables but some missing (for testing repair).
@@ -63,45 +59,11 @@ function createPreMigrationDatabase(
   );
 }
 
-let testDir: string;
-let originalConfigDir: string | undefined;
-
-beforeEach(() => {
-  // Save original config dir
-  originalConfigDir = process.env[CONFIG_DIR_ENV_VAR];
-
-  // Close any existing database connection
-  closeDatabase();
-
-  // Create unique test directory
-  const baseDir = originalConfigDir ?? "/tmp/sentry-cli-test";
-  testDir = join(
-    baseDir,
-    `schema-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testDir, { recursive: true });
-  process.env[CONFIG_DIR_ENV_VAR] = testDir;
-});
-
-afterEach(() => {
-  closeDatabase();
-  // Restore original config dir
-  if (originalConfigDir) {
-    process.env[CONFIG_DIR_ENV_VAR] = originalConfigDir;
-  } else {
-    delete process.env[CONFIG_DIR_ENV_VAR];
-  }
-  // Clean up test directory
-  try {
-    rmSync(testDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
+const getTestDir = useTestConfigDir("schema-test-");
 
 describe("tableExists", () => {
   test("returns true for existing table", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     db.exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)");
 
     expect(tableExists(db, "test_table")).toBe(true);
@@ -109,7 +71,7 @@ describe("tableExists", () => {
   });
 
   test("returns false for non-existent table", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
 
     expect(tableExists(db, "nonexistent")).toBe(false);
     db.close();
@@ -118,7 +80,7 @@ describe("tableExists", () => {
 
 describe("hasColumn", () => {
   test("returns true for existing column", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     db.exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)");
 
     expect(hasColumn(db, "test_table", "id")).toBe(true);
@@ -127,7 +89,7 @@ describe("hasColumn", () => {
   });
 
   test("returns false for non-existent column", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     db.exec("CREATE TABLE test_table (id INTEGER PRIMARY KEY)");
 
     expect(hasColumn(db, "test_table", "missing_column")).toBe(false);
@@ -137,7 +99,7 @@ describe("hasColumn", () => {
 
 describe("getSchemaIssues", () => {
   test("returns empty array for healthy database", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     initSchema(db);
 
     const issues = getSchemaIssues(db);
@@ -146,7 +108,7 @@ describe("getSchemaIssues", () => {
   });
 
   test("detects missing table", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     // Create schema without dsn_cache using the helper
     createDatabaseWithMissingTables(db, ["dsn_cache"]);
 
@@ -161,7 +123,7 @@ describe("getSchemaIssues", () => {
   });
 
   test("detects missing column", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     // Create dsn_cache without v4 columns (pre-migration state)
     createPreMigrationDatabase(db, ["dsn_cache"]);
 
@@ -185,7 +147,7 @@ describe("getSchemaIssues", () => {
 
 describe("repairSchema", () => {
   test("creates missing tables", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
     db.query("INSERT INTO schema_version (version) VALUES (?)").run(1);
 
@@ -204,7 +166,7 @@ describe("repairSchema", () => {
   });
 
   test("adds missing columns", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     initSchema(db);
 
     // Remove migrated columns by recreating the table in pre-migration state
@@ -228,7 +190,7 @@ describe("repairSchema", () => {
   });
 
   test("returns empty result for healthy database", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     initSchema(db);
 
     const result = repairSchema(db);
@@ -239,7 +201,7 @@ describe("repairSchema", () => {
   });
 
   test("updates schema version after repair", () => {
-    const db = new Database(join(testDir, "test.db"));
+    const db = new Database(join(getTestDir(), "test.db"));
     db.exec("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)");
     db.query("INSERT INTO schema_version (version) VALUES (?)").run(1);
 

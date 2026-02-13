@@ -171,7 +171,7 @@ function printWelcomeMessage(
   log(`Installed sentry v${version} to ${binaryPath}`);
   log("");
   log("Get started:");
-  log("  sentry login       Authenticate with Sentry");
+  log("  sentry auth login  Authenticate with Sentry");
   log("  sentry --help      See all available commands");
   log("");
   log("https://cli.sentry.dev");

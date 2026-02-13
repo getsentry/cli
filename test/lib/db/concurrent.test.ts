@@ -8,8 +8,7 @@
  * CLI usage (e.g., multiple terminals, CI jobs, editor integrations).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
 import {
@@ -17,9 +16,9 @@ import {
   closeDatabase,
 } from "../../../src/lib/db/index.js";
 import { getCachedProject } from "../../../src/lib/db/project-cache.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 const WORKER_SCRIPT = join(import.meta.dir, "concurrent-worker.ts");
-const TEST_BASE_DIR = process.env[CONFIG_DIR_ENV_VAR]!;
 
 type WorkerResult = {
   workerId: string;
@@ -88,17 +87,9 @@ async function spawnWorkersConcurrently(
 }
 
 describe("concurrent database access", () => {
-  let testConfigDir: string;
+  const getConfigDir = useTestConfigDir("concurrent-");
 
   beforeEach(async () => {
-    closeDatabase();
-    testConfigDir = join(
-      TEST_BASE_DIR,
-      `concurrent-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    );
-    mkdirSync(testConfigDir, { recursive: true });
-    process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-
     // Pre-create the database before spawning workers.
     // This ensures schema initialization completes before concurrent access,
     // which avoids lock contention during initial table creation.
@@ -107,14 +98,10 @@ describe("concurrent database access", () => {
     closeDatabase();
   });
 
-  afterEach(() => {
-    closeDatabase();
-  });
-
   test("multiple processes can write DSN cache entries simultaneously", async () => {
     const workerCount = 5;
     const results = await spawnWorkersConcurrently(
-      testConfigDir,
+      getConfigDir(),
       workerCount,
       "write-dsn"
     );
@@ -124,7 +111,7 @@ describe("concurrent database access", () => {
 
     // Verify all entries are present in the database
     closeDatabase(); // Close to re-open with fresh connection
-    process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+    process.env[CONFIG_DIR_ENV_VAR] = getConfigDir();
 
     for (let i = 0; i < workerCount; i++) {
       const directory = `/test/project-${i}`;
@@ -137,7 +124,7 @@ describe("concurrent database access", () => {
   test("multiple processes can write project cache entries simultaneously", async () => {
     const workerCount = 5;
     const results = await spawnWorkersConcurrently(
-      testConfigDir,
+      getConfigDir(),
       workerCount,
       "write-project"
     );
@@ -147,7 +134,7 @@ describe("concurrent database access", () => {
 
     // Verify all entries are present
     closeDatabase();
-    process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+    process.env[CONFIG_DIR_ENV_VAR] = getConfigDir();
 
     for (let i = 0; i < workerCount; i++) {
       const cached = await getCachedProject("org-456", `proj-${i}`);
@@ -159,7 +146,7 @@ describe("concurrent database access", () => {
   test("mixed read/write operations from multiple processes succeed", async () => {
     const workerCount = 5;
     const results = await spawnWorkersConcurrently(
-      testConfigDir,
+      getConfigDir(),
       workerCount,
       "read-write"
     );
@@ -169,7 +156,7 @@ describe("concurrent database access", () => {
 
     // Each worker did 5 iterations, verify some entries
     closeDatabase();
-    process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
+    process.env[CONFIG_DIR_ENV_VAR] = getConfigDir();
 
     for (let w = 0; w < workerCount; w++) {
       for (let i = 0; i < 5; i++) {
@@ -185,7 +172,7 @@ describe("concurrent database access", () => {
     // Run a larger batch to increase contention likelihood
     const workerCount = 10;
     const results = await spawnWorkersConcurrently(
-      testConfigDir,
+      getConfigDir(),
       workerCount,
       "write-dsn"
     );

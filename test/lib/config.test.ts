@@ -4,8 +4,8 @@
  * Integration tests for SQLite-based config storage.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clearAuth,
@@ -38,37 +38,14 @@ import {
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "../../src/lib/db/project-cache.js";
+import { useTestConfigDir } from "../helpers.js";
 
 /**
- * Test isolation: Each test gets its own config directory within
- * the main test directory created by preload.ts.
- *
- * We don't delete test subdirectories in afterEach because tests
- * run in parallel and the deletion can race with other tests that
- * are still running. The parent test directory is cleaned up on
- * process exit by preload.ts.
+ * Test isolation: Each test gets its own config directory via useTestConfigDir().
+ * The helper creates a unique temp directory in beforeEach and restores
+ * the env var in afterEach (never deleting it).
  */
-const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
-
-beforeEach(() => {
-  // Close any previous database connection
-  closeDatabase();
-
-  // Create a unique subdirectory for this test
-  const testConfigDir = join(
-    testBaseDir,
-    `test-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-});
-
-afterEach(() => {
-  // Close database to release file handles
-  closeDatabase();
-  // Note: We don't delete the test directory here because tests run in parallel.
-  // The parent test directory is cleaned up on process exit by preload.ts.
-});
+const getConfigDir = useTestConfigDir("test-config-");
 
 describe("auth token management", () => {
   test("setAuthToken stores token", async () => {
@@ -565,7 +542,7 @@ describe("getDbPath", () => {
   test("returns the database file path", () => {
     const path = getDbPath();
     expect(path).toContain("cli.db");
-    expect(path).toContain(testBaseDir);
+    expect(path).toContain(getConfigDir());
   });
 });
 
