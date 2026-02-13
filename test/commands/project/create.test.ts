@@ -245,6 +245,28 @@ describe("project create", () => {
     expect(err.message).toContain("other-org");
   });
 
+  test("handles 404 with non-404 listTeams failure — shows generic error", async () => {
+    createProjectSpy.mockRejectedValue(
+      new ApiError("API request failed: 404 Not Found", 404)
+    );
+    // listTeams returns 403 (not 404) — can't tell if org or team is wrong
+    listTeamsSpy.mockRejectedValue(
+      new ApiError("API request failed: 403 Forbidden", 403)
+    );
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false, team: "backend" }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Failed to create project");
+    expect(err.message).toContain("may not exist, or you may lack access");
+    // Should NOT say "Organization not found" — we don't know that
+    expect(err.message).not.toContain("not found");
+  });
+
   test("handles 400 invalid platform with platform list", async () => {
     createProjectSpy.mockRejectedValue(
       new ApiError(
