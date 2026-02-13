@@ -206,7 +206,7 @@ describe("project create", () => {
     expect(err.message).toContain("sentry project view");
   });
 
-  test("handles 404 from createProject as team-not-found", async () => {
+  test("handles 404 from createProject as team-not-found with available teams", async () => {
     createProjectSpy.mockRejectedValue(
       new ApiError("API request failed: 404 Not Found", 404)
     );
@@ -219,7 +219,30 @@ describe("project create", () => {
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Team 'engineering' not found");
+    expect(err.message).toContain("Available teams:");
+    expect(err.message).toContain("engineering");
     expect(err.message).toContain("--team <team-slug>");
+  });
+
+  test("handles 404 from createProject with bad org — shows user's orgs", async () => {
+    createProjectSpy.mockRejectedValue(
+      new ApiError("API request failed: 404 Not Found", 404)
+    );
+    // listTeams also fails → org is bad
+    listTeamsSpy.mockRejectedValue(
+      new ApiError("API request failed: 404 Not Found", 404)
+    );
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false, team: "backend" }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Organization 'acme-corp' not found");
+    expect(err.message).toContain("Your organizations");
+    expect(err.message).toContain("other-org");
   });
 
   test("handles 400 invalid platform with platform list", async () => {
