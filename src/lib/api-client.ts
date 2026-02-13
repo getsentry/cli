@@ -405,8 +405,10 @@ function extractLinkAttr(segment: string, attr: string): string | undefined {
  * covers even the largest organizations. Override with SENTRY_MAX_PAGINATION_PAGES
  * env var for edge cases.
  */
-const MAX_PAGINATION_PAGES =
-  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50;
+const MAX_PAGINATION_PAGES = Math.max(
+  1,
+  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
+);
 
 /**
  * Paginated API response with cursor metadata.
