@@ -671,6 +671,7 @@ describe("handleOrgAll", () => {
     const text = output();
     expect(text).toContain("No matching projects on this page");
     expect(text).toContain("-c last");
+    expect(text).toContain("--platform rust");
   });
 
   test("empty page without hasMore shows no projects", async () => {
@@ -723,6 +724,27 @@ describe("handleOrgAll", () => {
 
     const text = output();
     expect(text).toContain("more available");
+    expect(text).toContain("-c last");
+    expect(text).not.toContain("--platform");
+  });
+
+  test("hasMore with platform includes --platform in hint", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects, {
+      hasMore: true,
+      nextCursor: "1735689600000:100:0",
+    });
+    const { writer, output } = createCapture();
+
+    await handleOrgAll({
+      stdout: writer,
+      org: "test-org",
+      flags: { limit: 30, json: false, platform: "python" },
+      contextKey: "type:org:test-org:platform:python",
+      cursor: undefined,
+    });
+
+    const text = output();
+    expect(text).toContain("--platform python");
     expect(text).toContain("-c last");
   });
 });

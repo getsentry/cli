@@ -421,6 +421,12 @@ export type OrgAllOptions = {
   cursor: string | undefined;
 };
 
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(org: string, platform?: string): string {
+  const base = `sentry project list ${org}/ -c last`;
+  return platform ? `${base} --platform ${platform}` : base;
+}
+
 /**
  * Handle org-all mode (e.g., sentry/).
  * Uses cursor pagination for efficient page-by-page listing.
@@ -460,7 +466,7 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   if (filtered.length === 0) {
     if (hasMore) {
       stdout.write(
-        `No matching projects on this page. Try the next page: sentry project list ${org}/ -c last\n`
+        `No matching projects on this page. Try the next page: ${nextPageHint(org, flags.platform)}\n`
       );
     } else if (flags.platform) {
       stdout.write(
@@ -476,7 +482,7 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
 
   if (hasMore) {
     stdout.write(`\nShowing ${filtered.length} projects (more available)\n`);
-    stdout.write(`Next page: sentry project list ${org}/ -c last\n`);
+    stdout.write(`Next page: ${nextPageHint(org, flags.platform)}\n`);
   } else {
     stdout.write(`\nShowing ${filtered.length} projects\n`);
   }
