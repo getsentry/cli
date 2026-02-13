@@ -614,19 +614,42 @@ export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
 export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectWithOrg[]> {
+  // DEBUG
+  console.error("DEBUG findProjectsBySlug: searching for", projectSlug);
   const orgs = await listOrganizations();
+  // DEBUG
+  console.error(
+    "DEBUG findProjectsBySlug: listOrganizations returned",
+    orgs.length,
+    "orgs:",
+    JSON.stringify(orgs.map((o) => o.slug))
+  );
 
   // Search in parallel for performance
   const searchResults = await Promise.all(
     orgs.map(async (org) => {
       try {
         const projects = await listProjects(org.slug);
+        // DEBUG
+        console.error(
+          `DEBUG findProjectsBySlug: listProjects(${org.slug}) returned`,
+          projects.length,
+          "projects:",
+          JSON.stringify(projects.map((p) => p.slug))
+        );
         const match = projects.find((p) => p.slug === projectSlug);
         if (match) {
           return { ...match, orgSlug: org.slug };
         }
         return null;
       } catch (error) {
+        // DEBUG
+        console.error(
+          `DEBUG findProjectsBySlug: listProjects(${org.slug}) threw:`,
+          error instanceof Error
+            ? `${error.constructor.name}: ${error.message}`
+            : String(error)
+        );
         // Re-throw auth errors - user needs to login
         if (error instanceof AuthError) {
           throw error;

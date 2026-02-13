@@ -133,11 +133,33 @@ async function resolveProjectSearch(
     cwd
   );
   if (aliasResult) {
+    // DEBUG
+    console.error(
+      "DEBUG resolveProjectSearch: alias hit for",
+      projectSlug,
+      "→",
+      JSON.stringify(aliasResult)
+    );
     return aliasResult;
   }
 
+  // DEBUG
+  console.error(
+    "DEBUG resolveProjectSearch: no alias for",
+    projectSlug,
+    ", calling findProjectsBySlug"
+  );
+
   // 2. Search for project across all accessible orgs
   const projects = await findProjectsBySlug(projectSlug.toLowerCase());
+
+  // DEBUG
+  console.error(
+    "DEBUG resolveProjectSearch: findProjectsBySlug returned",
+    projects.length,
+    "projects:",
+    JSON.stringify(projects.map((p) => ({ slug: p.slug, org: p.orgSlug })))
+  );
 
   if (projects.length === 0) {
     throw new ContextError(`Project '${projectSlug}' not found`, commandHint, [

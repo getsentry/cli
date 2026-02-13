@@ -385,6 +385,24 @@ describe("resolveOrgAndIssueId", () => {
       });
     };
 
+    // Debug: Check DB state before calling
+    const { getDatabase: getDb } = await import("../../../src/lib/db/index.js");
+    const testDb = getDb();
+    const authRow = testDb
+      .query("SELECT * FROM auth WHERE id = 1")
+      .get() as Record<string, unknown> | null;
+    const aliasRows = testDb
+      .query("SELECT * FROM project_aliases")
+      .all() as Record<string, unknown>[];
+    const regionRows = testDb
+      .query("SELECT * FROM org_regions")
+      .all() as Record<string, unknown>[];
+    console.error("DEBUG: auth =", JSON.stringify(authRow));
+    console.error("DEBUG: aliases =", JSON.stringify(aliasRows));
+    console.error("DEBUG: regions =", JSON.stringify(regionRows));
+    console.error("DEBUG: SENTRY_CONFIG_DIR =", process.env.SENTRY_CONFIG_DIR);
+    console.error("DEBUG: cwd =", getConfigDir());
+
     try {
       const result = await resolveOrgAndIssueId({
         issueArg: "craft-g",
