@@ -115,9 +115,16 @@ async function handleCreateProject404(
   name: string,
   platform: string
 ): Promise<never> {
-  // If listTeams succeeds, the org is valid and the team is wrong
-  const teams = await listTeams(orgSlug).catch(() => null);
+  let teams: Awaited<ReturnType<typeof listTeams>> | null = null;
+  let listTeamsError: unknown = null;
 
+  try {
+    teams = await listTeams(orgSlug);
+  } catch (error) {
+    listTeamsError = error;
+  }
+
+  // listTeams succeeded → org is valid, team is wrong
   if (teams !== null) {
     if (teams.length > 0) {
       const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
@@ -134,19 +141,29 @@ async function handleCreateProject404(
     );
   }
 
-  // listTeams also failed — org is likely wrong
-  let orgHint = `Specify org explicitly: ${USAGE_HINT}`;
-  try {
-    const orgs = await listOrganizations();
-    if (orgs.length > 0) {
-      const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
-      orgHint = `Your organizations:\n\n${orgList}`;
+  // listTeams returned 404 → org doesn't exist
+  if (listTeamsError instanceof ApiError && listTeamsError.status === 404) {
+    let orgHint = `Specify org explicitly: ${USAGE_HINT}`;
+    try {
+      const orgs = await listOrganizations();
+      if (orgs.length > 0) {
+        const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
+        orgHint = `Your organizations:\n\n${orgList}`;
+      }
+    } catch {
+      // Best-effort — if this also fails, use the generic hint
     }
-  } catch {
-    // Best-effort — if this also fails, use the generic hint
+
+    throw new CliError(`Organization '${orgSlug}' not found.\n\n${orgHint}`);
   }
 
-  throw new CliError(`Organization '${orgSlug}' not found.\n\n${orgHint}`);
+  // listTeams failed for other reasons (403, 5xx, network) — can't disambiguate
+  throw new CliError(
+    `Failed to create project '${name}' in ${orgSlug}.\n\n` +
+      "The organization or team may not exist, or you may lack access.\n\n" +
+      "Try:\n" +
+      `  sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`
+  );
 }
 
 /**
