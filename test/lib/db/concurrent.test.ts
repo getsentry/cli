@@ -19,7 +19,6 @@ import {
 import { getCachedProject } from "../../../src/lib/db/project-cache.js";
 
 const WORKER_SCRIPT = join(import.meta.dir, "concurrent-worker.ts");
-const TEST_BASE_DIR = process.env[CONFIG_DIR_ENV_VAR]!;
 
 type WorkerResult = {
   workerId: string;
@@ -89,11 +88,14 @@ async function spawnWorkersConcurrently(
 
 describe("concurrent database access", () => {
   let testConfigDir: string;
+  let savedConfigDir: string | undefined;
 
   beforeEach(async () => {
     closeDatabase();
+    savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
+    const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
     testConfigDir = join(
-      TEST_BASE_DIR,
+      testBaseDir,
       `concurrent-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     mkdirSync(testConfigDir, { recursive: true });
@@ -109,6 +111,11 @@ describe("concurrent database access", () => {
 
   afterEach(() => {
     closeDatabase();
+    if (savedConfigDir !== undefined) {
+      process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+    } else {
+      delete process.env[CONFIG_DIR_ENV_VAR];
+    }
   });
 
   test("multiple processes can write DSN cache entries simultaneously", async () => {

@@ -39,9 +39,13 @@ const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-detector-config");
 
 describe("DSN Detector (New Module)", () => {
   let testDir: string;
+  let savedConfigDir: string | undefined;
+  let savedSentryDsn: string | undefined;
 
   beforeEach(async () => {
     testDir = createTempDir();
+    savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
+    savedSentryDsn = process.env.SENTRY_DSN;
     process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
     mkdirSync(TEST_CONFIG_DIR, { recursive: true });
     // Clear any cached DSN for the test directory
@@ -51,7 +55,17 @@ describe("DSN Detector (New Module)", () => {
   });
 
   afterEach(() => {
-    delete process.env.SENTRY_DSN;
+    // Restore env vars
+    if (savedConfigDir !== undefined) {
+      process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+    } else {
+      delete process.env[CONFIG_DIR_ENV_VAR];
+    }
+    if (savedSentryDsn !== undefined) {
+      process.env.SENTRY_DSN = savedSentryDsn;
+    } else {
+      delete process.env.SENTRY_DSN;
+    }
     cleanupDir(testDir);
     cleanupDir(TEST_CONFIG_DIR);
   });

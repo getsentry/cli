@@ -23,8 +23,10 @@ import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
+let savedConfigDir: string | undefined;
 
 beforeEach(async () => {
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   testConfigDir = await createTestConfigDir("test-multiregion-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
@@ -42,6 +44,11 @@ afterEach(async () => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
   closeDatabase();
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
   await cleanupTestDir(testConfigDir);
 });
 

@@ -18,15 +18,23 @@ import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 
 // Use a unique test config directory
 const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-cache");
+let savedConfigDir: string | undefined;
 
 describe("DSN Cache", () => {
   beforeEach(() => {
     // Set up test config directory
+    savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
     process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
     mkdirSync(TEST_CONFIG_DIR, { recursive: true });
   });
 
   afterEach(() => {
+    // Restore config dir
+    if (savedConfigDir !== undefined) {
+      process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+    } else {
+      delete process.env[CONFIG_DIR_ENV_VAR];
+    }
     // Clean up test config directory
     try {
       rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });

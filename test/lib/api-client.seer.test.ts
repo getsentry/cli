@@ -18,8 +18,10 @@ import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 // Test config directory
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
+let savedConfigDir: string | undefined;
 
 beforeEach(async () => {
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   testConfigDir = await createTestConfigDir("test-seer-api-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
@@ -35,6 +37,11 @@ beforeEach(async () => {
 afterEach(async () => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
   await cleanupTestDir(testConfigDir);
 });
 

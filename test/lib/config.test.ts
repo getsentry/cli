@@ -48,11 +48,16 @@ import {
  * are still running. The parent test directory is cleaned up on
  * process exit by preload.ts.
  */
-const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
+let savedConfigDir: string | undefined;
 
 beforeEach(() => {
   // Close any previous database connection
   closeDatabase();
+
+  // Read the base dir at hook time (not module scope) to avoid race conditions
+  // with other test files that may modify the env var during parallel execution
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
+  const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
 
   // Create a unique subdirectory for this test
   const testConfigDir = join(
@@ -66,8 +71,12 @@ beforeEach(() => {
 afterEach(() => {
   // Close database to release file handles
   closeDatabase();
-  // Note: We don't delete the test directory here because tests run in parallel.
-  // The parent test directory is cleaned up on process exit by preload.ts.
+  // Restore the original config dir set by preload.ts
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
 });
 
 describe("auth token management", () => {
@@ -565,7 +574,7 @@ describe("getDbPath", () => {
   test("returns the database file path", () => {
     const path = getDbPath();
     expect(path).toContain("cli.db");
-    expect(path).toContain(testBaseDir);
+    expect(path).toContain(process.env[CONFIG_DIR_ENV_VAR]!);
   });
 });
 

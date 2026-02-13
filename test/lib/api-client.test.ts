@@ -14,18 +14,12 @@ import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 // Test config directory
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
-
-/**
- * Tracks requests made during a test
- */
-type RequestLog = {
-  url: string;
-  method: string;
-  authorization: string | null;
-  isRetry: boolean;
-};
+let savedConfigDir: string | undefined;
+let savedClientId: string | undefined;
 
 beforeEach(async () => {
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
+  savedClientId = process.env.SENTRY_CLIENT_ID;
   testConfigDir = await createTestConfigDir("test-api-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
@@ -37,6 +31,25 @@ beforeEach(async () => {
 
   // Set up initial auth token with a refresh token so 401 retry can get a new token
   await setAuthToken("initial-token", 3600, "test-refresh-token");
+});
+
+afterEach(async () => {
+  // Restore original fetch
+  globalThis.fetch = originalFetch;
+
+  // Restore env vars
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
+  if (savedClientId !== undefined) {
+    process.env.SENTRY_CLIENT_ID = savedClientId;
+  } else {
+    delete process.env.SENTRY_CLIENT_ID;
+  }
+
+  await cleanupTestDir(testConfigDir);
 });
 
 afterEach(async () => {

@@ -49,8 +49,10 @@ describe("buildCommandHint", () => {
 
 let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
+let savedConfigDir: string | undefined;
 
 beforeEach(async () => {
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
   // Use isolateProjectRoot to prevent DSN detection from scanning the real project
   testConfigDir = await createTestConfigDir("test-issue-utils-", {
     isolateProjectRoot: true,
@@ -67,6 +69,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
   await cleanupTestDir(testConfigDir);
 });
 

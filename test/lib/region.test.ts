@@ -16,10 +16,14 @@ import {
 } from "../../src/lib/region.js";
 import { getSentryBaseUrl } from "../../src/lib/sentry-urls.js";
 
-const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
+let savedConfigDir: string | undefined;
+let savedSentryUrl: string | undefined;
 
 beforeEach(async () => {
   closeDatabase();
+  savedConfigDir = process.env[CONFIG_DIR_ENV_VAR];
+  savedSentryUrl = process.env.SENTRY_URL;
+  const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
   const testConfigDir = join(
     testBaseDir,
     `region-resolve-${Math.random().toString(36).slice(2)}`
@@ -34,7 +38,16 @@ beforeEach(async () => {
 
 afterEach(() => {
   closeDatabase();
-  delete process.env.SENTRY_URL;
+  if (savedConfigDir !== undefined) {
+    process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
+  } else {
+    delete process.env[CONFIG_DIR_ENV_VAR];
+  }
+  if (savedSentryUrl !== undefined) {
+    process.env.SENTRY_URL = savedSentryUrl;
+  } else {
+    delete process.env.SENTRY_URL;
+  }
 });
 
 describe("getSentryBaseUrl", () => {
