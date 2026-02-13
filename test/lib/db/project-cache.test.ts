@@ -16,8 +16,10 @@ import {
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 
 let testConfigDir: string;
+let savedConfigDir: string | undefined;
 
 beforeEach(async () => {
+  savedConfigDir = process.env.SENTRY_CONFIG_DIR;
   testConfigDir = await createTestConfigDir("test-project-cache-");
   process.env.SENTRY_CONFIG_DIR = testConfigDir;
 });
@@ -25,7 +27,11 @@ beforeEach(async () => {
 afterEach(async () => {
   // Close database to release file handles before cleanup
   closeDatabase();
-  delete process.env.SENTRY_CONFIG_DIR;
+  if (savedConfigDir !== undefined) {
+    process.env.SENTRY_CONFIG_DIR = savedConfigDir;
+  } else {
+    delete process.env.SENTRY_CONFIG_DIR;
+  }
   await cleanupTestDir(testConfigDir);
 });
 
