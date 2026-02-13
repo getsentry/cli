@@ -1,4 +1,4 @@
-name: CI
+name: Build
 
 on:
   push:
@@ -47,7 +47,18 @@ jobs:
     if: needs.changes.outputs.skill == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Get auth token
+        id: token
+        # Fork PRs don't have access to secrets, so this step is skipped
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+        uses: actions/create-github-app-token@v2.2.1
+        with:
+          app-id: ${{ vars.SENTRY_RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.SENTRY_RELEASE_BOT_PRIVATE_KEY }}
       - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.token.outputs.token || github.token }}
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: oven-sh/setup-bun@v2
       - uses: actions/cache@v4
         id: cache
@@ -60,33 +71,18 @@ jobs:
         id: check
         run: bun run check:skill
         continue-on-error: true
-      - name: Output regeneration instructions
-        if: steps.check.outcome == 'failure'
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+      - name: Auto-commit regenerated SKILL.md
+        if: steps.check.outcome == 'failure' && steps.token.outcome == 'success'
         run: |
-          echo "## SKILL.md is out of date" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The CLI commands have changed but \`plugins/sentry-cli/skills/sentry-cli/SKILL.md\` hasn't been updated." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### To fix, run locally and commit:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "bun run generate:skill" >> $GITHUB_STEP_SUMMARY
-          echo "git add plugins/sentry-cli/skills/sentry-cli/SKILL.md" >> $GITHUB_STEP_SUMMARY
-          echo "git commit -m 'chore: Regenerate SKILL.md'" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$IS_FORK" != "true" ]; then
-            WORKFLOW_URL="https://github.com/${GITHUB_REPOSITORY}/actions/workflows/generate-skill.yml/dispatch?ref=main&inputs%5Bbranch%5D=${BRANCH_NAME}"
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Or [trigger the Generate SKILL.md workflow](${WORKFLOW_URL}) to auto-commit the fix." >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "::error::SKILL.md is out of date. See job summary for fix options."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add plugins/sentry-cli/skills/sentry-cli/SKILL.md
+          git commit -m "chore: regenerate SKILL.md"
+          git push
+      - name: Fail for fork PRs with stale SKILL.md
+        if: steps.check.outcome == 'failure' && steps.token.outcome != 'success'
+        run: |
+          echo "::error::SKILL.md is out of date. Run 'bun run generate:skill' locally and commit the result."
           exit 1
 
   lint:

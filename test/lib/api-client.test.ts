@@ -8,11 +8,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import { useTestConfigDir } from "../helpers.js";
 
-// Test config directory
-let testConfigDir: string;
+useTestConfigDir("test-api-");
+
 let originalFetch: typeof globalThis.fetch;
 
 /**
@@ -26,9 +25,6 @@ type RequestLog = {
 };
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-api-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-
   // Set required env var for OAuth refresh
   process.env.SENTRY_CLIENT_ID = "test-client-id";
 
@@ -39,11 +35,9 @@ beforeEach(async () => {
   await setAuthToken("initial-token", 3600, "test-refresh-token");
 });
 
-afterEach(async () => {
+afterEach(() => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
-
-  await cleanupTestDir(testConfigDir);
 });
 
 /**

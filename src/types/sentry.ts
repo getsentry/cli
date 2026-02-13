@@ -258,6 +258,11 @@ export const SentryIssueSchema = z
     // Release information
     firstRelease: ReleaseSchema.nullable().optional(),
     lastRelease: ReleaseSchema.nullable().optional(),
+    /**
+     * Seer AI fixability score (0-1). Higher = easier to fix automatically.
+     * `null` when Seer has not analyzed this issue; absent when the org has Seer disabled.
+     */
+    seerFixabilityScore: z.number().nullable().optional(),
   })
   .passthrough();
 

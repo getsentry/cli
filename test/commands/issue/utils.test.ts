@@ -13,9 +13,8 @@ import {
 } from "../../../src/commands/issue/utils.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
   test("suggests <org>/ID for numeric IDs", () => {
@@ -47,15 +46,13 @@ describe("buildCommandHint", () => {
   });
 });
 
-let testConfigDir: string;
+const getConfigDir = useTestConfigDir("test-issue-utils-", {
+  isolateProjectRoot: true,
+});
+
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  // Use isolateProjectRoot to prevent DSN detection from scanning the real project
-  testConfigDir = await createTestConfigDir("test-issue-utils-", {
-    isolateProjectRoot: true,
-  });
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
   // Pre-populate region cache for orgs used in tests to avoid region resolution API calls
@@ -65,9 +62,8 @@ beforeEach(async () => {
   await setOrgRegion("org1", DEFAULT_SENTRY_URL);
 });
 
-afterEach(async () => {
+afterEach(() => {
   globalThis.fetch = originalFetch;
-  await cleanupTestDir(testConfigDir);
 });
 
 describe("resolveOrgAndIssueId", () => {
@@ -106,7 +102,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "123456789",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow("Organization");
@@ -144,7 +140,7 @@ describe("resolveOrgAndIssueId", () => {
 
     const result = await resolveOrgAndIssueId({
       issueArg: "my-org/PROJECT-ABC",
-      cwd: testConfigDir,
+      cwd: getConfigDir(),
       command: "explain",
     });
 
@@ -196,7 +192,7 @@ describe("resolveOrgAndIssueId", () => {
 
     const result = await resolveOrgAndIssueId({
       issueArg: "f-g",
-      cwd: testConfigDir,
+      cwd: getConfigDir(),
       command: "explain",
     });
 
@@ -237,7 +233,7 @@ describe("resolveOrgAndIssueId", () => {
 
     const result = await resolveOrgAndIssueId({
       issueArg: "org1/dashboard-4y",
-      cwd: testConfigDir,
+      cwd: getConfigDir(),
       command: "explain",
     });
 
@@ -280,7 +276,7 @@ describe("resolveOrgAndIssueId", () => {
 
     const result = await resolveOrgAndIssueId({
       issueArg: "G",
-      cwd: testConfigDir,
+      cwd: getConfigDir(),
       command: "explain",
     });
 
@@ -298,7 +294,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "G",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow("Cannot resolve issue suffix");
@@ -314,6 +310,14 @@ describe("resolveOrgAndIssueId", () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
+
+      // getUserRegions - return empty regions to use fallback path
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // listOrganizations call
       if (
@@ -372,7 +376,7 @@ describe("resolveOrgAndIssueId", () => {
 
     const result = await resolveOrgAndIssueId({
       issueArg: "craft-g",
-      cwd: testConfigDir,
+      cwd: getConfigDir(),
       command: "explain",
     });
 
@@ -390,6 +394,14 @@ describe("resolveOrgAndIssueId", () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
+
+      // getUserRegions - return empty regions to use fallback path
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // listOrganizations call
       if (
@@ -432,7 +444,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "nonexistent-g",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow("not found");
@@ -450,6 +462,14 @@ describe("resolveOrgAndIssueId", () => {
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
+
+      // getUserRegions - return empty regions to use fallback path
+      if (url.includes("/users/me/regions/")) {
+        return new Response(JSON.stringify({ regions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // listOrganizations call
       if (
@@ -509,7 +529,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "common-g",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow("multiple organizations");
@@ -529,7 +549,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "G",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow();
@@ -549,7 +569,7 @@ describe("resolveOrgAndIssueId", () => {
     await expect(
       resolveOrgAndIssueId({
         issueArg: "G",
-        cwd: testConfigDir,
+        cwd: getConfigDir(),
         command: "explain",
       })
     ).rejects.toThrow("500");

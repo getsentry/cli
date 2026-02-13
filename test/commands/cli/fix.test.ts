@@ -3,19 +3,16 @@
  */
 
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { describe, expect, mock, test } from "bun:test";
 import { join } from "node:path";
 import { fixCommand } from "../../../src/commands/cli/fix.js";
-import {
-  CONFIG_DIR_ENV_VAR,
-  closeDatabase,
-} from "../../../src/lib/db/index.js";
+import { closeDatabase } from "../../../src/lib/db/index.js";
 import {
   EXPECTED_TABLES,
   generatePreMigrationTableDDL,
   initSchema,
 } from "../../../src/lib/db/schema.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 /**
  * Generate DDL for creating a database with pre-migration tables.
@@ -63,46 +60,12 @@ function createDatabaseWithMissingTables(
   ).run();
 }
 
-let testDir: string;
-let originalConfigDir: string | undefined;
-
-beforeEach(() => {
-  // Save original config dir
-  originalConfigDir = process.env[CONFIG_DIR_ENV_VAR];
-
-  // Close any existing database connection
-  closeDatabase();
-
-  // Create unique test directory
-  const baseDir = originalConfigDir ?? "/tmp/sentry-cli-test";
-  testDir = join(
-    baseDir,
-    `fix-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testDir, { recursive: true });
-  process.env[CONFIG_DIR_ENV_VAR] = testDir;
-});
-
-afterEach(() => {
-  closeDatabase();
-  // Restore original config dir
-  if (originalConfigDir) {
-    process.env[CONFIG_DIR_ENV_VAR] = originalConfigDir;
-  } else {
-    delete process.env[CONFIG_DIR_ENV_VAR];
-  }
-  // Clean up test directory
-  try {
-    rmSync(testDir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
+const getTestDir = useTestConfigDir("fix-test-");
 
 describe("sentry cli fix", () => {
   test("reports no issues for healthy database", async () => {
     // Create healthy database
-    const db = new Database(join(testDir, "cli.db"));
+    const db = new Database(join(getTestDir(), "cli.db"));
     initSchema(db);
     db.close();
 
@@ -123,7 +86,7 @@ describe("sentry cli fix", () => {
 
   test("detects and reports missing columns in dry-run mode", async () => {
     // Create database with pre-migration tables (missing v4 columns)
-    const db = new Database(join(testDir, "cli.db"));
+    const db = new Database(join(getTestDir(), "cli.db"));
     createPreMigrationDatabase(db);
     db.close();
 
@@ -147,7 +110,7 @@ describe("sentry cli fix", () => {
 
   test("fixes missing columns when not in dry-run mode", async () => {
     // Create database with pre-migration tables (missing v4 columns)
-    const db = new Database(join(testDir, "cli.db"));
+    const db = new Database(join(getTestDir(), "cli.db"));
     createPreMigrationDatabase(db);
     db.close();
 
@@ -168,7 +131,7 @@ describe("sentry cli fix", () => {
 
     // Verify the column was actually added
     closeDatabase();
-    const verifyDb = new Database(join(testDir, "cli.db"));
+    const verifyDb = new Database(join(getTestDir(), "cli.db"));
     const cols = verifyDb.query("PRAGMA table_info(dsn_cache)").all() as Array<{
       name: string;
     }>;
@@ -187,7 +150,7 @@ describe("sentry cli fix", () => {
   // that was previously missing tables (now fixed by auto-repair at startup).
   test("handles database that was auto-repaired at startup", async () => {
     // Create database missing dsn_cache - initSchema will create it when command runs
-    const db = new Database(join(testDir, "cli.db"));
+    const db = new Database(join(getTestDir(), "cli.db"));
     createDatabaseWithMissingTables(db, ["dsn_cache"]);
     db.close();
 
@@ -209,7 +172,7 @@ describe("sentry cli fix", () => {
 
     // Verify the table was created (by initSchema auto-repair)
     closeDatabase();
-    const verifyDb = new Database(join(testDir, "cli.db"));
+    const verifyDb = new Database(join(getTestDir(), "cli.db"));
     const tables = verifyDb
       .query(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='dsn_cache'"
@@ -220,7 +183,7 @@ describe("sentry cli fix", () => {
   });
 
   test("shows database path in output", async () => {
-    const db = new Database(join(testDir, "cli.db"));
+    const db = new Database(join(getTestDir(), "cli.db"));
     initSchema(db);
     db.close();
 
@@ -236,6 +199,6 @@ describe("sentry cli fix", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Database:");
-    expect(output).toContain(testDir);
+    expect(output).toContain(getTestDir());
   });
 });

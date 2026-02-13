@@ -9,8 +9,8 @@ artifactProvider:
   name: github
   config:
     artifacts:
-      ci.yml:
-        - 'sentry-*'
+      Build:
+        - '/^sentry-.*$/'
         - 'npm-package'
         - 'gh-pages'
 targets:

@@ -4,8 +4,7 @@
  * Tests for caching project information by orgId:projectId or DSN public key.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { closeDatabase } from "../../../src/lib/db/index.js";
+import { describe, expect, test } from "bun:test";
 import {
   clearProjectCache,
   getCachedProject,
@@ -13,27 +12,9 @@ import {
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "../../../src/lib/db/project-cache.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
-let savedConfigDir: string | undefined;
-
-beforeEach(async () => {
-  savedConfigDir = process.env.SENTRY_CONFIG_DIR;
-  testConfigDir = await createTestConfigDir("test-project-cache-");
-  process.env.SENTRY_CONFIG_DIR = testConfigDir;
-});
-
-afterEach(async () => {
-  // Close database to release file handles before cleanup
-  closeDatabase();
-  if (savedConfigDir !== undefined) {
-    process.env.SENTRY_CONFIG_DIR = savedConfigDir;
-  } else {
-    delete process.env.SENTRY_CONFIG_DIR;
-  }
-  await cleanupTestDir(testConfigDir);
-});
+useTestConfigDir("test-project-cache-");
 
 describe("getCachedProject", () => {
   test("returns undefined when no cache entry exists", async () => {

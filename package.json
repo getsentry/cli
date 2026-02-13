@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.9.0-dev.0",
+  "version": "0.10.0-dev.0",
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "type": "module",
   "bin": {
@@ -59,7 +59,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "bun@1.3.3",
+  "packageManager": "bun@1.3.9",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
     "@sentry/core@10.38.0": "patches/@sentry%2Fcore@10.38.0.patch"

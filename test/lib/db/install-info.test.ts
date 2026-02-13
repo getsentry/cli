@@ -2,33 +2,15 @@
  * Install Info Storage Tests
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { closeDatabase } from "../../../src/lib/db/index.js";
+import { describe, expect, test } from "bun:test";
 import {
   clearInstallInfo,
   getInstallInfo,
   setInstallInfo,
 } from "../../../src/lib/db/install-info.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
-let savedConfigDir: string | undefined;
-
-beforeEach(async () => {
-  savedConfigDir = process.env.SENTRY_CONFIG_DIR;
-  testConfigDir = await createTestConfigDir("test-install-info-");
-  process.env.SENTRY_CONFIG_DIR = testConfigDir;
-});
-
-afterEach(async () => {
-  closeDatabase();
-  if (savedConfigDir !== undefined) {
-    process.env.SENTRY_CONFIG_DIR = savedConfigDir;
-  } else {
-    delete process.env.SENTRY_CONFIG_DIR;
-  }
-  await cleanupTestDir(testConfigDir);
-});
+useTestConfigDir("test-install-info-");
 
 describe("getInstallInfo", () => {
   test("returns null when no install info stored", () => {

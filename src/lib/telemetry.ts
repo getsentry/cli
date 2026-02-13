@@ -50,10 +50,35 @@ async function initTelemetryContext(): Promise<void> {
 }
 
 /**
+ * Mark the active session as crashed.
+ *
+ * Checks both current scope and isolation scope since processSessionIntegration
+ * stores the session on the isolation scope. Called when a command error
+ * propagates through withTelemetry — the SDK auto-marks crashes for truly
+ * uncaught exceptions (mechanism.handled === false), but command errors need
+ * explicit marking.
+ *
+ * @internal Exported for testing
+ */
+export function markSessionCrashed(): void {
+  const session =
+    Sentry.getCurrentScope().getSession() ??
+    Sentry.getIsolationScope().getSession();
+  if (session) {
+    session.status = "crashed";
+  }
+}
+
+/**
  * Wrap CLI execution with telemetry tracking.
  *
- * Creates a Sentry session and span for the command execution.
- * Captures any unhandled exceptions and reports them.
+ * Creates a Sentry span for the command execution and captures exceptions.
+ * Session lifecycle is managed by the SDK's processSessionIntegration
+ * (started during Sentry.init) and a beforeExit handler (registered in
+ * initSentry) that ends healthy sessions and flushes events. This ensures
+ * sessions are reliably tracked even for unhandled rejections and other
+ * paths that bypass this function's try/catch.
+ *
  * Telemetry can be disabled via SENTRY_CLI_NO_TELEMETRY=1 env var.
  *
  * @param callback - The CLI execution function to wrap, receives the span for naming
@@ -70,9 +95,6 @@ export async function withTelemetry<T>(
 
   // Initialize user and instance context
   await initTelemetryContext();
-
-  Sentry.startSession();
-  Sentry.captureSession();
 
   try {
     return await Sentry.startSpanManual(
@@ -92,31 +114,47 @@ export async function withTelemetry<T>(
       e instanceof AuthError && e.reason === "not_authenticated";
     if (!isExpectedAuthState) {
       Sentry.captureException(e);
-      const session = Sentry.getCurrentScope().getSession();
-      if (session) {
-        session.status = "crashed";
-      }
+      markSessionCrashed();
     }
     throw e;
-  } finally {
-    Sentry.endSession();
-    // Flush with a timeout to ensure events are sent before process exits
-    try {
-      await client.flush(3000);
-    } catch {
-      // Ignore flush errors - telemetry should never block CLI
-    }
   }
 }
 
 /**
- * Initialize Sentry for telemetry.
+ * Create a beforeExit handler that ends healthy sessions and flushes events.
  *
- * @param enabled - Whether telemetry is enabled
- * @returns The Sentry client, or undefined if initialization failed
+ * The SDK's processSessionIntegration only ends non-OK sessions (crashed/errored).
+ * This handler complements it by ending OK sessions (clean exit → 'exited')
+ * and flushing pending events. Includes a re-entry guard since flush is async
+ * and causes beforeExit to re-fire when complete.
+ *
+ * @param client - The Sentry client to flush
+ * @returns A handler function for process.on("beforeExit")
  *
  * @internal Exported for testing
  */
+export function createBeforeExitHandler(client: Sentry.BunClient): () => void {
+  let isFlushing = false;
+  return () => {
+    if (isFlushing) {
+      return;
+    }
+    isFlushing = true;
+
+    const session = Sentry.getIsolationScope().getSession();
+    if (session?.status === "ok") {
+      Sentry.endSession();
+    }
+
+    // Flush pending events before exit. Convert PromiseLike to Promise
+    // for proper error handling. The async work causes beforeExit to
+    // re-fire when complete, which the isFlushing guard handles.
+    Promise.resolve(client.flush(3000)).catch(() => {
+      // Ignore flush errors — telemetry should never block CLI exit
+    });
+  };
+}
+
 /**
  * Integrations to exclude for CLI.
  * These add overhead without benefit for short-lived CLI processes.
@@ -128,6 +166,17 @@ const EXCLUDED_INTEGRATIONS = new Set([
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
 ]);
 
+/** Current beforeExit handler, tracked so it can be replaced on re-init */
+let currentBeforeExitHandler: (() => void) | null = null;
+
+/**
+ * Initialize Sentry for telemetry.
+ *
+ * @param enabled - Whether telemetry is enabled
+ * @returns The Sentry client, or undefined if initialization failed
+ *
+ * @internal Exported for testing
+ */
 export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   const environment = process.env.NODE_ENV ?? "development";
 
@@ -162,14 +211,48 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   });
 
   if (client?.getOptions().enabled) {
-    // Tag whether running as bun binary or node (npm package)
-    // This is CLI-specific context not provided by the Context integration
-    const runtime =
-      typeof process.versions.bun !== "undefined" ? "bun" : "node";
+    const isBun = typeof process.versions.bun !== "undefined";
+    const runtime = isBun ? "bun" : "node";
+
+    // Fix runtime context: @sentry/bun v10 delegates to @sentry/node's NodeClient,
+    // which always overrides runtime to { name: 'node', version: process.version }.
+    // Under Bun, process.version returns the Node.js compat version (e.g. v24.3.0),
+    // not the Bun version. Override it so event.contexts.runtime is correct and
+    // Sentry's server-side tag promotion creates an accurate 'runtime' tag.
+    // TODO: Remove once fixed upstream: https://github.com/getsentry/sentry-javascript/issues/19269
+    if (isBun) {
+      // biome-ignore lint/suspicious/noExplicitAny: accessing internal SDK option not exposed in NodeClientOptions
+      const options = client.getOptions() as any;
+      options.runtime = {
+        name: "bun",
+        version: process.versions.bun as string,
+      };
+    }
+
+    // Tag whether running as bun binary or node (npm package).
+    // Kept alongside the SDK's promoted 'runtime' tag for explicit signaling
+    // and backward compatibility with existing dashboards/alerts.
     Sentry.setTag("cli.runtime", runtime);
 
     // Tag whether targeting self-hosted Sentry (not SaaS)
     Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
+
+    // End healthy sessions and flush events when the event loop drains.
+    // The SDK's processSessionIntegration starts a session during init and
+    // registers its own beforeExit handler that ends non-OK (crashed/errored)
+    // sessions. We complement it by ending OK sessions (clean exit → 'exited')
+    // and flushing pending events. This covers unhandled rejections and other
+    // paths that bypass withTelemetry's try/catch.
+    // Ref: https://nodejs.org/api/process.html#event-beforeexit
+    //
+    // Replace previous handler on re-init (e.g., auto-login retry calls
+    // withTelemetry → initSentry twice) to avoid duplicate handlers with
+    // independent re-entry guards and stale client references.
+    if (currentBeforeExitHandler) {
+      process.removeListener("beforeExit", currentBeforeExitHandler);
+    }
+    currentBeforeExitHandler = createBeforeExitHandler(client);
+    process.on("beforeExit", currentBeforeExitHandler);
   }
 
   return client;
