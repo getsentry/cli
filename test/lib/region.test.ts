@@ -5,27 +5,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
   isMultiRegionEnabled,
   resolveOrgRegion,
 } from "../../src/lib/region.js";
 import { getSentryBaseUrl } from "../../src/lib/sentry-urls.js";
+import { useTestConfigDir } from "../helpers.js";
 
-const testBaseDir = process.env[CONFIG_DIR_ENV_VAR]!;
+useTestConfigDir("region-resolve-");
 
 beforeEach(async () => {
-  closeDatabase();
-  const testConfigDir = join(
-    testBaseDir,
-    `region-resolve-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(testConfigDir, { recursive: true });
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   // Clear any SENTRY_URL override for most tests
   delete process.env.SENTRY_URL;
   // Set up auth token for API tests
@@ -33,7 +24,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  closeDatabase();
   delete process.env.SENTRY_URL;
 });
 
