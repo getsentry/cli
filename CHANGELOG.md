@@ -1,6 +1,25 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.10.0
+
+### New Features ✨
+
+- (formatters) Add Seer fixability score to issue list and detail views by @betegon in [#234](https://github.com/getsentry/cli/pull/234)
+- (team) Add `team list` command by @betegon in [#238](https://github.com/getsentry/cli/pull/238)
+
+### Bug Fixes 🐛
+
+#### Telemetry
+
+- Use SDK session integration instead of manual management by @BYK in [#232](https://github.com/getsentry/cli/pull/232)
+- Correct runtime context for Bun binary by @BYK in [#231](https://github.com/getsentry/cli/pull/231)
+
+#### Other
+
+- (setup) Use correct auth command in install welcome message by @betegon in [#241](https://github.com/getsentry/cli/pull/241)
+- (tests) Centralize test config dir lifecycle to prevent env var pollution by @BYK in [#242](https://github.com/getsentry/cli/pull/242)
+
 ## 0.9.1
 
 ### New Features ✨
