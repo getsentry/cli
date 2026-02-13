@@ -114,34 +114,34 @@ const platformArb = constantFrom(
 // Tests
 
 describe("buildContextKey", () => {
-  test("org-all mode produces org: prefix", () => {
+  test("org-all mode produces type:org:<slug>", () => {
     fcAssert(
       property(slugArb, (org) => {
         const parsed: ParsedOrgProject = { type: "org-all", org };
         const key = buildContextKey(parsed, {});
-        expect(key).toBe(`org:${org}`);
+        expect(key).toBe(`type:org:${org}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("auto-detect mode produces 'auto'", () => {
+  test("auto-detect mode produces 'type:auto'", () => {
     const parsed: ParsedOrgProject = { type: "auto-detect" };
-    expect(buildContextKey(parsed, {})).toBe("auto");
+    expect(buildContextKey(parsed, {})).toBe("type:auto");
   });
 
-  test("explicit mode produces type:explicit", () => {
+  test("explicit mode produces type:explicit:<org>/<project>", () => {
     fcAssert(
       property(tuple(slugArb, slugArb), ([org, project]) => {
         const parsed: ParsedOrgProject = { type: "explicit", org, project };
         const key = buildContextKey(parsed, {});
-        expect(key).toBe("type:explicit");
+        expect(key).toBe(`type:explicit:${org}/${project}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("project-search mode produces type:project-search", () => {
+  test("project-search mode produces type:search:<slug>", () => {
     fcAssert(
       property(slugArb, (projectSlug) => {
         const parsed: ParsedOrgProject = {
@@ -149,7 +149,7 @@ describe("buildContextKey", () => {
           projectSlug,
         };
         const key = buildContextKey(parsed, {});
-        expect(key).toBe("type:project-search");
+        expect(key).toBe(`type:search:${projectSlug}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -160,7 +160,7 @@ describe("buildContextKey", () => {
       property(tuple(slugArb, platformArb), ([org, platform]) => {
         const parsed: ParsedOrgProject = { type: "org-all", org };
         const key = buildContextKey(parsed, { platform });
-        expect(key).toBe(`org:${org}|platform:${platform}`);
+        expect(key).toBe(`type:org:${org}|platform:${platform}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -562,7 +562,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
@@ -584,7 +584,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: true },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
@@ -602,7 +602,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: true },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
@@ -622,16 +622,21 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const cached = getPaginationCursor(PAGINATION_KEY, "org:test-org");
+    const cached = getPaginationCursor(PAGINATION_KEY, "type:org:test-org");
     expect(cached).toBe("1735689600000:100:0");
   });
 
   test("no hasMore clears cached cursor", async () => {
-    setPaginationCursor(PAGINATION_KEY, "org:test-org", "old-cursor", 300_000);
+    setPaginationCursor(
+      PAGINATION_KEY,
+      "type:org:test-org",
+      "old-cursor",
+      300_000
+    );
 
     globalThis.fetch = mockProjectFetch(sampleProjects);
     const { writer } = createCapture();
@@ -640,11 +645,11 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const cached = getPaginationCursor(PAGINATION_KEY, "org:test-org");
+    const cached = getPaginationCursor(PAGINATION_KEY, "type:org:test-org");
     expect(cached).toBeUndefined();
   });
 
@@ -659,7 +664,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false, platform: "rust" },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
@@ -676,7 +681,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
@@ -695,7 +700,7 @@ describe("handleOrgAll", () => {
       stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false },
-      contextKey: "org:test-org",
+      contextKey: "type:org:test-org",
       cursor: undefined,
     });
 

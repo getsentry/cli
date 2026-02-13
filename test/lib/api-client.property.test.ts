@@ -48,19 +48,18 @@ const prevLinkArb = cursorArb.map(
 const nonNextRelArb = constantFrom("previous", "first", "last", "self");
 
 describe("property: parseLinkHeader", () => {
-  test("null or empty header returns hasMore=false, no cursor", () => {
+  test("null or empty header returns no cursor", () => {
     const result1 = parseLinkHeader(null);
-    expect(result1).toEqual({ hasMore: false });
+    expect(result1).toEqual({});
 
     const result2 = parseLinkHeader("");
-    expect(result2).toEqual({ hasMore: false });
+    expect(result2).toEqual({});
   });
 
-  test("valid next link with results=true returns cursor and hasMore=true", () => {
+  test("valid next link with results=true returns cursor", () => {
     fcAssert(
       property(nextLinkWithResultsArb, (header) => {
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(true);
         expect(result.nextCursor).toBeDefined();
         expect(result.nextCursor).toMatch(/^\d+:\d+:\d+$/);
       }),
@@ -68,22 +67,20 @@ describe("property: parseLinkHeader", () => {
     );
   });
 
-  test("next link with results=false returns hasMore=false, no cursor", () => {
+  test("next link with results=false returns no cursor", () => {
     fcAssert(
       property(nextLinkNoResultsArb, (header) => {
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(false);
         expect(result.nextCursor).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("previous-only link returns hasMore=false (ignores non-next)", () => {
+  test("previous-only link returns no cursor (ignores non-next)", () => {
     fcAssert(
       property(prevLinkArb, (header) => {
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(false);
         expect(result.nextCursor).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -96,7 +93,6 @@ describe("property: parseLinkHeader", () => {
         // Sentry sends both prev and next separated by comma
         const header = `${prev}, ${next}`;
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(true);
         expect(result.nextCursor).toBeDefined();
         expect(result.nextCursor).toMatch(/^\d+:\d+:\d+$/);
       }),
@@ -115,30 +111,30 @@ describe("property: parseLinkHeader", () => {
     );
   });
 
-  test("missing cursor attribute returns hasMore=false", () => {
+  test("missing cursor attribute returns no cursor", () => {
     const header =
       '<https://sentry.io/api/0/test/>; rel="next"; results="true"';
     const result = parseLinkHeader(header);
-    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBeUndefined();
   });
 
-  test("missing results attribute returns hasMore=false", () => {
+  test("missing results attribute returns no cursor", () => {
     fcAssert(
       property(cursorArb, (cursor) => {
         const header = `<https://sentry.io/api/0/test/>; rel="next"; cursor="${cursor}"`;
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(false);
+        expect(result.nextCursor).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("non-next rel with results=true returns hasMore=false", () => {
+  test("non-next rel with results=true returns no cursor", () => {
     fcAssert(
       property(tuple(nonNextRelArb, cursorArb), ([rel, cursor]) => {
         const header = `<https://sentry.io/api/0/test/>; rel="${rel}"; results="true"; cursor="${cursor}"`;
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(false);
+        expect(result.nextCursor).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -152,19 +148,17 @@ describe("property: parseLinkHeader", () => {
           `<https://sentry.io/api/0/test/?cursor=${nextCursor}>; rel="next"; results="true"; cursor="${nextCursor}"`,
         ].join(", ");
         const result = parseLinkHeader(header);
-        expect(result.hasMore).toBe(true);
         expect(result.nextCursor).toBe(nextCursor);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("random strings without expected attributes return hasMore=false", () => {
+  test("random strings without expected attributes return no cursor", () => {
     fcAssert(
       property(string({ minLength: 0, maxLength: 200 }), (header) => {
         // Any random string should not crash and should return a valid result
         const result = parseLinkHeader(header);
-        expect(typeof result.hasMore).toBe("boolean");
         if (result.nextCursor !== undefined) {
           expect(typeof result.nextCursor).toBe("string");
         }
@@ -178,7 +172,6 @@ describe("property: parseLinkHeader", () => {
       '<https://us.sentry.io/api/0/organizations/sentry/projects/?cursor=1735689600000:0:1>; rel="previous"; results="false"; cursor="1735689600000:0:1", ' +
       '<https://us.sentry.io/api/0/organizations/sentry/projects/?cursor=1735689600000:100:0>; rel="next"; results="true"; cursor="1735689600000:100:0"';
     const result = parseLinkHeader(header);
-    expect(result.hasMore).toBe(true);
     expect(result.nextCursor).toBe("1735689600000:100:0");
   });
 
@@ -187,7 +180,6 @@ describe("property: parseLinkHeader", () => {
       '<https://us.sentry.io/api/0/organizations/sentry/projects/?cursor=1735689600000:0:1>; rel="previous"; results="true"; cursor="1735689600000:0:1", ' +
       '<https://us.sentry.io/api/0/organizations/sentry/projects/?cursor=1735689600000:200:0>; rel="next"; results="false"; cursor="1735689600000:200:0"';
     const result = parseLinkHeader(header);
-    expect(result.hasMore).toBe(false);
     expect(result.nextCursor).toBeUndefined();
   });
 });

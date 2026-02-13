@@ -34,7 +34,7 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
   try {
     // First try the default URL - it may route correctly
     const baseUrl = getSentryBaseUrl();
-    const org = await apiRequestToRegion(
+    const { data: org } = await apiRequestToRegion(
       baseUrl,
       `/organizations/${orgSlug}/`,
       { schema: SentryOrganizationSchema }

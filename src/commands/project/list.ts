@@ -172,6 +172,8 @@ export function writeRows(options: WriteRowsOptions): void {
  * Build a context key for pagination cursor validation.
  * Captures the query parameters that affect result ordering,
  * so cursors from different queries are not accidentally reused.
+ *
+ * Format: `type:<kind>[:<arg>][|platform:<name>]`
  */
 export function buildContextKey(
   parsed: ParsedOrgProject,
@@ -180,13 +182,21 @@ export function buildContextKey(
   const parts: string[] = [];
   switch (parsed.type) {
     case "org-all":
-      parts.push(`org:${parsed.org}`);
+      parts.push(`type:org:${parsed.org}`);
       break;
     case "auto-detect":
-      parts.push("auto");
+      parts.push("type:auto");
       break;
-    default:
-      parts.push(`type:${parsed.type}`);
+    case "explicit":
+      parts.push(`type:explicit:${parsed.org}/${parsed.project}`);
+      break;
+    case "project-search":
+      parts.push(`type:search:${parsed.projectSlug}`);
+      break;
+    default: {
+      const _exhaustive: never = parsed;
+      parts.push(`type:unknown:${String(_exhaustive)}`);
+    }
   }
   if (flags.platform) {
     parts.push(`platform:${flags.platform}`);
@@ -288,7 +298,7 @@ export async function handleAutoDetect(
   } = await resolveOrgsForAutoDetect(cwd);
 
   let allProjects: ProjectWithOrg[];
-  let hasMore = false;
+  let nextCursor: string | undefined;
 
   // Fast path: single org, no platform filter — fetch only one page
   const canUsePaginated = orgsToFetch.length === 1 && !flags.platform;
@@ -299,7 +309,7 @@ export async function handleAutoDetect(
       perPage: flags.limit,
     });
     allProjects = response.data.map((p) => ({ ...p, orgSlug: org }));
-    hasMore = response.hasMore;
+    nextCursor = response.nextCursor;
   } else if (orgsToFetch.length > 0) {
     const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
     allProjects = results.flat();
@@ -325,8 +335,8 @@ export async function handleAutoDetect(
 
   displayProjectTable(stdout, limited);
 
-  if (filtered.length > limited.length || hasMore) {
-    if (hasMore && orgsToFetch.length === 1) {
+  if (filtered.length > limited.length || nextCursor) {
+    if (nextCursor && orgsToFetch.length === 1) {
       const org = orgsToFetch[0] as string;
       stdout.write(
         `\nShowing ${limited.length} projects (more available). ` +
@@ -429,15 +439,17 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
 
   const filtered = filterByPlatform(projects, flags.platform);
 
+  const hasMore = !!response.nextCursor;
+
   // Update cursor cache for `--cursor last` support
-  if (response.hasMore && response.nextCursor) {
+  if (response.nextCursor) {
     setPaginationCursor(PAGINATION_KEY, contextKey, response.nextCursor);
   } else {
     clearPaginationCursor(PAGINATION_KEY, contextKey);
   }
 
   if (flags.json) {
-    const output = response.hasMore
+    const output = hasMore
       ? { data: filtered, nextCursor: response.nextCursor, hasMore: true }
       : { data: filtered, hasMore: false };
     writeJson(stdout, output);
@@ -445,7 +457,7 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   }
 
   if (filtered.length === 0) {
-    if (response.hasMore) {
+    if (hasMore) {
       stdout.write(
         `No matching projects on this page. Try the next page: sentry project list ${org}/ -c last\n`
       );
@@ -457,7 +469,7 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
 
   displayProjectTable(stdout, filtered);
 
-  if (response.hasMore) {
+  if (hasMore) {
     stdout.write(`\nShowing ${filtered.length} projects (more available)\n`);
     stdout.write(`Next page: sentry project list ${org}/ -c last\n`);
   } else {
@@ -550,7 +562,11 @@ export const listCommand = buildCommand({
       "  sentry project list <project>      # find project across all orgs\n\n" +
       "Pagination:\n" +
       "  sentry project list <org>/ -c last  # continue from last page\n" +
-      "  sentry project list <org>/ -c <cursor>  # resume at specific cursor",
+      "  sentry project list <org>/ -c <cursor>  # resume at specific cursor\n\n" +
+      "Filtering and output:\n" +
+      "  sentry project list --platform javascript  # filter by platform\n" +
+      "  sentry project list --limit 50              # show more results\n" +
+      "  sentry project list --json                  # output as JSON",
   },
   parameters: {
     positional: {

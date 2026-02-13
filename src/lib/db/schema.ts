@@ -365,7 +365,14 @@ export type RepairResult = {
   failed: string[];
 };
 
-/** Tables that require custom DDL (not auto-generated from TABLE_SCHEMAS) */
+/**
+ * Tables that require hand-written DDL instead of auto-generation from TABLE_SCHEMAS.
+ *
+ * The auto-generation via `columnDefsToDDL` only supports single-column primary keys
+ * (via `primaryKey: true` on a column). Tables with composite primary keys (like
+ * `pagination_cursors` with `PRIMARY KEY (command_key, context)`) need custom DDL
+ * because SQLite requires composite PKs as a table-level constraint, not a column attribute.
+ */
 const CUSTOM_DDL_TABLES = new Set(["pagination_cursors"]);
 
 function repairPaginationCursorsTable(

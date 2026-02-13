@@ -374,26 +374,49 @@ async function createRegionApiClient(regionUrl: string): Promise<KyInstance> {
   });
 }
 
-/** Regex to extract rel attribute from Link header */
-const LINK_REL_REGEX = /rel="([^"]+)"/;
+/**
+ * Extract the value of a named attribute from a Link header segment.
+ * Parses `key="value"` pairs using string operations instead of regex
+ * for robustness and performance.
+ *
+ * @param segment - A single Link header segment (e.g., `<url>; rel="next"; cursor="abc"`)
+ * @param attr - The attribute name to extract (e.g., "rel", "cursor")
+ * @returns The attribute value, or undefined if not found
+ */
+function extractLinkAttr(segment: string, attr: string): string | undefined {
+  const prefix = `${attr}="`;
+  const start = segment.indexOf(prefix);
+  if (start === -1) {
+    return;
+  }
+  const valueStart = start + prefix.length;
+  const end = segment.indexOf('"', valueStart);
+  if (end === -1) {
+    return;
+  }
+  return segment.slice(valueStart, end);
+}
 
-/** Regex to extract results attribute from Link header */
-const LINK_RESULTS_REGEX = /results="([^"]+)"/;
+/**
+ * Maximum number of pages to follow when auto-paginating.
+ *
+ * Safety limit to prevent runaway pagination when the API returns an unexpectedly
+ * large number of pages. At 100 items/page this allows up to 5,000 items, which
+ * covers even the largest organizations. Override with SENTRY_MAX_PAGINATION_PAGES
+ * env var for edge cases.
+ */
+const MAX_PAGINATION_PAGES =
+  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50;
 
-/** Regex to extract cursor attribute from Link header */
-const LINK_CURSOR_REGEX = /cursor="([^"]+)"/;
-
-/** Maximum number of pages to follow when auto-paginating (safety limit) */
-const MAX_PAGINATION_PAGES = 50;
-
-/** Paginated API response with cursor metadata */
+/**
+ * Paginated API response with cursor metadata.
+ * More pages exist when `nextCursor` is defined.
+ */
 export type PaginatedResponse<T> = {
   /** The response data */
   data: T;
   /** Cursor for fetching the next page (undefined if no more pages) */
   nextCursor?: string;
-  /** Whether more results exist beyond this page */
-  hasMore: boolean;
 };
 
 /**
@@ -407,42 +430,35 @@ export type PaginatedResponse<T> = {
  */
 export function parseLinkHeader(header: string | null): {
   nextCursor?: string;
-  hasMore: boolean;
 } {
   if (!header) {
-    return { hasMore: false };
+    return {};
   }
 
   // Split on comma to get individual link entries
   for (const part of header.split(",")) {
-    const relMatch = part.match(LINK_REL_REGEX);
-    const resultsMatch = part.match(LINK_RESULTS_REGEX);
-    const cursorMatch = part.match(LINK_CURSOR_REGEX);
+    const rel = extractLinkAttr(part, "rel");
+    const results = extractLinkAttr(part, "results");
+    const cursor = extractLinkAttr(part, "cursor");
 
-    if (
-      relMatch?.[1] === "next" &&
-      resultsMatch?.[1] === "true" &&
-      cursorMatch?.[1]
-    ) {
-      return { nextCursor: cursorMatch[1], hasMore: true };
+    if (rel === "next" && results === "true" && cursor) {
+      return { nextCursor: cursor };
     }
   }
 
-  return { hasMore: false };
+  return {};
 }
 
 /**
- * Make an authenticated request to a specific Sentry region,
- * returning both parsed data and raw response headers.
- *
- * Used internally by pagination helpers that need access to the Link header.
+ * Make an authenticated request to a specific Sentry region.
+ * Returns both parsed response data and raw headers for pagination support.
  *
  * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
  * @param endpoint - API endpoint path (e.g., "/organizations/")
  * @param options - Request options
  * @returns Parsed data and response headers
  */
-async function apiRequestToRegionWithHeaders<T>(
+export async function apiRequestToRegion<T>(
   regionUrl: string,
   endpoint: string,
   options: ApiRequestOptions<T> = {}
@@ -484,26 +500,6 @@ async function apiRequestToRegionWithHeaders<T>(
 }
 
 /**
- * Make an authenticated request to a specific Sentry region.
- *
- * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
- * @param endpoint - API endpoint path (e.g., "/organizations/")
- * @param options - Request options
- */
-export async function apiRequestToRegion<T>(
-  regionUrl: string,
-  endpoint: string,
-  options: ApiRequestOptions<T> = {}
-): Promise<T> {
-  const { data } = await apiRequestToRegionWithHeaders(
-    regionUrl,
-    endpoint,
-    options
-  );
-  return data;
-}
-
-/**
  * Get the list of regions the user has organization membership in.
  * This endpoint is on the control silo (sentry.io) and returns all regions.
  *
@@ -511,12 +507,12 @@ export async function apiRequestToRegion<T>(
  */
 export async function getUserRegions(): Promise<Region[]> {
   // Always use control silo for this endpoint
-  const response = await apiRequestToRegion<UserRegionsResponse>(
+  const { data } = await apiRequestToRegion<UserRegionsResponse>(
     CONTROL_SILO_URL,
     "/users/me/regions/",
     { schema: UserRegionsResponseSchema }
   );
-  return response.regions;
+  return data.regions;
 }
 
 /**
@@ -525,16 +521,17 @@ export async function getUserRegions(): Promise<Region[]> {
  * @param regionUrl - The region's base URL
  * @returns Organizations in that region
  */
-export function listOrganizationsInRegion(
+export async function listOrganizationsInRegion(
   regionUrl: string
 ): Promise<SentryOrganization[]> {
-  return apiRequestToRegion<SentryOrganization[]>(
+  const { data } = await apiRequestToRegion<SentryOrganization[]>(
     regionUrl,
     "/organizations/",
     {
       schema: z.array(SentryOrganizationSchema),
     }
   );
+  return data;
 }
 
 /**
@@ -583,13 +580,13 @@ async function orgScopedRequestPaginated<T>(
   }
   const { resolveOrgRegion } = await import("./region.js");
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegionWithHeaders(
+  const { data, headers } = await apiRequestToRegion(
     regionUrl,
     endpoint,
     options
   );
-  const { nextCursor, hasMore } = parseLinkHeader(headers.get("link"));
-  return { data, nextCursor, hasMore };
+  const { nextCursor } = parseLinkHeader(headers.get("link"));
+  return { data, nextCursor };
 }
 
 /**
@@ -635,7 +632,7 @@ async function orgScopedPaginateAll<T>(
     });
     allResults.push(...response.data);
 
-    if (!(response.hasMore && response.nextCursor)) {
+    if (!response.nextCursor) {
       break;
     }
     cursor = response.nextCursor;
@@ -918,7 +915,7 @@ export async function findProjectByDsnKey(
   const results = await Promise.all(
     regions.map(async (region) => {
       try {
-        return await apiRequestToRegion<SentryProject[]>(
+        const { data } = await apiRequestToRegion<SentryProject[]>(
           region.url,
           "/projects/",
           {
@@ -926,6 +923,7 @@ export async function findProjectByDsnKey(
             schema: z.array(SentryProjectSchema),
           }
         );
+        return data;
       } catch {
         return [];
       }
