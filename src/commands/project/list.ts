@@ -280,6 +280,29 @@ export function displayProjectTable(
 }
 
 /**
+ * Fetch a single page of projects from one org, with error handling
+ * that mirrors `fetchOrgProjectsSafe` — re-throws auth errors but
+ * silently returns empty for other failures (403, network errors).
+ */
+async function fetchPaginatedSafe(
+  org: string,
+  limit: number
+): Promise<{ projects: ProjectWithOrg[]; nextCursor?: string }> {
+  try {
+    const response = await listProjectsPaginated(org, { perPage: limit });
+    return {
+      projects: response.data.map((p) => ({ ...p, orgSlug: org })),
+      nextCursor: response.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return { projects: [] };
+  }
+}
+
+/**
  * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
  * apply client-side filtering and limiting.
  *
@@ -302,15 +325,13 @@ export async function handleAutoDetect(
   let nextCursor: string | undefined;
 
   // Fast path: single org, no platform filter — fetch only one page
-  const canUsePaginated = orgsToFetch.length === 1 && !flags.platform;
-
-  if (canUsePaginated) {
-    const org = orgsToFetch[0] as string;
-    const response = await listProjectsPaginated(org, {
-      perPage: flags.limit,
-    });
-    allProjects = response.data.map((p) => ({ ...p, orgSlug: org }));
-    nextCursor = response.nextCursor;
+  if (orgsToFetch.length === 1 && !flags.platform) {
+    const result = await fetchPaginatedSafe(
+      orgsToFetch[0] as string,
+      flags.limit
+    );
+    allProjects = result.projects;
+    nextCursor = result.nextCursor;
   } else if (orgsToFetch.length > 0) {
     const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
     allProjects = results.flat();

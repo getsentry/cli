@@ -1336,6 +1336,44 @@ describe("handleAutoDetect", () => {
     expect(text).not.toContain("--limit");
   });
 
+  test("fast path: non-auth API errors return empty results instead of throwing", async () => {
+    await setDefaults("test-org");
+    // Mock returns 403 for projects endpoint (stale org, no access)
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/projects/")) {
+        return new Response(JSON.stringify({ detail: "Forbidden" }), {
+          status: 403,
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed).toEqual([]);
+  });
+
+  test("fast path: AuthError still propagates", async () => {
+    await setDefaults("test-org");
+    // Clear auth so getAuthToken() throws AuthError before any fetch
+    clearAuth();
+    const { writer } = createCapture();
+
+    await expect(
+      handleAutoDetect(writer, "/tmp/test-project", {
+        limit: 30,
+        json: true,
+      })
+    ).rejects.toThrow(AuthError);
+  });
+
   test("slow path: uses full fetch when platform filter is active", async () => {
     // Set default org — but platform filter forces slow path
     await setDefaults("test-org");

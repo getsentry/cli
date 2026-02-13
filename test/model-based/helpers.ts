@@ -19,7 +19,9 @@ import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
  * @returns Cleanup function to call after test completes
  */
 export function createIsolatedDbContext(): () => void {
-  let testBaseDir = process.env[CONFIG_DIR_ENV_VAR];
+  const originalEnvValue = process.env[CONFIG_DIR_ENV_VAR];
+
+  let testBaseDir = originalEnvValue;
   if (!testBaseDir) {
     // Fallback: create a temp base dir (matches preload.ts pattern)
     testBaseDir = join(homedir(), `.sentry-cli-test-model-${process.pid}`);
@@ -40,8 +42,12 @@ export function createIsolatedDbContext(): () => void {
 
   return () => {
     closeDatabase();
-    // Restore original base dir for next test
-    process.env[CONFIG_DIR_ENV_VAR] = testBaseDir;
+    // Restore the original env var value, preserving undefined if it was unset
+    if (originalEnvValue === undefined) {
+      delete process.env[CONFIG_DIR_ENV_VAR];
+    } else {
+      process.env[CONFIG_DIR_ENV_VAR] = originalEnvValue;
+    }
   };
 }
 
