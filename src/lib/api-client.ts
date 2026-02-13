@@ -11,6 +11,7 @@
 import {
   listAnOrganization_sIssues,
   listAnOrganization_sProjects,
+  listAnOrganization_sTeams,
   listAProject_sClientKeys,
   queryExploreEventsInTableFormat,
   resolveAShortId,
@@ -36,6 +37,7 @@ import {
   type SentryOrganization,
   type SentryProject,
   type SentryRepository,
+  type SentryTeam,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -456,6 +458,22 @@ export async function listRepositories(
     regionUrl,
     `/organizations/${orgSlug}/repos/`
   );
+}
+
+/**
+ * List teams in an organization.
+ * Uses region-aware routing for multi-region support.
+ */
+export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sTeams({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+
+  const data = unwrapResult(result, "Failed to list teams");
+  return data as unknown as SentryTeam[];
 }
 
 /**

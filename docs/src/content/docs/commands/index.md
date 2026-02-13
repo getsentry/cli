@@ -13,6 +13,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`cli`](./cli/) | CLI-related commands (feedback, upgrade) |
 | [`org`](./org/) | Organization operations |
 | [`project`](./project/) | Project operations |
+| [`team`](./team/) | Team operations |
 | [`issue`](./issue/) | Issue tracking |
 | [`event`](./event/) | Event inspection |
 | [`log`](./log/) | Log viewing and streaming |
