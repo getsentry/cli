@@ -423,4 +423,24 @@ describe("project create", () => {
     expect(err.message).toContain("123");
     expect(err.message).toContain("Your organizations");
   });
+
+  test("resolveTeam with non-404 listTeams failure shows generic error", async () => {
+    // listTeams returns 403 — org may exist, but user lacks access
+    listTeamsSpy.mockRejectedValue(
+      new ApiError("API request failed: 403 Forbidden", 403)
+    );
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Could not list teams");
+    expect(err.message).toContain("403");
+    expect(err.message).toContain("may not exist, or you may lack access");
+    // Should NOT say "Organization is required" — we don't know that
+    expect(err.message).not.toContain("is required");
+  });
 });
