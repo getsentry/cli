@@ -810,3 +810,22 @@ export const SentryRepositorySchema = z
   .passthrough();
 
 export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
+
+// Team
+
+/** A team in a Sentry organization */
+export const SentryTeamSchema = z
+  .object({
+    // Core identifiers (required)
+    id: z.string(),
+    slug: z.string(),
+    name: z.string(),
+    // Optional metadata
+    dateCreated: z.string().optional(),
+    isMember: z.boolean().optional(),
+    teamRole: z.string().nullable().optional(),
+    memberCount: z.number().optional(),
+  })
+  .passthrough();
+
+export type SentryTeam = z.infer<typeof SentryTeamSchema>;
