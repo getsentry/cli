@@ -440,6 +440,33 @@ List repositories
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
 
+### Team
+
+Work with Sentry teams
+
+#### `sentry team list <org>`
+
+List teams
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
+- `--json - Output JSON`
+
+**Examples:**
+
+```bash
+# Auto-detect organization or list all
+sentry team list
+
+# List teams in a specific organization
+sentry team list <org-slug>
+
+# Limit results
+sentry team list --limit 10
+
+sentry team list --json
+```
+
 ### Log
 
 View Sentry logs
@@ -592,6 +619,18 @@ List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
+- `--json - Output JSON`
+
+### Teams
+
+List teams
+
+#### `sentry teams <org>`
+
+List teams
+
+**Flags:**
+- `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
 
 ### Logs
