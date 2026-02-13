@@ -622,7 +622,6 @@ export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
  */
 export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
   return orgScopedRequest<SentryTeam[]>(`/organizations/${orgSlug}/teams/`, {
-    params: { detailed: "0" },
     schema: z.array(SentryTeamSchema),
   });
 }
