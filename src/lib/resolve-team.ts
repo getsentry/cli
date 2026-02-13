@@ -7,7 +7,7 @@
 
 import type { SentryTeam } from "../types/index.js";
 import { listOrganizations, listTeams } from "./api-client.js";
-import { ApiError, ContextError } from "./errors.js";
+import { ApiError, CliError, ContextError } from "./errors.js";
 import { getSentryBaseUrl } from "./sentry-urls.js";
 
 /** Options for resolving a team within an organization */
@@ -49,7 +49,15 @@ export async function resolveTeam(
     teams = await listTeams(orgSlug);
   } catch (error) {
     if (error instanceof ApiError) {
-      await buildOrgFailureError(orgSlug, error, options);
+      if (error.status === 404) {
+        await buildOrgFailureError(orgSlug, error, options);
+      }
+      // 403, 5xx, etc. — can't determine if org is wrong or something else
+      throw new CliError(
+        `Could not list teams for org '${orgSlug}' (${error.status}).\n\n` +
+          "The organization may not exist, or you may lack access.\n\n" +
+          `Try: ${options.usageHint} --team <team-slug>`
+      );
     }
     throw error;
   }
