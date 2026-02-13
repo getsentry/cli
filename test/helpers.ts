@@ -75,38 +75,75 @@ export function mockFetch(fn: FetchMockFn): typeof fetch {
 }
 
 /**
+ * Module-level lock state for SENTRY_CONFIG_DIR.
+ *
+ * We replace process.env with a Proxy that intercepts reads, writes,
+ * and deletes of SENTRY_CONFIG_DIR. When locked, the proxy returns the
+ * locked value and silently ignores mutations. When unlocked, all
+ * operations pass through to the real env object.
+ *
+ * A Proxy is used instead of Object.defineProperty because:
+ * - configurable:true descriptors can be removed by `delete` (other
+ *   test files do `delete process.env[CONFIG_DIR_ENV_VAR]` in afterEach)
+ * - configurable:false descriptors cause `delete` to throw in Bun,
+ *   breaking other test files
+ *
+ * The Proxy is installed once and persists for the process lifetime.
+ * Lock/unlock just toggles the module-level state variables.
+ */
+let configDirLocked = false;
+let configDirLockedValue: string | undefined;
+let envProxyInstalled = false;
+
+function installEnvProxy(): void {
+  if (envProxyInstalled) return;
+  const realEnv = process.env;
+  process.env = new Proxy(realEnv, {
+    get(target, prop, receiver) {
+      if (prop === "SENTRY_CONFIG_DIR" && configDirLocked) {
+        return configDirLockedValue;
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    set(target, prop, value) {
+      if (prop === "SENTRY_CONFIG_DIR" && configDirLocked) {
+        return true; // Silently ignore
+      }
+      return Reflect.set(target, prop, value);
+    },
+    deleteProperty(target, prop) {
+      if (prop === "SENTRY_CONFIG_DIR" && configDirLocked) {
+        return true; // Silently ignore
+      }
+      return Reflect.deleteProperty(target, prop);
+    },
+  });
+  envProxyInstalled = true;
+}
+
+/**
  * Lock SENTRY_CONFIG_DIR so concurrent test files cannot change it.
  *
  * Bun runs test files concurrently in a single process, sharing
- * `process.env` and `globalThis.fetch`. Between any `await` point
- * inside our test, another file's beforeEach/afterEach can mutate
- * these globals. The DB singleton auto-invalidates when the config
- * dir changes, so even a momentary mutation causes getDatabase() to
- * open the wrong DB and lose auth tokens / defaults.
+ * `process.env`. Between any `await` point inside our test, another
+ * file's beforeEach/afterEach can mutate the env var. The DB singleton
+ * auto-invalidates when the config dir changes, so even a momentary
+ * mutation causes getDatabase() to open the wrong DB and lose data.
  *
- * Uses Object.defineProperty to make the env var return the locked
- * value regardless of what other tests write. Call `unlockConfigDir`
- * in afterEach so other tests can proceed normally.
+ * Uses a Proxy on process.env that intercepts get/set/delete of the
+ * config dir env var. When locked, returns the locked value and ignores
+ * mutations. When unlocked, all operations pass through normally.
  *
  * @param configDir - The config directory path to lock
  * @returns Unlock function to call in afterEach
  */
 export function lockConfigDir(configDir: string): () => void {
-  Object.defineProperty(process.env, "SENTRY_CONFIG_DIR", {
-    get() {
-      return configDir;
-    },
-    set() {
-      // Silently ignore writes from other test files
-    },
-    configurable: true,
-    enumerable: true,
-  });
+  installEnvProxy();
+  configDirLocked = true;
+  configDirLockedValue = configDir;
 
   return () => {
-    // Restore normal property behavior
-    delete process.env.SENTRY_CONFIG_DIR;
-    process.env.SENTRY_CONFIG_DIR = configDir;
+    configDirLocked = false;
   };
 }
 
@@ -114,9 +151,10 @@ export function lockConfigDir(configDir: string): () => void {
  * Lock globalThis.fetch to a mock handler so concurrent test files
  * cannot replace it between async boundaries.
  *
- * Uses Object.defineProperty to intercept writes to globalThis.fetch,
- * similar to lockConfigDir. Call the returned unlock function in
- * afterEach to restore normal behavior.
+ * Uses configurable: true since concurrent test files use assignment
+ * (not delete) for fetch, and other test files (e.g. api-client) need
+ * to assign their own mock via globalThis.fetch = ... without going
+ * through this lock.
  *
  * @param fn - The fetch mock implementation
  * @returns Unlock function to call in afterEach
