@@ -689,6 +689,23 @@ describe("handleOrgAll", () => {
     expect(text).toContain("No projects found");
   });
 
+  test("empty page without hasMore and platform filter shows platform message", async () => {
+    globalThis.fetch = mockProjectFetch([]);
+    const { writer, output } = createCapture();
+
+    await handleOrgAll({
+      stdout: writer,
+      org: "test-org",
+      flags: { limit: 30, json: false, platform: "rust" },
+      contextKey: "type:org:test-org",
+      cursor: undefined,
+    });
+
+    const text = output();
+    expect(text).toContain("matching platform 'rust'");
+    expect(text).not.toContain("No projects found in organization");
+  });
+
   test("hasMore shows next page hint", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,

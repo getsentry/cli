@@ -199,7 +199,8 @@ export function buildContextKey(
     }
   }
   if (flags.platform) {
-    parts.push(`platform:${flags.platform}`);
+    // Normalize to lowercase since platform filtering is case-insensitive
+    parts.push(`platform:${flags.platform.toLowerCase()}`);
   }
   return parts.join("|");
 }
@@ -460,6 +461,10 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
     if (hasMore) {
       stdout.write(
         `No matching projects on this page. Try the next page: sentry project list ${org}/ -c last\n`
+      );
+    } else if (flags.platform) {
+      stdout.write(
+        `No projects matching platform '${flags.platform}' in organization '${org}'.\n`
       );
     } else {
       stdout.write(`No projects found in organization '${org}'.\n`);
