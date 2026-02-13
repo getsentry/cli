@@ -1,34 +1,43 @@
 /**
  * Sentry API Client
  *
- * Handles authenticated requests to the Sentry API.
- * Uses ky for retry logic, timeouts, and better error handling.
+ * Wraps @sentry/api SDK functions with multi-region support,
+ * telemetry, and custom error handling.
+ *
+ * Uses @sentry/api for type-safe API calls to public endpoints.
+ * Falls back to raw requests for internal/undocumented endpoints.
  */
 
-import kyHttpClient, { type KyInstance } from "ky";
-import { z } from "zod";
 import {
-  type DetailedLogsResponse,
+  listAnOrganization_sIssues,
+  listAnOrganization_sProjects,
+  listAnOrganization_sTeams,
+  listAProject_sClientKeys,
+  queryExploreEventsInTableFormat,
+  resolveAShortId,
+  retrieveAnEventForAProject,
+  retrieveAnIssueEvent,
+  retrieveAnOrganization,
+  retrieveAProject,
+  retrieveSeerIssueFixState,
+  listYourOrganizations as sdkListOrganizations,
+  startSeerIssueFix,
+} from "@sentry/api";
+import type { z } from "zod";
+
+import {
   DetailedLogsResponseSchema,
   type DetailedSentryLog,
-  type LogsResponse,
   LogsResponseSchema,
   type ProjectKey,
-  ProjectKeySchema,
   type Region,
   type SentryEvent,
-  SentryEventSchema,
   type SentryIssue,
-  SentryIssueSchema,
   type SentryLog,
   type SentryOrganization,
-  SentryOrganizationSchema,
   type SentryProject,
-  SentryProjectSchema,
   type SentryRepository,
-  SentryRepositorySchema,
   type SentryTeam,
-  SentryTeamSchema,
   type SentryUser,
   SentryUserSchema,
   type TraceSpan,
@@ -38,53 +47,19 @@ import {
   type UserRegionsResponse,
   UserRegionsResponseSchema,
 } from "../types/index.js";
+
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
-import { refreshToken } from "./db/auth.js";
 import { ApiError, AuthError } from "./errors.js";
-import { withHttpSpan } from "./telemetry.js";
+import { resolveOrgRegion } from "./region.js";
+import {
+  getApiBaseUrl,
+  getControlSiloUrl,
+  getDefaultSdkConfig,
+  getSdkConfig,
+} from "./sentry-client.js";
 import { isAllDigits } from "./utils.js";
 
-/**
- * Control silo URL - handles OAuth, user accounts, and region routing.
- * This is always sentry.io for SaaS, or the base URL for self-hosted.
- */
-const CONTROL_SILO_URL = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-
-/** Request timeout in milliseconds */
-const REQUEST_TIMEOUT_MS = 30_000;
-
-/** Maximum retry attempts for failed requests */
-const MAX_RETRIES = 2;
-
-/** Maximum backoff delay between retries in milliseconds */
-const MAX_BACKOFF_MS = 10_000;
-
-/** HTTP status codes that trigger automatic retry */
-const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
-
-/** Regex to extract org slug from /organizations/{slug}/... endpoints */
-const ORG_ENDPOINT_REGEX = /^\/?organizations\/([^/]+)/;
-
-/** Regex to extract org slug from /projects/{org}/{project}/... endpoints */
-const PROJECT_ENDPOINT_REGEX = /^\/?projects\/([^/]+)\/[^/]+/;
-
-/**
- * Get the Sentry API base URL.
- * Supports self-hosted instances via SENTRY_URL env var.
- */
-function getApiBaseUrl(): string {
-  const baseUrl = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-  return `${baseUrl}/api/0/`;
-}
-
-/**
- * Normalize endpoint path for use with ky's prefixUrl.
- * Removes leading slash since ky handles URL joining.
- */
-function normalizePath(endpoint: string): string {
-  return endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-}
+// Helpers
 
 type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -95,69 +70,62 @@ type ApiRequestOptions<T = unknown> = {
   schema?: z.ZodType<T>;
 };
 
-/** Header to mark requests as retries, preventing infinite retry loops */
-const RETRY_MARKER_HEADER = "x-sentry-cli-retry";
+/**
+ * Throw an ApiError from a failed @sentry/api SDK response.
+ *
+ * @param error - The error object from the SDK (contains status code and detail)
+ * @param response - The raw Response object
+ * @param context - Human-readable context for the error message
+ */
+function throwApiError(
+  error: unknown,
+  response: Response | undefined,
+  context: string
+): never {
+  const status = response?.status ?? 0;
+  const detail =
+    error && typeof error === "object" && "detail" in error
+      ? String((error as { detail: unknown }).detail)
+      : String(error);
+  throw new ApiError(
+    `${context}: ${status} ${response?.statusText ?? "Unknown"}`,
+    status,
+    detail
+  );
+}
 
 /**
- * Create a configured ky instance with retry, timeout, and authentication.
+ * Unwrap an @sentry/api SDK result, throwing ApiError on failure.
  *
- * @throws {AuthError} When not authenticated
- * @throws {ApiError} When API request fails
+ * When `throwOnError` is false (our default), the SDK catches errors from
+ * the fetch function and returns them in `{ error }`. This includes our
+ * AuthError from refreshToken(). We must re-throw known error types (AuthError,
+ * ApiError) directly so callers can distinguish auth failures from API errors.
+ *
+ * @param result - The result from an SDK function call
+ * @param context - Human-readable context for error messages
+ * @returns The data from the successful response
  */
-async function createApiClient(): Promise<KyInstance> {
-  const { token } = await refreshToken();
+function unwrapResult<T>(
+  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  context: string
+): T {
+  const { data, error } = result as {
+    data: unknown;
+    error: unknown;
+    response?: Response;
+  };
 
-  return kyHttpClient.create({
-    prefixUrl: getApiBaseUrl(),
-    timeout: REQUEST_TIMEOUT_MS,
-    retry: {
-      limit: MAX_RETRIES,
-      methods: ["get", "put", "delete", "patch"],
-      statusCodes: RETRYABLE_STATUS_CODES,
-      backoffLimit: MAX_BACKOFF_MS,
-    },
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": getUserAgent(),
-    },
-    hooks: {
-      afterResponse: [
-        async (request, options, response) => {
-          // On 401, force token refresh and retry once
-          const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
-          if (response.status === 401 && !isRetry) {
-            try {
-              const { token: newToken, refreshed } = await refreshToken({
-                force: true,
-              });
+  if (error !== undefined) {
+    // Preserve known error types that were caught by the SDK from our fetch function
+    if (error instanceof AuthError || error instanceof ApiError) {
+      throw error;
+    }
+    const response = (result as { response?: Response }).response;
+    throwApiError(error, response, context);
+  }
 
-              // Don't retry if token wasn't refreshed (e.g., manual API token)
-              if (!refreshed) {
-                return response;
-              }
-
-              const retryHeaders = new Headers(options.headers);
-              retryHeaders.set("Authorization", `Bearer ${newToken}`);
-              retryHeaders.set(RETRY_MARKER_HEADER, "1");
-
-              // Spread options but remove prefixUrl since request.url is already absolute
-              const { prefixUrl: _, ...retryOptions } = options;
-              return kyHttpClient(request.url, {
-                ...retryOptions,
-                headers: retryHeaders,
-                retry: 0,
-              });
-            } catch {
-              // Token refresh failed, return original 401 response
-              return response;
-            }
-          }
-          return response;
-        },
-      ],
-    },
-  });
+  return data as T;
 }
 
 /**
@@ -181,7 +149,6 @@ export function buildSearchParams(
       continue;
     }
     if (Array.isArray(value)) {
-      // Repeated keys for arrays: tags=1&tags=2&tags=3
       for (const item of value) {
         searchParams.append(key, item);
       }
@@ -194,193 +161,22 @@ export function buildSearchParams(
 }
 
 /**
- * Make an authenticated request to the Sentry API.
- *
- * @param endpoint - API endpoint path (e.g., "/organizations/")
- * @param options - Request options including method, body, query params, and validation schema
- * @returns Parsed JSON response (validated if schema provided)
- * @throws {AuthError} When not authenticated
- * @throws {ApiError} On API errors
- * @throws {z.ZodError} When response fails schema validation
+ * Get SDK config for an organization's region.
+ * Resolves the org's region URL and returns the config.
  */
-export function apiRequest<T>(
-  endpoint: string,
-  options: ApiRequestOptions<T> = {}
-): Promise<T> {
-  const { method = "GET", body, params, schema } = options;
-
-  return withHttpSpan(method, endpoint, async () => {
-    const client = await createApiClient();
-
-    let response: Response;
-    try {
-      response = await client(normalizePath(endpoint), {
-        method,
-        json: body,
-        searchParams: buildSearchParams(params),
-      });
-    } catch (error) {
-      // Transform ky HTTPError into ApiError
-      if (error && typeof error === "object" && "response" in error) {
-        const kyError = error as { response: Response };
-        const text = await kyError.response.text();
-        let detail: string | undefined;
-        try {
-          const parsed = JSON.parse(text) as { detail?: string };
-          detail = parsed.detail ?? JSON.stringify(parsed);
-        } catch {
-          detail = text;
-        }
-        throw new ApiError(
-          `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
-          kyError.response.status,
-          detail
-        );
-      }
-      throw error;
-    }
-
-    const data = await response.json();
-
-    // Validate response if schema provided
-    if (schema) {
-      return schema.parse(data);
-    }
-
-    return data as T;
-  });
+async function getOrgSdkConfig(orgSlug: string) {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  return getSdkConfig(regionUrl);
 }
 
-/**
- * Make a raw API request that returns full response details.
- * Unlike apiRequest, this does not throw on non-2xx responses.
- * Used by the 'sentry api' command for direct API access.
- *
- * @param endpoint - API endpoint path (e.g., "/organizations/")
- * @param options - Request options including method, body, params, and custom headers
- * @returns Response status, headers, and parsed body
- * @throws {AuthError} Only on authentication failure (not on API errors)
- */
-export function rawApiRequest(
-  endpoint: string,
-  options: ApiRequestOptions & { headers?: Record<string, string> } = {}
-): Promise<{ status: number; headers: Headers; body: unknown }> {
-  const { method = "GET", body, params, headers: customHeaders = {} } = options;
-
-  return withHttpSpan(method, endpoint, async () => {
-    const client = await createApiClient();
-
-    // Handle body based on type:
-    // - Objects: use ky's json option (auto-stringifies and sets Content-Type)
-    // - Strings: send as raw body (user can set Content-Type via custom headers if needed)
-    // - undefined: no body
-    const isStringBody = typeof body === "string";
-
-    // For string bodies, remove the default Content-Type: application/json from createApiClient
-    // unless the user explicitly provides one. This allows sending non-JSON content.
-    // Check is case-insensitive since HTTP headers are case-insensitive.
-    const hasContentType = Object.keys(customHeaders).some(
-      (k) => k.toLowerCase() === "content-type"
-    );
-    const headers =
-      isStringBody && !hasContentType
-        ? { ...customHeaders, "Content-Type": undefined }
-        : customHeaders;
-
-    const requestOptions: Parameters<typeof client>[1] = {
-      method,
-      searchParams: buildSearchParams(params),
-      headers,
-      throwHttpErrors: false,
-    };
-
-    if (body !== undefined) {
-      if (isStringBody) {
-        requestOptions.body = body;
-      } else {
-        requestOptions.json = body;
-      }
-    }
-
-    const response = await client(normalizePath(endpoint), requestOptions);
-
-    const text = await response.text();
-    let responseBody: unknown;
-    try {
-      responseBody = JSON.parse(text);
-    } catch {
-      responseBody = text;
-    }
-
-    return {
-      status: response.status,
-      headers: response.headers,
-      body: responseBody,
-    };
-  });
-}
-
-/**
- * Create a ky client configured for a specific region URL.
- * Used for making requests to region-specific endpoints.
- *
- * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
- */
-async function createRegionApiClient(regionUrl: string): Promise<KyInstance> {
-  const { token } = await refreshToken();
-  const baseUrl = regionUrl.endsWith("/") ? regionUrl : `${regionUrl}/`;
-
-  return kyHttpClient.create({
-    prefixUrl: `${baseUrl}api/0/`,
-    timeout: REQUEST_TIMEOUT_MS,
-    retry: {
-      limit: MAX_RETRIES,
-      methods: ["get", "put", "delete", "patch"],
-      statusCodes: RETRYABLE_STATUS_CODES,
-      backoffLimit: MAX_BACKOFF_MS,
-    },
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": getUserAgent(),
-    },
-    hooks: {
-      afterResponse: [
-        async (request, options, response) => {
-          const isRetry = request.headers.get(RETRY_MARKER_HEADER) === "1";
-          if (response.status === 401 && !isRetry) {
-            try {
-              const { token: newToken, refreshed } = await refreshToken({
-                force: true,
-              });
-              if (!refreshed) {
-                return response;
-              }
-              const retryHeaders = new Headers(options.headers);
-              retryHeaders.set("Authorization", `Bearer ${newToken}`);
-              retryHeaders.set(RETRY_MARKER_HEADER, "1");
-              const { prefixUrl: _, ...retryOptions } = options;
-              return kyHttpClient(request.url, {
-                ...retryOptions,
-                headers: retryHeaders,
-                retry: 0,
-              });
-            } catch {
-              return response;
-            }
-          }
-          return response;
-        },
-      ],
-    },
-  });
-}
+// Raw request functions (for internal/generic endpoints)
 
 /**
  * Make an authenticated request to a specific Sentry region.
+ * Used for internal endpoints not covered by @sentry/api SDK functions.
  *
  * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
- * @param endpoint - API endpoint path (e.g., "/organizations/")
+ * @param endpoint - API endpoint path (e.g., "/users/me/regions/")
  * @param options - Request options
  */
 export async function apiRequestToRegion<T>(
@@ -389,33 +185,44 @@ export async function apiRequestToRegion<T>(
   options: ApiRequestOptions<T> = {}
 ): Promise<T> {
   const { method = "GET", body, params, schema } = options;
-  const client = await createRegionApiClient(regionUrl);
+  const config = getSdkConfig(regionUrl);
 
-  let response: Response;
-  try {
-    response = await client(normalizePath(endpoint), {
-      method,
-      json: body,
-      searchParams: buildSearchParams(params),
-    });
-  } catch (error) {
-    if (error && typeof error === "object" && "response" in error) {
-      const kyError = error as { response: Response };
-      const text = await kyError.response.text();
-      let detail: string | undefined;
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+
+  const fetchFn = config.fetch;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    let detail: string | undefined;
+    try {
+      const text = await response.text();
       try {
         const parsed = JSON.parse(text) as { detail?: string };
         detail = parsed.detail ?? JSON.stringify(parsed);
       } catch {
         detail = text;
       }
-      throw new ApiError(
-        `API request failed: ${kyError.response.status} ${kyError.response.statusText}`,
-        kyError.response.status,
-        detail
-      );
+    } catch {
+      detail = response.statusText;
     }
-    throw error;
+    throw new ApiError(
+      `API request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      detail
+    );
   }
 
   const data = await response.json();
@@ -428,15 +235,99 @@ export async function apiRequestToRegion<T>(
 }
 
 /**
+ * Make an authenticated request to the default Sentry API.
+ *
+ * @param endpoint - API endpoint path (e.g., "/organizations/")
+ * @param options - Request options including method, body, query params, and validation schema
+ * @returns Parsed JSON response (validated if schema provided)
+ * @throws {AuthError} When not authenticated
+ * @throws {ApiError} On API errors
+ */
+export function apiRequest<T>(
+  endpoint: string,
+  options: ApiRequestOptions<T> = {}
+): Promise<T> {
+  return apiRequestToRegion(getApiBaseUrl(), endpoint, options);
+}
+
+/**
+ * Make a raw API request that returns full response details.
+ * Unlike apiRequest, this does not throw on non-2xx responses.
+ * Used by the 'sentry api' command for direct API access.
+ *
+ * @param endpoint - API endpoint path (e.g., "/organizations/")
+ * @param options - Request options including method, body, params, and custom headers
+ * @returns Response status, headers, and parsed body
+ * @throws {AuthError} Only on authentication failure (not on API errors)
+ */
+export async function rawApiRequest(
+  endpoint: string,
+  options: ApiRequestOptions & { headers?: Record<string, string> } = {}
+): Promise<{ status: number; headers: Headers; body: unknown }> {
+  const { method = "GET", body, params, headers: customHeaders = {} } = options;
+
+  const config = getDefaultSdkConfig();
+
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+
+  // Build request headers and body.
+  // String bodies: no Content-Type unless the caller explicitly provides one.
+  // Object bodies: application/json (auto-stringified).
+  const isStringBody = typeof body === "string";
+  const hasContentType = Object.keys(customHeaders).some(
+    (k) => k.toLowerCase() === "content-type"
+  );
+
+  const headers: Record<string, string> = { ...customHeaders };
+  if (!(isStringBody || hasContentType) && body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  let requestBody: string | undefined;
+  if (body !== undefined) {
+    requestBody = isStringBody ? body : JSON.stringify(body);
+  }
+
+  const fetchFn = config.fetch;
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: requestBody,
+  });
+
+  const text = await response.text();
+  let responseBody: unknown;
+  try {
+    responseBody = JSON.parse(text);
+  } catch {
+    responseBody = text;
+  }
+
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: responseBody,
+  };
+}
+
+// Organization functions
+
+/**
  * Get the list of regions the user has organization membership in.
  * This endpoint is on the control silo (sentry.io) and returns all regions.
  *
  * @returns Array of regions with name and URL
  */
 export async function getUserRegions(): Promise<Region[]> {
-  // Always use control silo for this endpoint
+  // /users/me/regions/ is an internal endpoint - use raw request
   const response = await apiRequestToRegion<UserRegionsResponse>(
-    CONTROL_SILO_URL,
+    getControlSiloUrl(),
     "/users/me/regions/",
     { schema: UserRegionsResponseSchema }
   );
@@ -449,64 +340,17 @@ export async function getUserRegions(): Promise<Region[]> {
  * @param regionUrl - The region's base URL
  * @returns Organizations in that region
  */
-export function listOrganizationsInRegion(
+export async function listOrganizationsInRegion(
   regionUrl: string
 ): Promise<SentryOrganization[]> {
-  return apiRequestToRegion<SentryOrganization[]>(
-    regionUrl,
-    "/organizations/",
-    {
-      schema: z.array(SentryOrganizationSchema),
-    }
-  );
-}
+  const config = getSdkConfig(regionUrl);
 
-/**
- * Extract organization slug from an endpoint path.
- * Supports:
- * - `/organizations/{slug}/...` - standard organization endpoints
- * - `/projects/{org}/{project}/...` - project-scoped endpoints
- */
-function extractOrgSlugFromEndpoint(endpoint: string): string | null {
-  // Try organization path first: /organizations/{slug}/...
-  const orgMatch = endpoint.match(ORG_ENDPOINT_REGEX);
-  if (orgMatch?.[1]) {
-    return orgMatch[1];
-  }
+  const result = await sdkListOrganizations({
+    ...config,
+  });
 
-  // Try project path: /projects/{org}/{project}/...
-  const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
-  if (projectMatch?.[1]) {
-    return projectMatch[1];
-  }
-
-  return null;
-}
-
-/**
- * Make an org-scoped API request, automatically resolving the correct region.
- * This is the preferred way to make org-scoped requests.
- *
- * The endpoint must contain the org slug in the path (e.g., `/organizations/{slug}/...`).
- * The org slug is extracted to look up the correct region URL.
- *
- * @param endpoint - API endpoint path containing the org slug
- * @param options - Request options
- */
-async function orgScopedRequest<T>(
-  endpoint: string,
-  options: ApiRequestOptions<T> = {}
-): Promise<T> {
-  const orgSlug = extractOrgSlugFromEndpoint(endpoint);
-  if (!orgSlug) {
-    throw new Error(
-      `Cannot extract org slug from endpoint: ${endpoint}. ` +
-        "Endpoint must match /organizations/{slug}/..."
-    );
-  }
-  const { resolveOrgRegion } = await import("./region.js");
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  return apiRequestToRegion(regionUrl, endpoint, options);
+  const data = unwrapResult(result, "Failed to list organizations");
+  return data as unknown as SentryOrganization[];
 }
 
 /**
@@ -521,7 +365,6 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   try {
     regions = await getUserRegions();
   } catch (error) {
-    // Re-throw auth errors - user needs to login
     if (error instanceof AuthError) {
       throw error;
     }
@@ -531,9 +374,7 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
 
   if (regions.length === 0) {
     // Fall back to default API for self-hosted instances
-    return apiRequest<SentryOrganization[]>("/organizations/", {
-      schema: z.array(SentryOrganizationSchema),
-    });
+    return listOrganizationsInRegion(getApiBaseUrl());
   }
 
   const results = await Promise.all(
@@ -566,23 +407,36 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
  * Get a specific organization.
  * Uses region-aware routing for multi-region support.
  */
-export function getOrganization(orgSlug: string): Promise<SentryOrganization> {
-  return orgScopedRequest<SentryOrganization>(`/organizations/${orgSlug}/`, {
-    schema: SentryOrganizationSchema,
+export async function getOrganization(
+  orgSlug: string
+): Promise<SentryOrganization> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
   });
+
+  const data = unwrapResult(result, "Failed to get organization");
+  return data as unknown as SentryOrganization;
 }
+
+// Project functions
 
 /**
  * List projects in an organization.
  * Uses region-aware routing for multi-region support.
  */
-export function listProjects(orgSlug: string): Promise<SentryProject[]> {
-  return orgScopedRequest<SentryProject[]>(
-    `/organizations/${orgSlug}/projects/`,
-    {
-      schema: z.array(SentryProjectSchema),
-    }
-  );
+export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sProjects({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+
+  const data = unwrapResult(result, "Failed to list projects");
+  return data as unknown as SentryProject[];
 }
 
 /** Project with its organization context */
@@ -595,12 +449,14 @@ export type ProjectWithOrg = SentryProject & {
  * List repositories in an organization.
  * Uses region-aware routing for multi-region support.
  */
-export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
-  return orgScopedRequest<SentryRepository[]>(
-    `/organizations/${orgSlug}/repos/`,
-    {
-      schema: z.array(SentryRepositorySchema),
-    }
+export async function listRepositories(
+  orgSlug: string
+): Promise<SentryRepository[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  return apiRequestToRegion<SentryRepository[]>(
+    regionUrl,
+    `/organizations/${orgSlug}/repos/`
   );
 }
 
@@ -608,10 +464,16 @@ export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
  * List teams in an organization.
  * Uses region-aware routing for multi-region support.
  */
-export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
-  return orgScopedRequest<SentryTeam[]>(`/organizations/${orgSlug}/teams/`, {
-    schema: z.array(SentryTeamSchema),
+export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sTeams({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
   });
+
+  const data = unwrapResult(result, "Failed to list teams");
+  return data as unknown as SentryTeam[];
 }
 
 /**
@@ -628,7 +490,6 @@ export async function findProjectsBySlug(
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
 
-  // Search in parallel for performance
   const searchResults = await Promise.all(
     orgs.map(async (org) => {
       try {
@@ -639,11 +500,9 @@ export async function findProjectsBySlug(
         }
         return null;
       } catch (error) {
-        // Re-throw auth errors - user needs to login
         if (error instanceof AuthError) {
           throw error;
         }
-        // Skip orgs where user lacks access (permission errors, etc.)
         return null;
       }
     })
@@ -712,7 +571,6 @@ export async function findProjectsByPattern(
         if (error instanceof AuthError) {
           throw error;
         }
-        // Skip orgs where user lacks access (permission errors, etc.)
         return [];
       }
     })
@@ -738,20 +596,20 @@ export async function findProjectByDsnKey(
   try {
     regions = await getUserRegions();
   } catch (error) {
-    // Re-throw auth errors - user needs to login
     if (error instanceof AuthError) {
       throw error;
     }
-    // Self-hosted instances may not have the regions endpoint (404)
     regions = [];
   }
 
   if (regions.length === 0) {
     // Fall back to default region for self-hosted
-    const projects = await apiRequest<SentryProject[]>("/projects/", {
-      params: { query: `dsn:${publicKey}` },
-      schema: z.array(SentryProjectSchema),
-    });
+    // This uses an internal query parameter not in the public API
+    const projects = await apiRequestToRegion<SentryProject[]>(
+      getApiBaseUrl(),
+      "/projects/",
+      { params: { query: `dsn:${publicKey}` } }
+    );
     return projects[0] ?? null;
   }
 
@@ -761,10 +619,7 @@ export async function findProjectByDsnKey(
         return await apiRequestToRegion<SentryProject[]>(
           region.url,
           "/projects/",
-          {
-            params: { query: `dsn:${publicKey}` },
-            schema: z.array(SentryProjectSchema),
-          }
+          { params: { query: `dsn:${publicKey}` } }
         );
       } catch {
         return [];
@@ -785,94 +640,131 @@ export async function findProjectByDsnKey(
  * Get a specific project.
  * Uses region-aware routing for multi-region support.
  */
-export function getProject(
+export async function getProject(
   orgSlug: string,
   projectSlug: string
 ): Promise<SentryProject> {
-  return orgScopedRequest<SentryProject>(
-    `/projects/${orgSlug}/${projectSlug}/`,
-    {
-      schema: SentryProjectSchema,
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get project");
+  return data as unknown as SentryProject;
 }
 
 /**
  * Get project keys (DSNs) for a project.
  * Uses region-aware routing for multi-region support.
  */
-export function getProjectKeys(
+export async function getProjectKeys(
   orgSlug: string,
   projectSlug: string
 ): Promise<ProjectKey[]> {
-  return orgScopedRequest<ProjectKey[]>(
-    `/projects/${orgSlug}/${projectSlug}/keys/`,
-    {
-      schema: z.array(ProjectKeySchema),
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAProject_sClientKeys({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get project keys");
+  return data as unknown as ProjectKey[];
 }
+
+// Issue functions
 
 /**
  * List issues for a project.
+ * Uses the org-scoped endpoint (the project-scoped one is deprecated).
  * Uses region-aware routing for multi-region support.
  */
-export function listIssues(
+export async function listIssues(
   orgSlug: string,
   projectSlug: string,
   options: {
     query?: string;
     cursor?: string;
     limit?: number;
-    sort?: "date" | "new" | "priority" | "freq" | "user";
+    sort?: "date" | "new" | "freq" | "user";
     statsPeriod?: string;
   } = {}
 ): Promise<SentryIssue[]> {
-  return orgScopedRequest<SentryIssue[]>(
-    `/projects/${orgSlug}/${projectSlug}/issues/`,
-    {
-      params: {
-        query: options.query,
-        cursor: options.cursor,
-        limit: options.limit,
-        sort: options.sort,
-        statsPeriod: options.statsPeriod,
-      },
-      schema: z.array(SentryIssueSchema),
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  // Build query with project filter: "project:{slug}" prefix
+  const projectFilter = `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  const result = await listAnOrganization_sIssues({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      query: fullQuery,
+      cursor: options.cursor,
+      limit: options.limit,
+      sort: options.sort,
+      statsPeriod: options.statsPeriod,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to list issues");
+  return data as unknown as SentryIssue[];
 }
 
 /**
- * Get a specific issue by numeric ID
+ * Get a specific issue by numeric ID.
  */
 export function getIssue(issueId: string): Promise<SentryIssue> {
-  return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
-    schema: SentryIssueSchema,
-  });
+  // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
+  // but the legacy endpoint /issues/{id}/ works without org context.
+  // Use raw request for backward compatibility.
+  return apiRequest<SentryIssue>(`/issues/${issueId}/`);
 }
 
 /**
  * Get an issue by short ID (e.g., SPOTLIGHT-ELECTRON-4D).
  * Requires organization context to resolve the short ID.
- * The shortId is normalized to uppercase for case-insensitive matching.
  * Uses region-aware routing for multi-region support.
- *
- * @see https://docs.sentry.io/api/events/retrieve-an-issue/
  */
-export function getIssueByShortId(
+export async function getIssueByShortId(
   orgSlug: string,
   shortId: string
 ): Promise<SentryIssue> {
-  // Normalize to uppercase for case-insensitive matching
   const normalizedShortId = shortId.toUpperCase();
-  return orgScopedRequest<SentryIssue>(
-    `/organizations/${orgSlug}/issues/${normalizedShortId}/`,
-    {
-      schema: SentryIssueSchema,
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await resolveAShortId({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: normalizedShortId,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to resolve short ID");
+
+  // resolveAShortId returns a ShortIdLookupResponse with a group (issue)
+  const resolved = data as unknown as { group?: SentryIssue };
+  if (!resolved.group) {
+    throw new ApiError(
+      `Short ID ${normalizedShortId} resolved but no issue group returned`,
+      404,
+      "Issue not found"
+    );
+  }
+  return resolved.group;
 }
+
+// Event functions
 
 /**
  * Get the latest event for an issue.
@@ -881,37 +773,52 @@ export function getIssueByShortId(
  * @param orgSlug - Organization slug (required for multi-region routing)
  * @param issueId - Issue ID (numeric)
  */
-export function getLatestEvent(
+export async function getLatestEvent(
   orgSlug: string,
   issueId: string
 ): Promise<SentryEvent> {
-  return orgScopedRequest<SentryEvent>(
-    `/organizations/${orgSlug}/issues/${issueId}/events/latest/`
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAnIssueEvent({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+      event_id: "latest",
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get latest event");
+  return data as unknown as SentryEvent;
 }
 
 /**
  * Get a specific event by ID.
  * Uses region-aware routing for multi-region support.
- *
- * @see https://docs.sentry.io/api/events/retrieve-an-event-for-a-project/
  */
-export function getEvent(
+export async function getEvent(
   orgSlug: string,
   projectSlug: string,
   eventId: string
 ): Promise<SentryEvent> {
-  return orgScopedRequest<SentryEvent>(
-    `/projects/${orgSlug}/${projectSlug}/events/${eventId}/`,
-    {
-      schema: SentryEventSchema,
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAnEventForAProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+      event_id: eventId,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get event");
+  return data as unknown as SentryEvent;
 }
 
 /**
  * Get detailed trace with nested children structure.
- * Uses the same endpoint as Sentry's dashboard for hierarchical span trees.
+ * This is an internal endpoint not covered by the public API.
  * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - Organization slug
@@ -919,20 +826,20 @@ export function getEvent(
  * @param timestamp - Unix timestamp (seconds) from the event's dateCreated
  * @returns Array of root spans with nested children
  */
-export function getDetailedTrace(
+export async function getDetailedTrace(
   orgSlug: string,
   traceId: string,
   timestamp: number
 ): Promise<TraceSpan[]> {
-  return orgScopedRequest<TraceSpan[]>(
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  return apiRequestToRegion<TraceSpan[]>(
+    regionUrl,
     `/organizations/${orgSlug}/trace/${traceId}/`,
     {
       params: {
         timestamp,
-        // Maximum spans to fetch - 10k is sufficient for most traces while
-        // preventing excessive response sizes for very large traces
         limit: 10_000,
-        // -1 means "all projects" - required since trace can span multiple projects
         project: -1,
       },
     }
@@ -978,12 +885,15 @@ export async function listTransactions(
   projectSlug: string,
   options: ListTransactionsOptions = {}
 ): Promise<TransactionListItem[]> {
-  // API only accepts numeric project IDs as param, slugs go in query
   const isNumericProject = isAllDigits(projectSlug);
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  const response = await orgScopedRequest<TransactionsResponse>(
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  // Use raw request: the SDK's dataset type doesn't include "transactions"
+  const response = await apiRequestToRegion<TransactionsResponse>(
+    regionUrl,
     `/organizations/${orgSlug}/events/`,
     {
       params: {
@@ -1003,19 +913,24 @@ export async function listTransactions(
   return response.data;
 }
 
+// Issue update functions
+
 /**
- * Update an issue's status
+ * Update an issue's status.
  */
 export function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored"
 ): Promise<SentryIssue> {
+  // Use raw request - the SDK's updateAnIssue requires org slug but
+  // the legacy /issues/{id}/ endpoint works without it
   return apiRequest<SentryIssue>(`/issues/${issueId}/`, {
     method: "PUT",
     body: { status },
-    schema: SentryIssueSchema,
   });
 }
+
+// Seer AI functions
 
 /**
  * Trigger root cause analysis for an issue using Seer AI.
@@ -1026,17 +941,25 @@ export function updateIssueStatus(
  * @returns The trigger response with run_id
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
-export function triggerRootCauseAnalysis(
+export async function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
 ): Promise<{ run_id: number }> {
-  return orgScopedRequest<{ run_id: number }>(
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    {
-      method: "POST",
-      body: { step: "root_cause" },
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await startSeerIssueFix({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+    },
+    body: {
+      stopping_point: "root_cause",
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to trigger root cause analysis");
+  return data as unknown as { run_id: number };
 }
 
 /**
@@ -1051,16 +974,23 @@ export async function getAutofixState(
   orgSlug: string,
   issueId: string
 ): Promise<AutofixState | null> {
-  const response = await orgScopedRequest<AutofixResponse>(
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`
-  );
+  const config = await getOrgSdkConfig(orgSlug);
 
-  return response.autofix;
+  const result = await retrieveSeerIssueFixState({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get autofix state");
+  const autofixResponse = data as unknown as AutofixResponse;
+  return autofixResponse.autofix;
 }
 
 /**
  * Trigger solution planning for an existing autofix run.
- * Continues from root cause analysis to generate a solution.
  * Uses region-aware routing for multi-region support.
  *
  * @param orgSlug - The organization slug
@@ -1068,12 +998,15 @@ export async function getAutofixState(
  * @param runId - The autofix run ID
  * @returns The response from the API
  */
-export function triggerSolutionPlanning(
+export async function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
   runId: number
 ): Promise<unknown> {
-  return orgScopedRequest(
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  return apiRequestToRegion(
+    regionUrl,
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
       method: "POST",
@@ -1085,18 +1018,19 @@ export function triggerSolutionPlanning(
   );
 }
 
+// User functions
+
 /**
  * Get the currently authenticated user's information.
- * Used for setting user context in telemetry.
- *
- * Note: This endpoint may not work with OAuth App tokens, but works with
- * manually created API tokens. Callers should handle failures gracefully.
+ * Uses the /users/me/ endpoint on the control silo.
  */
 export function getCurrentUser(): Promise<SentryUser> {
-  return apiRequest<SentryUser>("/users/me/", {
+  return apiRequestToRegion<SentryUser>(getControlSiloUrl(), "/users/me/", {
     schema: SentryUserSchema,
   });
 }
+
+// Log functions
 
 /** Fields to request from the logs API */
 const LOG_FIELDS = [
@@ -1123,10 +1057,6 @@ type ListLogsOptions = {
  * List logs for an organization/project.
  * Uses the Explore/Events API with dataset=logs.
  *
- * Handles project slug vs numeric ID automatically:
- * - Numeric IDs are passed as the `project` parameter
- * - Slugs are added to the query string as `project:{slug}`
- *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug or numeric ID
  * @param options - Query options (query, limit, statsPeriod)
@@ -1137,10 +1067,8 @@ export async function listLogs(
   projectSlug: string,
   options: ListLogsOptions = {}
 ): Promise<SentryLog[]> {
-  // API only accepts numeric project IDs as param, slugs go in query
   const isNumericProject = isAllDigits(projectSlug);
 
-  // Build query parts
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const timestampFilter = options.afterTimestamp
     ? `timestamp_precise:>${options.afterTimestamp}`
@@ -1150,23 +1078,25 @@ export async function listLogs(
     .filter(Boolean)
     .join(" ");
 
-  const response = await orgScopedRequest<LogsResponse>(
-    `/organizations/${orgSlug}/events/`,
-    {
-      params: {
-        dataset: "logs",
-        field: LOG_FIELDS,
-        project: isNumericProject ? projectSlug : undefined,
-        query: fullQuery || undefined,
-        per_page: options.limit || 100,
-        statsPeriod: options.statsPeriod ?? "7d",
-        sort: "-timestamp",
-      },
-      schema: LogsResponseSchema,
-    }
-  );
+  const config = await getOrgSdkConfig(orgSlug);
 
-  return response.data;
+  const result = await queryExploreEventsInTableFormat({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      dataset: "logs",
+      field: LOG_FIELDS,
+      project: isNumericProject ? [Number(projectSlug)] : undefined,
+      query: fullQuery || undefined,
+      per_page: options.limit || 100,
+      statsPeriod: options.statsPeriod ?? "7d",
+      sort: "-timestamp",
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to list logs");
+  const logsResponse = LogsResponseSchema.parse(data);
+  return logsResponse.data;
 }
 
 /** All fields to request for detailed log view */
@@ -1206,20 +1136,21 @@ export async function getLog(
   logId: string
 ): Promise<DetailedSentryLog | null> {
   const query = `project:${projectSlug} sentry.item_id:${logId}`;
+  const config = await getOrgSdkConfig(orgSlug);
 
-  const response = await orgScopedRequest<DetailedLogsResponse>(
-    `/organizations/${orgSlug}/events/`,
-    {
-      params: {
-        dataset: "logs",
-        field: DETAILED_LOG_FIELDS,
-        query,
-        per_page: 1,
-        statsPeriod: "90d",
-      },
-      schema: DetailedLogsResponseSchema,
-    }
-  );
+  const result = await queryExploreEventsInTableFormat({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      dataset: "logs",
+      field: DETAILED_LOG_FIELDS,
+      query,
+      per_page: 1,
+      statsPeriod: "90d",
+    },
+  });
 
-  return response.data[0] ?? null;
+  const data = unwrapResult(result, "Failed to get log");
+  const logsResponse = DetailedLogsResponseSchema.parse(data);
+  return logsResponse.data[0] ?? null;
 }
