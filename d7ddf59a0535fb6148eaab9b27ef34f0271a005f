@@ -1,0 +1,39 @@
+## Implementation Plan
+
+### Goal
+Implement gzip-compressed binary downloads for the Sentry CLI to reduce
+download size from ~99 MB to ~37 MB (~60% reduction). Applies to both the
+install script (curl-based fresh installs) and the CLI self-upgrade mechanism.
+
+### Key Decisions
+- gzip level 6 (default): 37.3 MB output; levels 4-9 produce nearly identical
+  sizes for binary data, so higher levels are not worth the CPU cost
+- No zstd: only 3 MB smaller than gzip, not worth dual-format complexity or
+  requiring zstd tooling in the install script
+- No pigz: gzip takes ~4s per binary on CI which is negligible
+- gunzip for install script: POSIX, available on every Unix system
+- DecompressionStream for upgrade path: fully streaming, minimal memory
+- Raw uncompressed binaries still uploaded alongside .gz for backward compat
+
+### Compression Benchmarks (on real 99 MB Sentry CLI binary)
+- gzip -1: 40.7 MB, 2.1s
+- gzip -6: 37.3 MB, ~4s
+- gzip -9: 37.1 MB, 11.7s (only 200KB smaller than -6, 3x slower)
+- zstd -3: ~35 MB (only 2 MB smaller than gzip)
+
+### Bun.write Streaming Bug (oven-sh/bun#13237)
+Bun.write(path, Response) with any streaming body hangs or exits early because
+the Response object gets GC'd before the body finishes. Workaround: use
+Bun.file(path).writer() + for-await loop which holds references alive. Open
+fix PR: oven-sh/bun#26397.
+
+### CI/Craft Compatibility
+- CI artifact upload uses glob dist-bin/sentry-* — already matches .gz files
+- Craft artifact pattern /^sentry-.*$/ — already matches .gz files
+- No config changes needed
+
+### Files Changed
+- script/build.ts: async gzip compression step (CI only) using node:zlib
+- src/lib/upgrade.ts: .gz-first download with streaming decompression + fallback
+- install: curl|gunzip for .gz with fallback to raw download
+- test/lib/upgrade.test.ts: tests for gzip download, fallback, and error cases
