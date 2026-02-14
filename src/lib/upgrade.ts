@@ -342,8 +342,38 @@ export type DownloadResult = {
 };
 
 /**
+ * Stream a response body through a decompression transform and write to disk.
+ *
+ * Uses a manual `for await` loop with `Bun.file().writer()` instead of
+ * `Bun.write(path, Response)` to work around a Bun event-loop bug where
+ * streaming response bodies get GC'd before completing.
+ * See: https://github.com/oven-sh/bun/issues/13237
+ *
+ * @param body - Readable stream from a fetch response
+ * @param destPath - File path to write the decompressed output
+ */
+async function streamDecompressToFile(
+  body: ReadableStream<Uint8Array>,
+  destPath: string
+): Promise<void> {
+  const stream = body.pipeThrough(new DecompressionStream("gzip"));
+  const writer = Bun.file(destPath).writer();
+  try {
+    for await (const chunk of stream) {
+      writer.write(chunk);
+    }
+  } finally {
+    await writer.end();
+  }
+}
+
+/**
  * Download the new binary to a temporary path and return its location.
  * Used by the upgrade command to download before spawning setup --install.
+ *
+ * Tries the gzip-compressed URL first (`{url}.gz`, ~37 MB vs ~99 MB),
+ * falling back to the raw binary URL on any failure. The compressed
+ * download is streamed through DecompressionStream for minimal memory usage.
  *
  * The lock is held on success so concurrent upgrades are blocked during the
  * download→spawn→install pipeline. The caller MUST release the lock after the
@@ -374,26 +404,42 @@ export async function downloadBinaryToTemp(
       // Ignore if doesn't exist
     }
 
-    // Download binary
-    const response = await fetchWithUpgradeError(
-      url,
-      { headers: getGitHubHeaders() },
-      "GitHub"
-    );
+    const headers = getGitHubHeaders();
 
-    if (!response.ok) {
-      throw new UpgradeError(
-        "execution_failed",
-        `Failed to download binary: HTTP ${response.status}`
+    // Try gzip-compressed download first (~60% smaller)
+    let downloaded = false;
+    try {
+      const gzResponse = await fetchWithUpgradeError(
+        `${url}.gz`,
+        { headers },
+        "GitHub"
       );
+      if (gzResponse.ok && gzResponse.body) {
+        await streamDecompressToFile(gzResponse.body, tempPath);
+        downloaded = true;
+      }
+    } catch {
+      // Fall through to raw download
     }
 
-    // Fully consume the response body before writing to disk.
-    // Bun.write(path, Response) with a large streaming body can exit the
-    // process before the download completes (Bun event-loop bug).
-    // Materialising the body first ensures the await keeps the process alive.
-    const body = await response.arrayBuffer();
-    await Bun.write(tempPath, body);
+    // Fall back to raw (uncompressed) binary
+    if (!downloaded) {
+      const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
+
+      if (!response.ok) {
+        throw new UpgradeError(
+          "execution_failed",
+          `Failed to download binary: HTTP ${response.status}`
+        );
+      }
+
+      // Fully consume the response body before writing to disk.
+      // Bun.write(path, Response) with a large streaming body can exit the
+      // process before the download completes (Bun event-loop bug).
+      // See: https://github.com/oven-sh/bun/issues/13237
+      const body = await response.arrayBuffer();
+      await Bun.write(tempPath, body);
+    }
 
     // Set executable permission (Unix only)
     if (process.platform !== "win32") {

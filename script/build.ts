@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Build script for Sentry CLI
  *
@@ -19,8 +20,12 @@
  *     sentry-windows-x64.exe
  */
 
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { $ } from "bun";
 import pkg from "../package.json";
+
+const gzipAsync = promisify(gzip);
 
 const VERSION = pkg.version;
 
@@ -92,6 +97,20 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
   }
 
   console.log(`    -> ${outfile}`);
+
+  // In CI, create gzip-compressed copies for release downloads.
+  // Reduces download size by ~60% (99 MB → 37 MB).
+  if (process.env.CI) {
+    const binary = await Bun.file(outfile).arrayBuffer();
+    const compressed = await gzipAsync(Buffer.from(binary), { level: 6 });
+    await Bun.write(`${outfile}.gz`, compressed);
+    const ratio = (
+      (1 - compressed.byteLength / binary.byteLength) *
+      100
+    ).toFixed(0);
+    console.log(`    -> ${outfile}.gz (${ratio}% smaller)`);
+  }
+
   return true;
 }
 
