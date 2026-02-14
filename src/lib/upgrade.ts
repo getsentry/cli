@@ -388,8 +388,12 @@ export async function downloadBinaryToTemp(
       );
     }
 
-    // Write to temp file
-    await Bun.write(tempPath, response);
+    // Fully consume the response body before writing to disk.
+    // Bun.write(path, Response) with a large streaming body can exit the
+    // process before the download completes (Bun event-loop bug).
+    // Materialising the body first ensures the await keeps the process alive.
+    const body = await response.arrayBuffer();
+    await Bun.write(tempPath, body);
 
     // Set executable permission (Unix only)
     if (process.platform !== "win32") {
