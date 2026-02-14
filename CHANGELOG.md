@@ -1,6 +1,10 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.10.2
+
+- fix(upgrade): work around Bun.write streaming bug for binary downloads by @BYK in [b393165d](https://github.com/getsentry/cli/commit/b393165d9f194071fe0c72b13eddb80d0a19f420)
+
 ## 0.10.0
 
 ### New Features ✨
