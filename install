@@ -104,7 +104,16 @@ tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
 trap 'rm -f "$tmp_binary"' EXIT
 
 echo -e "${MUTED}Downloading sentry v${version}...${NC}"
-curl -fsSL --progress-bar "$url" -o "$tmp_binary"
+
+# Try gzip-compressed download first (~60% smaller, ~37 MB vs ~99 MB).
+# gunzip is POSIX and available on all Unix systems.
+# Falls back to raw binary if the .gz asset doesn't exist yet.
+if curl -fsSL "${url}.gz" 2>/dev/null | gunzip > "$tmp_binary" 2>/dev/null; then
+  : # Compressed download succeeded
+else
+  curl -fsSL --progress-bar "$url" -o "$tmp_binary"
+fi
+
 chmod +x "$tmp_binary"
 
 # Delegate installation and configuration to the binary itself.

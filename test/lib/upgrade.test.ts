@@ -662,20 +662,22 @@ describe("executeUpgrade with curl method", () => {
     }
   });
 
-  test("executeUpgrade curl downloads binary to temp path", async () => {
+  test("downloads and decompresses gzip binary when .gz URL succeeds", async () => {
     const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic bytes
 
-    // Mock fetch to return our fake binary
-    mockFetch(async () => new Response(mockBinaryContent, { status: 200 }));
+    // Compress the mock content with gzip
+    const gzipped = Bun.gzipSync(mockBinaryContent);
 
-    // Run the actual executeUpgrade with curl method — returns DownloadResult
+    // Mock fetch: first call returns gzipped content (.gz URL)
+    mockFetch(async () => new Response(gzipped, { status: 200 }));
+
     const result = await executeUpgrade("curl", "1.0.0");
 
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("tempBinaryPath");
     expect(result).toHaveProperty("lockPath");
 
-    // Verify the binary was downloaded to the temp path
+    // Verify the decompressed binary matches the original content
     const paths = getTestPaths();
     expect(result!.tempBinaryPath).toBe(paths.tempPath);
     expect(result!.lockPath).toBe(paths.lockPath);
@@ -684,7 +686,54 @@ describe("executeUpgrade with curl method", () => {
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 
-  test("executeUpgrade curl throws on HTTP error", async () => {
+  test("falls back to raw binary when .gz URL returns 404", async () => {
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic bytes
+    let callCount = 0;
+
+    // Mock fetch: first call (for .gz) returns 404, second returns raw binary
+    mockFetch(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return new Response("Not Found", { status: 404 });
+      }
+      return new Response(mockBinaryContent, { status: 200 });
+    });
+
+    const result = await executeUpgrade("curl", "1.0.0");
+
+    expect(result).not.toBeNull();
+    expect(callCount).toBe(2); // Both .gz and raw URL were tried
+
+    // Verify the binary was downloaded
+    expect(await Bun.file(result!.tempBinaryPath).exists()).toBe(true);
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(new Uint8Array(content)).toEqual(mockBinaryContent);
+  });
+
+  test("falls back to raw binary when .gz fetch throws network error", async () => {
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
+    let callCount = 0;
+
+    // Mock fetch: first call throws, second returns raw binary
+    mockFetch(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        throw new TypeError("fetch failed");
+      }
+      return new Response(mockBinaryContent, { status: 200 });
+    });
+
+    const result = await executeUpgrade("curl", "1.0.0");
+
+    expect(result).not.toBeNull();
+    expect(callCount).toBe(2);
+
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(new Uint8Array(content)).toEqual(mockBinaryContent);
+  });
+
+  test("throws on HTTP error when both .gz and raw URLs fail", async () => {
+    // Both .gz and raw return errors
     mockFetch(async () => new Response("Not Found", { status: 404 }));
 
     await expect(executeUpgrade("curl", "99.99.99")).rejects.toThrow(
@@ -695,7 +744,7 @@ describe("executeUpgrade with curl method", () => {
     );
   });
 
-  test("executeUpgrade curl throws on network failure", async () => {
+  test("throws on network failure when both .gz and raw URLs fail", async () => {
     mockFetch(async () => {
       throw new TypeError("fetch failed");
     });
@@ -706,7 +755,7 @@ describe("executeUpgrade with curl method", () => {
     );
   });
 
-  test("executeUpgrade curl releases lock on failure", async () => {
+  test("releases lock on failure", async () => {
     mockFetch(async () => new Response("Server Error", { status: 500 }));
 
     try {
