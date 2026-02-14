@@ -316,7 +316,7 @@ export async function versionExists(
 ): Promise<boolean> {
   if (method === "curl") {
     const response = await fetchWithUpgradeError(
-      `${GITHUB_RELEASES_URL}/tags/v${version}`,
+      `${GITHUB_RELEASES_URL}/tags/${version}`,
       { method: "HEAD", headers: getGitHubHeaders() },
       "GitHub"
     );

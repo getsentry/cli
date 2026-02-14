@@ -31,9 +31,9 @@ describe("getBinaryDownloadUrl", () => {
   test("builds correct URL for current platform", () => {
     const url = getBinaryDownloadUrl("1.0.0");
 
-    expect(url).toContain("/v1.0.0/");
+    expect(url).toContain("/1.0.0/");
     expect(url).toStartWith(
-      "https://github.com/getsentry/cli/releases/download/v"
+      "https://github.com/getsentry/cli/releases/download/"
     );
     expect(url).toContain("sentry-");
 
