@@ -39,7 +39,7 @@ export function getBinaryDownloadUrl(version: string): string {
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const suffix = process.platform === "win32" ? ".exe" : "";
 
-  return `https://github.com/getsentry/cli/releases/download/v${version}/sentry-${os}-${arch}${suffix}`;
+  return `https://github.com/getsentry/cli/releases/download/${version}/sentry-${os}-${arch}${suffix}`;
 }
 
 /**

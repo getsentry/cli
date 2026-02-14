@@ -101,17 +101,17 @@ function mockGitHubVersion(version: string): void {
 
     // GitHub latest release endpoint — returns JSON with tag_name
     if (urlStr.includes("releases/latest")) {
-      return new Response(JSON.stringify({ tag_name: `v${version}` }), {
+      return new Response(JSON.stringify({ tag_name: version }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
 
-    // GitHub tag check (for versionExists)
-    if (urlStr.includes("/releases/tag/")) {
-      const requested = urlStr.split("/releases/tag/v")[1];
+    // GitHub tag check (for versionExists) — this repo uses un-prefixed tags
+    if (urlStr.includes("/releases/tags/")) {
+      const requested = urlStr.split("/releases/tags/")[1];
       if (requested === version) {
-        return new Response(JSON.stringify({ tag_name: `v${version}` }), {
+        return new Response(JSON.stringify({ tag_name: version }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
