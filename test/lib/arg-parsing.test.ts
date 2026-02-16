@@ -6,7 +6,7 @@
  * error messages and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   parseIssueArg,
   parseOrgProjectArg,
@@ -35,6 +35,67 @@ describe("parseOrgProjectArg", () => {
     expect(() => parseOrgProjectArg("/")).toThrow(
       'Invalid format: "/" requires a project slug'
     );
+  });
+
+  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  describe("Sentry URL inputs", () => {
+    let savedSentryUrl: string | undefined;
+
+    beforeEach(() => {
+      savedSentryUrl = process.env.SENTRY_URL;
+      delete process.env.SENTRY_URL;
+    });
+
+    afterEach(() => {
+      if (savedSentryUrl !== undefined) {
+        process.env.SENTRY_URL = savedSentryUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+    });
+
+    test("issue URL returns org-all", () => {
+      expect(
+        parseOrgProjectArg(
+          "https://sentry.io/organizations/my-org/issues/12345/"
+        )
+      ).toEqual({
+        type: "org-all",
+        org: "my-org",
+      });
+    });
+
+    test("project settings URL returns explicit", () => {
+      expect(
+        parseOrgProjectArg(
+          "https://sentry.io/settings/my-org/projects/backend/"
+        )
+      ).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "backend",
+      });
+    });
+
+    test("org-only URL returns org-all", () => {
+      expect(
+        parseOrgProjectArg("https://sentry.io/organizations/my-org/")
+      ).toEqual({
+        type: "org-all",
+        org: "my-org",
+      });
+    });
+
+    test("self-hosted URL extracts org", () => {
+      expect(
+        parseOrgProjectArg(
+          "https://sentry.example.com/organizations/acme-corp/issues/99/"
+        )
+      ).toEqual({
+        type: "org-all",
+        org: "acme-corp",
+      });
+    });
   });
 });
 
@@ -92,6 +153,81 @@ describe("parseIssueArg", () => {
 
     test("just slash throws error", () => {
       expect(() => parseIssueArg("/")).toThrow("Missing issue ID after slash");
+    });
+  });
+
+  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  describe("Sentry URL inputs", () => {
+    let savedSentryUrl: string | undefined;
+
+    beforeEach(() => {
+      savedSentryUrl = process.env.SENTRY_URL;
+      delete process.env.SENTRY_URL;
+    });
+
+    afterEach(() => {
+      if (savedSentryUrl !== undefined) {
+        process.env.SENTRY_URL = savedSentryUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+    });
+
+    test("issue URL with numeric ID returns explicit-org-numeric", () => {
+      expect(
+        parseIssueArg("https://sentry.io/organizations/my-org/issues/32886/")
+      ).toEqual({
+        type: "explicit-org-numeric",
+        org: "my-org",
+        numericId: "32886",
+      });
+    });
+
+    test("issue URL with short ID returns explicit", () => {
+      expect(
+        parseIssueArg("https://sentry.io/organizations/my-org/issues/CLI-G/")
+      ).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "CLI",
+        suffix: "G",
+      });
+    });
+
+    test("issue URL with multi-part short ID returns explicit", () => {
+      expect(
+        parseIssueArg(
+          "https://sentry.io/organizations/my-org/issues/SPOTLIGHT-ELECTRON-4Y/"
+        )
+      ).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "SPOTLIGHT-ELECTRON",
+        suffix: "4Y",
+      });
+    });
+
+    test("self-hosted issue URL with query params", () => {
+      expect(
+        parseIssueArg(
+          "https://sentry.example.com/organizations/acme/issues/32886/?project=2"
+        )
+      ).toEqual({
+        type: "explicit-org-numeric",
+        org: "acme",
+        numericId: "32886",
+      });
+    });
+
+    test("event URL extracts issue ID (ignores event part)", () => {
+      const result = parseIssueArg(
+        "https://sentry.io/organizations/my-org/issues/32886/events/abc123/"
+      );
+      expect(result).toEqual({
+        type: "explicit-org-numeric",
+        org: "my-org",
+        numericId: "32886",
+      });
     });
   });
 

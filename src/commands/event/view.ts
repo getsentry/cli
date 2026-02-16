@@ -19,6 +19,10 @@ import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
+import {
+  applySentryUrlContext,
+  parseSentryUrl,
+} from "../../lib/sentry-url-parser.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
@@ -64,7 +68,16 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
 /**
  * Parse positional arguments for event view.
- * Handles: `<event-id>` or `<target> <event-id>`
+ *
+ * Handles:
+ * - `<event-id>` — event ID only (auto-detect org/project)
+ * - `<target> <event-id>` — explicit target + event ID
+ * - `<sentry-url>` — extract eventId and org from a Sentry event URL
+ *   (e.g., `https://sentry.example.com/organizations/my-org/issues/123/events/abc/`)
+ *
+ * For event URLs, the org is extracted and passed as `targetArg` so the
+ * downstream resolution logic can use it. The URL must contain an eventId
+ * segment — issue-only URLs are not valid for event view.
  *
  * @returns Parsed event ID and optional target arg
  */
@@ -79,6 +92,21 @@ export function parsePositionalArgs(args: string[]): {
   const first = args[0];
   if (first === undefined) {
     throw new ContextError("Event ID", USAGE_HINT);
+  }
+
+  // URL detection — extract eventId and org from Sentry event URLs
+  const urlParsed = parseSentryUrl(first);
+  if (urlParsed) {
+    applySentryUrlContext(urlParsed.baseUrl);
+    if (urlParsed.eventId) {
+      // Event URL: use org as target, eventId from the URL
+      return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
+    }
+    // URL recognized but no eventId — not valid for event view
+    throw new ContextError(
+      "Event ID in URL (use a URL like /issues/{id}/events/{eventId}/)",
+      USAGE_HINT
+    );
   }
 
   if (args.length === 1) {
