@@ -78,7 +78,7 @@ async function runFix(dryRun: boolean) {
   };
 
   const func = await fixCommand.loader();
-  func.call(mockContext, { "dry-run": dryRun });
+  await func.call(mockContext, { "dry-run": dryRun });
 
   return {
     stdout: stdoutWrite.mock.calls.map((c) => c[0]).join(""),
@@ -112,7 +112,7 @@ describe("sentry cli fix", () => {
     };
 
     const func = await fixCommand.loader();
-    func.call(mockContext, { "dry-run": true });
+    await func.call(mockContext, { "dry-run": true });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Found");
@@ -136,7 +136,7 @@ describe("sentry cli fix", () => {
     };
 
     const func = await fixCommand.loader();
-    func.call(mockContext, { "dry-run": false });
+    await func.call(mockContext, { "dry-run": false });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Repairing");
@@ -178,7 +178,7 @@ describe("sentry cli fix", () => {
     const func = await fixCommand.loader();
     // When getRawDatabase() is called, it triggers getDatabase() which runs initSchema()
     // This auto-creates the missing dsn_cache table, so the fix command sees no issues
-    func.call(mockContext, { "dry-run": false });
+    await func.call(mockContext, { "dry-run": false });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     // Auto-repair at startup means command sees healthy database

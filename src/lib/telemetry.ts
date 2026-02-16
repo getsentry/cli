@@ -9,6 +9,7 @@
  * No PII is collected. Opt-out via SENTRY_CLI_NO_TELEMETRY=1 environment variable.
  */
 
+import { chmodSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
@@ -586,57 +587,123 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
   );
 }
 
-/** Whether the readonly database warning has been shown this process */
-let readonlyWarningShown = false;
+/** Intentional no-op used as a self-replacement target for one-shot functions. */
+// biome-ignore lint/suspicious/noEmptyBlockStatements: intentional noop
+const noop = (): void => {};
 
-/**
- * Print a one-time warning to stderr when the local database is read-only.
- * Does nothing if the warning was already shown this process.
- *
- * Uses lazy require for db/index.js to avoid a circular dependency
- * (db/index.ts imports createTracedDatabase from this module).
- */
-function warnReadonlyDatabaseOnce(): void {
-  if (readonlyWarningShown) {
-    return;
-  }
-  readonlyWarningShown = true;
-
-  let dbPath = "~/.sentry/cli.db";
+/** Resolves the database path, falling back to a default if the import fails. */
+function resolveDbPath(): string {
   try {
     const { getDbPath } = require("./db/index.js") as {
       getDbPath: () => string;
     };
-    dbPath = getDbPath();
+    return getDbPath();
   } catch {
-    // Fall back to default path if import fails
+    return "~/.sentry/cli.db";
   }
+}
 
+/**
+ * Print a one-time warning to stderr when the local database is read-only.
+ * Replaces itself with a noop after the first call so subsequent invocations
+ * are free. Assigned via `let` so the binding can be swapped.
+ *
+ * Uses lazy require for db/index.js to avoid a circular dependency
+ * (db/index.ts imports createTracedDatabase from this module).
+ */
+let warnReadonlyDatabaseOnce = (): void => {
+  warnReadonlyDatabaseOnce = noop;
+
+  const dbPath = resolveDbPath();
   process.stderr.write(
     `\nWarning: Sentry CLI local database is read-only. Caching and preferences won't persist.\n` +
       `  Path: ${dbPath}\n` +
       "  Fix:  sentry cli fix\n\n"
   );
+};
+
+/** Whether we already attempted a permission repair this process. */
+let repairAttempted = false;
+
+/**
+ * Attempt to repair database file permissions so future commands can write.
+ *
+ * SQLite caches the readonly state at connection open time, so even after a
+ * successful chmod the *current* connection remains readonly. This function
+ * repairs permissions for the NEXT command and prints a differentiated message.
+ * If the repair fails (e.g., file owned by another user) we fall through to
+ * {@link warnReadonlyDatabaseOnce} which tells the user to run `sentry cli fix`.
+ *
+ * Replaces itself with a noop after the first call via the `repairAttempted`
+ * guard so we only try once per process.
+ */
+function tryRepairReadonly(): boolean {
+  if (repairAttempted) {
+    return false;
+  }
+  repairAttempted = true;
+
+  try {
+    const dbPath = resolveDbPath();
+    chmodSync(dbPath, 0o600);
+    try {
+      chmodSync(`${dbPath}-wal`, 0o600);
+    } catch {
+      // WAL file may not exist
+    }
+    try {
+      chmodSync(`${dbPath}-shm`, 0o600);
+    } catch {
+      // SHM file may not exist
+    }
+
+    // Disable the fallback warning — repair succeeded
+    warnReadonlyDatabaseOnce = noop;
+
+    process.stderr.write(
+      "\nNote: Database permissions were auto-repaired. Caching will resume on next command.\n\n"
+    );
+    return true;
+  } catch {
+    // chmod failed — fall through so warnReadonlyDatabaseOnce fires
+    return false;
+  }
 }
 
 /**
- * Reset the readonly warning flag (for testing).
+ * Reset all readonly-related state (for testing).
  * @internal
  */
 export function resetReadonlyWarning(): void {
-  readonlyWarningShown = false;
+  repairAttempted = false;
+  warnReadonlyDatabaseOnce = (): void => {
+    warnReadonlyDatabaseOnce = noop;
+
+    const dbPath = resolveDbPath();
+    process.stderr.write(
+      `\nWarning: Sentry CLI local database is read-only. Caching and preferences won't persist.\n` +
+        `  Path: ${dbPath}\n` +
+        "  Fix:  sentry cli fix\n\n"
+    );
+  };
 }
 
 /** Methods on SQLite Statement that execute queries and should be traced */
 const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
 
 /**
- * Handle a readonly database error by warning the user and returning a
+ * Handle a readonly database error by attempting auto-repair and returning a
  * type-appropriate no-op value. Returns `undefined` for run/get (void / no-row)
  * and `[]` for all/values (empty result set).
+ *
+ * First tries to repair file permissions via {@link tryRepairReadonly}. If that
+ * fails (or was already attempted), falls back to a one-shot warning directing
+ * the user to `sentry cli fix`.
  */
 function handleReadonlyError(method: string | symbol): unknown {
-  warnReadonlyDatabaseOnce();
+  if (!tryRepairReadonly()) {
+    warnReadonlyDatabaseOnce();
+  }
   if (method === "all" || method === "values") {
     return [];
   }

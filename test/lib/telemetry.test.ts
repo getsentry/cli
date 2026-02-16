@@ -785,7 +785,23 @@ describe("createTracedDatabase", () => {
       db.close();
     });
 
-    test("warns to stderr only once across multiple writes", () => {
+    test("auto-repairs permissions on first readonly write", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(output).toContain("auto-repaired");
+      expect(output).toContain("next command");
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("shows only one message across multiple writes", () => {
       const db = new Database(dbPath);
       const tracedDb = createTracedDatabase(db);
 
@@ -799,10 +815,39 @@ describe("createTracedDatabase", () => {
         .query("INSERT INTO test (id, name) VALUES (?, ?)")
         .run(4, "Dave");
 
-      const warningCalls = stderrSpy.mock.calls.filter((call) =>
-        String(call[0]).includes("read-only")
-      );
-      expect(warningCalls.length).toBe(1);
+      // Only one message total (the auto-repair note)
+      expect(stderrSpy.mock.calls.length).toBe(1);
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("resetReadonlyWarning allows auto-repair to trigger again", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      // First write triggers auto-repair
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+      expect(String(stderrSpy.mock.calls[0]?.[0])).toContain("auto-repaired");
+
+      // Second write is silent (one-shot guard)
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(3, "X");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+
+      // Reset all state
+      resetReadonlyWarning();
+      stderrSpy.mockClear();
+
+      // Re-break permissions so SQLite errors again
+      chmodSync(dbPath, 0o444);
+
+      // Next write triggers auto-repair again after reset
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(4, "Y");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+      expect(String(stderrSpy.mock.calls[0]?.[0])).toContain("auto-repaired");
 
       stderrSpy.mockRestore();
       db.close();
@@ -822,23 +867,6 @@ describe("createTracedDatabase", () => {
       expect(allResult).toEqual([]);
       expect(valuesResult).toEqual([]);
 
-      db.close();
-    });
-
-    test("warning message includes helpful instructions", () => {
-      const db = new Database(dbPath);
-      const tracedDb = createTracedDatabase(db);
-
-      const stderrSpy = spyOn(process.stderr, "write");
-
-      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
-
-      const warning = String(stderrSpy.mock.calls[0]?.[0] ?? "");
-      expect(warning).toContain("local database");
-      expect(warning).toContain("read-only");
-      expect(warning).toContain("sentry cli fix");
-
-      stderrSpy.mockRestore();
       db.close();
     });
   });

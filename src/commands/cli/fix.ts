@@ -4,7 +4,7 @@
  * Diagnose and repair CLI database issues (schema and permissions).
  */
 
-import { chmodSync, statSync } from "node:fs";
+import { chmod, stat } from "node:fs/promises";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { getConfigDir, getDbPath, getRawDatabase } from "../../lib/db/index.js";
@@ -46,22 +46,32 @@ type PermissionIssue = {
  * @param path - Filesystem path to check
  * @param expectedMode - Bitmask of required permission bits (e.g., 0o700)
  * @returns Object with the actual mode if permissions are insufficient, or null if OK.
- *          Returns null if the path doesn't exist (missing files aren't a permission problem).
+ *          Returns null if the path doesn't exist (ENOENT). Re-throws unexpected errors
+ *          so they propagate to the user and get captured by Sentry's error handling.
  */
-function checkMode(
+async function checkMode(
   path: string,
   expectedMode: number
-): { actualMode: number } | null {
+): Promise<{ actualMode: number } | null> {
   try {
-    const st = statSync(path);
+    const st = await stat(path);
     // biome-ignore lint/suspicious/noBitwiseOperators: extracting permission bits with bitmask
     const mode = st.mode & 0o777;
     // biome-ignore lint/suspicious/noBitwiseOperators: checking required permission bits are set
     if ((mode & expectedMode) !== expectedMode) {
       return { actualMode: mode };
     }
-  } catch {
-    // File/dir doesn't exist — not a permission issue
+  } catch (error: unknown) {
+    // Missing files aren't a permission problem (WAL/SHM created on demand)
+    if (
+      error instanceof Error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return null;
+    }
+    // Unexpected filesystem error — re-throw so it surfaces to the user
+    // and gets captured by the top-level Sentry error handler in bin.ts
+    throw error;
   }
   return null;
 }
@@ -69,47 +79,50 @@ function checkMode(
 /**
  * Check if the database file and its directory have correct permissions.
  * Inspects the config directory (needs rwx), the DB file, and SQLite's
- * WAL/SHM journal files (need rw). Missing files are silently skipped
- * since WAL/SHM are created on demand.
+ * WAL/SHM journal files (need rw) in parallel. Missing files are silently
+ * skipped since WAL/SHM are created on demand.
  *
  * @param dbPath - Absolute path to the database file
  * @returns List of permission issues found (empty if everything is OK)
  */
-function checkPermissions(dbPath: string): PermissionIssue[] {
-  const issues: PermissionIssue[] = [];
+async function checkPermissions(dbPath: string): Promise<PermissionIssue[]> {
   const configDir = getConfigDir();
 
-  // Check config directory permissions
-  const dirCheck = checkMode(configDir, EXPECTED_DIR_MODE);
-  if (dirCheck) {
-    issues.push({
-      path: configDir,
-      kind: "directory",
-      currentMode: dirCheck.actualMode,
-      expectedMode: EXPECTED_DIR_MODE,
-    });
-  }
-
-  // Check database file and associated WAL/SHM files
-  const filesToCheck: Array<{ path: string; kind: "database" | "journal" }> = [
-    { path: dbPath, kind: "database" },
-    { path: `${dbPath}-wal`, kind: "journal" },
-    { path: `${dbPath}-shm`, kind: "journal" },
+  const checks: Array<{
+    path: string;
+    kind: PermissionIssue["kind"];
+    expectedMode: number;
+  }> = [
+    { path: configDir, kind: "directory", expectedMode: EXPECTED_DIR_MODE },
+    { path: dbPath, kind: "database", expectedMode: EXPECTED_FILE_MODE },
+    {
+      path: `${dbPath}-wal`,
+      kind: "journal",
+      expectedMode: EXPECTED_FILE_MODE,
+    },
+    {
+      path: `${dbPath}-shm`,
+      kind: "journal",
+      expectedMode: EXPECTED_FILE_MODE,
+    },
   ];
 
-  for (const { path, kind } of filesToCheck) {
-    const fileCheck = checkMode(path, EXPECTED_FILE_MODE);
-    if (fileCheck) {
-      issues.push({
-        path,
-        kind,
-        currentMode: fileCheck.actualMode,
-        expectedMode: EXPECTED_FILE_MODE,
-      });
-    }
-  }
+  const results = await Promise.all(
+    checks.map(async ({ path, kind, expectedMode }) => {
+      const result = await checkMode(path, expectedMode);
+      if (result) {
+        return {
+          path,
+          kind,
+          currentMode: result.actualMode,
+          expectedMode,
+        } satisfies PermissionIssue;
+      }
+      return null;
+    })
+  );
 
-  return issues;
+  return results.filter((r): r is PermissionIssue => r !== null);
 }
 
 /**
@@ -122,28 +135,35 @@ function formatMode(mode: number): string {
 }
 
 /**
- * Attempt to fix file/directory permissions via chmod.
+ * Attempt to fix file/directory permissions via chmod in parallel.
  * Repairs may fail if the current user doesn't own the file.
  *
  * @param issues - Permission issues to repair
  * @returns Separate lists of human-readable repair successes and failures
  */
-function repairPermissions(issues: PermissionIssue[]): {
+async function repairPermissions(issues: PermissionIssue[]): Promise<{
   fixed: string[];
   failed: string[];
-} {
+}> {
+  const results = await Promise.allSettled(
+    issues.map(async (issue) => {
+      await chmod(issue.path, issue.expectedMode);
+      return `${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} -> ${formatMode(issue.expectedMode)}`;
+    })
+  );
+
   const fixed: string[] = [];
   const failed: string[] = [];
-
-  for (const issue of issues) {
-    try {
-      chmodSync(issue.path, issue.expectedMode);
-      fixed.push(
-        `${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} -> ${formatMode(issue.expectedMode)}`
-      );
-    } catch (error) {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i] as PromiseSettledResult<string>;
+    if (result.status === "fulfilled") {
+      fixed.push(result.value);
+    } else {
+      const issue = issues[i] as PermissionIssue;
       const reason =
-        error instanceof Error ? error.message : "permission denied";
+        result.reason instanceof Error
+          ? result.reason.message
+          : "permission denied";
       failed.push(`${issue.kind} ${issue.path}: ${reason}`);
     }
   }
@@ -173,12 +193,12 @@ type DiagnoseResult = {
  * @param output - Streams for user-facing output
  * @returns Count of issues found and whether any repairs failed
  */
-function handlePermissionIssues(
+async function handlePermissionIssues(
   dbPath: string,
   dryRun: boolean,
   { stdout, stderr }: Output
-): DiagnoseResult {
-  const permIssues = checkPermissions(dbPath);
+): Promise<DiagnoseResult> {
+  const permIssues = await checkPermissions(dbPath);
   if (permIssues.length === 0) {
     return { found: 0, repairFailed: false };
   }
@@ -196,7 +216,7 @@ function handlePermissionIssues(
   }
 
   stdout.write("Repairing permissions...\n");
-  const { fixed, failed } = repairPermissions(permIssues);
+  const { fixed, failed } = await repairPermissions(permIssues);
   for (const fix of fixed) {
     stdout.write(`  + ${fix}\n`);
   }
@@ -265,42 +285,6 @@ function handleSchemaIssues(
   return { found: issues.length, repairFailed: failed.length > 0 };
 }
 
-/**
- * Entry point for `sentry cli fix`. Runs permission and schema checks
- * in sequence, repairs what it can, and reports results.
- */
-function fixFunc(this: SentryContext, flags: FixFlags): void {
-  const { stdout, process: proc } = this;
-  const dbPath = getDbPath();
-  const dryRun = flags["dry-run"];
-  const out = { stdout, stderr: this.stderr };
-
-  stdout.write(`Database: ${dbPath}\n`);
-  stdout.write(`Expected schema version: ${CURRENT_SCHEMA_VERSION}\n\n`);
-
-  const perm = handlePermissionIssues(dbPath, dryRun, out);
-  const schema = handleSchemaIssues(dbPath, dryRun, out);
-  const totalFound = perm.found + schema.found;
-
-  if (totalFound === 0) {
-    stdout.write(
-      "No issues found. Database schema and permissions are correct.\n"
-    );
-    return;
-  }
-
-  if (dryRun) {
-    stdout.write("Run 'sentry cli fix' to apply fixes.\n");
-    return;
-  }
-
-  if (perm.repairFailed || schema.repairFailed) {
-    proc.exitCode = 1;
-  } else {
-    stdout.write("All issues repaired successfully.\n");
-  }
-}
-
 export const fixCommand = buildCommand({
   docs: {
     brief: "Diagnose and repair CLI database issues",
@@ -324,5 +308,35 @@ export const fixCommand = buildCommand({
       },
     },
   },
-  func: fixFunc,
+  async func(this: SentryContext, flags: FixFlags): Promise<void> {
+    const { stdout, process: proc } = this;
+    const dbPath = getDbPath();
+    const dryRun = flags["dry-run"];
+    const out = { stdout, stderr: this.stderr };
+
+    stdout.write(`Database: ${dbPath}\n`);
+    stdout.write(`Expected schema version: ${CURRENT_SCHEMA_VERSION}\n\n`);
+
+    const perm = await handlePermissionIssues(dbPath, dryRun, out);
+    const schema = handleSchemaIssues(dbPath, dryRun, out);
+    const totalFound = perm.found + schema.found;
+
+    if (totalFound === 0) {
+      stdout.write(
+        "No issues found. Database schema and permissions are correct.\n"
+      );
+      return;
+    }
+
+    if (dryRun) {
+      stdout.write("Run 'sentry cli fix' to apply fixes.\n");
+      return;
+    }
+
+    if (perm.repairFailed || schema.repairFailed) {
+      proc.exitCode = 1;
+    } else {
+      stdout.write("All issues repaired successfully.\n");
+    }
+  },
 });
