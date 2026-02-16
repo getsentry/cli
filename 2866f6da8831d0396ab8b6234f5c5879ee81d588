@@ -1,0 +1,52 @@
+## Implementation Plan
+
+### Problem
+14 EPIPE issues on Sentry (~34 events, ~10 users) from CLI output being piped
+through commands like `head`, `less`, `jq`. EPIPE (errno -32) is normal Unix
+behavior — not a bug. The codebase had zero EPIPE handling: no stream error
+handlers, no SIGPIPE handler, no beforeSend filtering.
+
+Two error variants depending on runtime:
+- Bun: "EPIPE: broken pipe, write" (via writeFast in fs/streams)
+- Node.js: "write EPIPE" (via WriteWrap.onWriteComplete in stream_base_commons)
+
+Both surfaced as uncaught exceptions (mechanism: auto.node.onuncaughtexception)
+because Node.js/Bun ignore SIGPIPE at the process level, and there were no
+error event listeners on the stdout/stderr streams.
+
+### Affected Commands
+- sentry api (13 events) — piping API JSON output
+- sentry issue view (10 events) — piping issue details (often --json)
+- sentry logs (4 events) — piping log output
+- sentry auth login (1 event) — polling dots (stdout.write("."))
+- sentry --version (1 event) — stricli writing version string
+- sentry issue list (1 event) — piping issue list
+
+### Solution
+
+#### 1. Graceful exit on EPIPE (src/bin.ts)
+Register error event listeners on process.stdout and process.stderr before main()
+runs. On EPIPE, call process.exit(0) — exiting mid-write to a closed pipe is
+normal behavior, exit code 0 signals success. Non-EPIPE errors are re-thrown.
+
+This is the standard pattern used by gh CLI, npm, and other well-behaved CLI tools.
+
+#### 2. Filter EPIPE from Sentry telemetry (src/lib/telemetry.ts)
+Add isEpipeError() helper that detects EPIPE via:
+- Exception message containing "EPIPE" (covers both Bun and Node.js formats)
+- node_system_error context with code === "EPIPE"
+
+Wire it into beforeSend to return null (drop) for EPIPE events. This is a
+belt-and-suspenders measure in case there is a race between the stream error
+handler and the SDK uncaught exception capture.
+
+#### 3. Bulk-resolve existing issues
+Resolved all 14 EPIPE issues on Sentry:
+CLI-69, CLI-67, CLI-61, CLI-5Y, CLI-5W, CLI-5V, CLI-5T,
+CLI-5P, CLI-5N, CLI-C, CLI-4Q, CLI-44, CLI-3Z, CLI-3R
+
+### Why NOT wrap individual write() calls
+The 167+ stdout.write() call sites do not need try/catch because:
+- EPIPE errors are async (from WriteWrap.onWriteComplete / writeFast)
+- They are emitted as error events on the stream, not thrown synchronously
+- The global stream error handler catches all of them in one place
