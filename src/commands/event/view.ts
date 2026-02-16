@@ -99,8 +99,10 @@ export function parsePositionalArgs(args: string[]): {
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
     if (urlParsed.eventId) {
-      // Event URL: use org as target, eventId from the URL
-      return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
+      // Event URL: eventId from the URL, auto-detect org/project.
+      // SENTRY_URL is already set for self-hosted; org/project will be
+      // resolved via DSN detection or cached defaults.
+      return { eventId: urlParsed.eventId, targetArg: undefined };
     }
     // URL recognized but no eventId — not valid for event view
     throw new ContextError(

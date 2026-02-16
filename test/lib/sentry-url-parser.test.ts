@@ -271,4 +271,16 @@ describe("applySentryUrlContext", () => {
     applySentryUrlContext("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_URL).toBe("https://sentry.acme.internal:9000");
   });
+
+  test("clears existing SENTRY_URL when SaaS URL is detected", () => {
+    process.env.SENTRY_URL = "https://sentry.example.com";
+    applySentryUrlContext("https://sentry.io");
+    expect(process.env.SENTRY_URL).toBeUndefined();
+  });
+
+  test("clears existing SENTRY_URL when SaaS subdomain is detected", () => {
+    process.env.SENTRY_URL = "https://sentry.example.com";
+    applySentryUrlContext("https://us.sentry.io");
+    expect(process.env.SENTRY_URL).toBeUndefined();
+  });
 });

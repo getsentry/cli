@@ -6,6 +6,7 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
+import { ValidationError } from "./errors.js";
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -353,8 +354,11 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     if (result) {
       return result;
     }
-    // URL recognized but no issue ID — fall through to normal parsing
-    // (shouldn't happen for issue commands, but defensive)
+    // URL recognized but no issue ID (e.g., trace or project settings URL)
+    throw new ValidationError(
+      "This Sentry URL does not contain an issue ID. Use an issue URL like:\n" +
+        "  https://sentry.io/organizations/{org}/issues/{id}/"
+    );
   }
 
   // 1. Pure numeric → direct fetch by ID

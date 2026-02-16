@@ -131,6 +131,9 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
  */
 export function applySentryUrlContext(baseUrl: string): void {
   if (isSentrySaasUrl(baseUrl)) {
+    // Clear any self-hosted URL so API calls fall back to default SaaS routing.
+    // Without this, a stale SENTRY_URL would route SaaS requests to the wrong host.
+    process.env.SENTRY_URL = undefined;
     return;
   }
   process.env.SENTRY_URL = baseUrl;

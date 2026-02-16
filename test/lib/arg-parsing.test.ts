@@ -11,6 +11,7 @@ import {
   parseIssueArg,
   parseOrgProjectArg,
 } from "../../src/lib/arg-parsing.js";
+import { ValidationError } from "../../src/lib/errors.js";
 
 describe("parseOrgProjectArg", () => {
   // Representative examples for documentation (invariants covered by property tests)
@@ -228,6 +229,38 @@ describe("parseIssueArg", () => {
         org: "my-org",
         numericId: "32886",
       });
+    });
+
+    test("trace URL throws ValidationError (no issue ID in URL)", () => {
+      expect(() =>
+        parseIssueArg(
+          "https://sentry.io/organizations/my-org/traces/a4d1aae7216b47ff/"
+        )
+      ).toThrow(ValidationError);
+    });
+
+    test("org-only URL throws ValidationError (no issue ID in URL)", () => {
+      expect(() =>
+        parseIssueArg("https://sentry.io/organizations/my-org/")
+      ).toThrow(ValidationError);
+    });
+
+    test("project settings URL throws ValidationError (no issue ID in URL)", () => {
+      expect(() =>
+        parseIssueArg("https://sentry.io/settings/my-org/projects/backend/")
+      ).toThrow(ValidationError);
+    });
+
+    test("non-issue URL error mentions issue URL format", () => {
+      try {
+        parseIssueArg("https://sentry.io/organizations/my-org/traces/abc/");
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        expect((error as ValidationError).message).toContain(
+          "does not contain an issue ID"
+        );
+      }
     });
   });
 
