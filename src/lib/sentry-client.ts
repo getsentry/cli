@@ -12,11 +12,6 @@ import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { withHttpSpan } from "./telemetry.js";
 
-// CONTROL_SILO_URL was previously a module-level const that captured
-// process.env.SENTRY_URL at import time. This broke self-hosted URL
-// detection where SENTRY_URL is set after import. Now read lazily
-// via getControlSiloUrl().
-
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000;
 
