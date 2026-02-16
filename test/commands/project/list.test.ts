@@ -787,7 +787,7 @@ describe("handleProjectSearch", () => {
   });
 
   test("not found throws ContextError", async () => {
-    // Mock returning empty projects
+    // Mock returning orgs but 404 for project lookups
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
@@ -803,16 +803,8 @@ describe("handleProjectSearch", () => {
         );
       }
 
-      if (url.includes("/projects/")) {
-        return new Response(JSON.stringify([]), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            Link: '<url>; rel="next"; results="false"; cursor="0:0:0"',
-          },
-        });
-      }
-
+      // getProject (SDK retrieveAProject) hits /projects/{org}/{slug}/
+      // Return 404 to simulate project not found
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
@@ -844,16 +836,8 @@ describe("handleProjectSearch", () => {
         );
       }
 
-      if (url.includes("/projects/")) {
-        return new Response(JSON.stringify([]), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            Link: '<url>; rel="next"; results="false"; cursor="0:0:0"',
-          },
-        });
-      }
-
+      // getProject (SDK retrieveAProject) hits /projects/{org}/{slug}/
+      // Return 404 to simulate project not found
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });

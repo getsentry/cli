@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Build script for Sentry CLI
  *
@@ -19,8 +20,13 @@
  *     sentry-windows-x64.exe
  */
 
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { $ } from "bun";
 import pkg from "../package.json";
+import { processBinary } from "./hole-punch.js";
+
+const gzipAsync = promisify(gzip);
 
 const VERSION = pkg.version;
 
@@ -92,6 +98,29 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
   }
 
   console.log(`    -> ${outfile}`);
+
+  // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
+  // Must run before gzip so the compressed output benefits from zeroed regions.
+  const hpStats = processBinary(outfile);
+  if (hpStats && hpStats.removedEntries > 0) {
+    console.log(
+      `    -> hole-punched ${hpStats.removedEntries}/${hpStats.totalEntries} ICU entries`
+    );
+  }
+
+  // In CI, create gzip-compressed copies for release downloads.
+  // With hole-punch, reduces download size by ~70% (99 MB → 28 MB).
+  if (process.env.CI) {
+    const binary = await Bun.file(outfile).arrayBuffer();
+    const compressed = await gzipAsync(Buffer.from(binary), { level: 6 });
+    await Bun.write(`${outfile}.gz`, compressed);
+    const ratio = (
+      (1 - compressed.byteLength / binary.byteLength) *
+      100
+    ).toFixed(0);
+    console.log(`    -> ${outfile}.gz (${ratio}% smaller)`);
+  }
+
   return true;
 }
 
