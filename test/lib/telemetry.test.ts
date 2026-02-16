@@ -138,6 +138,43 @@ describe("withTelemetry", () => {
       })
     ).rejects.toThrow(error);
   });
+
+  describe("with telemetry enabled", () => {
+    beforeEach(() => {
+      delete process.env[ENV_VAR];
+    });
+
+    test("propagates 4xx ApiError through enabled SDK path", async () => {
+      const error = new ApiError("Not found", 404, "Issue not found");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+    });
+
+    test("propagates 5xx ApiError through enabled SDK path", async () => {
+      const error = new ApiError("Server error", 500, "Internal error");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+    });
+
+    test("propagates generic Error through enabled SDK path", async () => {
+      await expect(
+        withTelemetry(() => {
+          throw new Error("unexpected bug");
+        })
+      ).rejects.toThrow("unexpected bug");
+    });
+
+    test("returns result through enabled SDK path", async () => {
+      const result = await withTelemetry(() => 42);
+      expect(result).toBe(42);
+    });
+  });
 });
 
 describe("isClientApiError", () => {
