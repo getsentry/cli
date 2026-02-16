@@ -156,6 +156,41 @@ export function createBeforeExitHandler(client: Sentry.BunClient): () => void {
 }
 
 /**
+ * Check if a Sentry event represents an EPIPE error.
+ *
+ * EPIPE (errno -32) occurs when writing to a pipe whose reading end has been
+ * closed. This is normal Unix behavior when CLI output is piped through
+ * commands like `head`, `less`, or `grep -m1`. These errors are not bugs
+ * and should be silently dropped from telemetry.
+ *
+ * Detects both Bun-style ("EPIPE: broken pipe, write") and Node.js-style
+ * ("write EPIPE") error messages, plus the structured `node_system_error` context.
+ *
+ * @internal Exported for testing
+ */
+export function isEpipeError(event: Sentry.ErrorEvent): boolean {
+  // Check exception message for EPIPE
+  const exceptions = event.exception?.values;
+  if (exceptions) {
+    for (const ex of exceptions) {
+      if (ex.value?.includes("EPIPE")) {
+        return true;
+      }
+    }
+  }
+
+  // Check Node.js system error context (set by the SDK for system errors)
+  const systemError = event.contexts?.node_system_error as
+    | { code?: string }
+    | undefined;
+  if (systemError?.code === "EPIPE") {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Integrations to exclude for CLI.
  * These add overhead without benefit for short-lived CLI processes.
  */
@@ -206,6 +241,13 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     beforeSend: (event) => {
       // Remove server_name which may contain hostname (PII)
       event.server_name = undefined;
+
+      // EPIPE errors are expected when stdout is piped and the consumer closes
+      // early (e.g., `sentry issue list | head`). Not actionable — drop them.
+      if (isEpipeError(event)) {
+        return null;
+      }
+
       return event;
     },
   });
