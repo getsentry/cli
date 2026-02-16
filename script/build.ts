@@ -22,9 +22,9 @@
 
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
+import { processBinary } from "binpunch";
 import { $ } from "bun";
 import pkg from "../package.json";
-import { processBinary } from "./hole-punch.js";
 
 const gzipAsync = promisify(gzip);
 

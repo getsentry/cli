@@ -16,6 +16,7 @@
         "@types/node": "^22",
         "@types/qrcode-terminal": "^0.12.2",
         "@types/semver": "^7.7.1",
+        "binpunch": "^1.0.0",
         "chalk": "^5.6.2",
         "esbuild": "^0.25.0",
         "fast-check": "^4.5.3",
@@ -298,6 +299,8 @@
     "baseline-browser-mapping": ["baseline-browser-mapping@2.9.18", "", { "bin": { "baseline-browser-mapping": "dist/cli.js" } }, "sha512-e23vBV1ZLfjb9apvfPk4rHVu2ry6RIr2Wfs+O324okSidrX7pTAnEJPCh/O5BtRlr7QtZI7ktOP3vsqr7Z5XoA=="],
 
     "binary-extensions": ["binary-extensions@2.3.0", "", {}, "sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw=="],
+
+    "binpunch": ["binpunch@1.0.0", "", { "bin": { "binpunch": "dist/cli.js" } }, "sha512-ghxdoerLN3WN64kteDJuL4d9dy7gbvcqoADNRWBk6aQ5FrYH1EmPmREAdcdIdTNAA3uW3V38Env5OqH2lj+i+g=="],
 
     "brace-expansion": ["brace-expansion@2.0.2", "", { "dependencies": { "balanced-match": "^1.0.0" } }, "sha512-Jt0vHyM+jmUBqojB7E1NIYadt0vI0Qxjxd2TErW94wDz+E2LAm5vKMXXwg6ZZBTHPuUlDgQHKXvjGBdfcF1ZDQ=="],
 
