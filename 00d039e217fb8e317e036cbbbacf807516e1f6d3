@@ -1,0 +1,48 @@
+## Implementation Plan
+
+### Problem
+Bun-compiled CLI binaries are ~98 MB raw / ~37 MB gzipped. The binary is
+almost entirely the Bun runtime (~97 MB) with only ~1 MB of JS payload.
+
+### Binary Composition (from linker map analysis)
+- .text section (56.8 MB): JSC/WebKit 25.7 MB, Bun Zig 20.6 MB, ICU 1.3 MB, others
+- .rodata section (39.8 MB): ICU data blob 29.3 MB (!), other 10.5 MB
+
+### Approach: ICU Data Hole-Punching
+The ICU data blob (29.3 MB) contains ~4,000 entries for international locale
+support. Most are unused by a CLI tool. Zeroing unused entries makes them
+compress to nearly nothing.
+
+Safe to zero:
+- .cnv files (legacy charset converters, never used in JS)
+- .dict files in brkitr/ (CJK/Burmese/Khmer break dictionaries)
+- Non-English locale data in subcategories (coll/, zone/, curr/, lang/, etc.)
+
+Must keep (Bun accesses at startup/shutdown):
+- All root-level .res files
+- All .nrm, .icu, .cfu, .brk files
+- res_index.res, pool.res in every subcategory
+- Root and English entries in subcategories
+
+### Results
+2,578 entries zeroed (21.8 MB), 1,511 entries kept (7.4 MB)
+
+| Format   | Before  | After   | Savings        |
+|----------|---------|---------|----------------|
+| gzip     | 37.2 MB | 28.2 MB | 9.0 MB (24%)   |
+| zstd     | 34.7 MB | 26.4 MB | 8.2 MB (24%)   |
+| zstd -19 | 27.4 MB | 21.0 MB | 6.4 MB (23%)   |
+
+### Phase 2 Investigation (JSC code stubbing) — NOT PURSUED
+Investigated stubbing unused JSC subsystems (Wasm, Inspector, DFG, B3, FTL,
+Baseline JIT — 8.8 MB total). Only Inspector (530K) and Wasm (2.1 MB) could
+be safely stubbed, yielding just 0.9 MB additional gzip savings. The approach
+requires version-specific profile builds, iterative crash-test discovery, and
+maintenance of exclusion lists per Bun version. ROI too low vs. complexity.
+
+### Design Decisions
+- Version-independent: scans for ICU magic bytes, no hardcoded offsets
+- Platform-agnostic: works on ELF, Mach-O, and PE (scans data, not headers)
+- Conservative: only zeros entries proven safe through extensive testing
+- Modular exports: functions exported individually for unit testing
+- CI integration: runs after build, before smoke test, on all 5 targets
