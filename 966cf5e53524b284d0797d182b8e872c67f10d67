@@ -1,0 +1,40 @@
+## Implementation Plan
+
+### Context
+
+5 Sentry issues (CLI-K, CLI-53, CLI-48, CLI-42, CLI-5J) with 16 total events,
+all "SyntaxError: Unexpected end of JSON input" from response.json() calls
+without error handling.
+
+CLI-K (10 events) is confirmed from fetchLatestFromGitHub in the background
+version check. CLI-5J is the version check firing during sentry cli setup
+(which itself makes no API calls). The remaining 3 issues have minified
+stacktraces — could be version check or API calls.
+
+### Investigation findings
+
+8 unprotected response.json() / JSON.parse() call sites identified:
+- api-client.ts:228 (apiRequestToRegion)
+- upgrade.ts:249 (fetchLatestFromGitHub)
+- upgrade.ts:281 (fetchLatestFromNpm)
+- oauth.ts:127,161,366 (device code, token poll, token refresh)
+- @sentry/api SDK index.js:729 (successful 2xx responses)
+- dsn-cache.ts:337,347,357 (SQLite JSON columns)
+
+The @sentry/api SDK does NOT wrap JSON.parse in try/catch for successful
+responses (only for error responses and empty bodies). Truncated JSON on
+2xx responses propagates uncaught through the SDK, bypassing unwrapResult.
+
+### Decision
+
+Leave API-side JSON parse errors as-is for visibility — they are rare (16
+events over 2 weeks) and signal genuine server/network anomalies worth
+monitoring. Focus the fix on version-check noise:
+
+1. Replace captureException with span attributes (version_check.error,
+   version_check.error_type) so errors are queryable in Discover without
+   creating Issues.
+2. Suppress background version check for cli management commands (setup, fix)
+   where update notifications are irrelevant.
+3. Resolved CLI-K and CLI-5J in Sentry. Left CLI-53/48/42 unresolved
+   (ambiguous stacktraces, may recur from API paths).
