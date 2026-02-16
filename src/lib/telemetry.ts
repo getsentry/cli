@@ -13,7 +13,7 @@
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
 import { tryRepairAndRetry } from "./db/schema.js";
-import { AuthError } from "./errors.js";
+import { ApiError, AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
@@ -102,17 +102,25 @@ export async function withTelemetry<T>(
       async (span) => {
         try {
           return await callback(span);
+        } catch (e) {
+          // Record 4xx API errors as span attributes instead of exceptions.
+          // These are user errors (wrong ID, no access) not CLI bugs, but
+          // recording on the span lets us detect volume spikes in Discover.
+          if (isClientApiError(e)) {
+            recordApiErrorOnSpan(span, e as ApiError);
+          }
+          throw e;
         } finally {
           span.end();
         }
       }
     );
   } catch (e) {
-    // Don't capture or mark as crashed for expected auth state
-    // AuthError("not_authenticated") is re-thrown from app.ts for auto-login flow
     const isExpectedAuthState =
       e instanceof AuthError && e.reason === "not_authenticated";
-    if (!isExpectedAuthState) {
+    // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
+    // They're recorded as span attributes above for volume-spike detection.
+    if (!(isExpectedAuthState || isClientApiError(e))) {
       Sentry.captureException(e);
       markSessionCrashed();
     }
@@ -188,6 +196,35 @@ export function isEpipeError(event: Sentry.ErrorEvent): boolean {
   }
 
   return false;
+}
+
+/**
+ * Check if an error is a client-side (4xx) API error.
+ *
+ * 4xx errors are user errors — wrong issue IDs, no access, invalid input —
+ * not CLI bugs. These should be recorded as span attributes for volume-spike
+ * detection in Discover, but should NOT be captured as Sentry exceptions.
+ *
+ * @internal Exported for testing
+ */
+export function isClientApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+/**
+ * Record a client API error as span attributes for Discover queryability.
+ *
+ * Sets `api_error.status`, `api_error.message`, and optionally `api_error.detail`
+ * on the span. Must be called before `span.end()`.
+ *
+ * @internal Exported for testing
+ */
+export function recordApiErrorOnSpan(span: Span, error: ApiError): void {
+  span.setAttribute("api_error.status", error.status);
+  span.setAttribute("api_error.message", error.message);
+  if (error.detail) {
+    span.setAttribute("api_error.detail", error.detail);
+  }
 }
 
 /**
