@@ -13,6 +13,7 @@
     "dev": "bun run src/bin.ts",
     "build": "bun run script/build.ts --single",
     "build:all": "bun run script/build.ts",
+    "hole-punch": "bun run script/hole-punch.ts",
     "bundle": "bun run script/bundle.ts",
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
