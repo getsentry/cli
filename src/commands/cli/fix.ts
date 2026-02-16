@@ -342,8 +342,9 @@ export const fixCommand = buildCommand({
     }
 
     const totalFound = perm.found + schema.found;
+    const anyFailed = perm.repairFailed || schema.repairFailed;
 
-    if (totalFound === 0) {
+    if (totalFound === 0 && !anyFailed) {
       stdout.write(
         "No issues found. Database schema and permissions are correct.\n"
       );
@@ -351,11 +352,16 @@ export const fixCommand = buildCommand({
     }
 
     if (dryRun) {
-      stdout.write("Run 'sentry cli fix' to apply fixes.\n");
+      if (totalFound > 0) {
+        stdout.write("Run 'sentry cli fix' to apply fixes.\n");
+      }
+      if (anyFailed) {
+        proc.exitCode = 1;
+      }
       return;
     }
 
-    if (perm.repairFailed || schema.repairFailed) {
+    if (anyFailed) {
       proc.exitCode = 1;
     } else {
       stdout.write("All issues repaired successfully.\n");
