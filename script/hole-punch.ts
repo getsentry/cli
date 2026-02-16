@@ -326,8 +326,20 @@ function holePunch(buf: Buffer, scan: IcuScanResult): HolePunchStats {
   let bytesZeroed = 0;
   let bytesKept = 0;
 
-  for (const entry of scan.entries) {
+  const lastIndex = scan.entries.length - 1;
+
+  for (let i = 0; i < scan.entries.length; i += 1) {
+    const entry = scan.entries[i];
     entry.shouldRemove = shouldRemoveEntry(entry.name);
+
+    // Skip the last entry: its size is estimated (no successor to measure
+    // against) and zeroing it could overwrite bytes outside the ICU blob.
+    // One skipped entry has negligible impact on compression savings.
+    if (i === lastIndex) {
+      keptEntries += 1;
+      bytesKept += entry.dataSize;
+      continue;
+    }
 
     // Clamp data size to not exceed buffer bounds
     const safeSize = Math.min(entry.dataSize, buf.length - entry.dataOffset);
@@ -394,52 +406,107 @@ export {
   shouldRemoveEntry,
   holePunch,
   processBinary,
+  formatSize,
+  estimateLastEntrySize,
+  runCli,
 };
-export type { IcuScanResult, IcuEntry, HolePunchStats };
+export type { IcuScanResult, IcuEntry, HolePunchStats, CliFileResult };
 
 // --- CLI Entry Point ---
 
-function main(): void {
-  const cliArgs = process.argv.slice(2);
-  const isVerbose = cliArgs.includes("--verbose") || cliArgs.includes("-v");
-  const filePaths = cliArgs.filter((a) => !a.startsWith("-"));
+/** Result from a single file processed by the CLI */
+type CliFileResult = {
+  filePath: string;
+  status: "no_icu" | "no_removable" | "success";
+  stats?: HolePunchStats;
+  originalSize?: number;
+};
+
+/**
+ * Run the hole-punch CLI logic.
+ *
+ * Extracted from main() so it can be tested in-process without mocking
+ * process.exit or console output.
+ *
+ * @returns Error message string if validation fails, or array of results
+ */
+function runCli(
+  args: string[]
+): { error: string } | { results: CliFileResult[] } {
+  const filePaths = args.filter((a) => !a.startsWith("-"));
 
   if (filePaths.length === 0) {
-    console.error(
-      "Usage: bun run script/hole-punch.ts [--verbose] <binary-path> ..."
-    );
-    console.error("");
-    console.error(
-      "Reduces compressed binary size by ~24% by zeroing unused ICU data."
-    );
-    console.error("Modifies binaries in-place.");
-    process.exit(1);
+    return {
+      error:
+        "Usage: bun run script/hole-punch.ts [--verbose] <binary-path> ...",
+    };
   }
 
   // Validate all files exist before processing
   for (const filePath of filePaths) {
     if (!existsSync(filePath)) {
-      console.error(`Error: File not found: ${filePath}`);
-      process.exit(1);
+      return { error: `Error: File not found: ${filePath}` };
     }
     const stat = statSync(filePath);
     if (!stat.isFile()) {
-      console.error(`Error: Not a file: ${filePath}`);
-      process.exit(1);
+      return { error: `Error: Not a file: ${filePath}` };
     }
   }
+
+  const results: CliFileResult[] = [];
 
   for (const filePath of filePaths) {
     const originalSize = statSync(filePath).size;
     const stats = processBinary(filePath);
 
     if (!stats) {
-      console.error(`  Warning: No ICU data found in ${filePath}, skipping`);
+      results.push({ filePath, status: "no_icu" });
       continue;
     }
 
     if (stats.removedEntries === 0) {
-      console.log(`  ${filePath}: no removable entries found`);
+      results.push({ filePath, status: "no_removable", stats, originalSize });
+      continue;
+    }
+
+    results.push({ filePath, status: "success", stats, originalSize });
+  }
+
+  return { results };
+}
+
+function main(): void {
+  const cliArgs = process.argv.slice(2);
+  const isVerbose = cliArgs.includes("--verbose") || cliArgs.includes("-v");
+  const result = runCli(cliArgs);
+
+  if ("error" in result) {
+    console.error(result.error);
+    if (result.error.startsWith("Usage:")) {
+      console.error("");
+      console.error(
+        "Reduces compressed binary size by ~24% by zeroing unused ICU data."
+      );
+      console.error("Modifies binaries in-place.");
+    }
+    process.exit(1);
+  }
+
+  for (const fileResult of result.results) {
+    if (fileResult.status === "no_icu") {
+      console.error(
+        `  Warning: No ICU data found in ${fileResult.filePath}, skipping`
+      );
+      continue;
+    }
+
+    if (fileResult.status === "no_removable") {
+      console.log(`  ${fileResult.filePath}: no removable entries found`);
+      continue;
+    }
+
+    const { stats, originalSize, filePath } = fileResult;
+    if (!stats) {
       continue;
     }
 
@@ -452,7 +519,7 @@ function main(): void {
       `  ${filePath}: zeroed ${stats.removedEntries}/${stats.totalEntries} ICU entries (${formatSize(stats.bytesZeroed)}, ${pct}% of ICU data)`
     );
 
-    if (isVerbose) {
+    if (isVerbose && originalSize !== undefined) {
       console.log(`    Raw size: ${formatSize(originalSize)} (unchanged)`);
       console.log(`    ICU entries kept: ${stats.keptEntries}`);
       console.log(`    ICU data kept: ${formatSize(stats.bytesKept)}`);
