@@ -107,20 +107,20 @@ describe("parsePositionalArgs", () => {
       }
     });
 
-    test("event URL extracts eventId, auto-detects org/project", () => {
+    test("event URL extracts eventId and passes org as OrgAll target", () => {
       const result = parsePositionalArgs([
         "https://sentry.io/organizations/my-org/issues/32886/events/abc123def456/",
       ]);
       expect(result.eventId).toBe("abc123def456");
-      expect(result.targetArg).toBeUndefined();
+      expect(result.targetArg).toBe("my-org/");
     });
 
-    test("self-hosted event URL extracts eventId, sets SENTRY_URL", () => {
+    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL", () => {
       const result = parsePositionalArgs([
         "https://sentry.example.com/organizations/acme/issues/999/events/deadbeef/",
       ]);
       expect(result.eventId).toBe("deadbeef");
-      expect(result.targetArg).toBeUndefined();
+      expect(result.targetArg).toBe("acme/");
       expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
     });
 

@@ -75,9 +75,10 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
  * - `<sentry-url>` — extract eventId and org from a Sentry event URL
  *   (e.g., `https://sentry.example.com/organizations/my-org/issues/123/events/abc/`)
  *
- * For event URLs, the org is extracted and passed as `targetArg` so the
- * downstream resolution logic can use it. The URL must contain an eventId
- * segment — issue-only URLs are not valid for event view.
+ * For event URLs, the org is returned as `targetArg` in `"{org}/"` format
+ * (OrgAll). Since event URLs don't contain a project slug, the caller
+ * must fall back to auto-detection for the project. The URL must contain
+ * an eventId segment — issue-only URLs are not valid for event view.
  *
  * @returns Parsed event ID and optional target arg
  */
@@ -99,10 +100,10 @@ export function parsePositionalArgs(args: string[]): {
   if (urlParsed) {
     applySentryUrlContext(urlParsed.baseUrl);
     if (urlParsed.eventId) {
-      // Event URL: eventId from the URL, auto-detect org/project.
-      // SENTRY_URL is already set for self-hosted; org/project will be
-      // resolved via DSN detection or cached defaults.
-      return { eventId: urlParsed.eventId, targetArg: undefined };
+      // Event URL: pass org as OrgAll target ("{org}/").
+      // Event URLs don't contain a project slug, so viewCommand falls
+      // back to auto-detect for the project while keeping the org context.
+      return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
     }
     // URL recognized but no eventId — not valid for event view
     throw new ContextError(
@@ -211,8 +212,11 @@ export const viewCommand = buildCommand({
       }
 
       case ProjectSpecificationType.OrgAll:
-        throw new ContextError("Specific project", USAGE_HINT);
-
+      // Org-only (e.g., from event URL that has no project slug).
+      // Fall through to auto-detect — SENTRY_URL is already set for
+      // self-hosted, and auto-detect will resolve the project from
+      // DSN, config defaults, or directory name inference.
+      // falls through
       case ProjectSpecificationType.AutoDetect:
         target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
         break;
