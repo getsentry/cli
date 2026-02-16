@@ -1,0 +1,46 @@
+## Implementation Plan: Fix Bun.spawn Node.js Polyfill (CLI-68)
+
+### Problem
+
+The `Bun.spawn()` polyfill in `script/node-polyfills.ts` was designed for
+fire-and-forget background processes (browser opening). It returned only
+`{ unref() }` — missing `exited`, `stdin`, and `env` support.
+
+When npm-installed users ran `sentry cli upgrade`:
+1. `runSetupOnNewBinary()` calls `Bun.spawn()` (polyfilled on Node.js)
+2. `const exitCode = await proc.exited` → `undefined` (property missing)
+3. `undefined !== 0` → throws `UpgradeError("Setup failed with exit code undefined")`
+
+The spawned setup process likely ran successfully, but the parent could not
+observe its exit code.
+
+### Affected Code Paths
+
+| Location | Feature | Impact |
+|----------|---------|--------|
+| `upgrade.ts:113-118` | `runSetupOnNewBinary` | **Crash** — always throws on npm installs |
+| `clipboard.ts:55-65` | `copyToClipboard` | Silent failure — try/catch returns false |
+| `browser.ts:52-59` | `openBrowser` | Already worked (only uses `unref`) |
+
+### Fix
+
+Enhanced `script/node-polyfills.ts` spawn function:
+
+1. **`exited` promise** — Wraps Node.js `close` event in a Promise resolving
+   with the exit code (falls back to 1 on signal/error)
+2. **`stdin` passthrough** — Exposes `proc.stdin` from the child process
+3. **`env` option** — Passes through to Node.js `spawn()` options
+4. **Updated types** — Supports `"inherit"` alongside `"pipe"` and `"ignore"`
+5. **Removed `detached: true`** — Not needed; `unref()` is sufficient for
+   the browser fire-and-forget case
+
+### Tests
+
+Created `test/script/node-polyfills.test.ts` with 7 tests:
+- Exit code 0 for successful commands
+- Non-zero exit codes propagated correctly
+- stdin piping works with `stdin: "pipe"`
+- Environment variables passed through
+- `"inherit"` stdio does not throw
+- Non-existent commands resolve to exit code 1
+- `unref()` is callable
