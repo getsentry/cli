@@ -184,6 +184,7 @@ jobs:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
         run: bun run build --target ${{ matrix.target }}
       - name: Hole-punch binary (reduce compressed size)
+        shell: bash
         run: bun run hole-punch dist-bin/sentry-*
       - name: Smoke test
         if: matrix.can-test
