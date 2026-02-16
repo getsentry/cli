@@ -24,6 +24,7 @@ import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { $ } from "bun";
 import pkg from "../package.json";
+import { processBinary } from "./hole-punch.js";
 
 const gzipAsync = promisify(gzip);
 
@@ -100,7 +101,6 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
 
   // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
   // Must run before gzip so the compressed output benefits from zeroed regions.
-  // biome-ignore lint/correctness/noUndeclaredVariables: resolved at runtime via ./hole-punch.ts
   const hpStats = processBinary(outfile);
   if (hpStats && hpStats.removedEntries > 0) {
     console.log(

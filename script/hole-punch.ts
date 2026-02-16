@@ -370,7 +370,11 @@ function holePunch(buf: Buffer, scan: IcuScanResult): HolePunchStats {
 /**
  * Process a single binary file: find ICU data, zero unused entries, write back.
  *
- * @returns Hole-punch statistics, or null if no ICU data was found
+ * Returns null (rather than throwing) when the binary has no ICU data or
+ * when the ICU blob has an unexpected layout, so callers like the build
+ * script can skip hole-punch gracefully instead of crashing.
+ *
+ * @returns Hole-punch statistics, or null if no ICU data was found/parseable
  */
 function processBinary(filePath: string): HolePunchStats | null {
   const buf = readFileSync(filePath);
@@ -380,11 +384,17 @@ function processBinary(filePath: string): HolePunchStats | null {
     return null;
   }
 
-  const scan = parseIcuToc(buf, blobOffset);
-  const stats = holePunch(buf, scan);
+  try {
+    const scan = parseIcuToc(buf, blobOffset);
+    const stats = holePunch(buf, scan);
 
-  writeFileSync(filePath, buf);
-  return stats;
+    writeFileSync(filePath, buf);
+    return stats;
+  } catch {
+    // ICU blob matched the magic bytes but has an unexpected layout
+    // (e.g., entry count out of range). Skip instead of crashing.
+    return null;
+  }
 }
 
 /** Format bytes as a human-readable string */
