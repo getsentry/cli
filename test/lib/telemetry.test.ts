@@ -8,9 +8,12 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/bun";
+import { ApiError, AuthError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,
   initSentry,
+  isClientApiError,
+  recordApiErrorOnSpan,
   setArgsContext,
   setCommandSpanName,
   setFlagContext,
@@ -125,6 +128,114 @@ describe("withTelemetry", () => {
       executed = true;
     });
     expect(executed).toBe(true);
+  });
+
+  test("propagates 4xx ApiError to caller", async () => {
+    const error = new ApiError("Not found", 404, "Issue not found");
+    await expect(
+      withTelemetry(() => {
+        throw error;
+      })
+    ).rejects.toThrow(error);
+  });
+});
+
+describe("isClientApiError", () => {
+  test("returns true for 400 Bad Request", () => {
+    expect(isClientApiError(new ApiError("Bad request", 400))).toBe(true);
+  });
+
+  test("returns true for 403 Forbidden", () => {
+    expect(isClientApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
+      true
+    );
+  });
+
+  test("returns true for 404 Not Found", () => {
+    expect(
+      isClientApiError(new ApiError("Not found", 404, "Issue not found"))
+    ).toBe(true);
+  });
+
+  test("returns true for 429 Too Many Requests", () => {
+    expect(isClientApiError(new ApiError("Rate limited", 429))).toBe(true);
+  });
+
+  test("returns false for 500 Internal Server Error", () => {
+    expect(isClientApiError(new ApiError("Server error", 500))).toBe(false);
+  });
+
+  test("returns false for 502 Bad Gateway", () => {
+    expect(isClientApiError(new ApiError("Bad gateway", 502))).toBe(false);
+  });
+
+  test("returns false for non-ApiError", () => {
+    expect(isClientApiError(new Error("generic error"))).toBe(false);
+  });
+
+  test("returns false for AuthError", () => {
+    expect(isClientApiError(new AuthError("not_authenticated"))).toBe(false);
+  });
+
+  test("returns false for null/undefined", () => {
+    expect(isClientApiError(null)).toBe(false);
+    expect(isClientApiError(undefined)).toBe(false);
+  });
+
+  test("returns false for non-Error objects", () => {
+    expect(isClientApiError({ status: 404 })).toBe(false);
+    expect(isClientApiError("404")).toBe(false);
+  });
+});
+
+describe("recordApiErrorOnSpan", () => {
+  function createMockSpan() {
+    const attributes: Record<string, string | number> = {};
+    return {
+      attributes,
+      setAttribute(key: string, value: string | number) {
+        attributes[key] = value;
+      },
+    };
+  }
+
+  test("sets status and message attributes", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Not found", 404);
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(404);
+    expect(span.attributes["api_error.message"]).toBe("Not found");
+    expect(span.attributes["api_error.detail"]).toBeUndefined();
+  });
+
+  test("sets detail attribute when present", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Not found", 404, "Issue not found");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(404);
+    expect(span.attributes["api_error.message"]).toBe("Not found");
+    expect(span.attributes["api_error.detail"]).toBe("Issue not found");
+  });
+
+  test("omits detail attribute when empty string", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Bad request", 400, "");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(400);
+    expect(span.attributes["api_error.detail"]).toBeUndefined();
+  });
+
+  test("handles different 4xx status codes", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Forbidden", 403, "No access");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(403);
+    expect(span.attributes["api_error.message"]).toBe("Forbidden");
+    expect(span.attributes["api_error.detail"]).toBe("No access");
   });
 });
 
