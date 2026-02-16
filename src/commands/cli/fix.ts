@@ -41,11 +41,15 @@ type PermissionIssue = {
 };
 
 /**
- * Check if a path has the required permission bits set.
+ * Check if a path has the exact expected permission mode.
+ *
+ * Uses exact match (not bitmask) so extra bits like group/other read (e.g.,
+ * 0o644 instead of 0o600) are flagged as issues — the CLI's local database
+ * may contain auth tokens and should not be accessible to other users.
  *
  * @param path - Filesystem path to check
- * @param expectedMode - Bitmask of required permission bits (e.g., 0o700)
- * @returns Object with the actual mode if permissions are insufficient, or null if OK.
+ * @param expectedMode - Exact permission mode (e.g., 0o700, 0o600)
+ * @returns Object with the actual mode if permissions differ, or null if OK.
  *          Returns null if the path doesn't exist (ENOENT). Re-throws unexpected errors
  *          so they propagate to the user and get captured by Sentry's error handling.
  */
@@ -57,8 +61,7 @@ async function checkMode(
     const st = await stat(path);
     // biome-ignore lint/suspicious/noBitwiseOperators: extracting permission bits with bitmask
     const mode = st.mode & 0o777;
-    // biome-ignore lint/suspicious/noBitwiseOperators: checking required permission bits are set
-    if ((mode & expectedMode) !== expectedMode) {
+    if (mode !== expectedMode) {
       return { actualMode: mode };
     }
   } catch (error: unknown) {
@@ -318,7 +321,26 @@ export const fixCommand = buildCommand({
     stdout.write(`Expected schema version: ${CURRENT_SCHEMA_VERSION}\n\n`);
 
     const perm = await handlePermissionIssues(dbPath, dryRun, out);
-    const schema = handleSchemaIssues(dbPath, dryRun, out);
+
+    // Schema check opens the database, which can throw if the DB or config
+    // directory is readonly. Guard with try/catch so --dry-run can finish
+    // diagnostics even when the filesystem is broken.
+    let schema: DiagnoseResult;
+    try {
+      schema = handleSchemaIssues(dbPath, dryRun, out);
+    } catch {
+      // If we already found permission issues, the schema check failure is
+      // expected — don't obscure the permission report with an unrelated crash.
+      // If no permission issues were found, this is unexpected so re-report it.
+      if (perm.found === 0) {
+        out.stderr.write("Could not open database to check schema.\n");
+        out.stderr.write(
+          `Try deleting the database and restarting: rm "${dbPath}"\n`
+        );
+      }
+      schema = { found: 0, repairFailed: true };
+    }
+
     const totalFound = perm.found + schema.found;
 
     if (totalFound === 0) {

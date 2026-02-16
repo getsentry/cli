@@ -637,6 +637,24 @@ let repairAttempted = false;
  * Replaces itself with a noop after the first call via the `repairAttempted`
  * guard so we only try once per process.
  */
+/**
+ * Chmod a path, ignoring ENOENT (file doesn't exist yet).
+ * Re-throws any other error so permission failures aren't silently masked.
+ */
+function chmodIfExists(filePath: string, mode: number): void {
+  try {
+    chmodSync(filePath, mode);
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 function tryRepairReadonly(): boolean {
   if (repairAttempted) {
     return false;
@@ -645,17 +663,17 @@ function tryRepairReadonly(): boolean {
 
   try {
     const dbPath = resolveDbPath();
+
+    // Repair config directory (needs rwx for WAL/SHM creation)
+    const { dirname } = require("node:path") as {
+      dirname: (p: string) => string;
+    };
+    chmodSync(dirname(dbPath), 0o700);
+
+    // Repair database file and journal files
     chmodSync(dbPath, 0o600);
-    try {
-      chmodSync(`${dbPath}-wal`, 0o600);
-    } catch {
-      // WAL file may not exist
-    }
-    try {
-      chmodSync(`${dbPath}-shm`, 0o600);
-    } catch {
-      // SHM file may not exist
-    }
+    chmodIfExists(`${dbPath}-wal`, 0o600);
+    chmodIfExists(`${dbPath}-shm`, 0o600);
 
     // Disable the fallback warning — repair succeeded
     warnReadonlyDatabaseOnce = noop;

@@ -89,9 +89,12 @@ async function runFix(dryRun: boolean) {
 
 describe("sentry cli fix", () => {
   test("reports no issues for healthy database", async () => {
-    const db = new Database(join(getTestDir(), "cli.db"));
+    const dbPath = join(getTestDir(), "cli.db");
+    const db = new Database(dbPath);
     initSchema(db);
     db.close();
+    // Match the permissions that setDbPermissions() applies in production
+    chmodSync(dbPath, 0o600);
 
     const { stdout } = await runFix(false);
     expect(stdout).toContain("No issues found");
@@ -164,9 +167,11 @@ describe("sentry cli fix", () => {
   // that was previously missing tables (now fixed by auto-repair at startup).
   test("handles database that was auto-repaired at startup", async () => {
     // Create database missing dsn_cache - initSchema will create it when command runs
-    const db = new Database(join(getTestDir(), "cli.db"));
+    const dbPath = join(getTestDir(), "cli.db");
+    const db = new Database(dbPath);
     createDatabaseWithMissingTables(db, ["dsn_cache"]);
     db.close();
+    chmodSync(dbPath, 0o600);
 
     const stdoutWrite = mock(() => true);
     const mockContext = {
