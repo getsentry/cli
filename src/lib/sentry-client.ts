@@ -12,12 +12,6 @@ import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
 import { refreshToken } from "./db/auth.js";
 import { withHttpSpan } from "./telemetry.js";
 
-/**
- * Control silo URL - handles OAuth, user accounts, and region routing.
- * This is always sentry.io for SaaS, or the base URL for self-hosted.
- */
-const CONTROL_SILO_URL = process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
-
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -291,9 +285,12 @@ export function getApiBaseUrl(): string {
 /**
  * Get the control silo URL.
  * This is always sentry.io for SaaS, or the custom URL for self-hosted.
+ *
+ * Read lazily (not at module load) so that SENTRY_URL set after import
+ * (e.g., from URL argument parsing for self-hosted instances) is respected.
  */
 export function getControlSiloUrl(): string {
-  return CONTROL_SILO_URL;
+  return process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
 }
 
 /**
@@ -339,7 +336,7 @@ export function getDefaultSdkConfig() {
  * Used for endpoints that are always on the control silo (OAuth, user accounts, regions).
  */
 export function getControlSdkConfig() {
-  return getSdkConfig(CONTROL_SILO_URL);
+  return getSdkConfig(getControlSiloUrl());
 }
 
 /**
