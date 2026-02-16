@@ -24,6 +24,8 @@ const JITTER_FACTOR = 0.2;
 /** Commands/flags that should not show update notifications */
 const SUPPRESSED_ARGS = new Set([
   "upgrade",
+  "setup",
+  "fix",
   "--version",
   "-V",
   "--json",
@@ -107,9 +109,14 @@ function checkForUpdateInBackgroundImpl(): void {
         setVersionCheckInfo(latestVersion);
         span.setStatus({ code: 1 }); // OK
       } catch (error) {
-        // Don't report abort errors - they're expected when process exits
+        // Don't report abort errors - they're expected when process exits.
+        // Record other errors (network failures, JSON parse errors) as span
+        // attributes rather than captureException — these are transient
+        // infrastructure issues (GitHub rate limits, CDN errors), not CLI bugs.
+        // They remain queryable in Discover without cluttering the Issues feed.
         if (error instanceof Error && error.name !== "AbortError") {
-          Sentry.captureException(error);
+          span.setAttribute("version_check.error", error.message);
+          span.setAttribute("version_check.error_type", error.constructor.name);
         }
         span.setStatus({ code: 2 }); // Error
       } finally {
