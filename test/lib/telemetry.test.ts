@@ -144,6 +144,13 @@ describe("withTelemetry", () => {
       delete process.env[ENV_VAR];
     });
 
+    afterEach(() => {
+      // Re-init with enabled=false to reset global SDK state.
+      // Without this, Sentry.isEnabled() returns true for all
+      // subsequent test files (e.g. feedbackCommand checks it).
+      initSentry(false);
+    });
+
     test("propagates 4xx ApiError through enabled SDK path", async () => {
       const error = new ApiError("Not found", 404, "Issue not found");
       await expect(
