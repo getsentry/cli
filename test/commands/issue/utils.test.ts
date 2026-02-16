@@ -445,7 +445,16 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects - return projects that don't match "nonexistent"
+      // getProject (single project detail) — "nonexistent" doesn't exist
+      // URL pattern: /projects/{org}/{project}/
+      if (url.match(/\/projects\/[^/]+\/[^/]+/)) {
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      }
+
+      // listProjects — return projects that don't match "nonexistent"
+      // URL pattern: /organizations/{org}/projects/
       if (url.includes("/projects/")) {
         return new Response(
           JSON.stringify([
