@@ -1,0 +1,29 @@
+## Implementation Plan
+
+### Context
+Sentry SDK 10.39.0 was released with fixes for all issues we had manually
+patched in this codebase. This upgrade removes those patches.
+
+### Patches Removed
+
+1. **Timer .unref() patch** (`patches/@sentry%2Fcore@10.38.0.patch`)
+   - Added .unref() to setupWeightBasedFlushing timeout (client.js)
+   - Added .unref() + early return to _isClientDoneProcessing (client.js)
+   - Added .unref() to makePromiseBuffer drain timeout (promisebuffer.js)
+   - Fixed upstream by: #19062 (flush on empty buffer) and #19174 (weightBasedFlushing)
+   - They also added a bugbot lint rule (#19082) to prevent regressions
+
+2. **Runtime context workaround** (`src/lib/telemetry.ts:217-230`)
+   - Manually overrode options.runtime after Sentry.init() to report Bun
+   - NodeClient in 10.39.0 now uses `options.runtime || { name: "node", ... }`
+   - @sentry/bun passes `runtime: { name: "bun", version: Bun.version }`
+   - Tracked as upstream issue: getsentry/sentry-javascript#19269
+
+### Not Removed (intentional application logic, not patches)
+- createBeforeExitHandler (session management for CLI use case)
+- biome-ignore for import * as Sentry (lint config, not a workaround)
+
+### Verification
+- Typecheck: clean
+- Lint: clean (242 files)
+- Tests: 60/60 telemetry tests pass, no new failures vs baseline
