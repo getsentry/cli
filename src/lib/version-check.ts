@@ -24,13 +24,18 @@ const JITTER_FACTOR = 0.2;
 /** Commands/flags that should not show update notifications */
 const SUPPRESSED_ARGS = new Set([
   "upgrade",
-  "setup",
-  "fix",
   "--version",
   "-V",
   "--json",
   "token",
 ]);
+
+/**
+ * CLI management subcommands that should not trigger version checks.
+ * Matched only when preceded by "cli" to avoid false positives
+ * (e.g., `--project setup` should not suppress notifications).
+ */
+const SUPPRESSED_CLI_SUBCOMMANDS = new Set(["setup", "fix"]);
 
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;
@@ -65,7 +70,14 @@ function shouldCheckForUpdate(): boolean {
  * Check if update notifications should be suppressed for these args.
  */
 export function shouldSuppressNotification(args: string[]): boolean {
-  return args.some((arg) => SUPPRESSED_ARGS.has(arg));
+  if (args.some((arg) => SUPPRESSED_ARGS.has(arg))) {
+    return true;
+  }
+  // Suppress for "cli <subcommand>" management commands (setup, fix)
+  if (args[0] === "cli" && SUPPRESSED_CLI_SUBCOMMANDS.has(args[1] ?? "")) {
+    return true;
+  }
+  return false;
 }
 
 /**
