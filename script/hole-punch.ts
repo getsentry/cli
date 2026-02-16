@@ -384,17 +384,18 @@ function processBinary(filePath: string): HolePunchStats | null {
     return null;
   }
 
+  let scan: IcuScanResult;
   try {
-    const scan = parseIcuToc(buf, blobOffset);
-    const stats = holePunch(buf, scan);
-
-    writeFileSync(filePath, buf);
-    return stats;
+    scan = parseIcuToc(buf, blobOffset);
   } catch {
     // ICU blob matched the magic bytes but has an unexpected layout
     // (e.g., entry count out of range). Skip instead of crashing.
     return null;
   }
+
+  const stats = holePunch(buf, scan);
+  writeFileSync(filePath, buf);
+  return stats;
 }
 
 /** Format bytes as a human-readable string */
