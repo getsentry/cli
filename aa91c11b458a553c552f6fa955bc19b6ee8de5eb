@@ -1,0 +1,37 @@
+## Implementation Plan: Skip 4xx API Error Telemetry
+
+### Problem
+CLI-5M and CLI-46 are both `ApiError: 404 Not Found` from users referencing
+non-existent resources (wrong issue/event IDs). These are user errors, not bugs,
+but they were being reported via captureException, creating noise.
+
+### Approach: Record as span data (Option C)
+Skip captureException for 4xx ApiErrors, but record them as span attributes
+so they are queryable in Discover/Explore for volume-spike detection.
+
+This balances noise reduction with the ability to detect regressions —
+if we accidentally break API URL construction, a volume spike of 4xx errors
+on spans would be detectable via Discover queries.
+
+### Changes
+
+1. **src/lib/telemetry.ts**
+   - Add `isClientApiError(error): boolean` helper (exported for testing)
+   - Inner catch in startSpanManual: set api_error.status, api_error.message,
+     api_error.detail as span attributes before span.end()
+   - Outer catch: skip captureException and markSessionCrashed for client API errors
+
+2. **test/lib/telemetry.test.ts**
+   - 10 tests for isClientApiError: 400/403/404/429 → true; 500/502/non-ApiError/
+     AuthError/null/plain objects → false
+   - 1 withTelemetry test confirming 4xx ApiError propagates to caller
+
+### Queryable after deployment
+- `api_error.status:*` — all spans with client API errors
+- `api_error.status:404` — specifically 404s
+- Volume over time for regression detection
+
+### Not changed
+- 5xx ApiErrors still reported as exceptions (server bugs are actionable)
+- AuthError("not_authenticated") still skipped (existing behavior)
+- Errors still propagate to bin.ts for user-facing formatting
