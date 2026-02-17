@@ -1,0 +1,37 @@
+Implementation Plan for "Failed to fetch issues from N project(s)" fix
+
+Root Cause Analysis (CLI-3Q: 132 events, CLI-N: 81 events):
+- fetchIssuesForTarget() (lines 355-381) catches all errors and converts
+  them to { success: false, errorType: "permission"|"network"|"unknown" }
+  — the original error object is completely discarded.
+- Only 401/403 classified as "permission". All other ApiErrors (400, 404,
+  429, 500) fall through to "unknown".
+- When all fetches fail, lines 490-508 throw a plain Error (not CliError
+  or ApiError), so telemetry always calls captureException — no
+  suppression rule matches it.
+- JSON output silently drops partial failures with zero indication that
+  data is incomplete.
+- Highest-volume case (CLI-3Q) is a user running
+  `sentry issue list tuple-app/ --json --query "..."` — all 12 project
+  fetches likely fail with 400 Bad Request (invalid query syntax) but
+  the error detail is swallowed.
+
+Changes:
+A. Preserve underlying errors in FetchResult:
+   Add the original error object to the failure case so it can be
+   used downstream for re-throwing and messaging.
+
+B. Extract classifyApiError() helper:
+   Classify API errors into granular types: permission (401/403),
+   not_found (404), rate_limit (429), bad_request (other 4xx),
+   unknown (5xx+). Keeps fetchIssuesForTarget complexity manageable.
+
+C. Throw ApiError when underlying errors are ApiError:
+   Propagate the first ApiError so PR #251 isClientApiError()
+   suppresses it from telemetry. Include detail/message from original.
+
+D. Include partial failure info in JSON output:
+   When some projects succeed but others fail, JSON output includes
+   { issues: [...], errors: [...] } instead of silently dropping
+   failures. Plain array when all succeed (backward compat).
+   Human output gets a muted stderr warning about partial failures.
