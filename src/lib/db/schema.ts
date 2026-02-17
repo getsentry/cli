@@ -438,6 +438,22 @@ function isSchemaError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Check if an error is a SQLite "readonly database" error.
+ *
+ * This happens when the CLI's local database file or its containing directory
+ * lacks write permissions (e.g., installed globally in a protected path,
+ * read-only filesystem, or changed permissions).
+ */
+export function isReadonlyError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "SQLiteError") {
+    return error.message
+      .toLowerCase()
+      .includes("attempt to write a readonly database");
+  }
+  return false;
+}
+
 /** Result of a repair attempt */
 export type RepairAttemptResult<T> =
   | { attempted: false }

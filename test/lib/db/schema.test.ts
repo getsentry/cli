@@ -13,6 +13,7 @@ import {
   getSchemaIssues,
   hasColumn,
   initSchema,
+  isReadonlyError,
   repairSchema,
   tableExists,
 } from "../../../src/lib/db/schema.js";
@@ -257,5 +258,36 @@ describe("EXPECTED_COLUMNS", () => {
     const columnNames = userInfoColumns?.map((c) => c.name) ?? [];
 
     expect(columnNames).toContain("name");
+  });
+});
+
+describe("isReadonlyError", () => {
+  test("returns true for SQLiteError with readonly message", () => {
+    const error = new Error("attempt to write a readonly database");
+    error.name = "SQLiteError";
+    expect(isReadonlyError(error)).toBe(true);
+  });
+
+  test("returns true for mixed-case readonly message", () => {
+    const error = new Error("Attempt to Write a Readonly Database");
+    error.name = "SQLiteError";
+    expect(isReadonlyError(error)).toBe(true);
+  });
+
+  test("returns false for schema errors", () => {
+    const error = new Error("no such table: foo");
+    error.name = "SQLiteError";
+    expect(isReadonlyError(error)).toBe(false);
+  });
+
+  test("returns false for non-SQLiteError", () => {
+    const error = new Error("attempt to write a readonly database");
+    expect(isReadonlyError(error)).toBe(false);
+  });
+
+  test("returns false for non-Error values", () => {
+    expect(isReadonlyError("attempt to write a readonly database")).toBe(false);
+    expect(isReadonlyError(null)).toBe(false);
+    expect(isReadonlyError(undefined)).toBe(false);
   });
 });
