@@ -2,20 +2,26 @@
  * Upgrade Module
  *
  * Detects how the CLI was installed and provides self-upgrade functionality.
+ * Binary management helpers (download URLs, locking, replacement) live in
+ * binary.ts and are shared with the setup --install flow.
  */
 
 import { spawn } from "node:child_process";
-import {
-  chmodSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { unlink } from "node:fs/promises";
+import { chmodSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { CLI_VERSION, getUserAgent } from "./constants.js";
+import { join, sep } from "node:path";
+import {
+  acquireLock,
+  cleanupOldBinary,
+  fetchWithUpgradeError,
+  getBinaryDownloadUrl,
+  getBinaryFilename,
+  getBinaryPaths,
+  getGitHubHeaders,
+  KNOWN_CURL_DIRS,
+  releaseLock,
+} from "./binary.js";
+import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import { UpgradeError } from "./errors.js";
 
@@ -41,57 +47,21 @@ const GITHUB_RELEASES_URL =
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 
-/** Build headers for GitHub API requests */
-function getGitHubHeaders() {
-  return {
-    Accept: "application/vnd.github.v3+json",
-    "User-Agent": getUserAgent(),
-  };
-}
-
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
 // Curl Binary Helpers
 
 /**
- * Build the download URL for a platform-specific binary from GitHub releases.
- *
- * @param version - Version to download (without 'v' prefix)
- * @returns Download URL for the binary
+ * Known directories where the curl installer may place the binary.
+ * Resolved at runtime against the user's home directory.
+ * Used for legacy detection (when no install info is stored).
+ * Trailing separator ensures startsWith matches a directory boundary
+ * (e.g. ~/.local/bin/ won't match ~/.local/binaries/).
  */
-export function getBinaryDownloadUrl(version: string): string {
-  let os: string;
-  if (process.platform === "darwin") {
-    os = "darwin";
-  } else if (process.platform === "win32") {
-    os = "windows";
-  } else {
-    os = "linux";
-  }
-
-  const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const suffix = process.platform === "win32" ? ".exe" : "";
-
-  return `https://github.com/getsentry/cli/releases/download/v${version}/sentry-${os}-${arch}${suffix}`;
-}
-
-/**
- * Build paths object from an install path.
- */
-function buildPaths(installPath: string): {
-  installPath: string;
-  tempPath: string;
-  oldPath: string;
-  lockPath: string;
-} {
-  return {
-    installPath,
-    tempPath: `${installPath}.download`,
-    oldPath: `${installPath}.old`,
-    lockPath: `${installPath}.lock`,
-  };
-}
+const KNOWN_CURL_PATHS = KNOWN_CURL_DIRS.map(
+  (dir) => join(homedir(), dir) + sep
+);
 
 /**
  * Get file paths for curl-installed binary.
@@ -112,140 +82,28 @@ export function getCurlInstallPaths(): {
   // Check stored install path
   const stored = getInstallInfo();
   if (stored?.path && stored.method === "curl") {
-    return buildPaths(stored.path);
+    return getBinaryPaths(stored.path);
   }
 
   // Check if we're running from a known curl install location
   for (const dir of KNOWN_CURL_PATHS) {
     if (process.execPath.startsWith(dir)) {
-      return buildPaths(process.execPath);
+      return getBinaryPaths(process.execPath);
     }
   }
 
   // Fallback to default path (for fresh installs or non-curl runs like tests)
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  const defaultPath = join(homedir(), ".sentry", "bin", `sentry${suffix}`);
-  return buildPaths(defaultPath);
+  const defaultPath = join(homedir(), ".sentry", "bin", getBinaryFilename());
+  return getBinaryPaths(defaultPath);
 }
 
 /**
- * Clean up leftover .old files from previous upgrades.
- * Called on CLI startup to remove .old files left over from Windows upgrades
- * (where the running binary is renamed to .old before replacement).
- *
- * Note: We intentionally do NOT clean up .download files here because an
- * upgrade may be in progress in another process. The .download cleanup is
- * handled inside executeUpgradeCurl() under the exclusive lock.
- *
- * Fire-and-forget, non-blocking.
+ * Start cleanup of the .old binary for this install.
+ * Called on CLI startup. Fire-and-forget, non-blocking.
  */
-export function cleanupOldBinary(): void {
+export function startCleanupOldBinary(): void {
   const { oldPath } = getCurlInstallPaths();
-  // Fire-and-forget: don't await, just let cleanup run in background
-  unlink(oldPath).catch(() => {
-    // Intentionally ignore errors - file may not exist
-  });
-}
-
-/**
- * Check if a process with the given PID is still running.
- *
- * On Unix, process.kill(pid, 0) throws:
- * - ESRCH: Process does not exist (not running)
- * - EPERM: Process exists but we lack permission to signal it (IS running)
- */
-export function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // Signal 0 just checks if process exists
-    return true;
-  } catch (error) {
-    // EPERM means process exists but we can't signal it (different user)
-    // This is still a running process, so return true
-    if ((error as NodeJS.ErrnoException).code === "EPERM") {
-      return true;
-    }
-    // ESRCH or other errors mean process is not running
-    return false;
-  }
-}
-
-/**
- * Acquire an exclusive lock for the upgrade process.
- * Uses atomic file creation with 'wx' flag to prevent race conditions.
- * If lock exists, checks if owning process is still alive (stale lock detection).
- *
- * @param lockPath - Path to the lock file
- * @throws {UpgradeError} If another upgrade is already in progress
- */
-export function acquireUpgradeLock(lockPath: string): void {
-  try {
-    // Try atomic exclusive creation - fails if file exists
-    writeFileSync(lockPath, String(process.pid), { flag: "wx" });
-    // Lock acquired successfully
-  } catch (error) {
-    // If error is not "file exists", re-throw
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-    // File exists - check if it's a stale lock
-    handleExistingLock(lockPath);
-  }
-}
-
-/**
- * Handle an existing lock file by checking if it's stale.
- * If stale, removes it and retries acquisition. If active, throws.
- */
-function handleExistingLock(lockPath: string): void {
-  // Lock file exists - read and check if owner process is still alive
-  let content: string;
-  try {
-    content = readFileSync(lockPath, "utf-8").trim();
-  } catch (error) {
-    // Only retry if file disappeared (ENOENT) - race condition with another process
-    // For other errors (EACCES, etc.), re-throw to avoid infinite recursion
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      acquireUpgradeLock(lockPath);
-      return;
-    }
-    throw error;
-  }
-
-  const existingPid = Number.parseInt(content, 10);
-
-  if (!Number.isNaN(existingPid) && isProcessRunning(existingPid)) {
-    throw new UpgradeError(
-      "execution_failed",
-      "Another upgrade is already in progress"
-    );
-  }
-
-  // Stale lock from dead process - remove and retry
-  try {
-    unlinkSync(lockPath);
-  } catch (error) {
-    // Only proceed if file already gone (ENOENT) - someone else removed it
-    // For other errors (EACCES, etc.), re-throw to avoid infinite recursion
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  // Retry acquisition (recursive call handles race with other processes)
-  acquireUpgradeLock(lockPath);
-}
-
-/**
- * Release the upgrade lock.
- *
- * @param lockPath - Path to the lock file
- */
-export function releaseUpgradeLock(lockPath: string): void {
-  try {
-    unlinkSync(lockPath);
-  } catch {
-    // Ignore errors - file might already be gone
-  }
+  cleanupOldBinary(oldPath);
 }
 
 // Detection
@@ -303,16 +161,6 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
     return false;
   }
 }
-
-/**
- * Known directories where the curl installer may place the binary.
- * Used for legacy detection (when no install info is stored).
- */
-const KNOWN_CURL_PATHS = [
-  join(homedir(), ".local", "bin"),
-  join(homedir(), "bin"),
-  join(homedir(), ".sentry", "bin"),
-];
 
 /**
  * Legacy detection for existing installs that don't have stored install info.
@@ -373,41 +221,6 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
 }
 
 // Version Fetching
-
-/** Extract error message from unknown caught value */
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Fetch wrapper that converts network errors to UpgradeError.
- * Handles DNS failures, timeouts, and other connection issues.
- *
- * @param url - URL to fetch
- * @param init - Fetch options
- * @param serviceName - Service name for error messages (e.g., "GitHub")
- * @returns Response object
- * @throws {UpgradeError} On network failure
- * @throws {Error} AbortError if signal is aborted (re-thrown as-is)
- */
-async function fetchWithUpgradeError(
-  url: string,
-  init: RequestInit,
-  serviceName: string
-): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (error) {
-    // Re-throw AbortError as-is so callers can handle it specifically
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
-    }
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to ${serviceName}: ${getErrorMessage(error)}`
-    );
-  }
-}
 
 /**
  * Fetch the latest version from GitHub releases.
@@ -503,7 +316,7 @@ export async function versionExists(
 ): Promise<boolean> {
   if (method === "curl") {
     const response = await fetchWithUpgradeError(
-      `${GITHUB_RELEASES_URL}/tags/v${version}`,
+      `${GITHUB_RELEASES_URL}/tags/${version}`,
       { method: "HEAD", headers: getGitHubHeaders() },
       "GitHub"
     );
@@ -520,27 +333,68 @@ export async function versionExists(
 
 // Upgrade Execution
 
-/**
- * Execute upgrade by downloading binary directly from GitHub releases.
- * Downloads the platform-specific binary and replaces the current installation.
- *
- * Uses a PID-based lock file to prevent concurrent upgrades.
- *
- * On Windows, the running executable cannot be overwritten directly, so we:
- * 1. Rename the current binary to .old
- * 2. Write the new binary to the original path
- * 3. The .old file is cleaned up on next CLI startup via cleanupOldBinary()
- *
- * @param version - Target version to install
- * @throws {UpgradeError} When download or installation fails, or if another upgrade is running
- */
-async function executeUpgradeCurl(version: string): Promise<void> {
-  const url = getBinaryDownloadUrl(version);
-  const { installPath, tempPath, oldPath, lockPath } = getCurlInstallPaths();
-  const isWindows = process.platform === "win32";
+/** Result from downloadBinaryToTemp — includes both the binary path and lock path */
+export type DownloadResult = {
+  /** Path to the downloaded temporary binary */
+  tempBinaryPath: string;
+  /** Path to the lock file held during download (caller must release after child exits) */
+  lockPath: string;
+};
 
-  // Acquire exclusive lock to prevent concurrent upgrades
-  acquireUpgradeLock(lockPath);
+/**
+ * Stream a response body through a decompression transform and write to disk.
+ *
+ * Uses a manual `for await` loop with `Bun.file().writer()` instead of
+ * `Bun.write(path, Response)` to work around a Bun event-loop bug where
+ * streaming response bodies get GC'd before completing.
+ * See: https://github.com/oven-sh/bun/issues/13237
+ *
+ * @param body - Readable stream from a fetch response
+ * @param destPath - File path to write the decompressed output
+ */
+async function streamDecompressToFile(
+  body: ReadableStream<Uint8Array>,
+  destPath: string
+): Promise<void> {
+  const stream = body.pipeThrough(new DecompressionStream("gzip"));
+  const writer = Bun.file(destPath).writer();
+  try {
+    for await (const chunk of stream) {
+      writer.write(chunk);
+    }
+  } finally {
+    await writer.end();
+  }
+}
+
+/**
+ * Download the new binary to a temporary path and return its location.
+ * Used by the upgrade command to download before spawning setup --install.
+ *
+ * Tries the gzip-compressed URL first (`{url}.gz`, ~37 MB vs ~99 MB),
+ * falling back to the raw binary URL on any failure. The compressed
+ * download is streamed through DecompressionStream for minimal memory usage.
+ *
+ * The lock is held on success so concurrent upgrades are blocked during the
+ * download→spawn→install pipeline. The caller MUST release the lock after the
+ * child process exits (the child may use a different install directory and
+ * therefore a different lock file, so it cannot reliably release this one).
+ *
+ * If the child resolves to the same install path, it takes over the lock via
+ * process.ppid recognition in acquireLock — the parent's subsequent release
+ * is then a harmless no-op.
+ *
+ * @param version - Target version to download
+ * @returns The downloaded binary path and lock path to release
+ * @throws {UpgradeError} When download fails
+ */
+export async function downloadBinaryToTemp(
+  version: string
+): Promise<DownloadResult> {
+  const url = getBinaryDownloadUrl(version);
+  const { tempPath, lockPath } = getCurlInstallPaths();
+
+  acquireLock(lockPath);
 
   try {
     // Clean up any leftover temp file from interrupted download
@@ -550,58 +404,52 @@ async function executeUpgradeCurl(version: string): Promise<void> {
       // Ignore if doesn't exist
     }
 
-    // Download binary
-    const response = await fetchWithUpgradeError(
-      url,
-      { headers: getGitHubHeaders() },
-      "GitHub"
-    );
+    const headers = getGitHubHeaders();
 
-    if (!response.ok) {
-      throw new UpgradeError(
-        "execution_failed",
-        `Failed to download binary: HTTP ${response.status}`
+    // Try gzip-compressed download first (~60% smaller)
+    let downloaded = false;
+    try {
+      const gzResponse = await fetchWithUpgradeError(
+        `${url}.gz`,
+        { headers },
+        "GitHub"
       );
+      if (gzResponse.ok && gzResponse.body) {
+        await streamDecompressToFile(gzResponse.body, tempPath);
+        downloaded = true;
+      }
+    } catch {
+      // Fall through to raw download
     }
 
-    // Write to temp file
-    await Bun.write(tempPath, response);
+    // Fall back to raw (uncompressed) binary
+    if (!downloaded) {
+      const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
+
+      if (!response.ok) {
+        throw new UpgradeError(
+          "execution_failed",
+          `Failed to download binary: HTTP ${response.status}`
+        );
+      }
+
+      // Fully consume the response body before writing to disk.
+      // Bun.write(path, Response) with a large streaming body can exit the
+      // process before the download completes (Bun event-loop bug).
+      // See: https://github.com/oven-sh/bun/issues/13237
+      const body = await response.arrayBuffer();
+      await Bun.write(tempPath, body);
+    }
 
     // Set executable permission (Unix only)
-    if (!isWindows) {
+    if (process.platform !== "win32") {
       chmodSync(tempPath, 0o755);
     }
 
-    // Replace the binary
-    if (isWindows) {
-      // Windows: Can't overwrite running exe, but CAN rename it
-      // Rename current -> .old, then rename temp -> current
-      try {
-        renameSync(installPath, oldPath);
-      } catch {
-        // Current binary might not exist (fresh install) or .old already exists
-        // Try to remove .old first, then retry
-        try {
-          unlinkSync(oldPath);
-          renameSync(installPath, oldPath);
-        } catch {
-          // If still failing, current binary doesn't exist - that's fine
-        }
-      }
-      renameSync(tempPath, installPath);
-    } else {
-      // Unix: Atomic rename overwrites target
-      renameSync(tempPath, installPath);
-    }
-
-    // Update stored install info with new version
-    setInstallInfo({
-      method: "curl",
-      path: installPath,
-      version,
-    });
-  } finally {
-    releaseUpgradeLock(lockPath);
+    return { tempBinaryPath: tempPath, lockPath };
+  } catch (error) {
+    releaseLock(lockPath);
+    throw error;
   }
 }
 
@@ -626,12 +474,6 @@ function executeUpgradePackageManager(
 
     proc.on("close", (code) => {
       if (code === 0) {
-        // Update stored install info with new version
-        setInstallInfo({
-          method: pm,
-          path: process.execPath,
-          version,
-        });
         resolve();
       } else {
         reject(
@@ -654,22 +496,32 @@ function executeUpgradePackageManager(
 /**
  * Execute the upgrade using the appropriate method.
  *
+ * For curl installs, downloads the new binary to a temp path and returns a
+ * DownloadResult with the binary path and lock path. The caller should spawn
+ * `setup --install` on the new binary, then release the lock.
+ *
+ * For package manager installs, runs the package manager's global install
+ * command (which replaces the binary in-place). The caller should then
+ * spawn `setup` on the new binary for completions/agent skills.
+ *
  * @param method - How the CLI was installed
  * @param version - Target version to install
+ * @returns Download result with paths (curl), or null (package manager)
  * @throws {UpgradeError} When method is unknown or installation fails
  */
-export function executeUpgrade(
+export async function executeUpgrade(
   method: InstallationMethod,
   version: string
-): Promise<void> {
+): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return executeUpgradeCurl(version);
+      return downloadBinaryToTemp(version);
     case "npm":
     case "pnpm":
     case "bun":
     case "yarn":
-      return executeUpgradePackageManager(method, version);
+      await executeUpgradePackageManager(method, version);
+      return null;
     default:
       throw new UpgradeError("unknown_method");
   }

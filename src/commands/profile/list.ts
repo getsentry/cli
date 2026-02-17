@@ -82,9 +82,7 @@ async function resolveListTarget(
     }
 
     case "project-search":
-      return await resolveProjectBySlug(parsed.projectSlug, {
-        usageHint: USAGE_HINT,
-      });
+      return await resolveProjectBySlug(parsed.projectSlug, USAGE_HINT);
 
     case "auto-detect": {
       const resolved = await resolveOrgAndProject({

@@ -5,6 +5,7 @@
  * Follows gh cli patterns for alignment and presentation.
  */
 
+import prettyMs from "pretty-ms";
 import type {
   Breadcrumb,
   BreadcrumbsEntry,
@@ -22,6 +23,8 @@ import type {
 import { withSerializeSpan } from "../telemetry.js";
 import {
   boldUnderline,
+  type FixabilityTier,
+  fixabilityColor,
   green,
   levelColor,
   muted,
@@ -52,6 +55,60 @@ const MAX_DISPLAY_FEATURES = 10;
  */
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Convert Seer fixability score to a tier label.
+ *
+ * Thresholds are simplified from Sentry core (sentry/seer/autofix/constants.py)
+ * into 3 tiers for CLI display.
+ *
+ * @param score - Numeric fixability score (0-1)
+ * @returns `"high"` | `"med"` | `"low"`
+ */
+export function getSeerFixabilityLabel(score: number): FixabilityTier {
+  if (score > 0.66) {
+    return "high";
+  }
+  if (score > 0.33) {
+    return "med";
+  }
+  return "low";
+}
+
+/**
+ * Format fixability score as "label(pct%)" for compact list display.
+ *
+ * @param score - Numeric fixability score, or null/undefined if unavailable
+ * @returns Formatted string like `"med(50%)"`, or `""` when score is unavailable
+ */
+export function formatFixability(score: number | null | undefined): string {
+  if (score === null || score === undefined) {
+    return "";
+  }
+  const label = getSeerFixabilityLabel(score);
+  const pct = Math.round(score * 100);
+  return `${label}(${pct}%)`;
+}
+
+/**
+ * Format fixability score for detail view: "Label (pct%)".
+ *
+ * Uses capitalized label with space before parens for readability
+ * in the single-issue detail display.
+ *
+ * @param score - Numeric fixability score, or null/undefined if unavailable
+ * @returns Formatted string like `"Med (50%)"`, or `""` when score is unavailable
+ */
+export function formatFixabilityDetail(
+  score: number | null | undefined
+): string {
+  if (score === null || score === undefined) {
+    return "";
+  }
+  const label = getSeerFixabilityLabel(score);
+  const pct = Math.round(score * 100);
+  return `${capitalize(label)} (${pct}%)`;
 }
 
 /** Map of entry type strings to their TypeScript types */
@@ -253,10 +310,12 @@ const COL_ALIAS = 15;
 const COL_SHORT_ID = 22;
 const COL_COUNT = 5;
 const COL_SEEN = 10;
+/** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
+const COL_FIX = 10;
 
 /** Column where title starts in single-project mode (no ALIAS column) */
 const TITLE_START_COL =
-  COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2; // = 50
+  COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2 + COL_FIX + 2;
 
 /** Column where title starts in multi-project mode (with ALIAS column) */
 const TITLE_START_COL_MULTI =
@@ -269,7 +328,9 @@ const TITLE_START_COL_MULTI =
   COL_COUNT +
   2 +
   COL_SEEN +
-  2; // = 66
+  2 +
+  COL_FIX +
+  2;
 
 /**
  * Format the header row for issue list table.
@@ -290,6 +351,8 @@ export function formatIssueListHeader(isMultiProject = false): string {
       "  " +
       "SEEN".padEnd(COL_SEEN) +
       "  " +
+      "FIXABILITY".padEnd(COL_FIX) +
+      "  " +
       "TITLE"
     );
   }
@@ -301,6 +364,8 @@ export function formatIssueListHeader(isMultiProject = false): string {
     "COUNT".padStart(COL_COUNT) +
     "  " +
     "SEEN".padEnd(COL_SEEN) +
+    "  " +
+    "FIXABILITY".padEnd(COL_FIX) +
     "  " +
     "TITLE"
   );
@@ -520,6 +585,15 @@ export function formatIssueRow(
   const count = `${issue.count}`.padStart(COL_COUNT);
   const seen = formatRelativeTime(issue.lastSeen);
 
+  // Fixability column (color applied after padding to preserve alignment)
+  const fixText = formatFixability(issue.seerFixabilityScore);
+  const fixPadding = " ".repeat(Math.max(0, COL_FIX - fixText.length));
+  const score = issue.seerFixabilityScore;
+  const fix =
+    fixText && score !== null && score !== undefined
+      ? fixabilityColor(fixText, getSeerFixabilityLabel(score)) + fixPadding
+      : fixPadding;
+
   // Multi-project mode: include ALIAS column
   if (isMultiProject) {
     const aliasShorthand = computeAliasShorthand(issue.shortId, projectAlias);
@@ -528,11 +602,11 @@ export function formatIssueRow(
     );
     const alias = `${aliasShorthand}${aliasPadding}`;
     const title = wrapTitle(issue.title, TITLE_START_COL_MULTI, termWidth);
-    return `${level} ${alias} ${shortId} ${count}  ${seen}  ${title}`;
+    return `${level} ${alias} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
   }
 
   const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
-  return `${level} ${shortId} ${count}  ${seen}  ${title}`;
+  return `${level} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
 }
 
 /**
@@ -561,6 +635,16 @@ export function formatIssueDetails(issue: SentryIssue): string[] {
   // Priority
   if (issue.priority) {
     lines.push(`Priority:   ${capitalize(issue.priority)}`);
+  }
+
+  // Seer fixability
+  if (
+    issue.seerFixabilityScore !== null &&
+    issue.seerFixabilityScore !== undefined
+  ) {
+    const fixDetail = formatFixabilityDetail(issue.seerFixabilityScore);
+    const tier = getSeerFixabilityLabel(issue.seerFixabilityScore);
+    lines.push(`Fixability: ${fixabilityColor(fixDetail, tier)}`);
   }
 
   // Level with unhandled indicator
@@ -843,6 +927,24 @@ function formatRequest(requestEntry: RequestEntry): string[] {
 
 // Span Tree Formatting
 
+/**
+ * Compute the duration of a span in milliseconds.
+ * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
+ *
+ * @returns Duration in milliseconds, or undefined if not computable
+ */
+function computeSpanDurationMs(span: TraceSpan): number | undefined {
+  if (span.duration !== undefined && Number.isFinite(span.duration)) {
+    return span.duration;
+  }
+  const endTs = span.end_timestamp || span.timestamp;
+  if (endTs !== undefined && Number.isFinite(endTs)) {
+    const ms = (endTs - span.start_timestamp) * 1000;
+    return ms >= 0 ? ms : undefined;
+  }
+  return;
+}
+
 type FormatSpanOptions = {
   lines: string[];
   prefix: string;
@@ -853,7 +955,8 @@ type FormatSpanOptions = {
 
 /**
  * Recursively format a span and its children as simple tree lines.
- * Uses "op — description" format without durations.
+ * Uses "op — description (duration)" format.
+ * Duration is omitted when unavailable.
  */
 function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const { lines, prefix, isLast, currentDepth, maxDepth } = opts;
@@ -863,7 +966,14 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  lines.push(`${prefix}${branch} ${muted(op)} — ${desc}`);
+  let line = `${prefix}${branch} ${muted(op)} — ${desc}`;
+
+  const durationMs = computeSpanDurationMs(span);
+  if (durationMs !== undefined) {
+    line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
+  }
+
+  lines.push(line);
 
   if (currentDepth < maxDepth) {
     const children = span.children ?? [];
@@ -881,8 +991,18 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
 }
 
 /**
- * Format trace as simple tree (op — description).
- * No durations, just hierarchy like Sentry's dashboard.
+ * Maximum number of root-level spans to display before truncating.
+ * Prevents overwhelming output when traces have thousands of flat root spans
+ * (common in projects with very high span volume or flat hierarchies).
+ */
+const MAX_ROOT_SPANS = 50;
+
+/**
+ * Format trace as a simple tree with "op — description (duration)" per span.
+ * Durations are shown when available, omitted otherwise.
+ *
+ * Root spans are capped at {@link MAX_ROOT_SPANS} to prevent terminal flooding
+ * when traces contain thousands of flat spans.
  *
  * @param traceId - The trace ID for the header
  * @param spans - Root-level spans from the /trace/ API
@@ -911,16 +1031,27 @@ export function formatSimpleSpanTree(
     lines.push("");
     lines.push(`${muted("Trace —")} ${traceId}`);
 
-    const spanCount = spans.length;
-    spans.forEach((span, i) => {
+    const totalRootSpans = spans.length;
+    const truncated = totalRootSpans > MAX_ROOT_SPANS;
+    const displaySpans = truncated ? spans.slice(0, MAX_ROOT_SPANS) : spans;
+    const displayCount = displaySpans.length;
+
+    displaySpans.forEach((span, i) => {
       formatSpanSimple(span, {
         lines,
         prefix: "",
-        isLast: i === spanCount - 1,
+        isLast: !truncated && i === displayCount - 1,
         currentDepth: 1,
         maxDepth: effectiveMaxDepth,
       });
     });
+
+    if (truncated) {
+      const remaining = totalRootSpans - MAX_ROOT_SPANS;
+      lines.push(
+        `└─ ${muted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
+      );
+    }
 
     return lines;
   });

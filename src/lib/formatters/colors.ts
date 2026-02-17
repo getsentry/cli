@@ -88,3 +88,24 @@ export function levelColor(text: string, level: string | undefined): string {
   const colorFn = LEVEL_COLORS[normalizedLevel];
   return colorFn ? colorFn(text) : text;
 }
+
+// Fixability-based Coloring
+
+/** Fixability tier labels returned by getSeerFixabilityLabel() */
+export type FixabilityTier = "high" | "med" | "low";
+
+const FIXABILITY_COLORS: Record<FixabilityTier, (text: string) => string> = {
+  high: green,
+  med: yellow,
+  low: red,
+};
+
+/**
+ * Color text based on Seer fixability tier.
+ *
+ * @param text - Text to colorize
+ * @param tier - Fixability tier label (`"high"`, `"med"`, or `"low"`)
+ */
+export function fixabilityColor(text: string, tier: FixabilityTier): string {
+  return FIXABILITY_COLORS[tier](text);
+}

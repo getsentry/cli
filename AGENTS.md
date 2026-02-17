@@ -383,6 +383,37 @@ Minimal comments, maximum clarity. Comments explain **intent and reasoning**, no
 | Unit tests | `*.test.ts` | `test/` (mirrors `src/`) |
 | E2E tests | `*.test.ts` | `test/e2e/` |
 
+### Test Environment Isolation (CRITICAL)
+
+Tests that need a database or config directory **must** use `useTestConfigDir()` from `test/helpers.ts`. This helper:
+- Creates a unique temp directory in `beforeEach`
+- Sets `SENTRY_CONFIG_DIR` to point at it
+- **Restores** (never deletes) the env var in `afterEach`
+- Closes the database and cleans up temp files
+
+**NEVER** do any of these in test files:
+- `delete process.env.SENTRY_CONFIG_DIR` — This pollutes other test files that load after yours
+- `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
+- Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
+
+**Why**: Bun runs test files **sequentially in one thread** (load → run all tests → load next file). If your `afterEach` deletes the env var, the next file's module-level code reads `undefined`, causing `TypeError: The "paths[0]" property must be of type string`.
+
+```typescript
+// CORRECT: Use the helper
+import { useTestConfigDir } from "../helpers.js";
+
+const getConfigDir = useTestConfigDir("my-test-prefix-");
+
+// If you need the directory path in a test:
+test("example", () => {
+  const dir = getConfigDir();
+});
+
+// WRONG: Manual env var management
+beforeEach(() => { process.env.SENTRY_CONFIG_DIR = tmpDir; });
+afterEach(() => { delete process.env.SENTRY_CONFIG_DIR; }); // BUG!
+```
+
 ### Property-Based Testing
 
 Use property-based tests when verifying invariants that should hold for **any valid input**.

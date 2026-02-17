@@ -229,6 +229,10 @@ describe("alias resolution", () => {
 // =============================================================================
 
 describe("stale alias detection", () => {
+  beforeEach(() => {
+    clearTransactionAliases();
+  });
+
   test("detects stale index from different period", () => {
     // Store aliases with 7d period
     const oldFingerprint = "test-org:test-project:7d";

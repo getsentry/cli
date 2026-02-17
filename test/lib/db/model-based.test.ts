@@ -38,6 +38,10 @@ import {
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import {
+  getPaginationCursor,
+  setPaginationCursor,
+} from "../../../src/lib/db/pagination.js";
+import {
   clearProjectAliases,
   getProjectAliases,
   getProjectByAlias,
@@ -672,6 +676,38 @@ describe("model-based: database layer", () => {
           }
         }
       ),
+      { numRuns: 50 }
+    );
+  });
+
+  test("clearAuth also clears pagination cursors (key invariant)", () => {
+    fcAssert(
+      asyncProperty(tuple(slugArb, slugArb), async ([commandKey, context]) => {
+        const cleanup = createIsolatedDbContext();
+        try {
+          // Set up auth and a pagination cursor
+          setAuthToken("test-token");
+          setPaginationCursor(
+            commandKey,
+            context,
+            "1735689600000:100:0",
+            300_000
+          );
+
+          // Verify cursor was stored
+          const before = getPaginationCursor(commandKey, context);
+          expect(before).toBe("1735689600000:100:0");
+
+          // Clear auth
+          clearAuth();
+
+          // Verify pagination cursor was also cleared (this is the invariant!)
+          const after = getPaginationCursor(commandKey, context);
+          expect(after).toBeUndefined();
+        } finally {
+          cleanup();
+        }
+      }),
       { numRuns: 50 }
     );
   });

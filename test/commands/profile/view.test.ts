@@ -130,7 +130,7 @@ describe("parsePositionalArgs", () => {
 describe("resolveProjectBySlug (profile context)", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
-  const USAGE_HINT = "sentry profile view <org>/<project> <transaction>";
+  const HINT = "sentry profile view <org>/<project> <transaction>";
 
   beforeEach(() => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
@@ -144,22 +144,16 @@ describe("resolveProjectBySlug (profile context)", () => {
     test("throws ContextError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
-      await expect(
-        resolveProjectBySlug("my-project", {
-          usageHint: USAGE_HINT,
-          contextValue: "/api/users",
-        })
-      ).rejects.toThrow(ContextError);
+      await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
+        ContextError
+      );
     });
 
     test("includes project name in error message", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       try {
-        await resolveProjectBySlug("frontend", {
-          usageHint: USAGE_HINT,
-          contextValue: "/api/users",
-        });
+        await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
@@ -185,12 +179,9 @@ describe("resolveProjectBySlug (profile context)", () => {
         },
       ] as ProjectWithOrg[]);
 
-      await expect(
-        resolveProjectBySlug("frontend", {
-          usageHint: USAGE_HINT,
-          contextValue: "/api/users",
-        })
-      ).rejects.toThrow(ValidationError);
+      await expect(resolveProjectBySlug("frontend", HINT)).rejects.toThrow(
+        ValidationError
+      );
     });
 
     test("includes org alternatives in error", async () => {
@@ -210,10 +201,7 @@ describe("resolveProjectBySlug (profile context)", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveProjectBySlug("api", {
-          usageHint: USAGE_HINT,
-          contextValue: "/api/users",
-        });
+        await resolveProjectBySlug("api", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
@@ -234,15 +222,10 @@ describe("resolveProjectBySlug (profile context)", () => {
         },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveProjectBySlug("backend", {
-        usageHint: USAGE_HINT,
-        contextValue: "/api/users",
-      });
+      const result = await resolveProjectBySlug("backend", HINT);
 
       expect(result.org).toBe("my-company");
       expect(result.project).toBe("backend");
-      expect(result.orgDisplay).toBe("my-company");
-      expect(result.projectDisplay).toBe("backend");
     });
   });
 });

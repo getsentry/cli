@@ -13,13 +13,16 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import { ContextError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import {
-  type ResolvedTarget,
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
+import {
+  applySentryUrlContext,
+  parseSentryUrl,
+} from "../../lib/sentry-url-parser.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, Writer } from "../../types/index.js";
@@ -65,7 +68,17 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
 /**
  * Parse positional arguments for event view.
- * Handles: `<event-id>` or `<target> <event-id>`
+ *
+ * Handles:
+ * - `<event-id>` — event ID only (auto-detect org/project)
+ * - `<target> <event-id>` — explicit target + event ID
+ * - `<sentry-url>` — extract eventId and org from a Sentry event URL
+ *   (e.g., `https://sentry.example.com/organizations/my-org/issues/123/events/abc/`)
+ *
+ * For event URLs, the org is returned as `targetArg` in `"{org}/"` format
+ * (OrgAll). Since event URLs don't contain a project slug, the caller
+ * must fall back to auto-detection for the project. The URL must contain
+ * an eventId segment — issue-only URLs are not valid for event view.
  *
  * @returns Parsed event ID and optional target arg
  */
@@ -80,6 +93,23 @@ export function parsePositionalArgs(args: string[]): {
   const first = args[0];
   if (first === undefined) {
     throw new ContextError("Event ID", USAGE_HINT);
+  }
+
+  // URL detection — extract eventId and org from Sentry event URLs
+  const urlParsed = parseSentryUrl(first);
+  if (urlParsed) {
+    applySentryUrlContext(urlParsed.baseUrl);
+    if (urlParsed.eventId) {
+      // Event URL: pass org as OrgAll target ("{org}/").
+      // Event URLs don't contain a project slug, so viewCommand falls
+      // back to auto-detect for the project while keeping the org context.
+      return { eventId: urlParsed.eventId, targetArg: `${urlParsed.org}/` };
+    }
+    // URL recognized but no eventId — not valid for event view
+    throw new ContextError(
+      "Event ID in URL (use a URL like /issues/{id}/events/{eventId}/)",
+      USAGE_HINT
+    );
   }
 
   if (args.length === 1) {
@@ -102,7 +132,13 @@ export function parsePositionalArgs(args: string[]): {
  * Uses ResolvedTarget from resolve-target.ts.
  * @internal Exported for testing
  */
-export type ResolvedEventTarget = ResolvedTarget;
+export type ResolvedEventTarget = {
+  org: string;
+  project: string;
+  orgDisplay: string;
+  projectDisplay: string;
+  detectedFrom?: string;
+};
 
 export const viewCommand = buildCommand({
   docs: {
@@ -162,23 +198,33 @@ export const viewCommand = buildCommand({
         };
         break;
 
-      case ProjectSpecificationType.ProjectSearch:
-        target = await resolveProjectBySlug(parsed.projectSlug, {
-          usageHint: USAGE_HINT,
-          contextValue: eventId,
-        });
+      case ProjectSpecificationType.ProjectSearch: {
+        const resolved = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry event view <org>/${parsed.projectSlug} ${eventId}`
+        );
+        target = {
+          ...resolved,
+          orgDisplay: resolved.org,
+          projectDisplay: resolved.project,
+        };
         break;
+      }
 
       case ProjectSpecificationType.OrgAll:
-        throw new ContextError("Specific project", USAGE_HINT);
-
+      // Org-only (e.g., from event URL that has no project slug).
+      // Fall through to auto-detect — SENTRY_URL is already set for
+      // self-hosted, and auto-detect will resolve the project from
+      // DSN, config defaults, or directory name inference.
+      // falls through
       case ProjectSpecificationType.AutoDetect:
         target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
         break;
 
       default:
         // Exhaustive check - should never reach here
-        throw new ValidationError("Invalid target specification");
+        throw new ContextError("Organization and project", USAGE_HINT);
     }
 
     if (!target) {

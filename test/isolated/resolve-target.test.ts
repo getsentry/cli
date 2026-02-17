@@ -405,13 +405,13 @@ describe("resolveOrgAndProject", () => {
     expect(mockDetectDsn).not.toHaveBeenCalled();
   });
 
-  test("throws ContextError when only org flag provided", async () => {
+  test("throws ContextError when only org provided", async () => {
     await expect(
       resolveOrgAndProject({ org: "my-org", cwd: "/test" })
     ).rejects.toThrow(ContextError);
   });
 
-  test("throws ContextError when only project flag provided", async () => {
+  test("throws ContextError when only project provided", async () => {
     await expect(
       resolveOrgAndProject({ project: "my-project", cwd: "/test" })
     ).rejects.toThrow(ContextError);
@@ -519,7 +519,7 @@ describe("resolveAllTargets", () => {
     expect(result.targets[0].project).toBe("my-project");
   });
 
-  test("throws ContextError when only org flag provided", async () => {
+  test("throws ContextError when only org provided", async () => {
     await expect(
       resolveAllTargets({ org: "my-org", cwd: "/test" })
     ).rejects.toThrow(ContextError);

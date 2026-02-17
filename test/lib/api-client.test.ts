@@ -8,11 +8,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import { useTestConfigDir } from "../helpers.js";
 
-// Test config directory
-let testConfigDir: string;
+useTestConfigDir("test-api-");
+
 let originalFetch: typeof globalThis.fetch;
 
 /**
@@ -26,9 +25,6 @@ type RequestLog = {
 };
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-api-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-
   // Set required env var for OAuth refresh
   process.env.SENTRY_CLIENT_ID = "test-client-id";
 
@@ -39,11 +35,9 @@ beforeEach(async () => {
   await setAuthToken("initial-token", 3600, "test-refresh-token");
 });
 
-afterEach(async () => {
+afterEach(() => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
-
-  await cleanupTestDir(testConfigDir);
 });
 
 /**
@@ -598,31 +592,29 @@ describe("findProjectsBySlug", () => {
         );
       }
 
-      // Projects for acme org - has matching project
-      if (url.includes("/organizations/acme/projects/")) {
+      // getProject for acme/frontend - found
+      if (url.includes("/projects/acme/frontend/")) {
         return new Response(
-          JSON.stringify([
-            { id: "101", slug: "frontend", name: "Frontend" },
-            { id: "102", slug: "backend", name: "Backend" },
-          ]),
+          JSON.stringify({ id: "101", slug: "frontend", name: "Frontend" }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      // Projects for beta org - also has matching project
-      if (url.includes("/organizations/beta/projects/")) {
+      // getProject for beta/frontend - found
+      if (url.includes("/projects/beta/frontend/")) {
         return new Response(
-          JSON.stringify([
-            { id: "201", slug: "frontend", name: "Beta Frontend" },
-            { id: "202", slug: "api", name: "API" },
-          ]),
+          JSON.stringify({
+            id: "201",
+            slug: "frontend",
+            name: "Beta Frontend",
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      // Default response
-      return new Response(JSON.stringify([]), {
-        status: 200,
+      // Default - not found
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
         headers: { "Content-Type": "application/json" },
       });
     };
@@ -661,16 +653,9 @@ describe("findProjectsBySlug", () => {
         );
       }
 
-      // Projects - no match
-      if (url.includes("/organizations/acme/projects/")) {
-        return new Response(
-          JSON.stringify([{ id: "101", slug: "backend", name: "Backend" }]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(JSON.stringify([]), {
-        status: 200,
+      // getProject - not found (404)
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
         headers: { "Content-Type": "application/json" },
       });
     };
@@ -708,24 +693,24 @@ describe("findProjectsBySlug", () => {
         );
       }
 
-      // Projects for acme - success
-      if (url.includes("/organizations/acme/projects/")) {
+      // getProject for acme/frontend - success
+      if (url.includes("/projects/acme/frontend/")) {
         return new Response(
-          JSON.stringify([{ id: "101", slug: "frontend", name: "Frontend" }]),
+          JSON.stringify({ id: "101", slug: "frontend", name: "Frontend" }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      // Projects for restricted org - 403 forbidden
-      if (url.includes("/organizations/restricted/projects/")) {
+      // getProject for restricted/frontend - 403 forbidden
+      if (url.includes("/projects/restricted/frontend/")) {
         return new Response(JSON.stringify({ detail: "Forbidden" }), {
           status: 403,
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      return new Response(JSON.stringify([]), {
-        status: 200,
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
         headers: { "Content-Type": "application/json" },
       });
     };

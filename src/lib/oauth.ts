@@ -15,8 +15,16 @@ import { setAuthToken } from "./db/auth.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
 
-// Sentry instance URL (supports self-hosted via env override)
-const SENTRY_URL = process.env.SENTRY_URL ?? "https://sentry.io";
+/**
+ * Get the Sentry instance URL for OAuth endpoints.
+ *
+ * Read lazily (not at module load) so that SENTRY_URL set after import
+ * (e.g., from URL argument parsing for self-hosted instances) is respected
+ * by the device flow and token refresh.
+ */
+function getSentryUrl(): string {
+  return process.env.SENTRY_URL ?? "https://sentry.io";
+}
 
 /**
  * OAuth client ID
@@ -24,12 +32,20 @@ const SENTRY_URL = process.env.SENTRY_URL ?? "https://sentry.io";
  * Build-time: Injected via Bun.build({ define: { SENTRY_CLIENT_ID: "..." } })
  * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
  *
+ * Read at call time (not module load time) so tests can set process.env.SENTRY_CLIENT_ID
+ * after module initialization.
+ *
  * @see script/build.ts
  */
 declare const SENTRY_CLIENT_ID_BUILD: string | undefined;
-const SENTRY_CLIENT_ID =
-  process.env.SENTRY_CLIENT_ID ??
-  (typeof SENTRY_CLIENT_ID_BUILD !== "undefined" ? SENTRY_CLIENT_ID_BUILD : "");
+function getClientId(): string {
+  return (
+    process.env.SENTRY_CLIENT_ID ??
+    (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
+      ? SENTRY_CLIENT_ID_BUILD
+      : "")
+  );
+}
 
 // OAuth scopes requested for the CLI
 const SCOPES = [
@@ -74,7 +90,7 @@ async function fetchWithConnectionError(
 
     if (isConnectionError) {
       throw new ApiError(
-        `Cannot connect to Sentry at ${SENTRY_URL}`,
+        `Cannot connect to Sentry at ${getSentryUrl()}`,
         0,
         "Check your network connection and SENTRY_URL configuration"
       );
@@ -85,7 +101,8 @@ async function fetchWithConnectionError(
 
 /** Request a device code from Sentry's device authorization endpoint */
 function requestDeviceCode() {
-  if (!SENTRY_CLIENT_ID) {
+  const clientId = getClientId();
+  if (!clientId) {
     throw new ConfigError(
       "SENTRY_CLIENT_ID is required for authentication",
       "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
@@ -94,12 +111,12 @@ function requestDeviceCode() {
 
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
     const response = await fetchWithConnectionError(
-      `${SENTRY_URL}/oauth/device/code/`,
+      `${getSentryUrl()}/oauth/device/code/`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_id: SENTRY_CLIENT_ID,
+          client_id: clientId,
           scope: SCOPES,
         }),
       }
@@ -137,12 +154,12 @@ function requestDeviceCode() {
 function pollForToken(deviceCode: string): Promise<TokenResponse> {
   return withHttpSpan("POST", "/oauth/token/", async () => {
     const response = await fetchWithConnectionError(
-      `${SENTRY_URL}/oauth/token/`,
+      `${getSentryUrl()}/oauth/token/`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_id: SENTRY_CLIENT_ID,
+          client_id: getClientId(),
           device_code: deviceCode,
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
         }),
@@ -313,7 +330,8 @@ export async function setApiToken(token: string): Promise<void> {
 export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
-  if (!SENTRY_CLIENT_ID) {
+  const clientId = getClientId();
+  if (!clientId) {
     throw new ConfigError(
       "SENTRY_CLIENT_ID is required for token refresh",
       "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
@@ -322,12 +340,12 @@ export function refreshAccessToken(
 
   return withHttpSpan("POST", "/oauth/token/", async () => {
     const response = await fetchWithConnectionError(
-      `${SENTRY_URL}/oauth/token/`,
+      `${getSentryUrl()}/oauth/token/`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_id: SENTRY_CLIENT_ID,
+          client_id: clientId,
           grant_type: "refresh_token",
           refresh_token: refreshToken,
         }),

@@ -32,6 +32,13 @@ export type ColumnDef = {
 
 export type TableSchema = {
   columns: Record<string, ColumnDef>;
+  /**
+   * Composite primary key columns. When set, the DDL generator emits a
+   * table-level `PRIMARY KEY (col1, col2, ...)` constraint instead of
+   * per-column `PRIMARY KEY` attributes. Individual columns listed here
+   * should NOT also set `primaryKey: true`.
+   */
+  compositePrimaryKey?: string[];
 };
 
 /**
@@ -137,6 +144,15 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       },
     },
   },
+  pagination_cursors: {
+    columns: {
+      command_key: { type: "TEXT", notNull: true },
+      context: { type: "TEXT", notNull: true },
+      cursor: { type: "TEXT", notNull: true },
+      expires_at: { type: "INTEGER", notNull: true },
+    },
+    compositePrimaryKey: ["command_key", "context"],
+  },
   metadata: {
     columns: {
       key: { type: "TEXT", primaryKey: true },
@@ -213,7 +229,8 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
 /** Generate CREATE TABLE DDL from column definitions */
 function columnDefsToDDL(
   tableName: string,
-  columns: [string, ColumnDef][]
+  columns: [string, ColumnDef][],
+  compositePrimaryKey?: string[]
 ): string {
   const columnDefs = columns.map(([name, col]) => {
     const parts = [name, col.type];
@@ -232,6 +249,10 @@ function columnDefsToDDL(
     return parts.join(" ");
   });
 
+  if (compositePrimaryKey && compositePrimaryKey.length > 0) {
+    columnDefs.push(`PRIMARY KEY (${compositePrimaryKey.join(", ")})`);
+  }
+
   return `CREATE TABLE IF NOT EXISTS ${tableName} (\n    ${columnDefs.join(",\n    ")}\n  )`;
 }
 
@@ -240,7 +261,11 @@ export function generateTableDDL(
   tableName: string,
   schema: TableSchema
 ): string {
-  return columnDefsToDDL(tableName, Object.entries(schema.columns));
+  return columnDefsToDDL(
+    tableName,
+    Object.entries(schema.columns),
+    schema.compositePrimaryKey
+  );
 }
 
 /**
@@ -265,7 +290,7 @@ export function generatePreMigrationTableDDL(tableName: string): string {
     );
   }
 
-  return columnDefsToDDL(tableName, baseColumns);
+  return columnDefsToDDL(tableName, baseColumns, schema.compositePrimaryKey);
 }
 
 /** Generated DDL statements for all tables (used for repair and init) */
@@ -481,6 +506,22 @@ function isSchemaError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Check if an error is a SQLite "readonly database" error.
+ *
+ * This happens when the CLI's local database file or its containing directory
+ * lacks write permissions (e.g., installed globally in a protected path,
+ * read-only filesystem, or changed permissions).
+ */
+export function isReadonlyError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "SQLiteError") {
+    return error.message
+      .toLowerCase()
+      .includes("attempt to write a readonly database");
+  }
+  return false;
+}
+
 /** Result of a repair attempt */
 export type RepairAttemptResult<T> =
   | { attempted: false }
@@ -641,11 +682,11 @@ export function runMigrations(db: Database): void {
     db.exec(EXPECTED_TABLES.project_root_cache as string);
   }
 
-  // Migration 4 -> 5: Add transaction_aliases table for profile commands
-  // Note: Uses custom DDL because TABLE_SCHEMAS doesn't support composite primary keys
+  // Migration 4 -> 5: Add transaction_aliases and pagination_cursors tables
   if (currentVersion < 5) {
     db.exec(TRANSACTION_ALIASES_DDL);
     db.exec(TRANSACTION_ALIASES_INDEX);
+    db.exec(EXPECTED_TABLES.pagination_cursors as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

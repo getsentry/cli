@@ -97,11 +97,11 @@ describe("sentry project list", () => {
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use positional argument for organization
+      // Use org/ syntax for org-scoped listing
       const result = await ctx.run([
         "project",
         "list",
-        TEST_ORG,
+        `${TEST_ORG}/`,
         "--limit",
         "5",
       ]);
@@ -116,18 +116,20 @@ describe("sentry project list", () => {
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use positional argument for organization
+      // Use org/ syntax for org-scoped listing
       const result = await ctx.run([
         "project",
         "list",
-        TEST_ORG,
+        `${TEST_ORG}/`,
         "--json",
         "--limit",
         "5",
       ]);
 
       expect(result.exitCode).toBe(0);
-      const data = JSON.parse(result.stdout);
+      // JSON output in paginated mode wraps data in { data, hasMore }
+      const parsed = JSON.parse(result.stdout);
+      const data = Array.isArray(parsed) ? parsed : parsed.data;
       expect(Array.isArray(data)).toBe(true);
     },
     { timeout: 15_000 }
@@ -189,9 +191,7 @@ describe("sentry project view", () => {
     const result = await ctx.run([
       "project",
       "view",
-      TEST_PROJECT,
-      "--org",
-      TEST_ORG,
+      `${TEST_ORG}/${TEST_PROJECT}`,
     ]);
 
     expect(result.exitCode).toBe(1);
@@ -207,18 +207,16 @@ describe("sentry project view", () => {
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
   });
 
-  test("rejects partial flags (--org without project)", async () => {
+  test("rejects org-only target (org/)", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
-    const result = await ctx.run(["project", "view", "--org", TEST_ORG]);
+    const result = await ctx.run(["project", "view", `${TEST_ORG}/`]);
 
     expect(result.exitCode).toBe(1);
     // Should show error with usage hint
     const output = result.stderr + result.stdout;
-    expect(output).toMatch(/organization and project is required/i);
-    expect(output).toContain(
-      "sentry project view <project-slug> --org <org-slug>"
-    );
+    expect(output).toMatch(/specific project is required/i);
+    expect(output).toContain("sentry project view <org>/<project>");
   });
 
   test(
@@ -229,9 +227,7 @@ describe("sentry project view", () => {
       const result = await ctx.run([
         "project",
         "view",
-        TEST_PROJECT,
-        "--org",
-        TEST_ORG,
+        `${TEST_ORG}/${TEST_PROJECT}`,
       ]);
 
       expect(result.exitCode).toBe(0);
@@ -249,9 +245,7 @@ describe("sentry project view", () => {
       const result = await ctx.run([
         "project",
         "view",
-        TEST_PROJECT,
-        "--org",
-        TEST_ORG,
+        `${TEST_ORG}/${TEST_PROJECT}`,
       ]);
 
       expect(result.exitCode).toBe(0);
@@ -269,9 +263,7 @@ describe("sentry project view", () => {
       const result = await ctx.run([
         "project",
         "view",
-        TEST_PROJECT,
-        "--org",
-        TEST_ORG,
+        `${TEST_ORG}/${TEST_PROJECT}`,
         "--json",
       ]);
 
@@ -290,9 +282,7 @@ describe("sentry project view", () => {
       const result = await ctx.run([
         "project",
         "view",
-        TEST_PROJECT,
-        "--org",
-        TEST_ORG,
+        `${TEST_ORG}/${TEST_PROJECT}`,
         "--json",
       ]);
 
@@ -311,9 +301,7 @@ describe("sentry project view", () => {
       const result = await ctx.run([
         "project",
         "view",
-        "nonexistent-project-12345",
-        "--org",
-        TEST_ORG,
+        `${TEST_ORG}/nonexistent-project-12345`,
       ]);
 
       expect(result.exitCode).toBe(1);

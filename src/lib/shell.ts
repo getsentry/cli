@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 
 /** Supported shell types */
 export type ShellType = "bash" | "zsh" | "fish" | "sh" | "ash" | "unknown";
@@ -162,7 +162,7 @@ export function isInPath(
   if (!pathEnv) {
     return false;
   }
-  const paths = pathEnv.split(":");
+  const paths = pathEnv.split(delimiter);
   return paths.includes(directory);
 }
 

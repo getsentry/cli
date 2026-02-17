@@ -13,12 +13,39 @@ import {
   maybeCheckForUpdateInBackground,
   shouldSuppressNotification,
 } from "../../src/lib/version-check.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import { useTestConfigDir } from "../helpers.js";
 
 describe("shouldSuppressNotification", () => {
   test("suppresses for upgrade command", () => {
     expect(shouldSuppressNotification(["upgrade"])).toBe(true);
     expect(shouldSuppressNotification(["upgrade", "--check"])).toBe(true);
+  });
+
+  test("suppresses for cli management commands", () => {
+    expect(shouldSuppressNotification(["cli", "setup"])).toBe(true);
+    expect(shouldSuppressNotification(["cli", "fix"])).toBe(true);
+    expect(
+      shouldSuppressNotification([
+        "cli",
+        "setup",
+        "--install",
+        "--method",
+        "curl",
+      ])
+    ).toBe(true);
+  });
+
+  test("does not suppress for cli feedback", () => {
+    expect(shouldSuppressNotification(["cli", "feedback"])).toBe(false);
+  });
+
+  test("does not suppress when setup/fix appear as non-cli args", () => {
+    expect(
+      shouldSuppressNotification(["issue", "list", "--project", "setup"])
+    ).toBe(false);
+    expect(
+      shouldSuppressNotification(["issue", "list", "--query", "fix"])
+    ).toBe(false);
   });
 
   test("suppresses for --version flag", () => {
@@ -46,24 +73,20 @@ describe("shouldSuppressNotification", () => {
 // Its probabilistic behavior is tested indirectly through maybeCheckForUpdateInBackground.
 
 describe("getUpdateNotification", () => {
-  let testConfigDir: string;
+  useTestConfigDir("test-version-notif-");
   let savedNoUpdateCheck: string | undefined;
 
-  beforeEach(async () => {
-    testConfigDir = await createTestConfigDir("test-version-notif-");
-    process.env.SENTRY_CONFIG_DIR = testConfigDir;
+  beforeEach(() => {
     // Save and clear the env var to test real implementation
     savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
     delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
   });
 
-  afterEach(async () => {
-    delete process.env.SENTRY_CONFIG_DIR;
+  afterEach(() => {
     // Restore the env var
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
     }
-    await cleanupTestDir(testConfigDir);
   });
 
   test("returns null when no version info is cached", () => {
@@ -115,26 +138,22 @@ describe("abortPendingVersionCheck", () => {
 });
 
 describe("maybeCheckForUpdateInBackground", () => {
-  let testConfigDir: string;
+  useTestConfigDir("test-version-bg-");
   let savedNoUpdateCheck: string | undefined;
 
-  beforeEach(async () => {
-    testConfigDir = await createTestConfigDir("test-version-bg-");
-    process.env.SENTRY_CONFIG_DIR = testConfigDir;
+  beforeEach(() => {
     // Save and clear the env var to test real implementation
     savedNoUpdateCheck = process.env.SENTRY_CLI_NO_UPDATE_CHECK;
     delete process.env.SENTRY_CLI_NO_UPDATE_CHECK;
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     // Abort any pending check to clean up
     abortPendingVersionCheck();
-    delete process.env.SENTRY_CONFIG_DIR;
     // Restore the env var
     if (savedNoUpdateCheck !== undefined) {
       process.env.SENTRY_CLI_NO_UPDATE_CHECK = savedNoUpdateCheck;
     }
-    await cleanupTestDir(testConfigDir);
   });
 
   test("does not throw when called", () => {

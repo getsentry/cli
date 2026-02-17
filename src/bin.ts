@@ -6,13 +6,27 @@ import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
 import { withTelemetry } from "./lib/telemetry.js";
-import { cleanupOldBinary } from "./lib/upgrade.js";
+import { startCleanupOldBinary } from "./lib/upgrade.js";
 import {
   abortPendingVersionCheck,
   getUpdateNotification,
   maybeCheckForUpdateInBackground,
   shouldSuppressNotification,
 } from "./lib/version-check.js";
+
+// Exit cleanly when downstream pipe consumer closes (e.g., `sentry issue list | head`).
+// EPIPE (errno -32) is normal Unix behavior — not an error. Node.js/Bun ignore SIGPIPE
+// at the process level, so pipe write failures surface as async 'error' events on the
+// stream. Without this handler they become uncaught exceptions.
+function handleStreamError(err: NodeJS.ErrnoException): void {
+  if (err.code === "EPIPE") {
+    process.exit(0);
+  }
+  throw err;
+}
+
+process.stdout.on("error", handleStreamError);
+process.stderr.on("error", handleStreamError);
 
 /** Run CLI command with telemetry wrapper */
 async function runCommand(args: string[]): Promise<void> {
@@ -71,7 +85,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 
 async function main(): Promise<void> {
   // Clean up old binary from previous Windows upgrade (no-op if file doesn't exist)
-  cleanupOldBinary();
+  startCleanupOldBinary();
 
   const args = process.argv.slice(2);
   const suppressNotification = shouldSuppressNotification(args);

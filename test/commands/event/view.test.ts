@@ -89,12 +89,72 @@ describe("parsePositionalArgs", () => {
       expect(result.eventId).toBe("");
     });
   });
+
+  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  describe("Sentry URL inputs", () => {
+    let savedSentryUrl: string | undefined;
+
+    beforeEach(() => {
+      savedSentryUrl = process.env.SENTRY_URL;
+      delete process.env.SENTRY_URL;
+    });
+
+    afterEach(() => {
+      if (savedSentryUrl !== undefined) {
+        process.env.SENTRY_URL = savedSentryUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+    });
+
+    test("event URL extracts eventId and passes org as OrgAll target", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.io/organizations/my-org/issues/32886/events/abc123def456/",
+      ]);
+      expect(result.eventId).toBe("abc123def456");
+      expect(result.targetArg).toBe("my-org/");
+    });
+
+    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.example.com/organizations/acme/issues/999/events/deadbeef/",
+      ]);
+      expect(result.eventId).toBe("deadbeef");
+      expect(result.targetArg).toBe("acme/");
+      expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+    });
+
+    test("issue URL without event ID throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ])
+      ).toThrow(ContextError);
+    });
+
+    test("issue-only URL error mentions event ID", () => {
+      try {
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Event ID");
+      }
+    });
+
+    test("org-only URL throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs(["https://sentry.io/organizations/my-org/"])
+      ).toThrow(ContextError);
+    });
+  });
 });
 
 describe("resolveProjectBySlug", () => {
+  const HINT = "sentry event view <org>/<project> <event-id>";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
-
-  const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 
   beforeEach(() => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
@@ -108,22 +168,16 @@ describe("resolveProjectBySlug", () => {
     test("throws ContextError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
-      await expect(
-        resolveProjectBySlug("my-project", {
-          usageHint: USAGE_HINT,
-          contextValue: "event-123",
-        })
-      ).rejects.toThrow(ContextError);
+      await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
+        ContextError
+      );
     });
 
     test("includes project name in error message", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       try {
-        await resolveProjectBySlug("frontend", {
-          usageHint: USAGE_HINT,
-          contextValue: "event-123",
-        });
+        await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ContextError);
@@ -142,12 +196,9 @@ describe("resolveProjectBySlug", () => {
         { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
       ] as ProjectWithOrg[]);
 
-      await expect(
-        resolveProjectBySlug("frontend", {
-          usageHint: USAGE_HINT,
-          contextValue: "event-123",
-        })
-      ).rejects.toThrow(ValidationError);
+      await expect(resolveProjectBySlug("frontend", HINT)).rejects.toThrow(
+        ValidationError
+      );
     });
 
     test("includes all orgs in error message", async () => {
@@ -157,10 +208,11 @@ describe("resolveProjectBySlug", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveProjectBySlug("frontend", {
-          usageHint: USAGE_HINT,
-          contextValue: "event-456",
-        });
+        await resolveProjectBySlug(
+          "frontend",
+          HINT,
+          "sentry event view <org>/frontend event-456"
+        );
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
@@ -168,7 +220,7 @@ describe("resolveProjectBySlug", () => {
         expect(message).toContain("exists in multiple organizations");
         expect(message).toContain("acme-corp/frontend");
         expect(message).toContain("beta-inc/frontend");
-        expect(message).toContain("event-456"); // Context value in example
+        expect(message).toContain("event-456");
       }
     });
 
@@ -180,16 +232,18 @@ describe("resolveProjectBySlug", () => {
       ] as ProjectWithOrg[]);
 
       try {
-        await resolveProjectBySlug("api", {
-          usageHint: USAGE_HINT,
-          contextValue: "abc123",
-        });
+        await resolveProjectBySlug(
+          "api",
+          HINT,
+          "sentry event view <org>/api abc123"
+        );
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
         const message = (error as ValidationError).message;
-        // The shared function uses a generic example format
-        expect(message).toContain("Example: sentry <command> <org>/api abc123");
+        expect(message).toContain(
+          "Example: sentry event view <org>/api abc123"
+        );
       }
     });
   });
@@ -200,16 +254,11 @@ describe("resolveProjectBySlug", () => {
         { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveProjectBySlug("backend", {
-        usageHint: USAGE_HINT,
-        contextValue: "event-xyz",
-      });
+      const result = await resolveProjectBySlug("backend", HINT);
 
       expect(result).toEqual({
         org: "my-company",
         project: "backend",
-        orgDisplay: "my-company",
-        projectDisplay: "backend",
       });
     });
 
@@ -223,13 +272,9 @@ describe("resolveProjectBySlug", () => {
         },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveProjectBySlug("mobile-app", {
-        usageHint: USAGE_HINT,
-        contextValue: "evt-001",
-      });
+      const result = await resolveProjectBySlug("mobile-app", HINT);
 
       expect(result.org).toBe("acme-industries");
-      expect(result.orgDisplay).toBe("acme-industries");
     });
 
     test("preserves project slug in result", async () => {
@@ -237,13 +282,9 @@ describe("resolveProjectBySlug", () => {
         { slug: "web-frontend", orgSlug: "org", id: "1", name: "Web Frontend" },
       ] as ProjectWithOrg[]);
 
-      const result = await resolveProjectBySlug("web-frontend", {
-        usageHint: USAGE_HINT,
-        contextValue: "e123",
-      });
+      const result = await resolveProjectBySlug("web-frontend", HINT);
 
       expect(result.project).toBe("web-frontend");
-      expect(result.projectDisplay).toBe("web-frontend");
     });
   });
 });

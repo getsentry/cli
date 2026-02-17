@@ -24,7 +24,6 @@ import {
   hasProfileData,
 } from "../../lib/profile/analyzer.js";
 import {
-  type ResolvedTarget,
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
@@ -77,8 +76,14 @@ export function parsePositionalArgs(args: string[]): {
   return { transactionRef: second, targetArg: first };
 }
 
-/** Resolved target type for internal use */
-type ResolvedProfileTarget = ResolvedTarget;
+/** Resolved target type for profile view command */
+type ResolvedProfileTarget = {
+  org: string;
+  project: string;
+  orgDisplay: string;
+  projectDisplay: string;
+  detectedFrom?: string;
+};
 
 export const viewCommand = buildCommand({
   docs: {
@@ -159,12 +164,19 @@ export const viewCommand = buildCommand({
         };
         break;
 
-      case ProjectSpecificationType.ProjectSearch:
-        target = await resolveProjectBySlug(parsed.projectSlug, {
-          usageHint: USAGE_HINT,
-          contextValue: transactionRef,
-        });
+      case ProjectSpecificationType.ProjectSearch: {
+        const resolved = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry profile view <org>/${parsed.projectSlug} ${transactionRef}`
+        );
+        target = {
+          ...resolved,
+          orgDisplay: resolved.org,
+          projectDisplay: resolved.project,
+        };
         break;
+      }
 
       case ProjectSpecificationType.OrgAll:
         throw new ContextError(

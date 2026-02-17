@@ -150,10 +150,11 @@ export const viewCommand = buildCommand({
         break;
 
       case "project-search":
-        target = await resolveProjectBySlug(parsed.projectSlug, {
-          usageHint: USAGE_HINT,
-          contextValue: logId,
-        });
+        target = await resolveProjectBySlug(
+          parsed.projectSlug,
+          USAGE_HINT,
+          `sentry log view <org>/${parsed.projectSlug} ${logId}`
+        );
         break;
 
       case "org-all":

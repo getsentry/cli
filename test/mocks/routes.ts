@@ -16,6 +16,8 @@ import organizationFixture from "../fixtures/organization.json";
 import organizationsFixture from "../fixtures/organizations.json";
 import projectFixture from "../fixtures/project.json";
 import projectsFixture from "../fixtures/projects.json";
+import traceSpansFixture from "../fixtures/trace-spans.json";
+import transactionsFixture from "../fixtures/transactions.json";
 import userFixture from "../fixtures/user.json";
 import type { MockRoute, MockServer } from "./server.js";
 import { createMockServer } from "./server.js";
@@ -28,6 +30,7 @@ export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
 export const TEST_LOG_ID = "log-detail-001";
+export const TEST_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 
 const projectKeysFixture = [
   {
@@ -128,7 +131,18 @@ export const apiRoutes: MockRoute[] = [
     },
   },
 
-  // Issues
+  // Issues (org-scoped endpoint used by @sentry/api SDK)
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/issues/",
+    response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG) {
+        return { body: issuesFixture };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  // Issues (legacy project-scoped endpoint)
   {
     method: "GET",
     path: "/api/0/projects/:orgSlug/:projectSlug/issues/",
@@ -189,13 +203,21 @@ export const apiRoutes: MockRoute[] = [
     },
   },
 
-  // Logs (Events API with dataset=logs)
+  // Logs & Transactions (Events API - dispatches on dataset param)
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/events/",
     response: (req, params) => {
       if (params.orgSlug === TEST_ORG) {
         const url = new URL(req.url);
+        const dataset = url.searchParams.get("dataset");
+
+        // Transactions dataset (trace list)
+        if (dataset === "transactions") {
+          return { body: transactionsFixture };
+        }
+
+        // Logs dataset (default)
         const query = url.searchParams.get("query");
         // If query contains sentry.item_id filter, return detailed log
         // Query format: "project:${projectSlug} sentry.item_id:${logId}"
@@ -211,6 +233,19 @@ export const apiRoutes: MockRoute[] = [
         return { body: logsFixture };
       }
       return { status: 404, body: notFoundFixture };
+    },
+  },
+
+  // Trace detail (span tree)
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/trace/:traceId/",
+    response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG && params.traceId === TEST_TRACE_ID) {
+        return { body: traceSpansFixture };
+      }
+      // Empty array = no spans found for this trace
+      return { body: [] };
     },
   },
 ];

@@ -6,11 +6,16 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/bun";
+import { ApiError, AuthError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,
   initSentry,
+  isClientApiError,
+  recordApiErrorOnSpan,
+  resetReadonlyWarning,
   setArgsContext,
   setCommandSpanName,
   setFlagContext,
@@ -125,6 +130,158 @@ describe("withTelemetry", () => {
       executed = true;
     });
     expect(executed).toBe(true);
+  });
+
+  test("propagates 4xx ApiError to caller", async () => {
+    const error = new ApiError("Not found", 404, "Issue not found");
+    await expect(
+      withTelemetry(() => {
+        throw error;
+      })
+    ).rejects.toThrow(error);
+  });
+
+  describe("with telemetry enabled", () => {
+    beforeEach(() => {
+      delete process.env[ENV_VAR];
+    });
+
+    afterEach(() => {
+      // Re-init with enabled=false to reset global SDK state.
+      // Without this, Sentry.isEnabled() returns true for all
+      // subsequent test files (e.g. feedbackCommand checks it).
+      initSentry(false);
+    });
+
+    test("propagates 4xx ApiError through enabled SDK path", async () => {
+      const error = new ApiError("Not found", 404, "Issue not found");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+    });
+
+    test("propagates 5xx ApiError through enabled SDK path", async () => {
+      const error = new ApiError("Server error", 500, "Internal error");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+    });
+
+    test("propagates generic Error through enabled SDK path", async () => {
+      await expect(
+        withTelemetry(() => {
+          throw new Error("unexpected bug");
+        })
+      ).rejects.toThrow("unexpected bug");
+    });
+
+    test("returns result through enabled SDK path", async () => {
+      const result = await withTelemetry(() => 42);
+      expect(result).toBe(42);
+    });
+  });
+});
+
+describe("isClientApiError", () => {
+  test("returns true for 400 Bad Request", () => {
+    expect(isClientApiError(new ApiError("Bad request", 400))).toBe(true);
+  });
+
+  test("returns true for 403 Forbidden", () => {
+    expect(isClientApiError(new ApiError("Forbidden", 403, "No access"))).toBe(
+      true
+    );
+  });
+
+  test("returns true for 404 Not Found", () => {
+    expect(
+      isClientApiError(new ApiError("Not found", 404, "Issue not found"))
+    ).toBe(true);
+  });
+
+  test("returns true for 429 Too Many Requests", () => {
+    expect(isClientApiError(new ApiError("Rate limited", 429))).toBe(true);
+  });
+
+  test("returns false for 500 Internal Server Error", () => {
+    expect(isClientApiError(new ApiError("Server error", 500))).toBe(false);
+  });
+
+  test("returns false for 502 Bad Gateway", () => {
+    expect(isClientApiError(new ApiError("Bad gateway", 502))).toBe(false);
+  });
+
+  test("returns false for non-ApiError", () => {
+    expect(isClientApiError(new Error("generic error"))).toBe(false);
+  });
+
+  test("returns false for AuthError", () => {
+    expect(isClientApiError(new AuthError("not_authenticated"))).toBe(false);
+  });
+
+  test("returns false for null/undefined", () => {
+    expect(isClientApiError(null)).toBe(false);
+    expect(isClientApiError(undefined)).toBe(false);
+  });
+
+  test("returns false for non-Error objects", () => {
+    expect(isClientApiError({ status: 404 })).toBe(false);
+    expect(isClientApiError("404")).toBe(false);
+  });
+});
+
+describe("recordApiErrorOnSpan", () => {
+  function createMockSpan() {
+    const attributes: Record<string, string | number> = {};
+    return {
+      attributes,
+      setAttribute(key: string, value: string | number) {
+        attributes[key] = value;
+      },
+    };
+  }
+
+  test("sets status and message attributes", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Not found", 404);
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(404);
+    expect(span.attributes["api_error.message"]).toBe("Not found");
+    expect(span.attributes["api_error.detail"]).toBeUndefined();
+  });
+
+  test("sets detail attribute when present", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Not found", 404, "Issue not found");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(404);
+    expect(span.attributes["api_error.message"]).toBe("Not found");
+    expect(span.attributes["api_error.detail"]).toBe("Issue not found");
+  });
+
+  test("omits detail attribute when empty string", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Bad request", 400, "");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(400);
+    expect(span.attributes["api_error.detail"]).toBeUndefined();
+  });
+
+  test("handles different 4xx status codes", () => {
+    const span = createMockSpan();
+    const error = new ApiError("Forbidden", 403, "No access");
+    recordApiErrorOnSpan(span as never, error);
+
+    expect(span.attributes["api_error.status"]).toBe(403);
+    expect(span.attributes["api_error.message"]).toBe("Forbidden");
+    expect(span.attributes["api_error.detail"]).toBe("No access");
   });
 });
 
@@ -571,5 +728,181 @@ describe("createTracedDatabase", () => {
     expect(() => stmt.finalize()).not.toThrow();
 
     db.close();
+  });
+
+  describe("readonly database handling", () => {
+    let tmpDir: string;
+    let dbPath: string;
+
+    beforeEach(() => {
+      resetReadonlyWarning();
+
+      tmpDir = `${import.meta.dir}/tmp-readonly-${Date.now()}`;
+      mkdirSync(tmpDir, { recursive: true });
+      dbPath = `${tmpDir}/test.db`;
+
+      const setupDb = new Database(dbPath);
+      setupDb.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
+      setupDb.exec("INSERT INTO test (id, name) VALUES (1, 'Alice')");
+      setupDb.close();
+
+      chmodSync(dbPath, 0o444);
+    });
+
+    afterEach(() => {
+      try {
+        chmodSync(dbPath, 0o644);
+      } catch {
+        // May already be cleaned up
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test("does not throw on write to readonly database", () => {
+      // bun:sqlite opens the file successfully — the error only surfaces on write
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      expect(() => {
+        tracedDb
+          .query("INSERT INTO test (id, name) VALUES (?, ?)")
+          .run(2, "Bob");
+      }).not.toThrow();
+
+      db.close();
+    });
+
+    test("reads still work on readonly database", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const row = tracedDb.query("SELECT * FROM test WHERE id = ?").get(1) as {
+        id: number;
+        name: string;
+      };
+      expect(row).toEqual({ id: 1, name: "Alice" });
+
+      db.close();
+    });
+
+    test("auto-repairs permissions on first readonly write", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(output).toContain("auto-repaired");
+      expect(output).toContain("next command");
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("shows only one message across multiple writes", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+      tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .run(3, "Charlie");
+      tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .run(4, "Dave");
+
+      // Only one message total (the auto-repair note)
+      expect(stderrSpy.mock.calls.length).toBe(1);
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("resetReadonlyWarning allows auto-repair to trigger again", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      // First write triggers auto-repair
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+      expect(String(stderrSpy.mock.calls[0]?.[0])).toContain("auto-repaired");
+
+      // Second write is silent (one-shot guard)
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(3, "X");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+
+      // Reset all state
+      resetReadonlyWarning();
+      stderrSpy.mockClear();
+
+      // Re-break permissions so SQLite errors again
+      chmodSync(dbPath, 0o444);
+
+      // Next write triggers auto-repair again after reset
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(4, "Y");
+      expect(stderrSpy.mock.calls.length).toBe(1);
+      expect(String(stderrSpy.mock.calls[0]?.[0])).toContain("auto-repaired");
+
+      stderrSpy.mockRestore();
+      db.close();
+    });
+
+    test("all() and values() return empty arrays on readonly write", () => {
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const allResult = tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .all(2, "Bob");
+      const valuesResult = tracedDb
+        .query("INSERT INTO test (id, name) VALUES (?, ?)")
+        .values(3, "Charlie");
+
+      expect(allResult).toEqual([]);
+      expect(valuesResult).toEqual([]);
+
+      db.close();
+    });
+
+    test("shows readonly warning when auto-repair fails", () => {
+      // Mock chmodSync to always throw, simulating a file owned by another user.
+      // This makes tryRepairReadonly fail and fall through to warnReadonlyDatabaseOnce.
+      const { mock: mockFn } = require("bun:test");
+      mockFn.module("node:fs", () => {
+        const realFs = require("node:fs");
+        return {
+          ...realFs,
+          chmodSync: () => {
+            throw Object.assign(new Error("EPERM: operation not permitted"), {
+              code: "EPERM",
+            });
+          },
+        };
+      });
+
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      // When repair fails, the warning message should appear instead
+      expect(output).toContain("read-only");
+      expect(output).toContain("sentry cli fix");
+
+      stderrSpy.mockRestore();
+      db.close();
+
+      // Restore mock
+      mockFn.module("node:fs", () => require("node:fs"));
+    });
   });
 });

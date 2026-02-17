@@ -30,6 +30,13 @@ const SUPPRESSED_ARGS = new Set([
   "token",
 ]);
 
+/**
+ * CLI management subcommands that should not trigger version checks.
+ * Matched only when preceded by "cli" to avoid false positives
+ * (e.g., `--project setup` should not suppress notifications).
+ */
+const SUPPRESSED_CLI_SUBCOMMANDS = new Set(["setup", "fix"]);
+
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;
 
@@ -63,7 +70,14 @@ function shouldCheckForUpdate(): boolean {
  * Check if update notifications should be suppressed for these args.
  */
 export function shouldSuppressNotification(args: string[]): boolean {
-  return args.some((arg) => SUPPRESSED_ARGS.has(arg));
+  if (args.some((arg) => SUPPRESSED_ARGS.has(arg))) {
+    return true;
+  }
+  // Suppress for "cli <subcommand>" management commands (setup, fix)
+  if (args[0] === "cli" && SUPPRESSED_CLI_SUBCOMMANDS.has(args[1] ?? "")) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -107,9 +121,14 @@ function checkForUpdateInBackgroundImpl(): void {
         setVersionCheckInfo(latestVersion);
         span.setStatus({ code: 1 }); // OK
       } catch (error) {
-        // Don't report abort errors - they're expected when process exits
+        // Don't report abort errors - they're expected when process exits.
+        // Record other errors (network failures, JSON parse errors) as span
+        // attributes rather than captureException — these are transient
+        // infrastructure issues (GitHub rate limits, CDN errors), not CLI bugs.
+        // They remain queryable in Discover without cluttering the Issues feed.
         if (error instanceof Error && error.name !== "AbortError") {
-          Sentry.captureException(error);
+          span.setAttribute("version_check.error", error.message);
+          span.setAttribute("version_check.error_type", error.constructor.name);
         }
         span.setStatus({ code: 2 }); // Error
       } finally {
