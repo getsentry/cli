@@ -308,12 +308,36 @@ async function fetchPaginatedSafe(
 }
 
 /**
- * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
- * apply client-side filtering and limiting.
+ * Fetch projects for auto-detect mode.
  *
  * Optimization: when targeting a single org without platform filter, uses
  * single-page pagination (`perPage=limit`) to avoid fetching all projects.
  * Multi-org or filtered queries still require full fetch + client-side slicing.
+ */
+async function fetchAutoDetectProjects(
+  orgs: string[],
+  flags: ListFlags
+): Promise<{ projects: ProjectWithOrg[]; nextCursor?: string }> {
+  if (orgs.length === 1 && !flags.platform) {
+    return fetchPaginatedSafe(orgs[0] as string, flags.limit);
+  }
+  if (orgs.length > 0) {
+    const results = await Promise.all(orgs.map(fetchOrgProjectsSafe));
+    return { projects: results.flat() };
+  }
+  return { projects: await fetchAllOrgProjects() };
+}
+
+/** Build a pagination hint for auto-detect JSON output. */
+function autoDetectPaginationHint(orgs: string[]): string {
+  return orgs.length === 1
+    ? `sentry project list ${orgs[0]}/ --json`
+    : "sentry project list <org>/ --json";
+}
+
+/**
+ * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
+ * apply client-side filtering and limiting.
  */
 export async function handleAutoDetect(
   stdout: Writer,
@@ -326,31 +350,24 @@ export async function handleAutoDetect(
     skippedSelfHosted,
   } = await resolveOrgsForAutoDetect(cwd);
 
-  let allProjects: ProjectWithOrg[];
-  let nextCursor: string | undefined;
-
-  // Fast path: single org, no platform filter — fetch only one page
-  if (orgsToFetch.length === 1 && !flags.platform) {
-    const result = await fetchPaginatedSafe(
-      orgsToFetch[0] as string,
-      flags.limit
-    );
-    allProjects = result.projects;
-    nextCursor = result.nextCursor;
-  } else if (orgsToFetch.length > 0) {
-    const results = await Promise.all(orgsToFetch.map(fetchOrgProjectsSafe));
-    allProjects = results.flat();
-  } else {
-    allProjects = await fetchAllOrgProjects();
-  }
+  const { projects: allProjects, nextCursor } = await fetchAutoDetectProjects(
+    orgsToFetch,
+    flags
+  );
 
   const filtered = filterByPlatform(allProjects, flags.platform);
   const limitCount =
     orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
   const limited = filtered.slice(0, limitCount);
 
+  const hasMore = filtered.length > limited.length || !!nextCursor;
+
   if (flags.json) {
-    writeJson(stdout, limited);
+    const output: Record<string, unknown> = { data: limited, hasMore };
+    if (hasMore) {
+      output.hint = autoDetectPaginationHint(orgsToFetch);
+    }
+    writeJson(stdout, output);
     return;
   }
 
@@ -362,7 +379,7 @@ export async function handleAutoDetect(
 
   displayProjectTable(stdout, limited);
 
-  if (filtered.length > limited.length || nextCursor) {
+  if (hasMore) {
     if (nextCursor && orgsToFetch.length === 1) {
       const org = orgsToFetch[0] as string;
       stdout.write(

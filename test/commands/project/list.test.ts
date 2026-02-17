@@ -1218,7 +1218,7 @@ describe("handleAutoDetect", () => {
     expect(text).toContain("backend");
   });
 
-  test("--json outputs array", async () => {
+  test("--json outputs envelope with hasMore", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
     const { writer, output } = createCapture();
 
@@ -1228,8 +1228,9 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(2);
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("hasMore", false);
+    expect(parsed.data).toHaveLength(2);
   });
 
   test("empty results shows no projects message", async () => {
@@ -1244,7 +1245,7 @@ describe("handleAutoDetect", () => {
     expect(output()).toContain("No projects found");
   });
 
-  test("respects --limit flag", async () => {
+  test("respects --limit flag and indicates truncation", async () => {
     const manyProjects = Array.from({ length: 5 }, (_, i) =>
       makeProject({ id: String(i), slug: `proj-${i}`, name: `Project ${i}` })
     );
@@ -1257,7 +1258,9 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(2);
+    expect(parsed.data).toHaveLength(2);
+    expect(parsed.hasMore).toBe(true);
+    expect(parsed.hint).toBeString();
   });
 
   test("respects --platform flag", async () => {
@@ -1271,8 +1274,9 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].platform).toBe("python");
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].platform).toBe("python");
+    expect(parsed.hasMore).toBe(false);
   });
 
   test("shows limit message when more projects exist", async () => {
@@ -1304,10 +1308,10 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(2);
+    expect(parsed.data).toHaveLength(2);
     // Verify orgSlug is attached
-    expect(parsed[0].orgSlug).toBe("test-org");
+    expect(parsed.data[0].orgSlug).toBe("test-org");
+    expect(parsed.hasMore).toBe(false);
   });
 
   test("fast path: shows truncation message when server has more results", async () => {
@@ -1327,6 +1331,26 @@ describe("handleAutoDetect", () => {
     expect(text).toContain("Showing 2 projects (more available)");
     expect(text).toContain("sentry project list test-org/");
     expect(text).not.toContain("--limit");
+  });
+
+  test("fast path: JSON includes hasMore and hint when server has more results", async () => {
+    await setDefaults("test-org");
+    globalThis.fetch = mockProjectFetch(sampleProjects, {
+      hasMore: true,
+      nextCursor: "1735689600000:0:0",
+    });
+    const { writer, output } = createCapture();
+
+    await handleAutoDetect(writer, "/tmp/test-project", {
+      limit: 30,
+      json: true,
+    });
+
+    const parsed = JSON.parse(output());
+    expect(parsed.hasMore).toBe(true);
+    expect(parsed.data).toHaveLength(2);
+    expect(parsed.hint).toContain("test-org/");
+    expect(parsed.hint).toContain("--json");
   });
 
   test("fast path: non-auth API errors return empty results instead of throwing", async () => {
@@ -1350,7 +1374,8 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(parsed).toEqual([]);
+    expect(parsed.data).toEqual([]);
+    expect(parsed.hasMore).toBe(false);
   });
 
   test("fast path: AuthError still propagates", async () => {
@@ -1380,7 +1405,8 @@ describe("handleAutoDetect", () => {
     });
 
     const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].platform).toBe("python");
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].platform).toBe("python");
+    expect(parsed.hasMore).toBe(false);
   });
 });
