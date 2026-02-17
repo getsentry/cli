@@ -869,5 +869,40 @@ describe("createTracedDatabase", () => {
 
       db.close();
     });
+
+    test("shows readonly warning when auto-repair fails", () => {
+      // Mock chmodSync to always throw, simulating a file owned by another user.
+      // This makes tryRepairReadonly fail and fall through to warnReadonlyDatabaseOnce.
+      const { mock: mockFn } = require("bun:test");
+      mockFn.module("node:fs", () => {
+        const realFs = require("node:fs");
+        return {
+          ...realFs,
+          chmodSync: () => {
+            throw Object.assign(new Error("EPERM: operation not permitted"), {
+              code: "EPERM",
+            });
+          },
+        };
+      });
+
+      const db = new Database(dbPath);
+      const tracedDb = createTracedDatabase(db);
+
+      const stderrSpy = spyOn(process.stderr, "write");
+
+      tracedDb.query("INSERT INTO test (id, name) VALUES (?, ?)").run(2, "Bob");
+
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      // When repair fails, the warning message should appear instead
+      expect(output).toContain("read-only");
+      expect(output).toContain("sentry cli fix");
+
+      stderrSpy.mockRestore();
+      db.close();
+
+      // Restore mock
+      mockFn.module("node:fs", () => require("node:fs"));
+    });
   });
 });

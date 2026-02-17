@@ -299,4 +299,73 @@ describe("sentry cli fix", () => {
     expect(stdout).toContain("repaired successfully");
     expect(exitCode).toBe(0);
   });
+
+  test("repairs missing columns and reports success", async () => {
+    // Create database with pre-migration tables then repair (non-dry-run)
+    // This exercises the schema repair success path
+    const db = new Database(join(getTestDir(), "cli.db"));
+    createPreMigrationDatabase(db);
+    db.close();
+
+    const { stdout, exitCode } = await runFix(false);
+
+    expect(stdout).toContain("schema issue(s)");
+    expect(stdout).toContain("Missing column");
+    expect(stdout).toContain("Repairing schema");
+    expect(stdout).toContain("Added column");
+    expect(stdout).toContain("repaired successfully");
+    expect(exitCode).toBe(0);
+  });
+
+  test("sets exitCode=1 when schema check throws with no permission issues", async () => {
+    // Create a DB file that cannot be opened by getRawDatabase.
+    // Write garbage so SQLite cannot parse it — getRawDatabase will throw.
+    const dbPath = join(getTestDir(), "cli.db");
+    closeDatabase();
+    await Bun.write(dbPath, "not a sqlite database");
+    chmodSync(dbPath, 0o600);
+    chmodSync(getTestDir(), 0o700);
+
+    const { stdout, stderr, exitCode } = await runFix(false);
+
+    // No permission issues found, so schema failure should be reported
+    expect(stderr).toContain("Could not open database to check schema");
+    expect(stderr).toContain("Try deleting the database");
+    expect(exitCode).toBe(1);
+    // Should NOT say "No issues found"
+    expect(stdout).not.toContain("No issues found");
+  });
+
+  test("dry-run sets exitCode=1 when schema check throws", async () => {
+    // Same corrupt DB scenario, but in dry-run mode
+    const dbPath = join(getTestDir(), "cli.db");
+    closeDatabase();
+    await Bun.write(dbPath, "not a sqlite database");
+    chmodSync(dbPath, 0o600);
+    chmodSync(getTestDir(), 0o700);
+
+    const { stdout, stderr, exitCode } = await runFix(true);
+
+    expect(stderr).toContain("Could not open database to check schema");
+    expect(exitCode).toBe(1);
+    // Should NOT suggest running fix (no fixable issues found)
+    expect(stdout).not.toContain("Run 'sentry cli fix' to apply fixes");
+  });
+
+  test("schema check failure with permission issues does not print schema error", async () => {
+    // When permissions are broken AND schema can't be opened, the schema error
+    // is suppressed because permission issues are the likely root cause.
+    getDatabase();
+    const dbPath = join(getTestDir(), "cli.db");
+
+    // Make DB readonly — will cause permission issue AND potentially schema failure
+    chmodSync(dbPath, 0o444);
+
+    // The schema catch block should suppress the error message when perm.found > 0
+    const { stdout, stderr } = await runFix(true);
+
+    expect(stdout).toContain("permission issue(s)");
+    // Should NOT print "Could not open database" since permission issues explain it
+    expect(stderr).not.toContain("Could not open database");
+  });
 });
