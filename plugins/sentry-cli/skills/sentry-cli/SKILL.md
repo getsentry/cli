@@ -562,6 +562,14 @@ List transactions with profiling data
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 
+**Examples:**
+
+```bash
+sentry profile list [<org>/<project>]
+
+sentry profile list my-org/backend --period 7d
+```
+
 #### `sentry profile view <args...>`
 
 View CPU profiling analysis for a transaction
@@ -572,6 +580,26 @@ View CPU profiling analysis for a transaction
 - `--allFrames - Include library/system frames (default: user code only)`
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+sentry profile view [<org>/<project>] <transaction>
+
+sentry profile view my-org/backend e --period 7d
+
+sentry profile view my-org/backend e --allFrames --limit 5
+
+sentry profile view my-org/backend e --json | jq '.hotPaths[0].frames[0].name'
+
+sentry profile list my-org/backend
+
+sentry profile view my-org/backend e
+
+sentry profile view my-org/backend e --allFrames
+
+sentry profile view my-org/backend e -w
+```
 
 ### Trace
 
