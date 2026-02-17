@@ -6,6 +6,7 @@
  * interactive prompt → resume with result → repeat.
  */
 
+import { randomBytes } from "node:crypto";
 import { MastraClient } from "@mastra/client-js";
 import { CLI_VERSION } from "../constants.js";
 import { MASTRA_API_URL, WORKFLOW_ID } from "./constants.js";
@@ -22,6 +23,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, force, yes, dryRun, features, stdout, stderr } = options;
 
   const tracingOptions = {
+    traceId: randomBytes(16).toString("hex"),
     tags: ["sentry-cli", "init-wizard"],
     metadata: {
       cliVersion: CLI_VERSION,
