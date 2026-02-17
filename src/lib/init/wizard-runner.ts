@@ -24,6 +24,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
+    parentSpanId: randomBytes(8).toString("hex"),
     tags: ["sentry-cli", "init-wizard"],
     metadata: {
       cliVersion: CLI_VERSION,
