@@ -143,17 +143,21 @@ describe("listCommand.func", () => {
       await expect(func.call(ctx, defaultFlags)).rejects.toThrow(ContextError);
     });
 
-    test("resolves explicit org/project target", async () => {
+    test("resolves explicit org/project target directly", async () => {
       const ctx = createMockContext();
-      setupResolvedTarget();
+      getProjectSpy.mockResolvedValue({
+        id: "12345",
+        slug: "backend",
+        name: "Backend",
+      });
       listProfiledTransactionsSpy.mockResolvedValue({ data: [] });
       const func = await loadListFunc();
 
       await func.call(ctx, defaultFlags, "my-org/backend");
 
-      expect(resolveOrgAndProjectSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ org: "my-org", project: "backend" })
-      );
+      // Explicit targets skip resolveOrgAndProject and use parsed values directly
+      expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
+      expect(ctx.setContext).toHaveBeenCalledWith(["my-org"], ["backend"]);
     });
 
     test("resolves project-only target via findProjectsBySlug", async () => {
@@ -357,7 +361,7 @@ describe("listCommand.func", () => {
       );
     });
 
-    test("shows detectedFrom hint when present", async () => {
+    test("shows detectedFrom hint when auto-detected", async () => {
       const ctx = createMockContext();
       setupResolvedTarget({ detectedFrom: ".env file" });
       listProfiledTransactionsSpy.mockResolvedValue({
@@ -365,15 +369,20 @@ describe("listCommand.func", () => {
       });
       const func = await loadListFunc();
 
-      await func.call(ctx, defaultFlags, "my-org/backend");
+      // No target arg → auto-detect path, which returns detectedFrom
+      await func.call(ctx, defaultFlags);
 
       const output = getOutput(ctx);
       expect(output).toContain("Detected from .env file");
     });
 
-    test("does not show detectedFrom when absent", async () => {
+    test("does not show detectedFrom for explicit target", async () => {
       const ctx = createMockContext();
-      setupResolvedTarget();
+      getProjectSpy.mockResolvedValue({
+        id: "12345",
+        slug: "backend",
+        name: "Backend",
+      });
       listProfiledTransactionsSpy.mockResolvedValue({
         data: [{ transaction: "/api/users", "count_unique(timestamp)": 10 }],
       });

@@ -70,21 +70,15 @@ async function resolveListTarget(
           "Usage: sentry profile list <org>/<project>"
       );
 
-    case "explicit": {
-      const resolved = await resolveOrgAndProject({
-        org: parsed.org,
-        project: parsed.project,
-        cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      return resolved;
-    }
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
 
     case "project-search":
-      return await resolveProjectBySlug(parsed.projectSlug, USAGE_HINT);
+      return await resolveProjectBySlug(
+        parsed.projectSlug,
+        USAGE_HINT,
+        `sentry profile list <org>/${parsed.projectSlug}`
+      );
 
     case "auto-detect": {
       const resolved = await resolveOrgAndProject({
