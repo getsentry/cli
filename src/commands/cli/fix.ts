@@ -139,8 +139,10 @@ function formatMode(mode: number): string {
 }
 
 /**
- * Attempt to fix file/directory permissions via chmod in parallel.
- * Repairs may fail if the current user doesn't own the file.
+ * Attempt to fix file/directory permissions via chmod.
+ * Directory issues are repaired first (sequentially) because child file
+ * chmod calls will fail with EACCES if the parent directory lacks execute
+ * permission. File issues are then repaired in parallel.
  *
  * @param issues - Permission issues to repair
  * @returns Separate lists of human-readable repair successes and failures
@@ -149,6 +151,31 @@ async function repairPermissions(issues: PermissionIssue[]): Promise<{
   fixed: string[];
   failed: string[];
 }> {
+  const fixed: string[] = [];
+  const failed: string[] = [];
+
+  // Repair directories first so child file chmod calls don't fail with EACCES
+  const dirIssues = issues.filter((i) => i.kind === "directory");
+  const fileIssues = issues.filter((i) => i.kind !== "directory");
+
+  await collectResults(dirIssues, fixed, failed);
+  await collectResults(fileIssues, fixed, failed);
+
+  return { fixed, failed };
+}
+
+/**
+ * Run chmod for each issue in parallel, collecting successes and failures.
+ *
+ * @param issues - Permission issues to repair
+ * @param fixed - Accumulator for successful repair messages
+ * @param failed - Accumulator for failed repair messages
+ */
+async function collectResults(
+  issues: PermissionIssue[],
+  fixed: string[],
+  failed: string[]
+): Promise<void> {
   const results = await Promise.allSettled(
     issues.map(async (issue) => {
       await chmod(issue.path, issue.expectedMode);
@@ -156,8 +183,6 @@ async function repairPermissions(issues: PermissionIssue[]): Promise<{
     })
   );
 
-  const fixed: string[] = [];
-  const failed: string[] = [];
   for (let i = 0; i < results.length; i++) {
     const result = results[i] as PromiseSettledResult<string>;
     if (result.status === "fulfilled") {
@@ -171,8 +196,6 @@ async function repairPermissions(issues: PermissionIssue[]): Promise<{
       failed.push(`${issue.kind} ${issue.path}: ${reason}`);
     }
   }
-
-  return { fixed, failed };
 }
 
 type Output = {
