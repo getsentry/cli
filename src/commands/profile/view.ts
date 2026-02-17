@@ -80,8 +80,6 @@ export function parsePositionalArgs(args: string[]): {
 type ResolvedProfileTarget = {
   org: string;
   project: string;
-  orgDisplay: string;
-  projectDisplay: string;
   detectedFrom?: string;
 };
 
@@ -159,22 +157,15 @@ export const viewCommand = buildCommand({
         target = {
           org: parsed.org,
           project: parsed.project,
-          orgDisplay: parsed.org,
-          projectDisplay: parsed.project,
         };
         break;
 
       case ProjectSpecificationType.ProjectSearch: {
-        const resolved = await resolveProjectBySlug(
+        target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
           `sentry profile view <org>/${parsed.projectSlug} ${transactionRef}`
         );
-        target = {
-          ...resolved,
-          orgDisplay: resolved.org,
-          projectDisplay: resolved.project,
-        };
         break;
       }
 
