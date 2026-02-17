@@ -114,42 +114,44 @@ const platformArb = constantFrom(
 // Tests
 
 describe("buildContextKey", () => {
-  test("org-all mode produces type:org:<slug>", () => {
+  const host = "https://sentry.io";
+
+  test("org-all mode produces host:<url>|type:org:<slug>", () => {
     fcAssert(
       property(slugArb, (org) => {
         const parsed: ParsedOrgProject = { type: "org-all", org };
-        const key = buildContextKey(parsed, {});
-        expect(key).toBe(`type:org:${org}`);
+        const key = buildContextKey(parsed, {}, host);
+        expect(key).toBe(`host:${host}|type:org:${org}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("auto-detect mode produces 'type:auto'", () => {
+  test("auto-detect mode produces host + type:auto", () => {
     const parsed: ParsedOrgProject = { type: "auto-detect" };
-    expect(buildContextKey(parsed, {})).toBe("type:auto");
+    expect(buildContextKey(parsed, {}, host)).toBe(`host:${host}|type:auto`);
   });
 
-  test("explicit mode produces type:explicit:<org>/<project>", () => {
+  test("explicit mode produces host + type:explicit:<org>/<project>", () => {
     fcAssert(
       property(tuple(slugArb, slugArb), ([org, project]) => {
         const parsed: ParsedOrgProject = { type: "explicit", org, project };
-        const key = buildContextKey(parsed, {});
-        expect(key).toBe(`type:explicit:${org}/${project}`);
+        const key = buildContextKey(parsed, {}, host);
+        expect(key).toBe(`host:${host}|type:explicit:${org}/${project}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("project-search mode produces type:search:<slug>", () => {
+  test("project-search mode produces host + type:search:<slug>", () => {
     fcAssert(
       property(slugArb, (projectSlug) => {
         const parsed: ParsedOrgProject = {
           type: "project-search",
           projectSlug,
         };
-        const key = buildContextKey(parsed, {});
-        expect(key).toBe(`type:search:${projectSlug}`);
+        const key = buildContextKey(parsed, {}, host);
+        expect(key).toBe(`host:${host}|type:search:${projectSlug}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -159,19 +161,26 @@ describe("buildContextKey", () => {
     fcAssert(
       property(tuple(slugArb, platformArb), ([org, platform]) => {
         const parsed: ParsedOrgProject = { type: "org-all", org };
-        const key = buildContextKey(parsed, { platform });
-        expect(key).toBe(`type:org:${org}|platform:${platform}`);
+        const key = buildContextKey(parsed, { platform }, host);
+        expect(key).toBe(`host:${host}|type:org:${org}|platform:${platform}`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("no platform flag means no pipe in key", () => {
+  test("different hosts produce different keys for same org", () => {
     fcAssert(
       property(slugArb, (org) => {
         const parsed: ParsedOrgProject = { type: "org-all", org };
-        const key = buildContextKey(parsed, {});
-        expect(key).not.toContain("|");
+        const saas = buildContextKey(parsed, {}, "https://sentry.io");
+        const selfHosted = buildContextKey(
+          parsed,
+          {},
+          "https://sentry.example.com"
+        );
+        expect(saas).not.toBe(selfHosted);
+        expect(saas).toStartWith("host:https://sentry.io|");
+        expect(selfHosted).toStartWith("host:https://sentry.example.com|");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

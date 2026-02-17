@@ -38,6 +38,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import { resolveAllTargets } from "../../lib/resolve-target.js";
+import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
@@ -173,13 +174,17 @@ export function writeRows(options: WriteRowsOptions): void {
  * Captures the query parameters that affect result ordering,
  * so cursors from different queries are not accidentally reused.
  *
- * Format: `type:<kind>[:<arg>][|platform:<name>]`
+ * Includes the Sentry host so cursors from different instances
+ * (SaaS vs self-hosted) are never mixed.
+ *
+ * Format: `host:<url>|type:<kind>[:<arg>][|platform:<name>]`
  */
 export function buildContextKey(
   parsed: ParsedOrgProject,
-  flags: { platform?: string }
+  flags: { platform?: string },
+  host: string
 ): string {
-  const parts: string[] = [];
+  const parts: string[] = [`host:${host}`];
   switch (parsed.type) {
     case "org-all":
       parts.push(`type:org:${parsed.org}`);
@@ -659,7 +664,7 @@ export const listCommand = buildCommand({
       );
     }
 
-    const contextKey = buildContextKey(parsed, flags);
+    const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
     const cursor = resolveCursor(flags.cursor, contextKey);
 
     switch (parsed.type) {
