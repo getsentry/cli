@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Sentry.Cli/Sentry.Cli.csproj" />
+  <Project Path="Sentry.Cli.Tests/Sentry.Cli.Tests.csproj" />
+</Solution>
