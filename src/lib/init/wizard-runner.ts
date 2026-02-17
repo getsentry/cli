@@ -7,6 +7,7 @@
  */
 
 import { MastraClient } from "@mastra/client-js";
+import { CLI_VERSION } from "../constants.js";
 import { MASTRA_API_URL, WORKFLOW_ID } from "./constants.js";
 import { formatProgress, formatResult, formatError } from "./formatters.js";
 import { handleLocalOp } from "./local-ops.js";
@@ -20,12 +21,24 @@ import type {
 export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, force, yes, dryRun, features, stdout, stderr } = options;
 
+  const tracingOptions = {
+    tags: ["sentry-cli", "init-wizard"],
+    metadata: {
+      cliVersion: CLI_VERSION,
+      os: process.platform,
+      arch: process.arch,
+      nodeVersion: process.version,
+      dryRun,
+    },
+  };
+
   const client = new MastraClient({ baseUrl: MASTRA_API_URL });
   const workflow = client.getWorkflow(WORKFLOW_ID);
   const run = await workflow.createRun();
 
   let result = await run.startAsync({
     inputData: { directory, force, yes, dryRun, features },
+    tracingOptions,
   });
 
   // Track multi-suspend phases per step
@@ -83,6 +96,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     result = await run.resumeAsync({
       step: stepId,
       resumeData,
+      tracingOptions,
     });
   }
 
