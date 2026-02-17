@@ -225,14 +225,13 @@ export const viewCommand = buildCommand({
 
     // Check if we have profile data
     if (!hasProfileData(flamegraph)) {
+      const listCmd = `sentry profile list ${target.org}/${target.project} --period ${flags.period}`;
       stdout.write(
-        `No profiling data found for transaction "${transactionName}".\n\n`
+        `No profiling data found for transaction "${transactionName}" ` +
+          `in the last ${flags.period}.\n\n`
       );
       stdout.write(
-        "Make sure:\n" +
-          "  1. Profiling is enabled for your project\n" +
-          "  2. The transaction name is correct\n" +
-          "  3. Profile data has been collected in the specified period\n"
+        `Run '${listCmd}' to see transactions with available profile data.\n`
       );
       return;
     }

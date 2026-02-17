@@ -1315,12 +1315,15 @@ export async function listProfiledTransactions(
     {
       params: {
         dataset: "profile_functions",
-        field: ["transaction", "count()", "p75(function.duration)"],
+        field: [
+          "transaction",
+          "p75(function.duration)",
+          "p95(function.duration)",
+        ],
         statsPeriod,
         per_page: limit,
         project: projectId,
-        // Sort by count descending to show most active transactions first
-        sort: "-count()",
+        sort: "-p75(function.duration)",
       },
       schema: ProfileFunctionsResponseSchema,
     }

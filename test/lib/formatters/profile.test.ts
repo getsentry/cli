@@ -6,11 +6,13 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  findCommonPrefix,
   formatProfileAnalysis,
   formatProfileListFooter,
   formatProfileListHeader,
   formatProfileListRow,
   formatProfileListTableHeader,
+  truncateMiddle,
 } from "../../../src/lib/formatters/profile.js";
 import type {
   HotPath,
@@ -184,16 +186,16 @@ describe("formatProfileListTableHeader", () => {
     expect(result).toContain("ALIAS");
     expect(result).toContain("#");
     expect(result).toContain("TRANSACTION");
-    expect(result).toContain("PROFILES");
     expect(result).toContain("p75");
+    expect(result).toContain("p95");
   });
 
   test("does not include ALIAS or # columns when hasAliases is false", () => {
     const result = stripAnsi(formatProfileListTableHeader(false));
     expect(result).not.toContain("ALIAS");
     expect(result).toContain("TRANSACTION");
-    expect(result).toContain("PROFILES");
     expect(result).toContain("p75");
+    expect(result).toContain("p95");
   });
 
   test("defaults to no aliases", () => {
@@ -205,18 +207,18 @@ describe("formatProfileListTableHeader", () => {
 // formatProfileListRow
 
 describe("formatProfileListRow", () => {
-  test("formats row with transaction, count, and p75", () => {
+  test("formats row with transaction and p75/p95", () => {
     const row: ProfileFunctionRow = {
       transaction: "/api/users",
-      "count()": 150,
       "p75(function.duration)": 8_000_000, // 8ms in nanoseconds
+      "p95(function.duration)": 15_000_000, // 15ms in nanoseconds
     };
 
     const result = stripAnsi(formatProfileListRow(row));
 
     expect(result).toContain("/api/users");
-    expect(result).toContain("150");
     expect(result).toContain("8.00ms");
+    expect(result).toContain("15.0ms");
   });
 
   test("formats row with alias when provided", () => {
@@ -241,23 +243,15 @@ describe("formatProfileListRow", () => {
     expect(result).toContain("/api/users");
   });
 
-  test("handles missing count", () => {
+  test("handles missing p75 and p95", () => {
     const row: ProfileFunctionRow = {
       transaction: "/api/users",
     };
 
     const result = stripAnsi(formatProfileListRow(row));
-    expect(result).toContain("0");
-  });
-
-  test("handles missing p75 duration", () => {
-    const row: ProfileFunctionRow = {
-      transaction: "/api/users",
-      "count()": 10,
-    };
-
-    const result = stripAnsi(formatProfileListRow(row));
-    expect(result).toContain("-");
+    // Both p75 and p95 should show "-" when missing
+    const dashes = result.match(/-/g);
+    expect(dashes?.length).toBeGreaterThanOrEqual(2);
   });
 
   test("handles missing transaction name", () => {
@@ -303,5 +297,64 @@ describe("formatProfileListFooter", () => {
   test("defaults to no aliases", () => {
     const result = formatProfileListFooter();
     expect(result).toContain("<transaction>");
+  });
+});
+
+// truncateMiddle
+
+describe("truncateMiddle", () => {
+  test("returns short strings unchanged", () => {
+    expect(truncateMiddle("hello", 10)).toBe("hello");
+    expect(truncateMiddle("hello", 5)).toBe("hello");
+  });
+
+  test("truncates from the middle with ellipsis", () => {
+    const result = truncateMiddle("abcdefghijklmnop", 10);
+    expect(result.length).toBeLessThanOrEqual(10);
+    expect(result).toContain("…");
+    // Should preserve start and end
+    expect(result.startsWith("abcd")).toBe(true);
+    expect(result.endsWith("mnop")).toBe(true);
+  });
+
+  test("handles very short maxLen", () => {
+    const result = truncateMiddle("abcdefghij", 3);
+    expect(result.length).toBe(3);
+    expect(result).toContain("…");
+  });
+});
+
+// findCommonPrefix
+
+describe("findCommonPrefix", () => {
+  test("finds common path prefix", () => {
+    const result = findCommonPrefix([
+      "/api/0/organizations/foo/",
+      "/api/0/projects/bar/",
+      "/api/0/teams/baz/",
+    ]);
+    expect(result).toBe("/api/0/");
+  });
+
+  test("returns empty for single item", () => {
+    expect(findCommonPrefix(["/api/foo"])).toBe("");
+  });
+
+  test("returns empty for empty array", () => {
+    expect(findCommonPrefix([])).toBe("");
+  });
+
+  test("returns empty when no common prefix", () => {
+    expect(findCommonPrefix(["/api/foo", "/remote/bar"])).toBe("/");
+  });
+
+  test("trims to segment boundary", () => {
+    expect(findCommonPrefix(["/api/foo/a", "/api/foobar/b"])).toBe("/api/");
+  });
+
+  test("handles dotted names", () => {
+    expect(
+      findCommonPrefix(["tasks.sentry.process", "tasks.sentry.cleanup"])
+    ).toBe("tasks.sentry.");
   });
 });

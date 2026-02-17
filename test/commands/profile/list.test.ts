@@ -321,8 +321,9 @@ describe("listCommand.func", () => {
       expect(output).toContain("Transactions with Profiles");
       expect(output).toContain("my-org/backend");
       expect(output).toContain("last 24h");
-      expect(output).toContain("/api/users");
-      expect(output).toContain("/api/events");
+      // Common prefix "/api/" is stripped, so we see just the segments
+      expect(output).toContain("users");
+      expect(output).toContain("events");
       expect(output).toContain("sentry profile view");
     });
 

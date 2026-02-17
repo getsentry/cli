@@ -17,10 +17,12 @@ import {
 import { ContextError } from "../../lib/errors.js";
 import {
   divider,
+  findCommonPrefix,
   formatProfileListFooter,
   formatProfileListHeader,
   formatProfileListRow,
   formatProfileListTableHeader,
+  profileListDividerWidth,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
@@ -244,16 +246,23 @@ export const listCommand = buildCommand({
 
     // Human-readable output with aliases
     const hasAliases = aliases.length > 0;
+
+    // Compute common prefix for smarter transaction name display
+    const transactionNames = response.data
+      .map((r) => r.transaction)
+      .filter((t): t is string => t !== null && t !== undefined);
+    const commonPrefix = findCommonPrefix(transactionNames);
+
     stdout.write(`${formatProfileListHeader(orgProject, flags.period)}\n\n`);
     stdout.write(`${formatProfileListTableHeader(hasAliases)}\n`);
-    stdout.write(`${divider(82)}\n`);
+    stdout.write(`${divider(profileListDividerWidth(hasAliases))}\n`);
 
     for (const row of response.data) {
       const alias = row.transaction ? aliasMap.get(row.transaction) : undefined;
-      stdout.write(`${formatProfileListRow(row, alias)}\n`);
+      stdout.write(`${formatProfileListRow(row, alias, commonPrefix)}\n`);
     }
 
-    stdout.write(formatProfileListFooter(hasAliases));
+    stdout.write(formatProfileListFooter(hasAliases, commonPrefix));
 
     if (resolvedTarget.detectedFrom) {
       stdout.write(`\n\nDetected from ${resolvedTarget.detectedFrom}\n`);

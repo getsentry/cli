@@ -16,6 +16,58 @@ import { bold, muted, yellow } from "./colors.js";
 /** Minimum width for header separator line */
 const MIN_HEADER_WIDTH = 60;
 
+/** Max width for the transaction column in the list table */
+const TRANSACTION_COL_WIDTH = 50;
+
+/** Max width for the location column in the hot paths table */
+const LOCATION_COL_WIDTH = 30;
+
+/**
+ * Truncate a string from the middle, preserving start and end for context.
+ *
+ * @param str - String to truncate
+ * @param maxLen - Maximum allowed length
+ * @returns Truncated string with ellipsis in the middle, or original if short enough
+ */
+export function truncateMiddle(str: string, maxLen: number): string {
+  if (str.length <= maxLen) {
+    return str;
+  }
+  const ellipsis = "…";
+  const sideLen = Math.floor((maxLen - ellipsis.length) / 2);
+  return `${str.slice(0, sideLen)}${ellipsis}${str.slice(str.length - sideLen)}`;
+}
+
+/**
+ * Find the longest common prefix among an array of strings,
+ * trimmed to the last segment boundary (/ or .).
+ *
+ * @example
+ * findCommonPrefix(["/api/0/organizations/foo/", "/api/0/projects/bar/"])
+ * // => "/api/0/"
+ */
+export function findCommonPrefix(strings: string[]): string {
+  if (strings.length <= 1) {
+    return "";
+  }
+
+  const first = strings[0] ?? "";
+  let prefix = first;
+
+  for (const str of strings) {
+    while (prefix.length > 0 && !str.startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+    }
+    if (prefix.length === 0) {
+      return "";
+    }
+  }
+
+  // Trim to last segment boundary so we don't cut mid-word
+  const lastSep = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("."));
+  return lastSep >= 0 ? prefix.slice(0, lastSep + 1) : "";
+}
+
 /**
  * Format a section header with separator line.
  */
@@ -63,8 +115,11 @@ function formatHotPathRow(
   percentage: number
 ): string {
   const num = `${index + 1}`.padStart(3);
-  const funcName = frame.name.slice(0, 40).padEnd(40);
-  const location = `${frame.file}:${frame.line}`.slice(0, 20).padEnd(20);
+  const funcName = truncateMiddle(frame.name, 40).padEnd(40);
+  const location = truncateMiddle(
+    `${frame.file}:${frame.line}`,
+    LOCATION_COL_WIDTH
+  ).padEnd(LOCATION_COL_WIDTH);
   const pct = `${percentage.toFixed(1)}%`.padStart(7);
 
   return `  ${num}   ${funcName}  ${location}  ${pct}`;
@@ -84,10 +139,9 @@ function formatHotPaths(analysis: ProfileAnalysis): string[] {
   lines.push(...formatSectionHeader(title));
 
   // Table header
+  const locationHeader = "Location".padEnd(LOCATION_COL_WIDTH);
   lines.push(
-    muted(
-      "    #   Function                                  File:Line             % Time"
-    )
+    muted(`    #   ${"Function".padEnd(40)}  ${locationHeader}  % Time`)
   );
 
   if (hotPaths.length === 0) {
@@ -185,54 +239,96 @@ export function formatProfileListHeader(
  * @param hasAliases - Whether to include # and ALIAS columns
  */
 export function formatProfileListTableHeader(hasAliases = false): string {
+  const txnHeader = "TRANSACTION".padEnd(TRANSACTION_COL_WIDTH);
   if (hasAliases) {
     return muted(
-      "  #   ALIAS   TRANSACTION                                    PROFILES       p75"
+      `  #   ALIAS   ${txnHeader}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`
     );
   }
-  return muted(
-    "  TRANSACTION                                         PROFILES       p75"
-  );
+  return muted(`  ${txnHeader}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`);
 }
 
 /**
  * Format a single transaction row for the list.
+ * Transaction names are displayed with the common prefix stripped and
+ * middle-truncated to keep both start and end visible.
  *
  * @param row - Profile function row data
  * @param alias - Optional alias entry for this transaction
+ * @param commonPrefix - Common prefix stripped from all transaction names
  * @returns Formatted row string
  */
 export function formatProfileListRow(
   row: ProfileFunctionRow,
-  alias?: TransactionAliasEntry
+  alias?: TransactionAliasEntry,
+  commonPrefix = ""
 ): string {
-  const count = `${row["count()"] ?? 0}`.padStart(10);
   const rawP75 = row["p75(function.duration)"];
-  const p75Ms =
+  const p75 = (
     rawP75 !== null && rawP75 !== undefined
       ? formatDurationMs(rawP75 / 1_000_000) // ns to ms
-      : "-";
-  const p75 = p75Ms.padStart(10);
+      : "-"
+  ).padStart(10);
+
+  const rawP95 = row["p95(function.duration)"];
+  const p95 = (
+    rawP95 !== null && rawP95 !== undefined
+      ? formatDurationMs(rawP95 / 1_000_000) // ns to ms
+      : "-"
+  ).padStart(10);
+
+  // Strip common prefix and apply smart truncation
+  const rawTransaction = row.transaction ?? "unknown";
+  const displayTransaction = commonPrefix
+    ? rawTransaction.slice(commonPrefix.length)
+    : rawTransaction;
+  const transaction = truncateMiddle(
+    displayTransaction,
+    TRANSACTION_COL_WIDTH
+  ).padEnd(TRANSACTION_COL_WIDTH);
 
   if (alias) {
     const idx = `${alias.idx}`.padStart(3);
     const aliasStr = alias.alias.padEnd(6);
-    const transaction = (row.transaction ?? "unknown").slice(0, 42).padEnd(42);
-    return `  ${idx}   ${aliasStr}  ${transaction}  ${count}  ${p75}`;
+    return `  ${idx}   ${aliasStr}  ${transaction}  ${p75}  ${p95}`;
   }
 
-  const transaction = (row.transaction ?? "unknown").slice(0, 48).padEnd(48);
-  return `  ${transaction}  ${count}  ${p75}`;
+  return `  ${transaction}  ${p75}  ${p95}`;
+}
+
+/**
+ * Compute the table divider width based on whether aliases are shown.
+ */
+export function profileListDividerWidth(hasAliases: boolean): number {
+  // #(5) + sep(3) + alias(6) + sep(2) + txn(TRANSACTION_COL_WIDTH) + sep(2) + p75(10) + sep(2) + p95(10) = 90
+  return hasAliases ? 90 : 80;
 }
 
 /**
  * Format the footer tip for profile list command.
  *
  * @param hasAliases - Whether aliases are available for quick access
+ * @param commonPrefix - If set, the common prefix that was stripped
  */
-export function formatProfileListFooter(hasAliases = false): string {
-  if (hasAliases) {
-    return "\nTip: Use 'sentry profile view 1' or 'sentry profile view <alias>' to analyze.";
+export function formatProfileListFooter(
+  hasAliases = false,
+  commonPrefix?: string
+): string {
+  const lines: string[] = [];
+
+  if (commonPrefix) {
+    lines.push(`\n${muted(`Common prefix stripped: ${commonPrefix}`)}`);
   }
-  return "\nTip: Use 'sentry profile view \"<transaction>\"' to analyze.";
+
+  if (hasAliases) {
+    lines.push(
+      "\nTip: Use 'sentry profile view 1' or 'sentry profile view <alias>' to analyze."
+    );
+  } else {
+    lines.push(
+      "\nTip: Use 'sentry profile view \"<transaction>\"' to analyze."
+    );
+  }
+
+  return lines.join("");
 }
