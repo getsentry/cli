@@ -242,7 +242,10 @@ export function formatProfileListTableHeader(hasAliases = false): string {
   const txnHeader = "TRANSACTION".padEnd(TRANSACTION_COL_WIDTH);
   const tail = `${"SAMPLES".padStart(9)}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`;
   if (hasAliases) {
-    return muted(`  #   ALIAS   ${txnHeader}  ${tail}`);
+    // Pad # and ALIAS to match data row widths (padStart(3) and padEnd(6))
+    return muted(
+      `  ${"#".padStart(3)}   ${"ALIAS".padEnd(6)}  ${txnHeader}  ${tail}`
+    );
   }
   return muted(`  ${txnHeader}  ${tail}`);
 }
@@ -315,8 +318,9 @@ export function formatProfileListRow(
  * Compute the table divider width based on whether aliases are shown.
  */
 export function profileListDividerWidth(hasAliases: boolean): number {
-  // #(5) + sep(3) + alias(6) + sep(2) + txn(50) + sep(2) + samples(9) + sep(2) + p75(10) + sep(2) + p95(10) = 101
-  return hasAliases ? 101 : 91;
+  // With aliases: indent(2) + #(3) + sep(3) + alias(6) + sep(2) + txn(50) + sep(2) + samples(9) + sep(2) + p75(10) + sep(2) + p95(10) = 101
+  // Without:      indent(2) + txn(50) + sep(2) + samples(9) + sep(2) + p75(10) + sep(2) + p95(10) = 87
+  return hasAliases ? 101 : 87;
 }
 
 /**

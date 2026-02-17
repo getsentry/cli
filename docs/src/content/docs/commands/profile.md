@@ -39,13 +39,13 @@ sentry profile list my-org/backend --period 7d
 ```
 Transactions with Profiles in my-org/backend (last 7d):
 
-  #   ALIAS   TRANSACTION                                         SAMPLES         p75         p95
-─────────────────────────────────────────────────────────────────────────────────────────────────────
-    1   u       projects/{project_id}/users/                            42        3.8s        5.0s
-    2   a       webhooks/provision/account/                             18        2.7s        2.7s
-    3   c       organizations/{org_id}/code-mappings/                    6        2.1s        2.1s
-    4   e       projects/{project_id}/events/                          291        1.5s        8.6s
-    5   i       organizations/{org_id}/issues/                         541        1.5s        2.8s
+    #   ALIAS   TRANSACTION                                         SAMPLES         p75         p95
+─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    1   u       projects/{project_id}/users/                              42        3.8s        5.0s
+    2   a       webhooks/provision/account/                               18        2.7s        2.7s
+    3   c       organizations/{org_id}/code-mappings/                      6        2.1s        2.1s
+    4   e       projects/{project_id}/events/                            291        1.5s        8.6s
+    5   i       organizations/{org_id}/issues/                           541        1.5s        2.8s
 
 Common prefix stripped: /api/0/
 Tip: Use 'sentry profile view 1' or 'sentry profile view <alias>' to analyze.
