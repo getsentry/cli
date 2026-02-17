@@ -50,9 +50,8 @@ function createDatabaseWithMissingTables(
   const statements: string[] = [];
 
   for (const tableName of Object.keys(EXPECTED_TABLES)) {
-    if (!missingTables.includes(tableName)) {
-      statements.push(EXPECTED_TABLES[tableName] as string);
-    }
+    if (missingTables.includes(tableName)) continue;
+    statements.push(EXPECTED_TABLES[tableName] as string);
   }
 
   db.exec(statements.join(";\n"));

@@ -10,7 +10,6 @@
 
 import {
   listAnOrganization_sIssues,
-  listAnOrganization_sProjects,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   queryExploreEventsInTableFormat,
@@ -172,18 +171,97 @@ async function getOrgSdkConfig(orgSlug: string) {
 // Raw request functions (for internal/generic endpoints)
 
 /**
+ * Extract the value of a named attribute from a Link header segment.
+ * Parses `key="value"` pairs using string operations instead of regex
+ * for robustness and performance.
+ *
+ * @param segment - A single Link header segment (e.g., `<url>; rel="next"; cursor="abc"`)
+ * @param attr - The attribute name to extract (e.g., "rel", "cursor")
+ * @returns The attribute value, or undefined if not found
+ */
+function extractLinkAttr(segment: string, attr: string): string | undefined {
+  const prefix = `${attr}="`;
+  const start = segment.indexOf(prefix);
+  if (start === -1) {
+    return;
+  }
+  const valueStart = start + prefix.length;
+  const end = segment.indexOf('"', valueStart);
+  if (end === -1) {
+    return;
+  }
+  return segment.slice(valueStart, end);
+}
+
+/**
+ * Maximum number of pages to follow when auto-paginating.
+ *
+ * Safety limit to prevent runaway pagination when the API returns an unexpectedly
+ * large number of pages. At 100 items/page this allows up to 5,000 items, which
+ * covers even the largest organizations. Override with SENTRY_MAX_PAGINATION_PAGES
+ * env var for edge cases.
+ */
+const MAX_PAGINATION_PAGES = Math.max(
+  1,
+  Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
+);
+
+/**
+ * Paginated API response with cursor metadata.
+ * More pages exist when `nextCursor` is defined.
+ */
+export type PaginatedResponse<T> = {
+  /** The response data */
+  data: T;
+  /** Cursor for fetching the next page (undefined if no more pages) */
+  nextCursor?: string;
+};
+
+/**
+ * Parse Sentry's RFC 5988 Link response header to extract pagination cursors.
+ *
+ * Sentry Link header format:
+ * `<url>; rel="next"; results="true"; cursor="1735689600000:0:0"`
+ *
+ * @param header - Raw Link header string
+ * @returns Parsed pagination info with next cursor if available
+ */
+export function parseLinkHeader(header: string | null): {
+  nextCursor?: string;
+} {
+  if (!header) {
+    return {};
+  }
+
+  // Split on comma to get individual link entries
+  for (const part of header.split(",")) {
+    const rel = extractLinkAttr(part, "rel");
+    const results = extractLinkAttr(part, "results");
+    const cursor = extractLinkAttr(part, "cursor");
+
+    if (rel === "next" && results === "true" && cursor) {
+      return { nextCursor: cursor };
+    }
+  }
+
+  return {};
+}
+
+/**
  * Make an authenticated request to a specific Sentry region.
+ * Returns both parsed response data and raw headers for pagination support.
  * Used for internal endpoints not covered by @sentry/api SDK functions.
  *
  * @param regionUrl - The region's base URL (e.g., https://us.sentry.io)
  * @param endpoint - API endpoint path (e.g., "/users/me/regions/")
  * @param options - Request options
+ * @returns Parsed data and response headers
  */
 export async function apiRequestToRegion<T>(
   regionUrl: string,
   endpoint: string,
   options: ApiRequestOptions<T> = {}
-): Promise<T> {
+): Promise<{ data: T; headers: Headers }> {
   const { method = "GET", body, params, schema } = options;
   const config = getSdkConfig(regionUrl);
 
@@ -226,12 +304,9 @@ export async function apiRequestToRegion<T>(
   }
 
   const data = await response.json();
+  const validated = schema ? schema.parse(data) : (data as T);
 
-  if (schema) {
-    return schema.parse(data);
-  }
-
-  return data as T;
+  return { data: validated, headers: response.headers };
 }
 
 /**
@@ -243,11 +318,16 @@ export async function apiRequestToRegion<T>(
  * @throws {AuthError} When not authenticated
  * @throws {ApiError} On API errors
  */
-export function apiRequest<T>(
+export async function apiRequest<T>(
   endpoint: string,
   options: ApiRequestOptions<T> = {}
 ): Promise<T> {
-  return apiRequestToRegion(getApiBaseUrl(), endpoint, options);
+  const { data } = await apiRequestToRegion<T>(
+    getApiBaseUrl(),
+    endpoint,
+    options
+  );
+  return data;
 }
 
 /**
@@ -326,12 +406,12 @@ export async function rawApiRequest(
  */
 export async function getUserRegions(): Promise<Region[]> {
   // /users/me/regions/ is an internal endpoint - use raw request
-  const response = await apiRequestToRegion<UserRegionsResponse>(
+  const { data } = await apiRequestToRegion<UserRegionsResponse>(
     getControlSiloUrl(),
     "/users/me/regions/",
     { schema: UserRegionsResponseSchema }
   );
-  return response.regions;
+  return data.regions;
 }
 
 /**
@@ -351,6 +431,111 @@ export async function listOrganizationsInRegion(
 
   const data = unwrapResult(result, "Failed to list organizations");
   return data as unknown as SentryOrganization[];
+}
+
+// Pagination infrastructure for raw API endpoints
+
+/** Regex patterns for extracting org slugs from endpoint paths */
+const ORG_ENDPOINT_REGEX = /\/organizations\/([^/]+)\//;
+const PROJECT_ENDPOINT_REGEX = /\/projects\/([^/]+)\//;
+
+/**
+ * Extract organization slug from an endpoint path.
+ * Supports:
+ * - `/organizations/{slug}/...` - standard organization endpoints
+ * - `/projects/{org}/{project}/...` - project-scoped endpoints
+ */
+function extractOrgSlugFromEndpoint(endpoint: string): string | null {
+  const orgMatch = endpoint.match(ORG_ENDPOINT_REGEX);
+  if (orgMatch?.[1]) {
+    return orgMatch[1];
+  }
+
+  const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
+  if (projectMatch?.[1]) {
+    return projectMatch[1];
+  }
+
+  return null;
+}
+
+/**
+ * Make an org-scoped API request that returns pagination metadata.
+ * Used for single-page fetches where the caller needs cursor info.
+ *
+ * The endpoint must contain the org slug in the path (e.g., `/organizations/{slug}/...`).
+ * The org slug is extracted to look up the correct region URL.
+ *
+ * @param endpoint - API endpoint path containing the org slug
+ * @param options - Request options
+ * @returns Response data with pagination cursor metadata
+ */
+async function orgScopedRequestPaginated<T>(
+  endpoint: string,
+  options: ApiRequestOptions<T> = {}
+): Promise<PaginatedResponse<T>> {
+  const orgSlug = extractOrgSlugFromEndpoint(endpoint);
+  if (!orgSlug) {
+    throw new Error(
+      `Cannot extract org slug from endpoint: ${endpoint}. ` +
+        "Endpoint must match /organizations/{slug}/..."
+    );
+  }
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data, headers } = await apiRequestToRegion(
+    regionUrl,
+    endpoint,
+    options
+  );
+  const { nextCursor } = parseLinkHeader(headers.get("link"));
+  return { data, nextCursor };
+}
+
+/**
+ * Auto-paginate through all pages of an org-scoped API endpoint.
+ * Follows cursor links until no more results or the safety limit is reached.
+ *
+ * @param endpoint - API endpoint path containing the org slug
+ * @param options - Request options (schema must validate an array type)
+ * @param perPage - Number of items per API page (default: 100)
+ * @returns Combined array of all results across all pages
+ */
+async function orgScopedPaginateAll<T>(
+  endpoint: string,
+  options: ApiRequestOptions<T[]>,
+  perPage = 100
+): Promise<T[]> {
+  const allResults: T[] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const params = { ...options.params, per_page: perPage, cursor };
+    const response = await orgScopedRequestPaginated<T[]>(endpoint, {
+      ...options,
+      params,
+    });
+    allResults.push(...response.data);
+
+    if (!response.nextCursor) {
+      break;
+    }
+    cursor = response.nextCursor;
+
+    // Detect if we're about to exit due to the safety limit
+    if (page === MAX_PAGINATION_PAGES - 1) {
+      truncated = true;
+    }
+  }
+
+  if (truncated) {
+    console.error(
+      `Warning: Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
+        "Results may be incomplete for this organization."
+    );
+  }
+
+  return allResults;
 }
 
 /**
@@ -424,19 +609,42 @@ export async function getOrganization(
 // Project functions
 
 /**
- * List projects in an organization.
+ * List all projects in an organization.
+ * Automatically paginates through all API pages to return the complete list.
  * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - Organization slug
+ * @returns All projects in the organization
  */
-export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
-  const config = await getOrgSdkConfig(orgSlug);
+export function listProjects(orgSlug: string): Promise<SentryProject[]> {
+  return orgScopedPaginateAll<SentryProject>(
+    `/organizations/${orgSlug}/projects/`,
+    {}
+  );
+}
 
-  const result = await listAnOrganization_sProjects({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-  });
-
-  const data = unwrapResult(result, "Failed to list projects");
-  return data as unknown as SentryProject[];
+/**
+ * List projects in an organization with pagination control.
+ * Returns a single page of results with cursor metadata for manual pagination.
+ * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of projects with cursor metadata
+ */
+export function listProjectsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryProject[]>> {
+  return orgScopedRequestPaginated<SentryProject[]>(
+    `/organizations/${orgSlug}/projects/`,
+    {
+      params: {
+        per_page: options.perPage ?? 100,
+        cursor: options.cursor,
+      },
+    }
+  );
 }
 
 /** Project with its organization context */
@@ -454,10 +662,11 @@ export async function listRepositories(
 ): Promise<SentryRepository[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  return apiRequestToRegion<SentryRepository[]>(
+  const { data } = await apiRequestToRegion<SentryRepository[]>(
     regionUrl,
     `/organizations/${orgSlug}/repos/`
   );
+  return data;
 }
 
 /**
@@ -490,19 +699,22 @@ export async function findProjectsBySlug(
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
 
+  // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
     orgs.map(async (org) => {
       try {
-        const projects = await listProjects(org.slug);
-        const match = projects.find((p) => p.slug === projectSlug);
-        if (match) {
-          return { ...match, orgSlug: org.slug };
+        const project = await getProject(org.slug, projectSlug);
+        // The API accepts project_id_or_slug, so a numeric input could
+        // resolve by ID. Verify the returned slug actually matches.
+        if (project.slug !== projectSlug) {
+          return null;
         }
-        return null;
+        return { ...project, orgSlug: org.slug };
       } catch (error) {
         if (error instanceof AuthError) {
           throw error;
         }
+        // 404 or permission errors — project doesn't exist in this org
         return null;
       }
     })
@@ -605,7 +817,7 @@ export async function findProjectByDsnKey(
   if (regions.length === 0) {
     // Fall back to default region for self-hosted
     // This uses an internal query parameter not in the public API
-    const projects = await apiRequestToRegion<SentryProject[]>(
+    const { data: projects } = await apiRequestToRegion<SentryProject[]>(
       getApiBaseUrl(),
       "/projects/",
       { params: { query: `dsn:${publicKey}` } }
@@ -616,11 +828,12 @@ export async function findProjectByDsnKey(
   const results = await Promise.all(
     regions.map(async (region) => {
       try {
-        return await apiRequestToRegion<SentryProject[]>(
+        const { data } = await apiRequestToRegion<SentryProject[]>(
           region.url,
           "/projects/",
           { params: { query: `dsn:${publicKey}` } }
         );
+        return data;
       } catch {
         return [];
       }
@@ -833,7 +1046,7 @@ export async function getDetailedTrace(
 ): Promise<TraceSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  return apiRequestToRegion<TraceSpan[]>(
+  const { data } = await apiRequestToRegion<TraceSpan[]>(
     regionUrl,
     `/organizations/${orgSlug}/trace/${traceId}/`,
     {
@@ -844,6 +1057,7 @@ export async function getDetailedTrace(
       },
     }
   );
+  return data;
 }
 
 /** Fields to request from the transactions API */
@@ -892,7 +1106,7 @@ export async function listTransactions(
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   // Use raw request: the SDK's dataset type doesn't include "transactions"
-  const response = await apiRequestToRegion<TransactionsResponse>(
+  const { data: response } = await apiRequestToRegion<TransactionsResponse>(
     regionUrl,
     `/organizations/${orgSlug}/events/`,
     {
@@ -1005,7 +1219,7 @@ export async function triggerSolutionPlanning(
 ): Promise<unknown> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  return apiRequestToRegion(
+  const { data } = await apiRequestToRegion(
     regionUrl,
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
@@ -1016,6 +1230,7 @@ export async function triggerSolutionPlanning(
       },
     }
   );
+  return data;
 }
 
 // User functions
@@ -1024,10 +1239,13 @@ export async function triggerSolutionPlanning(
  * Get the currently authenticated user's information.
  * Uses the /users/me/ endpoint on the control silo.
  */
-export function getCurrentUser(): Promise<SentryUser> {
-  return apiRequestToRegion<SentryUser>(getControlSiloUrl(), "/users/me/", {
-    schema: SentryUserSchema,
-  });
+export async function getCurrentUser(): Promise<SentryUser> {
+  const { data } = await apiRequestToRegion<SentryUser>(
+    getControlSiloUrl(),
+    "/users/me/",
+    { schema: SentryUserSchema }
+  );
+  return data;
 }
 
 // Log functions

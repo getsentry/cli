@@ -136,13 +136,14 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <org>`
+#### `sentry project list <target>`
 
 List projects
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 
 **Examples:**
@@ -600,13 +601,14 @@ List organizations
 
 List projects
 
-#### `sentry projects <org>`
+#### `sentry projects <target>`
 
 List projects
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 
 ### Repos

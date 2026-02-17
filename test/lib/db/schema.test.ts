@@ -28,9 +28,8 @@ function createDatabaseWithMissingTables(
 ): void {
   const statements: string[] = [];
   for (const tableName of Object.keys(EXPECTED_TABLES)) {
-    if (!missingTables.includes(tableName)) {
-      statements.push(EXPECTED_TABLES[tableName] as string);
-    }
+    if (missingTables.includes(tableName)) continue;
+    statements.push(EXPECTED_TABLES[tableName] as string);
   }
   db.exec(statements.join(";\n"));
   db.query("INSERT INTO schema_version (version) VALUES (?)").run(
@@ -232,6 +231,7 @@ describe("EXPECTED_TABLES", () => {
       "user_info",
       "instance_info",
       "project_root_cache",
+      "pagination_cursors",
     ];
 
     for (const table of expectedTableNames) {
