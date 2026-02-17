@@ -5,7 +5,6 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
 
@@ -13,20 +12,12 @@ import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
  * Create an isolated database context for model-based tests.
  * Each test run gets its own SQLite database to avoid interference.
  *
- * Falls back to creating a temp directory if CONFIG_DIR_ENV_VAR is not set,
- * which can happen due to test ordering/worker isolation in CI.
- *
  * @returns Cleanup function to call after test completes
  */
 export function createIsolatedDbContext(): () => void {
-  const originalEnvValue = process.env[CONFIG_DIR_ENV_VAR];
-
-  let testBaseDir = originalEnvValue;
+  const testBaseDir = process.env[CONFIG_DIR_ENV_VAR];
   if (!testBaseDir) {
-    // Fallback: create a temp base dir (matches preload.ts pattern)
-    testBaseDir = join(homedir(), `.sentry-cli-test-model-${process.pid}`);
-    mkdirSync(testBaseDir, { recursive: true });
-    process.env[CONFIG_DIR_ENV_VAR] = testBaseDir;
+    throw new Error(`${CONFIG_DIR_ENV_VAR} not set - run tests via bun test`);
   }
 
   // Close any existing database connection
@@ -42,12 +33,8 @@ export function createIsolatedDbContext(): () => void {
 
   return () => {
     closeDatabase();
-    // Restore the original env var value, preserving undefined if it was unset
-    if (originalEnvValue === undefined) {
-      delete process.env[CONFIG_DIR_ENV_VAR];
-    } else {
-      process.env[CONFIG_DIR_ENV_VAR] = originalEnvValue;
-    }
+    // Restore original base dir for next test
+    process.env[CONFIG_DIR_ENV_VAR] = testBaseDir;
   };
 }
 
