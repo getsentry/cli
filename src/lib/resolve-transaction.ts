@@ -113,14 +113,30 @@ function buildStaleAliasError(
 
   const isNumeric = NUMERIC_PATTERN.test(ref);
   const refType = isNumeric ? "index" : "alias";
-  const listCmd = current.project
-    ? `sentry profile list ${current.org}/${current.project} --period ${current.period}`
-    : `sentry profile list --org ${current.org} --period ${current.period}`;
+  const listCmd = buildListCommand(
+    current.org,
+    current.project,
+    current.period
+  );
 
   return new ConfigError(
     `Transaction ${refType} '${ref}' is from a ${reason}.`,
     `Run '${listCmd}' to refresh aliases.`
   );
+}
+
+/**
+ * Build a suggested `sentry profile list` command string.
+ * Uses positional `<org>/<project>` when a project is known, otherwise
+ * omits the target to let auto-detection handle it.
+ */
+function buildListCommand(
+  org: string,
+  project: string | null,
+  period: string
+): string {
+  const target = project ? ` ${org}/${project}` : "";
+  return `sentry profile list${target} --period ${period}`;
 }
 
 /**
@@ -132,9 +148,11 @@ function buildUnknownRefError(
 ): ConfigError {
   const isNumeric = NUMERIC_PATTERN.test(ref);
   const refType = isNumeric ? "index" : "alias";
-  const listCmd = options.project
-    ? `sentry profile list ${options.org}/${options.project} --period ${options.period}`
-    : `sentry profile list --org ${options.org} --period ${options.period}`;
+  const listCmd = buildListCommand(
+    options.org,
+    options.project,
+    options.period
+  );
 
   return new ConfigError(
     `Unknown transaction ${refType} '${ref}'.`,
