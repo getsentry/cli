@@ -10,4 +10,32 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sentry</ToolCommandName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>dotnet-sentry</PackageId>
+    <PackageVersion>0.1.0</PackageVersion>
+    <Authors>Sentry Team and Contributors</Authors>
+    <Description>The command-line interface for Sentry. Built for developers and AI agents.</Description>
+    <Copyright>Copyright 2025 Functional Software, Inc. dba Sentry</Copyright>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageProjectUrl>https://cli.sentry.dev/</PackageProjectUrl>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>sentry;cli</PackageTags>
+    <PackageReleaseNotes>https://github.com/getsentry/cli/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/getsentry/cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../../LICENSE.md" Pack="true" PackagePath="LICENSE.md" />
+    <None Include="$(MSBuildThisFileDirectory)../sentry-nuget.png" Pack="true" PackagePath="icon.png" />
+    <None Include="$(MSBuildThisFileDirectory)../../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
 </Project>
