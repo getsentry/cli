@@ -7,11 +7,17 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
   <PropertyGroup>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <DefineConstants>$(DefineConstants);CI_BUILD</DefineConstants>
   </PropertyGroup>
 
 </Project>
