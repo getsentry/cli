@@ -179,9 +179,13 @@ export const viewCommand = buildCommand({
         target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
         break;
 
-      default:
-        // Exhaustive check - should never reach here
-        throw new ContextError("Invalid target specification", USAGE_HINT);
+      default: {
+        const _exhaustiveCheck: never = parsed;
+        throw new ContextError(
+          `Unexpected target type: ${_exhaustiveCheck}`,
+          USAGE_HINT
+        );
+      }
     }
 
     if (!target) {
