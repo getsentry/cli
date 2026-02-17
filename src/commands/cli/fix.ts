@@ -65,15 +65,16 @@ async function checkMode(
       return { actualMode: mode };
     }
   } catch (error: unknown) {
-    // Missing files aren't a permission problem (WAL/SHM created on demand)
-    if (
-      error instanceof Error &&
-      (error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
+    const code =
+      error instanceof Error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+    // Missing files aren't a permission problem (WAL/SHM created on demand).
+    // EACCES means the parent directory blocks stat — the directory check
+    // will catch the root cause, so skip the individual file here.
+    if (code === "ENOENT" || code === "EACCES") {
       return null;
     }
-    // Unexpected filesystem error — re-throw so it surfaces to the user
-    // and gets captured by the top-level Sentry error handler in bin.ts
     throw error;
   }
   return null;
