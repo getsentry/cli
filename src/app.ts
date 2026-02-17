@@ -11,6 +11,7 @@ import { authRoute } from "./commands/auth/index.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
+import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { listCommand as issueListCommand } from "./commands/issue/list.js";
 import { logRoute } from "./commands/log/index.js";
@@ -43,6 +44,7 @@ export const routes = buildRouteMap({
     event: eventRoute,
     log: logRoute,
     trace: traceRoute,
+    init: initCommand,
     api: apiCommand,
     issues: issueListCommand,
     orgs: orgListCommand,

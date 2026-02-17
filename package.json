@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
+    "@mastra/client-js": "^1.4.0",
     "@sentry/api": "^0.1.0",
     "@sentry/bun": "10.39.0",
     "@sentry/esbuild-plugin": "^2.23.0",
