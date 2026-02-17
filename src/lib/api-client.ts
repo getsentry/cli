@@ -704,6 +704,11 @@ export async function findProjectsBySlug(
     orgs.map(async (org) => {
       try {
         const project = await getProject(org.slug, projectSlug);
+        // The API accepts project_id_or_slug, so a numeric input could
+        // resolve by ID. Verify the returned slug actually matches.
+        if (project.slug !== projectSlug) {
+          return null;
+        }
         return { ...project, orgSlug: org.slug };
       } catch (error) {
         if (error instanceof AuthError) {
