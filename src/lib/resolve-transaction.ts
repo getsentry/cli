@@ -48,25 +48,25 @@ const MAX_ALIAS_LENGTH = 20;
 
 /**
  * Pattern matching alias-shaped input: purely ASCII letters in a single case
- * (all lowercase or all uppercase for caps-lock tolerance), optionally
- * followed by a numeric disambiguator (e.g. "issues2", "ISSUES2").
+ * (all lowercase or all uppercase for caps-lock tolerance).
  *
  * This mirrors how `buildTransactionAliases` generates aliases:
  * segments are lowercased, stripped of hyphens/underscores, then
- * `findShortestUniquePrefixes` produces a lowercase-letter prefix,
- * and `disambiguateSegments` may append a numeric suffix.
+ * `findShortestUniquePrefixes` produces a lowercase-letter prefix.
+ * `disambiguateSegments` prepends "x" characters for duplicates
+ * (e.g. "xissues", "xxissues"), so aliases are always purely alphabetic.
  *
  * Mixed-case inputs like "ProcessEvent" are treated as full transaction
  * names since aliases are always lowercase (or all-caps with caps lock).
  */
-const ALIAS_PATTERN = /^(?:[a-z]+|[A-Z]+)\d*$/;
+const ALIAS_PATTERN = /^(?:[a-z]+|[A-Z]+)$/;
 
 /**
  * Check if input looks like a cached alias rather than a full transaction name.
  *
- * Aliases are short, single-case letter strings (with optional numeric suffix).
- * Anything containing special characters like `/`, `.`, `-`, `_`, spaces,
- * colons, or mixed-case letters is treated as a full transaction name.
+ * Aliases are short, purely alphabetic, single-case strings.
+ * Anything containing digits, special characters like `/`, `.`, `-`, `_`,
+ * spaces, colons, or mixed-case letters is treated as a full transaction name.
  */
 function isAliasLike(input: string): boolean {
   return input.length <= MAX_ALIAS_LENGTH && ALIAS_PATTERN.test(input);
@@ -147,8 +147,8 @@ function buildUnknownRefError(
  *
  * Resolution order:
  *   1. Numeric index: "1", "2", "10" → looks up by cached index
- *   2. Alias-shaped input (single-case letters + optional digits, ≤20 chars):
- *      "i", "e", "iu", "issues2", "I" (caps lock) → looks up by cached alias
+ *   2. Alias-shaped input (single-case letters only, ≤20 chars):
+ *      "i", "e", "iu", "xissues", "I" (caps lock) → looks up by cached alias
  *   3. Everything else is treated as a full transaction name and passed through:
  *      "/api/0/...", "tasks.process", "process_request", "handle-webhook",
  *      "ProcessEvent", "GET /users"

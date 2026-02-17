@@ -398,6 +398,12 @@ export type RepairResult = {
   failed: string[];
 };
 
+/** Index for efficient alias lookups by alias string + fingerprint */
+const TRANSACTION_ALIASES_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_txn_alias_lookup 
+  ON transaction_aliases(alias, fingerprint)
+`;
+
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
     if (tableExists(db, tableName)) {
@@ -405,14 +411,28 @@ function repairMissingTables(db: Database, result: RepairResult): void {
     }
     try {
       db.exec(ddl);
-      // Create associated indexes for tables that need them
-      if (tableName === "transaction_aliases") {
-        db.exec(TRANSACTION_ALIASES_INDEX);
-      }
       result.fixed.push(`Created table ${tableName}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
+    }
+  }
+  // Create indexes for newly created tables (separate pass to avoid
+  // leaving the index uncreated if the table DDL succeeds but the
+  // index fails in the same try/catch)
+  ensureTableIndexes(db, result);
+}
+
+/** Ensure indexes exist for tables that need them */
+function ensureTableIndexes(db: Database, result: RepairResult): void {
+  if (tableExists(db, "transaction_aliases")) {
+    try {
+      db.exec(TRANSACTION_ALIASES_INDEX);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.failed.push(
+        `Failed to create index for transaction_aliases: ${msg}`
+      );
     }
   }
 }
@@ -568,12 +588,6 @@ export function tryRepairAndRetry<T>(
 
   return { attempted: false };
 }
-
-/** Index for efficient alias lookups by alias string + fingerprint */
-const TRANSACTION_ALIASES_INDEX = `
-  CREATE INDEX IF NOT EXISTS idx_txn_alias_lookup 
-  ON transaction_aliases(alias, fingerprint)
-`;
 
 export function initSchema(db: Database): void {
   const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
