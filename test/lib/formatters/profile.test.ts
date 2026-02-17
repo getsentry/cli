@@ -240,7 +240,7 @@ describe("formatProfileListRow", () => {
       projectSlug: "backend",
     };
 
-    const result = stripAnsi(formatProfileListRow(row, alias));
+    const result = stripAnsi(formatProfileListRow(row, { alias }));
 
     expect(result).toContain("1");
     expect(result).toContain("users");
@@ -266,6 +266,45 @@ describe("formatProfileListRow", () => {
 
     const result = stripAnsi(formatProfileListRow(row));
     expect(result).toContain("unknown");
+  });
+
+  test("handles missing transaction with common prefix without garbling", () => {
+    const row: ProfileFunctionRow = {
+      "count_unique(timestamp)": 5,
+      "p75(function.duration)": 2_000_000,
+    };
+
+    const result = stripAnsi(
+      formatProfileListRow(row, { commonPrefix: "/api/0/" })
+    );
+    // "unknown" should not be sliced by the common prefix
+    expect(result).toContain("unknown");
+  });
+
+  test("aligns columns when hasAliases is true but row has no alias", () => {
+    const row: ProfileFunctionRow = {
+      transaction: "/api/users",
+      "count_unique(timestamp)": 10,
+      "p75(function.duration)": 5_000_000,
+    };
+
+    const withAlias = stripAnsi(
+      formatProfileListRow(row, {
+        alias: {
+          idx: 1,
+          alias: "users",
+          transaction: "/api/users",
+          orgSlug: "o",
+          projectSlug: "p",
+        },
+      })
+    );
+    const withoutAlias = stripAnsi(
+      formatProfileListRow(row, { hasAliases: true })
+    );
+
+    // Both rows should have the same total length so columns align
+    expect(withoutAlias.length).toBe(withAlias.length);
   });
 
   test("truncates long transaction names", () => {

@@ -150,6 +150,17 @@ describe("formatDurationMs", () => {
     expect(formatDurationMs(99.99)).toBe("100ms");
   });
 
+  test("handles boundary rounding: 9.999ms promotes to 1-decimal format", () => {
+    // (9.999).toFixed(2) = "10.00", which should display as "10.0ms" not "10.00ms"
+    expect(formatDurationMs(9.999)).toBe("10.0ms");
+    expect(formatDurationMs(9.9999)).toBe("10.0ms");
+  });
+
+  test("handles boundary rounding: 0.9995ms promotes to ms", () => {
+    // 0.9995 * 1000 = 999.5, Math.round = 1000, should display as "1.00ms" not "1000µs"
+    expect(formatDurationMs(0.9995)).toBe("1.00ms");
+  });
+
   test("property: output always contains a unit", () => {
     fcAssert(
       property(double({ min: 0.000_001, max: 100_000, noNaN: true }), (ms) => {

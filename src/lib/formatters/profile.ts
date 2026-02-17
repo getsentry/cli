@@ -253,15 +253,21 @@ export function formatProfileListTableHeader(hasAliases = false): string {
  * middle-truncated to keep both start and end visible.
  *
  * @param row - Profile function row data
- * @param alias - Optional alias entry for this transaction
- * @param commonPrefix - Common prefix stripped from all transaction names
+ * @param options - Formatting options
+ * @param options.alias - Optional alias entry for this transaction
+ * @param options.commonPrefix - Common prefix stripped from all transaction names
+ * @param options.hasAliases - Whether the table uses alias layout (keeps columns aligned even for rows without an alias)
  * @returns Formatted row string
  */
 export function formatProfileListRow(
   row: ProfileFunctionRow,
-  alias?: TransactionAliasEntry,
-  commonPrefix = ""
+  options: {
+    alias?: TransactionAliasEntry;
+    commonPrefix?: string;
+    hasAliases?: boolean;
+  } = {}
 ): string {
+  const { alias, commonPrefix = "", hasAliases = false } = options;
   const samples = `${row["count_unique(timestamp)"] ?? 0}`.padStart(9);
 
   const rawP75 = row["p75(function.duration)"];
@@ -278,11 +284,14 @@ export function formatProfileListRow(
       : "-"
   ).padStart(10);
 
-  // Strip common prefix and apply smart truncation
+  // Strip common prefix and apply smart truncation.
+  // Only strip when the transaction actually starts with the prefix;
+  // the "unknown" fallback does not share it.
   const rawTransaction = row.transaction ?? "unknown";
-  const displayTransaction = commonPrefix
-    ? rawTransaction.slice(commonPrefix.length)
-    : rawTransaction;
+  const displayTransaction =
+    commonPrefix && rawTransaction.startsWith(commonPrefix)
+      ? rawTransaction.slice(commonPrefix.length)
+      : rawTransaction;
   const transaction = truncateMiddle(
     displayTransaction,
     TRANSACTION_COL_WIDTH
@@ -292,6 +301,11 @@ export function formatProfileListRow(
     const idx = `${alias.idx}`.padStart(3);
     const aliasStr = alias.alias.padEnd(6);
     return `  ${idx}   ${aliasStr}  ${transaction}  ${samples}  ${p75}  ${p95}`;
+  }
+
+  // When the table has aliases but this row doesn't, pad to keep columns aligned
+  if (hasAliases) {
+    return `  ${"".padStart(3)}   ${"".padEnd(6)}  ${transaction}  ${samples}  ${p75}  ${p95}`;
   }
 
   return `  ${transaction}  ${samples}  ${p75}  ${p95}`;

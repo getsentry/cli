@@ -51,11 +51,21 @@ export function formatDurationMs(ms: number): string {
     return `${formatted}ms`;
   }
   if (ms >= 1) {
-    return `${ms.toFixed(2)}ms`;
+    const formatted = ms.toFixed(2);
+    // toFixed(2) can push past 10ms boundary (e.g. 9.999 → "10.00")
+    if (Number.parseFloat(formatted) >= 10) {
+      return `${ms.toFixed(1)}ms`;
+    }
+    return `${formatted}ms`;
   }
   // Sub-millisecond
   const us = ms * 1000;
   if (us >= 1) {
+    const rounded = Math.round(us);
+    // Rounding can push past 1ms boundary (e.g. 0.9995ms → 1000µs)
+    if (rounded >= 1000) {
+      return `${ms.toFixed(2)}ms`;
+    }
     return `${us.toFixed(0)}µs`;
   }
   return `${(us * 1000).toFixed(0)}ns`;

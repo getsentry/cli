@@ -259,7 +259,9 @@ export const listCommand = buildCommand({
 
     for (const row of response.data) {
       const alias = row.transaction ? aliasMap.get(row.transaction) : undefined;
-      stdout.write(`${formatProfileListRow(row, alias, commonPrefix)}\n`);
+      stdout.write(
+        `${formatProfileListRow(row, { alias, commonPrefix, hasAliases })}\n`
+      );
     }
 
     stdout.write(formatProfileListFooter(hasAliases, commonPrefix));
