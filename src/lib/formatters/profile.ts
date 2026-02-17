@@ -240,12 +240,11 @@ export function formatProfileListHeader(
  */
 export function formatProfileListTableHeader(hasAliases = false): string {
   const txnHeader = "TRANSACTION".padEnd(TRANSACTION_COL_WIDTH);
+  const tail = `${"SAMPLES".padStart(9)}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`;
   if (hasAliases) {
-    return muted(
-      `  #   ALIAS   ${txnHeader}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`
-    );
+    return muted(`  #   ALIAS   ${txnHeader}  ${tail}`);
   }
-  return muted(`  ${txnHeader}  ${"p75".padStart(10)}  ${"p95".padStart(10)}`);
+  return muted(`  ${txnHeader}  ${tail}`);
 }
 
 /**
@@ -263,6 +262,8 @@ export function formatProfileListRow(
   alias?: TransactionAliasEntry,
   commonPrefix = ""
 ): string {
+  const samples = `${row["count_unique(timestamp)"] ?? 0}`.padStart(9);
+
   const rawP75 = row["p75(function.duration)"];
   const p75 = (
     rawP75 !== null && rawP75 !== undefined
@@ -290,18 +291,18 @@ export function formatProfileListRow(
   if (alias) {
     const idx = `${alias.idx}`.padStart(3);
     const aliasStr = alias.alias.padEnd(6);
-    return `  ${idx}   ${aliasStr}  ${transaction}  ${p75}  ${p95}`;
+    return `  ${idx}   ${aliasStr}  ${transaction}  ${samples}  ${p75}  ${p95}`;
   }
 
-  return `  ${transaction}  ${p75}  ${p95}`;
+  return `  ${transaction}  ${samples}  ${p75}  ${p95}`;
 }
 
 /**
  * Compute the table divider width based on whether aliases are shown.
  */
 export function profileListDividerWidth(hasAliases: boolean): number {
-  // #(5) + sep(3) + alias(6) + sep(2) + txn(TRANSACTION_COL_WIDTH) + sep(2) + p75(10) + sep(2) + p95(10) = 90
-  return hasAliases ? 90 : 80;
+  // #(5) + sep(3) + alias(6) + sep(2) + txn(50) + sep(2) + samples(9) + sep(2) + p75(10) + sep(2) + p95(10) = 101
+  return hasAliases ? 101 : 91;
 }
 
 /**

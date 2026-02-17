@@ -266,8 +266,8 @@ describe("listCommand.func", () => {
       const ctx = createMockContext();
       setupResolvedTarget();
       const mockData = [
-        { transaction: "/api/users", "count()": 50 },
-        { transaction: "/api/events", "count()": 30 },
+        { transaction: "/api/users", "count_unique(timestamp)": 50 },
+        { transaction: "/api/events", "count_unique(timestamp)": 30 },
       ];
       listProfiledTransactionsSpy.mockResolvedValue({ data: mockData });
       const func = await loadListFunc();
@@ -303,12 +303,12 @@ describe("listCommand.func", () => {
         data: [
           {
             transaction: "/api/users",
-            "count()": 150,
+            "count_unique(timestamp)": 150,
             "p75(function.duration)": 8_000_000,
           },
           {
             transaction: "/api/events",
-            "count()": 75,
+            "count_unique(timestamp)": 75,
             "p75(function.duration)": 15_000_000,
           },
         ],
@@ -361,7 +361,7 @@ describe("listCommand.func", () => {
       const ctx = createMockContext();
       setupResolvedTarget({ detectedFrom: ".env file" });
       listProfiledTransactionsSpy.mockResolvedValue({
-        data: [{ transaction: "/api/users", "count()": 10 }],
+        data: [{ transaction: "/api/users", "count_unique(timestamp)": 10 }],
       });
       const func = await loadListFunc();
 
@@ -375,7 +375,7 @@ describe("listCommand.func", () => {
       const ctx = createMockContext();
       setupResolvedTarget();
       listProfiledTransactionsSpy.mockResolvedValue({
-        data: [{ transaction: "/api/users", "count()": 10 }],
+        data: [{ transaction: "/api/users", "count_unique(timestamp)": 10 }],
       });
       const func = await loadListFunc();
 
@@ -392,8 +392,8 @@ describe("listCommand.func", () => {
       setupResolvedTarget();
       listProfiledTransactionsSpy.mockResolvedValue({
         data: [
-          { transaction: "/api/users", "count()": 50 },
-          { transaction: "/api/events", "count()": 30 },
+          { transaction: "/api/users", "count_unique(timestamp)": 50 },
+          { transaction: "/api/events", "count_unique(timestamp)": 30 },
         ],
       });
       const func = await loadListFunc();
@@ -414,8 +414,8 @@ describe("listCommand.func", () => {
       setupResolvedTarget();
       listProfiledTransactionsSpy.mockResolvedValue({
         data: [
-          { transaction: "/api/users", "count()": 50 },
-          { "count()": 30 }, // no transaction name
+          { transaction: "/api/users", "count_unique(timestamp)": 50 },
+          { "count_unique(timestamp)": 30 }, // no transaction name
         ],
       });
       const func = await loadListFunc();

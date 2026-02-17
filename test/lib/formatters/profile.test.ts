@@ -186,6 +186,7 @@ describe("formatProfileListTableHeader", () => {
     expect(result).toContain("ALIAS");
     expect(result).toContain("#");
     expect(result).toContain("TRANSACTION");
+    expect(result).toContain("SAMPLES");
     expect(result).toContain("p75");
     expect(result).toContain("p95");
   });
@@ -194,6 +195,7 @@ describe("formatProfileListTableHeader", () => {
     const result = stripAnsi(formatProfileListTableHeader(false));
     expect(result).not.toContain("ALIAS");
     expect(result).toContain("TRANSACTION");
+    expect(result).toContain("SAMPLES");
     expect(result).toContain("p75");
     expect(result).toContain("p95");
   });
@@ -207,9 +209,10 @@ describe("formatProfileListTableHeader", () => {
 // formatProfileListRow
 
 describe("formatProfileListRow", () => {
-  test("formats row with transaction and p75/p95", () => {
+  test("formats row with transaction, samples, and p75/p95", () => {
     const row: ProfileFunctionRow = {
       transaction: "/api/users",
+      "count_unique(timestamp)": 42,
       "p75(function.duration)": 8_000_000, // 8ms in nanoseconds
       "p95(function.duration)": 15_000_000, // 15ms in nanoseconds
     };
@@ -217,6 +220,7 @@ describe("formatProfileListRow", () => {
     const result = stripAnsi(formatProfileListRow(row));
 
     expect(result).toContain("/api/users");
+    expect(result).toContain("42");
     expect(result).toContain("8.00ms");
     expect(result).toContain("15.0ms");
   });
@@ -224,7 +228,7 @@ describe("formatProfileListRow", () => {
   test("formats row with alias when provided", () => {
     const row: ProfileFunctionRow = {
       transaction: "/api/users",
-      "count()": 150,
+      "count_unique(timestamp)": 150,
       "p75(function.duration)": 8_000_000,
     };
 
@@ -256,7 +260,7 @@ describe("formatProfileListRow", () => {
 
   test("handles missing transaction name", () => {
     const row: ProfileFunctionRow = {
-      "count()": 10,
+      "count_unique(timestamp)": 10,
       "p75(function.duration)": 5_000_000,
     };
 
@@ -269,7 +273,7 @@ describe("formatProfileListRow", () => {
       "/api/v2/organizations/{org}/projects/{project}/events/{event_id}/attachments/";
     const row: ProfileFunctionRow = {
       transaction: longTransaction,
-      "count()": 1,
+      "count_unique(timestamp)": 1,
       "p75(function.duration)": 1_000_000,
     };
 

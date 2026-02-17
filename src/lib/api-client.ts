@@ -1317,6 +1317,7 @@ export async function listProfiledTransactions(
         dataset: "profile_functions",
         field: [
           "transaction",
+          "count_unique(timestamp)",
           "p75(function.duration)",
           "p95(function.duration)",
         ],

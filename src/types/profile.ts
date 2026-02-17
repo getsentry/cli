@@ -154,8 +154,8 @@ export const ProfileFunctionRowSchema = z
   .object({
     /** Transaction name (null when transaction data is missing) */
     transaction: z.string().nullish(),
-    /** Number of profiles/samples */
-    "count()": z.number().nullish(),
+    /** Number of unique profile samples */
+    "count_unique(timestamp)": z.number().nullish(),
     /** 75th percentile duration */
     "p75(function.duration)": z.number().nullish(),
     /** 95th percentile duration */
