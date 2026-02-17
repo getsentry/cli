@@ -89,6 +89,67 @@ describe("parsePositionalArgs", () => {
       expect(result.eventId).toBe("");
     });
   });
+
+  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  describe("Sentry URL inputs", () => {
+    let savedSentryUrl: string | undefined;
+
+    beforeEach(() => {
+      savedSentryUrl = process.env.SENTRY_URL;
+      delete process.env.SENTRY_URL;
+    });
+
+    afterEach(() => {
+      if (savedSentryUrl !== undefined) {
+        process.env.SENTRY_URL = savedSentryUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+    });
+
+    test("event URL extracts eventId and passes org as OrgAll target", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.io/organizations/my-org/issues/32886/events/abc123def456/",
+      ]);
+      expect(result.eventId).toBe("abc123def456");
+      expect(result.targetArg).toBe("my-org/");
+    });
+
+    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.example.com/organizations/acme/issues/999/events/deadbeef/",
+      ]);
+      expect(result.eventId).toBe("deadbeef");
+      expect(result.targetArg).toBe("acme/");
+      expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+    });
+
+    test("issue URL without event ID throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ])
+      ).toThrow(ContextError);
+    });
+
+    test("issue-only URL error mentions event ID", () => {
+      try {
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Event ID");
+      }
+    });
+
+    test("org-only URL throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs(["https://sentry.io/organizations/my-org/"])
+      ).toThrow(ContextError);
+    });
+  });
 });
 
 describe("resolveProjectBySlug", () => {
