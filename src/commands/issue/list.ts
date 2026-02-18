@@ -14,7 +14,7 @@ import {
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
   resolveOrgCursor,
@@ -39,6 +39,12 @@ import {
   muted,
   writeJson,
 } from "../../lib/formatters/index.js";
+import {
+  buildListLimitFlag,
+  LIST_BASE_ALIASES,
+  LIST_JSON_FLAG,
+  LIST_TARGET_POSITIONAL,
+} from "../../lib/list-command.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
@@ -398,17 +404,7 @@ export const listCommand = buildCommand({
       "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <org>/, or <project>",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
       query: {
         kind: "parsed",
@@ -416,33 +412,24 @@ export const listCommand = buildCommand({
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of issues to return",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "10",
-      },
+      limit: buildListLimitFlag("issues", "10"),
       sort: {
         kind: "parsed",
         parse: parseSort,
         brief: "Sort by: date, new, freq, user",
         default: "date" as const,
       },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
+      json: LIST_JSON_FLAG,
       cursor: {
         kind: "parsed",
         parse: String,
+        // Issue-specific cursor brief: cursor only works in <org>/ mode
         brief:
           'Pagination cursor — only for <org>/ mode (use "last" to continue)',
         optional: true,
       },
     },
-    aliases: { q: "query", s: "sort", n: "limit", c: "cursor" },
+    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort" },
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
