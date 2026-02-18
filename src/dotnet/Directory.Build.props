@@ -20,4 +20,9 @@
     <DefineConstants>$(DefineConstants);CI_BUILD</DefineConstants>
   </PropertyGroup>
 
+  <ItemGroup Condition="'$(ImplicitUsings)' == 'true' Or '$(ImplicitUsings)' == 'enable'">
+    <Using Include="System.Diagnostics" />
+    <Using Include="System.Runtime.InteropServices" />
+  </ItemGroup>
+
 </Project>

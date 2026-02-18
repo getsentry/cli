@@ -14,7 +14,8 @@
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sentry</ToolCommandName>
-    <ToolPackageRuntimeIdentifiers>osx-arm64;osx-x64;linux-arm64;linux-x64;win-x64;any</ToolPackageRuntimeIdentifiers>
+    <ToolPackageRuntimeIdentifiers>any;linux-arm64;linux-x64;osx-arm64;osx-x64;win-x64</ToolPackageRuntimeIdentifiers>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../../dist-pkg</PackageOutputPath>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -33,10 +34,44 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'any'">
+    <SelfContainedPlatformSpecificSentryCliDirectory>$(MSBuildThisFileDirectory)../../../dist-bin/</SelfContainedPlatformSpecificSentryCliDirectory>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_LINUX_ARM64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-linux-arm64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_LINUX_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-linux-x64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_OSX_ARM64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-darwin-arm64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_OSX_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-darwin-x64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_WIN_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-windows-x64.exe</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)../../../LICENSE.md" Pack="true" PackagePath="LICENSE.md" />
     <None Include="$(MSBuildThisFileDirectory)../sentry-nuget.png" Pack="true" PackagePath="icon.png" />
     <None Include="$(MSBuildThisFileDirectory)../../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <!-- Pack the native Sentry CLI alongside the Native-AOT .NET tool -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'any'">
+    <None Include="$(SelfContainedPlatformSpecificSentryCliPath)" Pack="true" PackagePath="/tools/any/$(RuntimeIdentifier)/" />
   </ItemGroup>
 
 </Project>
