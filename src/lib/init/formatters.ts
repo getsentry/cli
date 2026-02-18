@@ -1,120 +1,113 @@
 /**
  * Output Formatters
  *
- * Format wizard progress, results, and errors for terminal display.
+ * Format wizard results and errors for terminal display using clack.
  */
 
-import type { Writer } from "../../types/index.js";
+import { cancel, log, note, outro } from "@clack/prompts";
+import { featureLabel } from "./clack-utils.js";
 
-const STEP_LABELS: Record<string, string> = {
-  "discover-context": "Analyzing project structure",
-  "select-target-app": "Selecting target application",
-  "resolve-dir": "Resolving project directory",
-  "check-existing-sentry": "Checking for existing Sentry installation",
-  "detect-platform": "Detecting platform and framework",
-  "ensure-sentry-project": "Setting up Sentry project",
-  "select-features": "Selecting features",
-  "determine-pm": "Detecting package manager",
-  "install-deps": "Installing dependencies",
-  "plan-codemods": "Planning code modifications",
-  "apply-codemods": "Applying code modifications",
-  "verify-changes": "Verifying changes",
-  "add-example-trigger": "Example error trigger",
-  "open-sentry-ui": "Finishing up",
-};
+type WizardOutput = Record<string, unknown>;
 
-export function formatProgress(
-  stdout: Writer,
-  stepId: string,
-  payload?: unknown,
-): void {
-  const label = STEP_LABELS[stepId] ?? stepId;
-  const payloadType = (payload as any)?.type as string | undefined;
-  const operation = (payload as any)?.operation as string | undefined;
-
-  let detail = "";
-  if (payloadType === "local-op" && operation) {
-    detail = ` (${operation})`;
+function fileActionIcon(action: string): string {
+  if (action === "create") {
+    return "+";
   }
-
-  stdout.write(`> ${label}${detail}...\n`);
+  if (action === "delete") {
+    return "-";
+  }
+  return "~";
 }
 
-export function formatResult(
-  stdout: Writer,
-  result: Record<string, any>,
-): void {
-  const output = result.result ?? result;
-
-  stdout.write("\nSentry SDK installed successfully!\n\n");
+function buildSummaryLines(output: WizardOutput): string[] {
+  const lines: string[] = [];
 
   if (output.platform) {
-    stdout.write(`  Platform:    ${output.platform}\n`);
+    lines.push(`Platform:    ${output.platform}`);
   }
   if (output.projectDir) {
-    stdout.write(`  Directory:   ${output.projectDir}\n`);
+    lines.push(`Directory:   ${output.projectDir}`);
   }
-  if (output.features?.length) {
-    stdout.write(`  Features:    ${output.features.join(", ")}\n`);
+
+  const features = output.features as string[] | undefined;
+  if (features?.length) {
+    lines.push(`Features:    ${features.map(featureLabel).join(", ")}`);
   }
-  if (output.commands?.length) {
-    stdout.write(`  Commands:    ${output.commands.join("; ")}\n`);
+
+  const commands = output.commands as string[] | undefined;
+  if (commands?.length) {
+    lines.push(`Commands:    ${commands.join("; ")}`);
   }
   if (output.sentryProjectUrl) {
-    stdout.write(`  Project:     ${output.sentryProjectUrl}\n`);
+    lines.push(`Project:     ${output.sentryProjectUrl}`);
   }
   if (output.docsUrl) {
-    stdout.write(`  Docs:        ${output.docsUrl}\n`);
+    lines.push(`Docs:        ${output.docsUrl}`);
   }
 
-  if (output.changedFiles?.length) {
-    stdout.write("\n  Changed files:\n");
-    for (const f of output.changedFiles) {
-      const icon = f.action === "create" ? "+" : f.action === "delete" ? "-" : "~";
-      stdout.write(`    ${icon} ${f.path}\n`);
+  const changedFiles = output.changedFiles as
+    | Array<{ action: string; path: string }>
+    | undefined;
+  if (changedFiles?.length) {
+    lines.push("");
+    lines.push("Changed files:");
+    for (const f of changedFiles) {
+      lines.push(`  ${fileActionIcon(f.action)} ${f.path}`);
     }
   }
 
-  if (output.warnings?.length) {
-    stdout.write("\n  Warnings:\n");
-    for (const w of output.warnings) {
-      stdout.write(`    ! ${w}\n`);
-    }
-  }
-
-  stdout.write("\n");
+  return lines;
 }
 
-export function formatError(
-  stderr: Writer,
-  result: Record<string, any>,
-): void {
+export function formatResult(result: WizardOutput): void {
+  const output = (result.result as WizardOutput) ?? result;
+  const lines = buildSummaryLines(output);
+
+  if (lines.length > 0) {
+    note(lines.join("\n"), "Setup complete");
+  }
+
+  const warnings = output.warnings as string[] | undefined;
+  if (warnings?.length) {
+    for (const w of warnings) {
+      log.warn(w);
+    }
+  }
+
+  log.info("Please review the changes above before committing.");
+
+  outro("Sentry SDK installed successfully!");
+}
+
+export function formatError(result: WizardOutput): void {
+  const inner = result.result as WizardOutput | undefined;
   const message =
-    result.error ?? result.result?.message ?? "Wizard failed with an unknown error";
-  const exitCode = result.result?.exitCode ?? 1;
+    result.error ?? inner?.message ?? "Wizard failed with an unknown error";
+  const exitCode = (inner?.exitCode as number) ?? 1;
 
-  stderr.write(`\nError: ${message}\n`);
+  log.error(String(message));
 
-  // Provide actionable suggestions based on exit code
   if (exitCode === 10) {
-    stderr.write("  Hint: Use --force to override existing Sentry installation.\n");
+    log.warn("Hint: Use --force to override existing Sentry installation.");
   } else if (exitCode === 20) {
-    stderr.write("  Hint: Could not detect your project's platform. Check that the directory contains a valid project.\n");
+    log.warn(
+      "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
+    );
   } else if (exitCode === 30) {
-    const commands = result.result?.commands as string[] | undefined;
+    const commands = inner?.commands as string[] | undefined;
     if (commands?.length) {
-      stderr.write("  You can install dependencies manually:\n");
-      for (const cmd of commands) {
-        stderr.write(`    $ ${cmd}\n`);
-      }
+      log.warn(
+        `You can install dependencies manually:\n${commands.map((cmd) => `  $ ${cmd}`).join("\n")}`
+      );
     }
   } else if (exitCode === 50) {
-    stderr.write("  Hint: Fix the verification issues and run 'sentry init' again.\n");
+    log.warn("Hint: Fix the verification issues and run 'sentry init' again.");
   }
 
-  if (result.result?.docsUrl) {
-    stderr.write(`  Docs: ${result.result.docsUrl}\n`);
+  const docsUrl = inner?.docsUrl;
+  if (docsUrl) {
+    log.info(`Docs: ${docsUrl}`);
   }
 
-  stderr.write("\n");
+  cancel("Setup failed");
 }

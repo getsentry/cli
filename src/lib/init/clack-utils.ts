@@ -5,6 +5,7 @@
  */
 
 import { cancel, isCancel } from "@clack/prompts";
+import { SENTRY_DOCS_URL } from "./constants.js";
 
 export class WizardCancelledError extends Error {
   constructor() {
@@ -15,9 +16,7 @@ export class WizardCancelledError extends Error {
 
 export function abortIfCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    cancel(
-      "Setup cancelled. Visit https://docs.sentry.io/platforms/ to set up manually."
-    );
+    cancel(`Setup cancelled. Visit ${SENTRY_DOCS_URL} to set up manually.`);
     throw new WizardCancelledError();
   }
   return value as T;

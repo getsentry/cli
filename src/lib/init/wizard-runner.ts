@@ -12,7 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import { CLI_VERSION } from "../constants.js";
 import { formatBanner } from "../help.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
-import { MASTRA_API_URL, WORKFLOW_ID } from "./constants.js";
+import { MASTRA_API_URL, SENTRY_DOCS_URL, WORKFLOW_ID } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
 import { handleLocalOp } from "./local-ops.js";
@@ -108,6 +108,11 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   if (dryRun) {
     log.warn("Dry-run mode: no files will be modified.");
   }
+
+  log.info(
+    "This wizard uses AI to analyze your project and configure Sentry." +
+      `\nFor manual setup: ${SENTRY_DOCS_URL}`
+  );
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
