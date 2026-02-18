@@ -446,9 +446,10 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
     return;
   }
 
-  writeListHeader(stdout, `Issues in ${org}`, false);
+  // isMultiProject=true: org-all shows issues from every project, so the ALIAS
+  // column is needed to identify which project each issue belongs to.
+  writeListHeader(stdout, `Issues in ${org}`, true);
   const termWidth = process.stdout.columns || 80;
-  // isMultiProject=true so the ALIAS column shows which project each issue belongs to
   const issuesWithOpts = response.data.map((issue) => ({
     issue,
     formatOptions: {

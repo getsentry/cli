@@ -664,8 +664,6 @@ export const listCommand = buildCommand({
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
-    const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
-    const cursor = resolveCursor(flags.cursor, contextKey);
 
     await dispatchOrgScopedList({
       config: projectListMeta,
@@ -682,14 +680,14 @@ export const listCommand = buildCommand({
             parsed.type === "explicit" ? parsed.project : "",
             flags
           ),
-        "org-all": () =>
-          handleOrgAll({
-            stdout,
-            org: parsed.type === "org-all" ? parsed.org : "",
-            flags,
-            contextKey,
-            cursor,
-          }),
+        "org-all": () => {
+          // Build context key and resolve cursor only in org-all mode, after
+          // dispatchOrgScopedList has already validated --cursor is allowed here.
+          const org = parsed.type === "org-all" ? parsed.org : "";
+          const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
+          const cursor = resolveCursor(flags.cursor, contextKey);
+          return handleOrgAll({ stdout, org, flags, contextKey, cursor });
+        },
         "project-search": () =>
           handleProjectSearch(
             stdout,

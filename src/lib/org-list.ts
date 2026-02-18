@@ -225,7 +225,9 @@ export async function handleOrgAll<TEntity, TWithOrg>(
     perPage: flags.limit,
   });
 
-  const { data: items, nextCursor } = response;
+  const { data: rawItems, nextCursor } = response;
+  // Attach org context to each entity so displayTable can show the ORG column
+  const items = rawItems.map((entity) => config.withOrg(entity, org));
   const hasMore = !!nextCursor;
 
   if (nextCursor) {
@@ -255,7 +257,7 @@ export async function handleOrgAll<TEntity, TWithOrg>(
     return;
   }
 
-  config.displayTable(stdout, items as unknown as TWithOrg[]);
+  config.displayTable(stdout, items);
 
   if (hasMore) {
     stdout.write(
@@ -341,7 +343,15 @@ type DisplayFetchedItemsOptions<TEntity, TWithOrg> = {
   stdout: Writer;
   items: TWithOrg[];
   flags: BaseListFlags;
+  /** Human-readable context for "No X found in <label>" messages (e.g. "organization 'my-org'"). */
   contextLabel: string;
+  /**
+   * Raw org slug for the pagination hint command (e.g. "my-org").
+   * When provided and results are truncated, emits a hint like
+   * `sentry team list my-org/ for paginated results`.
+   * Omit when there is no meaningful paginated target (e.g. project-scoped fetch).
+   */
+  orgSlugForHint?: string;
 };
 
 /**
@@ -351,7 +361,7 @@ type DisplayFetchedItemsOptions<TEntity, TWithOrg> = {
 function displayFetchedItems<TEntity, TWithOrg>(
   opts: DisplayFetchedItemsOptions<TEntity, TWithOrg>
 ): void {
-  const { config, stdout, items, flags, contextLabel } = opts;
+  const { config, stdout, items, flags, contextLabel, orgSlugForHint } = opts;
   const limited = items.slice(0, flags.limit);
 
   if (flags.json) {
@@ -367,9 +377,11 @@ function displayFetchedItems<TEntity, TWithOrg>(
   config.displayTable(stdout, limited);
 
   if (items.length > limited.length) {
+    const hint = orgSlugForHint
+      ? ` Use '${config.commandPrefix} ${orgSlugForHint}/' for paginated results.`
+      : "";
     stdout.write(
-      `\nShowing ${limited.length} of ${items.length} ${config.entityPlural}. ` +
-        `Use '${config.commandPrefix} ${contextLabel}/' for paginated results.\n`
+      `\nShowing ${limited.length} of ${items.length} ${config.entityPlural}.${hint}\n`
     );
   } else {
     stdout.write(`\nShowing ${limited.length} ${config.entityPlural}\n`);
@@ -410,6 +422,7 @@ export async function handleExplicitOrg<TEntity, TWithOrg>(
     items,
     flags,
     contextLabel: `organization '${org}'`,
+    orgSlugForHint: org,
   });
 
   if (!flags.json && items.length > 0) {
@@ -455,6 +468,7 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
     items,
     flags,
     contextLabel: `project '${org}/${project}'`,
+    // No orgSlugForHint: the footer already points to `${org}/` for pagination
   });
 
   if (!flags.json && items.length > 0) {
