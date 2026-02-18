@@ -8,7 +8,6 @@
 import type { SentryContext } from "../../context.js";
 import {
   createProject,
-  listOrganizations,
   listTeams,
   tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
@@ -17,9 +16,9 @@ import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { resolveTeam } from "../../lib/resolve-team.js";
+import { fetchOrgListHint, resolveTeam } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject } from "../../types/index.js";
+import type { SentryProject, SentryTeam, Writer } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -73,7 +72,10 @@ function slugify(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-/** Check whether an API error is about an invalid platform value */
+/**
+ * Check whether an API error is about an invalid platform value.
+ * Relies on Sentry's error message wording — may need updating if the API changes.
+ */
 function isPlatformError(error: ApiError): boolean {
   const detail = error.detail ?? error.message;
   return detail.includes("platform") && detail.includes("Invalid");
@@ -115,7 +117,7 @@ async function handleCreateProject404(
   name: string,
   platform: string
 ): Promise<never> {
-  let teams: Awaited<ReturnType<typeof listTeams>> | null = null;
+  let teams: SentryTeam[] | null = null;
   let listTeamsError: unknown = null;
 
   try {
@@ -143,17 +145,9 @@ async function handleCreateProject404(
 
   // listTeams returned 404 → org doesn't exist
   if (listTeamsError instanceof ApiError && listTeamsError.status === 404) {
-    let orgHint = `Specify org explicitly: ${USAGE_HINT}`;
-    try {
-      const orgs = await listOrganizations();
-      if (orgs.length > 0) {
-        const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
-        orgHint = `Your organizations:\n\n${orgList}`;
-      }
-    } catch {
-      // Best-effort — if this also fails, use the generic hint
-    }
-
+    const orgHint = await fetchOrgListHint(
+      `Specify org explicitly: ${USAGE_HINT}`
+    );
     throw new CliError(`Organization '${orgSlug}' not found.\n\n${orgHint}`);
   }
 
@@ -207,7 +201,7 @@ async function createProjectWithErrors(
  * Used for human-readable output after resource creation.
  */
 function writeKeyValue(
-  stdout: { write: (s: string) => void },
+  stdout: Writer,
   pairs: [label: string, value: string][]
 ): void {
   const maxLabel = Math.max(...pairs.map(([l]) => l.length));

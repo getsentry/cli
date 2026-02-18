@@ -21,7 +21,7 @@ import * as apiClient from "../../../src/lib/api-client.js";
 import { ApiError, CliError, ContextError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
-import type { SentryProject, SentryTeam } from "../../../src/types/sentry.js";
+import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
 
 const sampleTeam: SentryTeam = {
   id: "1",
