@@ -1,76 +1,46 @@
 /**
  * sentry team list
  *
- * List teams in an organization.
+ * List teams in an organization, with flexible targeting and cursor pagination.
+ *
+ * Supports:
+ * - Auto-detection from DSN/config
+ * - Org-scoped listing with cursor pagination (e.g., sentry/)
+ * - Project-scoped listing (e.g., sentry/cli) - lists teams for that project's org
+ * - Cross-org project search (e.g., sentry)
  */
 
 import type { SentryContext } from "../../context.js";
-import { listOrganizations, listTeams } from "../../lib/api-client.js";
+import {
+  listOrganizations,
+  listTeams,
+  listTeamsPaginated,
+  type PaginatedResponse,
+} from "../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { getDefaultOrganization } from "../../lib/db/defaults.js";
-import { AuthError } from "../../lib/errors.js";
+import {
+  clearPaginationCursor,
+  getPaginationCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
+import { AuthError, ContextError, ValidationError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
-import { resolveAllTargets } from "../../lib/resolve-target.js";
+import { resolveOrgsForListing } from "../../lib/resolve-target.js";
+import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryTeam, Writer } from "../../types/index.js";
+
+/** Command key for pagination cursor storage */
+export const PAGINATION_KEY = "team-list";
 
 type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 /** Team with its organization context for display */
 type TeamWithOrg = SentryTeam & { orgSlug?: string };
-
-/**
- * Fetch teams for a single organization.
- *
- * @param orgSlug - Organization slug to fetch teams from
- * @returns Teams with org context attached
- */
-async function fetchOrgTeams(orgSlug: string): Promise<TeamWithOrg[]> {
-  const teams = await listTeams(orgSlug);
-  return teams.map((t) => ({ ...t, orgSlug }));
-}
-
-/**
- * Fetch teams for a single org, returning empty array on non-auth errors.
- * Auth errors propagate so user sees "please log in" message.
- */
-async function fetchOrgTeamsSafe(orgSlug: string): Promise<TeamWithOrg[]> {
-  try {
-    return await fetchOrgTeams(orgSlug);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
-}
-
-/**
- * Fetch teams from all accessible organizations.
- * Skips orgs where the user lacks access.
- *
- * @returns Combined list of teams from all accessible orgs
- */
-async function fetchAllOrgTeams(): Promise<TeamWithOrg[]> {
-  const orgs = await listOrganizations();
-  const results: TeamWithOrg[] = [];
-
-  for (const org of orgs) {
-    try {
-      const teams = await fetchOrgTeams(org.slug);
-      results.push(...teams);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      // User may lack access to some orgs
-    }
-  }
-
-  return results;
-}
 
 /** Column widths for team list display */
 type ColumnWidths = {
@@ -126,69 +96,270 @@ function writeRows(options: WriteRowsOptions): void {
   }
 }
 
-/** Result of resolving organizations to fetch teams from */
-type OrgResolution = {
-  orgs: string[];
-  footer?: string;
-  skippedSelfHosted?: number;
-};
+/** Display teams in table format with header and rows */
+function displayTeamTable(stdout: Writer, teams: TeamWithOrg[]): void {
+  const widths = calculateColumnWidths(teams);
+  writeHeader(stdout, widths);
+  writeRows({ stdout, teams, ...widths });
+}
 
 /**
- * Resolve which organizations to fetch teams from.
- * Uses CLI flag, config defaults, or DSN auto-detection.
+ * Fetch teams for a single org, returning empty array on non-auth errors.
  */
-async function resolveOrgsToFetch(
-  orgFlag: string | undefined,
-  cwd: string
-): Promise<OrgResolution> {
-  // 1. If positional org provided, use it directly
-  if (orgFlag) {
-    return { orgs: [orgFlag] };
-  }
-
-  // 2. Check config defaults
-  const defaultOrg = await getDefaultOrganization();
-  if (defaultOrg) {
-    return { orgs: [defaultOrg] };
-  }
-
-  // 3. Auto-detect from DSNs (may find multiple in monorepos)
+async function fetchOrgTeamsSafe(orgSlug: string): Promise<TeamWithOrg[]> {
   try {
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      cwd,
-    });
-
-    if (targets.length > 0) {
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
-      return {
-        orgs: uniqueOrgs,
-        footer,
-        skippedSelfHosted,
-      };
-    }
-
-    // No resolvable targets, but may have self-hosted DSNs
-    return { orgs: [], skippedSelfHosted };
+    const teams = await listTeams(orgSlug);
+    return teams.map((t) => ({ ...t, orgSlug }));
   } catch (error) {
-    // Auth errors should propagate - user needs to log in
     if (error instanceof AuthError) {
       throw error;
     }
-    // Fall through to empty orgs for other errors (network, etc.)
+    return [];
+  }
+}
+
+/**
+ * Fetch teams from all accessible organizations.
+ */
+async function fetchAllOrgTeams(): Promise<TeamWithOrg[]> {
+  const orgs = await listOrganizations();
+  const results: TeamWithOrg[] = [];
+
+  for (const org of orgs) {
+    try {
+      const teams = await listTeams(org.slug);
+      results.push(...teams.map((t) => ({ ...t, orgSlug: org.slug })));
+    } catch (error) {
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      // User may lack access to some orgs
+    }
   }
 
-  return { orgs: [] };
+  return results;
+}
+
+/**
+ * Build a context key for pagination cursor validation.
+ * Captures the org so cursors from different orgs are never mixed.
+ */
+function buildContextKey(org: string): string {
+  return `host:${getApiBaseUrl()}|type:org:${org}`;
+}
+
+/**
+ * Resolve the cursor value from --cursor flag.
+ * Handles the magic "last" value by looking up the cached cursor.
+ */
+function resolveCursor(
+  cursorFlag: string | undefined,
+  contextKey: string
+): string | undefined {
+  if (!cursorFlag) {
+    return;
+  }
+  if (cursorFlag === "last") {
+    const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
+    if (!cached) {
+      throw new ContextError(
+        "Pagination cursor",
+        "No saved cursor for this query. Run without --cursor first."
+      );
+    }
+    return cached;
+  }
+  return cursorFlag;
+}
+
+/** Build the CLI hint for fetching the next page. */
+function nextPageHint(org: string): string {
+  return `sentry team list ${org}/ -c last`;
+}
+
+type OrgAllOptions = {
+  stdout: Writer;
+  org: string;
+  flags: ListFlags;
+  contextKey: string;
+  cursor: string | undefined;
+};
+
+/**
+ * Handle org-all mode (e.g., sentry/).
+ * Uses cursor pagination for efficient page-by-page listing.
+ */
+async function handleOrgAll(options: OrgAllOptions): Promise<void> {
+  const { stdout, org, flags, contextKey, cursor } = options;
+  const response: PaginatedResponse<SentryTeam[]> = await listTeamsPaginated(
+    org,
+    { cursor, perPage: flags.limit }
+  );
+
+  const teams: TeamWithOrg[] = response.data.map((t) => ({
+    ...t,
+    orgSlug: org,
+  }));
+  const hasMore = !!response.nextCursor;
+
+  // Update cursor cache for `--cursor last` support
+  if (response.nextCursor) {
+    setPaginationCursor(PAGINATION_KEY, contextKey, response.nextCursor);
+  } else {
+    clearPaginationCursor(PAGINATION_KEY, contextKey);
+  }
+
+  if (flags.json) {
+    const output = hasMore
+      ? { data: teams, nextCursor: response.nextCursor, hasMore: true }
+      : { data: teams, hasMore: false };
+    writeJson(stdout, output);
+    return;
+  }
+
+  if (teams.length === 0) {
+    if (hasMore) {
+      stdout.write(
+        `No teams on this page. Try the next page: ${nextPageHint(org)}\n`
+      );
+    } else {
+      stdout.write(`No teams found in organization '${org}'.\n`);
+    }
+    return;
+  }
+
+  displayTeamTable(stdout, teams);
+
+  if (hasMore) {
+    stdout.write(`\nShowing ${teams.length} teams (more available)\n`);
+    stdout.write(`Next page: ${nextPageHint(org)}\n`);
+  } else {
+    stdout.write(`\nShowing ${teams.length} teams\n`);
+  }
+
+  writeFooter(
+    stdout,
+    "Tip: Use 'sentry team list <org>/' for paginated results"
+  );
+}
+
+/**
+ * Handle auto-detect and explicit org modes.
+ * Fetches all teams for the resolved orgs (no cursor pagination).
+ */
+async function handleAutoDetect(
+  stdout: Writer,
+  cwd: string,
+  flags: ListFlags
+): Promise<void> {
+  const {
+    orgs: orgsToFetch,
+    footer,
+    skippedSelfHosted,
+  } = await resolveOrgsForListing(undefined, cwd);
+
+  let allTeams: TeamWithOrg[];
+  if (orgsToFetch.length > 0) {
+    const results = await Promise.all(orgsToFetch.map(fetchOrgTeamsSafe));
+    allTeams = results.flat();
+  } else {
+    allTeams = await fetchAllOrgTeams();
+  }
+
+  const limitCount =
+    orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
+  const limited = allTeams.slice(0, limitCount);
+
+  if (flags.json) {
+    writeJson(stdout, limited);
+    return;
+  }
+
+  if (limited.length === 0) {
+    const msg =
+      orgsToFetch.length === 1
+        ? `No teams found in organization '${orgsToFetch[0]}'.\n`
+        : "No teams found.\n";
+    stdout.write(msg);
+    return;
+  }
+
+  displayTeamTable(stdout, limited);
+
+  if (allTeams.length > limited.length) {
+    stdout.write(`\nShowing ${limited.length} of ${allTeams.length} teams\n`);
+  }
+
+  if (footer) {
+    stdout.write(`\n${footer}\n`);
+  }
+
+  if (skippedSelfHosted) {
+    stdout.write(
+      `\nNote: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
+        "Specify the organization explicitly: sentry team list <org>/\n"
+    );
+  }
+
+  writeFooter(
+    stdout,
+    "Tip: Use 'sentry team list <org>/' to filter by organization"
+  );
+}
+
+/**
+ * Handle a single explicit org (non-paginated fetch).
+ */
+async function handleExplicitOrg(
+  stdout: Writer,
+  org: string,
+  flags: ListFlags
+): Promise<void> {
+  const teams = await fetchOrgTeamsSafe(org);
+  const limited = teams.slice(0, flags.limit);
+
+  if (flags.json) {
+    writeJson(stdout, limited);
+    return;
+  }
+
+  if (limited.length === 0) {
+    stdout.write(`No teams found in organization '${org}'.\n`);
+    return;
+  }
+
+  displayTeamTable(stdout, limited);
+
+  if (teams.length > limited.length) {
+    stdout.write(
+      `\nShowing ${limited.length} of ${teams.length} teams. ` +
+        `Use 'sentry team list ${org}/' for paginated results.\n`
+    );
+  } else {
+    stdout.write(`\nShowing ${limited.length} teams\n`);
+  }
+
+  writeFooter(
+    stdout,
+    `Tip: Use 'sentry team list ${org}/' for paginated results`
+  );
 }
 
 export const listCommand = buildCommand({
   docs: {
     brief: "List teams",
     fullDescription:
-      "List teams in an organization. If no organization is specified, " +
-      "uses the default organization or lists teams from all accessible organizations.\n\n" +
+      "List teams in an organization.\n\n" +
+      "Target specification:\n" +
+      "  sentry team list               # auto-detect from DSN or config\n" +
+      "  sentry team list <org>/        # list all teams in org (paginated)\n" +
+      "  sentry team list <org>/<proj>  # list teams in org (project context)\n" +
+      "  sentry team list <org>         # list teams in org\n\n" +
+      "Pagination:\n" +
+      "  sentry team list <org>/ -c last  # continue from last page\n\n" +
       "Examples:\n" +
       "  sentry team list              # auto-detect or list all\n" +
-      "  sentry team list my-org       # list teams in my-org\n" +
+      "  sentry team list my-org/      # list teams in my-org (paginated)\n" +
       "  sentry team list --limit 10\n" +
       "  sentry team list --json",
   },
@@ -197,8 +368,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "org",
-          brief: "Organization slug (optional)",
+          placeholder: "target",
+          brief: "Target: <org>/, <org>/<project>, or <org>",
           parse: String,
           optional: true,
         },
@@ -216,77 +387,66 @@ export const listCommand = buildCommand({
         brief: "Output JSON",
         default: false,
       },
+      cursor: {
+        kind: "parsed",
+        parse: String,
+        brief: 'Pagination cursor (use "last" to continue from previous page)',
+        optional: true,
+      },
     },
-    aliases: { n: "limit" },
+    aliases: { n: "limit", c: "cursor" },
   },
   async func(
     this: SentryContext,
     flags: ListFlags,
-    org?: string
+    target?: string
   ): Promise<void> {
     const { stdout, cwd } = this;
 
-    // Resolve which organizations to fetch from
-    const {
-      orgs: orgsToFetch,
-      footer,
-      skippedSelfHosted,
-    } = await resolveOrgsToFetch(org, cwd);
+    const parsed = parseOrgProjectArg(target);
 
-    // Fetch teams from resolved orgs (or all accessible if none detected)
-    let allTeams: TeamWithOrg[];
-    if (orgsToFetch.length > 0) {
-      const results = await Promise.all(orgsToFetch.map(fetchOrgTeamsSafe));
-      allTeams = results.flat();
-    } else {
-      allTeams = await fetchAllOrgTeams();
-    }
-
-    // Apply limit (scale limit when multiple orgs)
-    const limitCount =
-      orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
-    const limited = allTeams.slice(0, limitCount);
-
-    if (flags.json) {
-      writeJson(stdout, limited);
-      return;
-    }
-
-    if (limited.length === 0) {
-      const msg =
-        orgsToFetch.length === 1
-          ? `No teams found in organization '${orgsToFetch[0]}'.\n`
-          : "No teams found.\n";
-      stdout.write(msg);
-      return;
-    }
-
-    const widths = calculateColumnWidths(limited);
-    writeHeader(stdout, widths);
-    writeRows({
-      stdout,
-      teams: limited,
-      ...widths,
-    });
-
-    if (allTeams.length > limited.length) {
-      stdout.write(`\nShowing ${limited.length} of ${allTeams.length} teams\n`);
-    }
-
-    if (footer) {
-      stdout.write(`\n${footer}\n`);
-    }
-
-    if (skippedSelfHosted) {
-      stdout.write(
-        `\nNote: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
-          "Specify the organization explicitly: sentry team list <org>\n"
+    // Cursor pagination is only supported in org-all mode
+    if (flags.cursor && parsed.type !== "org-all") {
+      throw new ValidationError(
+        "The --cursor flag is only supported when listing teams for a specific organization " +
+          "(e.g., sentry team list <org>/). " +
+          "Use 'sentry team list <org>/' for paginated results.",
+        "cursor"
       );
     }
 
-    writeFooter(
-      stdout,
-      "Tip: Use 'sentry team list <org>' to filter by organization"
-    );
+    switch (parsed.type) {
+      case "auto-detect":
+        await handleAutoDetect(stdout, cwd, flags);
+        break;
+
+      case "explicit":
+        // Use the org context; project part is ignored for team listing
+        await handleExplicitOrg(stdout, parsed.org, flags);
+        break;
+
+      case "project-search":
+        // Bare slug treated as org slug (no slash → team list for that org)
+        await handleExplicitOrg(stdout, parsed.projectSlug, flags);
+        break;
+
+      case "org-all": {
+        const contextKey = buildContextKey(parsed.org);
+        const cursor = resolveCursor(flags.cursor, contextKey);
+        await handleOrgAll({
+          stdout,
+          org: parsed.org,
+          flags,
+          contextKey,
+          cursor,
+        });
+        break;
+      }
+
+      default: {
+        const _exhaustiveCheck: never = parsed;
+        throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
+      }
+    }
   },
 });

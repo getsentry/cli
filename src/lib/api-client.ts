@@ -686,6 +686,52 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 }
 
 /**
+ * List teams in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of teams with cursor metadata
+ */
+export function listTeamsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryTeam[]>> {
+  return orgScopedRequestPaginated<SentryTeam[]>(
+    `/organizations/${orgSlug}/teams/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
+ * List repositories in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of repositories with cursor metadata
+ */
+export function listRepositoriesPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryRepository[]>> {
+  return orgScopedRequestPaginated<SentryRepository[]>(
+    `/organizations/${orgSlug}/repos/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
@@ -931,6 +977,44 @@ export async function listIssues(
 
   const data = unwrapResult(result, "Failed to list issues");
   return data as unknown as SentryIssue[];
+}
+
+/**
+ * List issues for a project with pagination control.
+ * Returns a single page of results with cursor metadata for manual pagination.
+ * Uses the org-scoped endpoint with a `project:{slug}` filter.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param options - Query and pagination options
+ * @returns Single page of issues with cursor metadata
+ */
+export function listIssuesPaginated(
+  orgSlug: string,
+  projectSlug: string,
+  options: {
+    query?: string;
+    cursor?: string;
+    perPage?: number;
+    sort?: "date" | "new" | "freq" | "user";
+    statsPeriod?: string;
+  } = {}
+): Promise<PaginatedResponse<SentryIssue[]>> {
+  const projectFilter = `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  return orgScopedRequestPaginated<SentryIssue[]>(
+    `/organizations/${orgSlug}/issues/`,
+    {
+      params: {
+        query: fullQuery,
+        cursor: options.cursor,
+        per_page: options.perPage ?? 25,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    }
+  );
 }
 
 /**

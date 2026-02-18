@@ -18,6 +18,7 @@ import {
   findProjectsBySlug,
   getProject,
 } from "./api-client.js";
+import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
 import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
@@ -722,4 +723,165 @@ export async function resolveProjectBySlug(
     org: foundProject.orgSlug,
     project: foundProject.slug,
   };
+}
+
+/** Result of resolving organizations to fetch from for listing commands */
+export type OrgListResolution = {
+  /** Organization slugs to list from */
+  orgs: string[];
+  /** Optional multi-org footer to display after listing */
+  footer?: string;
+  /** Number of self-hosted DSNs that could not be resolved */
+  skippedSelfHosted?: number;
+};
+
+/**
+ * Resolve which organizations to fetch data from for listing commands (team, repo).
+ *
+ * Resolution priority:
+ * 1. Explicit org flag → use that single org
+ * 2. Config default org → use that org
+ * 3. DSN auto-detection → extract unique orgs from detected targets
+ * 4. No context found → empty list (caller must decide to show all orgs or error)
+ *
+ * @param orgFlag - Explicit org slug from CLI positional arg, or undefined
+ * @param cwd - Current working directory for DSN detection
+ * @returns Orgs to fetch and optional display metadata
+ */
+export async function resolveOrgsForListing(
+  orgFlag: string | undefined,
+  cwd: string
+): Promise<OrgListResolution> {
+  if (orgFlag) {
+    return { orgs: [orgFlag] };
+  }
+
+  const defaultOrg = await getDefaultOrganization();
+  if (defaultOrg) {
+    return { orgs: [defaultOrg] };
+  }
+
+  try {
+    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
+      cwd,
+    });
+
+    if (targets.length > 0) {
+      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      return { orgs: uniqueOrgs, footer, skippedSelfHosted };
+    }
+
+    return { orgs: [], skippedSelfHosted };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+  }
+
+  return { orgs: [] };
+}
+
+/** Resolved org and project returned by `resolveOrgProjectTarget` */
+export type ResolvedOrgProject = {
+  /** Organization slug */
+  org: string;
+  /** Project slug */
+  project: string;
+};
+
+/**
+ * Resolve an org/project target for commands that require a single project
+ * (trace list, log list). Rejects `org-all` mode since these commands require
+ * a specific project.
+ *
+ * Handles:
+ * - explicit `<org>/<project>` → use directly
+ * - project-search `<project>` → find project across all orgs
+ * - auto-detect → use DSN detection or config defaults
+ * - org-all `<org>/` → throw ContextError asking for a specific project
+ *
+ * @param parsed - Parsed org/project argument
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "trace list")
+ * @returns Resolved org and project slugs
+ * @throws {ContextError} When target cannot be resolved or org-all is used
+ */
+export async function resolveOrgProjectTarget(
+  parsed: ParsedOrgProject,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgProject> {
+  const usageHint = `sentry ${commandName} <org>/<project>`;
+
+  switch (parsed.type) {
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
+
+    case "org-all":
+      throw new ContextError(
+        "Project",
+        `Please specify a project: sentry ${commandName} ${parsed.org}/<project>`
+      );
+
+    case "project-search": {
+      const matches = await findProjectsBySlug(parsed.projectSlug);
+
+      if (matches.length === 0) {
+        throw new ContextError(
+          "Project",
+          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
+            `Try: sentry ${commandName} <org>/${parsed.projectSlug}`
+        );
+      }
+
+      if (matches.length > 1) {
+        const options = matches
+          .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
+          .join("\n");
+        throw new ContextError(
+          "Project",
+          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
+        );
+      }
+
+      const match = matches[0] as (typeof matches)[number];
+      return { org: match.orgSlug, project: match.slug };
+    }
+
+    case "auto-detect": {
+      const resolved = await resolveOrgAndProject({
+        cwd,
+        usageHint,
+      });
+      if (!resolved) {
+        throw new ContextError("Organization and project", usageHint);
+      }
+      return { org: resolved.org, project: resolved.project };
+    }
+
+    default: {
+      const _exhaustiveCheck: never = parsed;
+      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
+    }
+  }
+}
+
+/**
+ * Resolve an org/project target from a raw CLI argument string for commands
+ * that require a single project (trace list, log list).
+ *
+ * Convenience wrapper around `resolveOrgProjectTarget` that also calls
+ * `parseOrgProjectArg` on the raw string argument.
+ *
+ * @param target - Raw CLI argument string (or undefined for auto-detect)
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "trace list")
+ * @returns Resolved org and project slugs
+ */
+export function resolveOrgProjectFromArg(
+  target: string | undefined,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgProject> {
+  return resolveOrgProjectTarget(parseOrgProjectArg(target), cwd, commandName);
 }

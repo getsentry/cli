@@ -8,17 +8,17 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import { listLogs } from "../../lib/api-client.js";
+import { validateLimit } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { AuthError } from "../../lib/errors.js";
 import {
   formatLogRow,
   formatLogsHeader,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
 
@@ -28,9 +28,6 @@ type ListFlags = {
   readonly follow?: number;
   readonly json: boolean;
 };
-
-/** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry log list <org>/<project>";
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -44,17 +41,14 @@ const DEFAULT_LIMIT = 100;
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
 
+/** Command name used in resolver error messages */
+const COMMAND_NAME = "log list";
+
 /**
- * Validate that --limit value is within allowed range.
- *
- * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
+ * Parse --limit flag, delegating range validation to shared utility.
  */
-function validateLimit(value: string): number {
-  const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
-    throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
-  }
-  return num;
+function parseLimit(value: string): number {
+  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
 }
 
 /**
@@ -233,83 +227,6 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   }
 }
 
-/** Resolved org and project for log commands */
-type ResolvedLogTarget = {
-  org: string;
-  project: string;
-};
-
-/**
- * Resolve org/project from parsed argument or auto-detection.
- *
- * Handles:
- * - explicit: "org/project" → use directly
- * - project-search: "project" → find project across all orgs
- * - auto-detect: no input → use DSN detection or config defaults
- *
- * @throws {ContextError} When target cannot be resolved
- */
-async function resolveLogTarget(
-  target: string | undefined,
-  cwd: string
-): Promise<ResolvedLogTarget> {
-  const parsed = parseOrgProjectArg(target);
-
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-
-    case "org-all":
-      throw new ContextError(
-        "Project",
-        `Please specify a project: sentry log list ${parsed.org}/<project>`
-      );
-
-    case "project-search": {
-      // Find project across all orgs
-      const matches = await findProjectsBySlug(parsed.projectSlug);
-
-      if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry log list <org>/${parsed.projectSlug}`
-        );
-      }
-
-      if (matches.length > 1) {
-        const options = matches
-          .map((m) => `  sentry log list ${m.orgSlug}/${m.slug}`)
-          .join("\n");
-        throw new ContextError(
-          "Project",
-          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
-        );
-      }
-
-      // Safe: we checked matches.length === 1 above, so first element exists
-      const match = matches[0] as (typeof matches)[number];
-      return { org: match.orgSlug, project: match.slug };
-    }
-
-    case "auto-detect": {
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      return { org: resolved.org, project: resolved.project };
-    }
-
-    default: {
-      const _exhaustiveCheck: never = parsed;
-      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-    }
-  }
-}
-
 export const listCommand = buildCommand({
   docs: {
     brief: "List logs from a project",
@@ -341,7 +258,7 @@ export const listCommand = buildCommand({
     flags: {
       limit: {
         kind: "parsed",
-        parse: validateLimit,
+        parse: parseLimit,
         brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
@@ -378,7 +295,11 @@ export const listCommand = buildCommand({
     const { stdout, stderr, cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
-    const { org, project } = await resolveLogTarget(target, cwd);
+    const { org, project } = await resolveOrgProjectFromArg(
+      target,
+      cwd,
+      COMMAND_NAME
+    );
     setContext([org], [project]);
 
     if (flags.follow) {

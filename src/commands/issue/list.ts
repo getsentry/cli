@@ -10,16 +10,27 @@ import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   findProjectsBySlug,
   listIssues,
+  listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import {
+  clearPaginationCursor,
+  getPaginationCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
+import {
   clearProjectAliases,
   setProjectAliases,
 } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
-import { ApiError, AuthError, ContextError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ContextError,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -32,17 +43,22 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
+import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type {
   ProjectAliasEntry,
   SentryIssue,
   Writer,
 } from "../../types/index.js";
 
+/** Command key for pagination cursor storage */
+export const PAGINATION_KEY = "issue-list";
+
 type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 type SortValue = "date" | "new" | "freq" | "user";
@@ -429,8 +445,15 @@ export const listCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      cursor: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          'Pagination cursor — only for <org>/ mode (use "last" to continue)',
+        optional: true,
+      },
     },
-    aliases: { q: "query", s: "sort", n: "limit" },
+    aliases: { q: "query", s: "sort", n: "limit", c: "cursor" },
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
@@ -442,6 +465,96 @@ export const listCommand = buildCommand({
 
     // Parse positional argument to determine resolution strategy
     const parsed = parseOrgProjectArg(target);
+
+    // Cursor pagination is only supported in org-all mode
+    if (flags.cursor && parsed.type !== "org-all") {
+      throw new ValidationError(
+        "The --cursor flag is only supported when listing issues for a specific organization " +
+          "(e.g., sentry issue list <org>/). " +
+          "Use 'sentry issue list <org>/' for paginated results.",
+        "cursor"
+      );
+    }
+
+    // Handle org-all mode with cursor pagination (different code path)
+    if (parsed.type === "org-all") {
+      const org = parsed.org;
+      const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${flags.query ? `|q:${flags.query}` : ""}`;
+      let cursor: string | undefined;
+      if (flags.cursor) {
+        if (flags.cursor === "last") {
+          const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
+          if (!cached) {
+            throw new ContextError(
+              "Pagination cursor",
+              "No saved cursor for this query. Run without --cursor first."
+            );
+          }
+          cursor = cached;
+        } else {
+          cursor = flags.cursor;
+        }
+      }
+
+      setContext([org], []);
+
+      const response = await listIssuesPaginated(org, "", {
+        query: flags.query,
+        cursor,
+        perPage: flags.limit,
+        sort: flags.sort,
+      });
+
+      // Strip the project filter since we're listing org-wide (pass empty projectSlug)
+      // The API handles org-wide issue listing without a project filter
+
+      if (response.nextCursor) {
+        setPaginationCursor(PAGINATION_KEY, contextKey, response.nextCursor);
+      } else {
+        clearPaginationCursor(PAGINATION_KEY, contextKey);
+      }
+
+      const hasMore = !!response.nextCursor;
+
+      if (flags.json) {
+        const output = hasMore
+          ? {
+              data: response.data,
+              nextCursor: response.nextCursor,
+              hasMore: true,
+            }
+          : { data: response.data, hasMore: false };
+        writeJson(stdout, output);
+        return;
+      }
+
+      if (response.data.length === 0) {
+        stdout.write(`No issues found in organization '${org}'.\n`);
+        return;
+      }
+
+      writeListHeader(stdout, `Issues in ${org}`, false);
+      const termWidth = process.stdout.columns || 80;
+      const issuesWithOpts = response.data.map((issue) => ({
+        issue,
+        formatOptions: {
+          projectSlug: issue.project?.slug ?? "",
+          isMultiProject: false,
+        },
+      }));
+      writeIssueRows(stdout, issuesWithOpts, termWidth);
+
+      if (hasMore) {
+        const hint = `sentry issue list ${org}/ -c last`;
+        stdout.write(
+          `\nShowing ${response.data.length} issues (more available)\n`
+        );
+        stdout.write(`Next page: ${hint}\n`);
+      } else {
+        stdout.write(`\nShowing ${response.data.length} issues\n`);
+      }
+      return;
+    }
 
     // Resolve targets based on parsed argument type
     const { targets, footer, skippedSelfHosted, detectedDsns } =
