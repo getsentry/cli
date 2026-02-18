@@ -312,8 +312,32 @@ export class SeerError extends CliError {
 // Error Utilities
 
 /**
+ * Convert an unknown value to a human-readable string.
+ *
+ * Handles Error instances (`.message`), plain objects (`JSON.stringify`),
+ * strings (as-is), and other primitives (`String()`).
+ * Use this instead of bare `String(value)` when the value might be a
+ * plain object — `String({})` produces the unhelpful `"[object Object]"`.
+ *
+ * @param value - Any thrown or unknown value
+ * @returns Human-readable string representation
+ */
+export function stringifyUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+/**
  * Format any error for user display.
- * Uses CliError.format() for CLI errors, message for standard errors.
+ * Uses CliError.format() for CLI errors, falls back to stringifyUnknown.
  *
  * @param error - Any thrown value
  * @returns Formatted error string
@@ -322,10 +346,7 @@ export function formatError(error: unknown): string {
   if (error instanceof CliError) {
     return error.format();
   }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
+  return stringifyUnknown(error);
 }
 
 /**
