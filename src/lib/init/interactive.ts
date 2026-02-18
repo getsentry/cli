@@ -7,7 +7,8 @@
  */
 
 import { confirm, log, multiselect, select } from "@clack/prompts";
-import { abortIfCancelled } from "./clack-utils.js";
+import chalk from "chalk";
+import { abortIfCancelled, featureHint, featureLabel } from "./clack-utils.js";
 import type { InteractivePayload, WizardOptions } from "./types.js";
 
 export async function handleInteractive(
@@ -83,25 +84,32 @@ async function handleMultiSelect(
     return { features: [] };
   }
 
-  const requiredFeature = "errors";
+  const requiredFeature = "errorMonitoring";
   const hasRequired = available.includes(requiredFeature);
 
   if (options.yes) {
-    log.info(`Auto-selected all features: ${available.join(", ")}`);
+    log.info(
+      `Auto-selected all features: ${available.map(featureLabel).join(", ")}`
+    );
     return { features: available };
-  }
-
-  if (hasRequired) {
-    log.info("Error monitoring is always enabled.");
   }
 
   const optional = available.filter((f) => f !== requiredFeature);
 
+  const hints: string[] = [];
+  if (hasRequired) {
+    hints.push(
+      chalk.dim(`  ${featureLabel(requiredFeature)} is always included`)
+    );
+  }
+  hints.push(chalk.dim("  space=toggle, a=all, enter=confirm"));
+
   const selected = await multiselect({
-    message: payload.prompt,
+    message: `${payload.prompt}\n${hints.join("\n")}`,
     options: optional.map((feature) => ({
       value: feature,
-      label: feature,
+      label: featureLabel(feature),
+      hint: featureHint(feature),
     })),
     initialValues: optional,
     required: false,

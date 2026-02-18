@@ -94,6 +94,14 @@ function errorMessage(err: unknown): string {
 export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, force, yes, dryRun, features } = options;
 
+  if (!(yes || process.stdin.isTTY)) {
+    process.stderr.write(
+      "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   process.stderr.write(`\n${formatBanner()}\n\n`);
   intro("sentry init");
 
@@ -169,13 +177,20 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     return;
   }
 
-  s.stop("Done");
+  handleFinalResult(result, s);
+}
 
+function handleFinalResult(result: WorkflowRunResult, s: StepSpinner): void {
   const output = result as unknown as Record<string, unknown>;
-  if (result.status === "success") {
-    formatResult(output);
-  } else {
+  const inner = (output.result as Record<string, unknown>) ?? output;
+  const hasError = result.status !== "success" || inner.exitCode;
+
+  if (hasError) {
+    s.stop("Failed", 1);
     formatError(output);
+  } else {
+    s.stop("Done");
+    formatResult(output);
   }
 }
 
