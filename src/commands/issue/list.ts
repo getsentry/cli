@@ -13,7 +13,10 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  type ParsedOrgProject,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
@@ -699,7 +702,7 @@ export const listCommand = buildCommand({
         "org-all": () =>
           handleOrgAllIssues({
             stdout,
-            org: parsed.type === "org-all" ? parsed.org : "",
+            org: (parsed as Extract<ParsedOrgProject, { type: "org-all" }>).org,
             flags,
             setContext,
           }),

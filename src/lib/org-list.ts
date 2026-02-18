@@ -505,7 +505,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       return;
     }
     throw new ContextError(
-      config.entityName,
+      "Project",
       `No project '${projectSlug}' found in any accessible organization.\n\n` +
         `Try: ${config.commandPrefix} <org>/${projectSlug}`
     );
