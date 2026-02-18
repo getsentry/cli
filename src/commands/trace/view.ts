@@ -7,7 +7,11 @@
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
-import { parseOrgProjectArg, spansFlag } from "../../lib/arg-parsing.js";
+import {
+  parseOrgProjectArg,
+  parseSlashSeparatedArg,
+  spansFlag,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
@@ -55,30 +59,11 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    const slashIdx = first.indexOf("/");
-
-    if (slashIdx === -1) {
-      // No slashes — plain trace ID
-      return { traceId: first, targetArg: undefined };
-    }
-
-    // Trace IDs are hex and never contain "/" — this must be a structured
-    // "org/project/traceId" or "org/project" (missing trace ID)
-    const lastSlashIdx = first.lastIndexOf("/");
-
-    if (slashIdx === lastSlashIdx) {
-      // Exactly one slash: "org/project" without trace ID
-      throw new ContextError("Trace ID", USAGE_HINT);
-    }
-
-    // Two+ slashes: split on last "/" → target + traceId
-    const targetArg = first.slice(0, lastSlashIdx);
-    const traceId = first.slice(lastSlashIdx + 1);
-
-    if (!traceId) {
-      throw new ContextError("Trace ID", USAGE_HINT);
-    }
-
+    const { id: traceId, targetArg } = parseSlashSeparatedArg(
+      first,
+      "Trace ID",
+      USAGE_HINT
+    );
     return { traceId, targetArg };
   }
 
