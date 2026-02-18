@@ -17,7 +17,7 @@ import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearPaginationCursor,
-  getPaginationCursor,
+  resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
 import {
@@ -468,22 +468,9 @@ export const listCommand = buildCommand({
     // Handle org-all mode with cursor pagination (different code path)
     if (parsed.type === "org-all") {
       const org = parsed.org;
+      // Issue cursors encode sort+query so different searches don't share pages.
       const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${flags.query ? `|q:${flags.query}` : ""}`;
-      let cursor: string | undefined;
-      if (flags.cursor) {
-        if (flags.cursor === "last") {
-          const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
-          if (!cached) {
-            throw new ContextError(
-              "Pagination cursor",
-              "No saved cursor for this query. Run without --cursor first."
-            );
-          }
-          cursor = cached;
-        } else {
-          cursor = flags.cursor;
-        }
-      }
+      const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
       setContext([org], []);
 
@@ -518,17 +505,24 @@ export const listCommand = buildCommand({
       }
 
       if (response.data.length === 0) {
-        stdout.write(`No issues found in organization '${org}'.\n`);
+        if (hasMore) {
+          const hint = `sentry issue list ${org}/ -c last`;
+          stdout.write(`No issues on this page. Try the next page: ${hint}\n`);
+        } else {
+          stdout.write(`No issues found in organization '${org}'.\n`);
+        }
         return;
       }
 
       writeListHeader(stdout, `Issues in ${org}`, false);
       const termWidth = process.stdout.columns || 80;
+      // isMultiProject=true so the ALIAS column shows which project each issue
+      // belongs to — essential when viewing issues across an entire org.
       const issuesWithOpts = response.data.map((issue) => ({
         issue,
         formatOptions: {
           projectSlug: issue.project?.slug ?? "",
-          isMultiProject: false,
+          isMultiProject: true,
         },
       }));
       writeIssueRows(stdout, issuesWithOpts, termWidth);

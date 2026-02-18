@@ -20,14 +20,14 @@ import {
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import {
+  buildOrgContextKey,
   clearPaginationCursor,
-  getPaginationCursor,
+  resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "../../lib/errors.js";
+import { AuthError, ValidationError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrgsForListing } from "../../lib/resolve-target.js";
-import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryTeam, Writer } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
@@ -140,38 +140,6 @@ async function fetchAllOrgTeams(): Promise<TeamWithOrg[]> {
   return results;
 }
 
-/**
- * Build a context key for pagination cursor validation.
- * Captures the org so cursors from different orgs are never mixed.
- */
-function buildContextKey(org: string): string {
-  return `host:${getApiBaseUrl()}|type:org:${org}`;
-}
-
-/**
- * Resolve the cursor value from --cursor flag.
- * Handles the magic "last" value by looking up the cached cursor.
- */
-function resolveCursor(
-  cursorFlag: string | undefined,
-  contextKey: string
-): string | undefined {
-  if (!cursorFlag) {
-    return;
-  }
-  if (cursorFlag === "last") {
-    const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
-    if (!cached) {
-      throw new ContextError(
-        "Pagination cursor",
-        "No saved cursor for this query. Run without --cursor first."
-      );
-    }
-    return cached;
-  }
-  return cursorFlag;
-}
-
 /** Build the CLI hint for fetching the next page. */
 function nextPageHint(org: string): string {
   return `sentry team list ${org}/ -c last`;
@@ -236,11 +204,6 @@ async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   } else {
     stdout.write(`\nShowing ${teams.length} teams\n`);
   }
-
-  writeFooter(
-    stdout,
-    "Tip: Use 'sentry team list <org>/' for paginated results"
-  );
 }
 
 /**
@@ -431,8 +394,12 @@ export const listCommand = buildCommand({
         break;
 
       case "org-all": {
-        const contextKey = buildContextKey(parsed.org);
-        const cursor = resolveCursor(flags.cursor, contextKey);
+        const contextKey = buildOrgContextKey(parsed.org);
+        const cursor = resolveOrgCursor(
+          flags.cursor,
+          PAGINATION_KEY,
+          contextKey
+        );
         await handleOrgAll({
           stdout,
           org: parsed.org,

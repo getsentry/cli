@@ -1000,7 +1000,10 @@ export function listIssuesPaginated(
     statsPeriod?: string;
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
-  const projectFilter = `project:${projectSlug}`;
+  // Only add project filter when projectSlug is non-empty; an empty slug would
+  // produce "project:" (a truthy string that .filter(Boolean) won't remove),
+  // sending a malformed query to the API for org-wide listing.
+  const projectFilter = projectSlug ? `project:${projectSlug}` : "";
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   return orgScopedRequestPaginated<SentryIssue[]>(
