@@ -10,6 +10,13 @@
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+// IMPORTANT: Import the real formatMultipleProjectsFooter from its source file
+// (not the barrel dsn/index.js). We pass this through the mock below so that
+// if Bun leaks the mock.module() into other test files (which it does — see
+// https://github.com/getsentry/cli/issues/258), the leaked version still has
+// the real behavior instead of a simplified stub.
+import { formatMultipleProjectsFooter } from "../../src/lib/dsn/errors.js";
+
 // ============================================================================
 // Mock Setup - All dependency modules mocked before importing resolve-target
 // ============================================================================
@@ -53,15 +60,17 @@ mock.module("../../src/lib/db/defaults.js", () => ({
   getDefaultProject: mockGetDefaultProject,
 }));
 
+// Bun's mock.module() replaces the ENTIRE barrel module. Since resolve-target.ts
+// imports formatMultipleProjectsFooter from dsn/index.js, we must include it here.
+// We pass through the real function (imported above from dsn/errors.js) rather than
+// a stub, because Bun leaks mock.module() state across test files in the same run
+// and a simplified stub would break tests in dsn/errors.test.ts.
 mock.module("../../src/lib/dsn/index.js", () => ({
   detectDsn: mockDetectDsn,
   detectAllDsns: mockDetectAllDsns,
   findProjectRoot: mockFindProjectRoot,
   getDsnSourceDescription: mockGetDsnSourceDescription,
-  formatMultipleProjectsFooter: (projects: unknown[]) =>
-    (projects as { orgDisplay: string; projectDisplay: string }[]).length > 1
-      ? `Found ${(projects as unknown[]).length} projects`
-      : "",
+  formatMultipleProjectsFooter,
 }));
 
 mock.module("../../src/lib/db/project-cache.js", () => ({
