@@ -26,7 +26,12 @@ import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
 import { listCommand as traceListCommand } from "./commands/trace/list.js";
 import { CLI_VERSION } from "./lib/constants.js";
-import { AuthError, CliError, getExitCode } from "./lib/errors.js";
+import {
+  AuthError,
+  CliError,
+  getExitCode,
+  stringifyUnknown,
+} from "./lib/errors.js";
 import { error as errorColor } from "./lib/formatters/colors.js";
 
 /** Top-level route map containing all CLI commands */
@@ -88,7 +93,7 @@ const customText: ApplicationText = {
     if (exc instanceof Error) {
       return `Unexpected error: ${exc.stack ?? exc.message}`;
     }
-    return `Unexpected error: ${String(exc)}`;
+    return `Unexpected error: ${stringifyUnknown(exc)}`;
   },
 };
 
