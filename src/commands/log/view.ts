@@ -48,8 +48,31 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    // Single arg - must be log ID
-    return { logId: first, targetArg: undefined };
+    const slashIdx = first.indexOf("/");
+
+    if (slashIdx === -1) {
+      // No slashes — plain log ID
+      return { logId: first, targetArg: undefined };
+    }
+
+    // Log IDs are hex and never contain "/" — this must be a structured
+    // "org/project/logId" or "org/project" (missing log ID)
+    const lastSlashIdx = first.lastIndexOf("/");
+
+    if (slashIdx === lastSlashIdx) {
+      // Exactly one slash: "org/project" without log ID
+      throw new ContextError("Log ID", USAGE_HINT);
+    }
+
+    // Two+ slashes: split on last "/" → target + logId
+    const targetArg = first.slice(0, lastSlashIdx);
+    const logId = first.slice(lastSlashIdx + 1);
+
+    if (!logId) {
+      throw new ContextError("Log ID", USAGE_HINT);
+    }
+
+    return { logId, targetArg };
   }
 
   const second = args[1];
