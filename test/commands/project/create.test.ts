@@ -357,6 +357,32 @@ describe("project create", () => {
     expect(output).toContain("/settings/acme-corp/projects/my-app/");
   });
 
+  test("shows slug divergence note when Sentry adjusts the slug", async () => {
+    // Sentry may append a random suffix when the desired slug is taken
+    createProjectSpy.mockResolvedValue({
+      ...sampleProject,
+      slug: "my-app-0g",
+      name: "my-app",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "node");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Slug 'my-app-0g' was assigned");
+    expect(output).toContain("'my-app' is already taken");
+  });
+
+  test("does not show slug note when slug matches name", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "node");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).not.toContain("was assigned");
+  });
+
   test("shows helpful error when name is missing", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();

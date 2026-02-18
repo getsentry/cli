@@ -336,7 +336,17 @@ export const createCommand = buildCommand({
     }
     fields.push(["URL", url]);
 
-    stdout.write(`\nCreated project '${project.name}' in ${orgSlug}\n\n`);
+    stdout.write(`\nCreated project '${project.name}' in ${orgSlug}\n`);
+
+    // Sentry may adjust the slug to avoid collisions (e.g., "my-app" → "my-app-0g")
+    const expectedSlug = slugify(name);
+    if (project.slug !== expectedSlug) {
+      stdout.write(
+        `Note: Slug '${project.slug}' was assigned because '${expectedSlug}' is already taken.\n`
+      );
+    }
+
+    stdout.write("\n");
     writeKeyValue(stdout, fields);
 
     writeFooter(
