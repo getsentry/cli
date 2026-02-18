@@ -5,13 +5,16 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listTeams } from "../../lib/api-client.js";
+import { listTeams, listTeamsPaginated } from "../../lib/api-client.js";
 import {
   listCommand as buildListCommand,
   fetchFromOrgs,
   resolveOrgsForList,
 } from "../../lib/list-helpers.js";
 import type { SentryTeam, Writer } from "../../types/index.js";
+
+/** Key for SQLite cursor storage */
+const PAGINATION_KEY = "team-list";
 
 /** Team with its organization context for display */
 type TeamWithOrg = SentryTeam & { orgSlug?: string };
@@ -79,16 +82,20 @@ export const listCommand = buildListCommand<TeamWithOrg>({
       "Examples:\n" +
       "  sentry team list              # auto-detect or list all\n" +
       "  sentry team list my-org       # list teams in my-org\n" +
+      "  sentry team list my-org -c last  # continue from previous page\n" +
       "  sentry team list --limit 10\n" +
       "  sentry team list --json",
   },
   limit: 30,
+  features: { cursor: true },
   positional: {
     placeholder: "org",
     brief: "Organization slug (optional)",
     optional: true,
   },
   itemName: "teams",
+  paginationKey: PAGINATION_KEY,
+  buildContextKey: (_, org) => org ?? "all",
   emptyMessage: (_, org) =>
     org ? `No teams found in organization '${org}'.` : "No teams found.",
   footerTip: "Tip: Use 'sentry team list <org>' to filter by organization",
@@ -97,6 +104,25 @@ export const listCommand = buildListCommand<TeamWithOrg>({
       org,
       this.cwd
     );
+
+    // Cursor pagination only works for single-org fetches
+    const isSingleOrg = orgSlugs.length === 1;
+    if (isSingleOrg && flags.cursor !== undefined) {
+      const singleOrg = orgSlugs[0] as string;
+      const response = await listTeamsPaginated(singleOrg, {
+        cursor: flags.cursor,
+        perPage: flags.limit,
+      });
+      const items = response.data.map((t) => ({ ...t, orgSlug: singleOrg }));
+      // Return nextCursor so the factory's outer updateCursorCache stores it
+      return {
+        items,
+        hasMore: !!response.nextCursor,
+        nextCursor: response.nextCursor,
+        footer,
+        skippedSelfHosted,
+      };
+    }
 
     const effectiveSlugs = orgSlugs.length > 0 ? orgSlugs : ("all" as const);
     const allTeams = await fetchFromOrgs<TeamWithOrg>({

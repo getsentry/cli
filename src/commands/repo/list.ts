@@ -5,13 +5,19 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listRepositories } from "../../lib/api-client.js";
+import {
+  listRepositories,
+  listRepositoriesPaginated,
+} from "../../lib/api-client.js";
 import {
   listCommand as buildListCommand,
   fetchFromOrgs,
   resolveOrgsForList,
 } from "../../lib/list-helpers.js";
 import type { SentryRepository, Writer } from "../../types/index.js";
+
+/** Key for SQLite cursor storage */
+const PAGINATION_KEY = "repo-list";
 
 /** Repository with its organization context for display */
 type RepositoryWithOrg = SentryRepository & { orgSlug?: string };
@@ -80,16 +86,20 @@ export const listCommand = buildListCommand<RepositoryWithOrg>({
       "Examples:\n" +
       "  sentry repo list              # auto-detect or list all\n" +
       "  sentry repo list my-org       # list repositories in my-org\n" +
+      "  sentry repo list my-org -c last  # continue from previous page\n" +
       "  sentry repo list --limit 10\n" +
       "  sentry repo list --json",
   },
   limit: 30,
+  features: { cursor: true },
   positional: {
     placeholder: "org",
     brief: "Organization slug (optional)",
     optional: true,
   },
   itemName: "repositories",
+  paginationKey: PAGINATION_KEY,
+  buildContextKey: (_, org) => org ?? "all",
   emptyMessage: (_, org) =>
     org
       ? `No repositories found in organization '${org}'.`
@@ -100,6 +110,25 @@ export const listCommand = buildListCommand<RepositoryWithOrg>({
       org,
       this.cwd
     );
+
+    // Cursor pagination only works for single-org fetches
+    const isSingleOrg = orgSlugs.length === 1;
+    if (isSingleOrg && flags.cursor !== undefined) {
+      const singleOrg = orgSlugs[0] as string;
+      const response = await listRepositoriesPaginated(singleOrg, {
+        cursor: flags.cursor,
+        perPage: flags.limit,
+      });
+      const items = response.data.map((r) => ({ ...r, orgSlug: singleOrg }));
+      // Return nextCursor so the factory's outer updateCursorCache stores it
+      return {
+        items,
+        hasMore: !!response.nextCursor,
+        nextCursor: response.nextCursor,
+        footer,
+        skippedSelfHosted,
+      };
+    }
 
     const effectiveSlugs = orgSlugs.length > 0 ? orgSlugs : ("all" as const);
     const allRepos = await fetchFromOrgs<RepositoryWithOrg>({

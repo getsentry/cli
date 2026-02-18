@@ -9,8 +9,6 @@
  */
 
 import {
-  listAnOrganization_sIssues,
-  listAnOrganization_sTeams,
   listAProject_sClientKeys,
   queryExploreEventsInTableFormat,
   resolveAShortId,
@@ -654,35 +652,80 @@ export type ProjectWithOrg = SentryProject & {
 };
 
 /**
- * List repositories in an organization.
+ * List all repositories in an organization.
+ * Automatically paginates through all API pages to return the complete list.
  * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - Organization slug
+ * @returns All repositories in the organization
  */
-export async function listRepositories(
-  orgSlug: string
-): Promise<SentryRepository[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  const { data } = await apiRequestToRegion<SentryRepository[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/repos/`
+export function listRepositories(orgSlug: string): Promise<SentryRepository[]> {
+  return orgScopedPaginateAll<SentryRepository>(
+    `/organizations/${orgSlug}/repos/`,
+    {}
   );
-  return data;
 }
 
 /**
- * List teams in an organization.
- * Uses region-aware routing for multi-region support.
+ * List repositories in an organization with pagination control.
+ * Returns a single page with cursor metadata for manual pagination.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of repositories with cursor metadata
  */
-export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
-  const config = await getOrgSdkConfig(orgSlug);
+export function listRepositoriesPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryRepository[]>> {
+  return orgScopedRequestPaginated<SentryRepository[]>(
+    `/organizations/${orgSlug}/repos/`,
+    {
+      params: {
+        per_page: options.perPage ?? 100,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
 
-  const result = await listAnOrganization_sTeams({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-  });
+/**
+ * List all teams in an organization.
+ * Automatically paginates through all API pages to return the complete list.
+ * Bypasses the @sentry/api SDK to access pagination headers directly.
+ *
+ * @param orgSlug - Organization slug
+ * @returns All teams in the organization
+ */
+export function listTeams(orgSlug: string): Promise<SentryTeam[]> {
+  return orgScopedPaginateAll<SentryTeam>(
+    `/organizations/${orgSlug}/teams/`,
+    {}
+  );
+}
 
-  const data = unwrapResult(result, "Failed to list teams");
-  return data as unknown as SentryTeam[];
+/**
+ * List teams in an organization with pagination control.
+ * Returns a single page with cursor metadata for manual pagination.
+ * Bypasses the @sentry/api SDK to access pagination headers directly.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of teams with cursor metadata
+ */
+export function listTeamsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryTeam[]>> {
+  return orgScopedRequestPaginated<SentryTeam[]>(
+    `/organizations/${orgSlug}/teams/`,
+    {
+      params: {
+        per_page: options.perPage ?? 100,
+        cursor: options.cursor,
+      },
+    }
+  );
 }
 
 /**
@@ -895,42 +938,72 @@ export async function getProjectKeys(
 
 // Issue functions
 
+/** Options for issue list queries */
+type IssueListOptions = {
+  query?: string;
+  cursor?: string;
+  limit?: number;
+  sort?: "date" | "new" | "freq" | "user";
+  statsPeriod?: string;
+};
+
+/**
+ * Build the query string for an issue list request.
+ * Prepends a project filter to any user-supplied query.
+ */
+function buildIssueQuery(projectSlug: string, userQuery?: string): string {
+  const projectFilter = `project:${projectSlug}`;
+  return [projectFilter, userQuery].filter(Boolean).join(" ");
+}
+
+/**
+ * List issues for a project with pagination control.
+ * Returns a single page with cursor metadata for manual pagination.
+ * Uses the org-scoped endpoint (the project-scoped one is deprecated).
+ * Bypasses the @sentry/api SDK to access pagination headers directly.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param options - Query and pagination options
+ * @returns Single page of issues with cursor metadata
+ */
+export function listIssuesPaginated(
+  orgSlug: string,
+  projectSlug: string,
+  options: IssueListOptions = {}
+): Promise<PaginatedResponse<SentryIssue[]>> {
+  return orgScopedRequestPaginated<SentryIssue[]>(
+    `/organizations/${orgSlug}/issues/`,
+    {
+      params: {
+        query: buildIssueQuery(projectSlug, options.query),
+        cursor: options.cursor,
+        limit: options.limit,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    }
+  );
+}
+
 /**
  * List issues for a project.
  * Uses the org-scoped endpoint (the project-scoped one is deprecated).
- * Uses region-aware routing for multi-region support.
+ * Bypasses the @sentry/api SDK to access pagination headers directly.
+ * When no cursor or limit is provided, fetches only the first page (up to 100 items).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param options - Query and pagination options
+ * @returns Issues matching the query
  */
 export async function listIssues(
   orgSlug: string,
   projectSlug: string,
-  options: {
-    query?: string;
-    cursor?: string;
-    limit?: number;
-    sort?: "date" | "new" | "freq" | "user";
-    statsPeriod?: string;
-  } = {}
+  options: IssueListOptions = {}
 ): Promise<SentryIssue[]> {
-  const config = await getOrgSdkConfig(orgSlug);
-
-  // Build query with project filter: "project:{slug}" prefix
-  const projectFilter = `project:${projectSlug}`;
-  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
-
-  const result = await listAnOrganization_sIssues({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-    query: {
-      query: fullQuery,
-      cursor: options.cursor,
-      limit: options.limit,
-      sort: options.sort,
-      statsPeriod: options.statsPeriod,
-    },
-  });
-
-  const data = unwrapResult(result, "Failed to list issues");
-  return data as unknown as SentryIssue[];
+  const response = await listIssuesPaginated(orgSlug, projectSlug, options);
+  return response.data;
 }
 
 /**
