@@ -10,6 +10,26 @@ import { listOrganizations, listTeams } from "./api-client.js";
 import { ApiError, CliError, ContextError } from "./errors.js";
 import { getSentryBaseUrl } from "./sentry-urls.js";
 
+/**
+ * Best-effort fetch the user's organizations and format as a hint string.
+ * Returns a fallback hint if the API call fails or no orgs are found.
+ *
+ * @param fallbackHint - Shown when the org list can't be fetched
+ * @returns Formatted org list like "Your organizations:\n\n  acme-corp\n  other-org"
+ */
+export async function fetchOrgListHint(fallbackHint: string): Promise<string> {
+  try {
+    const orgs = await listOrganizations();
+    if (orgs.length > 0) {
+      const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
+      return `Your organizations:\n\n${orgList}`;
+    }
+  } catch {
+    // Best-effort — if this also fails, use the fallback
+  }
+  return fallbackHint;
+}
+
 /** Options for resolving a team within an organization */
 export type ResolveTeamOptions = {
   /** Explicit team slug from --team flag */
@@ -94,16 +114,9 @@ async function buildOrgFailureError(
   error: ApiError,
   options: ResolveTeamOptions
 ): Promise<never> {
-  let orgHint = `Specify org explicitly: ${options.usageHint}`;
-  try {
-    const orgs = await listOrganizations();
-    if (orgs.length > 0) {
-      const orgList = orgs.map((o) => `  ${o.slug}`).join("\n");
-      orgHint = `Your organizations:\n\n${orgList}`;
-    }
-  } catch {
-    // Best-effort — if this also fails, use the generic hint
-  }
+  const orgHint = await fetchOrgListHint(
+    `Specify org explicitly: ${options.usageHint}`
+  );
 
   const alternatives = [
     `Could not list teams for org '${orgSlug}' (${error.status})`,
