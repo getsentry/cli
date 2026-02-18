@@ -197,6 +197,7 @@ List issues in a project
 - `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output as JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 **Examples:**
 
@@ -433,25 +434,27 @@ Update the Sentry CLI to the latest version
 
 Work with Sentry repositories
 
-#### `sentry repo list <org>`
+#### `sentry repo list <target>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Team
 
 Work with Sentry teams
 
-#### `sentry team list <org>`
+#### `sentry team list <target>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 
@@ -584,6 +587,7 @@ List issues in a project
 - `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output as JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 ### Orgs
 
@@ -615,25 +619,27 @@ List projects
 
 List repositories
 
-#### `sentry repos <org>`
+#### `sentry repos <target>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Teams
 
 List teams
 
-#### `sentry teams <org>`
+#### `sentry teams <target>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Logs
 
