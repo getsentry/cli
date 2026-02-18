@@ -403,7 +403,9 @@ describe("issue list: org-all mode (cursor pagination)", () => {
         stdout: { write: stdoutWrite },
         stderr: { write: stderrWrite },
         cwd: "/tmp",
-        setContext: mock(() => {}),
+        setContext: mock(() => {
+          // no-op for test
+        }),
       },
       stdoutWrite,
       stderrWrite,
