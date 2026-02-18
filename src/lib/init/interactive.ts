@@ -6,21 +6,23 @@
  * Respects --yes flag for non-interactive mode.
  */
 
-import type { WizardOptions, InteractivePayload } from "./types.js";
+import { confirm, log, multiselect, select } from "@clack/prompts";
+import { abortIfCancelled } from "./clack-utils.js";
+import type { InteractivePayload, WizardOptions } from "./types.js";
 
 export async function handleInteractive(
   payload: InteractivePayload,
-  options: WizardOptions,
+  options: WizardOptions
 ): Promise<Record<string, unknown>> {
   const { kind } = payload;
 
   switch (kind) {
     case "select":
-      return handleSelect(payload, options);
+      return await handleSelect(payload, options);
     case "multi-select":
-      return handleMultiSelect(payload, options);
+      return await handleMultiSelect(payload, options);
     case "confirm":
-      return handleConfirm(payload, options);
+      return await handleConfirm(payload, options);
     default:
       return { cancelled: true };
   }
@@ -28,48 +30,49 @@ export async function handleInteractive(
 
 async function handleSelect(
   payload: InteractivePayload,
-  options: WizardOptions,
+  options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  const apps = (payload.apps as Array<{ name: string; path: string; framework?: string }>) ?? [];
+  const apps =
+    (payload.apps as Array<{
+      name: string;
+      path: string;
+      framework?: string;
+    }>) ?? [];
   const items = (payload.options as string[]) ?? apps.map((a) => a.name);
 
   if (items.length === 0) {
     return { cancelled: true };
   }
 
-  // --yes: auto-pick if exactly one option
   if (options.yes) {
     if (items.length === 1) {
+      log.info(`Auto-selected: ${items[0]}`);
       return { selectedApp: items[0] };
     }
-    options.stderr.write(
-      "Error: --yes requires exactly one option for selection, but found " +
-        `${items.length}. Run interactively to choose.\n`,
+    log.error(
+      `--yes requires exactly one option for selection, but found ${items.length}. Run interactively to choose.`
     );
     return { cancelled: true };
   }
 
-  options.stdout.write(`\n${payload.prompt}\n`);
-  for (let i = 0; i < items.length; i++) {
-    const app = apps[i];
-    const extra = app?.framework ? ` (${app.framework})` : "";
-    options.stdout.write(`  ${i + 1}. ${items[i]}${extra}\n`);
-  }
+  const selected = await select({
+    message: payload.prompt,
+    options: items.map((item, i) => {
+      const app = apps[i];
+      return {
+        value: item,
+        label: item,
+        hint: app?.framework ?? undefined,
+      };
+    }),
+  });
 
-  const answer = await readLine(options, `Choose [1-${items.length}]: `);
-  const idx = Number.parseInt(answer.trim(), 10) - 1;
-
-  if (idx >= 0 && idx < items.length) {
-    return { selectedApp: items[idx] };
-  }
-
-  options.stderr.write("Invalid selection.\n");
-  return { cancelled: true };
+  return { selectedApp: abortIfCancelled(selected) };
 }
 
 async function handleMultiSelect(
   payload: InteractivePayload,
-  options: WizardOptions,
+  options: WizardOptions
 ): Promise<Record<string, unknown>> {
   const available =
     (payload.availableFeatures as string[]) ??
@@ -80,102 +83,60 @@ async function handleMultiSelect(
     return { features: [] };
   }
 
-  // --yes: select all available features
+  const requiredFeature = "errors";
+  const hasRequired = available.includes(requiredFeature);
+
   if (options.yes) {
+    log.info(`Auto-selected all features: ${available.join(", ")}`);
     return { features: available };
   }
 
-  options.stdout.write(`\n${payload.prompt}\n`);
-  for (let i = 0; i < available.length; i++) {
-    options.stdout.write(`  ${i + 1}. ${available[i]}\n`);
+  if (hasRequired) {
+    log.info("Error monitoring is always enabled.");
   }
 
-  const answer = await readLine(
-    options,
-    `Choose (comma-separated, or "all") [1-${available.length}]: `,
-  );
+  const optional = available.filter((f) => f !== requiredFeature);
 
-  if (answer.trim().toLowerCase() === "all") {
-    return { features: available };
+  const selected = await multiselect({
+    message: payload.prompt,
+    options: optional.map((feature) => ({
+      value: feature,
+      label: feature,
+    })),
+    initialValues: optional,
+    required: false,
+  });
+
+  const chosen = abortIfCancelled(selected);
+  if (hasRequired && !chosen.includes(requiredFeature)) {
+    chosen.unshift(requiredFeature);
   }
 
-  const indices = answer
-    .split(",")
-    .map((s) => Number.parseInt(s.trim(), 10) - 1)
-    .filter((i) => i >= 0 && i < available.length);
-
-  const selected = [...new Set(indices.map((i) => available[i]))];
-  return { features: selected };
+  return { features: chosen };
 }
 
 async function handleConfirm(
   payload: InteractivePayload,
-  options: WizardOptions,
+  options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  // --yes: auto-confirm
   if (options.yes) {
-    // For "add example trigger" → default to true
-    // For "verification issues" → default to continue
     if (payload.prompt.includes("example")) {
+      log.info("Auto-confirmed: adding example trigger");
       return { addExample: true };
     }
+    log.info("Auto-confirmed: continuing");
     return { action: "continue" };
   }
 
-  options.stdout.write(`\n${payload.prompt} [Y/n] `);
-
-  const answer = await readLine(options, "");
-  const confirmed =
-    answer.trim() === "" ||
-    answer.trim().toLowerCase() === "y" ||
-    answer.trim().toLowerCase() === "yes";
-
-  // Determine which field to set based on the prompt
-  if (payload.prompt.includes("example")) {
-    return { addExample: confirmed };
-  }
-  return { action: confirmed ? "continue" : "stop" };
-}
-
-function readLine(
-  options: WizardOptions,
-  prompt: string,
-): Promise<string> {
-  return new Promise((resolve) => {
-    if (prompt) {
-      options.stdout.write(prompt);
-    }
-
-    const { stdin } = options;
-    const wasRaw = stdin.isRaw;
-
-    // Handle piped stdin (non-TTY)
-    if (!stdin.isTTY) {
-      let data = "";
-      const onData = (chunk: Buffer) => {
-        data += chunk.toString();
-        if (data.includes("\n")) {
-          stdin.removeListener("data", onData);
-          resolve(data.split("\n")[0] ?? "");
-        }
-      };
-      stdin.on("data", onData);
-      stdin.resume();
-      return;
-    }
-
-    // TTY mode: read a line
-    stdin.setRawMode?.(false);
-    stdin.resume();
-    stdin.setEncoding("utf-8");
-
-    const onData = (chunk: string) => {
-      stdin.removeListener("data", onData);
-      stdin.pause();
-      if (wasRaw !== undefined) stdin.setRawMode?.(wasRaw);
-      resolve(chunk.trim());
-    };
-
-    stdin.once("data", onData);
+  const confirmed = await confirm({
+    message: payload.prompt,
+    initialValue: true,
   });
+
+  const value = abortIfCancelled(confirmed);
+
+  if (payload.prompt.includes("example")) {
+    return { addExample: value };
+  }
+  return { action: value ? "continue" : "stop" };
 }

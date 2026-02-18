@@ -7,20 +7,99 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { cancel, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { CLI_VERSION } from "../constants.js";
+import { formatBanner } from "../help.js";
+import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import { MASTRA_API_URL, WORKFLOW_ID } from "./constants.js";
-import { formatProgress, formatResult, formatError } from "./formatters.js";
-import { handleLocalOp } from "./local-ops.js";
+import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
+import { handleLocalOp } from "./local-ops.js";
 import type {
-  WizardOptions,
-  LocalOpPayload,
   InteractivePayload,
+  LocalOpPayload,
+  WizardOptions,
+  WorkflowRunResult,
 } from "./types.js";
 
+type StepSpinner = ReturnType<typeof spinner>;
+
+type StepContext = {
+  payload: unknown;
+  stepId: string;
+  s: StepSpinner;
+  options: WizardOptions;
+};
+
+function nextPhase(
+  stepPhases: Map<string, number>,
+  stepId: string,
+  names: string[]
+): string {
+  const phase = (stepPhases.get(stepId) ?? 0) + 1;
+  stepPhases.set(stepId, phase);
+  return names[Math.min(phase - 1, names.length - 1)] ?? "done";
+}
+
+async function handleSuspendedStep(
+  ctx: StepContext,
+  stepPhases: Map<string, number>
+): Promise<Record<string, unknown>> {
+  const { payload, stepId, s, options } = ctx;
+  const { type: payloadType, operation } = payload as {
+    type: string;
+    operation?: string;
+  };
+  const label = STEP_LABELS[stepId] ?? stepId;
+
+  if (payloadType === "local-op") {
+    const detail = operation ? ` (${operation})` : "";
+    s.message(`${label}${detail}...`);
+
+    const localResult = await handleLocalOp(payload as LocalOpPayload, options);
+
+    return {
+      ...localResult,
+      _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
+    };
+  }
+
+  if (payloadType === "interactive") {
+    s.stop(label);
+
+    const interactiveResult = await handleInteractive(
+      payload as InteractivePayload,
+      options
+    );
+
+    s.start("Processing...");
+
+    return {
+      ...interactiveResult,
+      _phase: nextPhase(stepPhases, stepId, ["apply"]),
+    };
+  }
+
+  s.stop("Error", 1);
+  log.error(`Unknown suspend payload type "${payloadType}"`);
+  cancel("Setup failed");
+  throw new WizardCancelledError();
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function runWizard(options: WizardOptions): Promise<void> {
-  const { directory, force, yes, dryRun, features, stdout, stderr } = options;
+  const { directory, force, yes, dryRun, features } = options;
+
+  process.stderr.write(`\n${formatBanner()}\n\n`);
+  intro("sentry init");
+
+  if (dryRun) {
+    log.warn("Dry-run mode: no files will be modified.");
+  }
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
@@ -38,94 +117,87 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   const workflow = client.getWorkflow(WORKFLOW_ID);
   const run = await workflow.createRun();
 
-  let result = await run.startAsync({
-    inputData: { directory, force, yes, dryRun, features },
-    tracingOptions,
-  });
+  const s = spinner();
 
-  // Track multi-suspend phases per step
-  const stepPhases = new Map<string, number>();
-
-  while ((result as any).status === "suspended") {
-    // Extract step ID and suspend payload
-    const stepPath =
-      (result as any).suspended?.[0] ??
-      (result as any).activePaths?.[0] ??
-      [];
-    const stepId: string = stepPath[stepPath.length - 1] ?? "unknown";
-
-    const payload = extractSuspendPayload(result as Record<string, any>, stepId);
-    if (!payload) {
-      stderr.write(`Error: No suspend payload found for step "${stepId}"\n`);
-      break;
-    }
-
-    formatProgress(stdout, stepId, payload);
-
-    let resumeData: Record<string, any>;
-    const payloadType = (payload as any).type as string;
-
-    if (payloadType === "local-op") {
-      const localResult = await handleLocalOp(
-        payload as LocalOpPayload,
-        options,
-      );
-
-      // Track phase progression for multi-suspend steps
-      const phase = (stepPhases.get(stepId) ?? 0) + 1;
-      stepPhases.set(stepId, phase);
-      const phaseNames = ["read-files", "analyze", "done"];
-      resumeData = {
-        ...localResult,
-        _phase: phaseNames[Math.min(phase - 1, phaseNames.length - 1)],
-      };
-    } else if (payloadType === "interactive") {
-      const interactiveResult = await handleInteractive(
-        payload as InteractivePayload,
-        options,
-      );
-      const phase = (stepPhases.get(stepId) ?? 0) + 1;
-      stepPhases.set(stepId, phase);
-      resumeData = {
-        ...interactiveResult,
-        _phase: "apply",
-      };
-    } else {
-      stderr.write(`Error: Unknown suspend payload type "${payloadType}"\n`);
-      break;
-    }
-
-    result = await run.resumeAsync({
-      step: stepId,
-      resumeData,
+  let result: WorkflowRunResult;
+  try {
+    s.start("Connecting to wizard...");
+    result = (await run.startAsync({
+      inputData: { directory, force, yes, dryRun, features },
       tracingOptions,
-    });
+    })) as WorkflowRunResult;
+  } catch (err) {
+    s.stop("Connection failed", 1);
+    log.error(errorMessage(err));
+    cancel("Setup failed");
+    return;
   }
 
-  const resultObj = result as Record<string, any>;
-  if (resultObj.status === "success") {
-    formatResult(stdout, resultObj);
+  const stepPhases = new Map<string, number>();
+
+  try {
+    while (result.status === "suspended") {
+      const stepPath = result.suspended?.at(0) ?? [];
+      const stepId: string = stepPath.at(-1) ?? "unknown";
+
+      const payload = extractSuspendPayload(result, stepId);
+      if (!payload) {
+        s.stop("Error", 1);
+        log.error(`No suspend payload found for step "${stepId}"`);
+        cancel("Setup failed");
+        return;
+      }
+
+      const resumeData = await handleSuspendedStep(
+        { payload, stepId, s, options },
+        stepPhases
+      );
+
+      result = (await run.resumeAsync({
+        step: stepId,
+        resumeData,
+        tracingOptions,
+      })) as WorkflowRunResult;
+    }
+  } catch (err) {
+    if (err instanceof WizardCancelledError) {
+      return;
+    }
+    s.stop("Cancelled", 1);
+    log.error(errorMessage(err));
+    cancel("Setup failed");
+    return;
+  }
+
+  s.stop("Done");
+
+  const output = result as unknown as Record<string, unknown>;
+  if (result.status === "success") {
+    formatResult(output);
   } else {
-    formatError(stderr, resultObj);
+    formatError(output);
   }
 }
 
 function extractSuspendPayload(
-  result: Record<string, any>,
-  stepId: string,
+  result: WorkflowRunResult,
+  stepId: string
 ): unknown | undefined {
-  // Try step-specific payload first
   const stepPayload = result.steps?.[stepId]?.suspendPayload;
-  if (stepPayload) return stepPayload;
-
-  // Try top-level suspend payload
-  if (result.suspendPayload) return result.suspendPayload;
-
-  // Try nested in activePaths data
-  for (const key of Object.keys(result.steps ?? {})) {
-    const step = result.steps[key];
-    if (step?.suspendPayload) return step.suspendPayload;
+  if (stepPayload) {
+    return stepPayload;
   }
 
-  return undefined;
+  if (result.suspendPayload) {
+    return result.suspendPayload;
+  }
+
+  for (const key of Object.keys(result.steps ?? {})) {
+    const step = result.steps?.[key];
+    if (step?.suspendPayload) {
+      return step.suspendPayload;
+    }
+  }
+
+  return;
 }
