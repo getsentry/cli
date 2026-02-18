@@ -52,9 +52,6 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
 
-/** Error type classification for fetch failures */
-type FetchErrorType = "permission" | "network" | "unknown";
-
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
     throw new Error(
@@ -241,7 +238,7 @@ function getComparator(
 
 type FetchResult =
   | { success: true; data: IssueListResult }
-  | { success: false; errorType: FetchErrorType };
+  | { success: false; error: Error };
 
 /** Result of resolving targets from parsed argument */
 type TargetResolutionResult = {
@@ -349,7 +346,7 @@ async function resolveTargetsFromParsedArg(
  *
  * @param target - Resolved org/project target
  * @param options - Query options (query, limit, sort)
- * @returns Success with issues, or failure with error type classification
+ * @returns Success with issues, or failure with the original error preserved
  * @throws {AuthError} When user is not authenticated
  */
 async function fetchIssuesForTarget(
@@ -364,19 +361,11 @@ async function fetchIssuesForTarget(
     if (error instanceof AuthError) {
       throw error;
     }
-    // Classify error type for better user messaging
-    // 401/403 are permission errors
-    if (
-      error instanceof ApiError &&
-      (error.status === 401 || error.status === 403)
-    ) {
-      return { success: false, errorType: "permission" };
-    }
-    // Network errors (fetch failures, timeouts)
-    if (error instanceof TypeError && error.message.includes("fetch")) {
-      return { success: false, errorType: "network" };
-    }
-    return { success: false, errorType: "unknown" };
+
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
   }
 }
 
@@ -438,7 +427,7 @@ export const listCommand = buildCommand({
     flags: ListFlags,
     target?: string
   ): Promise<void> {
-    const { stdout, cwd, setContext } = this;
+    const { stdout, stderr, cwd, setContext } = this;
 
     // Parse positional argument to determine resolution strategy
     const parsed = parseOrgProjectArg(target);
@@ -477,34 +466,36 @@ export const listCommand = buildCommand({
 
     // Separate successful fetches from failures
     const validResults: IssueListResult[] = [];
-    const errorTypes = new Set<FetchErrorType>();
+    const failures: Error[] = [];
 
     for (const result of results) {
       if (result.success) {
         validResults.push(result.data);
       } else {
-        errorTypes.add(result.errorType);
+        failures.push(result.error);
       }
     }
 
-    if (validResults.length === 0) {
-      // Build error message based on what types of errors we saw
-      if (errorTypes.has("permission")) {
-        throw new Error(
-          `Failed to fetch issues from ${targets.length} project(s).\n` +
-            "You don't have permission to access these projects.\n\n" +
-            "Try running 'sentry auth status' to verify your authentication."
+    if (validResults.length === 0 && failures.length > 0) {
+      // Re-throw the first underlying error so telemetry can classify it
+      // correctly (e.g., ApiError → isClientApiError → suppressed from exceptions).
+      // Add context about how many projects failed.
+      // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
+      const first = failures[0]!;
+      const prefix = `Failed to fetch issues from ${targets.length} project(s)`;
+
+      // For ApiError, propagate the original so telemetry sees the status code
+      if (first instanceof ApiError) {
+        throw new ApiError(
+          `${prefix}: ${first.message}`,
+          first.status,
+          first.detail,
+          first.endpoint
         );
       }
-      if (errorTypes.has("network")) {
-        throw new Error(
-          `Failed to fetch issues from ${targets.length} project(s).\n` +
-            "Network connection failed. Check your internet connection."
-        );
-      }
-      throw new Error(
-        `Failed to fetch issues from ${targets.length} project(s).`
-      );
+
+      // For other errors, add context to the message
+      throw new Error(`${prefix}.\n${first.message}`);
     }
 
     // Determine display mode
@@ -539,11 +530,31 @@ export const listCommand = buildCommand({
       getComparator(flags.sort)(a.issue, b.issue)
     );
 
-    // JSON output
+    // JSON output — include partial failure info when some projects failed
     if (flags.json) {
       const allIssues = issuesWithOptions.map((i) => i.issue);
-      writeJson(stdout, allIssues);
+      if (failures.length > 0) {
+        writeJson(stdout, {
+          issues: allIssues,
+          errors: failures.map((e) =>
+            e instanceof ApiError
+              ? { status: e.status, message: e.message }
+              : { message: e.message }
+          ),
+        });
+      } else {
+        writeJson(stdout, allIssues);
+      }
       return;
+    }
+
+    // Warn on stderr about partial failures (human output only)
+    if (failures.length > 0) {
+      stderr.write(
+        muted(
+          `\nNote: Failed to fetch issues from ${failures.length} project(s). Showing results from ${validResults.length} project(s).\n`
+        )
+      );
     }
 
     if (issuesWithOptions.length === 0) {

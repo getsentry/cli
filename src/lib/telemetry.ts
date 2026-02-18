@@ -9,11 +9,12 @@
  * No PII is collected. Opt-out via SENTRY_CLI_NO_TELEMETRY=1 environment variable.
  */
 
+import { chmodSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
-import { tryRepairAndRetry } from "./db/schema.js";
-import { AuthError } from "./errors.js";
+import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
+import { ApiError, AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 export type { Span } from "@sentry/bun";
@@ -102,17 +103,25 @@ export async function withTelemetry<T>(
       async (span) => {
         try {
           return await callback(span);
+        } catch (e) {
+          // Record 4xx API errors as span attributes instead of exceptions.
+          // These are user errors (wrong ID, no access) not CLI bugs, but
+          // recording on the span lets us detect volume spikes in Discover.
+          if (isClientApiError(e)) {
+            recordApiErrorOnSpan(span, e as ApiError);
+          }
+          throw e;
         } finally {
           span.end();
         }
       }
     );
   } catch (e) {
-    // Don't capture or mark as crashed for expected auth state
-    // AuthError("not_authenticated") is re-thrown from app.ts for auto-login flow
     const isExpectedAuthState =
       e instanceof AuthError && e.reason === "not_authenticated";
-    if (!isExpectedAuthState) {
+    // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
+    // They're recorded as span attributes above for volume-spike detection.
+    if (!(isExpectedAuthState || isClientApiError(e))) {
       Sentry.captureException(e);
       markSessionCrashed();
     }
@@ -153,6 +162,70 @@ export function createBeforeExitHandler(client: Sentry.BunClient): () => void {
       // Ignore flush errors — telemetry should never block CLI exit
     });
   };
+}
+
+/**
+ * Check if a Sentry event represents an EPIPE error.
+ *
+ * EPIPE (errno -32) occurs when writing to a pipe whose reading end has been
+ * closed. This is normal Unix behavior when CLI output is piped through
+ * commands like `head`, `less`, or `grep -m1`. These errors are not bugs
+ * and should be silently dropped from telemetry.
+ *
+ * Detects both Bun-style ("EPIPE: broken pipe, write") and Node.js-style
+ * ("write EPIPE") error messages, plus the structured `node_system_error` context.
+ *
+ * @internal Exported for testing
+ */
+export function isEpipeError(event: Sentry.ErrorEvent): boolean {
+  // Check exception message for EPIPE
+  const exceptions = event.exception?.values;
+  if (exceptions) {
+    for (const ex of exceptions) {
+      if (ex.value?.includes("EPIPE")) {
+        return true;
+      }
+    }
+  }
+
+  // Check Node.js system error context (set by the SDK for system errors)
+  const systemError = event.contexts?.node_system_error as
+    | { code?: string }
+    | undefined;
+  if (systemError?.code === "EPIPE") {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if an error is a client-side (4xx) API error.
+ *
+ * 4xx errors are user errors — wrong issue IDs, no access, invalid input —
+ * not CLI bugs. These should be recorded as span attributes for volume-spike
+ * detection in Discover, but should NOT be captured as Sentry exceptions.
+ *
+ * @internal Exported for testing
+ */
+export function isClientApiError(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+/**
+ * Record a client API error as span attributes for Discover queryability.
+ *
+ * Sets `api_error.status`, `api_error.message`, and optionally `api_error.detail`
+ * on the span. Must be called before `span.end()`.
+ *
+ * @internal Exported for testing
+ */
+export function recordApiErrorOnSpan(span: Span, error: ApiError): void {
+  span.setAttribute("api_error.status", error.status);
+  span.setAttribute("api_error.message", error.message);
+  if (error.detail) {
+    span.setAttribute("api_error.detail", error.detail);
+  }
 }
 
 /**
@@ -206,6 +279,13 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     beforeSend: (event) => {
       // Remove server_name which may contain hostname (PII)
       event.server_name = undefined;
+
+      // EPIPE errors are expected when stdout is piped and the consumer closes
+      // early (e.g., `sentry issue list | head`). Not actionable — drop them.
+      if (isEpipeError(event)) {
+        return null;
+      }
+
       return event;
     },
   });
@@ -213,21 +293,6 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
   if (client?.getOptions().enabled) {
     const isBun = typeof process.versions.bun !== "undefined";
     const runtime = isBun ? "bun" : "node";
-
-    // Fix runtime context: @sentry/bun v10 delegates to @sentry/node's NodeClient,
-    // which always overrides runtime to { name: 'node', version: process.version }.
-    // Under Bun, process.version returns the Node.js compat version (e.g. v24.3.0),
-    // not the Bun version. Override it so event.contexts.runtime is correct and
-    // Sentry's server-side tag promotion creates an accurate 'runtime' tag.
-    // TODO: Remove once fixed upstream: https://github.com/getsentry/sentry-javascript/issues/19269
-    if (isBun) {
-      // biome-ignore lint/suspicious/noExplicitAny: accessing internal SDK option not exposed in NodeClientOptions
-      const options = client.getOptions() as any;
-      options.runtime = {
-        name: "bun",
-        version: process.versions.bun as string,
-      };
-    }
 
     // Tag whether running as bun binary or node (npm package).
     // Kept alongside the SDK's promoted 'runtime' tag for explicit signaling
@@ -522,8 +587,146 @@ export function withDbSpan<T>(operation: string, fn: () => T): T {
   );
 }
 
+/** Intentional no-op used as a self-replacement target for one-shot functions. */
+// biome-ignore lint/suspicious/noEmptyBlockStatements: intentional noop
+const noop = (): void => {};
+
+/** Resolves the database path, falling back to a default if the import fails. */
+function resolveDbPath(): string {
+  try {
+    const { getDbPath } = require("./db/index.js") as {
+      getDbPath: () => string;
+    };
+    return getDbPath();
+  } catch {
+    return "~/.sentry/cli.db";
+  }
+}
+
+/**
+ * Print a one-time warning to stderr when the local database is read-only.
+ * Replaces itself with a noop after the first call so subsequent invocations
+ * are free. Assigned via `let` so the binding can be swapped.
+ *
+ * Uses lazy require for db/index.js to avoid a circular dependency
+ * (db/index.ts imports createTracedDatabase from this module).
+ */
+let warnReadonlyDatabaseOnce = (): void => {
+  warnReadonlyDatabaseOnce = noop;
+
+  const dbPath = resolveDbPath();
+  process.stderr.write(
+    `\nWarning: Sentry CLI local database is read-only. Caching and preferences won't persist.\n` +
+      `  Path: ${dbPath}\n` +
+      "  Fix:  sentry cli fix\n\n"
+  );
+};
+
+/** Whether we already attempted a permission repair this process. */
+let repairAttempted = false;
+
+/**
+ * Attempt to repair database file permissions so future commands can write.
+ *
+ * SQLite caches the readonly state at connection open time, so even after a
+ * successful chmod the *current* connection remains readonly. This function
+ * repairs permissions for the NEXT command and prints a differentiated message.
+ * If the repair fails (e.g., file owned by another user) we fall through to
+ * {@link warnReadonlyDatabaseOnce} which tells the user to run `sentry cli fix`.
+ *
+ * Replaces itself with a noop after the first call via the `repairAttempted`
+ * guard so we only try once per process.
+ */
+/**
+ * Chmod a path, ignoring ENOENT (file doesn't exist yet).
+ * Re-throws any other error so permission failures aren't silently masked.
+ */
+function chmodIfExists(filePath: string, mode: number): void {
+  try {
+    chmodSync(filePath, mode);
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function tryRepairReadonly(): boolean {
+  if (repairAttempted) {
+    return false;
+  }
+  repairAttempted = true;
+
+  try {
+    const dbPath = resolveDbPath();
+
+    // Repair config directory (needs rwx for WAL/SHM creation)
+    const { dirname } = require("node:path") as {
+      dirname: (p: string) => string;
+    };
+    chmodSync(dirname(dbPath), 0o700);
+
+    // Repair database file and journal files
+    chmodSync(dbPath, 0o600);
+    chmodIfExists(`${dbPath}-wal`, 0o600);
+    chmodIfExists(`${dbPath}-shm`, 0o600);
+
+    // Disable the fallback warning — repair succeeded
+    warnReadonlyDatabaseOnce = noop;
+
+    process.stderr.write(
+      "\nNote: Database permissions were auto-repaired. Caching will resume on next command.\n\n"
+    );
+    return true;
+  } catch {
+    // chmod failed — fall through so warnReadonlyDatabaseOnce fires
+    return false;
+  }
+}
+
+/**
+ * Reset all readonly-related state (for testing).
+ * @internal
+ */
+export function resetReadonlyWarning(): void {
+  repairAttempted = false;
+  warnReadonlyDatabaseOnce = (): void => {
+    warnReadonlyDatabaseOnce = noop;
+
+    const dbPath = resolveDbPath();
+    process.stderr.write(
+      `\nWarning: Sentry CLI local database is read-only. Caching and preferences won't persist.\n` +
+        `  Path: ${dbPath}\n` +
+        "  Fix:  sentry cli fix\n\n"
+    );
+  };
+}
+
 /** Methods on SQLite Statement that execute queries and should be traced */
 const TRACED_STATEMENT_METHODS = ["get", "run", "all", "values"] as const;
+
+/**
+ * Handle a readonly database error by attempting auto-repair and returning a
+ * type-appropriate no-op value. Returns `undefined` for run/get (void / no-row)
+ * and `[]` for all/values (empty result set).
+ *
+ * First tries to repair file permissions via {@link tryRepairReadonly}. If that
+ * fails (or was already attempted), falls back to a one-shot warning directing
+ * the user to `sentry cli fix`.
+ */
+function handleReadonlyError(method: string | symbol): unknown {
+  if (!tryRepairReadonly()) {
+    warnReadonlyDatabaseOnce();
+  }
+  if (method === "all" || method === "values") {
+    return [];
+  }
+  return;
+}
 
 /**
  * Wrap a SQLite Statement to automatically trace query execution.
@@ -580,6 +783,13 @@ function createTracedStatement<T>(stmt: T, sql: string): T {
               if (repairResult.attempted) {
                 return repairResult.result;
               }
+
+              // Handle readonly database gracefully: warn once, skip the write.
+              // The CLI still works — reads succeed, only caching/persistence is lost.
+              if (isReadonlyError(error)) {
+                return handleReadonlyError(prop);
+              }
+
               // Re-throw if repair didn't help or wasn't applicable
               throw error;
             }

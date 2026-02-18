@@ -163,7 +163,7 @@ describe("multi-region", () => {
         // First list orgs to populate region cache
         await ctx.run(["org", "list"]);
 
-        const result = await ctx.run(["project", "list", "acme-corp"]);
+        const result = await ctx.run(["project", "list", "acme-corp/"]);
 
         expect(result.exitCode).toBe(0);
         // Should contain US projects for acme-corp
@@ -182,7 +182,7 @@ describe("multi-region", () => {
         // First list orgs to populate region cache
         await ctx.run(["org", "list"]);
 
-        const result = await ctx.run(["project", "list", "euro-gmbh"]);
+        const result = await ctx.run(["project", "list", "euro-gmbh/"]);
 
         expect(result.exitCode).toBe(0);
         // Should contain EU projects for euro-gmbh
@@ -204,12 +204,14 @@ describe("multi-region", () => {
         const result = await ctx.run([
           "project",
           "list",
-          "berlin-startup",
+          "berlin-startup/",
           "--json",
         ]);
 
         expect(result.exitCode).toBe(0);
-        const data = JSON.parse(result.stdout);
+        // JSON output in paginated mode wraps data in { data, hasMore }
+        const parsed = JSON.parse(result.stdout);
+        const data = Array.isArray(parsed) ? parsed : parsed.data;
         expect(Array.isArray(data)).toBe(true);
 
         const slugs = data.map((p: { slug: string }) => p.slug);

@@ -97,11 +97,11 @@ describe("sentry project list", () => {
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use positional argument for organization
+      // Use org/ syntax for org-scoped listing
       const result = await ctx.run([
         "project",
         "list",
-        TEST_ORG,
+        `${TEST_ORG}/`,
         "--limit",
         "5",
       ]);
@@ -116,18 +116,20 @@ describe("sentry project list", () => {
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use positional argument for organization
+      // Use org/ syntax for org-scoped listing
       const result = await ctx.run([
         "project",
         "list",
-        TEST_ORG,
+        `${TEST_ORG}/`,
         "--json",
         "--limit",
         "5",
       ]);
 
       expect(result.exitCode).toBe(0);
-      const data = JSON.parse(result.stdout);
+      // JSON output in paginated mode wraps data in { data, hasMore }
+      const parsed = JSON.parse(result.stdout);
+      const data = Array.isArray(parsed) ? parsed : parsed.data;
       expect(Array.isArray(data)).toBe(true);
     },
     { timeout: 15_000 }

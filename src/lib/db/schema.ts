@@ -12,8 +12,9 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { stringifyUnknown } from "../errors.js";
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -32,6 +33,13 @@ export type ColumnDef = {
 
 export type TableSchema = {
   columns: Record<string, ColumnDef>;
+  /**
+   * Composite primary key columns. When set, the DDL generator emits a
+   * table-level `PRIMARY KEY (col1, col2, ...)` constraint instead of
+   * per-column `PRIMARY KEY` attributes. Individual columns listed here
+   * should NOT also set `primaryKey: true`.
+   */
+  compositePrimaryKey?: string[];
 };
 
 /**
@@ -137,6 +145,15 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       },
     },
   },
+  pagination_cursors: {
+    columns: {
+      command_key: { type: "TEXT", notNull: true },
+      context: { type: "TEXT", notNull: true },
+      cursor: { type: "TEXT", notNull: true },
+      expires_at: { type: "INTEGER", notNull: true },
+    },
+    compositePrimaryKey: ["command_key", "context"],
+  },
   metadata: {
     columns: {
       key: { type: "TEXT", primaryKey: true },
@@ -198,7 +215,8 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
 /** Generate CREATE TABLE DDL from column definitions */
 function columnDefsToDDL(
   tableName: string,
-  columns: [string, ColumnDef][]
+  columns: [string, ColumnDef][],
+  compositePrimaryKey?: string[]
 ): string {
   const columnDefs = columns.map(([name, col]) => {
     const parts = [name, col.type];
@@ -217,6 +235,10 @@ function columnDefsToDDL(
     return parts.join(" ");
   });
 
+  if (compositePrimaryKey && compositePrimaryKey.length > 0) {
+    columnDefs.push(`PRIMARY KEY (${compositePrimaryKey.join(", ")})`);
+  }
+
   return `CREATE TABLE IF NOT EXISTS ${tableName} (\n    ${columnDefs.join(",\n    ")}\n  )`;
 }
 
@@ -225,7 +247,11 @@ export function generateTableDDL(
   tableName: string,
   schema: TableSchema
 ): string {
-  return columnDefsToDDL(tableName, Object.entries(schema.columns));
+  return columnDefsToDDL(
+    tableName,
+    Object.entries(schema.columns),
+    schema.compositePrimaryKey
+  );
 }
 
 /**
@@ -250,7 +276,7 @@ export function generatePreMigrationTableDDL(tableName: string): string {
     );
   }
 
-  return columnDefsToDDL(tableName, baseColumns);
+  return columnDefsToDDL(tableName, baseColumns, schema.compositePrimaryKey);
 }
 
 /** Generated DDL statements for all tables (used for repair and init) */
@@ -366,7 +392,7 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       db.exec(ddl);
       result.fixed.push(`Created table ${tableName}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = stringifyUnknown(e);
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
@@ -385,7 +411,7 @@ function repairMissingColumns(db: Database, result: RepairResult): void {
         db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col.name} ${col.type}`);
         result.fixed.push(`Added column ${tableName}.${col.name}`);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = stringifyUnknown(e);
         result.failed.push(
           `Failed to add column ${tableName}.${col.name}: ${msg}`
         );
@@ -434,6 +460,22 @@ function isSchemaError(error: unknown): boolean {
       msg.includes("no such table") ||
       msg.includes("has no column named")
     );
+  }
+  return false;
+}
+
+/**
+ * Check if an error is a SQLite "readonly database" error.
+ *
+ * This happens when the CLI's local database file or its containing directory
+ * lacks write permissions (e.g., installed globally in a protected path,
+ * read-only filesystem, or changed permissions).
+ */
+export function isReadonlyError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "SQLiteError") {
+    return error.message
+      .toLowerCase()
+      .includes("attempt to write a readonly database");
   }
   return false;
 }
@@ -509,7 +551,6 @@ export function tryRepairAndRetry<T>(
 }
 
 export function initSchema(db: Database): void {
-  // Generate combined DDL from all table schemas
   const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
   db.exec(ddlStatements);
 
@@ -567,6 +608,11 @@ export function runMigrations(db: Database): void {
     addColumnIfMissing(db, "dsn_cache", "ttl_expires_at", "INTEGER");
 
     db.exec(EXPECTED_TABLES.project_root_cache as string);
+  }
+
+  // Migration 4 -> 5: Add pagination_cursors table for --cursor last support
+  if (currentVersion < 5) {
+    db.exec(EXPECTED_TABLES.pagination_cursors as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

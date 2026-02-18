@@ -74,7 +74,7 @@ describe("triggerRootCauseAnalysis", () => {
 
     await triggerRootCauseAnalysis("test-org", "123456789");
 
-    expect(capturedBody).toEqual({ step: "root_cause" });
+    expect(capturedBody).toEqual({ stopping_point: "root_cause" });
   });
 
   test("throws ApiError on 402 response", async () => {

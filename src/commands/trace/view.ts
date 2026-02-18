@@ -7,7 +7,11 @@
 import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
-import { parseOrgProjectArg, spansFlag } from "../../lib/arg-parsing.js";
+import {
+  parseOrgProjectArg,
+  parseSlashSeparatedArg,
+  spansFlag,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
@@ -55,8 +59,12 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    // Single arg - must be trace ID
-    return { traceId: first, targetArg: undefined };
+    const { id: traceId, targetArg } = parseSlashSeparatedArg(
+      first,
+      "Trace ID",
+      USAGE_HINT
+    );
+    return { traceId, targetArg };
   }
 
   const second = args[1];

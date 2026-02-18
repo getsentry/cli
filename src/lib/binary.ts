@@ -15,7 +15,7 @@ import {
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { getUserAgent } from "./constants.js";
-import { UpgradeError } from "./errors.js";
+import { stringifyUnknown, UpgradeError } from "./errors.js";
 
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
@@ -39,7 +39,7 @@ export function getBinaryDownloadUrl(version: string): string {
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const suffix = process.platform === "win32" ? ".exe" : "";
 
-  return `https://github.com/getsentry/cli/releases/download/v${version}/sentry-${os}-${arch}${suffix}`;
+  return `https://github.com/getsentry/cli/releases/download/${version}/sentry-${os}-${arch}${suffix}`;
 }
 
 /**
@@ -143,7 +143,7 @@ export async function fetchWithUpgradeError(
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
     }
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = stringifyUnknown(error);
     throw new UpgradeError(
       "network_error",
       `Failed to connect to ${serviceName}: ${msg}`

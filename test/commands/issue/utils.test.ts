@@ -114,17 +114,22 @@ describe("resolveOrgAndIssueId", () => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("organizations/my-org/issues/PROJECT-ABC")) {
+      if (url.includes("organizations/my-org/shortids/PROJECT-ABC")) {
         return new Response(
           JSON.stringify({
-            id: "987654321",
-            shortId: "PROJECT-ABC",
-            title: "Test Issue",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "10",
-            userCount: 5,
+            organizationSlug: "my-org",
+            projectSlug: "project",
+            groupId: "987654321",
+            group: {
+              id: "987654321",
+              shortId: "PROJECT-ABC",
+              title: "Test Issue",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "10",
+              userCount: 5,
+            },
           }),
           {
             status: 200,
@@ -166,17 +171,22 @@ describe("resolveOrgAndIssueId", () => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("organizations/cached-org/issues/FRONTEND-G")) {
+      if (url.includes("organizations/cached-org/shortids/FRONTEND-G")) {
         return new Response(
           JSON.stringify({
-            id: "111222333",
-            shortId: "FRONTEND-G",
-            title: "Test Issue from alias",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "5",
-            userCount: 2,
+            organizationSlug: "cached-org",
+            projectSlug: "frontend",
+            groupId: "111222333",
+            group: {
+              id: "111222333",
+              shortId: "FRONTEND-G",
+              title: "Test Issue from alias",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "5",
+              userCount: 2,
+            },
           }),
           {
             status: 200,
@@ -207,17 +217,22 @@ describe("resolveOrgAndIssueId", () => {
       const url = req.url;
 
       // With explicit org, we try project-suffix format: dashboard-4y -> DASHBOARD-4Y
-      if (url.includes("organizations/org1/issues/DASHBOARD-4Y")) {
+      if (url.includes("organizations/org1/shortids/DASHBOARD-4Y")) {
         return new Response(
           JSON.stringify({
-            id: "999888777",
-            shortId: "DASHBOARD-4Y",
-            title: "Test Issue with explicit org",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "1",
-            userCount: 1,
+            organizationSlug: "org1",
+            projectSlug: "dashboard",
+            groupId: "999888777",
+            group: {
+              id: "999888777",
+              shortId: "DASHBOARD-4Y",
+              title: "Test Issue with explicit org",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "1",
+              userCount: 1,
+            },
           }),
           {
             status: 200,
@@ -250,17 +265,22 @@ describe("resolveOrgAndIssueId", () => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("organizations/my-org/issues/MY-PROJECT-G")) {
+      if (url.includes("organizations/my-org/shortids/MY-PROJECT-G")) {
         return new Response(
           JSON.stringify({
-            id: "444555666",
-            shortId: "MY-PROJECT-G",
-            title: "Test Issue from short suffix",
-            status: "unresolved",
-            platform: "python",
-            type: "error",
-            count: "3",
-            userCount: 1,
+            organizationSlug: "my-org",
+            projectSlug: "my-project",
+            groupId: "444555666",
+            group: {
+              id: "444555666",
+              shortId: "MY-PROJECT-G",
+              title: "Test Issue from short suffix",
+              status: "unresolved",
+              platform: "python",
+              type: "error",
+              count: "3",
+              userCount: 1,
+            },
           }),
           {
             status: 200,
@@ -323,7 +343,8 @@ describe("resolveOrgAndIssueId", () => {
       if (
         url.includes("/organizations/") &&
         !url.includes("/projects/") &&
-        !url.includes("/issues/")
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
       ) {
         return new Response(
           JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
@@ -334,18 +355,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for my-org
-      if (url.includes("organizations/my-org/projects/")) {
+      // getProject for my-org/craft - found
+      if (url.includes("/projects/my-org/craft/")) {
         return new Response(
-          JSON.stringify([
-            { id: "123", slug: "craft", name: "Craft", platform: "javascript" },
-            {
-              id: "456",
-              slug: "other-project",
-              name: "Other",
-              platform: "python",
-            },
-          ]),
+          JSON.stringify({
+            id: "123",
+            slug: "craft",
+            name: "Craft",
+            platform: "javascript",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -353,17 +371,22 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      if (url.includes("organizations/my-org/issues/CRAFT-G")) {
+      if (url.includes("organizations/my-org/shortids/CRAFT-G")) {
         return new Response(
           JSON.stringify({
-            id: "777888999",
-            shortId: "CRAFT-G",
-            title: "Test Issue fallback",
-            status: "unresolved",
-            platform: "javascript",
-            type: "error",
-            count: "1",
-            userCount: 1,
+            organizationSlug: "my-org",
+            projectSlug: "craft",
+            groupId: "777888999",
+            group: {
+              id: "777888999",
+              shortId: "CRAFT-G",
+              title: "Test Issue fallback",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "1",
+              userCount: 1,
+            },
           }),
           {
             status: 200,
@@ -410,7 +433,8 @@ describe("resolveOrgAndIssueId", () => {
       if (
         url.includes("/organizations/") &&
         !url.includes("/projects/") &&
-        !url.includes("/issues/")
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
       ) {
         return new Response(
           JSON.stringify([{ id: "1", slug: "my-org", name: "My Org" }]),
@@ -421,7 +445,16 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects - return projects that don't match "nonexistent"
+      // getProject (single project detail) — "nonexistent" doesn't exist
+      // URL pattern: /projects/{org}/{project}/
+      if (url.match(/\/projects\/[^/]+\/[^/]+/)) {
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      }
+
+      // listProjects — return projects that don't match "nonexistent"
+      // URL pattern: /organizations/{org}/projects/
       if (url.includes("/projects/")) {
         return new Response(
           JSON.stringify([
@@ -478,7 +511,8 @@ describe("resolveOrgAndIssueId", () => {
       if (
         url.includes("/organizations/") &&
         !url.includes("/projects/") &&
-        !url.includes("/issues/")
+        !url.includes("/issues/") &&
+        !url.includes("/shortids/")
       ) {
         return new Response(
           JSON.stringify([
@@ -492,17 +526,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for org1 - has "common" project
-      if (url.includes("organizations/org1/projects/")) {
+      // getProject for org1/common - found
+      if (url.includes("/projects/org1/common/")) {
         return new Response(
-          JSON.stringify([
-            {
-              id: "123",
-              slug: "common",
-              name: "Common",
-              platform: "javascript",
-            },
-          ]),
+          JSON.stringify({
+            id: "123",
+            slug: "common",
+            name: "Common",
+            platform: "javascript",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -510,12 +542,15 @@ describe("resolveOrgAndIssueId", () => {
         );
       }
 
-      // listProjects for org2 - also has "common" project
-      if (url.includes("organizations/org2/projects/")) {
+      // getProject for org2/common - also found
+      if (url.includes("/projects/org2/common/")) {
         return new Response(
-          JSON.stringify([
-            { id: "456", slug: "common", name: "Common", platform: "python" },
-          ]),
+          JSON.stringify({
+            id: "456",
+            slug: "common",
+            name: "Common",
+            platform: "python",
+          }),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },

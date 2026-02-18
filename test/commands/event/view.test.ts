@@ -72,6 +72,46 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("slash-separated org/project/eventId (single arg)", () => {
+    test("parses org/project/eventId as target + event ID", () => {
+      const result = parsePositionalArgs(["sentry/cli/abc123def"]);
+      expect(result.targetArg).toBe("sentry/cli");
+      expect(result.eventId).toBe("abc123def");
+    });
+
+    test("parses with long hex event ID", () => {
+      const result = parsePositionalArgs([
+        "my-org/frontend/a1b2c3d4e5f67890abcdef1234567890",
+      ]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.eventId).toBe("a1b2c3d4e5f67890abcdef1234567890");
+    });
+
+    test("handles hyphenated org and project slugs", () => {
+      const result = parsePositionalArgs(["my-org/my-project/deadbeef"]);
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.eventId).toBe("deadbeef");
+    });
+
+    test("one slash (org/project, missing event ID) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli"])).toThrow(ContextError);
+    });
+
+    test("trailing slash (org/project/) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli/"])).toThrow(ContextError);
+    });
+
+    test("one-slash ContextError mentions Event ID", () => {
+      try {
+        parsePositionalArgs(["sentry/cli"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Event ID");
+      }
+    });
+  });
+
   describe("edge cases", () => {
     test("handles more than two args (ignores extras)", () => {
       const result = parsePositionalArgs([
@@ -87,6 +127,67 @@ describe("parsePositionalArgs", () => {
       const result = parsePositionalArgs(["my-org/frontend", ""]);
       expect(result.targetArg).toBe("my-org/frontend");
       expect(result.eventId).toBe("");
+    });
+  });
+
+  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  describe("Sentry URL inputs", () => {
+    let savedSentryUrl: string | undefined;
+
+    beforeEach(() => {
+      savedSentryUrl = process.env.SENTRY_URL;
+      delete process.env.SENTRY_URL;
+    });
+
+    afterEach(() => {
+      if (savedSentryUrl !== undefined) {
+        process.env.SENTRY_URL = savedSentryUrl;
+      } else {
+        delete process.env.SENTRY_URL;
+      }
+    });
+
+    test("event URL extracts eventId and passes org as OrgAll target", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.io/organizations/my-org/issues/32886/events/abc123def456/",
+      ]);
+      expect(result.eventId).toBe("abc123def456");
+      expect(result.targetArg).toBe("my-org/");
+    });
+
+    test("self-hosted event URL extracts eventId, passes org, sets SENTRY_URL", () => {
+      const result = parsePositionalArgs([
+        "https://sentry.example.com/organizations/acme/issues/999/events/deadbeef/",
+      ]);
+      expect(result.eventId).toBe("deadbeef");
+      expect(result.targetArg).toBe("acme/");
+      expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+    });
+
+    test("issue URL without event ID throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ])
+      ).toThrow(ContextError);
+    });
+
+    test("issue-only URL error mentions event ID", () => {
+      try {
+        parsePositionalArgs([
+          "https://sentry.io/organizations/my-org/issues/32886/",
+        ]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Event ID");
+      }
+    });
+
+    test("org-only URL throws ContextError", () => {
+      expect(() =>
+        parsePositionalArgs(["https://sentry.io/organizations/my-org/"])
+      ).toThrow(ContextError);
     });
   });
 });

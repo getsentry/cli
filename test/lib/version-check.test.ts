@@ -21,6 +21,33 @@ describe("shouldSuppressNotification", () => {
     expect(shouldSuppressNotification(["upgrade", "--check"])).toBe(true);
   });
 
+  test("suppresses for cli management commands", () => {
+    expect(shouldSuppressNotification(["cli", "setup"])).toBe(true);
+    expect(shouldSuppressNotification(["cli", "fix"])).toBe(true);
+    expect(
+      shouldSuppressNotification([
+        "cli",
+        "setup",
+        "--install",
+        "--method",
+        "curl",
+      ])
+    ).toBe(true);
+  });
+
+  test("does not suppress for cli feedback", () => {
+    expect(shouldSuppressNotification(["cli", "feedback"])).toBe(false);
+  });
+
+  test("does not suppress when setup/fix appear as non-cli args", () => {
+    expect(
+      shouldSuppressNotification(["issue", "list", "--project", "setup"])
+    ).toBe(false);
+    expect(
+      shouldSuppressNotification(["issue", "list", "--query", "fix"])
+    ).toBe(false);
+  });
+
   test("suppresses for --version flag", () => {
     expect(shouldSuppressNotification(["--version"])).toBe(true);
     expect(shouldSuppressNotification(["-V"])).toBe(true);

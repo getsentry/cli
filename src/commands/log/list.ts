@@ -11,7 +11,7 @@ import type { SentryContext } from "../../context.js";
 import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
 import {
   formatLogRow,
   formatLogsHeader,
@@ -226,7 +226,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
       Sentry.captureException(error);
 
       // Always write to stderr (doesn't interfere with JSON on stdout)
-      const message = error instanceof Error ? error.message : String(error);
+      const message = stringifyUnknown(error);
       stderr.write(`Error fetching logs: ${message}\n`);
       // Continue polling on transient errors (network, etc.)
     }

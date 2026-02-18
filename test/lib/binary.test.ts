@@ -31,9 +31,9 @@ describe("getBinaryDownloadUrl", () => {
   test("builds correct URL for current platform", () => {
     const url = getBinaryDownloadUrl("1.0.0");
 
-    expect(url).toContain("/v1.0.0/");
+    expect(url).toContain("/1.0.0/");
     expect(url).toStartWith(
-      "https://github.com/getsentry/cli/releases/download/v"
+      "https://github.com/getsentry/cli/releases/download/"
     );
     expect(url).toContain("sentry-");
 
@@ -227,7 +227,7 @@ describe("fetchWithUpgradeError", () => {
   test("wraps non-Error thrown values as UpgradeError", async () => {
     globalThis.fetch = (async () => {
       // biome-ignore lint/style/useThrowOnlyError: intentionally testing non-Error throw
-      throw { toString: () => "custom thrown value" };
+      throw { code: "ECONNRESET", reason: "connection reset" };
     }) as typeof globalThis.fetch;
 
     try {
@@ -235,7 +235,7 @@ describe("fetchWithUpgradeError", () => {
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(UpgradeError);
-      expect((error as UpgradeError).message).toContain("custom thrown value");
+      expect((error as UpgradeError).message).toContain("ECONNRESET");
     }
   });
 });

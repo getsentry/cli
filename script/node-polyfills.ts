@@ -135,19 +135,34 @@ const BunPolyfill = {
 
   spawn(
     cmd: string[],
-    opts?: { stdout?: "pipe" | "ignore"; stderr?: "pipe" | "ignore" }
+    opts?: {
+      stdin?: "pipe" | "ignore" | "inherit";
+      stdout?: "pipe" | "ignore" | "inherit";
+      stderr?: "pipe" | "ignore" | "inherit";
+      env?: Record<string, string | undefined>;
+    }
   ) {
     const [command, ...args] = cmd;
-    const stdio: ("pipe" | "ignore")[] = [
-      "ignore", // stdin
-      opts?.stdout ?? "ignore",
-      opts?.stderr ?? "ignore",
-    ];
     const proc = nodeSpawn(command, args, {
-      detached: true,
-      stdio,
+      stdio: [
+        opts?.stdin ?? "ignore",
+        opts?.stdout ?? "ignore",
+        opts?.stderr ?? "ignore",
+      ],
+      env: opts?.env,
     });
+
+    // Promise that resolves with the exit code when the process exits.
+    // Bun's proc.exited resolves to the numeric exit code; we match that
+    // contract, falling back to 1 on signal-only termination.
+    const exited = new Promise<number>((resolve) => {
+      proc.on("close", (code) => resolve(code ?? 1));
+      proc.on("error", () => resolve(1));
+    });
+
     return {
+      stdin: proc.stdin,
+      exited,
       unref() {
         proc.unref();
       },

@@ -6,7 +6,9 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
-import { ContextError } from "./errors.js";
+import { ContextError, ValidationError } from "./errors.js";
+import type { ParsedSentryUrl } from "./sentry-url-parser.js";
+import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
 
 /** Default span depth when no value is provided */
@@ -98,10 +100,59 @@ export type ParsedOrgProject =
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
 /**
+ * Map a parsed Sentry URL to a ParsedOrgProject.
+ * If the URL contains a project slug, returns explicit; otherwise org-all.
+ */
+function orgProjectFromUrl(parsed: ParsedSentryUrl): ParsedOrgProject {
+  if (parsed.project) {
+    return { type: "explicit", org: parsed.org, project: parsed.project };
+  }
+  return { type: "org-all", org: parsed.org };
+}
+
+/**
+ * Map a parsed Sentry URL to a ParsedIssueArg.
+ * Handles numeric group IDs and short IDs (e.g., "CLI-G") from the URL path.
+ */
+function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
+  const { issueId } = parsed;
+  if (!issueId) {
+    return null;
+  }
+
+  // Numeric group ID (e.g., /issues/32886/)
+  if (isAllDigits(issueId)) {
+    return {
+      type: "explicit-org-numeric",
+      org: parsed.org,
+      numericId: issueId,
+    };
+  }
+
+  // Short ID with dash (e.g., /issues/CLI-G/ or /issues/SPOTLIGHT-ELECTRON-4Y/)
+  const dashIdx = issueId.lastIndexOf("-");
+  if (dashIdx > 0) {
+    const project = issueId.slice(0, dashIdx);
+    const suffix = issueId.slice(dashIdx + 1).toUpperCase();
+    if (project && suffix) {
+      return { type: "explicit", org: parsed.org, project, suffix };
+    }
+  }
+
+  // No dash — treat as suffix-only with org context
+  return {
+    type: "explicit-org-suffix",
+    org: parsed.org,
+    suffix: issueId.toUpperCase(),
+  };
+}
+
+/**
  * Parse an org/project positional argument string.
  *
  * Supports the following patterns:
  * - `undefined` or empty → auto-detect from DSN/config
+ * - `https://sentry.io/organizations/org/...` → extract from Sentry URL
  * - `sentry/cli` → explicit org and project
  * - `sentry/` → org with all projects
  * - `/cli` → search for project across all orgs (leading slash)
@@ -123,6 +174,13 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   }
 
   const trimmed = arg.trim();
+
+  // URL detection — extract org/project from Sentry web URLs
+  const urlParsed = parseSentryUrl(trimmed);
+  if (urlParsed) {
+    applySentryUrlContext(urlParsed.baseUrl);
+    return orgProjectFromUrl(urlParsed);
+  }
 
   if (trimmed.includes("/")) {
     const slashIndex = trimmed.indexOf("/");
@@ -338,7 +396,71 @@ function parseWithDash(arg: string): ParsedIssueArg {
   return { type: "project-search", projectSlug, suffix };
 }
 
+/**
+ * Parse a single positional arg that may be a plain hex ID or a slash-separated
+ * `org/project/id` pattern.
+ *
+ * Used by commands whose IDs are hex strings that never contain `/`
+ * (event, trace, log), making the pattern unambiguous:
+ * - No slashes → plain ID, no target
+ * - Exactly one slash → `org/project` without ID → throws {@link ContextError}
+ * - Two or more slashes → splits on last `/` → `targetArg` + `id`
+ *
+ * @param arg - The raw single positional argument
+ * @param idLabel - Human-readable ID label for error messages (e.g. `"Event ID"`)
+ * @param usageHint - Usage example shown in error messages
+ * @returns Parsed `{ id, targetArg }` — `targetArg` is `undefined` for plain IDs
+ * @throws {ContextError} When the arg contains exactly one slash (missing ID)
+ *   or ends with a trailing slash (empty ID segment)
+ */
+export function parseSlashSeparatedArg(
+  arg: string,
+  idLabel: string,
+  usageHint: string
+): { id: string; targetArg: string | undefined } {
+  const slashIdx = arg.indexOf("/");
+
+  if (slashIdx === -1) {
+    // No slashes — plain ID
+    return { id: arg, targetArg: undefined };
+  }
+
+  // IDs are hex and never contain "/" — this must be a structured
+  // "org/project/id" or "org/project" (missing ID)
+  const lastSlashIdx = arg.lastIndexOf("/");
+
+  if (slashIdx === lastSlashIdx) {
+    // Exactly one slash: "org/project" without ID
+    throw new ContextError(idLabel, usageHint);
+  }
+
+  // Two+ slashes: split on last "/" → target + id
+  const targetArg = arg.slice(0, lastSlashIdx);
+  const id = arg.slice(lastSlashIdx + 1);
+
+  if (!id) {
+    throw new ContextError(idLabel, usageHint);
+  }
+
+  return { id, targetArg };
+}
+
 export function parseIssueArg(arg: string): ParsedIssueArg {
+  // 0. URL detection — extract issue ID from Sentry web URLs
+  const urlParsed = parseSentryUrl(arg);
+  if (urlParsed) {
+    applySentryUrlContext(urlParsed.baseUrl);
+    const result = issueArgFromUrl(urlParsed);
+    if (result) {
+      return result;
+    }
+    // URL recognized but no issue ID (e.g., trace or project settings URL)
+    throw new ValidationError(
+      "This Sentry URL does not contain an issue ID. Use an issue URL like:\n" +
+        "  https://sentry.io/organizations/{org}/issues/{id}/"
+    );
+  }
+
   // 1. Pure numeric → direct fetch by ID
   if (isAllDigits(arg)) {
     return { type: "numeric", id: arg };
