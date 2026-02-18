@@ -72,6 +72,46 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("slash-separated org/project/eventId (single arg)", () => {
+    test("parses org/project/eventId as target + event ID", () => {
+      const result = parsePositionalArgs(["sentry/cli/abc123def"]);
+      expect(result.targetArg).toBe("sentry/cli");
+      expect(result.eventId).toBe("abc123def");
+    });
+
+    test("parses with long hex event ID", () => {
+      const result = parsePositionalArgs([
+        "my-org/frontend/a1b2c3d4e5f67890abcdef1234567890",
+      ]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.eventId).toBe("a1b2c3d4e5f67890abcdef1234567890");
+    });
+
+    test("handles hyphenated org and project slugs", () => {
+      const result = parsePositionalArgs(["my-org/my-project/deadbeef"]);
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.eventId).toBe("deadbeef");
+    });
+
+    test("one slash (org/project, missing event ID) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli"])).toThrow(ContextError);
+    });
+
+    test("trailing slash (org/project/) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli/"])).toThrow(ContextError);
+    });
+
+    test("one-slash ContextError mentions Event ID", () => {
+      try {
+        parsePositionalArgs(["sentry/cli"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Event ID");
+      }
+    });
+  });
+
   describe("edge cases", () => {
     test("handles more than two args (ignores extras)", () => {
       const result = parsePositionalArgs([

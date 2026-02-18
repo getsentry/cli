@@ -9,6 +9,7 @@ import { getEvent } from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
+  parseSlashSeparatedArg,
   spansFlag,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
@@ -113,8 +114,12 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    // Single arg - must be event ID
-    return { eventId: first, targetArg: undefined };
+    const { id: eventId, targetArg } = parseSlashSeparatedArg(
+      first,
+      "Event ID",
+      USAGE_HINT
+    );
+    return { eventId, targetArg };
   }
 
   const second = args[1];

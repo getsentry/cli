@@ -70,6 +70,42 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("slash-separated org/project/logId (single arg)", () => {
+    test("parses org/project/logId as target + log ID", () => {
+      const result = parsePositionalArgs([
+        "sentry/cli/968c763c740cfda8b6728f27fb9e9b01",
+      ]);
+      expect(result.targetArg).toBe("sentry/cli");
+      expect(result.logId).toBe("968c763c740cfda8b6728f27fb9e9b01");
+    });
+
+    test("handles hyphenated org and project slugs", () => {
+      const result = parsePositionalArgs([
+        "my-org/my-project/deadbeef12345678",
+      ]);
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.logId).toBe("deadbeef12345678");
+    });
+
+    test("one slash (org/project, missing log ID) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli"])).toThrow(ContextError);
+    });
+
+    test("trailing slash (org/project/) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli/"])).toThrow(ContextError);
+    });
+
+    test("one-slash ContextError mentions Log ID", () => {
+      try {
+        parsePositionalArgs(["sentry/cli"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Log ID");
+      }
+    });
+  });
+
   describe("edge cases", () => {
     test("handles more than two args (ignores extras)", () => {
       const result = parsePositionalArgs([
