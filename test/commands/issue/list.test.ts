@@ -201,42 +201,67 @@ describe("issue list: error propagation", () => {
 });
 
 describe("issue list: partial failure handling", () => {
+  // Partial failure handling applies to the per-project fetch path (auto-detect,
+  // explicit, and project-search modes). The org-all mode (e.g. "multi-org/")
+  // uses a single paginated API call and does not do per-project fetching.
+  //
+  // To trigger partial failures, we use project-search (bare slug) which fans
+  // out across orgs via findProjectsBySlug → getProject per org, creating
+  // multiple per-project fetch targets where some can fail independently.
+  //
+  // findProjectsBySlug flow:
+  //   1. listOrganizations() → GET /api/0/organizations/
+  //   2. getProject(org, slug) → GET /api/0/projects/{org}/{slug}/  (per org)
+  //   3. listIssues(org, slug) → GET /api/0/organizations/{org}/issues/?query=project:{slug}
+
   test("JSON output includes error info on partial failures", async () => {
-    await setOrgRegion("multi-org", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      // listProjects: /api/0/organizations/multi-org/projects/
-      if (url.includes("/organizations/multi-org/projects/")) {
+      // listOrganizations → returns org-one and org-two
+      if (
+        url.includes("/api/0/organizations/") &&
+        !url.includes("/organizations/org-")
+      ) {
         return new Response(
           JSON.stringify([
-            { id: "1", slug: "proj-a", name: "Project A" },
-            { id: "2", slug: "proj-b", name: "Project B" },
+            { slug: "org-one", name: "Org One" },
+            { slug: "org-two", name: "Org Two" },
           ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", Link: "" },
-          }
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      // listIssues: /api/0/organizations/multi-org/issues/?query=project:proj-a...
-      if (url.includes("/organizations/multi-org/issues/")) {
-        const queryParam = new URL(url).searchParams.get("query") ?? "";
-        if (queryParam.includes("project:proj-a")) {
-          return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (queryParam.includes("project:proj-b")) {
-          return new Response(
-            JSON.stringify({ detail: "Invalid query syntax" }),
-            { status: 400 }
-          );
-        }
+      // getProject for each org (findProjectsBySlug)
+      if (url.includes("/projects/org-one/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "1", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/projects/org-two/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "2", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listIssues: org-one succeeds, org-two fails with 400
+      if (url.includes("/organizations/org-one/issues/")) {
+        return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/organizations/org-two/issues/")) {
+        return new Response(
+          JSON.stringify({ detail: "Invalid query syntax" }),
+          { status: 400 }
+        );
       }
 
       return new Response(JSON.stringify([]), {
@@ -247,11 +272,9 @@ describe("issue list: partial failure handling", () => {
 
     const { context, stdout } = createContext();
 
-    await func.call(
-      context,
-      { limit: 10, sort: "date", json: true },
-      "multi-org/"
-    );
+    // project-search for "myproj" — finds it in org-one and org-two, creating
+    // two per-project targets; org-one succeeds, org-two fails → partial failure
+    await func.call(context, { limit: 10, sort: "date", json: true }, "myproj");
 
     const output = JSON.parse(stdout.output);
     expect(output).toHaveProperty("issues");
@@ -262,38 +285,52 @@ describe("issue list: partial failure handling", () => {
   });
 
   test("stderr warning on partial failures in human output", async () => {
-    await setOrgRegion("multi-org", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("/organizations/multi-org/projects/")) {
+      // listOrganizations → returns org-one and org-two
+      if (
+        url.includes("/api/0/organizations/") &&
+        !url.includes("/organizations/org-")
+      ) {
         return new Response(
           JSON.stringify([
-            { id: "1", slug: "proj-a", name: "Project A" },
-            { id: "2", slug: "proj-b", name: "Project B" },
+            { slug: "org-one", name: "Org One" },
+            { slug: "org-two", name: "Org Two" },
           ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", Link: "" },
-          }
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      if (url.includes("/organizations/multi-org/issues/")) {
-        const queryParam = new URL(url).searchParams.get("query") ?? "";
-        if (queryParam.includes("project:proj-a")) {
-          return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (queryParam.includes("project:proj-b")) {
-          return new Response(JSON.stringify({ detail: "Permission denied" }), {
-            status: 403,
-          });
-        }
+      // getProject for each org (findProjectsBySlug)
+      if (url.includes("/projects/org-one/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "1", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/projects/org-two/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "2", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listIssues: org-one succeeds, org-two fails with 403
+      if (url.includes("/organizations/org-one/issues/")) {
+        return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/organizations/org-two/issues/")) {
+        return new Response(JSON.stringify({ detail: "Permission denied" }), {
+          status: 403,
+        });
       }
 
       return new Response(JSON.stringify([]), {
@@ -304,10 +341,11 @@ describe("issue list: partial failure handling", () => {
 
     const { context, stderr } = createContext();
 
+    // project-search for "myproj" — org-one succeeds, org-two gets 403 → partial failure
     await func.call(
       context,
       { limit: 10, sort: "date", json: false },
-      "multi-org/"
+      "myproj"
     );
 
     expect(stderr.output).toContain("Failed to fetch issues from 1 project(s)");
