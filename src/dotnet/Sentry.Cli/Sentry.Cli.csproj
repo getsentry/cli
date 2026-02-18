@@ -7,7 +7,6 @@
 
   <PropertyGroup>
     <PublishAot>true</PublishAot>
-    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -32,6 +31,13 @@
     <PackageReleaseNotes>https://github.com/getsentry/cli/blob/main/CHANGELOG.md</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/getsentry/cli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <!-- https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/optimizing -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <StripSymbols>true</StripSymbols>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'any'">
