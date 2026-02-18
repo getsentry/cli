@@ -4,22 +4,15 @@
  * List organizations the user has access to.
  */
 
-import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import {
   calculateOrgSlugWidth,
   formatOrgRow,
-  writeFooter,
-  writeJson,
 } from "../../lib/formatters/index.js";
-
-type ListFlags = {
-  readonly limit: number;
-  readonly json: boolean;
-};
+import { listCommand as buildListCommand } from "../../lib/list-helpers.js";
+import type { SentryOrganization } from "../../types/index.js";
 
 /**
  * Extract a human-readable region name from a region URL.
@@ -57,7 +50,7 @@ function getRegionDisplayName(regionUrl: string): string {
   }
 }
 
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand<SentryOrganization>({
   docs: {
     brief: "List organizations",
     fullDescription:
@@ -67,44 +60,24 @@ export const listCommand = buildCommand({
       "  sentry org list --limit 10\n" +
       "  sentry org list --json",
   },
-  parameters: {
-    flags: {
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of organizations to list",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "30",
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output JSON",
-        default: false,
-      },
-    },
-  },
-  async func(this: SentryContext, flags: ListFlags): Promise<void> {
-    const { stdout } = this;
-
+  limit: 30,
+  emptyMessage: "No organizations found.",
+  footerTip: "Tip: Use 'sentry org view <slug>' for details",
+  async fetch(flags) {
     const orgs = await listOrganizations();
-    const limitedOrgs = orgs.slice(0, flags.limit);
-
-    if (flags.json) {
-      writeJson(stdout, limitedOrgs);
-      return;
-    }
-
-    if (limitedOrgs.length === 0) {
-      stdout.write("No organizations found.\n");
-      return;
-    }
-
+    const items = orgs.slice(0, flags.limit);
+    return {
+      items,
+      total: orgs.length > flags.limit ? orgs.length : undefined,
+    };
+  },
+  async render(items, stdout) {
     // Check if user has orgs in multiple regions
     const orgRegions = await getAllOrgRegions();
     const uniqueRegions = new Set(orgRegions.values());
     const showRegion = uniqueRegions.size > 1;
 
-    const slugWidth = calculateOrgSlugWidth(limitedOrgs);
+    const slugWidth = calculateOrgSlugWidth(items);
 
     // Header
     if (showRegion) {
@@ -116,7 +89,7 @@ export const listCommand = buildCommand({
     }
 
     // Rows
-    for (const org of limitedOrgs) {
+    for (const org of items) {
       if (showRegion) {
         const regionUrl = orgRegions.get(org.slug) ?? "";
         const regionName = getRegionDisplayName(regionUrl);
@@ -127,13 +100,5 @@ export const listCommand = buildCommand({
         stdout.write(`${formatOrgRow(org, slugWidth)}\n`);
       }
     }
-
-    if (orgs.length > flags.limit) {
-      stdout.write(
-        `\nShowing ${flags.limit} of ${orgs.length} organizations\n`
-      );
-    }
-
-    writeFooter(stdout, "Tip: Use 'sentry org view <slug>' for details");
   },
 });

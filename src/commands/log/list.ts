@@ -8,29 +8,19 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
+import { listLogs } from "../../lib/api-client.js";
+import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   formatLogRow,
   formatLogsHeader,
-  writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  listCommand as buildListCommand,
+  resolveSingleTarget,
+} from "../../lib/list-helpers.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
-
-type ListFlags = {
-  readonly limit: number;
-  readonly query?: string;
-  readonly follow?: number;
-  readonly json: boolean;
-};
-
-/** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry log list <org>/<project>";
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -43,36 +33,6 @@ const DEFAULT_LIMIT = 100;
 
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
-
-/**
- * Validate that --limit value is within allowed range.
- *
- * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
- */
-function validateLimit(value: string): number {
-  const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
-    throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
-  }
-  return num;
-}
-
-/**
- * Parse --follow flag value.
- * Supports: -f (empty string → default interval), -f 10 (explicit interval)
- *
- * @throws Error if value is not a positive integer
- */
-function parseFollow(value: string): number {
-  if (value === "") {
-    return DEFAULT_POLL_INTERVAL;
-  }
-  const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < 1) {
-    throw new Error("--follow interval must be a positive integer");
-  }
-  return num;
-}
 
 /**
  * Write logs to output in the appropriate format.
@@ -89,53 +49,15 @@ function writeLogs(stdout: Writer, logs: SentryLog[], asJson: boolean): void {
   }
 }
 
-/**
- * Execute a single fetch of logs (non-streaming mode).
- */
-async function executeSingleFetch(
-  stdout: Writer,
-  org: string,
-  project: string,
-  flags: ListFlags
-): Promise<void> {
-  const logs = await listLogs(org, project, {
-    query: flags.query,
-    limit: flags.limit,
-    statsPeriod: "90d",
-  });
-
-  if (flags.json) {
-    // Reverse for chronological order (API returns newest first)
-    writeJson(stdout, [...logs].reverse());
-    return;
-  }
-
-  if (logs.length === 0) {
-    stdout.write("No logs found.\n");
-    return;
-  }
-
-  // Reverse for chronological order (API returns newest first, tail shows oldest first)
-  const chronological = [...logs].reverse();
-
-  stdout.write(formatLogsHeader());
-  for (const log of chronological) {
-    stdout.write(formatLogRow(log));
-  }
-
-  // Show footer with tip if we hit the limit
-  const hasMore = logs.length >= flags.limit;
-  const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
-  const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
-  writeFooter(stdout, `${countText}${tip}`);
-}
-
 type FollowModeOptions = {
   stdout: Writer;
   stderr: Writer;
   org: string;
   project: string;
-  flags: ListFlags;
+  query: string | undefined;
+  limit: number;
+  json: boolean;
+  pollInterval: number;
 };
 
 /**
@@ -147,11 +69,11 @@ type FollowModeOptions = {
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: streaming loop with error handling
 async function executeFollowMode(options: FollowModeOptions): Promise<void> {
-  const { stdout, stderr, org, project, flags } = options;
-  const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
+  const { stdout, stderr, org, project, query, limit, json, pollInterval } =
+    options;
   const pollIntervalMs = pollInterval * 1000;
 
-  if (!flags.json) {
+  if (!json) {
     stderr.write(`Streaming logs... (poll interval: ${pollInterval}s)\n`);
     stderr.write("Press Ctrl+C to stop.\n");
 
@@ -168,20 +90,20 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
   const initialLogs = await listLogs(org, project, {
-    query: flags.query,
-    limit: flags.limit,
+    query,
+    limit,
     statsPeriod: "1m",
   });
 
   // Print header before initial logs (human mode only)
-  if (!flags.json && initialLogs.length > 0) {
+  if (!json && initialLogs.length > 0) {
     stdout.write(formatLogsHeader());
     headerPrinted = true;
   }
 
   // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
   const chronologicalInitial = [...initialLogs].reverse();
-  writeLogs(stdout, chronologicalInitial, flags.json);
+  writeLogs(stdout, chronologicalInitial, json);
 
   // Track newest timestamp (logs are sorted -timestamp, so first is newest)
   // Use current time as fallback to avoid fetching old logs when initial fetch is empty
@@ -195,8 +117,8 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
     try {
       const newLogs = await listLogs(org, project, {
-        query: flags.query,
-        limit: flags.limit,
+        query,
+        limit,
         statsPeriod: "10m",
         afterTimestamp: lastTimestamp,
       });
@@ -204,14 +126,14 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
       const newestLog = newLogs[0];
       if (newestLog) {
         // Print header before first logs if not already printed
-        if (!(flags.json || headerPrinted)) {
+        if (!(json || headerPrinted)) {
           stdout.write(formatLogsHeader());
           headerPrinted = true;
         }
 
         // Reverse for chronological order (oldest first for tail -f style)
         const chronologicalNew = [...newLogs].reverse();
-        writeLogs(stdout, chronologicalNew, flags.json);
+        writeLogs(stdout, chronologicalNew, json);
 
         // Update timestamp AFTER successful write to avoid losing logs on write failure
         lastTimestamp = newestLog.timestamp_precise;
@@ -233,84 +155,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   }
 }
 
-/** Resolved org and project for log commands */
-type ResolvedLogTarget = {
-  org: string;
-  project: string;
-};
-
-/**
- * Resolve org/project from parsed argument or auto-detection.
- *
- * Handles:
- * - explicit: "org/project" → use directly
- * - project-search: "project" → find project across all orgs
- * - auto-detect: no input → use DSN detection or config defaults
- *
- * @throws {ContextError} When target cannot be resolved
- */
-async function resolveLogTarget(
-  target: string | undefined,
-  cwd: string
-): Promise<ResolvedLogTarget> {
-  const parsed = parseOrgProjectArg(target);
-
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-
-    case "org-all":
-      throw new ContextError(
-        "Project",
-        `Please specify a project: sentry log list ${parsed.org}/<project>`
-      );
-
-    case "project-search": {
-      // Find project across all orgs
-      const matches = await findProjectsBySlug(parsed.projectSlug);
-
-      if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry log list <org>/${parsed.projectSlug}`
-        );
-      }
-
-      if (matches.length > 1) {
-        const options = matches
-          .map((m) => `  sentry log list ${m.orgSlug}/${m.slug}`)
-          .join("\n");
-        throw new ContextError(
-          "Project",
-          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
-        );
-      }
-
-      // Safe: we checked matches.length === 1 above, so first element exists
-      const match = matches[0] as (typeof matches)[number];
-      return { org: match.orgSlug, project: match.slug };
-    }
-
-    case "auto-detect": {
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      return { org: resolved.org, project: resolved.project };
-    }
-
-    default: {
-      const _exhaustiveCheck: never = parsed;
-      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-    }
-  }
-}
-
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand<SentryLog>({
   docs: {
     brief: "List logs from a project",
     fullDescription:
@@ -326,65 +171,68 @@ export const listCommand = buildCommand({
       "  sentry log list --limit 50         # Show last 50 logs\n" +
       "  sentry log list -q 'level:error'   # Filter to errors only",
   },
-  parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
-    flags: {
-      limit: {
-        kind: "parsed",
-        parse: validateLimit,
-        brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
-        default: String(DEFAULT_LIMIT),
-      },
-      query: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter query (Sentry search syntax)",
-        optional: true,
-      },
-      follow: {
-        kind: "parsed",
-        parse: parseFollow,
-        brief: "Stream logs (optionally specify poll interval in seconds)",
-        optional: true,
-        inferEmpty: true,
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
-    },
-    aliases: {
-      n: "limit",
-      q: "query",
-      f: "follow",
-    },
+  limit: { min: MIN_LIMIT, max: MAX_LIMIT, default: DEFAULT_LIMIT },
+  features: { query: true, follow: true },
+  positional: {
+    placeholder: "target",
+    brief: "Target: <org>/<project> or <project>",
+    optional: true,
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<void> {
-    const { stdout, stderr, cwd, setContext } = this;
+  emptyMessage: "No logs found.",
+  footerTip: (result, flags) => {
+    const count = result.items.length;
+    const hasMore = count >= (flags.limit as number);
+    const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
+    return `Showing ${count} log${count === 1 ? "" : "s"}.${tip}`;
+  },
+  async fetch(this: SentryContext, flags, target) {
+    const { org, project } = await resolveSingleTarget(
+      target,
+      this.cwd,
+      "sentry log list"
+    );
+    this.setContext([org], [project]);
 
-    // Resolve org/project from positional arg, config, or DSN auto-detection
-    const { org, project } = await resolveLogTarget(target, cwd);
-    setContext([org], [project]);
-
-    if (flags.follow) {
-      await executeFollowMode({ stdout, stderr, org, project, flags });
-    } else {
-      await executeSingleFetch(stdout, org, project, flags);
+    // In --follow mode skip the historical fetch; the follow() callback owns the output.
+    if (flags.follow !== undefined) {
+      return { items: [] };
     }
+
+    const logs = await listLogs(org, project, {
+      query: flags.query,
+      limit: flags.limit,
+      statsPeriod: "90d",
+    });
+
+    // Reverse for chronological order (API returns newest first)
+    const items = [...logs].reverse();
+    return { items };
+  },
+  render(items, stdout) {
+    stdout.write(formatLogsHeader());
+    for (const log of items) {
+      stdout.write(formatLogRow(log));
+    }
+  },
+  // Override JSON output: reverse back to chronological
+  formatJson(result, stdout) {
+    writeJson(stdout, result.items);
+  },
+  async follow(this: SentryContext, flags, target, _initialResult) {
+    const { org, project } = await resolveSingleTarget(
+      target,
+      this.cwd,
+      "sentry log list"
+    );
+    await executeFollowMode({
+      stdout: this.stdout,
+      stderr: this.stderr,
+      org,
+      project,
+      query: flags.query,
+      limit: flags.limit,
+      json: flags.json,
+      pollInterval: (flags.follow as number) ?? DEFAULT_POLL_INTERVAL,
+    });
   },
 });
