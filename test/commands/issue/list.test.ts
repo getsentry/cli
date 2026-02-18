@@ -5,13 +5,25 @@
  * in src/commands/issue/list.ts
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { listCommand } from "../../../src/commands/issue/list.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setDefaults } from "../../../src/lib/db/defaults.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
@@ -374,5 +386,250 @@ describe("issue list: partial failure handling", () => {
     const output = JSON.parse(stdout.output);
     // Should be a plain array, not an object with issues/errors keys
     expect(Array.isArray(output)).toBe(true);
+  });
+});
+
+describe("issue list: org-all mode (cursor pagination)", () => {
+  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
+  let getPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+
+  function createOrgAllContext() {
+    const stdoutWrite = mock(() => true);
+    const stderrWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: stderrWrite },
+        cwd: "/tmp",
+        setContext: mock(() => {}),
+      },
+      stdoutWrite,
+      stderrWrite,
+    };
+  }
+
+  const sampleIssue = {
+    id: "1",
+    shortId: "PROJ-1",
+    title: "Test Error",
+    status: "unresolved",
+    platform: "javascript",
+    type: "error",
+    count: "5",
+    userCount: 2,
+    lastSeen: "2025-01-01T00:00:00Z",
+    firstSeen: "2025-01-01T00:00:00Z",
+    level: "error",
+    project: { slug: "test-proj" },
+  };
+
+  beforeEach(() => {
+    listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
+    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
+    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
+    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+
+    setPaginationCursorSpy.mockReturnValue(undefined);
+    clearPaginationCursorSpy.mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    listIssuesPaginatedSpy.mockRestore();
+    getPaginationCursorSpy.mockRestore();
+    setPaginationCursorSpy.mockRestore();
+    clearPaginationCursorSpy.mockRestore();
+  });
+
+  test("throws ValidationError when --cursor used outside org-all mode", async () => {
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+
+    await expect(
+      orgAllFunc.call(
+        context,
+        { limit: 10, sort: "date", json: false, cursor: "some-cursor" },
+        "my-org/my-project"
+      )
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("hasMore", false);
+    expect(clearPaginationCursorSpy).toHaveBeenCalled();
+  });
+
+  test("returns paginated JSON with hasMore=true when nextCursor present", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: "cursor:xyz:1",
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("hasMore", true);
+    expect(parsed).toHaveProperty("nextCursor", "cursor:xyz:1");
+    expect(setPaginationCursorSpy).toHaveBeenCalled();
+  });
+
+  test("human output shows next page hint when hasMore", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: "cursor:xyz:1",
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("more available");
+    expect(output).toContain("Next page:");
+    expect(output).toContain("-c last");
+  });
+
+  test("human output 'No issues found' when empty org-all", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No issues found in organization 'my-org'.");
+  });
+
+  test("resolves 'last' cursor from cache in org-all mode", async () => {
+    getPaginationCursorSpy.mockReturnValue("cached:cursor:789");
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false, cursor: "last" },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+      "my-org",
+      "",
+      expect.objectContaining({ cursor: "cached:cursor:789" })
+    );
+  });
+
+  test("throws ContextError when 'last' cursor not in cache", async () => {
+    getPaginationCursorSpy.mockReturnValue(null);
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+
+    await expect(
+      orgAllFunc.call(
+        context,
+        { limit: 10, sort: "date", json: false, cursor: "last" },
+        "my-org/"
+      )
+    ).rejects.toThrow("No saved cursor");
+  });
+
+  test("uses explicit cursor string in org-all mode", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false, cursor: "explicit:cursor:val" },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+      "my-org",
+      "",
+      expect.objectContaining({ cursor: "explicit:cursor:val" })
+    );
   });
 });
