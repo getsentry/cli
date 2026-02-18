@@ -70,23 +70,29 @@ function createMockContext(cwd = "/tmp") {
   };
 }
 
-describe("listCommand.func — explicit org (project-search / bare slug)", () => {
+describe("listCommand.func — project-search (bare slug)", () => {
   let listRepositoriesSpy: ReturnType<typeof spyOn>;
+  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listRepositoriesSpy = spyOn(apiClient, "listRepositories");
+    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {
     listRepositoriesSpy.mockRestore();
+    findProjectsBySlugSpy.mockRestore();
   });
 
   test("outputs JSON array when --json flag is set", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: true }, "test-org");
+    await func.call(context, { limit: 30, json: true }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -97,33 +103,42 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
   });
 
   test("outputs empty JSON array when no repos found with --json", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: true }, "test-org");
+    await func.call(context, { limit: 30, json: true }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(JSON.parse(output)).toEqual([]);
   });
 
   test("writes 'No repositories found' when empty without --json", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No repositories found");
   });
 
-  test("writes header, rows, and footer for human output", async () => {
+  test("writes header and rows for human output", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("ORG");
@@ -135,7 +150,6 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
     expect(output).toContain("getsentry/sentry-javascript");
     expect(output).toContain("GitHub");
     expect(output).toContain("active");
-    expect(output).toContain("sentry repo list");
   });
 
   test("shows count when results exceed limit", async () => {
@@ -144,36 +158,88 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
       id: String(i),
       name: `repo-${i}`,
     }));
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue(manyRepos);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 5, json: false }, "test-org");
+    await func.call(context, { limit: 5, json: false }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 5 of 10 repositories");
   });
 
   test("shows all repos when count is under limit", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-proj", orgSlug: "test-org" },
+    ]);
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 2 repositories");
   });
 
-  test("explicit org/project uses org part only", async () => {
+  test("outputs empty JSON array when project not found", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { limit: 30, json: true }, "unknown-proj");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(JSON.parse(output)).toEqual([]);
+  });
+});
+
+describe("listCommand.func — explicit org/project (org-scoped with note)", () => {
+  let listRepositoriesSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    listRepositoriesSpy = spyOn(apiClient, "listRepositories");
+  });
+
+  afterEach(() => {
+    listRepositoriesSpy.mockRestore();
+  });
+
+  test("explicit org/project uses org part (repos are org-scoped)", async () => {
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    // "my-org/my-project" — explicit mode, org = "my-org"
     await func.call(context, { limit: 30, json: false }, "my-org/my-project");
 
     expect(listRepositoriesSpy).toHaveBeenCalledWith("my-org");
+  });
+
+  test("explicit org/project writes org-scoped note in human output", async () => {
+    listRepositoriesSpy.mockResolvedValue(sampleRepos);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { limit: 30, json: false }, "my-org/my-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("org-scoped");
+  });
+
+  test("explicit org/project suppresses note in JSON output", async () => {
+    listRepositoriesSpy.mockResolvedValue(sampleRepos);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { limit: 30, json: true }, "my-org/my-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
   });
 });
 

@@ -66,23 +66,29 @@ function createMockContext(cwd = "/tmp") {
   };
 }
 
-describe("listCommand.func — explicit org (project-search / bare slug)", () => {
-  let listTeamsSpy: ReturnType<typeof spyOn>;
+describe("listCommand.func — project-search (bare slug)", () => {
+  let listProjectTeamsSpy: ReturnType<typeof spyOn>;
+  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listTeamsSpy = spyOn(apiClient, "listTeams");
+    listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
+    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {
-    listTeamsSpy.mockRestore();
+    listProjectTeamsSpy.mockRestore();
+    findProjectsBySlugSpy.mockRestore();
   });
 
   test("outputs JSON array when --json flag is set", async () => {
-    listTeamsSpy.mockResolvedValue(sampleTeams);
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: true }, "test-org");
+    await func.call(context, { limit: 30, json: true }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -93,33 +99,42 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
   });
 
   test("outputs empty JSON array when no teams found with --json", async () => {
-    listTeamsSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: true }, "test-org");
+    await func.call(context, { limit: 30, json: true }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(JSON.parse(output)).toEqual([]);
   });
 
   test("writes 'No teams found' when empty without --json", async () => {
-    listTeamsSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No teams found");
   });
 
-  test("writes header, rows, and footer for human output", async () => {
-    listTeamsSpy.mockResolvedValue(sampleTeams);
+  test("writes header and rows for human output", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("ORG");
@@ -132,7 +147,6 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
     expect(output).toContain("frontend");
     expect(output).toContain("Frontend Team");
     expect(output).toContain("5");
-    expect(output).toContain("sentry team list");
   });
 
   test("shows count when results exceed limit", async () => {
@@ -142,36 +156,77 @@ describe("listCommand.func — explicit org (project-search / bare slug)", () =>
       slug: `team-${i}`,
       name: `Team ${i}`,
     }));
-    listTeamsSpy.mockResolvedValue(manyTeams);
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue(manyTeams);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 5, json: false }, "test-org");
+    await func.call(context, { limit: 5, json: false }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 5 of 10 teams");
   });
 
   test("shows all teams when count is under limit", async () => {
-    listTeamsSpy.mockResolvedValue(sampleTeams);
+    findProjectsBySlugSpy.mockResolvedValue([
+      { slug: "test-org-proj", orgSlug: "test-org" },
+    ]);
+    listProjectTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { limit: 30, json: false }, "test-org");
+    await func.call(context, { limit: 30, json: false }, "test-org-proj");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 2 teams");
   });
 
-  test("explicit org/project uses org part only", async () => {
-    listTeamsSpy.mockResolvedValue(sampleTeams);
+  test("outputs empty JSON array when project not found", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { limit: 30, json: true }, "unknown-proj");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(JSON.parse(output)).toEqual([]);
+  });
+});
+
+describe("listCommand.func — explicit org/project", () => {
+  let listProjectTeamsSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
+  });
+
+  afterEach(() => {
+    listProjectTeamsSpy.mockRestore();
+  });
+
+  test("explicit org/project calls listProjectTeams for that project", async () => {
+    listProjectTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    // "my-org/my-project" — explicit mode, org = "my-org"
     await func.call(context, { limit: 30, json: false }, "my-org/my-project");
 
-    expect(listTeamsSpy).toHaveBeenCalledWith("my-org");
+    expect(listProjectTeamsSpy).toHaveBeenCalledWith("my-org", "my-project");
+  });
+
+  test("explicit org/project outputs JSON from project-scoped fetch", async () => {
+    listProjectTeamsSpy.mockResolvedValue(sampleTeams);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { limit: 30, json: true }, "my-org/my-project");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
   });
 });
 

@@ -30,7 +30,7 @@ import {
   getPaginationCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "../../lib/errors.js";
+import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   calculateProjectColumnWidths,
   formatProjectRow,
@@ -44,6 +44,10 @@ import {
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
 } from "../../lib/list-command.js";
+import {
+  dispatchOrgScopedList,
+  type ListCommandMeta,
+} from "../../lib/org-list.js";
 import { resolveAllTargets } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
@@ -611,6 +615,14 @@ export function writeSelfHostedWarning(
   }
 }
 
+/** Metadata used by the shared dispatch infrastructure for error messages and cursor keys. */
+const projectListMeta: ListCommandMeta = {
+  paginationKey: PAGINATION_KEY,
+  entityName: "project",
+  entityPlural: "projects",
+  commandPrefix: "sentry project list",
+};
+
 export const listCommand = buildCommand({
   docs: {
     brief: "List projects",
@@ -652,47 +664,39 @@ export const listCommand = buildCommand({
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
-
-    // Cursor pagination is only supported in org-all mode — check before resolving
-    if (flags.cursor && parsed.type !== "org-all") {
-      throw new ValidationError(
-        "The --cursor flag is only supported when listing projects for a specific organization " +
-          "(e.g., sentry project list <org>/). " +
-          "Use 'sentry project list <org>/' for paginated results.",
-        "cursor"
-      );
-    }
-
     const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
     const cursor = resolveCursor(flags.cursor, contextKey);
 
-    switch (parsed.type) {
-      case "auto-detect":
-        await handleAutoDetect(stdout, cwd, flags);
-        break;
-
-      case "explicit":
-        await handleExplicit(stdout, parsed.org, parsed.project, flags);
-        break;
-
-      case "org-all":
-        await handleOrgAll({
-          stdout,
-          org: parsed.org,
-          flags,
-          contextKey,
-          cursor,
-        });
-        break;
-
-      case "project-search":
-        await handleProjectSearch(stdout, parsed.projectSlug, flags);
-        break;
-
-      default: {
-        const _exhaustiveCheck: never = parsed;
-        throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-      }
-    }
+    await dispatchOrgScopedList({
+      config: projectListMeta,
+      stdout,
+      cwd,
+      flags,
+      parsed,
+      overrides: {
+        "auto-detect": () => handleAutoDetect(stdout, cwd, flags),
+        explicit: () =>
+          handleExplicit(
+            stdout,
+            parsed.type === "explicit" ? parsed.org : "",
+            parsed.type === "explicit" ? parsed.project : "",
+            flags
+          ),
+        "org-all": () =>
+          handleOrgAll({
+            stdout,
+            org: parsed.type === "org-all" ? parsed.org : "",
+            flags,
+            contextKey,
+            cursor,
+          }),
+        "project-search": () =>
+          handleProjectSearch(
+            stdout,
+            parsed.type === "project-search" ? parsed.projectSlug : "",
+            flags
+          ),
+      },
+    });
   },
 });

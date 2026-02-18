@@ -12,6 +12,7 @@ import {
   listAnOrganization_sIssues,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
+  listAProject_sTeams,
   queryExploreEventsInTableFormat,
   resolveAShortId,
   retrieveAnEventForAProject,
@@ -706,6 +707,32 @@ export function listTeamsPaginated(
       },
     }
   );
+}
+
+/**
+ * List teams that have access to a specific project.
+ *
+ * Uses the project-scoped endpoint (`/projects/{org}/{project}/teams/`) which
+ * returns only the teams with access to that project, not all teams in the org.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Teams with access to the project
+ */
+export async function listProjectTeams(
+  orgSlug: string,
+  projectSlug: string
+): Promise<SentryTeam[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAProject_sTeams({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+  const data = unwrapResult(result, "Failed to list project teams");
+  return data as unknown as SentryTeam[];
 }
 
 /**

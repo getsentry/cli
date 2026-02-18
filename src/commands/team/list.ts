@@ -10,7 +10,11 @@
  * - Cross-org project search (e.g., sentry)
  */
 
-import { listTeams, listTeamsPaginated } from "../../lib/api-client.js";
+import {
+  listProjectTeams,
+  listTeams,
+  listTeamsPaginated,
+} from "../../lib/api-client.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   buildOrgListCommand,
@@ -49,6 +53,7 @@ const teamListConfig: OrgListConfig<SentryTeam, TeamWithOrg> = {
   withOrg: (team, orgSlug) => ({ ...team, orgSlug }),
   displayTable: (stdout: Writer, teams: TeamWithOrg[]) =>
     writeTable(stdout, teams, TEAM_COLUMNS),
+  listForProject: (org, project) => listProjectTeams(org, project),
 };
 
 const docs: OrgListCommandDocs = {

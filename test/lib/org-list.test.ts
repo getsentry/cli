@@ -1,8 +1,9 @@
 /**
  * Tests for the shared org-scoped list infrastructure.
  *
- * Tests the core functions directly (fetchOrgSafe, fetchAllOrgs, handleOrgAll,
- * handleAutoDetect, handleExplicitOrg, dispatchOrgScopedList).
+ * Covers: fetchOrgSafe, fetchAllOrgs, handleOrgAll, handleAutoDetect,
+ * handleExplicitOrg, handleExplicitProject, handleProjectSearch,
+ * dispatchOrgScopedList (with and without overrides, metadata-only config).
  */
 
 import {
@@ -20,12 +21,21 @@ import * as apiClient from "../../src/lib/api-client.js";
 import * as defaults from "../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
-import { AuthError, ValidationError } from "../../src/lib/errors.js";
+import {
+  AuthError,
+  ContextError,
+  ValidationError,
+} from "../../src/lib/errors.js";
 import {
   dispatchOrgScopedList,
   fetchAllOrgs,
   fetchOrgSafe,
+  handleExplicitOrg,
+  handleExplicitProject,
   handleOrgAll,
+  handleProjectSearch,
+  isOrgListConfig,
+  type ListCommandMeta,
   type OrgListConfig,
 } from "../../src/lib/org-list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -54,10 +64,31 @@ function makeConfig(
   };
 }
 
+const META_ONLY: ListCommandMeta = {
+  paginationKey: "meta-list",
+  entityName: "thing",
+  entityPlural: "things",
+  commandPrefix: "sentry thing list",
+};
+
 function createStdout() {
   const write = mock((_chunk: string) => true);
   return { writer: { write }, write };
 }
+
+// ---------------------------------------------------------------------------
+// isOrgListConfig
+// ---------------------------------------------------------------------------
+
+describe("isOrgListConfig", () => {
+  test("returns true for full OrgListConfig", () => {
+    expect(isOrgListConfig(makeConfig())).toBe(true);
+  });
+
+  test("returns false for ListCommandMeta only", () => {
+    expect(isOrgListConfig(META_ONLY)).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // fetchOrgSafe
@@ -330,7 +361,274 @@ describe("handleOrgAll", () => {
 });
 
 // ---------------------------------------------------------------------------
-// dispatchOrgScopedList
+// handleExplicitOrg
+// ---------------------------------------------------------------------------
+
+describe("handleExplicitOrg", () => {
+  test("returns JSON array of entities", async () => {
+    const config = makeConfig({
+      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleExplicitOrg({
+      config,
+      stdout: writer,
+      org: "my-org",
+      flags: { limit: 10, json: true },
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].orgSlug).toBe("my-org");
+  });
+
+  test("writes org-scoped note when noteOrgScoped=true", async () => {
+    const config = makeConfig({
+      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleExplicitOrg({
+      config,
+      stdout: writer,
+      org: "my-org",
+      flags: { limit: 10, json: false },
+      noteOrgScoped: true,
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("widgets are org-scoped");
+    expect(output).toContain("my-org");
+  });
+
+  test("does not write org-scoped note when noteOrgScoped=false (default)", async () => {
+    const config = makeConfig({
+      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleExplicitOrg({
+      config,
+      stdout: writer,
+      org: "my-org",
+      flags: { limit: 10, json: false },
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(output).not.toContain("org-scoped");
+  });
+
+  test("does not write org-scoped note for JSON output even when noteOrgScoped=true", async () => {
+    const config = makeConfig({
+      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleExplicitOrg({
+      config,
+      stdout: writer,
+      org: "my-org",
+      flags: { limit: 10, json: true },
+      noteOrgScoped: true,
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    // Should be valid JSON, no prose note
+    expect(() => JSON.parse(output)).not.toThrow();
+    expect(output).not.toContain("org-scoped");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleExplicitProject
+// ---------------------------------------------------------------------------
+
+describe("handleExplicitProject", () => {
+  test("fetches and displays project-scoped entities", async () => {
+    const listForProject = mock(() =>
+      Promise.resolve([{ id: "1", name: "Team A" }])
+    );
+    const config = makeConfig({ listForProject });
+    const { writer, write } = createStdout();
+
+    await handleExplicitProject({
+      config,
+      stdout: writer,
+      org: "my-org",
+      project: "my-proj",
+      flags: { limit: 10, json: true },
+    });
+
+    expect(listForProject).toHaveBeenCalledWith("my-org", "my-proj");
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].orgSlug).toBe("my-org");
+  });
+
+  test("throws when listForProject is not defined on config", async () => {
+    const config = makeConfig(); // no listForProject
+    const { writer } = createStdout();
+
+    await expect(
+      handleExplicitProject({
+        config,
+        stdout: writer,
+        org: "my-org",
+        project: "my-proj",
+        flags: { limit: 10, json: false },
+      })
+    ).rejects.toThrow("listForProject is not defined");
+  });
+
+  test("shows 'no entities found' when project has none", async () => {
+    const config = makeConfig({
+      listForProject: mock(() => Promise.resolve([])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleExplicitProject({
+      config,
+      stdout: writer,
+      org: "my-org",
+      project: "my-proj",
+      flags: { limit: 10, json: false },
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No widgets found");
+    expect(output).toContain("my-org/my-proj");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleProjectSearch
+// ---------------------------------------------------------------------------
+
+describe("handleProjectSearch", () => {
+  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+  });
+
+  afterEach(() => {
+    findProjectsBySlugSpy.mockRestore();
+  });
+
+  test("throws ContextError when no project found", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([]);
+    const config = makeConfig();
+    const { writer } = createStdout();
+
+    await expect(
+      handleProjectSearch(config, writer, "no-such-project", {
+        limit: 10,
+        json: false,
+      })
+    ).rejects.toThrow(ContextError);
+  });
+
+  test("returns empty JSON array when no project found with --json", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([]);
+    const config = makeConfig();
+    const { writer, write } = createStdout();
+
+    await handleProjectSearch(config, writer, "no-such-project", {
+      limit: 10,
+      json: true,
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(JSON.parse(output)).toEqual([]);
+  });
+
+  test("with listForProject: fetches project-scoped entities", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+    ]);
+    const listForProject = mock(() =>
+      Promise.resolve([{ id: "1", name: "Team A" }])
+    );
+    const config = makeConfig({ listForProject });
+    const { writer, write } = createStdout();
+
+    await handleProjectSearch(config, writer, "my-proj", {
+      limit: 10,
+      json: true,
+    });
+
+    expect(listForProject).toHaveBeenCalledWith("org-a", "my-proj");
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].orgSlug).toBe("org-a");
+  });
+
+  test("without listForProject: fetches from parent org (entity is org-scoped)", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+    ]);
+    const listForOrg = mock(() =>
+      Promise.resolve([{ id: "1", name: "Repo A" }])
+    );
+    const config = makeConfig({ listForOrg });
+    const { writer, write } = createStdout();
+
+    await handleProjectSearch(config, writer, "my-proj", {
+      limit: 10,
+      json: true,
+    });
+
+    expect(listForOrg).toHaveBeenCalledWith("org-a");
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed[0].orgSlug).toBe("org-a");
+  });
+
+  test("deduplicates orgs when multiple projects share one org", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { orgSlug: "org-a", slug: "proj-1", id: "1", name: "Proj 1" },
+      { orgSlug: "org-a", slug: "proj-2", id: "2", name: "Proj 2" },
+    ]);
+    const listForOrg = mock(() =>
+      Promise.resolve([{ id: "1", name: "Repo A" }])
+    );
+    const config = makeConfig({ listForOrg });
+    const { writer } = createStdout();
+
+    await handleProjectSearch(config, writer, "proj", {
+      limit: 10,
+      json: true,
+    });
+
+    // org-a should only be fetched once
+    expect(listForOrg).toHaveBeenCalledTimes(1);
+  });
+
+  test("shows multi-org note when project found in multiple orgs", async () => {
+    findProjectsBySlugSpy.mockResolvedValue([
+      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+      { orgSlug: "org-b", slug: "my-proj", id: "2", name: "My Project" },
+    ]);
+    const config = makeConfig({
+      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "Widget" }])),
+    });
+    const { writer, write } = createStdout();
+
+    await handleProjectSearch(config, writer, "my-proj", {
+      limit: 10,
+      json: false,
+    });
+
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("2 organizations");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchOrgScopedList — cursor validation and handler map pattern
 // ---------------------------------------------------------------------------
 
 describe("dispatchOrgScopedList", () => {
@@ -373,7 +671,26 @@ describe("dispatchOrgScopedList", () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  test("delegates to handleOrgAll for org-all parsed type", async () => {
+  test("error message includes entity plural name", async () => {
+    const config = makeConfig();
+    const { writer } = createStdout();
+
+    try {
+      await dispatchOrgScopedList({
+        config,
+        stdout: writer,
+        cwd: "/tmp",
+        flags: { limit: 10, json: false, cursor: "x" },
+        parsed: { type: "auto-detect" },
+      });
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ValidationError);
+      expect((e as ValidationError).message).toContain("widgets");
+    }
+  });
+
+  test("delegates to handleOrgAll for org-all mode", async () => {
     const items: FakeEntity[] = [{ id: "1", name: "A" }];
     const config = makeConfig({
       listPaginated: mock(() =>
@@ -396,11 +713,11 @@ describe("dispatchOrgScopedList", () => {
     expect(parsed.data).toHaveLength(1);
   });
 
-  test("delegates to handleExplicitOrg for explicit parsed type", async () => {
-    const items: FakeEntity[] = [{ id: "1", name: "A" }];
-    const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve(items)),
-    });
+  test("explicit mode uses listForProject when available", async () => {
+    const listForProject = mock(() =>
+      Promise.resolve([{ id: "1", name: "T" }])
+    );
+    const config = makeConfig({ listForProject });
     const { writer, write } = createStdout();
 
     await dispatchOrgScopedList({
@@ -408,51 +725,114 @@ describe("dispatchOrgScopedList", () => {
       stdout: writer,
       cwd: "/tmp",
       flags: { limit: 10, json: true },
-      parsed: { type: "explicit", org: "my-org", project: "proj" },
+      parsed: { type: "explicit", org: "my-org", project: "my-proj" },
     });
 
+    expect(listForProject).toHaveBeenCalledWith("my-org", "my-proj");
     const output = write.mock.calls.map((c) => c[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(1);
+    expect(Array.isArray(JSON.parse(output))).toBe(true);
   });
 
-  test("delegates to handleExplicitOrg for project-search parsed type", async () => {
-    const items: FakeEntity[] = [{ id: "1", name: "A" }];
-    const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve(items)),
-    });
+  test("explicit mode falls back to org-scoped with note when no listForProject", async () => {
+    const listForOrg = mock(() => Promise.resolve([{ id: "1", name: "R" }]));
+    const config = makeConfig({ listForOrg }); // no listForProject
     const { writer, write } = createStdout();
 
     await dispatchOrgScopedList({
       config,
       stdout: writer,
       cwd: "/tmp",
-      flags: { limit: 10, json: true },
-      parsed: { type: "project-search", projectSlug: "my-proj" },
+      flags: { limit: 10, json: false },
+      parsed: { type: "explicit", org: "my-org", project: "my-proj" },
     });
 
+    expect(listForOrg).toHaveBeenCalledWith("my-org");
     const output = write.mock.calls.map((c) => c[0]).join("");
-    const parsed = JSON.parse(output);
-    expect(Array.isArray(parsed)).toBe(true);
+    expect(output).toContain("org-scoped");
   });
 
-  test("error message includes entity name", async () => {
+  test("override replaces default handler for that mode", async () => {
     const config = makeConfig();
     const { writer } = createStdout();
+    const overrideCalled = mock(() => Promise.resolve());
 
-    try {
-      await dispatchOrgScopedList({
-        config,
+    await dispatchOrgScopedList({
+      config,
+      stdout: writer,
+      cwd: "/tmp",
+      flags: { limit: 10, json: false },
+      parsed: { type: "auto-detect" },
+      overrides: {
+        "auto-detect": overrideCalled,
+      },
+    });
+
+    expect(overrideCalled).toHaveBeenCalledTimes(1);
+  });
+
+  test("override does not affect other modes", async () => {
+    const items: FakeEntity[] = [{ id: "1", name: "A" }];
+    const config = makeConfig({
+      listPaginated: mock(() =>
+        Promise.resolve({ data: items, nextCursor: undefined })
+      ),
+    });
+    const { writer, write } = createStdout();
+    const autoDetectOverride = mock(() => Promise.resolve());
+
+    await dispatchOrgScopedList({
+      config,
+      stdout: writer,
+      cwd: "/tmp",
+      flags: { limit: 10, json: true },
+      parsed: { type: "org-all", org: "my-org" },
+      overrides: {
+        "auto-detect": autoDetectOverride, // overrides auto-detect, not org-all
+      },
+    });
+
+    // org-all default handler ran, not the auto-detect override
+    expect(autoDetectOverride).not.toHaveBeenCalled();
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    expect(JSON.parse(output).hasMore).toBe(false);
+  });
+
+  test("metadata-only config with full overrides dispatches correctly", async () => {
+    const { writer } = createStdout();
+    const handler = mock(() => Promise.resolve());
+
+    await dispatchOrgScopedList({
+      config: META_ONLY,
+      stdout: writer,
+      cwd: "/tmp",
+      flags: { limit: 10, json: false },
+      parsed: { type: "explicit", org: "my-org", project: "my-proj" },
+      overrides: {
+        "auto-detect": handler,
+        explicit: handler,
+        "project-search": handler,
+        "org-all": handler,
+      },
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test("metadata-only config without override for invoked mode throws", async () => {
+    const { writer } = createStdout();
+
+    await expect(
+      dispatchOrgScopedList({
+        config: META_ONLY,
         stdout: writer,
         cwd: "/tmp",
-        flags: { limit: 10, json: false, cursor: "x" },
+        flags: { limit: 10, json: false },
         parsed: { type: "auto-detect" },
-      });
-      expect.unreachable("should have thrown");
-    } catch (e) {
-      expect(e).toBeInstanceOf(ValidationError);
-      expect((e as ValidationError).message).toContain("widgets");
-    }
+        overrides: {
+          // missing auto-detect override — should throw
+          explicit: mock(() => Promise.resolve()),
+        },
+      })
+    ).rejects.toThrow("No handler for 'auto-detect' mode");
   });
 });
