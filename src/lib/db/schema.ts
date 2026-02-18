@@ -12,6 +12,7 @@
  */
 
 import type { Database } from "bun:sqlite";
+import { stringifyUnknown } from "../errors.js";
 
 export const CURRENT_SCHEMA_VERSION = 5;
 
@@ -391,7 +392,7 @@ function repairMissingTables(db: Database, result: RepairResult): void {
       db.exec(ddl);
       result.fixed.push(`Created table ${tableName}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = stringifyUnknown(e);
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
     }
   }
@@ -410,7 +411,7 @@ function repairMissingColumns(db: Database, result: RepairResult): void {
         db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col.name} ${col.type}`);
         result.fixed.push(`Added column ${tableName}.${col.name}`);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = stringifyUnknown(e);
         result.failed.push(
           `Failed to add column ${tableName}.${col.name}: ${msg}`
         );

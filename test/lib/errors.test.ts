@@ -9,6 +9,7 @@ import {
   formatError,
   getExitCode,
   SeerError,
+  stringifyUnknown,
   UpgradeError,
   ValidationError,
 } from "../../src/lib/errors.js";
@@ -253,6 +254,60 @@ describe("SeerError", () => {
   });
 });
 
+describe("stringifyUnknown", () => {
+  test("returns strings as-is", () => {
+    expect(stringifyUnknown("hello")).toBe("hello");
+    expect(stringifyUnknown("")).toBe("");
+  });
+
+  test("extracts message from Error instances", () => {
+    expect(stringifyUnknown(new Error("something broke"))).toBe(
+      "something broke"
+    );
+    expect(stringifyUnknown(new TypeError("bad type"))).toBe("bad type");
+  });
+
+  test("serializes plain objects to JSON", () => {
+    expect(stringifyUnknown({ code: "not_found" })).toBe(
+      '{"code":"not_found"}'
+    );
+    expect(stringifyUnknown({ detail: { message: "Forbidden" } })).toBe(
+      '{"detail":{"message":"Forbidden"}}'
+    );
+  });
+
+  test("serializes empty objects", () => {
+    expect(stringifyUnknown({})).toBe("{}");
+  });
+
+  test("serializes arrays to JSON", () => {
+    expect(stringifyUnknown(["error1", "error2"])).toBe('["error1","error2"]');
+  });
+
+  test("converts primitives via String()", () => {
+    expect(stringifyUnknown(42)).toBe("42");
+    expect(stringifyUnknown(null)).toBe("null");
+    expect(stringifyUnknown(undefined)).toBe("undefined");
+    expect(stringifyUnknown(true)).toBe("true");
+    expect(stringifyUnknown(0)).toBe("0");
+  });
+
+  test("falls back to String() for circular references", () => {
+    const circular: Record<string, unknown> = { name: "loop" };
+    circular.self = circular;
+    // Should not throw — falls back to String() which returns [object Object]
+    expect(() => stringifyUnknown(circular)).not.toThrow();
+    expect(stringifyUnknown(circular)).toBe("[object Object]");
+  });
+
+  test("falls back to String() for BigInt values", () => {
+    const obj = { count: BigInt(42) };
+    // JSON.stringify throws on BigInt — should fall back gracefully
+    expect(() => stringifyUnknown(obj)).not.toThrow();
+    expect(stringifyUnknown(obj)).toBe("[object Object]");
+  });
+});
+
 describe("formatError", () => {
   test("uses format() for CliError subclasses", () => {
     const err = new ApiError("API failed", 500, "Server error");
@@ -269,6 +324,11 @@ describe("formatError", () => {
     expect(formatError(42)).toBe("42");
     expect(formatError(null)).toBe("null");
     expect(formatError(undefined)).toBe("undefined");
+  });
+
+  test("serializes plain objects instead of [object Object]", () => {
+    expect(formatError({ code: "not_found" })).toBe('{"code":"not_found"}');
+    expect(formatError({})).toBe("{}");
   });
 });
 

@@ -18,7 +18,7 @@ import {
 } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
-import { AuthError } from "../../lib/errors.js";
+import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import { error, muted, success } from "../../lib/formatters/colors.js";
 import {
   formatExpiration,
@@ -112,7 +112,7 @@ async function verifyCredentials(
       stdout.write(`  ... and ${orgs.length - maxDisplay} more\n`);
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = stringifyUnknown(err);
     stderr.write(`\n${error("✗")} Could not verify credentials: ${message}\n`);
   }
 }

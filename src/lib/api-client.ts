@@ -48,7 +48,7 @@ import {
 } from "../types/index.js";
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { ApiError, AuthError } from "./errors.js";
+import { ApiError, AuthError, stringifyUnknown } from "./errors.js";
 import { resolveOrgRegion } from "./region.js";
 import {
   getApiBaseUrl,
@@ -84,8 +84,8 @@ function throwApiError(
   const status = response?.status ?? 0;
   const detail =
     error && typeof error === "object" && "detail" in error
-      ? String((error as { detail: unknown }).detail)
-      : String(error);
+      ? stringifyUnknown((error as { detail: unknown }).detail)
+      : stringifyUnknown(error);
   throw new ApiError(
     `${context}: ${status} ${response?.statusText ?? "Unknown"}`,
     status,
