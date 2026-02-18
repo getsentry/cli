@@ -13,7 +13,6 @@ import {
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearProjectAliases,
   setProjectAliases,
@@ -29,6 +28,10 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  listCommand as buildListCommand,
+  type ListResult,
+} from "../../lib/list-helpers.js";
+import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
@@ -37,13 +40,6 @@ import type {
   SentryIssue,
   Writer,
 } from "../../types/index.js";
-
-type ListFlags = {
-  readonly query?: string;
-  readonly limit: number;
-  readonly sort: "date" | "new" | "freq" | "user";
-  readonly json: boolean;
-};
 
 type SortValue = "date" | "new" | "freq" | "user";
 
@@ -54,32 +50,6 @@ const USAGE_HINT = "sentry issue list <org>/<project>";
 
 /** Error type classification for fetch failures */
 type FetchErrorType = "permission" | "network" | "unknown";
-
-function parseSort(value: string): SortValue {
-  if (!VALID_SORT_VALUES.includes(value as SortValue)) {
-    throw new Error(
-      `Invalid sort value. Must be one of: ${VALID_SORT_VALUES.join(", ")}`
-    );
-  }
-  return value as SortValue;
-}
-
-/**
- * Write the issue list header with column titles.
- *
- * @param stdout - Output writer
- * @param title - Section title
- * @param isMultiProject - Whether to show ALIAS column for multi-project mode
- */
-function writeListHeader(
-  stdout: Writer,
-  title: string,
-  isMultiProject = false
-): void {
-  stdout.write(`${title}:\n\n`);
-  stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
-  stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
-}
 
 /** Issue with formatting options attached */
 type IssueWithOptions = {
@@ -97,34 +67,6 @@ function writeIssueRows(
 ): void {
   for (const { issue, formatOptions } of issues) {
     stdout.write(`${formatIssueRow(issue, termWidth, formatOptions)}\n`);
-  }
-}
-
-/**
- * Write footer with usage tip.
- *
- * @param stdout - Output writer
- * @param mode - Display mode: 'single' (one project), 'multi' (multiple projects), or 'none'
- */
-function writeListFooter(
-  stdout: Writer,
-  mode: "single" | "multi" | "none"
-): void {
-  switch (mode) {
-    case "single":
-      stdout.write(
-        "\nTip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).\n"
-      );
-      break;
-    case "multi":
-      stdout.write(
-        "\nTip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).\n"
-      );
-      break;
-    default:
-      stdout.write(
-        "\nTip: Use 'sentry issue view <SHORT_ID>' to view issue details.\n"
-      );
   }
 }
 
@@ -380,7 +322,23 @@ async function fetchIssuesForTarget(
   }
 }
 
-export const listCommand = buildCommand({
+/**
+ * Pick the footer tip text based on display mode.
+ */
+function pickFooterTip(
+  isMultiProject: boolean,
+  hasSingleProject: boolean
+): string {
+  if (isMultiProject) {
+    return "Tip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).";
+  }
+  if (hasSingleProject) {
+    return "Tip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).";
+  }
+  return "Tip: Use 'sentry issue view <SHORT_ID>' to view issue details.";
+}
+
+export const listCommand = buildListCommand<IssueWithOptions>({
   docs: {
     brief: "List issues in a project",
     fullDescription:
@@ -392,53 +350,19 @@ export const listCommand = buildCommand({
       "  sentry issue list <project>     # find project across all orgs\n\n" +
       "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
   },
-  parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <org>/, or <project>",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
-    flags: {
-      query: {
-        kind: "parsed",
-        parse: String,
-        brief: "Search query (Sentry search syntax)",
-        optional: true,
-      },
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of issues to return",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "10",
-      },
-      sort: {
-        kind: "parsed",
-        parse: parseSort,
-        brief: "Sort by: date, new, freq, user",
-        default: "date" as const,
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
-    },
-    aliases: { q: "query", s: "sort", n: "limit" },
+  limit: 10,
+  features: {
+    query: true,
+    sort: VALID_SORT_VALUES,
+  },
+  positional: {
+    placeholder: "target",
+    brief: "Target: <org>/<project>, <org>/, or <project>",
+    optional: true,
   },
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<void> {
-    const { stdout, cwd, setContext } = this;
+  async fetch(this: SentryContext, flags, target) {
+    const { cwd, setContext } = this;
 
     // Parse positional argument to determine resolution strategy
     const parsed = parseOrgProjectArg(target);
@@ -465,12 +389,12 @@ export const listCommand = buildCommand({
     }
 
     // Fetch issues from all targets in parallel
-    const results = await Promise.all(
+    const fetchResults = await Promise.all(
       targets.map((t) =>
         fetchIssuesForTarget(t, {
           query: flags.query,
           limit: flags.limit,
-          sort: flags.sort,
+          sort: (flags.sort as SortValue | undefined) ?? "date",
         })
       )
     );
@@ -479,7 +403,7 @@ export const listCommand = buildCommand({
     const validResults: IssueListResult[] = [];
     const errorTypes = new Set<FetchErrorType>();
 
-    for (const result of results) {
+    for (const result of fetchResults) {
       if (result.success) {
         validResults.push(result.data);
       } else {
@@ -535,47 +459,45 @@ export const listCommand = buildCommand({
     );
 
     // Sort by user preference
+    const sortValue = (flags.sort as SortValue | undefined) ?? "date";
     issuesWithOptions.sort((a, b) =>
-      getComparator(flags.sort)(a.issue, b.issue)
+      getComparator(sortValue)(a.issue, b.issue)
     );
 
-    // JSON output
-    if (flags.json) {
-      const allIssues = issuesWithOptions.map((i) => i.issue);
-      writeJson(stdout, allIssues);
-      return;
-    }
-
-    if (issuesWithOptions.length === 0) {
-      stdout.write("No issues found.\n");
-      if (footer) {
-        stdout.write(`\n${footer}\n`);
-      }
-      return;
-    }
-
-    // Header depends on single vs multiple projects
-    const title =
+    // Build title for the header line (written by render)
+    // Colon suffix matches original output: "Issues in org/project:"
+    const header =
       isSingleProject && firstTarget
-        ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
-        : `Issues from ${validResults.length} projects`;
+        ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}:`
+        : `Issues from ${validResults.length} projects:`;
 
-    writeListHeader(stdout, title, isMultiProject);
-
-    const termWidth = process.stdout.columns || 80;
-    writeIssueRows(stdout, issuesWithOptions, termWidth);
-
-    // Footer mode
-    let footerMode: "single" | "multi" | "none" = "none";
-    if (isMultiProject) {
-      footerMode = "multi";
-    } else if (isSingleProject) {
-      footerMode = "single";
-    }
-    writeListFooter(stdout, footerMode);
-
-    if (footer) {
-      stdout.write(`\n${footer}\n`);
-    }
+    return {
+      items: issuesWithOptions,
+      footer,
+      skippedSelfHosted,
+      header,
+    } satisfies ListResult<IssueWithOptions>;
   },
+  render(items, stdout, _flags) {
+    const isMultiProject = items[0]?.formatOptions.isMultiProject ?? false;
+    // The factory already wrote the header title line; write only column headers + divider
+    stdout.write("\n");
+    stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
+    stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
+    const termWidth = process.stdout.columns || 80;
+    writeIssueRows(stdout, items, termWidth);
+  },
+  formatJson(result, stdout) {
+    writeJson(
+      stdout,
+      result.items.map((i) => i.issue)
+    );
+  },
+  footerTip(result) {
+    const isMultiProject =
+      result.items[0]?.formatOptions.isMultiProject ?? false;
+    const isSingleProject = result.items.length > 0 && !isMultiProject;
+    return pickFooterTip(isMultiProject, isSingleProject);
+  },
+  emptyMessage: "No issues found.",
 });
