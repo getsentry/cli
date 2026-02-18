@@ -291,6 +291,21 @@ describe("stringifyUnknown", () => {
     expect(stringifyUnknown(true)).toBe("true");
     expect(stringifyUnknown(0)).toBe("0");
   });
+
+  test("falls back to String() for circular references", () => {
+    const circular: Record<string, unknown> = { name: "loop" };
+    circular.self = circular;
+    // Should not throw — falls back to String() which returns [object Object]
+    expect(() => stringifyUnknown(circular)).not.toThrow();
+    expect(stringifyUnknown(circular)).toBe("[object Object]");
+  });
+
+  test("falls back to String() for BigInt values", () => {
+    const obj = { count: BigInt(42) };
+    // JSON.stringify throws on BigInt — should fall back gracefully
+    expect(() => stringifyUnknown(obj)).not.toThrow();
+    expect(stringifyUnknown(obj)).toBe("[object Object]");
+  });
 });
 
 describe("formatError", () => {

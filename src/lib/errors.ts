@@ -330,7 +330,13 @@ export function stringifyUnknown(value: unknown): string {
     return value.message;
   }
   if (value && typeof value === "object") {
-    return JSON.stringify(value);
+    // JSON.stringify can throw on circular references or BigInt values.
+    // Fall back to String() which is always safe.
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
   }
   return String(value);
 }
