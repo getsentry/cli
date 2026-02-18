@@ -14,7 +14,6 @@ import type { SentryContext } from "../../context.js";
 import {
   findProjectsBySlug,
   getProject,
-  listOrganizations,
   listProjects,
   listProjectsPaginated,
   type PaginatedResponse,
@@ -24,7 +23,6 @@ import {
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
   clearPaginationCursor,
   getPaginationCursor,
@@ -37,7 +35,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveAllTargets } from "../../lib/resolve-target.js";
+import { fetchFromOrgs, resolveOrgsForList } from "../../lib/list-helpers.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
@@ -90,28 +88,16 @@ export async function fetchOrgProjectsSafe(
 }
 
 /**
- * Fetch projects from all accessible organizations.
+ * Fetch projects from all accessible organizations in parallel.
  * Skips orgs where the user lacks access.
  *
  * @returns Combined list of projects from all accessible orgs
  */
-export async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
-  const orgs = await listOrganizations();
-  const results: ProjectWithOrg[] = [];
-
-  for (const org of orgs) {
-    try {
-      const projects = await fetchOrgProjects(org.slug);
-      results.push(...projects);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      // User may lack access to some orgs
-    }
-  }
-
-  return results;
+export function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
+  return fetchFromOrgs<ProjectWithOrg>({
+    orgSlugs: "all",
+    fetcher: fetchOrgProjects,
+  });
 }
 
 /**
@@ -234,43 +220,21 @@ export function resolveCursor(
   return cursorFlag;
 }
 
-/** Result of resolving organizations to fetch projects from */
-type OrgResolution = {
+/**
+ * Resolve which organizations to fetch projects from (auto-detect mode).
+ * Delegates to the shared `resolveOrgsForList` helper.
+ */
+async function resolveOrgsForAutoDetect(cwd: string): Promise<{
   orgs: string[];
   footer?: string;
   skippedSelfHosted?: number;
-};
-
-/**
- * Resolve which organizations to fetch projects from (auto-detect mode).
- * Uses config defaults or DSN auto-detection.
- */
-async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
-  // 1. Check config defaults
-  const defaultOrg = await getDefaultOrganization();
-  if (defaultOrg) {
-    return { orgs: [defaultOrg] };
-  }
-
-  // 2. Auto-detect from DSNs (may find multiple in monorepos)
-  try {
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      cwd,
-    });
-
-    if (targets.length > 0) {
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
-      return { orgs: uniqueOrgs, footer, skippedSelfHosted };
-    }
-
-    return { orgs: [], skippedSelfHosted };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-  }
-
-  return { orgs: [] };
+}> {
+  const {
+    orgSlugs: orgs,
+    footer,
+    skippedSelfHosted,
+  } = await resolveOrgsForList(undefined, cwd);
+  return { orgs, footer, skippedSelfHosted };
 }
 
 /** Display projects in table format with header and rows */
