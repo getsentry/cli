@@ -1,6 +1,47 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.11.0
+
+### New Features ✨
+
+#### Build
+
+- Add hole-punch tool to reduce compressed binary size by @BYK in [#245](https://github.com/getsentry/cli/pull/245)
+- Add gzip-compressed binary downloads by @BYK in [#244](https://github.com/getsentry/cli/pull/244)
+
+#### Other
+
+- (args) Parse Sentry web URLs as CLI arguments by @BYK in [#252](https://github.com/getsentry/cli/pull/252)
+- (auth) Switch to /auth/ endpoint and add whoami command by @BYK in [#266](https://github.com/getsentry/cli/pull/266)
+- (list) Add pagination and consistent target parsing to all list commands by @BYK in [#262](https://github.com/getsentry/cli/pull/262)
+
+### Bug Fixes 🐛
+
+#### Telemetry
+
+- Reduce noise from version-check JSON parse errors by @BYK in [#253](https://github.com/getsentry/cli/pull/253)
+- Skip Sentry reporting for 4xx API errors by @BYK in [#251](https://github.com/getsentry/cli/pull/251)
+- Handle EPIPE errors from piped stdout gracefully by @BYK in [#250](https://github.com/getsentry/cli/pull/250)
+- Upgrade Sentry SDK to 10.39.0 and remove custom patches by @BYK in [#249](https://github.com/getsentry/cli/pull/249)
+
+#### Other
+
+- (commands) Support org/project/id as single positional arg by @BYK in [#261](https://github.com/getsentry/cli/pull/261)
+- (db) Handle readonly database gracefully instead of crashing by @betegon in [#235](https://github.com/getsentry/cli/pull/235)
+- (errors) Show meaningful detail instead of [object Object] in API errors by @BYK in [#259](https://github.com/getsentry/cli/pull/259)
+- (issue-list) Propagate original errors instead of wrapping in plain Error by @BYK in [#254](https://github.com/getsentry/cli/pull/254)
+- (polyfill) Add exited promise and stdin to Bun.spawn Node.js polyfill by @BYK in [#248](https://github.com/getsentry/cli/pull/248)
+- (project-list) Add pagination and flexible target parsing by @BYK in [#221](https://github.com/getsentry/cli/pull/221)
+- (test) Prevent mock.module() leak from breaking test:isolated by @BYK in [#260](https://github.com/getsentry/cli/pull/260)
+- (upgrade) Remove v prefix from release URLs and work around Bun.write streaming bug by @BYK in [#243](https://github.com/getsentry/cli/pull/243)
+- Repair pagination_cursors composite PK and isolate test suites by @BYK in [#265](https://github.com/getsentry/cli/pull/265)
+
+### Internal Changes 🔧
+
+- (build) Replace local hole-punch script with binpunch package by @BYK in [#246](https://github.com/getsentry/cli/pull/246)
+- Use @sentry/api client for requests by @MathurAditya724 in [#226](https://github.com/getsentry/cli/pull/226)
+
 ## 0.10.0
 
 ### New Features ✨
