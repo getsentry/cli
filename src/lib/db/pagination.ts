@@ -104,6 +104,21 @@ export function clearPaginationCursor(
 }
 
 /**
+ * Escape a user-provided value for safe inclusion in a context key.
+ *
+ * Context keys use `|` as a segment delimiter. If user input (e.g., a search
+ * query or platform filter) contains `|`, it must be escaped to prevent
+ * delimiter injection that could cause cache collisions between different
+ * query combinations.
+ *
+ * @param value - Raw user-provided string
+ * @returns Escaped string with `|` replaced by `%7C`
+ */
+export function escapeContextKeyValue(value: string): string {
+  return value.replaceAll("|", "%7C");
+}
+
+/**
  * Build a context key for org-scoped pagination cursor storage.
  *
  * Encodes the API base URL and org slug so cursors from different hosts or

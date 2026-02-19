@@ -521,6 +521,9 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       writeJson(stdout, []);
       return;
     }
+    // Use "Project" as the resource name (not config.entityName) because the
+    // error is about a project lookup failure, not the entity being listed.
+    // e.g., "Project is missing" not "Team is missing".
     throw new ContextError(
       "Project",
       `No project '${projectSlug}' found in any accessible organization.\n\n` +

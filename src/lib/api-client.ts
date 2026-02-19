@@ -1037,6 +1037,9 @@ export function listIssuesPaginated(
     `/organizations/${orgSlug}/issues/`,
     {
       params: {
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
         query: fullQuery || undefined,
         cursor: options.cursor,
         per_page: options.perPage ?? 25,
@@ -1228,6 +1231,9 @@ export async function listTransactions(
         dataset: "transactions",
         field: TRANSACTION_FIELDS,
         project: isNumericProject ? projectSlug : undefined,
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
         query: fullQuery || undefined,
         per_page: options.limit || 10,
         statsPeriod: options.statsPeriod ?? "7d",

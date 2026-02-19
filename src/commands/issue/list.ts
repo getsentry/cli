@@ -13,10 +13,14 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  type ParsedOrgProject,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
+  escapeContextKeyValue,
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
@@ -407,8 +411,9 @@ type OrgAllIssuesOptions = {
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const { stdout, org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
-  // Pipe chars in user query are escaped to prevent delimiter injection.
-  const escapedQuery = flags.query?.replaceAll("|", "%7C");
+  const escapedQuery = flags.query
+    ? escapeContextKeyValue(flags.query)
+    : undefined;
   const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
@@ -685,6 +690,19 @@ export const listCommand = buildCommand({
 
     const parsed = parseOrgProjectArg(target);
 
+    // Shared handler for modes that resolve targets (auto-detect, explicit, project-search).
+    // Each mode's narrowed ParsedVariant<K> is a subtype of ParsedOrgProject,
+    // so passing it to handleResolvedTargets (which accepts the full union) is safe.
+    const resolveAndHandle = (p: ParsedOrgProject) =>
+      handleResolvedTargets({
+        stdout,
+        stderr,
+        parsed: p,
+        flags,
+        cwd,
+        setContext,
+      });
+
     await dispatchOrgScopedList({
       config: issueListMeta,
       stdout,
@@ -692,33 +710,9 @@ export const listCommand = buildCommand({
       flags,
       parsed,
       overrides: {
-        "auto-detect": (p) =>
-          handleResolvedTargets({
-            stdout,
-            stderr,
-            parsed: p,
-            flags,
-            cwd,
-            setContext,
-          }),
-        explicit: (p) =>
-          handleResolvedTargets({
-            stdout,
-            stderr,
-            parsed: p,
-            flags,
-            cwd,
-            setContext,
-          }),
-        "project-search": (p) =>
-          handleResolvedTargets({
-            stdout,
-            stderr,
-            parsed: p,
-            flags,
-            cwd,
-            setContext,
-          }),
+        "auto-detect": resolveAndHandle,
+        explicit: resolveAndHandle,
+        "project-search": resolveAndHandle,
         "org-all": (p) =>
           handleOrgAllIssues({ stdout, org: p.org, flags, setContext }),
       },

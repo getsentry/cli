@@ -27,6 +27,7 @@ import { buildCommand } from "../../lib/command.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
   clearPaginationCursor,
+  escapeContextKeyValue,
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
@@ -216,9 +217,8 @@ export function buildContextKey(
   }
   if (flags.platform) {
     // Normalize to lowercase since platform filtering is case-insensitive.
-    // Escape pipe chars to prevent delimiter injection.
     parts.push(
-      `platform:${flags.platform.toLowerCase().replaceAll("|", "%7C")}`
+      `platform:${escapeContextKeyValue(flags.platform.toLowerCase())}`
     );
   }
   return parts.join("|");
