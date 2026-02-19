@@ -24,7 +24,7 @@ internal static class PathUtilities
 
         if (!testProject.Exists)
         {
-            Assert.Fail("Test project not found.");
+            Assert.Fail($"Test project not found: {testProject}");
         }
 
         Assert.NotNull(testProject.Directory);
@@ -38,7 +38,7 @@ internal static class PathUtilities
 
         if (!project.Exists)
         {
-            Assert.Fail("Launcher project not found.");
+            Assert.Fail($"Launcher project not found: {project}");
         }
 
         return new DotnetProject(project);
@@ -51,7 +51,7 @@ internal static class PathUtilities
 
         if (!artifacts.Exists)
         {
-            Assert.Fail("Artifacts path not found.");
+            Assert.Fail($"Artifacts path not found: {artifacts}");
         }
 
         return artifacts;
@@ -64,7 +64,7 @@ internal static class PathUtilities
 
         if (!binary.Exists)
         {
-            Assert.Fail("Binary path not found.");
+            Assert.Fail($"Binary path not found: {binary}");
         }
 
         return binary;
@@ -77,7 +77,7 @@ internal static class PathUtilities
 
         if (!package.Exists)
         {
-            Assert.Fail("Package JSON not found.");
+            Assert.Fail($"Package JSON not found: {package}");
         }
 
         return package;
