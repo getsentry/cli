@@ -261,7 +261,7 @@ jobs:
       - name: Pack NuGet packages
         run: bun run script/pack.ts --target ${{ matrix.pack-target }}
       - name: Pack agnostic NuGet packages
-        if: matrix.pack-agnostic == 'true'
+        if: matrix.pack-agnostic
         run: bun run script/pack.ts --no-clean --agnostic
       - name: Upload artifact
         uses: actions/upload-artifact@v4
