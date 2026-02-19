@@ -67,24 +67,17 @@ export const loginCommand = buildCommand({
         );
       }
 
-      // Try to get user info (works with API tokens, may not work with OAuth App tokens)
-      let user: Awaited<ReturnType<typeof getCurrentUser>> | undefined;
-      try {
-        user = await getCurrentUser();
-        setUserInfo({
-          userId: user.id,
-          email: user.email,
-          username: user.username,
-          name: user.name,
-        });
-      } catch {
-        // Ignore - user info is optional, token may not have permission
-      }
+      // Fetch and store user info via /auth/ (works with all token types)
+      const user = await getCurrentUser();
+      setUserInfo({
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+        name: user.name,
+      });
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
-      if (user) {
-        stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
-      }
+      stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }

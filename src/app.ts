@@ -8,6 +8,7 @@ import {
 } from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
+import { whoamiCommand } from "./commands/auth/whoami.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
@@ -56,6 +57,7 @@ export const routes = buildRouteMap({
     teams: teamListCommand,
     logs: logListCommand,
     traces: traceListCommand,
+    whoami: whoamiCommand,
   },
   defaultCommand: "help",
   docs: {

@@ -1357,12 +1357,15 @@ export async function triggerSolutionPlanning(
 
 /**
  * Get the currently authenticated user's information.
- * Uses the /users/me/ endpoint on the control silo.
+ *
+ * Uses the `/auth/` endpoint on the control silo, which works with all token
+ * types (OAuth, API tokens, OAuth App tokens). Unlike `/users/me/`, this
+ * endpoint does not return 403 for OAuth tokens.
  */
 export async function getCurrentUser(): Promise<SentryUser> {
   const { data } = await apiRequestToRegion<SentryUser>(
     getControlSiloUrl(),
-    "/users/me/",
+    "/auth/",
     { schema: SentryUserSchema }
   );
   return data;
