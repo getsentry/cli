@@ -28,6 +28,7 @@ const sampleTeam: SentryTeam = {
   slug: "engineering",
   name: "Engineering",
   memberCount: 5,
+  isMember: true,
 };
 
 const sampleTeam2: SentryTeam = {
@@ -35,6 +36,7 @@ const sampleTeam2: SentryTeam = {
   slug: "mobile",
   name: "Mobile Team",
   memberCount: 3,
+  isMember: true,
 };
 
 const sampleProject: SentryProject = {
@@ -150,18 +152,75 @@ describe("project create", () => {
     });
   });
 
-  test("errors when multiple teams exist without --team", async () => {
+  test("auto-selects team when user is member of exactly one among many", async () => {
+    const nonMemberTeam = { ...sampleTeam2, isMember: false };
+    listTeamsSpy.mockResolvedValue([nonMemberTeam, sampleTeam]);
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "node");
+
+    // Should auto-select the one team the user is a member of
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "node",
+    });
+  });
+
+  test("errors when user is member of multiple teams without --team", async () => {
     listTeamsSpy.mockResolvedValue([sampleTeam, sampleTeam2]);
 
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
-    await expect(
-      func.call(context, { json: false }, "my-app", "node")
-    ).rejects.toThrow(ContextError);
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ContextError);
+    expect(err.message).toContain("You belong to 2 teams");
+    expect(err.message).toContain("engineering");
+    expect(err.message).toContain("mobile");
 
-    // Should not call createProject
     expect(createProjectSpy).not.toHaveBeenCalled();
+  });
+
+  test("shows only member teams in error, not all org teams", async () => {
+    const nonMemberTeam = {
+      id: "3",
+      slug: "infra",
+      name: "Infrastructure",
+      isMember: false,
+    };
+    listTeamsSpy.mockResolvedValue([sampleTeam, sampleTeam2, nonMemberTeam]);
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ContextError);
+    expect(err.message).toContain("engineering");
+    expect(err.message).toContain("mobile");
+    // Non-member team should NOT appear
+    expect(err.message).not.toContain("infra");
+  });
+
+  test("falls back to all teams when isMember is not available", async () => {
+    const teamNoMembership1 = { id: "1", slug: "alpha", name: "Alpha" };
+    const teamNoMembership2 = { id: "2", slug: "beta", name: "Beta" };
+    listTeamsSpy.mockResolvedValue([teamNoMembership1, teamNoMembership2]);
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(ContextError);
+    expect(err.message).toContain("Multiple teams found");
+    expect(err.message).toContain("alpha");
+    expect(err.message).toContain("beta");
   });
 
   test("errors when no teams exist", async () => {
