@@ -5,23 +5,23 @@
  * All operations are sandboxed to the workflow's cwd directory.
  */
 
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import {
+  DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_FILE_BYTES,
   MAX_STDOUT_BYTES,
-  DEFAULT_COMMAND_TIMEOUT_MS,
 } from "./constants.js";
 import type {
-  WizardOptions,
+  ApplyPatchsetPayload,
+  FileExistsBatchPayload,
+  ListDirPayload,
   LocalOpPayload,
   LocalOpResult,
-  ListDirPayload,
   ReadFilesPayload,
-  FileExistsBatchPayload,
   RunCommandsPayload,
-  ApplyPatchsetPayload,
+  WizardOptions,
 } from "./types.js";
 
 /**
@@ -31,7 +31,10 @@ import type {
 function safePath(cwd: string, relative: string): string {
   const resolved = path.resolve(cwd, relative);
   const normalizedCwd = path.resolve(cwd);
-  if (!resolved.startsWith(normalizedCwd + path.sep) && resolved !== normalizedCwd) {
+  if (
+    !resolved.startsWith(normalizedCwd + path.sep) &&
+    resolved !== normalizedCwd
+  ) {
     throw new Error(`Path "${relative}" resolves outside project directory`);
   }
   return resolved;
@@ -39,7 +42,7 @@ function safePath(cwd: string, relative: string): string {
 
 export async function handleLocalOp(
   payload: LocalOpPayload,
-  _options: WizardOptions,
+  _options: WizardOptions
 ): Promise<LocalOpResult> {
   try {
     switch (payload.operation) {
@@ -54,7 +57,10 @@ export async function handleLocalOp(
       case "apply-patchset":
         return await applyPatchset(payload);
       default:
-        return { ok: false, error: `Unknown operation: ${(payload as any).operation}` };
+        return {
+          ok: false,
+          error: `Unknown operation: ${(payload as any).operation}`,
+        };
     }
   } catch (error) {
     return {
@@ -71,7 +77,11 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const maxEntries = params.maxEntries ?? 500;
   const recursive = params.recursive ?? false;
 
-  const entries: Array<{ name: string; path: string; type: "file" | "directory" }> = [];
+  const entries: Array<{
+    name: string;
+    path: string;
+    type: "file" | "directory";
+  }> = [];
 
   function walk(dir: string, depth: number): void {
     if (entries.length >= maxEntries) return;
@@ -91,7 +101,12 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
       const type = entry.isDirectory() ? "directory" : "file";
       entries.push({ name: entry.name, path: relPath, type });
 
-      if (recursive && entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+      if (
+        recursive &&
+        entry.isDirectory() &&
+        !entry.name.startsWith(".") &&
+        entry.name !== "node_modules"
+      ) {
         walk(path.join(dir, entry.name), depth + 1);
       }
     }
@@ -129,7 +144,7 @@ async function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
 }
 
 async function fileExistsBatch(
-  payload: FileExistsBatchPayload,
+  payload: FileExistsBatchPayload
 ): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const exists: Record<string, boolean> = {};
@@ -146,7 +161,9 @@ async function fileExistsBatch(
   return { ok: true, data: { exists } };
 }
 
-async function runCommands(payload: RunCommandsPayload): Promise<LocalOpResult> {
+async function runCommands(
+  payload: RunCommandsPayload
+): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const timeoutMs = params.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
@@ -175,8 +192,13 @@ async function runCommands(payload: RunCommandsPayload): Promise<LocalOpResult> 
 function runSingleCommand(
   command: string,
   cwd: string,
-  timeoutMs: number,
-): Promise<{ command: string; exitCode: number; stdout: string; stderr: string }> {
+  timeoutMs: number
+): Promise<{
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}> {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", command], {
       cwd,
@@ -225,7 +247,7 @@ function runSingleCommand(
 }
 
 async function applyPatchset(
-  payload: ApplyPatchsetPayload,
+  payload: ApplyPatchsetPayload
 ): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const applied: Array<{ path: string; action: string }> = [];
