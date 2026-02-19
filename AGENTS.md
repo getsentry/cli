@@ -328,7 +328,9 @@ Two abstraction levels exist for list commands:
 2. **`src/lib/org-list.ts`** — `dispatchOrgScopedList` with `OrgListConfig` and a 4-mode handler map: `auto-detect`, `explicit`, `org-all`, `project-search`. Complex commands (`project list`, `issue list`) call `dispatchOrgScopedList` with an `overrides` map directly instead of using `buildOrgListCommand`.
 
 Key rules when writing overrides:
-- Each mode handler receives the correctly-narrowed `ParsedVariant<T>` as its argument (e.g., `(p) => p.org` in an `org-all` handler). No manual `Extract<>` casts are needed — the dispatcher guarantees type safety.
+- Each mode handler receives a `HandlerContext<T>` with the narrowed `parsed` plus shared I/O (`stdout`, `cwd`, `flags`). Access parsed fields via `ctx.parsed.org`, `ctx.parsed.projectSlug`, etc. — no manual `Extract<>` casts needed.
+- When multiple modes share one handler, use the `fallback` option instead of repeating the handler for each key: `fallback: (ctx) => sharedHandler({ ...ctx, extra })`.
+- Commands with extra fields (e.g., `stderr`, `setContext`) spread the context and add them: `(ctx) => handle({ ...ctx, flags, stderr, setContext })`. Override `ctx.flags` with the command-specific flags type when needed.
 - `resolveCursor()` must be called **inside** the `org-all` override closure, not before `dispatchOrgScopedList`, so that `--cursor` validation errors fire correctly for non-org-all modes.
 - `handleProjectSearch` errors must use `"Project"` as the `ContextError` resource, not `config.entityName`.
 

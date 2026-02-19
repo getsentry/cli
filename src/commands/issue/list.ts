@@ -13,10 +13,7 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
-import {
-  type ParsedOrgProject,
-  parseOrgProjectArg,
-} from "../../lib/arg-parsing.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
@@ -703,31 +700,22 @@ export const listCommand = buildCommand({
 
     const parsed = parseOrgProjectArg(target);
 
-    // Shared handler for modes that resolve targets (auto-detect, explicit, project-search).
-    // Each mode's narrowed ParsedVariant<K> is a subtype of ParsedOrgProject,
-    // so passing it to handleResolvedTargets (which accepts the full union) is safe.
-    const resolveAndHandle = (p: ParsedOrgProject) =>
-      handleResolvedTargets({
-        stdout,
-        stderr,
-        parsed: p,
-        flags,
-        cwd,
-        setContext,
-      });
-
     await dispatchOrgScopedList({
       config: issueListMeta,
       stdout,
       cwd,
       flags,
       parsed,
+      fallback: (ctx) =>
+        handleResolvedTargets({ ...ctx, flags, stderr, setContext }),
       overrides: {
-        "auto-detect": resolveAndHandle,
-        explicit: resolveAndHandle,
-        "project-search": resolveAndHandle,
-        "org-all": (p) =>
-          handleOrgAllIssues({ stdout, org: p.org, flags, setContext }),
+        "org-all": (ctx) =>
+          handleOrgAllIssues({
+            stdout: ctx.stdout,
+            org: ctx.parsed.org,
+            flags,
+            setContext,
+          }),
       },
     });
   },

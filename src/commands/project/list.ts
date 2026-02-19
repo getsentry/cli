@@ -651,27 +651,32 @@ export const listCommand = buildCommand({
       flags,
       parsed,
       overrides: {
-        "auto-detect": () => handleAutoDetect(stdout, cwd, flags),
-        explicit: (p) => handleExplicit(stdout, p.org, p.project, flags),
-        "org-all": (p) => {
+        "auto-detect": (ctx) => handleAutoDetect(ctx.stdout, ctx.cwd, flags),
+        explicit: (ctx) =>
+          handleExplicit(ctx.stdout, ctx.parsed.org, ctx.parsed.project, flags),
+        "org-all": (ctx) => {
           // Build context key and resolve cursor only in org-all mode, after
           // dispatchOrgScopedList has already validated --cursor is allowed here.
-          const contextKey = buildContextKey(p, flags, getApiBaseUrl());
+          const contextKey = buildContextKey(
+            ctx.parsed,
+            flags,
+            getApiBaseUrl()
+          );
           const cursor = resolveOrgCursor(
             flags.cursor,
             PAGINATION_KEY,
             contextKey
           );
           return handleOrgAll({
-            stdout,
-            org: p.org,
+            stdout: ctx.stdout,
+            org: ctx.parsed.org,
             flags,
             contextKey,
             cursor,
           });
         },
-        "project-search": (p) =>
-          handleProjectSearch(stdout, p.projectSlug, flags),
+        "project-search": (ctx) =>
+          handleProjectSearch(ctx.stdout, ctx.parsed.projectSlug, flags),
       },
     });
   },
