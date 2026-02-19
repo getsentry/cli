@@ -73,7 +73,7 @@ export async function handleLocalOp(
   }
 }
 
-function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
+function listDir(payload: ListDirPayload): LocalOpResult {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
   const maxDepth = params.maxDepth ?? 3;
@@ -123,7 +123,7 @@ function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   return { ok: true, data: { entries } };
 }
 
-function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
+function readFiles(payload: ReadFilesPayload): LocalOpResult {
   const { cwd, params } = payload;
   const maxBytes = params.maxBytes ?? MAX_FILE_BYTES;
   const files: Record<string, string | null> = {};
@@ -150,9 +150,7 @@ function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
   return { ok: true, data: { files } };
 }
 
-function fileExistsBatch(
-  payload: FileExistsBatchPayload
-): Promise<LocalOpResult> {
+function fileExistsBatch(payload: FileExistsBatchPayload): LocalOpResult {
   const { cwd, params } = payload;
   const exists: Record<string, boolean> = {};
 
@@ -253,7 +251,7 @@ function runSingleCommand(
   });
 }
 
-function applyPatchset(payload: ApplyPatchsetPayload): Promise<LocalOpResult> {
+function applyPatchset(payload: ApplyPatchsetPayload): LocalOpResult {
   const { cwd, params } = payload;
   const applied: Array<{ path: string; action: string }> = [];
 
