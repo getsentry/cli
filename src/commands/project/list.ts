@@ -27,7 +27,7 @@ import { buildCommand } from "../../lib/command.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
   clearPaginationCursor,
-  getPaginationCursor,
+  resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
@@ -219,30 +219,6 @@ export function buildContextKey(
     parts.push(`platform:${flags.platform.toLowerCase()}`);
   }
   return parts.join("|");
-}
-
-/**
- * Resolve the cursor value from --cursor flag.
- * Handles the magic "last" value by looking up the cached cursor.
- */
-export function resolveCursor(
-  cursorFlag: string | undefined,
-  contextKey: string
-): string | undefined {
-  if (!cursorFlag) {
-    return;
-  }
-  if (cursorFlag === "last") {
-    const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
-    if (!cached) {
-      throw new ContextError(
-        "Pagination cursor",
-        "No saved cursor for this query. Run without --cursor first."
-      );
-    }
-    return cached;
-  }
-  return cursorFlag;
 }
 
 /** Result of resolving organizations to fetch projects from */
@@ -677,8 +653,12 @@ export const listCommand = buildCommand({
         "org-all": (p) => {
           // Build context key and resolve cursor only in org-all mode, after
           // dispatchOrgScopedList has already validated --cursor is allowed here.
-          const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
-          const cursor = resolveCursor(flags.cursor, contextKey);
+          const contextKey = buildContextKey(p, flags, getApiBaseUrl());
+          const cursor = resolveOrgCursor(
+            flags.cursor,
+            PAGINATION_KEY,
+            contextKey
+          );
           return handleOrgAll({
             stdout,
             org: p.org,

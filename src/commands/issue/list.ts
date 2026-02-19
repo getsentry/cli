@@ -683,9 +683,6 @@ export const listCommand = buildCommand({
 
     const parsed = parseOrgProjectArg(target);
 
-    const resolveAndHandle = () =>
-      handleResolvedTargets({ stdout, stderr, parsed, flags, cwd, setContext });
-
     await dispatchOrgScopedList({
       config: issueListMeta,
       stdout,
@@ -693,16 +690,35 @@ export const listCommand = buildCommand({
       flags,
       parsed,
       overrides: {
-        "auto-detect": resolveAndHandle,
-        explicit: resolveAndHandle,
-        "project-search": resolveAndHandle,
-        "org-all": (p) =>
-          handleOrgAllIssues({
+        "auto-detect": (p) =>
+          handleResolvedTargets({
             stdout,
-            org: p.org,
+            stderr,
+            parsed: p,
             flags,
+            cwd,
             setContext,
           }),
+        explicit: (p) =>
+          handleResolvedTargets({
+            stdout,
+            stderr,
+            parsed: p,
+            flags,
+            cwd,
+            setContext,
+          }),
+        "project-search": (p) =>
+          handleResolvedTargets({
+            stdout,
+            stderr,
+            parsed: p,
+            flags,
+            cwd,
+            setContext,
+          }),
+        "org-all": (p) =>
+          handleOrgAllIssues({ stdout, org: p.org, flags, setContext }),
       },
     });
   },
