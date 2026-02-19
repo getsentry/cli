@@ -463,7 +463,6 @@ export async function handleExplicitOrg<TEntity, TWithOrg>(
     items,
     flags,
     contextLabel: `organization '${org}'`,
-    orgSlugForHint: org,
   });
 
   if (!flags.json && items.length > 0) {
