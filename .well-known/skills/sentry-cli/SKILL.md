@@ -94,6 +94,13 @@ sentry auth status
 
 Print the stored authentication token
 
+#### `sentry auth whoami`
+
+Show the currently authenticated user
+
+**Flags:**
+- `--json - Output as JSON`
+
 ### Org
 
 Work with Sentry organizations
@@ -136,13 +143,14 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <org>`
+#### `sentry project list <target>`
 
 List projects
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 
 **Examples:**
@@ -193,9 +201,10 @@ List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `--json - Output as JSON`
+- `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 **Examples:**
 
@@ -432,25 +441,27 @@ Update the Sentry CLI to the latest version
 
 Work with Sentry repositories
 
-#### `sentry repo list <org>`
+#### `sentry repo list <target>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Team
 
 Work with Sentry teams
 
-#### `sentry team list <org>`
+#### `sentry team list <target>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 
@@ -580,9 +591,10 @@ List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `--json - Output as JSON`
+- `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 ### Orgs
 
@@ -600,38 +612,41 @@ List organizations
 
 List projects
 
-#### `sentry projects <org>`
+#### `sentry projects <target>`
 
 List projects
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
 
 ### Repos
 
 List repositories
 
-#### `sentry repos <org>`
+#### `sentry repos <target>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Teams
 
 List teams
 
-#### `sentry teams <org>`
+#### `sentry teams <target>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Logs
 
@@ -659,6 +674,17 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `--json - Output as JSON`
+
+### Whoami
+
+Show the currently authenticated user
+
+#### `sentry whoami`
+
+Show the currently authenticated user
+
+**Flags:**
 - `--json - Output as JSON`
 
 ## Output Formats
