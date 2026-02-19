@@ -386,9 +386,9 @@ describe("repairSchema: wrong primary key", () => {
 
     const result = repairSchema(db);
 
-    expect(
-      result.fixed.some((f) => f.includes("pagination_cursors"))
-    ).toBe(true);
+    expect(result.fixed.some((f) => f.includes("pagination_cursors"))).toBe(
+      true
+    );
     expect(result.failed).toEqual([]);
 
     const row = db
@@ -407,9 +407,9 @@ describe("repairSchema: wrong primary key", () => {
     const result = repairSchema(db);
 
     // Should not report pagination_cursors as fixed
-    expect(
-      result.fixed.some((f) => f.includes("pagination_cursors"))
-    ).toBe(false);
+    expect(result.fixed.some((f) => f.includes("pagination_cursors"))).toBe(
+      false
+    );
     db.close();
   });
 });
