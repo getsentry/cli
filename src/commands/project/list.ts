@@ -673,14 +673,10 @@ export const listCommand = buildCommand({
       parsed,
       overrides: {
         "auto-detect": () => handleAutoDetect(stdout, cwd, flags),
-        explicit: () => {
-          const p = parsed as Extract<ParsedOrgProject, { type: "explicit" }>;
-          return handleExplicit(stdout, p.org, p.project, flags);
-        },
-        "org-all": () => {
+        explicit: (p) => handleExplicit(stdout, p.org, p.project, flags),
+        "org-all": (p) => {
           // Build context key and resolve cursor only in org-all mode, after
           // dispatchOrgScopedList has already validated --cursor is allowed here.
-          const p = parsed as Extract<ParsedOrgProject, { type: "org-all" }>;
           const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
           const cursor = resolveCursor(flags.cursor, contextKey);
           return handleOrgAll({
@@ -691,13 +687,8 @@ export const listCommand = buildCommand({
             cursor,
           });
         },
-        "project-search": () => {
-          const p = parsed as Extract<
-            ParsedOrgProject,
-            { type: "project-search" }
-          >;
-          return handleProjectSearch(stdout, p.projectSlug, flags);
-        },
+        "project-search": (p) =>
+          handleProjectSearch(stdout, p.projectSlug, flags),
       },
     });
   },

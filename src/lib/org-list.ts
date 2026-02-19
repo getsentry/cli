@@ -125,14 +125,29 @@ export type OrgListConfig<TEntity, TWithOrg> = ListCommandMeta & {
 // Mode handler types
 // ---------------------------------------------------------------------------
 
-/** A single dispatch handler — a zero-argument async function. */
-export type ModeHandler = () => Promise<void>;
+/** Extract a specific variant from the {@link ParsedOrgProject} union by its `type` discriminant. */
+export type ParsedVariant<T extends ParsedOrgProject["type"]> = Extract<
+  ParsedOrgProject,
+  { type: T }
+>;
+
+/**
+ * A dispatch handler that receives the correctly-narrowed parsed variant.
+ * The dispatcher guarantees `parsed.type` matches the handler key, so
+ * callers can safely access variant-specific fields (e.g. `.org`, `.projectSlug`)
+ * without runtime checks or manual casts.
+ */
+export type ModeHandler<
+  T extends ParsedOrgProject["type"] = ParsedOrgProject["type"],
+> = (parsed: ParsedVariant<T>) => Promise<void>;
 
 /**
  * Complete handler map — one handler per parsed target type.
- * Keys match `ParsedOrgProject["type"]`.
+ * Each handler receives the corresponding {@link ParsedVariant}.
  */
-export type ModeHandlerMap = Record<ParsedOrgProject["type"], ModeHandler>;
+export type ModeHandlerMap = {
+  [K in ParsedOrgProject["type"]]: ModeHandler<K>;
+};
 
 /**
  * Partial handler map for overriding specific dispatch modes.
@@ -140,7 +155,9 @@ export type ModeHandlerMap = Record<ParsedOrgProject["type"], ModeHandler>;
  * Provide only the modes you need to customise; the rest will use
  * the default handlers from {@link buildDefaultHandlers}.
  */
-export type ModeOverrides = Partial<ModeHandlerMap>;
+export type ModeOverrides = {
+  [K in ParsedOrgProject["type"]]?: ModeHandler<K>;
+};
 
 // ---------------------------------------------------------------------------
 // Type guard
@@ -580,11 +597,13 @@ type DefaultHandlerOptions<TEntity, TWithOrg> = {
   stdout: Writer;
   cwd: string;
   flags: BaseListFlags;
-  parsed: ParsedOrgProject;
 };
 
 /**
  * Build the default `ModeHandlerMap` for the given config and request context.
+ *
+ * Each handler receives the correctly-narrowed {@link ParsedVariant} for its mode,
+ * so it can access variant-specific fields (`.org`, `.projectSlug`) without casts.
  *
  * If `config` is only {@link ListCommandMeta} (not a full {@link OrgListConfig}),
  * each default handler throws when invoked — this only happens if a mode is not
@@ -593,17 +612,19 @@ type DefaultHandlerOptions<TEntity, TWithOrg> = {
 function buildDefaultHandlers<TEntity, TWithOrg>(
   options: DefaultHandlerOptions<TEntity, TWithOrg>
 ): ModeHandlerMap {
-  const { config, stdout, cwd, flags, parsed } = options;
+  const { config, stdout, cwd, flags } = options;
 
-  const notSupported =
-    (mode: string): ModeHandler =>
-    () =>
+  function notSupported<T extends ParsedOrgProject["type"]>(
+    mode: string
+  ): ModeHandler<T> {
+    return () =>
       Promise.reject(
         new Error(
           `No handler for '${mode}' mode in '${config.commandPrefix}'. ` +
             "Provide a full OrgListConfig or an override for this mode."
         )
       );
+  }
 
   if (!isOrgListConfig(config)) {
     // Metadata-only config — all modes must be overridden by the caller
@@ -615,20 +636,16 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
     };
   }
 
-  const contextKey = buildOrgContextKey(
-    parsed.type === "org-all" ? parsed.org : ""
-  );
-
   return {
     "auto-detect": () => handleAutoDetect(config, stdout, cwd, flags),
 
-    explicit: () => {
+    explicit: (parsed) => {
       if (config.listForProject) {
         return handleExplicitProject({
           config,
           stdout,
-          org: parsed.type === "explicit" ? parsed.org : "",
-          project: parsed.type === "explicit" ? parsed.project : "",
+          org: parsed.org,
+          project: parsed.project,
           flags,
         });
       }
@@ -636,28 +653,30 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
       return handleExplicitOrg({
         config,
         stdout,
-        org: parsed.type === "explicit" ? parsed.org : "",
+        org: parsed.org,
         flags,
         noteOrgScoped: true,
       });
     },
 
-    "project-search": () =>
-      handleProjectSearch(
-        config,
-        stdout,
-        parsed.type === "project-search" ? parsed.projectSlug : "",
-        flags
-      ),
+    "project-search": (parsed) =>
+      handleProjectSearch(config, stdout, parsed.projectSlug, flags),
 
-    "org-all": () => {
-      const org = parsed.type === "org-all" ? parsed.org : "";
+    "org-all": (parsed) => {
+      const contextKey = buildOrgContextKey(parsed.org);
       const cursor = resolveOrgCursor(
         flags.cursor,
         config.paginationKey,
         contextKey
       );
-      return handleOrgAll({ config, stdout, org, flags, contextKey, cursor });
+      return handleOrgAll({
+        config,
+        stdout,
+        org: parsed.org,
+        flags,
+        contextKey,
+        cursor,
+      });
     },
   };
 }
@@ -683,10 +702,13 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
 };
 
 /**
- * Validate the cursor flag and dispatch to the correct handler.
+ * Validate the cursor flag and dispatch to the correct mode handler.
  *
  * Merges default handlers with caller-provided overrides using
- * `{ ...defaults, ...overrides }`, then invokes `handlers[parsed.type]()`.
+ * `{ ...defaults, ...overrides }`, then invokes `handlers[parsed.type](parsed)`.
+ * Each handler receives the correctly-narrowed {@link ParsedVariant} for its mode,
+ * eliminating the need for `Extract<>` casts at call sites.
+ *
  * This is the single entry point for all org-scoped list commands.
  */
 export async function dispatchOrgScopedList<TEntity, TWithOrg>(
@@ -704,8 +726,12 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     );
   }
 
-  const defaults = buildDefaultHandlers({ config, stdout, cwd, flags, parsed });
+  const defaults = buildDefaultHandlers({ config, stdout, cwd, flags });
   const handlers: ModeHandlerMap = { ...defaults, ...overrides };
 
-  await handlers[parsed.type]();
+  // TypeScript cannot prove that `parsed` narrows to `ParsedVariant<typeof parsed.type>`
+  // through the indexed access `handlers[parsed.type]`, but the handler map guarantees
+  // each key maps to a handler expecting exactly that variant.
+  // biome-ignore lint/suspicious/noExplicitAny: safe — dispatch guarantees type match
+  await (handlers[parsed.type] as ModeHandler<any>)(parsed);
 }
