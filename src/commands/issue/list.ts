@@ -394,6 +394,19 @@ async function fetchIssuesForTarget(
   }
 }
 
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(org: string, flags: ListFlags): string {
+  const base = `sentry issue list ${org}/ -c last`;
+  const parts: string[] = [];
+  if (flags.sort !== "date") {
+    parts.push(`--sort ${flags.sort}`);
+  }
+  if (flags.query) {
+    parts.push(`-q "${flags.query}"`);
+  }
+  return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
+
 /** Options for {@link handleOrgAllIssues}. */
 type OrgAllIssuesOptions = {
   stdout: Writer;
@@ -445,7 +458,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   if (response.data.length === 0) {
     if (hasMore) {
       stdout.write(
-        `No issues on this page. Try the next page: sentry issue list ${org}/ -c last\n`
+        `No issues on this page. Try the next page: ${nextPageHint(org, flags)}\n`
       );
     } else {
       stdout.write(`No issues found in organization '${org}'.\n`);
@@ -468,7 +481,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
 
   if (hasMore) {
     stdout.write(`\nShowing ${response.data.length} issues (more available)\n`);
-    stdout.write(`Next page: sentry issue list ${org}/ -c last\n`);
+    stdout.write(`Next page: ${nextPageHint(org, flags)}\n`);
   } else {
     stdout.write(`\nShowing ${response.data.length} issues\n`);
   }
