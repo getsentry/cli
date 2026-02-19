@@ -28,13 +28,13 @@ public class LauncherTests
         var sourceFileName = Path.Combine(PathUtilities.BinaryDirectory.FullName, PlatformUtilities.GetNativeExecutableName());
         var destFileName = Path.Combine(output, PlatformUtilities.GetNativeExecutableName());
         File.Copy(sourceFileName, destFileName, true);
+        if (OperatingSystem.IsWindows())
+        {
+            File.Copy($"{sourceFileName}.gz", $"{destFileName}.gz", true);
+        }
 
         var executable = Path.Combine(output, "Sentry.Cli");
         var exec = await DotnetProject.ExecAsync(executable, ["--version"]);
-
-        // there is an issue on Windows in CI
-        if (OperatingSystem.IsWindows())
-            return;
 
         var version = await JsonUtilities.GetVersionAsync(PathUtilities.PackageFile);
         await exec.AssertSuccessAsync();

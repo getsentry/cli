@@ -44,7 +44,11 @@ static int StartExecutable(string fileName, string[] args)
 {
     ProcessStartInfo startInfo = new(fileName, args)
     {
+#if _PLATFORM_WIN_X64
+        CreateNoWindow = false,
+#else
         CreateNoWindow = true,
+#endif
         UseShellExecute = false,
     };
 
