@@ -719,38 +719,24 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
   /**
    * Per-mode handler overrides. Each key matches a `ParsedOrgProject["type"]`.
    * Provided handlers replace the corresponding default handler; unspecified
-   * modes fall back to {@link fallback} (if given) then the defaults from
-   * {@link buildDefaultHandlers}.
+   * modes fall back to the defaults from {@link buildDefaultHandlers}.
    */
   overrides?: ModeOverrides;
-  /**
-   * Fallback handler invoked for any mode not covered by `overrides`.
-   *
-   * Useful when most modes share the same handler and only one or two need
-   * custom logic.  Receives the full `HandlerContext<ParsedOrgProject["type"]>`
-   * so it can be reused across modes without casts.
-   *
-   * Resolution order: `overrides[mode]` → `fallback` → default handler.
-   */
-  fallback?: ModeHandler;
 };
 
 /**
  * Validate the cursor flag and dispatch to the correct mode handler.
  *
  * Builds a {@link HandlerContext} from the shared fields (stdout, cwd, flags,
- * parsed) and passes it to the resolved handler.  Resolution order:
- *
- * 1. `overrides[parsed.type]` — caller-supplied per-mode handler
- * 2. `fallback` — catch-all handler for modes not in overrides
- * 3. Default handler from {@link buildDefaultHandlers}
+ * parsed) and passes it to the resolved handler.  Merges default handlers
+ * with caller-provided overrides using `{ ...defaults, ...overrides }`.
  *
  * This is the single entry point for all org-scoped list commands.
  */
 export async function dispatchOrgScopedList<TEntity, TWithOrg>(
   options: DispatchOptions<TEntity, TWithOrg>
 ): Promise<void> {
-  const { config, stdout, cwd, flags, parsed, overrides, fallback } = options;
+  const { config, stdout, cwd, flags, parsed, overrides } = options;
 
   // Cursor pagination is only supported in org-all mode
   if (flags.cursor && parsed.type !== "org-all") {
@@ -763,7 +749,8 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
   }
 
   const defaults = buildDefaultHandlers(config);
-  const handler = overrides?.[parsed.type] ?? fallback ?? defaults[parsed.type];
+  const handlers: ModeHandlerMap = { ...defaults, ...overrides };
+  const handler = handlers[parsed.type];
 
   const ctx: HandlerContext = { parsed, stdout, cwd, flags };
 

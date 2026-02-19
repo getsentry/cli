@@ -44,6 +44,7 @@ import {
 import {
   dispatchOrgScopedList,
   type ListCommandMeta,
+  type ModeHandler,
 } from "../../lib/org-list.js";
 import {
   type ResolvedTarget,
@@ -700,15 +701,20 @@ export const listCommand = buildCommand({
 
     const parsed = parseOrgProjectArg(target);
 
+    // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
+    const resolveAndHandle: ModeHandler<any> = (ctx) =>
+      handleResolvedTargets({ ...ctx, flags, stderr, setContext });
+
     await dispatchOrgScopedList({
       config: issueListMeta,
       stdout,
       cwd,
       flags,
       parsed,
-      fallback: (ctx) =>
-        handleResolvedTargets({ ...ctx, flags, stderr, setContext }),
       overrides: {
+        "auto-detect": resolveAndHandle,
+        explicit: resolveAndHandle,
+        "project-search": resolveAndHandle,
         "org-all": (ctx) =>
           handleOrgAllIssues({
             stdout: ctx.stdout,
