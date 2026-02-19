@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
+    "lint:dotnet": "bun run script/dotnet-lint.ts --check",
+    "lint:dotnet:fix": "bun run script/dotnet-lint.ts",
     "test": "bun test",
     "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:isolated": "bun test test/isolated",

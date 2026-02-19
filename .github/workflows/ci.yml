@@ -104,6 +104,16 @@ jobs:
       - run: bun run typecheck
       - run: bun run check:deps
 
+  lint-dotnet:
+    name: .NET Lint
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+      - run: dotnet format src/dotnet/Sentry.Cli.slnx --verify-no-changes
+
   test-unit:
     name: Unit Tests
     needs: [changes]
@@ -226,7 +236,7 @@ jobs:
 
   test-dotnet:
     name: .NET Tests (${{ matrix.target }})
-    needs: [changes, build-binary]
+    needs: [changes, lint-dotnet, build-binary]
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -242,8 +252,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
