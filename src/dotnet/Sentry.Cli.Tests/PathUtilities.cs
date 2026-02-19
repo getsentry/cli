@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Sentry.Cli.Tests;
@@ -24,11 +25,41 @@ internal static class PathUtilities
 
         if (!testProject.Exists)
         {
-            Assert.Fail($"Test project not found: {testProject}");
+            if (TryFindSolutionDirectory(out var solution))
+            {
+                testProject = new FileInfo(Path.Combine(solution.FullName, "Sentry.Cli.Tests", "Sentry.Cli.Tests.csproj"));
+                if (!testProject.Exists)
+                {
+                    Assert.Fail($"Test project not found: {testProject}");
+                }
+            }
+            else
+            {
+                Assert.Fail($"Test project not found: {testProject}");
+            }
         }
 
         Assert.NotNull(testProject.Directory);
         return testProject.Directory;
+    }
+
+    private static bool TryFindSolutionDirectory([NotNullWhen(true)] out DirectoryInfo? solution)
+    {
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        while (directory.Parent is { } parent)
+        {
+            directory = parent;
+
+            if (Directory.EnumerateFiles(directory.FullName, "Sentry.Cli.slnx", SearchOption.TopDirectoryOnly).Any())
+            {
+                solution = directory;
+                return true;
+            }
+        }
+
+        solution = null;
+        return false;
     }
 
     private static DotnetProject GetLauncherProject()
