@@ -215,8 +215,11 @@ export function buildContextKey(
     }
   }
   if (flags.platform) {
-    // Normalize to lowercase since platform filtering is case-insensitive
-    parts.push(`platform:${flags.platform.toLowerCase()}`);
+    // Normalize to lowercase since platform filtering is case-insensitive.
+    // Escape pipe chars to prevent delimiter injection.
+    parts.push(
+      `platform:${flags.platform.toLowerCase().replaceAll("|", "%7C")}`
+    );
   }
   return parts.join("|");
 }

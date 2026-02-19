@@ -406,8 +406,10 @@ type OrgAllIssuesOptions = {
  */
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const { stdout, org, flags, setContext } = options;
-  // Encode sort + query in context key so cursors from different searches don't collide
-  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${flags.query ? `|q:${flags.query}` : ""}`;
+  // Encode sort + query in context key so cursors from different searches don't collide.
+  // Pipe chars in user query are escaped to prevent delimiter injection.
+  const escapedQuery = flags.query?.replaceAll("|", "%7C");
+  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
   setContext([org], []);

@@ -1037,7 +1037,7 @@ export function listIssuesPaginated(
     `/organizations/${orgSlug}/issues/`,
     {
       params: {
-        query: fullQuery,
+        query: fullQuery || undefined,
         cursor: options.cursor,
         per_page: options.perPage ?? 25,
         sort: options.sort,
