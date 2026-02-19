@@ -65,8 +65,12 @@ function getBinaryName(target: PackTarget): string {
 
 /** Get .NET Runtime Identifier for a target */
 function getDotnetRid(target: PackTarget): string {
-  if (target.os === "darwin") return `osx-${target.arch}`;
-  if (target.os === "win32") return `win-${target.arch}`;
+  if (target.os === "darwin") {
+    return `osx-${target.arch}`;
+  }
+  if (target.os === "win32") {
+    return `win-${target.arch}`;
+  }
   return `${target.os}-${target.arch}`;
 }
 
@@ -84,7 +88,10 @@ function parseTarget(targetStr: string): PackTarget | null {
 }
 
 /** Pack a platform-specific NuGet package with embedded native binary */
-async function packTarget(target: PackTarget, version: string): Promise<boolean> {
+async function packTarget(
+  target: PackTarget,
+  version: string
+): Promise<boolean> {
   const rid = getDotnetRid(target);
   const packageName = getPackageName(target);
   const outfile = getNupkgPath(version, rid);
@@ -104,14 +111,14 @@ async function packTarget(target: PackTarget, version: string): Promise<boolean>
 /** Pack the "any" (framework-dependent, CoreCLR) package */
 async function packAny(version: string): Promise<boolean> {
   const outfile = getNupkgPath(version, "any");
-  console.log(`  Packing any (framework-dependent)...`);
+  console.log("  Packing any (framework-dependent)...");
 
   try {
     await $`dotnet pack ${PROJECT_DIR} -c Release -r any -p:PackageVersion=${version} -p:PublishAot=false`.quiet();
     console.log(`    -> ${outfile}`);
     return true;
   } catch (error) {
-    console.error(`  Failed to pack any:`);
+    console.error("  Failed to pack any:");
     console.error(error);
     return false;
   }
@@ -120,34 +127,25 @@ async function packAny(version: string): Promise<boolean> {
 /** Pack the root package (no RID — pointer/manifest package) */
 async function packRoot(version: string): Promise<boolean> {
   const outfile = getNupkgPath(version);
-  console.log(`  Packing root (no RID)...`);
+  console.log("  Packing root (no RID)...");
 
   try {
     await $`dotnet pack ${PROJECT_DIR} -c Release -p:PackageVersion=${version} -p:PublishAot=true`.quiet();
     console.log(`    -> ${outfile}`);
     return true;
   } catch (error) {
-    console.error(`  Failed to pack root:`);
+    console.error("  Failed to pack root:");
     console.error(error);
     return false;
   }
 }
 
-/** Main pack function */
-async function pack(): Promise<void> {
-  const args = process.argv.slice(2);
-  const singlePack = args.includes("--single");
+/** Resolve pack targets from CLI args, printing a status line and exiting on error */
+function resolveTargets(args: string[]): PackTarget[] {
   const targetIndex = args.indexOf("--target");
   const targetArg = targetIndex !== -1 ? args[targetIndex + 1] : null;
 
-  console.log(`\nSentry CLI NuGet Pack v${pkg.version}`);
-  console.log("=".repeat(40));
-
-  // Determine targets
-  let targets: PackTarget[];
-
   if (targetArg) {
-    // Explicit target specified (for cross-compilation)
     const target = parseTarget(targetArg);
     if (!target) {
       console.error(`Invalid target: ${targetArg}`);
@@ -156,9 +154,11 @@ async function pack(): Promise<void> {
       );
       process.exit(1);
     }
-    targets = [target];
     console.log(`\nPacking for target: ${getPackageName(target)}`);
-  } else if (singlePack) {
+    return [target];
+  }
+
+  if (args.includes("--single")) {
     const currentTarget = ALL_TARGETS.find(
       (t) => t.os === process.platform && t.arch === process.arch
     );
@@ -168,23 +168,23 @@ async function pack(): Promise<void> {
       );
       process.exit(1);
     }
-    targets = [currentTarget];
     console.log(
       `\nPacking for current platform: ${getPackageName(currentTarget)}`
     );
-  } else {
-    targets = ALL_TARGETS;
-    console.log(`\nPacking for ${targets.length} targets`);
+    return [currentTarget];
   }
 
-  // Verify native binaries for selected targets
+  console.log(`\nPacking for ${ALL_TARGETS.length} targets`);
+  return ALL_TARGETS;
+}
+
+/** Verify that native binaries exist for all targets, exiting on missing files */
+async function verifyBinaries(targets: PackTarget[]): Promise<void> {
   console.log("\nVerifying native binaries...");
   let binaryMissing = false;
   for (const target of targets) {
-    const binaryName = getBinaryName(target);
-    const binaryPath = `${DIST_BIN_DIR}/${binaryName}`;
-    const exists = await Bun.file(binaryPath).exists();
-    if (exists) {
+    const binaryPath = `${DIST_BIN_DIR}/${getBinaryName(target)}`;
+    if (await Bun.file(binaryPath).exists()) {
       console.log(`  ✓ ${binaryPath}`);
     } else {
       console.error(`  ✗ ${binaryPath} not found`);
@@ -196,6 +196,18 @@ async function pack(): Promise<void> {
     console.error("Run 'bun run build:all' first to generate all binaries.");
     process.exit(1);
   }
+}
+
+/** Main pack function */
+async function pack(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  console.log(`\nSentry CLI NuGet Pack v${pkg.version}`);
+  console.log("=".repeat(40));
+
+  const targets = resolveTargets(args);
+
+  await verifyBinaries(targets);
 
   // Clean output directory
   await $`rm -rf ${DIST_PKG_DIR}`.quiet();
