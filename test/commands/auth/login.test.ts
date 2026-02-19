@@ -142,7 +142,7 @@ describe("loginCommand.func --token path", () => {
     expect(getCurrentUserSpy).not.toHaveBeenCalled();
   });
 
-  test("--token: always shows 'Logged in as' with user identity", async () => {
+  test("--token: shows 'Logged in as' when user info fetch succeeds", async () => {
     isAuthenticatedSpy.mockResolvedValue(false);
     setAuthTokenSpy.mockResolvedValue(undefined);
     getUserRegionsSpy.mockResolvedValue([]);
@@ -154,6 +154,26 @@ describe("loginCommand.func --token path", () => {
 
     expect(getStdout()).toContain("Logged in as");
     expect(getStdout()).toContain("only@email.com");
+  });
+
+  test("--token: login succeeds even when getCurrentUser() fails transiently", async () => {
+    isAuthenticatedSpy.mockResolvedValue(false);
+    setAuthTokenSpy.mockResolvedValue(undefined);
+    getUserRegionsSpy.mockResolvedValue([]);
+    getCurrentUserSpy.mockRejectedValue(new Error("Network error"));
+
+    const { context, getStdout } = createContext();
+
+    // Must not throw — login should succeed with the stored token
+    await func.call(context, { token: "valid-token", timeout: 900 });
+
+    const out = getStdout();
+    expect(out).toContain("Authenticated");
+    // 'Logged in as' is omitted when user info is unavailable
+    expect(out).not.toContain("Logged in as");
+    // Token was stored and not cleared
+    expect(clearAuthSpy).not.toHaveBeenCalled();
+    expect(setUserInfoSpy).not.toHaveBeenCalled();
   });
 
   test("no token: falls through to interactive login", async () => {

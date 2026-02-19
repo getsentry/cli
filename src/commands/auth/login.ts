@@ -67,17 +67,25 @@ export const loginCommand = buildCommand({
         );
       }
 
-      // Fetch and store user info via /auth/ (works with all token types)
-      const user = await getCurrentUser();
-      setUserInfo({
-        userId: user.id,
-        email: user.email,
-        username: user.username,
-        name: user.name,
-      });
+      // Fetch and cache user info via /auth/ (works with all token types).
+      // A transient failure here must not block login — the token is already valid.
+      let user: Awaited<ReturnType<typeof getCurrentUser>> | undefined;
+      try {
+        user = await getCurrentUser();
+        setUserInfo({
+          userId: user.id,
+          email: user.email,
+          username: user.username,
+          name: user.name,
+        });
+      } catch {
+        // Non-fatal: user info is supplementary. Token remains stored and valid.
+      }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);
-      stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
+      if (user) {
+        stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
+      }
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
