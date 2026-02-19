@@ -59,7 +59,10 @@ export async function handleLocalOp(
       default:
         return {
           ok: false,
-          error: `Unknown operation: ${(payload as any).operation}`,
+          error: `Unknown operation: ${
+            // biome-ignore lint/suspicious/noExplicitAny: payload is of type LocalOpPayload
+            (payload as any).operation
+          }`,
         };
     }
   } catch (error) {
@@ -70,7 +73,7 @@ export async function handleLocalOp(
   }
 }
 
-async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
+function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const targetPath = safePath(cwd, params.path);
   const maxDepth = params.maxDepth ?? 3;
@@ -83,9 +86,11 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
     type: "file" | "directory";
   }> = [];
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walking the directory tree is a complex operation
   function walk(dir: string, depth: number): void {
-    if (entries.length >= maxEntries) return;
-    if (depth > maxDepth) return;
+    if (entries.length >= maxEntries || depth > maxDepth) {
+      return;
+    }
 
     let dirEntries: fs.Dirent[];
     try {
@@ -95,7 +100,9 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
     }
 
     for (const entry of dirEntries) {
-      if (entries.length >= maxEntries) return;
+      if (entries.length >= maxEntries) {
+        return;
+      }
 
       const relPath = path.relative(cwd, path.join(dir, entry.name));
       const type = entry.isDirectory() ? "directory" : "file";
@@ -116,7 +123,7 @@ async function listDir(payload: ListDirPayload): Promise<LocalOpResult> {
   return { ok: true, data: { entries } };
 }
 
-async function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
+function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const maxBytes = params.maxBytes ?? MAX_FILE_BYTES;
   const files: Record<string, string | null> = {};
@@ -143,7 +150,7 @@ async function readFiles(payload: ReadFilesPayload): Promise<LocalOpResult> {
   return { ok: true, data: { files } };
 }
 
-async function fileExistsBatch(
+function fileExistsBatch(
   payload: FileExistsBatchPayload
 ): Promise<LocalOpResult> {
   const { cwd, params } = payload;
@@ -246,9 +253,7 @@ function runSingleCommand(
   });
 }
 
-async function applyPatchset(
-  payload: ApplyPatchsetPayload
-): Promise<LocalOpResult> {
+function applyPatchset(payload: ApplyPatchsetPayload): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const applied: Array<{ path: string; action: string }> = [];
 
@@ -282,6 +287,8 @@ async function applyPatchset(
         applied.push({ path: patch.path, action: "delete" });
         break;
       }
+      default:
+        break;
     }
   }
 

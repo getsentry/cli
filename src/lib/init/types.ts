@@ -1,6 +1,6 @@
 import type { Writer } from "../../types/index.js";
 
-export interface WizardOptions {
+export type WizardOptions = {
   directory: string;
   force: boolean;
   yes: boolean;
@@ -9,7 +9,7 @@ export interface WizardOptions {
   stdout: Writer;
   stderr: Writer;
   stdin: NodeJS.ReadStream & { fd: 0 };
-}
+};
 
 // ── Local-op suspend payloads ──────────────────────────────
 
@@ -20,7 +20,7 @@ export type LocalOpPayload =
   | RunCommandsPayload
   | ApplyPatchsetPayload;
 
-export interface ListDirPayload {
+export type ListDirPayload = {
   type: "local-op";
   operation: "list-dir";
   cwd: string;
@@ -30,9 +30,9 @@ export interface ListDirPayload {
     maxDepth?: number;
     maxEntries?: number;
   };
-}
+};
 
-export interface ReadFilesPayload {
+export type ReadFilesPayload = {
   type: "local-op";
   operation: "read-files";
   cwd: string;
@@ -40,18 +40,18 @@ export interface ReadFilesPayload {
     paths: string[];
     maxBytes?: number;
   };
-}
+};
 
-export interface FileExistsBatchPayload {
+export type FileExistsBatchPayload = {
   type: "local-op";
   operation: "file-exists-batch";
   cwd: string;
   params: {
     paths: string[];
   };
-}
+};
 
-export interface RunCommandsPayload {
+export type RunCommandsPayload = {
   type: "local-op";
   operation: "run-commands";
   cwd: string;
@@ -59,9 +59,9 @@ export interface RunCommandsPayload {
     commands: string[];
     timeoutMs?: number;
   };
-}
+};
 
-export interface ApplyPatchsetPayload {
+export type ApplyPatchsetPayload = {
   type: "local-op";
   operation: "apply-patchset";
   cwd: string;
@@ -72,30 +72,30 @@ export interface ApplyPatchsetPayload {
       patch: string;
     }>;
   };
-}
+};
 
-export interface LocalOpResult {
+export type LocalOpResult = {
   ok: boolean;
   error?: string;
   data?: unknown;
-}
+};
 
 // ── Interactive suspend payloads ───────────────────────────
 
-export interface InteractivePayload {
+export type InteractivePayload = {
   type: "interactive";
   prompt: string;
   kind: "select" | "multi-select" | "confirm";
   [key: string]: unknown;
-}
+};
 
 // ── Workflow run result ────────────────────────────────────
 
-export interface WorkflowRunResult {
+export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";
   suspended?: string[][];
   steps?: Record<string, { suspendPayload?: unknown }>;
   suspendPayload?: unknown;
   result?: unknown;
   error?: string;
-}
+};
