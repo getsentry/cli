@@ -1,0 +1,43 @@
+## Implementation Plan
+
+### Problem 1: CLI-72 — pagination_cursors wrong primary key
+
+The pagination_cursors table could be created with a single-column PK
+(command_key TEXT PRIMARY KEY) by migration 4→5, which used CREATE TABLE
+IF NOT EXISTS. Any DB that already had the table from an earlier code path
+would keep the wrong schema, causing:
+
+  SQLiteError: ON CONFLICT clause does not match any PRIMARY KEY or
+  UNIQUE constraint
+
+at runtime when setPaginationCursor tried to upsert.
+
+**Fix strategy:**
+1. Add hasCompositePrimaryKey(db, table, columns) that inspects
+   sqlite_master DDL to check for the table-level PRIMARY KEY clause.
+2. Migration 5→6: if pagination_cursors exists with wrong PK, DROP it
+   and recreate with the correct composite PK. Cursor data loss is
+   acceptable (5-min TTL, ephemeral).
+3. repairWrongPrimaryKeys() added to repairSchema() so the auto-repair
+   path also fixes this without relying on the version check.
+4. isSchemaError() extended to match 'on conflict clause does not match'
+   so the error triggers auto-repair rather than crashing the CLI.
+5. New wrong_primary_key SchemaIssue variant exposed via getSchemaIssues()
+   and sentry cli fix for diagnostics.
+
+### Problem 2: 130 spurious test failures with bare 'bun test'
+
+Root cause: Bun runs all test files in a single process when invoked as
+'bun test'. test/isolated/resolve-target.test.ts uses mock.module() which
+replaces entire barrel modules (api-client.js, dsn/index.js, db/defaults.js
+etc.) globally and the replacement persists for all subsequent test files
+loaded in the same process.
+
+This was already known and documented in AGENTS.md. The test suite is split
+into test:unit (safe, runs in one process) and test:isolated (uses
+mock.module(), runs in a separate process). However the top-level 'test'
+script was still 'bun test', which picks up everything including test/e2e.
+
+**Fix:** Change 'test' script to 'bun run test:unit && bun run test:isolated'
+so each invocation gets a clean module registry. test:e2e remains a separate
+script (requires a built binary, not run by default).
