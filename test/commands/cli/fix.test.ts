@@ -367,4 +367,59 @@ describe("sentry cli fix", () => {
     // Should NOT print "Could not open database" since permission issues explain it
     expect(stderr).not.toContain("Could not open database");
   });
+
+  test("detects and repairs wrong primary key on pagination_cursors (CLI-72)", async () => {
+    const dbPath = join(getTestDir(), "cli.db");
+    const db = new Database(dbPath);
+    // Create a full schema but with the buggy pagination_cursors table
+    initSchema(db);
+    db.exec("DROP TABLE pagination_cursors");
+    db.exec(
+      "CREATE TABLE pagination_cursors (command_key TEXT PRIMARY KEY, context TEXT NOT NULL, cursor TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+    );
+    db.close();
+    chmodSync(dbPath, 0o600);
+
+    // Warm the DB cache so getRawDatabase() uses this pre-repaired DB
+    getDatabase();
+
+    const { stdout, exitCode } = await runFix(false);
+
+    expect(stdout).toContain("schema issue(s)");
+    expect(stdout).toContain("Wrong primary key");
+    expect(stdout).toContain("pagination_cursors");
+    expect(stdout).toContain("Repairing schema");
+    expect(stdout).toContain("repaired successfully");
+    expect(exitCode).toBe(0);
+  });
+
+  test("dry-run detects wrong primary key without repairing", async () => {
+    const dbPath = join(getTestDir(), "cli.db");
+    const db = new Database(dbPath);
+    initSchema(db);
+    db.exec("DROP TABLE pagination_cursors");
+    db.exec(
+      "CREATE TABLE pagination_cursors (command_key TEXT PRIMARY KEY, context TEXT NOT NULL, cursor TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+    );
+    db.close();
+    chmodSync(dbPath, 0o600);
+
+    getDatabase();
+
+    const { stdout } = await runFix(true);
+
+    expect(stdout).toContain("Wrong primary key");
+    expect(stdout).toContain("pagination_cursors");
+    expect(stdout).toContain("Run 'sentry cli fix' to apply fixes");
+    // Table should still have the wrong PK
+    closeDatabase();
+    const verifyDb = new Database(dbPath);
+    const row = verifyDb
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='pagination_cursors'"
+      )
+      .get() as { sql: string };
+    expect(row.sql).not.toContain("PRIMARY KEY (command_key, context)");
+    verifyDb.close();
+  });
 });

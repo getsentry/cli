@@ -92,9 +92,11 @@ describe("sentry issue list", () => {
     const result = await ctx.run(["issue", "list", `${TEST_ORG}/`, "--json"]);
 
     expect(result.exitCode).toBe(0);
-    // Should be valid JSON array (issues from all projects in org)
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
+    // Org-all mode returns paginated JSON object with data array and hasMore flag
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed).toHaveProperty("data");
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed).toHaveProperty("hasMore");
   });
 
   test("searches for project across orgs with project-only arg", async () => {

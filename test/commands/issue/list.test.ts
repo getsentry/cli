@@ -5,13 +5,25 @@
  * in src/commands/issue/list.ts
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { listCommand } from "../../../src/commands/issue/list.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setDefaults } from "../../../src/lib/db/defaults.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
@@ -201,42 +213,67 @@ describe("issue list: error propagation", () => {
 });
 
 describe("issue list: partial failure handling", () => {
+  // Partial failure handling applies to the per-project fetch path (auto-detect,
+  // explicit, and project-search modes). The org-all mode (e.g. "multi-org/")
+  // uses a single paginated API call and does not do per-project fetching.
+  //
+  // To trigger partial failures, we use project-search (bare slug) which fans
+  // out across orgs via findProjectsBySlug → getProject per org, creating
+  // multiple per-project fetch targets where some can fail independently.
+  //
+  // findProjectsBySlug flow:
+  //   1. listOrganizations() → GET /api/0/organizations/
+  //   2. getProject(org, slug) → GET /api/0/projects/{org}/{slug}/  (per org)
+  //   3. listIssues(org, slug) → GET /api/0/organizations/{org}/issues/?query=project:{slug}
+
   test("JSON output includes error info on partial failures", async () => {
-    await setOrgRegion("multi-org", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      // listProjects: /api/0/organizations/multi-org/projects/
-      if (url.includes("/organizations/multi-org/projects/")) {
+      // listOrganizations → returns org-one and org-two
+      if (
+        url.includes("/api/0/organizations/") &&
+        !url.includes("/organizations/org-")
+      ) {
         return new Response(
           JSON.stringify([
-            { id: "1", slug: "proj-a", name: "Project A" },
-            { id: "2", slug: "proj-b", name: "Project B" },
+            { slug: "org-one", name: "Org One" },
+            { slug: "org-two", name: "Org Two" },
           ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", Link: "" },
-          }
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      // listIssues: /api/0/organizations/multi-org/issues/?query=project:proj-a...
-      if (url.includes("/organizations/multi-org/issues/")) {
-        const queryParam = new URL(url).searchParams.get("query") ?? "";
-        if (queryParam.includes("project:proj-a")) {
-          return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (queryParam.includes("project:proj-b")) {
-          return new Response(
-            JSON.stringify({ detail: "Invalid query syntax" }),
-            { status: 400 }
-          );
-        }
+      // getProject for each org (findProjectsBySlug)
+      if (url.includes("/projects/org-one/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "1", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/projects/org-two/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "2", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listIssues: org-one succeeds, org-two fails with 400
+      if (url.includes("/organizations/org-one/issues/")) {
+        return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/organizations/org-two/issues/")) {
+        return new Response(
+          JSON.stringify({ detail: "Invalid query syntax" }),
+          { status: 400 }
+        );
       }
 
       return new Response(JSON.stringify([]), {
@@ -247,11 +284,9 @@ describe("issue list: partial failure handling", () => {
 
     const { context, stdout } = createContext();
 
-    await func.call(
-      context,
-      { limit: 10, sort: "date", json: true },
-      "multi-org/"
-    );
+    // project-search for "myproj" — finds it in org-one and org-two, creating
+    // two per-project targets; org-one succeeds, org-two fails → partial failure
+    await func.call(context, { limit: 10, sort: "date", json: true }, "myproj");
 
     const output = JSON.parse(stdout.output);
     expect(output).toHaveProperty("issues");
@@ -262,38 +297,52 @@ describe("issue list: partial failure handling", () => {
   });
 
   test("stderr warning on partial failures in human output", async () => {
-    await setOrgRegion("multi-org", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
 
-      if (url.includes("/organizations/multi-org/projects/")) {
+      // listOrganizations → returns org-one and org-two
+      if (
+        url.includes("/api/0/organizations/") &&
+        !url.includes("/organizations/org-")
+      ) {
         return new Response(
           JSON.stringify([
-            { id: "1", slug: "proj-a", name: "Project A" },
-            { id: "2", slug: "proj-b", name: "Project B" },
+            { slug: "org-one", name: "Org One" },
+            { slug: "org-two", name: "Org Two" },
           ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", Link: "" },
-          }
+          { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
 
-      if (url.includes("/organizations/multi-org/issues/")) {
-        const queryParam = new URL(url).searchParams.get("query") ?? "";
-        if (queryParam.includes("project:proj-a")) {
-          return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (queryParam.includes("project:proj-b")) {
-          return new Response(JSON.stringify({ detail: "Permission denied" }), {
-            status: 403,
-          });
-        }
+      // getProject for each org (findProjectsBySlug)
+      if (url.includes("/projects/org-one/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "1", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/projects/org-two/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "2", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listIssues: org-one succeeds, org-two fails with 403
+      if (url.includes("/organizations/org-one/issues/")) {
+        return new Response(JSON.stringify([mockIssue({ id: "1" })]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/organizations/org-two/issues/")) {
+        return new Response(JSON.stringify({ detail: "Permission denied" }), {
+          status: 403,
+        });
       }
 
       return new Response(JSON.stringify([]), {
@@ -304,10 +353,11 @@ describe("issue list: partial failure handling", () => {
 
     const { context, stderr } = createContext();
 
+    // project-search for "myproj" — org-one succeeds, org-two gets 403 → partial failure
     await func.call(
       context,
       { limit: 10, sort: "date", json: false },
-      "multi-org/"
+      "myproj"
     );
 
     expect(stderr.output).toContain("Failed to fetch issues from 1 project(s)");
@@ -336,5 +386,252 @@ describe("issue list: partial failure handling", () => {
     const output = JSON.parse(stdout.output);
     // Should be a plain array, not an object with issues/errors keys
     expect(Array.isArray(output)).toBe(true);
+  });
+});
+
+describe("issue list: org-all mode (cursor pagination)", () => {
+  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
+  let getPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let setPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+
+  function createOrgAllContext() {
+    const stdoutWrite = mock(() => true);
+    const stderrWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: stderrWrite },
+        cwd: "/tmp",
+        setContext: mock(() => {
+          // no-op for test
+        }),
+      },
+      stdoutWrite,
+      stderrWrite,
+    };
+  }
+
+  const sampleIssue = {
+    id: "1",
+    shortId: "PROJ-1",
+    title: "Test Error",
+    status: "unresolved",
+    platform: "javascript",
+    type: "error",
+    count: "5",
+    userCount: 2,
+    lastSeen: "2025-01-01T00:00:00Z",
+    firstSeen: "2025-01-01T00:00:00Z",
+    level: "error",
+    project: { slug: "test-proj" },
+  };
+
+  beforeEach(() => {
+    listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
+    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
+    setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
+    clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+
+    setPaginationCursorSpy.mockReturnValue(undefined);
+    clearPaginationCursorSpy.mockReturnValue(undefined);
+  });
+
+  afterEach(() => {
+    listIssuesPaginatedSpy.mockRestore();
+    getPaginationCursorSpy.mockRestore();
+    setPaginationCursorSpy.mockRestore();
+    clearPaginationCursorSpy.mockRestore();
+  });
+
+  test("throws ValidationError when --cursor used outside org-all mode", async () => {
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+
+    await expect(
+      orgAllFunc.call(
+        context,
+        { limit: 10, sort: "date", json: false, cursor: "some-cursor" },
+        "my-org/my-project"
+      )
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("hasMore", false);
+    expect(clearPaginationCursorSpy).toHaveBeenCalled();
+  });
+
+  test("returns paginated JSON with hasMore=true when nextCursor present", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: "cursor:xyz:1",
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: true },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("hasMore", true);
+    expect(parsed).toHaveProperty("nextCursor", "cursor:xyz:1");
+    expect(setPaginationCursorSpy).toHaveBeenCalled();
+  });
+
+  test("human output shows next page hint when hasMore", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: "cursor:xyz:1",
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("more available");
+    expect(output).toContain("Next page:");
+    expect(output).toContain("-c last");
+  });
+
+  test("human output 'No issues found' when empty org-all", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context, stdoutWrite } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false },
+      "my-org/"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No issues found in organization 'my-org'.");
+  });
+
+  test("resolves 'last' cursor from cache in org-all mode", async () => {
+    getPaginationCursorSpy.mockReturnValue("cached:cursor:789");
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false, cursor: "last" },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+      "my-org",
+      "",
+      expect.objectContaining({ cursor: "cached:cursor:789" })
+    );
+  });
+
+  test("throws ContextError when 'last' cursor not in cache", async () => {
+    getPaginationCursorSpy.mockReturnValue(null);
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+
+    await expect(
+      orgAllFunc.call(
+        context,
+        { limit: 10, sort: "date", json: false, cursor: "last" },
+        "my-org/"
+      )
+    ).rejects.toThrow("No saved cursor");
+  });
+
+  test("uses explicit cursor string in org-all mode", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", json: false, cursor: "explicit:cursor:val" },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+      "my-org",
+      "",
+      expect.objectContaining({ cursor: "explicit:cursor:val" })
+    );
   });
 });

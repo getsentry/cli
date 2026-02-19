@@ -11,6 +11,31 @@ import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
 
+/**
+ * Validate that a CLI --limit flag value is within an allowed range.
+ *
+ * Used by commands that need API-side limiting (trace list, log list) where
+ * the value is passed directly to the API as `per_page`.
+ *
+ * @param value - Raw string input from CLI flag
+ * @param min - Minimum allowed value (inclusive)
+ * @param max - Maximum allowed value (inclusive)
+ * @returns Parsed integer
+ * @throws {Error} If value is NaN or outside [min, max]
+ *
+ * @example
+ * validateLimit("50", 1, 1000)  // 50
+ * validateLimit("0", 1, 1000)   // throws
+ * validateLimit("abc", 1, 1000) // throws
+ */
+export function validateLimit(value: string, min: number, max: number): number {
+  const num = Number.parseInt(value, 10);
+  if (Number.isNaN(num) || num < min || num > max) {
+    throw new Error(`--limit must be between ${min} and ${max}`);
+  }
+  return num;
+}
+
 /** Default span depth when no value is provided */
 const DEFAULT_SPAN_DEPTH = 3;
 

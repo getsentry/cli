@@ -24,7 +24,10 @@ function formatIssue(issue: SchemaIssue): string {
   if (issue.type === "missing_table") {
     return `Missing table: ${issue.table}`;
   }
-  return `Missing column: ${issue.table}.${issue.column}`;
+  if (issue.type === "missing_column") {
+    return `Missing column: ${issue.table}.${issue.column}`;
+  }
+  return `Wrong primary key: ${issue.table}`;
 }
 
 /** Expected permissions for the config directory (owner rwx) */
