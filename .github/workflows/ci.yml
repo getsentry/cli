@@ -208,6 +208,67 @@ jobs:
           name: sentry-${{ matrix.target }}
           path: dist-bin/sentry-*
 
+  build-nuget:
+    name: Pack NuGet (${{ matrix.name }})
+    needs: [changes, lint-dotnet, build-binary]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            artifact-pattern: sentry-linux-*
+            pack-targets: linux-x64 linux-arm64
+            pack-agnostic: true
+          - name: macos
+            os: macos-latest
+            artifact-pattern: sentry-darwin-*
+            pack-targets: darwin-arm64 darwin-x64
+            pack-agnostic: false
+          - name: windows
+            os: windows-latest
+            artifact-pattern: sentry-windows-*
+            pack-targets: windows-x64
+            pack-agnostic: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: node_modules
+          key: node-modules-${{ matrix.os }}-${{ hashFiles('bun.lock', 'patches/**') }}
+      - name: Install dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bun install --frozen-lockfile
+      - uses: actions/setup-dotnet@v4
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.artifact-pattern }}
+          path: dist-bin
+          merge-multiple: true
+      - name: Make binaries executable
+        if: runner.os != 'Windows'
+        run: chmod +x dist-bin/sentry-*
+      - name: Pack NuGet packages
+        shell: bash
+        run: |
+          for target in ${{ matrix.pack-targets }}; do
+            bun run script/pack.ts --no-clean --target $target
+          done
+          if [[ "${{ matrix.pack-agnostic }}" == "true" ]]; then
+            bun run script/pack.ts --no-clean --agnostic
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-${{ matrix.name }}
+          path: dist-pkg/*.nupkg
+
   test-e2e:
     name: E2E Tests
     needs: [build-binary]
@@ -325,14 +386,14 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, test-dotnet]
+    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, test-dotnet, build-nuget]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.test-dotnet.result }}"
+          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.test-dotnet.result }} ${{ needs.build-nuget.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -348,6 +409,10 @@ jobs:
           fi
           if [[ "${{ needs.changes.outputs.code }}" == "true" && "${{ needs.test-dotnet.result }}" == "skipped" ]]; then
             echo "::error::CI failed - upstream job failed causing test-dotnet to be skipped"
+            exit 1
+          fi
+          if [[ "${{ needs.changes.outputs.code }}" == "true" && "${{ needs.build-nuget.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing build-nuget to be skipped"
             exit 1
           fi
           if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-skill.result }}" == "skipped" ]]; then

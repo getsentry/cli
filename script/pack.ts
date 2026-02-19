@@ -5,12 +5,16 @@
  *
  * Creates platform-specific NuGet packages with embedded native binaries,
  * as well as the required top-level pointer package and the RID-agnostic package as fallback.
- * The .NET equivalent of build.ts — same target model, same CLI flags, but dependent on it's output at "dist-bin/".
+ * The .NET equivalent of build.ts — same target model, same CLI flags, but dependent on its output at "dist-bin/".
  *
  * Usage:
- *   bun run script/pack.ts                        # Pack for all platforms
- *   bun run script/pack.ts --single               # Pack for current platform only
- *   bun run script/pack.ts --target darwin-x64    # Pack for specific target (cross-compile)
+ *   bun run script/pack.ts                        # Pack for current platform + root + any packages
+ *   bun run script/pack.ts --agnostic             # Pack only root + any packages (no platform-specific)
+ *   bun run script/pack.ts --single               # Pack for current platform only (no root/any)
+ *   bun run script/pack.ts --target darwin-x64    # Pack for a specific target only (no root/any)
+ *
+ * Flags:
+ *   --no-clean    Skip cleaning the dist-pkg directory before packing
  *
  * Output:
  *   dist-pkg/
@@ -140,8 +144,20 @@ async function packRoot(version: string): Promise<boolean> {
   }
 }
 
-/** Resolve pack targets from CLI args, printing a status line and exiting on error */
-function resolveTargets(args: string[]): PackTarget[] {
+type PackMode = {
+  /** Platform-specific targets to pack */
+  targets: PackTarget[];
+  /** Whether to also pack the root (pointer) and any (agnostic) packages */
+  includeAgnostic: boolean;
+};
+
+/** Resolve pack mode from CLI args, printing a status line and exiting on error */
+function resolveMode(args: string[]): PackMode {
+  if (args.includes("--agnostic")) {
+    console.log("\nPacking agnostic packages (root + any)");
+    return { targets: [], includeAgnostic: true };
+  }
+
   const targetIndex = args.indexOf("--target");
   const targetArg = targetIndex !== -1 ? args[targetIndex + 1] : null;
 
@@ -155,27 +171,29 @@ function resolveTargets(args: string[]): PackTarget[] {
       process.exit(1);
     }
     console.log(`\nPacking for target: ${getPackageName(target)}`);
-    return [target];
+    return { targets: [target], includeAgnostic: false };
+  }
+
+  const currentTarget = ALL_TARGETS.find(
+    (t) => t.os === process.platform && t.arch === process.arch
+  );
+  if (!currentTarget) {
+    console.error(`Unsupported platform: ${process.platform}-${process.arch}`);
+    process.exit(1);
   }
 
   if (args.includes("--single")) {
-    const currentTarget = ALL_TARGETS.find(
-      (t) => t.os === process.platform && t.arch === process.arch
-    );
-    if (!currentTarget) {
-      console.error(
-        `Unsupported platform: ${process.platform}-${process.arch}`
-      );
-      process.exit(1);
-    }
     console.log(
       `\nPacking for current platform: ${getPackageName(currentTarget)}`
     );
-    return [currentTarget];
+    return { targets: [currentTarget], includeAgnostic: false };
   }
 
-  console.log(`\nPacking for ${ALL_TARGETS.length} targets`);
-  return ALL_TARGETS;
+  // Default: current platform + agnostic packages
+  console.log(
+    `\nPacking for current platform + agnostic packages: ${getPackageName(currentTarget)}`
+  );
+  return { targets: [currentTarget], includeAgnostic: true };
 }
 
 /** Verify that native binaries exist for all targets, exiting on missing files */
@@ -201,39 +219,44 @@ async function verifyBinaries(targets: PackTarget[]): Promise<void> {
 /** Main pack function */
 async function pack(): Promise<void> {
   const args = process.argv.slice(2);
+  const noClean = args.includes("--no-clean");
 
   console.log(`\nSentry CLI NuGet Pack v${pkg.version}`);
   console.log("=".repeat(40));
 
-  const targets = resolveTargets(args);
+  const mode = resolveMode(args);
 
-  await verifyBinaries(targets);
+  if (mode.targets.length > 0) {
+    await verifyBinaries(mode.targets);
+  }
 
-  // Clean output directory
-  await $`rm -rf ${DIST_PKG_DIR}`.quiet();
+  // Clean output directory (unless --no-clean is specified)
+  if (!noClean) {
+    await $`rm -rf ${DIST_PKG_DIR}`.quiet();
+  }
 
   console.log("");
 
-  // Build all packages
   let successCount = 0;
   let failCount = 0;
 
-  // Root package (no RID) — always included, even for --single / --target
-  if (await packRoot(pkg.version)) {
-    successCount += 1;
-  } else {
-    failCount += 1;
-  }
+  // Root package (no RID) and any package — only when includeAgnostic is set
+  if (mode.includeAgnostic) {
+    if (await packRoot(pkg.version)) {
+      successCount += 1;
+    } else {
+      failCount += 1;
+    }
 
-  // "any" package (framework-dependent fallback) — always included, even for --single / --target
-  if (await packAny(pkg.version)) {
-    successCount += 1;
-  } else {
-    failCount += 1;
+    if (await packAny(pkg.version)) {
+      successCount += 1;
+    } else {
+      failCount += 1;
+    }
   }
 
   // Platform-specific packages
-  for (const target of targets) {
+  for (const target of mode.targets) {
     if (await packTarget(target, pkg.version)) {
       successCount += 1;
     } else {
