@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
-    "test": "bun test",
+    "test": "bun run test:unit && bun run test:isolated",
     "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:isolated": "bun test test/isolated",
     "test:e2e": "bun test test/e2e",
