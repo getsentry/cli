@@ -14,7 +14,7 @@
 import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -330,6 +330,31 @@ export function hasColumn(
   return result.count > 0;
 }
 
+/**
+ * Check if a table has the expected composite primary key.
+ *
+ * Inspects the CREATE TABLE DDL stored in sqlite_master to verify
+ * the table has a table-level PRIMARY KEY constraint matching the
+ * expected columns. Returns false if the table uses per-column
+ * PRIMARY KEY instead (e.g., `command_key TEXT PRIMARY KEY`).
+ */
+function hasCompositePrimaryKey(
+  db: Database,
+  table: string,
+  expectedColumns: string[]
+): boolean {
+  const row = db
+    .query("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+    .get(table) as { sql: string } | undefined;
+
+  if (!row) {
+    return false;
+  }
+
+  const expectedPK = `PRIMARY KEY (${expectedColumns.join(", ")})`;
+  return row.sql.includes(expectedPK);
+}
+
 /** Add a column to a table if it doesn't exist */
 function addColumnIfMissing(
   db: Database,
@@ -345,7 +370,33 @@ function addColumnIfMissing(
 /** Schema issue types for diagnostics */
 export type SchemaIssue =
   | { type: "missing_table"; table: string }
-  | { type: "missing_column"; table: string; column: string };
+  | { type: "missing_column"; table: string; column: string }
+  | { type: "wrong_primary_key"; table: string };
+
+function findMissingColumns(db: Database, tableName: string): SchemaIssue[] {
+  const columns = EXPECTED_COLUMNS[tableName];
+  if (!columns) {
+    return [];
+  }
+  return columns
+    .filter((col) => !hasColumn(db, tableName, col.name))
+    .map((col) => ({
+      type: "missing_column" as const,
+      table: tableName,
+      column: col.name,
+    }));
+}
+
+function findPrimaryKeyIssues(db: Database, tableName: string): SchemaIssue[] {
+  const schema = TABLE_SCHEMAS[tableName];
+  if (
+    schema?.compositePrimaryKey &&
+    !hasCompositePrimaryKey(db, tableName, schema.compositePrimaryKey)
+  ) {
+    return [{ type: "wrong_primary_key", table: tableName }];
+  }
+  return [];
+}
 
 /**
  * Check schema and return list of issues.
@@ -360,18 +411,8 @@ export function getSchemaIssues(db: Database): SchemaIssue[] {
       continue;
     }
 
-    const columns = EXPECTED_COLUMNS[tableName];
-    if (columns) {
-      for (const col of columns) {
-        if (!hasColumn(db, tableName, col.name)) {
-          issues.push({
-            type: "missing_column",
-            table: tableName,
-            column: col.name,
-          });
-        }
-      }
-    }
+    issues.push(...findMissingColumns(db, tableName));
+    issues.push(...findPrimaryKeyIssues(db, tableName));
   }
 
   return issues;
@@ -421,8 +462,42 @@ function repairMissingColumns(db: Database, result: RepairResult): void {
 }
 
 /**
- * Repair schema issues by creating missing tables and adding missing columns.
- * This is a non-destructive operation that only adds missing schema elements.
+ * Drop and recreate tables that have incorrect primary key constraints.
+ *
+ * This fixes the CLI-72 bug where pagination_cursors was created with a
+ * single-column PK (`command_key TEXT PRIMARY KEY`) instead of the expected
+ * composite PK (`PRIMARY KEY (command_key, context)`). SQLite does not
+ * support ALTER TABLE to change primary keys, so the table must be dropped
+ * and recreated. The data loss is acceptable since pagination cursors are
+ * ephemeral (5-minute TTL).
+ */
+function repairWrongPrimaryKeys(db: Database, result: RepairResult): void {
+  for (const [tableName, schema] of Object.entries(TABLE_SCHEMAS)) {
+    if (!schema.compositePrimaryKey) {
+      continue;
+    }
+    if (!tableExists(db, tableName)) {
+      continue;
+    }
+    if (hasCompositePrimaryKey(db, tableName, schema.compositePrimaryKey)) {
+      continue;
+    }
+    try {
+      db.exec(`DROP TABLE ${tableName}`);
+      db.exec(EXPECTED_TABLES[tableName] as string);
+      result.fixed.push(
+        `Recreated table ${tableName} with correct primary key`
+      );
+    } catch (e) {
+      const msg = stringifyUnknown(e);
+      result.failed.push(`Failed to recreate table ${tableName}: ${msg}`);
+    }
+  }
+}
+
+/**
+ * Repair schema issues by creating missing tables, adding missing columns,
+ * and recreating tables with incorrect primary key constraints.
  *
  * @param db - The raw database connection (not the traced wrapper)
  * @returns Lists of fixed and failed repairs
@@ -432,6 +507,7 @@ export function repairSchema(db: Database): RepairResult {
 
   repairMissingTables(db, result);
   repairMissingColumns(db, result);
+  repairWrongPrimaryKeys(db, result);
 
   if (result.fixed.length > 0) {
     try {
@@ -458,7 +534,8 @@ function isSchemaError(error: unknown): boolean {
     return (
       msg.includes("no such column") ||
       msg.includes("no such table") ||
-      msg.includes("has no column named")
+      msg.includes("has no column named") ||
+      msg.includes("on conflict clause does not match")
     );
   }
   return false;
@@ -612,6 +689,22 @@ export function runMigrations(db: Database): void {
 
   // Migration 4 -> 5: Add pagination_cursors table for --cursor last support
   if (currentVersion < 5) {
+    db.exec(EXPECTED_TABLES.pagination_cursors as string);
+  }
+
+  // Migration 5 -> 6: Repair pagination_cursors if created with wrong PK (CLI-72)
+  // Earlier versions could create the table with a single-column PK instead of
+  // the composite PK (command_key, context). DROP + CREATE is safe because
+  // pagination cursors are ephemeral (5-minute TTL).
+  if (
+    currentVersion < 6 &&
+    tableExists(db, "pagination_cursors") &&
+    !hasCompositePrimaryKey(db, "pagination_cursors", [
+      "command_key",
+      "context",
+    ])
+  ) {
+    db.exec("DROP TABLE pagination_cursors");
     db.exec(EXPECTED_TABLES.pagination_cursors as string);
   }
 
