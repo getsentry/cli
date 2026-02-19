@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { cancel, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { CLI_VERSION } from "../constants.js";
+import { getAuthToken } from "../db/auth.js";
 import { formatBanner } from "../help.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import { MASTRA_API_URL, SENTRY_DOCS_URL, WORKFLOW_ID } from "./constants.js";
@@ -126,7 +127,11 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     },
   };
 
-  const client = new MastraClient({ baseUrl: MASTRA_API_URL });
+  const token = getAuthToken();
+  const client = new MastraClient({
+    baseUrl: MASTRA_API_URL,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   const workflow = client.getWorkflow(WORKFLOW_ID);
   const run = await workflow.createRun();
 
