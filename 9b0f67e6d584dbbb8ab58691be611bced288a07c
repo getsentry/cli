@@ -1,0 +1,40 @@
+Implementation Plan
+
+## Problem
+The /users/me/ endpoint returns 403 for OAuth tokens (including OAuth App
+tokens). This caused user info fetching to silently fail, requiring a
+try-catch fallback in the --token login path. The /auth/ endpoint works
+with all token types and lives on the control silo (sentry.io for SaaS).
+
+## Changes
+
+1. getCurrentUser() in src/lib/api-client.ts
+   - Changed endpoint from /users/me/ to /auth/
+   - Updated JSDoc to document the token compatibility guarantee
+
+2. src/commands/auth/login.ts
+   - Removed try-catch around getCurrentUser() for --token login
+   - User info is now always fetched and stored (no more silent failures)
+   - Simplified: removed the conditional display of 'Logged in as'
+
+3. src/commands/auth/whoami.ts (new)
+   - Fetches live user identity from /auth/
+   - Displays name, email, username via formatUserIdentity()
+   - Supports --json for machine consumption
+   - Updates cached user info in the DB on each call
+   - Available as both `sentry auth whoami` and `sentry whoami`
+
+4. src/commands/auth/index.ts
+   - Registered whoamiCommand as 'whoami' subcommand
+   - Updated fullDescription to mention the new command
+
+5. src/app.ts
+   - Imported whoamiCommand and added as top-level alias
+   - Follows same pattern as issues/orgs/projects shortcuts
+
+## Design Decisions
+- whoami is separate from status: status shows full auth state (token,
+  expiry, defaults, org verification); whoami shows only user identity
+- Top-level alias follows gh CLI convention for common operations
+- /auth/ routing: getControlSiloUrl() already returns sentry.io for SaaS,
+  so no special host-override logic needed (unlike sentry-mcp's approach)
