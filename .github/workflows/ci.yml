@@ -217,20 +217,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux
+          - name: linux-x64
             os: ubuntu-latest
-            artifact-pattern: sentry-linux-*
-            pack-targets: linux-x64 linux-arm64
+            pack-target: linux-x64
             pack-agnostic: true
-          - name: macos
-            os: macos-latest
-            artifact-pattern: sentry-darwin-*
-            pack-targets: darwin-arm64 darwin-x64
+          - name: linux-arm64
+            os: ubuntu-latest
+            pack-target: linux-arm64
             pack-agnostic: false
-          - name: windows
+          - name: macos-arm64
+            os: macos-latest
+            pack-target: darwin-arm64
+            pack-agnostic: false
+          - name: macos-x64
+            os: macos-latest
+            pack-target: darwin-x64
+            pack-agnostic: false
+          - name: windows-x64
             os: windows-latest
-            artifact-pattern: sentry-windows-*
-            pack-targets: windows-x64
+            pack-target: windows-x64
             pack-agnostic: false
     steps:
       - uses: actions/checkout@v4
@@ -245,24 +250,19 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile
       - uses: actions/setup-dotnet@v4
-      - name: Download binaries
+      - name: Download binary
         uses: actions/download-artifact@v4
         with:
-          pattern: ${{ matrix.artifact-pattern }}
+          name: sentry-${{ matrix.pack-target }}
           path: dist-bin
-          merge-multiple: true
-      - name: Make binaries executable
+      - name: Make binary executable
         if: runner.os != 'Windows'
         run: chmod +x dist-bin/sentry-*
       - name: Pack NuGet packages
-        shell: bash
-        run: |
-          for target in ${{ matrix.pack-targets }}; do
-            bun run script/pack.ts --no-clean --target $target
-          done
-          if [[ "${{ matrix.pack-agnostic }}" == "true" ]]; then
-            bun run script/pack.ts --no-clean --agnostic
-          fi
+        run: bun run script/pack.ts --target ${{ matrix.pack-target }}
+      - name: Pack agnostic NuGet packages
+        if: matrix.pack-agnostic == 'true'
+        run: bun run script/pack.ts --no-clean --agnostic
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
