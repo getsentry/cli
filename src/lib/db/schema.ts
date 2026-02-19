@@ -14,7 +14,7 @@
 import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -210,6 +210,22 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       ttl_expires_at: { type: "INTEGER", notNull: true },
     },
   },
+  transaction_aliases: {
+    columns: {
+      idx: { type: "INTEGER", notNull: true },
+      alias: { type: "TEXT", notNull: true },
+      transaction_name: { type: "TEXT", notNull: true },
+      org_slug: { type: "TEXT", notNull: true },
+      project_slug: { type: "TEXT", notNull: true },
+      fingerprint: { type: "TEXT", notNull: true },
+      cached_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+    compositePrimaryKey: ["fingerprint", "idx"],
+  },
 };
 
 /** Generate CREATE TABLE DDL from column definitions */
@@ -383,6 +399,12 @@ export type RepairResult = {
   failed: string[];
 };
 
+/** Index for efficient alias lookups by alias string + fingerprint */
+const TRANSACTION_ALIASES_INDEX = `
+  CREATE INDEX IF NOT EXISTS idx_txn_alias_lookup 
+  ON transaction_aliases(alias, fingerprint)
+`;
+
 function repairMissingTables(db: Database, result: RepairResult): void {
   for (const [tableName, ddl] of Object.entries(EXPECTED_TABLES)) {
     if (tableExists(db, tableName)) {
@@ -394,6 +416,24 @@ function repairMissingTables(db: Database, result: RepairResult): void {
     } catch (e) {
       const msg = stringifyUnknown(e);
       result.failed.push(`Failed to create table ${tableName}: ${msg}`);
+    }
+  }
+  // Create indexes for newly created tables (separate pass to avoid
+  // leaving the index uncreated if the table DDL succeeds but the
+  // index fails in the same try/catch)
+  ensureTableIndexes(db, result);
+}
+
+/** Ensure indexes exist for tables that need them */
+function ensureTableIndexes(db: Database, result: RepairResult): void {
+  if (tableExists(db, "transaction_aliases")) {
+    try {
+      db.exec(TRANSACTION_ALIASES_INDEX);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.failed.push(
+        `Failed to create index for transaction_aliases: ${msg}`
+      );
     }
   }
 }
@@ -553,6 +593,7 @@ export function tryRepairAndRetry<T>(
 export function initSchema(db: Database): void {
   const ddlStatements = Object.values(EXPECTED_TABLES).join(";\n\n");
   db.exec(ddlStatements);
+  db.exec(TRANSACTION_ALIASES_INDEX);
 
   const versionRow = db
     .query("SELECT version FROM schema_version LIMIT 1")
@@ -610,9 +651,15 @@ export function runMigrations(db: Database): void {
     db.exec(EXPECTED_TABLES.project_root_cache as string);
   }
 
-  // Migration 4 -> 5: Add pagination_cursors table for --cursor last support
+  // Migration 4 -> 5: Add pagination_cursors table
   if (currentVersion < 5) {
     db.exec(EXPECTED_TABLES.pagination_cursors as string);
+  }
+
+  // Migration 5 -> 6: Add transaction_aliases table
+  if (currentVersion < 6) {
+    db.exec(EXPECTED_TABLES.transaction_aliases as string);
+    db.exec(TRANSACTION_ALIASES_INDEX);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

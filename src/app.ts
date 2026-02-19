@@ -17,6 +17,7 @@ import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
 import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
+import { profileRoute } from "./commands/profile/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
@@ -47,6 +48,7 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     log: logRoute,
+    profile: profileRoute,
     trace: traceRoute,
     api: apiCommand,
     issues: issueListCommand,

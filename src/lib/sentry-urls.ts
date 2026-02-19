@@ -105,6 +105,39 @@ export function buildBillingUrl(orgSlug: string, product?: string): string {
   return product ? `${base}?product=${product}` : base;
 }
 
+// Profiling URLs
+
+/**
+ * Build URL to the profiling flamegraph view for a transaction.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param transactionName - Transaction name to view profiles for
+ * @returns Full URL to the profiling flamegraph view
+ */
+export function buildProfileUrl(
+  orgSlug: string,
+  projectSlug: string,
+  transactionName: string
+): string {
+  const encodedTransaction = encodeURIComponent(transactionName);
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/profile/${projectSlug}/flamegraph/?query=transaction%3A%22${encodedTransaction}%22`;
+}
+
+/**
+ * Build URL to the profiling summary page for a project.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectId - Numeric project ID (Sentry frontend requires numeric ID for ?project= param)
+ * @returns Full URL to the profiling summary page
+ */
+export function buildProfilingSummaryUrl(
+  orgSlug: string,
+  projectId: string | number
+): string {
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/profiling/?project=${projectId}`;
+}
+
 // Logs URLs
 
 /**

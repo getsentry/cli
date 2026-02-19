@@ -551,6 +551,59 @@ sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
 sentry log list --json | jq '.[] | select(.level == "error")'
 ```
 
+### Profile
+
+Analyze CPU profiling data
+
+#### `sentry profile list <target>`
+
+List transactions with profiling data
+
+**Flags:**
+- `--period <value> - Time period: 1h, 24h, 7d, 14d, 30d - (default: "24h")`
+- `-n, --limit <value> - Maximum number of transactions to return - (default: "20")`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+sentry profile list [<org>/<project>]
+
+sentry profile list my-org/backend --period 7d
+```
+
+#### `sentry profile view <args...>`
+
+View CPU profiling analysis for a transaction
+
+**Flags:**
+- `--period <value> - Stats period: 1h, 24h, 7d, 14d, 30d - (default: "24h")`
+- `-n, --limit <value> - Number of hot paths to show (max 20) - (default: "10")`
+- `--allFrames - Include library/system frames (default: user code only)`
+- `--json - Output as JSON`
+- `-w, --web - Open in browser`
+
+**Examples:**
+
+```bash
+sentry profile view [<org>/<project>] <transaction>
+
+sentry profile view my-org/backend e --period 7d
+
+sentry profile view my-org/backend e --allFrames --limit 5
+
+sentry profile view my-org/backend e --json | jq '.hotPaths[0].frames[0].name'
+
+sentry profile list my-org/backend
+
+sentry profile view my-org/backend e
+
+sentry profile view my-org/backend e --allFrames
+
+sentry profile view my-org/backend e -w
+```
+
 ### Trace
 
 View distributed traces

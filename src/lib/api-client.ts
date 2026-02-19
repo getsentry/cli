@@ -28,7 +28,11 @@ import type { z } from "zod";
 import {
   DetailedLogsResponseSchema,
   type DetailedSentryLog,
+  type Flamegraph,
+  FlamegraphSchema,
   LogsResponseSchema,
+  type ProfileFunctionsResponse,
+  ProfileFunctionsResponseSchema,
   type ProjectKey,
   type Region,
   type SentryEvent,
@@ -1366,6 +1370,86 @@ export async function getCurrentUser(): Promise<SentryUser> {
     { schema: SentryUserSchema }
   );
   return data;
+}
+
+// Profiling API
+
+/**
+ * Get flamegraph data for a transaction.
+ * Returns aggregated profiling data across all samples for the given transaction.
+ * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectId - Project ID (numeric)
+ * @param transactionName - Transaction name to analyze
+ * @param statsPeriod - Time period to aggregate (e.g., "7d", "24h")
+ * @returns Flamegraph data with frames, samples, and statistics
+ */
+export async function getFlamegraph(
+  orgSlug: string,
+  projectId: string | number,
+  transactionName: string,
+  statsPeriod = "24h"
+): Promise<Flamegraph> {
+  // Escape special characters in transaction name for query
+  const escapedTransaction = transactionName
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+
+  const response = await orgScopedRequestPaginated<Flamegraph>(
+    `/organizations/${orgSlug}/profiling/flamegraph/`,
+    {
+      params: {
+        project: projectId,
+        query: `event.type:transaction transaction:"${escapedTransaction}"`,
+        statsPeriod,
+      },
+      schema: FlamegraphSchema,
+    }
+  );
+  return response.data;
+}
+
+/**
+ * List transactions with profiling data using the Explore Events API.
+ * Queries the profile_functions dataset to find transactions with profiles.
+ * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectId - Project ID (numeric)
+ * @param options - Query options
+ * @returns List of transactions with profile counts and timing data
+ */
+export async function listProfiledTransactions(
+  orgSlug: string,
+  projectId: string | number,
+  options: {
+    statsPeriod?: string;
+    limit?: number;
+  } = {}
+): Promise<ProfileFunctionsResponse> {
+  const { statsPeriod = "24h", limit = 20 } = options;
+
+  const response = await orgScopedRequestPaginated<ProfileFunctionsResponse>(
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "profile_functions",
+        field: [
+          "transaction",
+          "count_unique(timestamp)",
+          "p75(function.duration)",
+          "p95(function.duration)",
+        ],
+        statsPeriod,
+        per_page: limit,
+        project: projectId,
+        sort: "-p75(function.duration)",
+      },
+      schema: ProfileFunctionsResponseSchema,
+    }
+  );
+  return response.data;
 }
 
 // Log functions

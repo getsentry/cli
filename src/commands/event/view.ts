@@ -134,6 +134,7 @@ export function parsePositionalArgs(args: string[]): {
 
 /**
  * Resolved target type for event commands.
+ * Uses ResolvedTarget from resolve-target.ts.
  * @internal Exported for testing
  */
 export type ResolvedEventTarget = {

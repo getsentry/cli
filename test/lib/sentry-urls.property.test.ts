@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
+  nat,
   oneof,
   property,
   stringMatching,
@@ -20,6 +21,8 @@ import {
   buildLogsUrl,
   buildOrgSettingsUrl,
   buildOrgUrl,
+  buildProfileUrl,
+  buildProfilingSummaryUrl,
   buildProjectUrl,
   buildSeerSettingsUrl,
   buildTraceUrl,
@@ -92,6 +95,18 @@ const hashArb = stringMatching(/^[a-zA-Z][a-zA-Z0-9-]{0,20}$/);
 
 /** Product names for billing URLs */
 const productArb = constantFrom("seer", "errors", "performance", "replays");
+
+/** Numeric project IDs (Sentry uses numeric IDs for ?project= params) */
+const projectIdArb = nat({ max: 9_999_999 }).filter((n) => n > 0);
+
+/** Transaction names (URL-style paths) */
+const transactionNameArb = constantFrom(
+  "/api/users",
+  "/api/0/organizations/{org}/issues/",
+  "POST /api/v2/users/:id",
+  "tasks.process_event",
+  "/health"
+);
 
 describe("isSentrySaasUrl properties", () => {
   test("sentry.io always returns true", () => {
@@ -456,6 +471,109 @@ describe("buildTraceUrl properties", () => {
   });
 });
 
+describe("buildProfileUrl properties", () => {
+  test("output contains org slug, project slug, and encoded transaction", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, transactionNameArb),
+        ([orgSlug, projectSlug, transaction]) => {
+          const result = buildProfileUrl(orgSlug, projectSlug, transaction);
+          expect(result).toContain(orgSlug);
+          expect(result).toContain(projectSlug);
+          expect(result).toContain(encodeURIComponent(transaction));
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains /profiling/profile/ path", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, transactionNameArb),
+        ([orgSlug, projectSlug, transaction]) => {
+          const result = buildProfileUrl(orgSlug, projectSlug, transaction);
+          expect(result).toContain("/profiling/profile/");
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, transactionNameArb),
+        ([orgSlug, projectSlug, transaction]) => {
+          const result = buildProfileUrl(orgSlug, projectSlug, transaction);
+          expect(() => new URL(result)).not.toThrow();
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains flamegraph and quoted transaction query", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, transactionNameArb),
+        ([orgSlug, projectSlug, transaction]) => {
+          const result = buildProfileUrl(orgSlug, projectSlug, transaction);
+          expect(result).toContain("/flamegraph/");
+          // Transaction should be wrapped in encoded quotes (%22) for Sentry search syntax
+          expect(result).toContain(
+            `query=transaction%3A%22${encodeURIComponent(transaction)}%22`
+          );
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("buildProfilingSummaryUrl properties", () => {
+  test("output contains org slug and project ID", async () => {
+    await fcAssert(
+      property(tuple(slugArb, projectIdArb), ([orgSlug, projectId]) => {
+        const result = buildProfilingSummaryUrl(orgSlug, projectId);
+        expect(result).toContain(orgSlug);
+        expect(result).toContain(`${projectId}`);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains /profiling/ path", async () => {
+    await fcAssert(
+      property(tuple(slugArb, projectIdArb), ([orgSlug, projectId]) => {
+        const result = buildProfilingSummaryUrl(orgSlug, projectId);
+        expect(result).toContain("/profiling/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(tuple(slugArb, projectIdArb), ([orgSlug, projectId]) => {
+        const result = buildProfilingSummaryUrl(orgSlug, projectId);
+        expect(() => new URL(result)).not.toThrow();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output has project query parameter with numeric ID", async () => {
+    await fcAssert(
+      property(tuple(slugArb, projectIdArb), ([orgSlug, projectId]) => {
+        const result = buildProfilingSummaryUrl(orgSlug, projectId);
+        expect(result).toContain(`?project=${projectId}`);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("URL building cross-function properties", () => {
   test("all URL builders produce valid URLs", async () => {
     await fcAssert(
@@ -471,6 +589,8 @@ describe("URL building cross-function properties", () => {
             buildSeerSettingsUrl(orgSlug),
             buildBillingUrl(orgSlug),
             buildBillingUrl(orgSlug, product),
+            buildProfileUrl(orgSlug, projectSlug, "/api/users"),
+            buildProfilingSummaryUrl(orgSlug, 12_345),
           ];
 
           for (const url of urls) {
