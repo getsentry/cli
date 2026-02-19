@@ -44,13 +44,18 @@ export const whoamiCommand = buildCommand({
 
     const user = await getCurrentUser();
 
-    // Keep cached user info up to date
-    setUserInfo({
-      userId: user.id,
-      email: user.email,
-      username: user.username,
-      name: user.name,
-    });
+    // Keep cached user info up to date. Non-fatal: display must succeed even
+    // if the DB write fails (read-only filesystem, corrupted database, etc.).
+    try {
+      setUserInfo({
+        userId: user.id,
+        email: user.email,
+        username: user.username,
+        name: user.name,
+      });
+    } catch {
+      // Cache update failure is non-essential — user identity was already fetched.
+    }
 
     if (flags.json) {
       writeJson(stdout, {

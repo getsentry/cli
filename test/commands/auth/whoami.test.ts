@@ -165,6 +165,20 @@ describe("whoamiCommand.func", () => {
         email: "jane@example.com",
       });
     });
+
+    test("still displays identity when DB cache write fails", async () => {
+      isAuthenticatedSpy.mockResolvedValue(true);
+      getCurrentUserSpy.mockResolvedValue(FULL_USER);
+      setUserInfoSpy.mockImplementation(() => {
+        throw new Error("read-only filesystem");
+      });
+
+      const { context, getOutput } = createContext();
+      // Must not throw — output must still be shown
+      await func.call(context, { json: false });
+
+      expect(getOutput()).toContain("Jane Doe");
+    });
   });
 
   describe("--json output", () => {
