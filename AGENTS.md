@@ -328,7 +328,7 @@ Two abstraction levels exist for list commands:
 2. **`src/lib/org-list.ts`** — `dispatchOrgScopedList` with `OrgListConfig` and a 4-mode handler map: `auto-detect`, `explicit`, `org-all`, `project-search`. Complex commands (`project list`, `issue list`) call `dispatchOrgScopedList` with an `overrides` map directly instead of using `buildOrgListCommand`.
 
 Key rules when writing overrides:
-- Use `Extract<ParsedOrgProject, { type: "..." }>` casts to access variant-specific fields — TypeScript cannot narrow discriminated unions across closure boundaries.
+- Each mode handler receives the correctly-narrowed `ParsedVariant<T>` as its argument (e.g., `(p) => p.org` in an `org-all` handler). No manual `Extract<>` casts are needed — the dispatcher guarantees type safety.
 - `resolveCursor()` must be called **inside** the `org-all` override closure, not before `dispatchOrgScopedList`, so that `--cursor` validation errors fire correctly for non-org-all modes.
 - `handleProjectSearch` errors must use `"Project"` as the `ContextError` resource, not `config.entityName`.
 
