@@ -90,18 +90,24 @@ export async function resolveTeam(
     ]);
   }
 
-  if (teams.length === 1) {
-    return (teams[0] as SentryTeam).slug;
+  // Prefer teams the user belongs to — avoids requiring --team in multi-team orgs
+  const memberTeams = teams.filter((t) => t.isMember === true);
+  const candidates = memberTeams.length > 0 ? memberTeams : teams;
+
+  if (candidates.length === 1) {
+    return (candidates[0] as SentryTeam).slug;
   }
 
-  // Multiple teams — user must specify
-  const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
+  // Multiple candidates — user must specify
+  const teamList = candidates.map((t) => `  ${t.slug}`).join("\n");
+  const label =
+    memberTeams.length > 0
+      ? `You belong to ${candidates.length} teams in ${orgSlug}`
+      : `Multiple teams found in ${orgSlug}`;
   throw new ContextError(
     "Team",
-    `${options.usageHint} --team ${(teams[0] as SentryTeam).slug}`,
-    [
-      `Multiple teams found in ${orgSlug}. Specify one with --team:\n\n${teamList}`,
-    ]
+    `${options.usageHint} --team ${(candidates[0] as SentryTeam).slug}`,
+    [`${label}. Specify one with --team:\n\n${teamList}`]
   );
 }
 
