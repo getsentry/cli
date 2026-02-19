@@ -15,6 +15,7 @@ import {
   initSchema,
   isReadonlyError,
   repairSchema,
+  runMigrations,
   tableExists,
 } from "../../../src/lib/db/schema.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -289,5 +290,157 @@ describe("isReadonlyError", () => {
     expect(isReadonlyError("attempt to write a readonly database")).toBe(false);
     expect(isReadonlyError(null)).toBe(false);
     expect(isReadonlyError(undefined)).toBe(false);
+  });
+});
+
+describe("runMigrations", () => {
+  test("no-op when already at current version", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    // Should not throw and version stays at current
+    runMigrations(db);
+
+    const version = (
+      db.query("SELECT version FROM schema_version").get() as {
+        version: number;
+      }
+    ).version;
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
+    db.close();
+  });
+
+  test("repairs pagination_cursors with wrong single-column PK (CLI-72)", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    // Build a full schema but with the bugged pagination_cursors table
+    initSchema(db);
+    db.exec("DROP TABLE pagination_cursors");
+    db.exec(
+      "CREATE TABLE pagination_cursors (command_key TEXT PRIMARY KEY, context TEXT NOT NULL, cursor TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+    );
+    // Set version to 5 so migration 5→6 fires
+    db.query("UPDATE schema_version SET version = 5").run();
+
+    runMigrations(db);
+
+    // Table should now have the correct composite PK
+    const row = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='pagination_cursors'"
+      )
+      .get() as { sql: string };
+    expect(row.sql).toContain("PRIMARY KEY (command_key, context)");
+
+    // Version should be bumped to 6
+    const version = (
+      db.query("SELECT version FROM schema_version").get() as {
+        version: number;
+      }
+    ).version;
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
+    db.close();
+  });
+
+  test("skips pagination_cursors repair when PK is already correct", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+    db.query("UPDATE schema_version SET version = 5").run();
+
+    // pagination_cursors was created by initSchema with the correct PK
+    runMigrations(db);
+
+    const row = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='pagination_cursors'"
+      )
+      .get() as { sql: string };
+    expect(row.sql).toContain("PRIMARY KEY (command_key, context)");
+    db.close();
+  });
+
+  test("creates pagination_cursors when missing during migration 4→5", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    // Set up schema at version 4 without pagination_cursors
+    const statementsWithoutPagination = Object.entries(EXPECTED_TABLES)
+      .filter(([name]) => name !== "pagination_cursors")
+      .map(([, ddl]) => ddl);
+    db.exec(statementsWithoutPagination.join(";\n"));
+    db.query("INSERT INTO schema_version (version) VALUES (4)").run();
+
+    runMigrations(db);
+
+    expect(tableExists(db, "pagination_cursors")).toBe(true);
+    db.close();
+  });
+});
+
+describe("repairSchema: wrong primary key", () => {
+  test("detects and repairs pagination_cursors with wrong single-column PK", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+    // Simulate the bug: drop and recreate with wrong PK
+    db.exec("DROP TABLE pagination_cursors");
+    db.exec(
+      "CREATE TABLE pagination_cursors (command_key TEXT PRIMARY KEY, context TEXT NOT NULL, cursor TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+    );
+
+    const result = repairSchema(db);
+
+    expect(
+      result.fixed.some((f) => f.includes("pagination_cursors"))
+    ).toBe(true);
+    expect(result.failed).toEqual([]);
+
+    const row = db
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='pagination_cursors'"
+      )
+      .get() as { sql: string };
+    expect(row.sql).toContain("PRIMARY KEY (command_key, context)");
+    db.close();
+  });
+
+  test("no-op when pagination_cursors already has correct composite PK", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    const result = repairSchema(db);
+
+    // Should not report pagination_cursors as fixed
+    expect(
+      result.fixed.some((f) => f.includes("pagination_cursors"))
+    ).toBe(false);
+    db.close();
+  });
+});
+
+describe("getSchemaIssues: wrong primary key", () => {
+  test("detects wrong_primary_key when pagination_cursors has single-column PK", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+    db.exec("DROP TABLE pagination_cursors");
+    db.exec(
+      "CREATE TABLE pagination_cursors (command_key TEXT PRIMARY KEY, context TEXT NOT NULL, cursor TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+    );
+
+    const issues = getSchemaIssues(db);
+    const pkIssues = issues.filter((i) => i.type === "wrong_primary_key");
+
+    expect(pkIssues).toContainEqual({
+      type: "wrong_primary_key",
+      table: "pagination_cursors",
+    });
+    db.close();
+  });
+
+  test("no wrong_primary_key issues for healthy database", () => {
+    const db = new Database(join(getTestDir(), "test.db"));
+    initSchema(db);
+
+    const issues = getSchemaIssues(db);
+    const pkIssues = issues.filter((i) => i.type === "wrong_primary_key");
+
+    expect(pkIssues).toEqual([]);
+    db.close();
   });
 });
