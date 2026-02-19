@@ -305,9 +305,23 @@ export async function apiRequestToRegion<T>(
   }
 
   const data = await response.json();
-  const validated = schema ? schema.parse(data) : (data as T);
 
-  return { data: validated, headers: response.headers };
+  if (schema) {
+    const result = schema.safeParse(data);
+    if (!result.success) {
+      // Treat schema validation failures as API errors so they surface cleanly
+      // through the central error handler rather than showing a raw ZodError
+      // stack trace. This guards against unexpected API response format changes.
+      throw new ApiError(
+        `Unexpected response format from ${endpoint}`,
+        response.status,
+        result.error.message
+      );
+    }
+    return { data: result.data, headers: response.headers };
+  }
+
+  return { data: data as T, headers: response.headers };
 }
 
 /**
@@ -1357,12 +1371,15 @@ export async function triggerSolutionPlanning(
 
 /**
  * Get the currently authenticated user's information.
- * Uses the /users/me/ endpoint on the control silo.
+ *
+ * Uses the `/auth/` endpoint on the control silo, which works with all token
+ * types (OAuth, API tokens, OAuth App tokens). Unlike `/users/me/`, this
+ * endpoint does not return 403 for OAuth tokens.
  */
 export async function getCurrentUser(): Promise<SentryUser> {
   const { data } = await apiRequestToRegion<SentryUser>(
     getControlSiloUrl(),
-    "/users/me/",
+    "/auth/",
     { schema: SentryUserSchema }
   );
   return data;

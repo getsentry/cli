@@ -94,6 +94,13 @@ sentry auth status
 
 Print the stored authentication token
 
+#### `sentry auth whoami`
+
+Show the currently authenticated user
+
+**Flags:**
+- `--json - Output as JSON`
+
 ### Org
 
 Work with Sentry organizations
@@ -667,6 +674,17 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `--json - Output as JSON`
+
+### Whoami
+
+Show the currently authenticated user
+
+#### `sentry whoami`
+
+Show the currently authenticated user
+
+**Flags:**
 - `--json - Output as JSON`
 
 ## Output Formats

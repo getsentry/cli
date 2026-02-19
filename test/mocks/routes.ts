@@ -58,7 +58,14 @@ export const apiRoutes: MockRoute[] = [
     }),
   },
 
-  // Users
+  // Auth / current user (works with all token types including OAuth)
+  {
+    method: "GET",
+    path: "/api/0/auth/",
+    response: userFixture,
+  },
+
+  // Users (legacy endpoint, kept for backward compatibility)
   {
     method: "GET",
     path: "/api/0/users/me/",
