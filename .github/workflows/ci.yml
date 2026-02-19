@@ -224,6 +224,37 @@ jobs:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
         run: bun run test:e2e
 
+  test-dotnet:
+    name: .NET Tests (${{ matrix.target }})
+    needs: [changes, build-binary]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            os: macos-latest
+          - target: linux-x64
+            os: ubuntu-latest
+          - target: windows-x64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sentry-${{ matrix.target }}
+          path: dist-bin
+      - name: Make binary executable
+        if: runner.os != 'Windows'
+        run: chmod +x dist-bin/sentry-${{ matrix.target }}
+      - name: .NET Tests
+        run: dotnet test --project src/dotnet/Sentry.Cli.Tests/Sentry.Cli.Tests.csproj
+
   build-npm:
     name: Build npm Package (Node ${{ matrix.node }})
     needs: [lint, test-unit]
@@ -286,14 +317,14 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e]
+    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, test-dotnet]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }}"
+          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.test-dotnet.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -305,6 +336,10 @@ jobs:
           # it means an upstream job failed (skipped jobs cascade to dependents)
           if [[ "${{ needs.changes.outputs.code }}" == "true" && "${{ needs.test-e2e.result }}" == "skipped" ]]; then
             echo "::error::CI failed - upstream job failed causing test-e2e to be skipped"
+            exit 1
+          fi
+          if [[ "${{ needs.changes.outputs.code }}" == "true" && "${{ needs.test-dotnet.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing test-dotnet to be skipped"
             exit 1
           fi
           if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-skill.result }}" == "skipped" ]]; then

@@ -23,6 +23,7 @@
     "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:isolated": "bun test test/isolated",
     "test:e2e": "bun test test/e2e",
+    "test:dotnet": "dotnet test --project src/dotnet/Sentry.Cli.Tests/Sentry.Cli.Tests.csproj",
     "generate:skill": "bun run script/generate-skill.ts",
     "check:skill": "bun run script/check-skill.ts",
     "check:deps": "bun run script/check-no-deps.ts"
