@@ -1,0 +1,83 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sentry</ToolCommandName>
+    <ToolPackageRuntimeIdentifiers>any;linux-arm64;linux-x64;osx-arm64;osx-x64;win-x64</ToolPackageRuntimeIdentifiers>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../../dist-pkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>dotnet-sentry</PackageId>
+    <PackageVersion>0.1.0</PackageVersion>
+    <Authors>Sentry Team and Contributors</Authors>
+    <Description>The command-line interface for Sentry. Built for developers and AI agents.</Description>
+    <Copyright>Copyright 2025 Functional Software, Inc. dba Sentry</Copyright>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageProjectUrl>https://cli.sentry.dev/</PackageProjectUrl>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>sentry;cli</PackageTags>
+    <PackageReleaseNotes>https://github.com/getsentry/cli/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/getsentry/cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <!-- https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/optimizing -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'any'">
+    <SelfContainedPlatformSpecificSentryCliDirectory>$(MSBuildThisFileDirectory)../../../dist-bin/</SelfContainedPlatformSpecificSentryCliDirectory>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_LINUX_ARM64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-linux-arm64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_LINUX_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-linux-x64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_OSX_ARM64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-darwin-arm64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_OSX_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-darwin-x64</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <DefineConstants>$(DefineConstants);_PLATFORM_SPECIFIC;_PLATFORM_WIN_X64</DefineConstants>
+    <SelfContainedPlatformSpecificSentryCliPath>$(SelfContainedPlatformSpecificSentryCliDirectory)sentry-windows-x64.exe</SelfContainedPlatformSpecificSentryCliPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../../LICENSE.md" Pack="true" PackagePath="LICENSE.md" />
+    <None Include="$(MSBuildThisFileDirectory)../sentry-nuget.png" Pack="true" PackagePath="icon.png" />
+    <None Include="$(MSBuildThisFileDirectory)../../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+  <!-- Pack the native Sentry CLI alongside the Native-AOT .NET tool -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' != '' And '$(RuntimeIdentifier)' != 'any'">
+    <None Include="$(SelfContainedPlatformSpecificSentryCliPath)" Pack="true" PackagePath="/tools/any/$(RuntimeIdentifier)/" />
+  </ItemGroup>
+
+</Project>

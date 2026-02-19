@@ -45,3 +45,7 @@ docs/.astro
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# .NET & NuGet
+dist-pkg
+dotnet-tools.json
