@@ -5,8 +5,13 @@
  * using a composite primary key so different contexts (e.g., different orgs)
  * maintain independent cursors.
  * Cursors expire after a short TTL to prevent stale pagination.
+ *
+ * Also exports shared helpers for building context keys and resolving cursor
+ * flags, used by list commands that support cursor-based pagination.
  */
 
+import { ContextError } from "../errors.js";
+import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
 
@@ -96,4 +101,65 @@ export function clearPaginationCursor(
   db.query(
     "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
   ).run(commandKey, context);
+}
+
+/**
+ * Escape a user-provided value for safe inclusion in a context key.
+ *
+ * Context keys use `|` as a segment delimiter. If user input (e.g., a search
+ * query or platform filter) contains `|`, it must be escaped to prevent
+ * delimiter injection that could cause cache collisions between different
+ * query combinations.
+ *
+ * @param value - Raw user-provided string
+ * @returns Escaped string with `|` replaced by `%7C`
+ */
+export function escapeContextKeyValue(value: string): string {
+  return value.replaceAll("|", "%7C");
+}
+
+/**
+ * Build a context key for org-scoped pagination cursor storage.
+ *
+ * Encodes the API base URL and org slug so cursors from different hosts or
+ * orgs are never mixed up in the cursor cache.
+ *
+ * @param org - Organization slug
+ * @returns Composite context key string
+ */
+export function buildOrgContextKey(org: string): string {
+  return `host:${getApiBaseUrl()}|type:org:${org}`;
+}
+
+/**
+ * Resolve the cursor value from a `--cursor` flag.
+ *
+ * Handles the magic `"last"` value by looking up the cached cursor for the
+ * given context key. Throws a {@link ContextError} if `"last"` is requested
+ * but no cursor has been cached yet.
+ *
+ * @param cursorFlag - Raw value of the `--cursor` flag (undefined if not set)
+ * @param commandKey - Command identifier used for cursor storage
+ * @param contextKey - Serialized query context used for cursor storage
+ * @returns Resolved cursor string, or `undefined` if no cursor was specified
+ */
+export function resolveOrgCursor(
+  cursorFlag: string | undefined,
+  commandKey: string,
+  contextKey: string
+): string | undefined {
+  if (!cursorFlag) {
+    return;
+  }
+  if (cursorFlag === "last") {
+    const cached = getPaginationCursor(commandKey, contextKey);
+    if (!cached) {
+      throw new ContextError(
+        "Pagination cursor",
+        "No saved cursor for this query. Run without --cursor first."
+      );
+    }
+    return cached;
+  }
+  return cursorFlag;
 }

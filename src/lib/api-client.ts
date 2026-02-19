@@ -12,6 +12,7 @@ import {
   listAnOrganization_sIssues,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
+  listAProject_sTeams,
   queryExploreEventsInTableFormat,
   resolveAShortId,
   retrieveAnEventForAProject,
@@ -686,6 +687,78 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 }
 
 /**
+ * List teams in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of teams with cursor metadata
+ */
+export function listTeamsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryTeam[]>> {
+  return orgScopedRequestPaginated<SentryTeam[]>(
+    `/organizations/${orgSlug}/teams/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
+ * List teams that have access to a specific project.
+ *
+ * Uses the project-scoped endpoint (`/projects/{org}/{project}/teams/`) which
+ * returns only the teams with access to that project, not all teams in the org.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Teams with access to the project
+ */
+export async function listProjectTeams(
+  orgSlug: string,
+  projectSlug: string
+): Promise<SentryTeam[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAProject_sTeams({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+  const data = unwrapResult(result, "Failed to list project teams");
+  return data as unknown as SentryTeam[];
+}
+
+/**
+ * List repositories in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of repositories with cursor metadata
+ */
+export function listRepositoriesPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryRepository[]>> {
+  return orgScopedRequestPaginated<SentryRepository[]>(
+    `/organizations/${orgSlug}/repos/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
@@ -934,6 +1007,50 @@ export async function listIssues(
 }
 
 /**
+ * List issues for a project with pagination control.
+ * Returns a single page of results with cursor metadata for manual pagination.
+ * Uses the org-scoped endpoint with a `project:{slug}` filter.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param options - Query and pagination options
+ * @returns Single page of issues with cursor metadata
+ */
+export function listIssuesPaginated(
+  orgSlug: string,
+  projectSlug: string,
+  options: {
+    query?: string;
+    cursor?: string;
+    perPage?: number;
+    sort?: "date" | "new" | "freq" | "user";
+    statsPeriod?: string;
+  } = {}
+): Promise<PaginatedResponse<SentryIssue[]>> {
+  // Only add project filter when projectSlug is non-empty; an empty slug would
+  // produce "project:" (a truthy string that .filter(Boolean) won't remove),
+  // sending a malformed query to the API for org-wide listing.
+  const projectFilter = projectSlug ? `project:${projectSlug}` : "";
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  return orgScopedRequestPaginated<SentryIssue[]>(
+    `/organizations/${orgSlug}/issues/`,
+    {
+      params: {
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
+        query: fullQuery || undefined,
+        cursor: options.cursor,
+        per_page: options.perPage ?? 25,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    }
+  );
+}
+
+/**
  * Get a specific issue by numeric ID.
  */
 export function getIssue(issueId: string): Promise<SentryIssue> {
@@ -1114,6 +1231,9 @@ export async function listTransactions(
         dataset: "transactions",
         field: TRANSACTION_FIELDS,
         project: isNumericProject ? projectSlug : undefined,
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
         query: fullQuery || undefined,
         per_page: options.limit || 10,
         statsPeriod: options.statsPeriod ?? "7d",

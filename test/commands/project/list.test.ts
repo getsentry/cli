@@ -27,7 +27,6 @@ import {
   handleOrgAll,
   handleProjectSearch,
   PAGINATION_KEY,
-  resolveCursor,
   writeHeader,
   writeRows,
   writeSelfHostedWarning,
@@ -39,6 +38,7 @@ import { setDefaults } from "../../../src/lib/db/defaults.js";
 import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   getPaginationCursor,
+  resolveOrgCursor,
   setPaginationCursor,
 } from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
@@ -258,22 +258,26 @@ describe("filterByPlatform", () => {
   });
 });
 
-describe("resolveCursor", () => {
+describe("resolveOrgCursor", () => {
   test("undefined cursor returns undefined", () => {
-    expect(resolveCursor(undefined, "org:sentry")).toBeUndefined();
+    expect(
+      resolveOrgCursor(undefined, PAGINATION_KEY, "org:sentry")
+    ).toBeUndefined();
   });
 
   test("explicit cursor value is passed through", () => {
-    expect(resolveCursor("1735689600000:100:0", "org:sentry")).toBe(
-      "1735689600000:100:0"
-    );
+    expect(
+      resolveOrgCursor("1735689600000:100:0", PAGINATION_KEY, "org:sentry")
+    ).toBe("1735689600000:100:0");
   });
 
   test("'last' with no cached cursor throws ContextError", () => {
-    expect(() => resolveCursor("last", "org:sentry")).toThrow(ContextError);
-    expect(() => resolveCursor("last", "org:sentry")).toThrow(
-      /No saved cursor/
-    );
+    expect(() =>
+      resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
+    ).toThrow(ContextError);
+    expect(() =>
+      resolveOrgCursor("last", PAGINATION_KEY, "org:sentry")
+    ).toThrow(/No saved cursor/);
   });
 
   test("'last' with cached cursor returns the cached value", () => {
@@ -281,7 +285,7 @@ describe("resolveCursor", () => {
     const contextKey = "org:test-resolve";
     setPaginationCursor(PAGINATION_KEY, contextKey, cursor, 300_000);
 
-    const result = resolveCursor("last", contextKey);
+    const result = resolveOrgCursor("last", PAGINATION_KEY, contextKey);
     expect(result).toBe(cursor);
   });
 
@@ -289,7 +293,9 @@ describe("resolveCursor", () => {
     const contextKey = "org:test-expired";
     setPaginationCursor(PAGINATION_KEY, contextKey, "old-cursor", -1000);
 
-    expect(() => resolveCursor("last", contextKey)).toThrow(ContextError);
+    expect(() => resolveOrgCursor("last", PAGINATION_KEY, contextKey)).toThrow(
+      ContextError
+    );
   });
 });
 

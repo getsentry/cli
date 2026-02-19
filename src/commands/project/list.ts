@@ -23,20 +23,32 @@ import {
   type ParsedOrgProject,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import { buildCommand } from "../../lib/command.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
   clearPaginationCursor,
-  getPaginationCursor,
+  escapeContextKeyValue,
+  resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "../../lib/errors.js";
+import { AuthError, ContextError } from "../../lib/errors.js";
 import {
   calculateProjectColumnWidths,
   formatProjectRow,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import {
+  buildListLimitFlag,
+  LIST_BASE_ALIASES,
+  LIST_CURSOR_FLAG,
+  LIST_JSON_FLAG,
+  LIST_TARGET_POSITIONAL,
+} from "../../lib/list-command.js";
+import {
+  dispatchOrgScopedList,
+  type ListCommandMeta,
+} from "../../lib/org-list.js";
 import { resolveAllTargets } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
@@ -204,34 +216,12 @@ export function buildContextKey(
     }
   }
   if (flags.platform) {
-    // Normalize to lowercase since platform filtering is case-insensitive
-    parts.push(`platform:${flags.platform.toLowerCase()}`);
+    // Normalize to lowercase since platform filtering is case-insensitive.
+    parts.push(
+      `platform:${escapeContextKeyValue(flags.platform.toLowerCase())}`
+    );
   }
   return parts.join("|");
-}
-
-/**
- * Resolve the cursor value from --cursor flag.
- * Handles the magic "last" value by looking up the cached cursor.
- */
-export function resolveCursor(
-  cursorFlag: string | undefined,
-  contextKey: string
-): string | undefined {
-  if (!cursorFlag) {
-    return;
-  }
-  if (cursorFlag === "last") {
-    const cached = getPaginationCursor(PAGINATION_KEY, contextKey);
-    if (!cached) {
-      throw new ContextError(
-        "Pagination cursor",
-        "No saved cursor for this query. Run without --cursor first."
-      );
-    }
-    return cached;
-  }
-  return cursorFlag;
 }
 
 /** Result of resolving organizations to fetch projects from */
@@ -604,6 +594,14 @@ export function writeSelfHostedWarning(
   }
 }
 
+/** Metadata used by the shared dispatch infrastructure for error messages and cursor keys. */
+const projectListMeta: ListCommandMeta = {
+  paginationKey: PAGINATION_KEY,
+  entityName: "project",
+  entityPlural: "projects",
+  commandPrefix: "sentry project list",
+};
+
 export const listCommand = buildCommand({
   docs: {
     brief: "List projects",
@@ -623,36 +621,11 @@ export const listCommand = buildCommand({
       "  sentry project list --json                  # output as JSON",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "target",
-          brief: "Target: <org>/, <org>/<project>, or <project>",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of projects to list",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "30",
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output JSON",
-        default: false,
-      },
-      cursor: {
-        kind: "parsed",
-        parse: String,
-        brief: 'Pagination cursor (use "last" to continue from previous page)',
-        optional: true,
-      },
+      limit: buildListLimitFlag("projects"),
+      json: LIST_JSON_FLAG,
+      cursor: LIST_CURSOR_FLAG,
       platform: {
         kind: "parsed",
         parse: String,
@@ -660,7 +633,7 @@ export const listCommand = buildCommand({
         optional: true,
       },
     },
-    aliases: { n: "limit", p: "platform", c: "cursor" },
+    aliases: { ...LIST_BASE_ALIASES, p: "platform" },
   },
   async func(
     this: SentryContext,
@@ -671,46 +644,40 @@ export const listCommand = buildCommand({
 
     const parsed = parseOrgProjectArg(target);
 
-    // Cursor pagination is only supported in org-all mode — check before resolving
-    if (flags.cursor && parsed.type !== "org-all") {
-      throw new ValidationError(
-        "The --cursor flag is only supported when listing projects for a specific organization " +
-          "(e.g., sentry project list <org>/). " +
-          "Use 'sentry project list <org>/' for paginated results.",
-        "cursor"
-      );
-    }
-
-    const contextKey = buildContextKey(parsed, flags, getApiBaseUrl());
-    const cursor = resolveCursor(flags.cursor, contextKey);
-
-    switch (parsed.type) {
-      case "auto-detect":
-        await handleAutoDetect(stdout, cwd, flags);
-        break;
-
-      case "explicit":
-        await handleExplicit(stdout, parsed.org, parsed.project, flags);
-        break;
-
-      case "org-all":
-        await handleOrgAll({
-          stdout,
-          org: parsed.org,
-          flags,
-          contextKey,
-          cursor,
-        });
-        break;
-
-      case "project-search":
-        await handleProjectSearch(stdout, parsed.projectSlug, flags);
-        break;
-
-      default: {
-        const _exhaustiveCheck: never = parsed;
-        throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-      }
-    }
+    await dispatchOrgScopedList({
+      config: projectListMeta,
+      stdout,
+      cwd,
+      flags,
+      parsed,
+      overrides: {
+        "auto-detect": (ctx) => handleAutoDetect(ctx.stdout, ctx.cwd, flags),
+        explicit: (ctx) =>
+          handleExplicit(ctx.stdout, ctx.parsed.org, ctx.parsed.project, flags),
+        "org-all": (ctx) => {
+          // Build context key and resolve cursor only in org-all mode, after
+          // dispatchOrgScopedList has already validated --cursor is allowed here.
+          const contextKey = buildContextKey(
+            ctx.parsed,
+            flags,
+            getApiBaseUrl()
+          );
+          const cursor = resolveOrgCursor(
+            flags.cursor,
+            PAGINATION_KEY,
+            contextKey
+          );
+          return handleOrgAll({
+            stdout: ctx.stdout,
+            org: ctx.parsed.org,
+            flags,
+            contextKey,
+            cursor,
+          });
+        },
+        "project-search": (ctx) =>
+          handleProjectSearch(ctx.stdout, ctx.parsed.projectSlug, flags),
+      },
+    });
   },
 });
