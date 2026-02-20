@@ -126,8 +126,19 @@ async function handleCreateProject404(
     listTeamsError = error;
   }
 
-  // listTeams succeeded → org is valid, team is wrong
+  // listTeams succeeded → org is valid, diagnose the team
   if (teams !== null) {
+    const teamExists = teams.some((t) => t.slug === teamSlug);
+    if (teamExists) {
+      // Team is in the list but the create endpoint still returned 404 —
+      // likely a permissions issue (rare; Sentry usually returns 403)
+      throw new CliError(
+        `Failed to create project '${name}' in ${orgSlug}.\n\n` +
+          `Team '${teamSlug}' exists but the request was rejected. ` +
+          "You may lack permission to create projects in this team."
+      );
+    }
+
     if (teams.length > 0) {
       const teamList = teams.map((t) => `  ${t.slug}`).join("\n");
       throw new CliError(

@@ -273,14 +273,39 @@ describe("project create", () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
+    // Use --team with a slug that doesn't match any team in the org
+    const err = await func
+      .call(context, { team: "nonexistent", json: false }, "my-app", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Team 'nonexistent' not found");
+    expect(err.message).toContain("Available teams:");
+    expect(err.message).toContain("engineering");
+    expect(err.message).toContain("--team <team-slug>");
+  });
+
+  test("handles 404 when auto-selected team exists — shows permission error", async () => {
+    // createProject returns 404 but the auto-selected team IS in the org.
+    // This used to produce a contradictory "Team 'engineering' not found"
+    // while listing "engineering" as an available team.
+    createProjectSpy.mockRejectedValue(
+      new ApiError("API request failed: 404 Not Found", 404)
+    );
+    // Default listTeams returns [sampleTeam] (slug: "engineering")
+    // resolveTeam auto-selects "engineering", then handleCreateProject404
+    // calls listTeams again and finds "engineering" in the list.
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
     const err = await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("Team 'engineering' not found");
-    expect(err.message).toContain("Available teams:");
-    expect(err.message).toContain("engineering");
-    expect(err.message).toContain("--team <team-slug>");
+    expect(err.message).toContain("exists but the request was rejected");
+    expect(err.message).toContain("permission");
+    // Must NOT say "not found" — the team clearly exists
+    expect(err.message).not.toContain("not found");
   });
 
   test("handles 404 from createProject with bad org — shows user's orgs", async () => {
