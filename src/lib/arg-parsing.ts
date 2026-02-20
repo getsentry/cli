@@ -267,13 +267,15 @@ export function parseOrgPrefixedArg(
   resourceLabel: string,
   usageHint: string
 ): ParsedOrgPrefixed {
-  if (!arg.includes("/")) {
-    return { name: arg };
+  const trimmed = arg.trim();
+
+  if (!trimmed.includes("/")) {
+    return { name: trimmed };
   }
 
-  const slashIndex = arg.indexOf("/");
-  const org = arg.slice(0, slashIndex);
-  const name = arg.slice(slashIndex + 1);
+  const slashIndex = trimmed.indexOf("/");
+  const org = trimmed.slice(0, slashIndex);
+  const name = trimmed.slice(slashIndex + 1);
 
   if (!(org && name)) {
     throw new ContextError(
