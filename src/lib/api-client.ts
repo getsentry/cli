@@ -453,6 +453,7 @@ export async function listOrganizationsInRegion(
 /** Regex patterns for extracting org slugs from endpoint paths */
 const ORG_ENDPOINT_REGEX = /\/organizations\/([^/]+)\//;
 const PROJECT_ENDPOINT_REGEX = /\/projects\/([^/]+)\//;
+const TEAM_ENDPOINT_REGEX = /\/teams\/([^/]+)\//;
 
 /**
  * Extract organization slug from an endpoint path.
@@ -469,6 +470,12 @@ function extractOrgSlugFromEndpoint(endpoint: string): string | null {
   const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
   if (projectMatch?.[1]) {
     return projectMatch[1];
+  }
+
+  // Try team path: /teams/{org}/{team}/...
+  const teamMatch = endpoint.match(TEAM_ENDPOINT_REGEX);
+  if (teamMatch?.[1]) {
+    return teamMatch[1];
   }
 
   return null;
@@ -687,6 +694,9 @@ export async function listRepositories(
 /**
  * List teams in an organization.
  * Uses region-aware routing for multi-region support.
+ *
+ * @param orgSlug - The organization slug
+ * @returns Array of teams in the organization
  */
 export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
   const config = await getOrgSdkConfig(orgSlug);
@@ -698,6 +708,37 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 
   const data = unwrapResult(result, "Failed to list teams");
   return data as unknown as SentryTeam[];
+}
+
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ * Uses region-aware routing via the /teams/ endpoint regex.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export async function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<SentryProject>(
+    regionUrl,
+    `/teams/${orgSlug}/${teamSlug}/projects/`,
+    { method: "POST", body }
+  );
+  return data;
 }
 
 /**
@@ -981,6 +1022,30 @@ export async function getProjectKeys(
 }
 
 // Issue functions
+
+/**
+ * Fetch the primary DSN for a project.
+ * Returns the public DSN of the first active key, or null on any error.
+ *
+ * Best-effort: failures are silently swallowed so callers can treat
+ * DSN display as optional (e.g., after project creation or in views).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Public DSN string, or null if unavailable
+ */
+export async function tryGetPrimaryDsn(
+  orgSlug: string,
+  projectSlug: string
+): Promise<string | null> {
+  try {
+    const keys = await getProjectKeys(orgSlug, projectSlug);
+    const activeKey = keys.find((k) => k.isActive);
+    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * List issues for a project.
