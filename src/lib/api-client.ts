@@ -9,6 +9,9 @@
  */
 
 import {
+  createANewProject,
+  listAnOrganization_sIssues,
+  listAnOrganization_sRepositories,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   listAProject_sTeams,
@@ -690,13 +693,13 @@ export type ProjectWithOrg = SentryProject & {
 export async function listRepositories(
   orgSlug: string
 ): Promise<SentryRepository[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  const { data } = await apiRequestToRegion<SentryRepository[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/repos/`
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAnOrganization_sRepositories({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+  const data = unwrapResult(result, "Failed to list repositories");
+  return data as unknown as SentryRepository[];
 }
 
 /**
@@ -714,6 +717,41 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
   const data = unwrapResult(result, "Failed to list teams");
   return data as unknown as SentryTeam[];
 }
+
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export async function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await createANewProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      team_id_or_slug: teamSlug,
+    },
+    body,
+  });
+  const data = unwrapResult(result, "Failed to create project");
+  return data as unknown as SentryProject;
+}
+
 
 /**
  * List teams in an organization with pagination control.
