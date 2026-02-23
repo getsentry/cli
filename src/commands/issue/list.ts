@@ -13,7 +13,7 @@ import {
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import { parseOrgProjectArg, validateLimit } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
@@ -36,7 +36,6 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
-  buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
@@ -74,6 +73,9 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
+
+/** Matches strings that are all digits — used to detect invalid cursor values */
+const ALL_DIGITS_RE = /^\d+$/;
 
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
@@ -673,7 +675,12 @@ export const listCommand = buildCommand({
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
-      limit: buildListLimitFlag("issues", "10"),
+      limit: {
+        kind: "parsed",
+        parse: (value: string) => validateLimit(value, 1, 100),
+        brief: "Maximum number of issues to list (1-100)",
+        default: "10",
+      },
       sort: {
         kind: "parsed",
         parse: parseSort,
@@ -683,7 +690,21 @@ export const listCommand = buildCommand({
       json: LIST_JSON_FLAG,
       cursor: {
         kind: "parsed",
-        parse: String,
+        parse: (value: string) => {
+          // "last" is the magic keyword to resume from the saved cursor
+          if (value === "last") {
+            return value;
+          }
+          // Sentry pagination cursors are opaque strings like "1735689600:0:0".
+          // Plain integers are not valid cursors — catch this early so the user
+          // gets a clear error rather than a cryptic 400 from the API.
+          if (ALL_DIGITS_RE.test(value)) {
+            throw new Error(
+              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+            );
+          }
+          return value;
+        },
         // Issue-specific cursor brief: cursor only works in <org>/ mode
         brief:
           'Pagination cursor — only for <org>/ mode (use "last" to continue)',

@@ -14,7 +14,7 @@ import {
 import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
-import { ContextError } from "../../lib/errors.js";
+import { ApiError, ContextError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
@@ -255,8 +255,21 @@ export async function resolveIssue(
   switch (parsed.type) {
     case "numeric": {
       // Direct fetch by numeric ID - no org context
-      const issue = await getIssue(parsed.id);
-      return { org: undefined, issue };
+      try {
+        const issue = await getIssue(parsed.id);
+        return { org: undefined, issue };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          // Improve on the generic "Issue not found" message by including the ID
+          // and suggesting the short-ID format, since users often confuse numeric
+          // group IDs with short-ID suffixes.
+          throw new ContextError(`Issue ${parsed.id}`, commandHint, [
+            `No issue with numeric ID ${parsed.id} found — you may not have access, or it may have been deleted.`,
+            `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.id}`,
+          ]);
+        }
+        throw err;
+      }
     }
 
     case "explicit": {
@@ -268,8 +281,18 @@ export async function resolveIssue(
 
     case "explicit-org-numeric": {
       // Org + numeric ID
-      const issue = await getIssue(parsed.numericId);
-      return { org: parsed.org, issue };
+      try {
+        const issue = await getIssue(parsed.numericId);
+        return { org: parsed.org, issue };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          throw new ContextError(`Issue ${parsed.numericId}`, commandHint, [
+            `No issue with numeric ID ${parsed.numericId} found in org '${parsed.org}' — you may not have access, or it may have been deleted.`,
+            `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
+          ]);
+        }
+        throw err;
+      }
     }
 
     case "explicit-org-suffix":
