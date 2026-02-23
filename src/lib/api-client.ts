@@ -790,6 +790,7 @@ export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
+  const isNumericId = isAllDigits(projectSlug);
 
   // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
@@ -797,8 +798,11 @@ export async function findProjectsBySlug(
       try {
         const project = await getProject(org.slug, projectSlug);
         // The API accepts project_id_or_slug, so a numeric input could
-        // resolve by ID. Verify the returned slug actually matches.
-        if (project.slug !== projectSlug) {
+        // resolve by ID instead of slug. When the input is all digits,
+        // accept the match (the user passed a numeric project ID).
+        // For non-numeric inputs, verify the slug actually matches to
+        // avoid false positives from coincidental ID collisions.
+        if (!isNumericId && project.slug !== projectSlug) {
           return null;
         }
         return { ...project, orgSlug: org.slug };

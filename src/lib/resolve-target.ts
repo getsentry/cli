@@ -38,6 +38,8 @@ import {
   getDsnSourceDescription,
 } from "./dsn/index.js";
 import { AuthError, ContextError, ValidationError } from "./errors.js";
+import { warning } from "./formatters/colors.js";
+import { isAllDigits } from "./utils.js";
 
 /**
  * Resolved organization and project target for API calls.
@@ -786,12 +788,15 @@ export async function resolveOrg(
 export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
-  disambiguationExample?: string
+  disambiguationExample?: string,
+  stderr?: { write(s: string): void }
 ): Promise<{ org: string; project: string }> {
   const found = await findProjectsBySlug(projectSlug);
   if (found.length === 0) {
     throw new ContextError(`Project "${projectSlug}"`, usageHint, [
-      "Check that you have access to a project with this slug",
+      isAllDigits(projectSlug)
+        ? "Numeric project IDs are not supported — use the project slug instead"
+        : "Check that you have access to a project with this slug",
     ]);
   }
   if (found.length > 1) {
@@ -805,6 +810,17 @@ export async function resolveProjectBySlug(
     );
   }
   const foundProject = found[0] as (typeof found)[0];
+
+  // When a numeric project ID resolved successfully, hint about using the slug
+  if (stderr && isAllDigits(projectSlug) && foundProject.slug !== projectSlug) {
+    stderr.write(
+      warning(
+        `Tip: Resolved project ID ${projectSlug} to ${foundProject.orgSlug}/${foundProject.slug}. ` +
+          "Use the slug form for faster lookups.\n"
+      )
+    );
+  }
+
   return {
     org: foundProject.orgSlug,
     project: foundProject.slug,

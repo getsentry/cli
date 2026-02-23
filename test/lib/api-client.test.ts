@@ -729,6 +729,99 @@ describe("findProjectsBySlug", () => {
     expect(results).toHaveLength(1);
     expect(results[0].orgSlug).toBe("acme");
   });
+
+  test("resolves numeric project ID when slug differs", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Regions endpoint
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Organizations list
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme Corp" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // getProject for acme/7275560680 - API resolves by numeric ID,
+      // returns project with a different slug
+      if (url.includes("/projects/acme/7275560680/")) {
+        return new Response(
+          JSON.stringify({
+            id: "7275560680",
+            slug: "frontend",
+            name: "Frontend",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Numeric ID should resolve even though returned slug differs
+    const results = await findProjectsBySlug("7275560680");
+    expect(results).toHaveLength(1);
+    expect(results[0].slug).toBe("frontend");
+    expect(results[0].orgSlug).toBe("acme");
+  });
+
+  test("rejects non-numeric input when returned slug differs", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme Corp" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // API returns project with different slug (coincidental ID match)
+      if (url.includes("/projects/acme/wrong-slug/")) {
+        return new Response(
+          JSON.stringify({ id: "999", slug: "actual-slug", name: "Actual" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Non-numeric input with slug mismatch should be rejected
+    const results = await findProjectsBySlug("wrong-slug");
+    expect(results).toHaveLength(0);
+  });
 });
 
 describe("listTeamsPaginated", () => {

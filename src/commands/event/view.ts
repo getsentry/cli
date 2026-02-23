@@ -206,7 +206,8 @@ export const viewCommand = buildCommand({
         const resolved = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry event view <org>/${parsed.projectSlug} ${eventId}`
+          `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
+          this.stderr
         );
         target = {
           ...resolved,
