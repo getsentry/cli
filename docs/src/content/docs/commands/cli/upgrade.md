@@ -20,7 +20,7 @@ sentry cli upgrade --method npm # Force using npm to upgrade
 |--------|-------------|
 | `<version>` | Target version to install (defaults to latest) |
 | `--check` | Check for updates without installing |
-| `--method <method>` | Force installation method: curl, npm, pnpm, bun, yarn |
+| `--method <method>` | Force installation method: curl, brew, npm, pnpm, bun, yarn |
 
 ## Installation Detection
 
@@ -29,6 +29,7 @@ The CLI auto-detects how it was installed and uses the same method to upgrade:
 | Method | Detection |
 |--------|-----------|
 | curl | Binary located in `~/.sentry/bin` (installed via cli.sentry.dev) |
+| brew | Binary located in a Homebrew Cellar (installed via `brew install getsentry/tools/sentry`) |
 | npm | Globally installed via `npm install -g sentry` |
 | pnpm | Globally installed via `pnpm add -g sentry` |
 | bun | Globally installed via `bun install -g sentry` |

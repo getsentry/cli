@@ -17,3 +17,43 @@ targets:
   - name: npm
   - name: github
   - name: gh-pages
+  - name: brew
+    tap: getsentry/tools
+    formula: sentry
+    path: Formula
+    includeNames: '/^sentry-(darwin|linux)-(arm64|x64)$/'
+    template: |
+      class Sentry < Formula
+        desc "Sentry command-line tool for error monitoring and debugging"
+        homepage "https://cli.sentry.dev"
+        version "{{version}}"
+        license "FSL-1.1-MIT"
+
+        if OS.mac?
+          if Hardware::CPU.arm?
+            url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-darwin-arm64"
+            sha256 "{{checksums.sentry-darwin-arm64}}"
+          elsif Hardware::CPU.intel?
+            url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-darwin-x64"
+            sha256 "{{checksums.sentry-darwin-x64}}"
+          end
+        elsif OS.linux?
+          if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+            url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-linux-arm64"
+            sha256 "{{checksums.sentry-linux-arm64}}"
+          elsif Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
+            url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-linux-x64"
+            sha256 "{{checksums.sentry-linux-x64}}"
+          end
+        else
+          raise "Unsupported operating system"
+        end
+
+        def install
+          bin.install Dir["sentry-*"].first => "sentry"
+        end
+
+        test do
+          assert_match version.to_s, shell_output("#{bin}/sentry --version").chomp
+        end
+      end

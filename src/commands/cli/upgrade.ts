@@ -157,7 +157,7 @@ export const upgradeCommand = buildCommand({
       method: {
         kind: "parsed",
         parse: parseInstallationMethod,
-        brief: "Installation method to use (curl, npm, pnpm, bun, yarn)",
+        brief: "Installation method to use (curl, brew, npm, pnpm, bun, yarn)",
         optional: true,
         placeholder: "method",
       },
