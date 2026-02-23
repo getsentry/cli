@@ -201,7 +201,7 @@ List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
@@ -591,7 +591,7 @@ List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`

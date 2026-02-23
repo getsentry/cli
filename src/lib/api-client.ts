@@ -9,7 +9,6 @@
  */
 
 import {
-  listAnOrganization_sIssues,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   listAProject_sTeams,
@@ -198,7 +197,7 @@ function extractLinkAttr(segment: string, attr: string): string | undefined {
  * Maximum number of pages to follow when auto-paginating.
  *
  * Safety limit to prevent runaway pagination when the API returns an unexpectedly
- * large number of pages. At 100 items/page this allows up to 5,000 items, which
+ * large number of pages. At API_MAX_PER_PAGE items/page this allows up to 5,000 items, which
  * covers even the largest organizations. Override with SENTRY_MAX_PAGINATION_PAGES
  * env var for edge cases.
  */
@@ -206,6 +205,12 @@ const MAX_PAGINATION_PAGES = Math.max(
   1,
   Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
 );
+
+/**
+ * Sentry API's maximum items per page.
+ * Requests for more items are silently capped server-side.
+ */
+export const API_MAX_PER_PAGE = 100;
 
 /**
  * Paginated API response with cursor metadata.
@@ -512,13 +517,13 @@ async function orgScopedRequestPaginated<T>(
  *
  * @param endpoint - API endpoint path containing the org slug
  * @param options - Request options (schema must validate an array type)
- * @param perPage - Number of items per API page (default: 100)
+ * @param perPage - Number of items per API page (default: API_MAX_PER_PAGE)
  * @returns Combined array of all results across all pages
  */
 async function orgScopedPaginateAll<T>(
   endpoint: string,
   options: ApiRequestOptions<T[]>,
-  perPage = 100
+  perPage = API_MAX_PER_PAGE
 ): Promise<T[]> {
   const allResults: T[] = [];
   let cursor: string | undefined;
@@ -655,7 +660,7 @@ export function listProjectsPaginated(
     `/organizations/${orgSlug}/projects/`,
     {
       params: {
-        per_page: options.perPage ?? 100,
+        per_page: options.perPage ?? API_MAX_PER_PAGE,
         cursor: options.cursor,
       },
     }
@@ -983,44 +988,6 @@ export async function getProjectKeys(
 // Issue functions
 
 /**
- * List issues for a project.
- * Uses the org-scoped endpoint (the project-scoped one is deprecated).
- * Uses region-aware routing for multi-region support.
- */
-export async function listIssues(
-  orgSlug: string,
-  projectSlug: string,
-  options: {
-    query?: string;
-    cursor?: string;
-    limit?: number;
-    sort?: "date" | "new" | "freq" | "user";
-    statsPeriod?: string;
-  } = {}
-): Promise<SentryIssue[]> {
-  const config = await getOrgSdkConfig(orgSlug);
-
-  // Build query with project filter: "project:{slug}" prefix
-  const projectFilter = `project:${projectSlug}`;
-  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
-
-  const result = await listAnOrganization_sIssues({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-    query: {
-      query: fullQuery,
-      cursor: options.cursor,
-      limit: options.limit,
-      sort: options.sort,
-      statsPeriod: options.statsPeriod,
-    },
-  });
-
-  const data = unwrapResult(result, "Failed to list issues");
-  return data as unknown as SentryIssue[];
-}
-
-/**
  * List issues for a project with pagination control.
  * Returns a single page of results with cursor metadata for manual pagination.
  * Uses the org-scoped endpoint with a `project:{slug}` filter.
@@ -1062,6 +1029,81 @@ export function listIssuesPaginated(
       },
     }
   );
+}
+
+/** Result from {@link listIssuesAllPages}. */
+export type IssuesPage = {
+  issues: SentryIssue[];
+  /**
+   * Cursor for the next page of results, if more exist beyond the returned
+   * issues. `undefined` when all matching issues have been returned OR when
+   * the last page was trimmed to fit `limit` (cursor would skip items).
+   */
+  nextCursor?: string;
+};
+
+/**
+ * Auto-paginate through issues up to the requested limit.
+ *
+ * The Sentry API caps `per_page` at {@link API_MAX_PER_PAGE} server-side. When the caller
+ * requests more than that, this function transparently fetches multiple
+ * pages using cursor-based pagination and returns the combined result.
+ *
+ * Safety-bounded by {@link MAX_PAGINATION_PAGES} to prevent runaway requests.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug (empty string for org-wide)
+ * @param options - Query, sort, and limit options
+ * @returns Issues (up to `limit` items) and a cursor for the next page if available
+ */
+export async function listIssuesAllPages(
+  orgSlug: string,
+  projectSlug: string,
+  options: {
+    query?: string;
+    limit: number;
+    sort?: "date" | "new" | "freq" | "user";
+    statsPeriod?: string;
+  }
+): Promise<IssuesPage> {
+  if (options.limit < 1) {
+    throw new Error(
+      `listIssuesAllPages: limit must be at least 1, got ${options.limit}`
+    );
+  }
+
+  const allResults: SentryIssue[] = [];
+  let cursor: string | undefined;
+
+  // Use the smaller of the requested limit and the API max as page size
+  const perPage = Math.min(options.limit, API_MAX_PER_PAGE);
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const response = await listIssuesPaginated(orgSlug, projectSlug, {
+      query: options.query,
+      cursor,
+      perPage,
+      sort: options.sort,
+      statsPeriod: options.statsPeriod,
+    });
+
+    allResults.push(...response.data);
+
+    // Stop if we've reached the requested limit or there are no more pages
+    if (allResults.length >= options.limit || !response.nextCursor) {
+      // If we overshot the limit, trim and don't return a nextCursor —
+      // the cursor would point past the trimmed items, causing skips.
+      if (allResults.length > options.limit) {
+        return { issues: allResults.slice(0, options.limit) };
+      }
+      return { issues: allResults, nextCursor: response.nextCursor };
+    }
+
+    cursor = response.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { issues: allResults.slice(0, options.limit) };
 }
 
 /**
@@ -1443,7 +1485,7 @@ export async function listLogs(
       field: LOG_FIELDS,
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
-      per_page: options.limit || 100,
+      per_page: options.limit || API_MAX_PER_PAGE,
       statsPeriod: options.statsPeriod ?? "7d",
       sort: "-timestamp",
     },

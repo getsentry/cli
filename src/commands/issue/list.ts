@@ -8,8 +8,10 @@
 import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
+  API_MAX_PER_PAGE,
   findProjectsBySlug,
-  listIssues,
+  type IssuesPage,
+  listIssuesAllPages,
   listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
@@ -26,7 +28,12 @@ import {
   setProjectAliases,
 } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
-import { ApiError, AuthError, ContextError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ContextError,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -75,6 +82,12 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
+
+/**
+ * Maximum --limit value (user-facing ceiling for practical CLI response times).
+ * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
+ */
+const MAX_LIMIT = 1000;
 
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
@@ -378,7 +391,11 @@ async function fetchIssuesForTarget(
   options: { query?: string; limit: number; sort: SortValue }
 ): Promise<FetchResult> {
   try {
-    const issues = await listIssues(target.org, target.project, options);
+    const { issues } = await listIssuesAllPages(
+      target.org,
+      target.project,
+      options
+    );
     return { success: true, data: { target, issues } };
   } catch (error) {
     // Auth errors should propagate - user needs to authenticate
@@ -406,6 +423,38 @@ function nextPageHint(org: string, flags: ListFlags): string {
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
+/**
+ * Fetch org-wide issues, auto-paginating from the start or resuming from a cursor.
+ *
+ * When `cursor` is provided (--cursor resume), fetches a single page to keep the
+ * cursor chain intact. Otherwise auto-paginates up to the requested limit.
+ */
+async function fetchOrgAllIssues(
+  org: string,
+  flags: Pick<ListFlags, "query" | "limit" | "sort">,
+  cursor: string | undefined
+): Promise<IssuesPage> {
+  // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
+  if (cursor) {
+    const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+    const response = await listIssuesPaginated(org, "", {
+      query: flags.query,
+      cursor,
+      perPage,
+      sort: flags.sort,
+    });
+    return { issues: response.data, nextCursor: response.nextCursor };
+  }
+
+  // No cursor — auto-paginate from the beginning via the shared helper.
+  const { issues, nextCursor } = await listIssuesAllPages(org, "", {
+    query: flags.query,
+    limit: flags.limit,
+    sort: flags.sort,
+  });
+  return { issues, nextCursor };
+}
+
 /** Options for {@link handleOrgAllIssues}. */
 type OrgAllIssuesOptions = {
   stdout: Writer;
@@ -431,30 +480,25 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
 
   setContext([org], []);
 
-  const response = await listIssuesPaginated(org, "", {
-    query: flags.query,
-    cursor,
-    perPage: flags.limit,
-    sort: flags.sort,
-  });
+  const { issues, nextCursor } = await fetchOrgAllIssues(org, flags, cursor);
 
-  if (response.nextCursor) {
-    setPaginationCursor(PAGINATION_KEY, contextKey, response.nextCursor);
+  if (nextCursor) {
+    setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
   } else {
     clearPaginationCursor(PAGINATION_KEY, contextKey);
   }
 
-  const hasMore = !!response.nextCursor;
+  const hasMore = !!nextCursor;
 
   if (flags.json) {
     const output = hasMore
-      ? { data: response.data, nextCursor: response.nextCursor, hasMore: true }
-      : { data: response.data, hasMore: false };
+      ? { data: issues, nextCursor, hasMore: true }
+      : { data: issues, hasMore: false };
     writeJson(stdout, output);
     return;
   }
 
-  if (response.data.length === 0) {
+  if (issues.length === 0) {
     if (hasMore) {
       stdout.write(
         `No issues on this page. Try the next page: ${nextPageHint(org, flags)}\n`
@@ -469,7 +513,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   // column is needed to identify which project each issue belongs to.
   writeListHeader(stdout, `Issues in ${org}`, true);
   const termWidth = process.stdout.columns || 80;
-  const issuesWithOpts = response.data.map((issue) => ({
+  const issuesWithOpts = issues.map((issue) => ({
     issue,
     formatOptions: {
       projectSlug: issue.project?.slug ?? "",
@@ -479,10 +523,10 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   writeIssueRows(stdout, issuesWithOpts, termWidth);
 
   if (hasMore) {
-    stdout.write(`\nShowing ${response.data.length} issues (more available)\n`);
+    stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
     stdout.write(`Next page: ${nextPageHint(org, flags)}\n`);
   } else {
-    stdout.write(`\nShowing ${response.data.length} issues\n`);
+    stdout.write(`\nShowing ${issues.length} issues\n`);
   }
 }
 
@@ -664,7 +708,11 @@ export const listCommand = buildCommand({
       "  sentry issue list <org>/        # all projects in org (trailing / required)\n" +
       "  sentry issue list <project>     # find project across all orgs\n\n" +
       `${targetPatternExplanation()}\n\n` +
-      "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
+      "In monorepos with multiple Sentry projects, shows issues from all detected projects.\n\n" +
+      "The --limit flag specifies the number of results to fetch per project (max 1000). " +
+      "When the limit exceeds the API page size (100), multiple requests are made " +
+      "automatically. Use --cursor to paginate through larger result sets. " +
+      "Note: --cursor resumes from a single page to keep the cursor chain intact.",
   },
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
@@ -675,7 +723,7 @@ export const listCommand = buildCommand({
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
-      limit: buildListLimitFlag("issues", "10"),
+      limit: buildListLimitFlag("issues", "25"),
       sort: {
         kind: "parsed",
         parse: parseSort,
@@ -702,6 +750,20 @@ export const listCommand = buildCommand({
     const { stdout, stderr, cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);
+
+    // Validate --limit range. Auto-pagination handles the API's 100-per-page
+    // cap transparently, but we cap the total at MAX_LIMIT for practical CLI
+    // response times. Use --cursor for paginating through larger result sets.
+    if (flags.limit < 1) {
+      throw new ValidationError("--limit must be at least 1.", "limit");
+    }
+    if (flags.limit > MAX_LIMIT) {
+      throw new ValidationError(
+        `--limit cannot exceed ${MAX_LIMIT}. ` +
+          "Use --cursor to paginate through larger result sets.",
+        "limit"
+      );
+    }
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
