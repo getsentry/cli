@@ -67,8 +67,5 @@
   "packageManager": "bun@1.3.9",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
-  },
-  "dependencies": {
-    "opencode-lore": "^0.1.0"
   }
 }
