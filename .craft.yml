@@ -36,6 +36,8 @@ targets:
           elsif Hardware::CPU.intel?
             url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-darwin-x64"
             sha256 "{{checksums.sentry-darwin-x64}}"
+          else
+            raise "Unsupported macOS CPU architecture: #{Hardware::CPU.type}"
           end
         elsif OS.linux?
           if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
@@ -44,6 +46,8 @@ targets:
           elsif Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
             url "https://github.com/getsentry/cli/releases/download/{{version}}/sentry-linux-x64"
             sha256 "{{checksums.sentry-linux-x64}}"
+          else
+            raise "Unsupported Linux CPU architecture: #{Hardware::CPU.type} (only 64-bit arm and x86_64 are supported)"
           end
         else
           raise "Unsupported operating system"
