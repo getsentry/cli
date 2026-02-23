@@ -29,7 +29,7 @@ describe("LIST_TARGET_POSITIONAL", () => {
     expect(LIST_TARGET_POSITIONAL.kind).toBe("tuple");
     expect(LIST_TARGET_POSITIONAL.parameters).toHaveLength(1);
     const param = LIST_TARGET_POSITIONAL.parameters[0];
-    expect(param.placeholder).toBe("target");
+    expect(param.placeholder).toBe("org/project");
     expect(param.optional).toBe(true);
     expect(param.parse).toBe(String);
   });

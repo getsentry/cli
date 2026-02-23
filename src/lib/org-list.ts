@@ -739,10 +739,15 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
 
   // Cursor pagination is only supported in org-all mode
   if (flags.cursor && parsed.type !== "org-all") {
+    const hint =
+      parsed.type === "project-search"
+        ? `\n\nDid you mean '${config.commandPrefix} ${parsed.projectSlug}/'? ` +
+          `A bare name searches for a project — add a trailing slash to list an org's ${config.entityPlural}.`
+        : "";
     throw new ValidationError(
-      `The --cursor flag is only supported when listing ${config.entityPlural} for a specific organization ` +
-        `(e.g., ${config.commandPrefix} <org>/). ` +
-        `Use '${config.commandPrefix} <org>/' for paginated results.`,
+      "The --cursor flag requires the <org>/ pattern " +
+        `(e.g., ${config.commandPrefix} my-org/).` +
+        hint,
       "cursor"
     );
   }
