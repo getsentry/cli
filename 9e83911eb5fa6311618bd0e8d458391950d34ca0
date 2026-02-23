@@ -1,0 +1,61 @@
+Implementation plan for #267
+
+Problem
+=======
+The <target> placeholder in usage lines was opaque. Users had no way to know:
+- Multiple input patterns are supported (auto-detect, explicit, org-all, project-search)
+- The trailing / on <org>/ is significant syntax that changes behaviour entirely
+  (switches from project-search to org-all, the only mode that accepts --cursor)
+
+Root cause confirmed: parseOrgProjectArg in src/lib/arg-parsing.ts dispatches on
+whether the argument contains a slash and whether the part before/after is empty.
+A bare word with no slash always goes to project-search, never org-all.
+
+Architecture note
+=================
+main was significantly refactored between our original branch and now (#262):
+- LIST_TARGET_POSITIONAL shared constant in src/lib/list-command.ts replaces
+  the inline positional blocks in issue/list and project/list
+- dispatchOrgScopedList in src/lib/org-list.ts centralises mode dispatch and
+  cursor validation, replacing the inline switch in project/list
+The placeholder fix (Edit 1) and cursor error improvement (Edit 4) were applied
+to these shared locations instead of the individual command files.
+
+Changes
+=======
+Seven files updated:
+
+1. src/lib/list-command.ts — LIST_TARGET_POSITIONAL
+   placeholder: 'target' → 'org/project'; brief updated to describe all patterns.
+   Used by issue/list, project/list, and the buildOrgListCommand factory.
+
+2. src/commands/issue/list.ts — fullDescription only
+   'Target specification' → 'Target patterns'; trailing-slash annotation on
+   the org-all line; prose paragraph explaining the trailing-slash semantics.
+
+3. src/commands/project/list.ts — fullDescription only
+   Same as above, plus note that --cursor requires the <org>/ form.
+
+4. src/lib/org-list.ts — dispatchOrgScopedList cursor ValidationError
+   Old: generic 'only supported when listing X for a specific organization'
+   New: shorter 'requires the <org>/ pattern' + contextual hint when
+   parsed.type === 'project-search': 'Did you mean sentry X list <slug>/?
+   A bare name searches for a project — add a trailing slash to list an
+   org's projects.'
+
+5-7. trace/list, log/list, project/view
+   'Target specification' → 'Target patterns'; added short bare-name note;
+   placeholder/brief updated on the inline positional (these commands do not
+   use LIST_TARGET_POSITIONAL).
+
+Alternatives considered
+=======================
+- Auto-promote bare-slug + --cursor to org-all mode: rejected — 'sentry' could
+  be a project slug in one org and a valid org in another. Explicit > implicit.
+- Pattern table in fullDescription: prose reads better in a terminal than a
+  Markdown table; the example list serves the same purpose.
+
+Verification
+============
+bun run typecheck — passes (0 errors, 261 files)
+bun run lint     — passes (no issues)
