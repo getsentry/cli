@@ -33,12 +33,12 @@
   },
 
   "python-flask": {
-    "getting-started": [],
-    "errors": [],
-    "tracing": [],
-    "logs": [],
+    "getting-started": ["https://docs.sentry.io/platforms/python/integrations/flask/"],
+    "errors": ["https://docs.sentry.io/platforms/python/integrations/flask/"],
+    "tracing": ["https://docs.sentry.io/platforms/python/integrations/flask/"],
+    "logs": ["https://docs.sentry.io/platforms/python/integrations/flask/"],
     "metrics": [],
-    "profiling": []
+    "profiling": ["https://docs.sentry.io/platforms/python/integrations/flask/", "https://docs.sentry.io/platforms/python/profiling/"]
   },
 
   "python-fastapi": {
@@ -46,7 +46,7 @@
     "errors": ["https://docs.sentry.io/platforms/python/integrations/fastapi/"],
     "tracing": ["https://docs.sentry.io/platforms/python/integrations/fastapi/"],
     "logs": ["https://docs.sentry.io/platforms/python/integrations/fastapi/"],
-    "profiling": ["https://docs.sentry.io/platforms/python/integrations/fastapi/"]
+    "profiling": ["https://docs.sentry.io/platforms/python/integrations/fastapi/", "https://docs.sentry.io/platforms/python/profiling/"]
   },
 
   "sveltekit": {
