@@ -363,6 +363,12 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 }
 
 /**
+ * Flag names whose values must never be sent to telemetry.
+ * Values for these flags are replaced with "[REDACTED]" regardless of content.
+ */
+const SENSITIVE_FLAGS = new Set(["token"]);
+
+/**
  * Set command flags as telemetry tags.
  *
  * Converts flag names from camelCase to kebab-case and sets them as tags
@@ -372,6 +378,9 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
  * - Boolean flags: only when true
  * - String/number flags: only when defined and non-empty
  * - Array flags: only when non-empty
+ *
+ * Sensitive flags (e.g., `--token`) have their values replaced with
+ * "[REDACTED]" to prevent secrets from reaching telemetry.
  *
  * Call this at the start of command func() to instrument flag usage.
  *
@@ -409,6 +418,12 @@ export function setFlagContext(flags: Record<string, unknown>): void {
 
     // Convert camelCase to kebab-case for consistency with CLI flag names
     const kebabKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+
+    // Redact sensitive flag values (e.g., API tokens) — never send secrets to telemetry
+    if (SENSITIVE_FLAGS.has(kebabKey)) {
+      Sentry.setTag(`flag.${kebabKey}`, "[REDACTED]");
+      continue;
+    }
 
     // Set the tag with flag. prefix
     // For booleans, just set "true"; for other types, convert to string

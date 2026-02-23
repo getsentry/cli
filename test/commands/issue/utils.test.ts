@@ -9,11 +9,13 @@ import {
   buildCommandHint,
   ensureRootCauseAnalysis,
   pollAutofixState,
+  resolveIssue,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
+import { ContextError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
@@ -1265,5 +1267,99 @@ describe("ensureRootCauseAnalysis", () => {
     });
 
     expect(stderrOutput).toContain("root cause analysis");
+  });
+});
+
+describe("resolveIssue: numeric 404 error handling", () => {
+  const getResolveIssueConfigDir = useTestConfigDir("test-resolve-issue-");
+
+  let savedFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    savedFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = savedFetch;
+  });
+
+  test("numeric 404 throws ContextError with ID and short-ID hint", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Issue not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const err = await resolveIssue({
+      issueArg: "123456789",
+      cwd: getResolveIssueConfigDir(),
+      command: "view",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ContextError);
+    // Message includes the numeric ID
+    expect(String(err)).toContain("123456789");
+    // Suggests the short-ID format
+    expect(String(err)).toContain("project>-123456789");
+  });
+
+  test("numeric non-404 error propagates unchanged", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    await expect(
+      resolveIssue({
+        issueArg: "123456789",
+        cwd: getResolveIssueConfigDir(),
+        command: "view",
+      })
+    ).rejects.not.toBeInstanceOf(ContextError);
+  });
+
+  test("explicit-org-numeric 404 throws ContextError with org and ID", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Issue not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const err = await resolveIssue({
+      issueArg: "my-org/999999999",
+      cwd: getResolveIssueConfigDir(),
+      command: "view",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ContextError);
+    // Message includes the numeric ID
+    expect(String(err)).toContain("999999999");
+    // Message mentions the org
+    expect(String(err)).toContain("my-org");
+    // Suggests the short-ID format
+    expect(String(err)).toContain("project>-999999999");
+  });
+
+  test("explicit-org-numeric non-404 error propagates unchanged", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    await expect(
+      resolveIssue({
+        issueArg: "my-org/999999999",
+        cwd: getResolveIssueConfigDir(),
+        command: "view",
+      })
+    ).rejects.not.toBeInstanceOf(ContextError);
   });
 });

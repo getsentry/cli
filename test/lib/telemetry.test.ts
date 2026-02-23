@@ -411,6 +411,27 @@ describe("setFlagContext", () => {
     expect(setTagSpy).toHaveBeenCalledTimes(1);
     expect(setTagSpy).toHaveBeenCalledWith("flag.long-flag", "x".repeat(200));
   });
+
+  test("redacts sensitive flag values (token)", () => {
+    setFlagContext({
+      token: "sntrys_eyJpYXQiOjE3MDAwMDAwMDAsImF1dGhUb2tlbiI6InNlY3JldCJ9",
+    });
+    expect(setTagSpy).toHaveBeenCalledTimes(1);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.token", "[REDACTED]");
+  });
+
+  test("still sets the tag when token flag is present (presence is useful signal)", () => {
+    setFlagContext({ token: "any-token-value" });
+    // The tag is set (so we know --token was used), but the value is redacted
+    expect(setTagSpy).toHaveBeenCalledWith("flag.token", "[REDACTED]");
+  });
+
+  test("does not redact non-sensitive flags alongside token", () => {
+    setFlagContext({ token: "secret", format: "json" });
+    expect(setTagSpy).toHaveBeenCalledTimes(2);
+    expect(setTagSpy).toHaveBeenCalledWith("flag.token", "[REDACTED]");
+    expect(setTagSpy).toHaveBeenCalledWith("flag.format", "json");
+  });
 });
 
 describe("setArgsContext", () => {

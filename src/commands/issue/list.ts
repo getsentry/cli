@@ -83,6 +83,9 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
 
+/** Matches strings that are all digits — used to detect invalid cursor values */
+const ALL_DIGITS_RE = /^\d+$/;
+
 /**
  * Maximum --limit value (user-facing ceiling for practical CLI response times).
  * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
@@ -733,7 +736,21 @@ export const listCommand = buildCommand({
       json: LIST_JSON_FLAG,
       cursor: {
         kind: "parsed",
-        parse: String,
+        parse: (value: string) => {
+          // "last" is the magic keyword to resume from the saved cursor
+          if (value === "last") {
+            return value;
+          }
+          // Sentry pagination cursors are opaque strings like "1735689600:0:0".
+          // Plain integers are not valid cursors — catch this early so the user
+          // gets a clear error rather than a cryptic 400 from the API.
+          if (ALL_DIGITS_RE.test(value)) {
+            throw new Error(
+              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+            );
+          }
+          return value;
+        },
         // Issue-specific cursor brief: cursor only works in <org>/ mode
         brief:
           'Pagination cursor — only for <org>/ mode (use "last" to continue)',

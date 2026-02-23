@@ -635,3 +635,30 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     );
   });
 });
+
+describe("issue list: cursor flag parse validation", () => {
+  // Access the parse function directly from the command's flag definition.
+  // This tests the validation without needing a full command invocation.
+  const parseCursor = (
+    listCommand.parameters.flags!.cursor as { parse: (v: string) => string }
+  ).parse;
+
+  test('accepts "last" keyword', () => {
+    expect(parseCursor("last")).toBe("last");
+  });
+
+  test("accepts valid opaque cursor strings", () => {
+    expect(parseCursor("1735689600:0:0")).toBe("1735689600:0:0");
+    expect(parseCursor("1735689600:0:1")).toBe("1735689600:0:1");
+    expect(parseCursor("abc:def:ghi")).toBe("abc:def:ghi");
+  });
+
+  test("rejects plain integer cursors with descriptive error", () => {
+    expect(() => parseCursor("100")).toThrow("not a valid cursor");
+    expect(() => parseCursor("100")).toThrow("1735689600:0:0");
+  });
+
+  test("error message includes the invalid value passed", () => {
+    expect(() => parseCursor("5000")).toThrow("'5000'");
+  });
+});
