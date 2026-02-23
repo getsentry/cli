@@ -177,6 +177,15 @@ export const upgradeCommand = buildCommand({
       throw new UpgradeError("unknown_method");
     }
 
+    // Homebrew manages versioning through the formula in the tap — the installed
+    // version is always whatever the formula specifies, not an arbitrary release.
+    if (method === "brew" && version) {
+      throw new UpgradeError(
+        "unknown_method",
+        "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
+      );
+    }
+
     stdout.write(`Installation method: ${method}\n`);
     stdout.write(`Current version: ${CLI_VERSION}\n`);
 

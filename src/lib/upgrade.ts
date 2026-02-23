@@ -7,7 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, unlinkSync } from "node:fs";
+import { chmodSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import {
@@ -166,14 +166,21 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
 /**
  * Detect if the CLI binary is running from a Homebrew Cellar.
  *
- * Homebrew installs binaries as symlinks into the Cellar directory
- * (e.g. `/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry` or
- * `/usr/local/Cellar/sentry/1.2.3/bin/sentry`). Checking for `/Cellar/`
- * in the resolved exec path is a reliable heuristic that works on both
- * Apple Silicon (`/opt/homebrew`) and Intel Macs (`/usr/local`).
+ * Homebrew places the real binary deep in the Cellar
+ * (e.g. `/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry`) and exposes it
+ * via a symlink at the prefix bin dir (e.g. `/opt/homebrew/bin/sentry`).
+ * `process.execPath` typically reflects the symlink, not the realpath, so
+ * we resolve symlinks first before checking for `/Cellar/`. Falls back to
+ * the unresolved path if `realpathSync` throws (e.g. binary was deleted).
  */
 function isHomebrewInstall(): boolean {
-  return process.execPath.includes("/Cellar/");
+  let execPath = process.execPath;
+  try {
+    execPath = realpathSync(execPath);
+  } catch {
+    // Binary may have been deleted or moved; use the original path
+  }
+  return execPath.includes("/Cellar/");
 }
 
 /**
