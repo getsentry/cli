@@ -151,6 +151,119 @@ export type ResolvedEventTarget = {
   prefetchedEvent?: ResolvedEvent["event"];
 };
 
+/** Options for resolving the event target */
+type ResolveTargetOptions = {
+  parsed: ReturnType<typeof parseOrgProjectArg>;
+  eventId: string;
+  cwd: string;
+  stderr: { write(s: string): void };
+};
+
+/**
+ * Resolve org/project context for the event view command.
+ *
+ * Handles all target types (explicit, search, org-all, auto-detect)
+ * including cross-project fallback via the eventids endpoint.
+ */
+/** @internal Exported for testing */
+export async function resolveEventTarget(
+  options: ResolveTargetOptions
+): Promise<ResolvedEventTarget | null> {
+  const { parsed, eventId, cwd, stderr } = options;
+
+  switch (parsed.type) {
+    case ProjectSpecificationType.Explicit:
+      return {
+        org: parsed.org,
+        project: parsed.project,
+        orgDisplay: parsed.org,
+        projectDisplay: parsed.project,
+      };
+
+    case ProjectSpecificationType.ProjectSearch: {
+      const resolved = await resolveProjectBySlug(
+        parsed.projectSlug,
+        USAGE_HINT,
+        `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
+        stderr
+      );
+      return {
+        ...resolved,
+        orgDisplay: resolved.org,
+        projectDisplay: resolved.project,
+      };
+    }
+
+    case ProjectSpecificationType.OrgAll:
+      return resolveOrgAllTarget(parsed.org, eventId, cwd);
+
+    case ProjectSpecificationType.AutoDetect:
+      return resolveAutoDetectTarget(eventId, cwd, stderr);
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * Resolve target when only an org is known (e.g., from a Sentry event URL).
+ * Uses the eventids endpoint to find the project, falls back to auto-detect.
+ */
+/** @internal Exported for testing */
+export async function resolveOrgAllTarget(
+  org: string,
+  eventId: string,
+  cwd: string
+): Promise<ResolvedEventTarget | null> {
+  try {
+    const resolved = await resolveEventInOrg(org, eventId);
+    if (resolved) {
+      return {
+        org: resolved.org,
+        project: resolved.project,
+        orgDisplay: org,
+        projectDisplay: resolved.project,
+        prefetchedEvent: resolved.event,
+      };
+    }
+  } catch {
+    // Auth or network errors — fall through to auto-detect
+  }
+  return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+}
+
+/**
+ * Resolve target via auto-detect cascade, falling back to cross-project
+ * event search across all accessible orgs.
+ */
+/** @internal Exported for testing */
+export async function resolveAutoDetectTarget(
+  eventId: string,
+  cwd: string,
+  stderr: { write(s: string): void }
+): Promise<ResolvedEventTarget | null> {
+  const autoTarget = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+  if (autoTarget) {
+    return autoTarget;
+  }
+
+  const resolved = await findEventAcrossOrgs(eventId);
+  if (resolved) {
+    stderr.write(
+      `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
+        `Run "sentry project set ${resolved.org}/${resolved.project}" to set as default.\n`
+    );
+    return {
+      org: resolved.org,
+      project: resolved.project,
+      orgDisplay: resolved.org,
+      projectDisplay: resolved.project,
+      prefetchedEvent: resolved.event,
+    };
+  }
+  return null;
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View details of a specific event",
@@ -197,85 +310,12 @@ export const viewCommand = buildCommand({
     const { eventId, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
 
-    let target: ResolvedEventTarget | null = null;
-
-    switch (parsed.type) {
-      case ProjectSpecificationType.Explicit:
-        target = {
-          org: parsed.org,
-          project: parsed.project,
-          orgDisplay: parsed.org,
-          projectDisplay: parsed.project,
-        };
-        break;
-
-      case ProjectSpecificationType.ProjectSearch: {
-        const resolved = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
-          this.stderr
-        );
-        target = {
-          ...resolved,
-          orgDisplay: resolved.org,
-          projectDisplay: resolved.project,
-        };
-        break;
-      }
-
-      case ProjectSpecificationType.OrgAll: {
-        // Org-only (e.g., from a Sentry event URL that has no project slug).
-        // Use the org from the URL + event ID to resolve the project directly.
-        const resolved = await resolveEventInOrg(parsed.org, eventId);
-        if (resolved) {
-          target = {
-            org: resolved.org,
-            project: resolved.project,
-            orgDisplay: parsed.org,
-            projectDisplay: resolved.project,
-            prefetchedEvent: resolved.event,
-          };
-        } else {
-          // Event not found in the given org — fall back to full auto-detect
-          target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        }
-        break;
-      }
-
-      case ProjectSpecificationType.AutoDetect: {
-        // Try the standard resolution cascade first (env vars, config defaults,
-        // DSN detection, directory name inference). If none apply, fan out
-        // across all accessible orgs using the eventids endpoint.
-        const autoTarget = await resolveOrgAndProject({
-          cwd,
-          usageHint: USAGE_HINT,
-        });
-        if (autoTarget) {
-          target = autoTarget;
-        } else {
-          const resolved = await findEventAcrossOrgs(eventId);
-          if (resolved) {
-            this.stderr.write(
-              `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
-                `Run "sentry project set ${resolved.org}/${resolved.project}" to set as default.\n`
-            );
-            target = {
-              org: resolved.org,
-              project: resolved.project,
-              orgDisplay: resolved.org,
-              projectDisplay: resolved.project,
-              prefetchedEvent: resolved.event,
-            };
-          }
-        }
-        break;
-      }
-
-      default:
-        // Exhaustive check - should never reach here
-        throw new ContextError("Organization and project", USAGE_HINT);
-    }
+    const target = await resolveEventTarget({
+      parsed,
+      eventId,
+      cwd,
+      stderr: this.stderr,
+    });
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);

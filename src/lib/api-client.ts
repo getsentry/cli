@@ -1261,18 +1261,16 @@ export async function findEventAcrossOrgs(
 ): Promise<ResolvedEvent | null> {
   const orgs = await listOrganizations();
 
-  const results = await Promise.all(
-    orgs.map(async (org) => {
-      try {
-        return await resolveEventInOrg(org.slug, eventId);
-      } catch {
-        // 404 or permission errors — event not in this org
-        return null;
-      }
-    })
+  const results = await Promise.allSettled(
+    orgs.map((org) => resolveEventInOrg(org.slug, eventId))
   );
 
-  return results.find((r): r is ResolvedEvent => r !== null) ?? null;
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value !== null) {
+      return result.value;
+    }
+  }
+  return null;
 }
 
 /**

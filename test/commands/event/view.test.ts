@@ -14,11 +14,19 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { parsePositionalArgs } from "../../../src/commands/event/view.js";
+import {
+  parsePositionalArgs,
+  resolveAutoDetectTarget,
+  resolveEventTarget,
+  resolveOrgAllTarget,
+} from "../../../src/commands/event/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 describe("parsePositionalArgs", () => {
@@ -461,6 +469,257 @@ describe("cross-project event resolution", () => {
     resolveEventInOrgSpy.mockResolvedValue(null);
 
     const result = await apiClient.resolveEventInOrg("acme", "notfound");
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("resolveEventTarget", () => {
+  let resolveEventInOrgSpy: ReturnType<typeof spyOn>;
+  let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
+  let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+
+  const mockStderr = { write: mock(() => true) };
+
+  beforeEach(() => {
+    resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
+    findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
+    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
+  });
+
+  afterEach(() => {
+    resolveEventInOrgSpy.mockRestore();
+    findEventAcrossOrgsSpy.mockRestore();
+    resolveOrgAndProjectSpy.mockRestore();
+    resolveProjectBySlugSpy.mockRestore();
+    mockStderr.write.mockClear();
+  });
+
+  test("returns explicit target directly", async () => {
+    const result = await resolveEventTarget({
+      parsed: {
+        type: ProjectSpecificationType.Explicit,
+        org: "acme",
+        project: "cli",
+      },
+      eventId: "abc123",
+      cwd: "/tmp",
+      stderr: mockStderr,
+    });
+
+    expect(result).toEqual({
+      org: "acme",
+      project: "cli",
+      orgDisplay: "acme",
+      projectDisplay: "cli",
+    });
+  });
+
+  test("resolves project search via resolveProjectBySlug", async () => {
+    resolveProjectBySlugSpy.mockResolvedValue({
+      org: "acme",
+      project: "frontend",
+    });
+
+    const result = await resolveEventTarget({
+      parsed: {
+        type: ProjectSpecificationType.ProjectSearch,
+        projectSlug: "frontend",
+      },
+      eventId: "abc123",
+      cwd: "/tmp",
+      stderr: mockStderr,
+    });
+
+    expect(result).toEqual({
+      org: "acme",
+      project: "frontend",
+      orgDisplay: "acme",
+      projectDisplay: "frontend",
+    });
+  });
+
+  test("delegates OrgAll to resolveOrgAllTarget", async () => {
+    resolveEventInOrgSpy.mockResolvedValue({
+      org: "acme",
+      project: "backend",
+      event: { eventID: "abc123" },
+    });
+
+    const result = await resolveEventTarget({
+      parsed: { type: ProjectSpecificationType.OrgAll, org: "acme" },
+      eventId: "abc123",
+      cwd: "/tmp",
+      stderr: mockStderr,
+    });
+
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("backend");
+    expect(result?.prefetchedEvent).toBeDefined();
+  });
+
+  test("delegates AutoDetect to resolveAutoDetectTarget", async () => {
+    resolveOrgAndProjectSpy.mockResolvedValue({
+      org: "acme",
+      project: "cli",
+      orgDisplay: "acme",
+      projectDisplay: "cli",
+    });
+
+    const result = await resolveEventTarget({
+      parsed: { type: ProjectSpecificationType.AutoDetect },
+      eventId: "abc123",
+      cwd: "/tmp",
+      stderr: mockStderr,
+    });
+
+    expect(result?.org).toBe("acme");
+  });
+
+  test("returns null for unknown parsed type", async () => {
+    const result = await resolveEventTarget({
+      parsed: { type: "unknown" as any },
+      eventId: "abc123",
+      cwd: "/tmp",
+      stderr: mockStderr,
+    });
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("resolveOrgAllTarget", () => {
+  let resolveEventInOrgSpy: ReturnType<typeof spyOn>;
+  let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
+    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+  });
+
+  afterEach(() => {
+    resolveEventInOrgSpy.mockRestore();
+    resolveOrgAndProjectSpy.mockRestore();
+  });
+
+  test("returns resolved target when event found in org", async () => {
+    resolveEventInOrgSpy.mockResolvedValue({
+      org: "acme",
+      project: "frontend",
+      event: { eventID: "abc123" },
+    });
+
+    const result = await resolveOrgAllTarget("acme", "abc123", "/tmp");
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("frontend");
+    expect(result?.prefetchedEvent?.eventID).toBe("abc123");
+  });
+
+  test("falls back to auto-detect when event not found", async () => {
+    resolveEventInOrgSpy.mockResolvedValue(null);
+    resolveOrgAndProjectSpy.mockResolvedValue({
+      org: "acme",
+      project: "cli",
+      orgDisplay: "acme",
+      projectDisplay: "cli",
+    });
+
+    const result = await resolveOrgAllTarget("acme", "notfound", "/tmp");
+
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("cli");
+    expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
+  });
+
+  test("falls back to auto-detect when resolveEventInOrg throws", async () => {
+    resolveEventInOrgSpy.mockRejectedValue(new Error("Auth failed"));
+    resolveOrgAndProjectSpy.mockResolvedValue({
+      org: "acme",
+      project: "cli",
+      orgDisplay: "acme",
+      projectDisplay: "cli",
+    });
+
+    const result = await resolveOrgAllTarget("acme", "abc123", "/tmp");
+
+    expect(result?.org).toBe("acme");
+    expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
+  });
+});
+
+describe("resolveAutoDetectTarget", () => {
+  let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
+  let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+
+  const mockStderr = { write: mock(() => true) };
+
+  beforeEach(() => {
+    findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
+    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+  });
+
+  afterEach(() => {
+    findEventAcrossOrgsSpy.mockRestore();
+    resolveOrgAndProjectSpy.mockRestore();
+    mockStderr.write.mockClear();
+  });
+
+  test("returns auto-detect target when it resolves", async () => {
+    resolveOrgAndProjectSpy.mockResolvedValue({
+      org: "acme",
+      project: "cli",
+      orgDisplay: "acme",
+      projectDisplay: "cli",
+    });
+
+    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("cli");
+    expect(findEventAcrossOrgsSpy).not.toHaveBeenCalled();
+  });
+
+  test("falls back to findEventAcrossOrgs when auto-detect returns null", async () => {
+    resolveOrgAndProjectSpy.mockResolvedValue(null);
+    findEventAcrossOrgsSpy.mockResolvedValue({
+      org: "other-org",
+      project: "backend",
+      event: { eventID: "abc123" },
+    });
+
+    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+
+    expect(result?.org).toBe("other-org");
+    expect(result?.project).toBe("backend");
+    expect(result?.prefetchedEvent?.eventID).toBe("abc123");
+    expect(findEventAcrossOrgsSpy).toHaveBeenCalledWith("abc123");
+  });
+
+  test("writes stderr tip when event found via cross-project search", async () => {
+    resolveOrgAndProjectSpy.mockResolvedValue(null);
+    findEventAcrossOrgsSpy.mockResolvedValue({
+      org: "acme",
+      project: "frontend",
+      event: { eventID: "abc123" },
+    });
+
+    await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+
+    expect(mockStderr.write).toHaveBeenCalledTimes(1);
+    const hint = mockStderr.write.mock.calls[0][0] as string;
+    expect(hint).toContain("acme/frontend");
+    expect(hint).toContain("sentry project set");
+  });
+
+  test("returns null when both auto-detect and cross-project fail", async () => {
+    resolveOrgAndProjectSpy.mockResolvedValue(null);
+    findEventAcrossOrgsSpy.mockResolvedValue(null);
+
+    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
 
     expect(result).toBeNull();
   });
