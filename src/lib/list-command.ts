@@ -24,22 +24,48 @@ import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Positional `target` parameter shared by all list commands.
+ * Positional `org/project` parameter shared by all list commands.
  *
- * Accepts `<org>/`, `<org>/<project>`, or bare `<org>` / `<project>`.
+ * Accepts `<org>/`, `<org>/<project>`, or bare `<project>` (search).
  * Marked optional so the command falls back to auto-detection when omitted.
  */
 export const LIST_TARGET_POSITIONAL = {
   kind: "tuple" as const,
   parameters: [
     {
-      placeholder: "target",
-      brief: "Target: <org>/, <org>/<project>, or <org>",
+      placeholder: "org/project",
+      brief: "<org>/ (all projects), <org>/<project>, or <project> (search)",
       parse: String,
       optional: true as const,
     },
   ],
 };
+
+/**
+ * Short note for commands that accept a bare project name but do not support
+ * org-all mode (e.g. trace list, log list, project view).
+ *
+ * Explains that a bare name triggers project-search, not org-scoped listing.
+ */
+export const TARGET_PATTERN_NOTE =
+  "A bare name (no slash) is treated as a project search. " +
+  "Use <org>/<project> for an explicit target.";
+
+/**
+ * Full explanation of trailing-slash semantics for commands that support all
+ * four target modes including org-all (e.g. issue list, project list).
+ *
+ * @param cursorNote - Optional sentence appended when the command supports
+ *   cursor pagination (e.g. "Cursor pagination (--cursor) requires the <org>/ form.").
+ */
+export function targetPatternExplanation(cursorNote?: string): string {
+  const base =
+    "The trailing slash on <org>/ is significant — without it, the argument " +
+    "is treated as a project name search (e.g., 'sentry' searches for a " +
+    "project named 'sentry', while 'sentry/' lists all projects in the " +
+    "'sentry' org).";
+  return cursorNote ? `${base} ${cursorNote}` : base;
+}
 
 /**
  * The `--json` flag shared by all list commands.

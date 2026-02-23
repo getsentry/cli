@@ -686,7 +686,7 @@ describe("dispatchOrgScopedList", () => {
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(ValidationError);
-      expect((e as ValidationError).message).toContain("widgets");
+      expect((e as ValidationError).message).toContain("<org>/");
     }
   });
 

@@ -14,6 +14,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 
 type ListFlags = {
@@ -67,10 +68,11 @@ export const listCommand = buildCommand({
     brief: "List recent traces in a project",
     fullDescription:
       "List recent traces from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry trace list               # auto-detect from DSN or config\n" +
       "  sentry trace list <org>/<proj>  # explicit org and project\n" +
       "  sentry trace list <project>     # find project across all orgs\n\n" +
+      `${TARGET_PATTERN_NOTE}\n\n` +
       "Examples:\n" +
       "  sentry trace list                     # List last 10 traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
@@ -82,8 +84,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },

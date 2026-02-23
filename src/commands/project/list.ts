@@ -44,6 +44,7 @@ import {
   LIST_CURSOR_FLAG,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
+  targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
@@ -607,13 +608,14 @@ export const listCommand = buildCommand({
     brief: "List projects",
     fullDescription:
       "List projects in an organization.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry project list                # auto-detect from DSN or config\n" +
-      "  sentry project list <org>/         # list all projects in org (paginated)\n" +
+      "  sentry project list <org>/         # all projects in org (paginated)\n" +
       "  sentry project list <org>/<proj>   # show specific project\n" +
       "  sentry project list <project>      # find project across all orgs\n\n" +
+      `${targetPatternExplanation("Cursor pagination (--cursor) requires the <org>/ form.")}\n\n` +
       "Pagination:\n" +
-      "  sentry project list <org>/ -c last  # continue from last page\n" +
+      "  sentry project list <org>/ -c last      # continue from last page\n" +
       "  sentry project list <org>/ -c <cursor>  # resume at specific cursor\n\n" +
       "Filtering and output:\n" +
       "  sentry project list --platform javascript  # filter by platform\n" +

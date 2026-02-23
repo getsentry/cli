@@ -18,6 +18,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
@@ -232,10 +233,11 @@ export const listCommand = buildCommand({
     brief: "List logs from a project",
     fullDescription:
       "List and stream logs from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry log list               # auto-detect from DSN or config\n" +
       "  sentry log list <org>/<proj>  # explicit org and project\n" +
       "  sentry log list <project>     # find project across all orgs\n\n" +
+      `${TARGET_PATTERN_NOTE}\n\n` +
       "Examples:\n" +
       "  sentry log list                    # List last 100 logs\n" +
       "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
@@ -248,8 +250,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },

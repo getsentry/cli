@@ -143,7 +143,7 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <target>`
+#### `sentry project list <org/project>`
 
 List projects
 
@@ -166,7 +166,7 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <target>`
+#### `sentry project view <org/project>`
 
 View details of a project
 
@@ -195,7 +195,7 @@ sentry project view my-org/frontend -w
 
 Manage Sentry issues
 
-#### `sentry issue list <target>`
+#### `sentry issue list <org/project>`
 
 List issues in a project
 
@@ -441,7 +441,7 @@ Update the Sentry CLI to the latest version
 
 Work with Sentry repositories
 
-#### `sentry repo list <target>`
+#### `sentry repo list <org/project>`
 
 List repositories
 
@@ -454,7 +454,7 @@ List repositories
 
 Work with Sentry teams
 
-#### `sentry team list <target>`
+#### `sentry team list <org/project>`
 
 List teams
 
@@ -482,7 +482,7 @@ sentry team list --json
 
 View Sentry logs
 
-#### `sentry log list <target>`
+#### `sentry log list <org/project>`
 
 List logs from a project
 
@@ -562,7 +562,7 @@ sentry log list --json | jq '.[] | select(.level == "error")'
 
 View distributed traces
 
-#### `sentry trace list <target>`
+#### `sentry trace list <org/project>`
 
 List recent traces in a project
 
@@ -585,7 +585,7 @@ View details of a specific trace
 
 List issues in a project
 
-#### `sentry issues <target>`
+#### `sentry issues <org/project>`
 
 List issues in a project
 
@@ -612,7 +612,7 @@ List organizations
 
 List projects
 
-#### `sentry projects <target>`
+#### `sentry projects <org/project>`
 
 List projects
 
@@ -626,7 +626,7 @@ List projects
 
 List repositories
 
-#### `sentry repos <target>`
+#### `sentry repos <org/project>`
 
 List repositories
 
@@ -639,7 +639,7 @@ List repositories
 
 List teams
 
-#### `sentry teams <target>`
+#### `sentry teams <org/project>`
 
 List teams
 
@@ -652,7 +652,7 @@ List teams
 
 List logs from a project
 
-#### `sentry logs <target>`
+#### `sentry logs <org/project>`
 
 List logs from a project
 
@@ -666,7 +666,7 @@ List logs from a project
 
 List recent traces in a project
 
-#### `sentry traces <target>`
+#### `sentry traces <org/project>`
 
 List recent traces in a project
 
