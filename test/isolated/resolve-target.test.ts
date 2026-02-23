@@ -8,7 +8,7 @@
  * Run with: bun test test/isolated
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 // IMPORTANT: Import the real formatMultipleProjectsFooter from its source file
 // (not the barrel dsn/index.js). We pass this through the mock below so that
@@ -730,5 +730,192 @@ describe("resolveAllTargets", () => {
     const result = await resolveAllTargets({ cwd: "/test" });
 
     expect(result.targets).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Environment Variable Resolution Tests (SENTRY_ORG / SENTRY_PROJECT)
+// ============================================================================
+
+describe("env var resolution: SENTRY_ORG + SENTRY_PROJECT", () => {
+  beforeEach(() => {
+    resetAllMocks();
+  });
+
+  afterEach(() => {
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+  });
+
+  // --- resolveOrg ---
+
+  test("resolveOrg: returns org from SENTRY_ORG when no CLI flag", async () => {
+    process.env.SENTRY_ORG = "env-org";
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("env-org");
+    // Env vars take priority over config defaults
+    expect(mockGetDefaultOrganization).not.toHaveBeenCalled();
+  });
+
+  test("resolveOrg: CLI flag takes priority over env var", async () => {
+    process.env.SENTRY_ORG = "env-org";
+
+    const result = await resolveOrg({ org: "flag-org", cwd: "/test" });
+
+    expect(result?.org).toBe("flag-org");
+  });
+
+  test("resolveOrg: SENTRY_PROJECT=org/project combo provides org", async () => {
+    process.env.SENTRY_PROJECT = "combo-org/combo-project";
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    expect(result?.org).toBe("combo-org");
+  });
+
+  test("resolveOrg: combo SENTRY_PROJECT overrides SENTRY_ORG", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "combo-org/combo-project";
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    // The combo form should win because resolveFromEnvVars returns combo-org
+    expect(result?.org).toBe("combo-org");
+  });
+
+  // --- resolveOrgAndProject ---
+
+  test("resolveOrgAndProject: uses SENTRY_ORG + SENTRY_PROJECT", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "env-project";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("env-org");
+    expect(result?.project).toBe("env-project");
+    expect(result?.detectedFrom).toContain("env var");
+    // Should not fall through to defaults or DSN detection
+    expect(mockGetDefaultOrganization).not.toHaveBeenCalled();
+    expect(mockDetectDsn).not.toHaveBeenCalled();
+  });
+
+  test("resolveOrgAndProject: SENTRY_PROJECT=org/project combo works", async () => {
+    process.env.SENTRY_PROJECT = "my-org/my-project";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("my-org");
+    expect(result?.project).toBe("my-project");
+    expect(result?.detectedFrom).toContain("SENTRY_PROJECT");
+  });
+
+  test("resolveOrgAndProject: CLI flags take priority over env vars", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "env-project";
+
+    const result = await resolveOrgAndProject({
+      org: "flag-org",
+      project: "flag-project",
+      cwd: "/test",
+    });
+
+    expect(result?.org).toBe("flag-org");
+    expect(result?.project).toBe("flag-project");
+  });
+
+  test("resolveOrgAndProject: SENTRY_ORG alone (no project) falls through", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    // No SENTRY_PROJECT — resolveFromEnvVars returns org-only, but
+    // resolveOrgAndProject requires project, so it falls through
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    // Falls through to defaults (which are null), then DSN, then dir inference
+    expect(result).toBeNull();
+  });
+
+  test("resolveOrgAndProject: env vars beat config defaults", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "env-project";
+    mockGetDefaultOrganization.mockResolvedValue("default-org");
+    mockGetDefaultProject.mockResolvedValue("default-project");
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    expect(result?.org).toBe("env-org");
+    expect(result?.project).toBe("env-project");
+    // Config defaults should not have been checked
+    expect(mockGetDefaultOrganization).not.toHaveBeenCalled();
+  });
+
+  // --- resolveAllTargets ---
+
+  test("resolveAllTargets: uses SENTRY_ORG + SENTRY_PROJECT", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "env-project";
+
+    const result = await resolveAllTargets({ cwd: "/test" });
+
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]?.org).toBe("env-org");
+    expect(result.targets[0]?.project).toBe("env-project");
+    expect(result.targets[0]?.detectedFrom).toContain("env var");
+  });
+
+  test("resolveAllTargets: SENTRY_PROJECT=org/project combo", async () => {
+    process.env.SENTRY_PROJECT = "combo-org/combo-proj";
+
+    const result = await resolveAllTargets({ cwd: "/test" });
+
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]?.org).toBe("combo-org");
+    expect(result.targets[0]?.project).toBe("combo-proj");
+  });
+
+  test("resolveAllTargets: env vars beat config defaults", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    process.env.SENTRY_PROJECT = "env-project";
+    mockGetDefaultOrganization.mockResolvedValue("default-org");
+    mockGetDefaultProject.mockResolvedValue("default-project");
+
+    const result = await resolveAllTargets({ cwd: "/test" });
+
+    expect(result.targets[0]?.org).toBe("env-org");
+    expect(mockGetDefaultOrganization).not.toHaveBeenCalled();
+  });
+
+  // --- Edge cases ---
+
+  test("whitespace-only env vars are ignored", async () => {
+    process.env.SENTRY_ORG = "  ";
+    process.env.SENTRY_PROJECT = "  ";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    // Should fall through — empty after trim
+    expect(result).toBeNull();
+  });
+
+  test("SENTRY_PROJECT with trailing slash is treated as combo with empty project", async () => {
+    process.env.SENTRY_PROJECT = "my-org/";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    // slash present but empty project — falls through
+    expect(result).toBeNull();
+  });
+
+  test("SENTRY_PROJECT with leading slash is treated as combo with empty org", async () => {
+    process.env.SENTRY_PROJECT = "/my-project";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    // slash present but empty org — falls through
+    expect(result).toBeNull();
   });
 });
