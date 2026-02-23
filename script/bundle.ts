@@ -94,8 +94,9 @@ const result = await build({
     "@sentry/bun": "@sentry/node",
   },
   banner: {
-    // Suppress Node.js warnings (e.g., SQLite experimental) - not useful for CLI users
+    // Check Node.js version (>= 22 required for node:sqlite) and suppress warnings
     js: `#!/usr/bin/env node
+if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Node.js 22 or later (found "+process.version+").\n\nEither upgrade Node.js, or install the standalone binary instead:\n  curl -fsSL https://cli.sentry.dev/install | bash\n");process.exit(1)}
 {let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}`,
   },
   sourcemap: true,
