@@ -18,6 +18,7 @@ import {
 import { clearInstallInfo } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  detectInstallationMethod,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
@@ -250,6 +251,14 @@ describe("UpgradeError", () => {
     expect(error.message).toBe("The specified version was not found.");
   });
 
+  test("creates error with default message for unsupported_operation", () => {
+    const error = new UpgradeError("unsupported_operation");
+    expect(error.reason).toBe("unsupported_operation");
+    expect(error.message).toBe(
+      "This operation is not supported for this installation method."
+    );
+  });
+
   test("allows custom message", () => {
     const error = new UpgradeError("network_error", "Custom error message");
     expect(error.reason).toBe("network_error");
@@ -323,6 +332,19 @@ describe("fetchLatestVersion", () => {
     expect(version).toBe("2.0.0");
   });
 
+  test("uses GitHub for brew method", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "v2.0.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const version = await fetchLatestVersion("brew");
+    expect(version).toBe("2.0.0");
+  });
+
   test("uses npm for unknown method", async () => {
     mockFetch(
       async () =>
@@ -380,6 +402,20 @@ describe("versionExists", () => {
     expect(exists).toBe(true);
   });
 
+  test("checks GitHub for brew method - version exists", async () => {
+    mockFetch(async () => new Response(null, { status: 200 }));
+
+    const exists = await versionExists("brew", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks GitHub for brew method - version does not exist", async () => {
+    mockFetch(async () => new Response(null, { status: 404 }));
+
+    const exists = await versionExists("brew", "99.99.99");
+    expect(exists).toBe(false);
+  });
+
   test("checks npm for yarn method", async () => {
     mockFetch(async () => new Response(null, { status: 200 }));
 
@@ -428,6 +464,54 @@ describe("executeUpgrade", () => {
       expect(error).toBeInstanceOf(UpgradeError);
       expect((error as UpgradeError).reason).toBe("unknown_method");
     }
+  });
+});
+
+describe("Homebrew detection (detectInstallationMethod)", () => {
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("detects brew when execPath resolves through /Cellar/", async () => {
+    Object.defineProperty(process, "execPath", {
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("detects brew for Intel Homebrew path (/usr/local/Cellar/)", async () => {
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/local/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("does not detect brew for non-Homebrew paths", async () => {
+    // A plain curl-installed binary should not be detected as brew
+    Object.defineProperty(process, "execPath", {
+      value: "/home/user/.sentry/bin/sentry",
+      configurable: true,
+    });
+
+    // Will fall through to package manager checks and return "unknown" in test env
+    const method = await detectInstallationMethod();
+    expect(method).not.toBe("brew");
   });
 });
 
