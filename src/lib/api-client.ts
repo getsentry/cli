@@ -1237,15 +1237,20 @@ export async function resolveEventInOrg(
     path: { organization_id_or_slug: orgSlug, event_id: eventId },
   });
 
-  if (!result.data) {
-    return null;
+  try {
+    const data = unwrapResult(result, "Failed to resolve event ID");
+    return {
+      org: data.organizationSlug,
+      project: data.projectSlug,
+      event: data.event as unknown as SentryEvent,
+    };
+  } catch (error) {
+    // 404 means the event doesn't exist in this org — not an error
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
   }
-
-  return {
-    org: result.data.organizationSlug,
-    project: result.data.projectSlug,
-    event: result.data.event as unknown as SentryEvent,
-  };
 }
 
 /**
