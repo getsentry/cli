@@ -1,5 +1,5 @@
 function toMarkdownUrl(docsUrl: string): string {
-  return docsUrl.replace(/\/+$/, "") + ".md";
+  return `${docsUrl.replace(/\/+$/, "")}.md`;
 }
 
 /**

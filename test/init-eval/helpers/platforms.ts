@@ -91,7 +91,8 @@ export const PLATFORMS: Platform[] = [
     sdkPackage: "sentry-sdk",
     depFile: "requirements.txt",
     docs: getDocs("python-flask"),
-    installCmd: "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
+    installCmd:
+      "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
     buildCmd: ".venv/bin/python -m compileall -q .",
     initPattern: /sentry_sdk\.init/,
     timeout: 300_000,
@@ -103,7 +104,8 @@ export const PLATFORMS: Platform[] = [
     sdkPackage: "sentry-sdk",
     depFile: "requirements.txt",
     docs: getDocs("python-fastapi"),
-    installCmd: "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
+    installCmd:
+      "python -m venv .venv && .venv/bin/pip install -r requirements.txt",
     buildCmd: ".venv/bin/python -m compileall -q .",
     initPattern: /sentry_sdk\.init/,
     timeout: 300_000,
