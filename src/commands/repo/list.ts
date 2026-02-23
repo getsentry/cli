@@ -68,4 +68,4 @@ const docs: OrgListCommandDocs = {
     "  sentry repo list --json",
 };
 
-export const listCommand = buildOrgListCommand(repoListConfig, docs);
+export const listCommand = buildOrgListCommand(repoListConfig, docs, "repo");

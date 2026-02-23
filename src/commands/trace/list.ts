@@ -7,14 +7,16 @@
 import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
 import {
   formatTraceRow,
   formatTracesHeader,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
+import {
+  buildListCommand,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 
 type ListFlags = {
@@ -63,7 +65,7 @@ export function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("trace", {
   docs: {
     brief: "List recent traces in a project",
     fullDescription:

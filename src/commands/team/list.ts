@@ -74,4 +74,4 @@ const docs: OrgListCommandDocs = {
     "  sentry team list --json",
 };
 
-export const listCommand = buildOrgListCommand(teamListConfig, docs);
+export const listCommand = buildOrgListCommand(teamListConfig, docs, "team");

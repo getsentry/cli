@@ -10,7 +10,6 @@ import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
 import { listLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   formatLogRow,
@@ -18,7 +17,10 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
+import {
+  buildListCommand,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
@@ -228,7 +230,7 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
   }
 }
 
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("log", {
   docs: {
     brief: "List logs from a project",
     fullDescription:

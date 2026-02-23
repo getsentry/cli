@@ -16,7 +16,6 @@ import {
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
 import {
   clearPaginationCursor,
   escapeContextKeyValue,
@@ -43,6 +42,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
@@ -700,7 +700,7 @@ const issueListMeta: ListCommandMeta = {
   commandPrefix: "sentry issue list",
 };
 
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("issue", {
   docs: {
     brief: "List issues in a project",
     fullDescription:
