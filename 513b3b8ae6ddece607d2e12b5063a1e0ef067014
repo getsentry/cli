@@ -1,0 +1,24 @@
+## Implementation Plan
+
+### Problem
+During `sentry setup`, when an unsupported shell (e.g. xonsh, nushell) is
+detected, completions are skipped entirely. Most systems have bash installed,
+and many custom shells can use bash completions as a compatibility layer.
+
+### Solution
+1. Add `isBashAvailable()` to `src/lib/shell.ts` using `Bun.which("bash")`.
+2. Extract `tryBashCompletionFallback()` in setup.ts to keep cognitive
+   complexity within the lint limit.
+3. When `handleCompletions()` encounters an unsupported (non-sh/ash) shell:
+   - If bash is found → install bash completions and tell the user
+   - If bash is not found → fall back to the existing "Not supported" message
+
+### User-visible output (e.g. xonsh with bash present)
+    Completions: Your shell (unknown) is not directly supported
+          Installed bash completions as a fallback: ~/.local/share/bash-completion/completions/sentry
+
+### Files changed
+- src/lib/shell.ts          — isBashAvailable()
+- src/commands/cli/setup.ts — tryBashCompletionFallback(), handleCompletions()
+- test/commands/cli/setup.test.ts — two new tests, one updated
+- test/lib/shell.test.ts    — isBashAvailable test
