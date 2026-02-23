@@ -5,9 +5,9 @@
  * Similar to 'gh api' for GitHub.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { rawApiRequest } from "../lib/api-client.js";
+import { buildCommand } from "../lib/command.js";
 import type { Writer } from "../types/index.js";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";

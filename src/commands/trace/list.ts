@@ -4,10 +4,10 @@
  * List recent traces from Sentry projects.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
+import { buildCommand } from "../../lib/command.js";
 import {
   formatTraceRow,
   formatTracesHeader,

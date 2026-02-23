@@ -4,7 +4,6 @@
  * View detailed information about a Sentry log entry.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getLog } from "../../lib/api-client.js";
 import {
@@ -12,6 +11,7 @@ import {
   parseSlashSeparatedArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
 import {
