@@ -222,10 +222,9 @@ export const upgradeCommand = buildCommand({
       } finally {
         releaseLock(downloadResult.lockPath);
       }
-    } else {
+    } else if (method !== "brew") {
       // Package manager: binary already in place, just run setup.
-      // Always use execPath — storedInfo?.path could reference a stale
-      // binary from a different installation method.
+      // Skip brew — Homebrew's post_install hook already runs setup.
       await runSetupOnNewBinary(this.process.execPath, method, false);
     }
 
