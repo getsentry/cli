@@ -40,6 +40,9 @@ docs/dist
 docs/node_modules
 docs/.astro
 
+# local planning notes (not for version control)
+.plans
+
 # IntelliJ based IDEs
 .idea
 
