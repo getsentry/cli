@@ -4,7 +4,6 @@
  * View detailed information about a distributed trace.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
 import {
@@ -13,6 +12,7 @@ import {
   spansFlag,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
   computeTraceSummary,
