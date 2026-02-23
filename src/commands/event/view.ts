@@ -207,31 +207,29 @@ export async function resolveEventTarget(
 
 /**
  * Resolve target when only an org is known (e.g., from a Sentry event URL).
- * Uses the eventids endpoint to find the project, falls back to auto-detect.
+ * Uses the eventids endpoint to find the project directly.
+ *
+ * Returns null if the event is not found in the given org.
+ * Propagates auth/network errors — if the user provided an explicit org
+ * via URL, errors should surface rather than silently resolving a different org.
  */
 /** @internal Exported for testing */
 export async function resolveOrgAllTarget(
   org: string,
   eventId: string,
-  cwd: string
+  _cwd: string
 ): Promise<ResolvedEventTarget | null> {
-  try {
-    const resolved = await resolveEventInOrg(org, eventId);
-    if (resolved) {
-      return {
-        org: resolved.org,
-        project: resolved.project,
-        orgDisplay: org,
-        projectDisplay: resolved.project,
-        prefetchedEvent: resolved.event,
-      };
-    }
-  } catch {
-    // Auth or network errors — fall through to auto-detect below
-    return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+  const resolved = await resolveEventInOrg(org, eventId);
+  if (!resolved) {
+    return null;
   }
-  // Event not found in the explicit org — don't silently switch orgs
-  return null;
+  return {
+    org: resolved.org,
+    project: resolved.project,
+    orgDisplay: org,
+    projectDisplay: resolved.project,
+    prefetchedEvent: resolved.event,
+  };
 }
 
 /**

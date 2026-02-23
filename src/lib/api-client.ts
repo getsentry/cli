@@ -1274,6 +1274,13 @@ export async function findEventAcrossOrgs(
     if (result.status === "fulfilled" && result.value !== null) {
       return result.value;
     }
+    // Propagate auth errors immediately — they indicate a global problem
+    // (expired/missing token) rather than a per-org miss, so the user needs
+    // to know. Transient per-org failures (network, 5xx) are swallowed since
+    // other orgs may still succeed.
+    if (result.status === "rejected" && result.reason instanceof AuthError) {
+      throw result.reason;
+    }
   }
   return null;
 }

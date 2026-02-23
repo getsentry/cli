@@ -520,16 +520,13 @@ describe("resolveEventTarget", () => {
 
 describe("resolveOrgAllTarget", () => {
   let resolveEventInOrgSpy: ReturnType<typeof spyOn>;
-  let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
   });
 
   afterEach(() => {
     resolveEventInOrgSpy.mockRestore();
-    resolveOrgAndProjectSpy.mockRestore();
   });
 
   test("returns resolved target when event found in org", async () => {
@@ -553,22 +550,13 @@ describe("resolveOrgAllTarget", () => {
     const result = await resolveOrgAllTarget("acme", "notfound", "/tmp");
 
     expect(result).toBeNull();
-    expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
   });
 
-  test("falls back to auto-detect when resolveEventInOrg throws", async () => {
-    resolveEventInOrgSpy.mockRejectedValue(new Error("Auth failed"));
-    resolveOrgAndProjectSpy.mockResolvedValue({
-      org: "acme",
-      project: "cli",
-      orgDisplay: "acme",
-      projectDisplay: "cli",
-    });
+  test("propagates errors from resolveEventInOrg", async () => {
+    const err = new Error("Auth failed");
+    resolveEventInOrgSpy.mockRejectedValue(err);
 
-    const result = await resolveOrgAllTarget("acme", "abc123", "/tmp");
-
-    expect(result?.org).toBe("acme");
-    expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
+    expect(resolveOrgAllTarget("acme", "abc123", "/tmp")).rejects.toBe(err);
   });
 });
 
