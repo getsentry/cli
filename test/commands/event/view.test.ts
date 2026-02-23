@@ -5,7 +5,15 @@
  * in src/commands/event/view.ts
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { parsePositionalArgs } from "../../../src/commands/event/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -325,6 +333,63 @@ describe("resolveProjectBySlug", () => {
       const result = await resolveProjectBySlug("web-frontend", HINT);
 
       expect(result.project).toBe("web-frontend");
+    });
+  });
+
+  describe("numeric project ID", () => {
+    test("uses numeric-ID-specific error when not found", async () => {
+      findProjectsBySlugSpy.mockResolvedValue([]);
+
+      try {
+        await resolveProjectBySlug("7275560680", HINT);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        const message = (error as ContextError).message;
+        expect(message).toContain('Project "7275560680"');
+        expect(message).toContain("No project with this ID was found");
+      }
+    });
+
+    test("writes stderr hint when numeric ID resolves to a different slug", async () => {
+      findProjectsBySlugSpy.mockResolvedValue([
+        {
+          slug: "my-frontend",
+          orgSlug: "acme",
+          id: "7275560680",
+          name: "Frontend",
+        },
+      ] as ProjectWithOrg[]);
+      const stderrWrite = mock(() => true);
+      const stderr = { write: stderrWrite };
+
+      const result = await resolveProjectBySlug(
+        "7275560680",
+        HINT,
+        undefined,
+        stderr
+      );
+
+      expect(result).toEqual({ org: "acme", project: "my-frontend" });
+      expect(stderrWrite).toHaveBeenCalledTimes(1);
+      const hint = stderrWrite.mock.calls[0][0] as string;
+      expect(hint).toContain("7275560680");
+      expect(hint).toContain("acme/my-frontend");
+    });
+
+    test("does not write hint when stderr is not provided", async () => {
+      findProjectsBySlugSpy.mockResolvedValue([
+        {
+          slug: "my-frontend",
+          orgSlug: "acme",
+          id: "7275560680",
+          name: "Frontend",
+        },
+      ] as ProjectWithOrg[]);
+
+      // Should not throw even without stderr
+      const result = await resolveProjectBySlug("7275560680", HINT);
+      expect(result).toEqual({ org: "acme", project: "my-frontend" });
     });
   });
 });

@@ -160,7 +160,8 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry log view <org>/${parsed.projectSlug} ${logId}`
+          `sentry log view <org>/${parsed.projectSlug} ${logId}`,
+          this.stderr
         );
         break;
 

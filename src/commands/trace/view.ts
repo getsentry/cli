@@ -170,7 +170,8 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`
+          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`,
+          this.stderr
         );
         break;
 
