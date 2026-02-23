@@ -1,0 +1,53 @@
+Implementation plan for #267
+
+Problem
+=======
+The <target> placeholder in usage lines was opaque. Users had no way to know:
+- Multiple input patterns are supported (auto-detect, explicit, org-all, project-search)
+- The trailing / on <org>/ is significant syntax that changes behaviour entirely
+  (switches from project-search to org-all, the only mode that accepts --cursor)
+
+Root cause confirmed: parseOrgProjectArg in src/lib/arg-parsing.ts dispatches on
+whether the argument contains a slash and whether the part before/after is empty.
+A bare word with no slash always goes to project-search, never org-all.
+
+Changes
+=======
+Five commands updated (issue/list, project/list, trace/list, log/list, project/view):
+
+1. placeholder: 'target' → 'org/project'
+   Usage line changes from [<target>] to [<org/project>], self-documenting the
+   expected format without requiring the user to read --help.
+
+2. fullDescription 'Target specification' → 'Target patterns'
+   Clearer heading; 'specification' implied a formal grammar, 'patterns' is friendlier.
+
+3. Trailing-slash explanation paragraph
+   issue/list and project/list get the full explanation with a concrete example
+   ('sentry' vs 'sentry/'). trace/list, log/list, project/view get a shorter note
+   since they don't support cursor pagination.
+
+4. project/list: '(trailing / required)' annotation on the org-all pattern line.
+
+5. project/list: cursor ValidationError improvement
+   Old: generic message about <org>/ pattern
+   New: shorter base message + contextual hint when parsed.type === 'project-search':
+     'Did you mean sentry project list <slug>/? A bare name searches for a project
+     — add a trailing slash to list an org's projects.'
+
+Alternatives considered
+=======================
+- Auto-promote bare-slug + --cursor to org-all mode: rejected because it changes
+  silent behaviour and 'sentry' could be a project slug in one org and a valid
+  org slug in another. Explicit > implicit for destructive ambiguity.
+- Show a pattern table in fullDescription: prose is more readable in a terminal
+  than a Markdown table that won't render; the example list already serves the
+  same purpose.
+
+Verification
+============
+bun run typecheck — passes (0 errors, 250 files)
+bun run lint     — passes (no issues)
+bun test         — all failures are pre-existing (DB permission issues, mock setup
+                   problems); none are related to these help-text changes. No tests
+                   reference the old placeholder text or old cursor error messages.
