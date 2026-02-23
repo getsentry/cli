@@ -1,0 +1,46 @@
+## Implementation Plan: fix/268 — auto-paginate --limit beyond 100
+
+### Problem
+
+`sentry issue list --limit N` where N > 100 silently returned only 100 results.
+Root cause: the non-org-all code path called `listIssues()` which uses the
+@sentry/api SDK and sends `limit` as a single query parameter. The Sentry API
+server-side caps `limit` at 100 with no error or warning.
+
+### Architecture context
+
+Two fundamentally different pagination modes existed:
+- **non-org-all** (auto-detect / explicit / project-search): calls `listIssues()`,
+  single API request, returns whatever the API returns for the given limit param
+- **org-all** (`<org>/`): calls `listIssuesPaginated()`, parses Link headers,
+  stores cursors in SQLite for `--cursor last` support
+
+`listIssuesPaginated()` already uses `orgScopedRequestPaginated()` which parses
+RFC 5988 Link headers. `orgScopedPaginateAll()` already exists for projects but
+was not used for issues.
+
+### Approach
+
+1. **New function `listIssuesAllPages()`** in `api-client.ts`: thin auto-pagination
+   wrapper over `listIssuesPaginated()`. Uses `Math.min(limit, 100)` as page size,
+   loops until limit is satisfied or no more pages, bounded by MAX_PAGINATION_PAGES
+   (50 pages = up to 5000 items safety limit), trims final result with .slice(0, limit).
+
+2. **Switch non-org-all to use the new function**: `fetchIssuesForTarget()` now
+   calls `listIssuesAllPages` instead of `listIssues`.
+
+3. **Explicit limit validation** before dispatch:
+   - non-org-all: cap at 1000, error points to `<org>/` + `--cursor` for more
+   - org-all: cap at 100 (page size semantics differ here — limit = per_page)
+
+4. **UX improvements**: default raised 10→25, help text documents auto-pagination.
+
+### Alternatives considered
+
+- **Use `orgScopedPaginateAll()` directly**: would fetch unlimited pages with no
+  per-request control. Rejected in favour of a limit-aware loop.
+- **Warn to stderr when auto-paginating**: added complexity without clear benefit;
+  the validation error for out-of-range values is the right signal.
+- **Raise limit ceiling above 1000**: MAX_PAGINATION_PAGES * 100 = 5000 is the
+  true ceiling, but 1000 is a practical user-facing cap that avoids very slow
+  commands while still covering the reported use-case (500 results).
