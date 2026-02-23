@@ -1,0 +1,34 @@
+## Implementation Plan
+
+### Problem
+Users on Node.js < 22 installing the Sentry CLI via pnpm (or npm/yarn without
+strict engine enforcement) get a cryptic crash at startup:
+
+  ERR_UNKNOWN_BUILTIN_MODULE: No such built-in module: node:sqlite
+  Node.js v20.18.0
+
+Root cause: the npm bundle (dist/bin.cjs) polyfills bun:sqlite using Node.js
+22's built-in node:sqlite module. The polyfill is injected at the top of the
+bundle via esbuild's inject option, so the require('node:sqlite') call happens
+during module loading — before any user code runs and before any error handler
+can catch it. package.json already declares engines: { node: '>=22' }, but
+pnpm does not enforce engine constraints by default.
+
+### Fix
+Add a Node.js version guard to the esbuild banner in script/bundle.ts. The
+banner is the very first code in dist/bin.cjs (before the injected polyfill),
+so it fires before require('node:sqlite') is ever attempted.
+
+Guard: parseInt(process.versions.node) < 22 → print clear error + exit(1).
+
+Error message includes:
+- The constraint violated (requires Node.js 22+)
+- The version actually found (process.version)
+- Actionable next steps: upgrade Node.js OR use the standalone binary
+  (curl -fsSL https://cli.sentry.dev/install | bash)
+
+### Alternatives considered
+- Runtime check in src/bin.ts: too late — the polyfill import fails at module
+  load time before bin.ts code runs.
+- engine-strict in package.json: doesn't help users who already installed.
+- better-sqlite3 as fallback: heavy native addon, defeats zero-dep goal.
