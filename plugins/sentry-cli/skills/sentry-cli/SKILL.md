@@ -110,7 +110,7 @@ Work with Sentry organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 **Examples:**
@@ -605,7 +605,7 @@ List organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 ### Projects
