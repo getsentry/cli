@@ -12,6 +12,7 @@ on:
           - all
           - express
           - nextjs
+          - python-fastapi
           - python-flask
           - react-vite
           - sveltekit
@@ -25,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: ${{ inputs.platform == 'all'
-          && fromJson('["express","nextjs","python-flask","react-vite","sveltekit"]')
+          && fromJson('["express","nextjs","python-fastapi","python-flask","react-vite","sveltekit"]')
           || fromJson(format('["{0}"]', inputs.platform)) }}
     steps:
       - uses: actions/checkout@v4
