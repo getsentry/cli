@@ -61,10 +61,13 @@
   },
 
   "react-vite": {
-    "getting-started": [],
-    "errors": [],
+    "getting-started": ["https://docs.sentry.io/platforms/javascript/guides/react/"],
+    "errors": ["https://docs.sentry.io/platforms/javascript/guides/react/", "https://docs.sentry.io/platforms/javascript/guides/react/usage/"],
     "sourcemaps": [],
-    "replay": [],
-    "tracing": []
+    "replay": ["https://docs.sentry.io/platforms/javascript/guides/react/session-replay/"],
+    "tracing": ["https://docs.sentry.io/platforms/javascript/guides/react/tracing/"],
+    "logs": ["https://docs.sentry.io/platforms/javascript/guides/react/logs/"],
+    "metrics": ["https://docs.sentry.io/platforms/javascript/guides/react/metrics/"],
+    "profiling": ["https://docs.sentry.io/platforms/javascript/guides/react/profiling/"]
   }
 }
