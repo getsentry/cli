@@ -232,6 +232,7 @@ export class DeviceFlowError extends CliError {
 
 export type UpgradeErrorReason =
   | "unknown_method"
+  | "unsupported_operation"
   | "network_error"
   | "execution_failed"
   | "version_not_found";
@@ -249,6 +250,8 @@ export class UpgradeError extends CliError {
     const defaultMessages: Record<UpgradeErrorReason, string> = {
       unknown_method:
         "Could not detect installation method. Use --method to specify.",
+      unsupported_operation:
+        "This operation is not supported for this installation method.",
       network_error: "Failed to fetch version information.",
       execution_failed: "Upgrade command failed.",
       version_not_found: "The specified version was not found.",

@@ -181,7 +181,7 @@ export const upgradeCommand = buildCommand({
     // version is always whatever the formula specifies, not an arbitrary release.
     if (method === "brew" && version) {
       throw new UpgradeError(
-        "unknown_method",
+        "unsupported_operation",
         "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
       );
     }
