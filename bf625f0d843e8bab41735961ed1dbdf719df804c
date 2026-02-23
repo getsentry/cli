@@ -1,0 +1,10 @@
+## Implementation Note
+
+The original PR #270 attempted a larger refactor (listCommand factory in
+list-helpers.ts), but PR #262 landed concurrently with an equivalent approach
+(dispatchOrgScopedList + buildOrgListCommand in list-command.ts / org-list.ts).
+
+After rebasing and finding the overlap, this was scoped down to just the
+remaining gap: org/list was the one list command not using the shared
+list-command.ts constants. The change is minimal on purpose — the func body
+is unchanged, only the flag definitions are replaced with shared constants.
