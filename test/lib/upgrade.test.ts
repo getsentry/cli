@@ -49,6 +49,7 @@ afterEach(() => {
 describe("parseInstallationMethod", () => {
   test("parses valid methods", () => {
     expect(parseInstallationMethod("curl")).toBe("curl");
+    expect(parseInstallationMethod("brew")).toBe("brew");
     expect(parseInstallationMethod("npm")).toBe("npm");
     expect(parseInstallationMethod("pnpm")).toBe("pnpm");
     expect(parseInstallationMethod("bun")).toBe("bun");
@@ -64,9 +65,6 @@ describe("parseInstallationMethod", () => {
   test("throws on invalid method", () => {
     expect(() => parseInstallationMethod("pip")).toThrow("Invalid method: pip");
     expect(() => parseInstallationMethod("apt")).toThrow("Invalid method: apt");
-    expect(() => parseInstallationMethod("brew")).toThrow(
-      "Invalid method: brew"
-    );
     expect(() => parseInstallationMethod("")).toThrow("Invalid method: ");
   });
 });
