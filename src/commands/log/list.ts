@@ -315,10 +315,12 @@ export const listCommand = buildCommand({
     brief: "List logs from a project",
     fullDescription:
       "List and stream logs from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry log list               # auto-detect from DSN or config\n" +
       "  sentry log list <org>/<proj>  # explicit org and project\n" +
       "  sentry log list <project>     # find project across all orgs\n\n" +
+      "A bare name (no slash) is treated as a project search. Use <org>/<proj>\n" +
+      "for an explicit target.\n\n" +
       "Examples:\n" +
       "  sentry log list                    # List last 100 logs\n" +
       "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
@@ -331,8 +333,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },

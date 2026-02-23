@@ -201,10 +201,12 @@ export const viewCommand = buildCommand({
     brief: "View details of a project",
     fullDescription:
       "View detailed information about Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry project view                       # auto-detect from DSN or config\n" +
       "  sentry project view <org>/<project>       # explicit org and project\n" +
       "  sentry project view <project>             # find project across all orgs\n\n" +
+      "A bare name (no slash) is treated as a project search. Use <org>/<project>\n" +
+      "for an explicit target.\n\n" +
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
   parameters: {
@@ -212,8 +214,8 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <project>, or omit for auto-detect",
+          placeholder: "org/project",
+          brief: "<org>/<project>, <project> (search), or omit for auto-detect",
           parse: String,
           optional: true,
         },

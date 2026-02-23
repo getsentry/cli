@@ -385,11 +385,15 @@ export const listCommand = buildCommand({
     brief: "List issues in a project",
     fullDescription:
       "List issues from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry issue list               # auto-detect from DSN or config\n" +
       "  sentry issue list <org>/<proj>  # explicit org and project\n" +
-      "  sentry issue list <org>/        # all projects in org\n" +
+      "  sentry issue list <org>/        # all projects in org (trailing / required)\n" +
       "  sentry issue list <project>     # find project across all orgs\n\n" +
+      "The trailing slash on <org>/ is significant — without it, the argument\n" +
+      "is treated as a project name search (e.g., 'sentry' searches for a\n" +
+      "project named 'sentry', while 'sentry/' lists all projects in the\n" +
+      "'sentry' org).\n\n" +
       "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
   },
   parameters: {
@@ -397,8 +401,9 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <org>/, or <project>",
+          placeholder: "org/project",
+          brief:
+            "<org>/<project>, <org>/ (all projects), or <project> (search)",
           parse: String,
           optional: true,
         },

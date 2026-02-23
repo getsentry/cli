@@ -152,10 +152,12 @@ export const listCommand = buildCommand({
     brief: "List recent traces in a project",
     fullDescription:
       "List recent traces from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry trace list               # auto-detect from DSN or config\n" +
       "  sentry trace list <org>/<proj>  # explicit org and project\n" +
       "  sentry trace list <project>     # find project across all orgs\n\n" +
+      "A bare name (no slash) is treated as a project search. Use <org>/<proj>\n" +
+      "for an explicit target.\n\n" +
       "Examples:\n" +
       "  sentry trace list                     # List last 10 traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
@@ -167,8 +169,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },

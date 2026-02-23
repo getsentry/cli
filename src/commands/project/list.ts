@@ -609,13 +609,17 @@ export const listCommand = buildCommand({
     brief: "List projects",
     fullDescription:
       "List projects in an organization.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry project list                # auto-detect from DSN or config\n" +
-      "  sentry project list <org>/         # list all projects in org (paginated)\n" +
+      "  sentry project list <org>/         # all projects in org (paginated)\n" +
       "  sentry project list <org>/<proj>   # show specific project\n" +
       "  sentry project list <project>      # find project across all orgs\n\n" +
+      "The trailing slash on <org>/ is significant — without it, the argument\n" +
+      "is treated as a project name search (e.g., 'sentry' searches for a\n" +
+      "project named 'sentry', while 'sentry/' lists all projects in the\n" +
+      "'sentry' org). Cursor pagination (--cursor) requires the <org>/ form.\n\n" +
       "Pagination:\n" +
-      "  sentry project list <org>/ -c last  # continue from last page\n" +
+      "  sentry project list <org>/ -c last      # continue from last page\n" +
       "  sentry project list <org>/ -c <cursor>  # resume at specific cursor\n\n" +
       "Filtering and output:\n" +
       "  sentry project list --platform javascript  # filter by platform\n" +
@@ -627,8 +631,9 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/, <org>/<project>, or <project>",
+          placeholder: "org/project",
+          brief:
+            "<org>/ (all projects), <org>/<project>, or <project> (search)",
           parse: String,
           optional: true,
         },
@@ -673,10 +678,15 @@ export const listCommand = buildCommand({
 
     // Cursor pagination is only supported in org-all mode — check before resolving
     if (flags.cursor && parsed.type !== "org-all") {
+      const hint =
+        parsed.type === "project-search"
+          ? `\n\nDid you mean 'sentry project list ${parsed.projectSlug}/'? ` +
+            "A bare name searches for a project — add a trailing slash to list an org's projects."
+          : "";
       throw new ValidationError(
-        "The --cursor flag is only supported when listing projects for a specific organization " +
-          "(e.g., sentry project list <org>/). " +
-          "Use 'sentry project list <org>/' for paginated results.",
+        "The --cursor flag requires the <org>/ pattern " +
+          "(e.g., sentry project list my-org/)." +
+          hint,
         "cursor"
       );
     }
