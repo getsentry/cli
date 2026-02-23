@@ -50,12 +50,27 @@ function isUserAbort(error: unknown, signal?: AbortSignal | null): boolean {
  * - apiRequestToRegion always sends JSON and sets it explicitly
  * - rawApiRequest may or may not want Content-Type (e.g., string bodies)
  *
+ * When `init` is undefined (the SDK passes only a Request object), headers are
+ * read from the Request object to preserve Content-Type and other headers set
+ * by the SDK. Without this, fetch(Request, {headers}) would override the
+ * Request's headers with our empty headers, stripping Content-Type and causing
+ * HTTP 415 errors on Node.js (which strictly follows the spec).
+ *
  * The returned Headers instance is intentionally shared and mutated across
  * retry attempts (e.g., handleUnauthorized updates the Authorization header
  * and sets the retry marker). Do not clone before passing to retry logic.
  */
-function prepareHeaders(init: RequestInit | undefined, token: string): Headers {
-  const headers = new Headers(init?.headers);
+function prepareHeaders(
+  input: Request | string | URL,
+  init: RequestInit | undefined,
+  token: string
+): Headers {
+  // When the SDK calls fetch(request) with no init, read headers from the Request
+  // object to preserve Content-Type. On Node.js, fetch(request, {headers}) replaces
+  // the Request's headers entirely per spec, so we must carry them forward explicitly.
+  const sourceHeaders =
+    init?.headers ?? (input instanceof Request ? input.headers : undefined);
+  const headers = new Headers(sourceHeaders);
   headers.set("Authorization", `Bearer ${token}`);
   if (!headers.has("User-Agent")) {
     headers.set("User-Agent", getUserAgent());
@@ -211,12 +226,13 @@ function createAuthenticatedFetch(): (
     input: Request | string | URL,
     init?: RequestInit
   ): Promise<Response> {
-    const method = init?.method ?? "GET";
+    const method =
+      init?.method ?? (input instanceof Request ? input.method : "GET");
     const urlPath = extractUrlPath(input);
 
     return withHttpSpan(method, urlPath, async () => {
       const { token } = await refreshToken();
-      const headers = prepareHeaders(init, token);
+      const headers = prepareHeaders(input, init, token);
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         const isLastAttempt = attempt === MAX_RETRIES;
