@@ -20,6 +20,7 @@ import {
   addToPath,
   detectShell,
   getPathCommand,
+  isBashAvailable,
   isInPath,
   type ShellInfo,
 } from "../../lib/shell.js";
@@ -118,30 +119,81 @@ async function handlePathModification(
 }
 
 /**
+ * Attempt to install bash completions as a fallback for unsupported shells.
+ *
+ * Many custom shells (xonsh, nushell, etc.) can load bash completions,
+ * so this is a useful fallback when the user's shell isn't directly supported.
+ *
+ * @param pathEnv - The PATH to search for bash, forwarded from the process env.
+ */
+async function tryBashCompletionFallback(
+  homeDir: string,
+  xdgDataHome: string | undefined,
+  pathEnv: string | undefined
+): Promise<string | null> {
+  if (!isBashAvailable(pathEnv)) {
+    return null;
+  }
+
+  const fallback = await installCompletions("bash", homeDir, xdgDataHome);
+  if (!fallback) {
+    // Defensive: installCompletions returns null only if the shell type has no
+    // completion script or path configured. "bash" is always supported, but
+    // we guard here in case that changes in future.
+    return null;
+  }
+  const action = fallback.created ? "Installed" : "Updated";
+  return `      ${action} bash completions as a fallback: ${fallback.path}`;
+}
+
+/**
  * Handle shell completion installation.
+ *
+ * For unsupported shells (xonsh, nushell, etc.), falls back to installing
+ * bash completions if bash is available on the system. Uses the provided
+ * PATH env to check for bash so the call is testable without side effects.
  */
 async function handleCompletions(
   shell: ShellInfo,
   homeDir: string,
   xdgDataHome: string | undefined,
-  log: Logger
-): Promise<void> {
+  pathEnv: string | undefined
+): Promise<string[]> {
   const location = await installCompletions(shell.type, homeDir, xdgDataHome);
 
   if (location) {
     const action = location.created ? "Installed to" : "Updated";
-    log(`Completions: ${action} ${location.path}`);
+    const lines = [`Completions: ${action} ${location.path}`];
 
     // Zsh may need fpath hint
     if (shell.type === "zsh") {
       const completionDir = dirname(location.path);
-      log(
+      lines.push(
         `      You may need to add to .zshrc: fpath=(${completionDir} $fpath)`
       );
     }
-  } else if (shell.type !== "sh" && shell.type !== "ash") {
-    log(`Completions: Not supported for ${shell.type} shell`);
+    return lines;
   }
+
+  // sh/ash are minimal POSIX shells — completions aren't expected
+  if (shell.type === "sh" || shell.type === "ash") {
+    return [];
+  }
+
+  const fallbackMsg = await tryBashCompletionFallback(
+    homeDir,
+    xdgDataHome,
+    pathEnv
+  );
+
+  if (fallbackMsg) {
+    return [
+      `Completions: Your shell (${shell.type}) is not directly supported`,
+      fallbackMsg,
+    ];
+  }
+
+  return [`Completions: Not supported for ${shell.type} shell`];
 }
 
 /**
@@ -284,7 +336,15 @@ export const setupCommand = buildCommand({
 
     // 3. Install shell completions
     if (!flags["no-completions"]) {
-      await handleCompletions(shell, homeDir, process.env.XDG_DATA_HOME, log);
+      const completionLines = await handleCompletions(
+        shell,
+        homeDir,
+        process.env.XDG_DATA_HOME,
+        process.env.PATH
+      );
+      for (const line of completionLines) {
+        log(line);
+      }
     }
 
     // 4. Install agent skills (auto-detected, silent when no agent found)

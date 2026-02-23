@@ -266,3 +266,17 @@ export async function addToGitHubPath(
     return false;
   }
 }
+
+/**
+ * Check if bash is available on the system.
+ *
+ * Uses `Bun.which` to search PATH for a bash executable.
+ * Useful as a fallback for unsupported shells — many custom shells
+ * (xonsh, nushell, etc.) support bash completions.
+ *
+ * @param pathEnv - Override PATH for testing. Defaults to the process PATH.
+ */
+export function isBashAvailable(pathEnv?: string): boolean {
+  const opts = pathEnv !== undefined ? { PATH: pathEnv } : undefined;
+  return Bun.which("bash", opts) !== null;
+}

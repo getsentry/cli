@@ -297,13 +297,22 @@ describe("sentry cli setup", () => {
     expect(combined).toContain("GITHUB_PATH");
   });
 
-  test("shows unsupported message for sh shell completions", async () => {
+  test("falls back to bash completions for unsupported shell when bash is available", async () => {
+    // Create a fake bash executable in testDir/bin so isBashAvailable() returns
+    // true with PATH pointing there — no dependency on the host system.
+    const binDir = join(testDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+    const { chmodSync, writeFileSync: wf } = await import("node:fs");
+    const fakeBash = join(binDir, "bash");
+    wf(fakeBash, "#!/bin/sh\necho fake-bash");
+    chmodSync(fakeBash, 0o755);
+
     const { context, output } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
-        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
-        SHELL: "/bin/tcsh",
+        PATH: binDir,
+        SHELL: "/bin/xonsh",
       },
     });
 
@@ -314,7 +323,51 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("Not supported for");
+    expect(combined).toContain("not directly supported");
+    expect(combined).toContain("bash completions as a fallback");
+    expect(combined).toContain("bash-completion");
+  });
+
+  test("shows unsupported message for unknown shell when bash is not in PATH", async () => {
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        // Empty PATH so isBashAvailable() returns false
+        PATH: "",
+        SHELL: "/bin/xonsh",
+      },
+    });
+
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).toContain("Not supported for unknown shell");
+  });
+
+  test("silently skips completions for sh shell", async () => {
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+        SHELL: "/bin/sh",
+      },
+    });
+
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const combined = output.join("");
+    // sh/ash shells silently skip completions — no message at all
+    expect(combined).not.toContain("Completions:");
   });
 
   test("supports kebab-case flags", async () => {
