@@ -802,6 +802,8 @@ export async function findProjectsBySlug(
         // accept the match (the user passed a numeric project ID).
         // For non-numeric inputs, verify the slug actually matches to
         // avoid false positives from coincidental ID collisions.
+        // Note: Sentry enforces that project slugs must start with a letter,
+        // so an all-digits input can only ever be a numeric ID, never a slug.
         if (!isNumericId && project.slug !== projectSlug) {
           return null;
         }
