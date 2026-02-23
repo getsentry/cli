@@ -22,6 +22,8 @@ jobs:
     name: Eval ${{ matrix.platform }}
     runs-on: ubuntu-latest
     environment: init-eval
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
