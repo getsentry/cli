@@ -132,7 +132,7 @@ export class ConfigError extends CliError {
 
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
-  "Set SENTRY_DSN environment variable",
+  "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
 ] as const;
 
 /**

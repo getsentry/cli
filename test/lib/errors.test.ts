@@ -108,7 +108,9 @@ describe("ContextError", () => {
     expect(formatted).toContain(
       "Run from a directory with a Sentry-configured project"
     );
-    expect(formatted).toContain("Set SENTRY_DSN environment variable");
+    expect(formatted).toContain(
+      "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables"
+    );
   });
 
   test("format() includes custom alternatives", () => {

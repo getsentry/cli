@@ -57,6 +57,8 @@ delete process.env.SENTRY_DSN;
 delete process.env.SENTRY_AUTH_TOKEN;
 delete process.env.SENTRY_CLIENT_ID;
 delete process.env.SENTRY_URL;
+delete process.env.SENTRY_ORG;
+delete process.env.SENTRY_PROJECT;
 
 // Disable telemetry and background update checks in tests
 // This prevents Sentry SDK from keeping the process alive and making external calls

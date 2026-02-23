@@ -2,13 +2,15 @@
  * Target Resolution
  *
  * Shared utilities for resolving organization and project context from
- * various sources: CLI flags, config defaults, and DSN detection.
+ * various sources: CLI flags, environment variables, config defaults,
+ * and DSN detection.
  *
  * Resolution priority (highest to lowest):
  * 1. Explicit CLI flags
- * 2. Config defaults
- * 3. DSN auto-detection (source code, .env files, environment variables)
- * 4. Directory name inference (matches project slugs with word boundaries)
+ * 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+ * 3. Config defaults
+ * 4. DSN auto-detection (source code, .env files, environment variables)
+ * 5. Directory name inference (matches project slugs with word boundaries)
  */
 
 import { basename } from "node:path";
@@ -462,6 +464,55 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
 }
 
 /**
+ * Read org/project from SENTRY_ORG and SENTRY_PROJECT environment variables.
+ *
+ * SENTRY_PROJECT supports the `<org>/<project>` combo notation (presence of
+ * `/` distinguishes it from a plain project slug). When the combo form is
+ * used, SENTRY_ORG is ignored.
+ *
+ * @returns Resolved org+project, org-only, or null if no env vars are set
+ */
+function resolveFromEnvVars(): {
+  org: string;
+  project?: string;
+  detectedFrom: string;
+} | null {
+  const rawProject = process.env.SENTRY_PROJECT?.trim();
+
+  // SENTRY_PROJECT=org/project combo takes priority.
+  // If the value contains a slash it is always treated as combo notation;
+  // a malformed combo (empty org or project part) is discarded entirely
+  // so it cannot leak a slash into a project slug.
+  if (rawProject?.includes("/")) {
+    const slashIdx = rawProject.indexOf("/");
+    const org = rawProject.slice(0, slashIdx);
+    const project = rawProject.slice(slashIdx + 1);
+    if (org && project) {
+      return { org, project, detectedFrom: "SENTRY_PROJECT env var" };
+    }
+    // Malformed combo — fall through without using rawProject as a slug
+    const envOrg = process.env.SENTRY_ORG?.trim();
+    return envOrg ? { org: envOrg, detectedFrom: "SENTRY_ORG env var" } : null;
+  }
+
+  const envOrg = process.env.SENTRY_ORG?.trim();
+
+  if (envOrg && rawProject) {
+    return {
+      org: envOrg,
+      project: rawProject,
+      detectedFrom: "SENTRY_ORG / SENTRY_PROJECT env vars",
+    };
+  }
+
+  if (envOrg) {
+    return { org: envOrg, detectedFrom: "SENTRY_ORG env var" };
+  }
+
+  return null;
+}
+
+/**
  * Resolve all targets for monorepo-aware commands.
  *
  * When multiple DSNs are detected, resolves all of them in parallel
@@ -469,9 +520,10 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
  *
  * Resolution priority:
  * 1. Explicit org and project - returns single target
- * 2. Config defaults - returns single target
- * 3. DSN auto-detection - may return multiple targets
- * 4. Directory name inference - matches project slugs with word boundaries
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars - returns single target
+ * 3. Config defaults - returns single target
+ * 4. DSN auto-detection - may return multiple targets
+ * 5. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns All resolved targets and optional footer message
@@ -504,7 +556,23 @@ export async function resolveAllTargets(
     );
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars?.project) {
+    return {
+      targets: [
+        {
+          org: envVars.org,
+          project: envVars.project,
+          orgDisplay: envVars.org,
+          projectDisplay: envVars.project,
+          detectedFrom: envVars.detectedFrom,
+        },
+      ],
+    };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
@@ -520,11 +588,11 @@ export async function resolveAllTargets(
     };
   }
 
-  // 3. DSN auto-detection (may find multiple in monorepos)
+  // 4. DSN auto-detection (may find multiple in monorepos)
   const detection = await detectAllDsns(cwd);
 
   if (detection.all.length === 0) {
-    // 4. Fallback: infer from directory name
+    // 5. Fallback: infer from directory name
     return inferFromDirectoryName(cwd);
   }
 
@@ -576,9 +644,10 @@ export async function resolveAllTargets(
  *
  * Resolution priority:
  * 1. Explicit org and project - both must be provided together
- * 2. Config defaults
- * 3. DSN auto-detection
- * 4. Directory name inference - matches project slugs with word boundaries
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars
+ * 3. Config defaults
+ * 4. DSN auto-detection
+ * 5. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns Resolved target, or null if resolution failed
@@ -607,7 +676,19 @@ export async function resolveOrgAndProject(
     );
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars?.project) {
+    return {
+      org: envVars.org,
+      project: envVars.project,
+      orgDisplay: envVars.org,
+      projectDisplay: envVars.project,
+      detectedFrom: envVars.detectedFrom,
+    };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
@@ -619,7 +700,7 @@ export async function resolveOrgAndProject(
     };
   }
 
-  // 3. DSN auto-detection
+  // 4. DSN auto-detection
   try {
     const dsnResult = await resolveFromDsn(cwd);
     if (dsnResult) {
@@ -629,23 +710,21 @@ export async function resolveOrgAndProject(
     // Fall through to directory inference
   }
 
-  // 4. Fallback: infer from directory name
+  // 5. Fallback: infer from directory name
   const inferred = await inferFromDirectoryName(cwd);
-  if (inferred.targets.length > 0) {
-    const [first] = inferred.targets;
-    if (first) {
-      // If multiple matches, note it in detectedFrom
-      return {
-        ...first,
-        detectedFrom:
-          inferred.targets.length > 1
-            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
-            : first.detectedFrom,
-      };
-    }
+  const [first] = inferred.targets;
+  if (!first) {
+    return null;
   }
 
-  return null;
+  // If multiple matches, note it in detectedFrom
+  return {
+    ...first,
+    detectedFrom:
+      inferred.targets.length > 1
+        ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
+        : first.detectedFrom,
+  };
 }
 
 /**
@@ -653,8 +732,9 @@ export async function resolveOrgAndProject(
  *
  * Resolution priority:
  * 1. Positional argument
- * 2. Config defaults
- * 3. DSN auto-detection
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars
+ * 3. Config defaults
+ * 4. DSN auto-detection
  *
  * @param options - Resolution options with flag and cwd
  * @returns Resolved org, or null if resolution failed
@@ -669,13 +749,19 @@ export async function resolveOrg(
     return { org };
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars) {
+    return { org: envVars.org, detectedFrom: envVars.detectedFrom };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
     return { org: defaultOrg };
   }
 
-  // 3. DSN auto-detection
+  // 4. DSN auto-detection
   try {
     return await resolveOrgFromDsn(cwd);
   } catch {
@@ -754,6 +840,12 @@ export async function resolveOrgsForListing(
 ): Promise<OrgListResolution> {
   if (orgFlag) {
     return { orgs: [orgFlag] };
+  }
+
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars) {
+    return { orgs: [envVars.org] };
   }
 
   const defaultOrg = await getDefaultOrganization();
