@@ -7,7 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, unlinkSync } from "node:fs";
+import { chmodSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import {
@@ -29,6 +29,7 @@ import { UpgradeError } from "./errors.js";
 
 export type InstallationMethod =
   | "curl"
+  | "brew"
   | "npm"
   | "pnpm"
   | "bun"
@@ -163,6 +164,26 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
 }
 
 /**
+ * Detect if the CLI binary is running from a Homebrew Cellar.
+ *
+ * Homebrew places the real binary deep in the Cellar
+ * (e.g. `/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry`) and exposes it
+ * via a symlink at the prefix bin dir (e.g. `/opt/homebrew/bin/sentry`).
+ * `process.execPath` typically reflects the symlink, not the realpath, so
+ * we resolve symlinks first before checking for `/Cellar/`. Falls back to
+ * the unresolved path if `realpathSync` throws (e.g. binary was deleted).
+ */
+function isHomebrewInstall(): boolean {
+  let execPath = process.execPath;
+  try {
+    execPath = realpathSync(execPath);
+  } catch {
+    // Binary may have been deleted or moved; use the original path
+  }
+  return execPath.includes("/Cellar/");
+}
+
+/**
  * Legacy detection for existing installs that don't have stored install info.
  * Checks known curl install paths and package managers.
  *
@@ -199,7 +220,14 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  * @returns Detected installation method, or "unknown" if unable to determine
  */
 export async function detectInstallationMethod(): Promise<InstallationMethod> {
-  // 1. Check stored info (fast path)
+  // Always check for Homebrew first — the stored install info may be stale
+  // (e.g. user previously had a curl install recorded, then switched to
+  // Homebrew). The realpath check is cheap and authoritative.
+  if (isHomebrewInstall()) {
+    return "brew";
+  }
+
+  // 1. Check stored info (fast path for non-Homebrew installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
@@ -289,7 +317,7 @@ export async function fetchLatestFromNpm(): Promise<string> {
 
 /**
  * Fetch the latest available version based on installation method.
- * curl installations check GitHub releases; package managers check npm.
+ * curl and brew installations check GitHub releases; package managers check npm.
  *
  * @param method - How the CLI was installed
  * @returns Latest version string (without 'v' prefix)
@@ -298,7 +326,9 @@ export async function fetchLatestFromNpm(): Promise<string> {
 export function fetchLatestVersion(
   method: InstallationMethod
 ): Promise<string> {
-  return method === "curl" ? fetchLatestFromGitHub() : fetchLatestFromNpm();
+  return method === "curl" || method === "brew"
+    ? fetchLatestFromGitHub()
+    : fetchLatestFromNpm();
 }
 
 /**
@@ -314,7 +344,7 @@ export async function versionExists(
   method: InstallationMethod,
   version: string
 ): Promise<boolean> {
-  if (method === "curl") {
+  if (method === "curl" || method === "brew") {
     const response = await fetchWithUpgradeError(
       `${GITHUB_RELEASES_URL}/tags/${version}`,
       { method: "HEAD", headers: getGitHubHeaders() },
@@ -454,6 +484,43 @@ export async function downloadBinaryToTemp(
 }
 
 /**
+ * Execute upgrade via Homebrew.
+ *
+ * Runs `brew upgrade getsentry/tools/sentry` which fetches the latest
+ * formula from the tap and installs the new version. The version argument
+ * is intentionally ignored: Homebrew manages versioning through the formula
+ * file in the tap and does not support pinning to an arbitrary release.
+ *
+ * @throws {UpgradeError} When brew upgrade fails
+ */
+function executeUpgradeHomebrew(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("brew", ["upgrade", "getsentry/tools/sentry"], {
+      stdio: "inherit",
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new UpgradeError(
+            "execution_failed",
+            `brew upgrade failed with exit code ${code}`
+          )
+        );
+      }
+    });
+
+    proc.on("error", (err) => {
+      reject(
+        new UpgradeError("execution_failed", `brew failed: ${err.message}`)
+      );
+    });
+  });
+}
+
+/**
  * Execute upgrade via package manager global install.
  *
  * @param pm - Package manager to use
@@ -516,6 +583,9 @@ export async function executeUpgrade(
   switch (method) {
     case "curl":
       return downloadBinaryToTemp(version);
+    case "brew":
+      await executeUpgradeHomebrew();
+      return null;
     case "npm":
     case "pnpm":
     case "bun":
@@ -530,6 +600,7 @@ export async function executeUpgrade(
 /** Valid methods that can be specified via --method flag */
 const VALID_METHODS: InstallationMethod[] = [
   "curl",
+  "brew",
   "npm",
   "pnpm",
   "bun",

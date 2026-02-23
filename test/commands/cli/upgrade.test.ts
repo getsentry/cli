@@ -216,6 +216,39 @@ describe("sentry cli upgrade", () => {
     });
   });
 
+  describe("brew method", () => {
+    test("errors immediately when specific version requested with brew", async () => {
+      // No fetch mock needed — error is thrown before any network call
+      const { context, output, errors } = createMockContext({
+        homeDir: testDir,
+      });
+
+      await run(app, ["cli", "upgrade", "--method", "brew", "1.2.3"], context);
+
+      const allOutput = [...output, ...errors].join("");
+      expect(allOutput).toContain(
+        "Homebrew does not support installing a specific version"
+      );
+    });
+
+    test("check mode works for brew method", async () => {
+      mockGitHubVersion("99.99.99");
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "brew"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Installation method: brew");
+      expect(combined).toContain("Latest version: 99.99.99");
+      expect(combined).toContain("Run 'sentry cli upgrade' to update.");
+    });
+  });
+
   describe("version validation", () => {
     test("reports error for non-existent version", async () => {
       // Mock: latest is 99.99.99, but 0.0.1 doesn't exist

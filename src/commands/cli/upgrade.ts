@@ -157,7 +157,7 @@ export const upgradeCommand = buildCommand({
       method: {
         kind: "parsed",
         parse: parseInstallationMethod,
-        brief: "Installation method to use (curl, npm, pnpm, bun, yarn)",
+        brief: "Installation method to use (curl, brew, npm, pnpm, bun, yarn)",
         optional: true,
         placeholder: "method",
       },
@@ -175,6 +175,15 @@ export const upgradeCommand = buildCommand({
 
     if (method === "unknown") {
       throw new UpgradeError("unknown_method");
+    }
+
+    // Homebrew manages versioning through the formula in the tap — the installed
+    // version is always whatever the formula specifies, not an arbitrary release.
+    if (method === "brew" && version) {
+      throw new UpgradeError(
+        "unsupported_operation",
+        "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
+      );
     }
 
     stdout.write(`Installation method: ${method}\n`);
@@ -213,10 +222,9 @@ export const upgradeCommand = buildCommand({
       } finally {
         releaseLock(downloadResult.lockPath);
       }
-    } else {
+    } else if (method !== "brew") {
       // Package manager: binary already in place, just run setup.
-      // Always use execPath — storedInfo?.path could reference a stale
-      // binary from a different installation method.
+      // Skip brew — Homebrew's post_install hook already runs setup.
       await runSetupOnNewBinary(this.process.execPath, method, false);
     }
 
