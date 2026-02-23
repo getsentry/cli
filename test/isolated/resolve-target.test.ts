@@ -98,6 +98,7 @@ import {
   resolveFromDsn,
   resolveOrg,
   resolveOrgAndProject,
+  resolveOrgsForListing,
 } from "../../src/lib/resolve-target.js";
 
 /** Reset all mocks between tests */
@@ -889,6 +890,16 @@ describe("env var resolution: SENTRY_ORG + SENTRY_PROJECT", () => {
     expect(mockGetDefaultOrganization).not.toHaveBeenCalled();
   });
 
+  // --- resolveOrgsForListing ---
+
+  test("resolveOrgsForListing: returns org from SENTRY_ORG when no flag or defaults", async () => {
+    process.env.SENTRY_ORG = "env-org";
+
+    const result = await resolveOrgsForListing(undefined, "/test");
+
+    expect(result.orgs).toEqual(["env-org"]);
+  });
+
   // --- Edge cases ---
 
   test("whitespace-only env vars are ignored", async () => {
@@ -901,21 +912,46 @@ describe("env var resolution: SENTRY_ORG + SENTRY_PROJECT", () => {
     expect(result).toBeNull();
   });
 
-  test("SENTRY_PROJECT with trailing slash is treated as combo with empty project", async () => {
+  test("SENTRY_PROJECT with trailing slash is treated as invalid combo", async () => {
     process.env.SENTRY_PROJECT = "my-org/";
 
     const result = await resolveOrgAndProject({ cwd: "/test" });
 
-    // slash present but empty project — falls through
+    // slash present but empty project — falls through entirely
     expect(result).toBeNull();
   });
 
-  test("SENTRY_PROJECT with leading slash is treated as combo with empty org", async () => {
+  test("SENTRY_PROJECT with leading slash is treated as invalid combo", async () => {
     process.env.SENTRY_PROJECT = "/my-project";
 
     const result = await resolveOrgAndProject({ cwd: "/test" });
 
-    // slash present but empty org — falls through
+    // slash present but empty org — falls through entirely
     expect(result).toBeNull();
+  });
+
+  test("malformed SENTRY_PROJECT with slash does not leak slash into project slug", async () => {
+    // Regression: SENTRY_PROJECT="org/" + SENTRY_ORG="my-org" must NOT
+    // produce project="org/" — the malformed combo should be discarded
+    // and only the org from SENTRY_ORG should be returned.
+    process.env.SENTRY_ORG = "my-org";
+    process.env.SENTRY_PROJECT = "other-org/";
+
+    const result = await resolveOrgAndProject({ cwd: "/test" });
+
+    // Should fall through because SENTRY_PROJECT is a malformed combo.
+    // resolveFromEnvVars returns org-only from SENTRY_ORG, but
+    // resolveOrgAndProject requires a project, so result is null.
+    expect(result).toBeNull();
+  });
+
+  test("malformed SENTRY_PROJECT with slash still provides org via SENTRY_ORG", async () => {
+    process.env.SENTRY_ORG = "my-org";
+    process.env.SENTRY_PROJECT = "other-org/";
+
+    const result = await resolveOrg({ cwd: "/test" });
+
+    // Malformed combo discards SENTRY_PROJECT but SENTRY_ORG is still used
+    expect(result?.org).toBe("my-org");
   });
 });

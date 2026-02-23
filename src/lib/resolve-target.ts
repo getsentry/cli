@@ -477,24 +477,30 @@ function resolveFromEnvVars(): {
   project?: string;
   detectedFrom: string;
 } | null {
-  const envProject = process.env.SENTRY_PROJECT?.trim();
+  const rawProject = process.env.SENTRY_PROJECT?.trim();
 
-  // SENTRY_PROJECT=org/project combo takes priority
-  if (envProject?.includes("/")) {
-    const slashIdx = envProject.indexOf("/");
-    const org = envProject.slice(0, slashIdx);
-    const project = envProject.slice(slashIdx + 1);
+  // SENTRY_PROJECT=org/project combo takes priority.
+  // If the value contains a slash it is always treated as combo notation;
+  // a malformed combo (empty org or project part) is discarded entirely
+  // so it cannot leak a slash into a project slug.
+  if (rawProject?.includes("/")) {
+    const slashIdx = rawProject.indexOf("/");
+    const org = rawProject.slice(0, slashIdx);
+    const project = rawProject.slice(slashIdx + 1);
     if (org && project) {
       return { org, project, detectedFrom: "SENTRY_PROJECT env var" };
     }
+    // Malformed combo — fall through without using rawProject as a slug
+    const envOrg = process.env.SENTRY_ORG?.trim();
+    return envOrg ? { org: envOrg, detectedFrom: "SENTRY_ORG env var" } : null;
   }
 
   const envOrg = process.env.SENTRY_ORG?.trim();
 
-  if (envOrg && envProject) {
+  if (envOrg && rawProject) {
     return {
       org: envOrg,
-      project: envProject,
+      project: rawProject,
       detectedFrom: "SENTRY_ORG / SENTRY_PROJECT env vars",
     };
   }
