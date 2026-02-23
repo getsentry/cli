@@ -1,0 +1,45 @@
+## Root Cause
+
+The @sentry/api SDK builds a Request object with Content-Type: application/json
+in its headers, then calls _fetch(request2) with a single argument (no init).
+
+In authenticatedFetch(input, init), init is undefined. prepareHeaders(init, token)
+called new Headers(init?.headers) = new Headers(undefined) = empty Headers, so
+Authorization and User-Agent were set but Content-Type was lost.
+
+fetchWithTimeout then called fetch(input, { ...init, headers, signal }) where
+headers was our prepared (empty) Headers. Per the Fetch spec, passing an init
+object with a headers property to fetch(Request, init) replaces the Request's
+headers entirely — so Content-Type was stripped before the request went out.
+
+The server (Django REST Framework) received a POST with no Content-Type and
+returned HTTP 415 Unsupported Media Type with detail 'Unsupported media type
+"" in request.' This was caught as an ApiError, passed through
+handleSeerApiError, and surfaced to the user as an unhandled error event.
+
+This only manifested on Node.js because Bun's fetch implementation appears to
+merge headers from the Request object when an init is also provided, rather
+than replacing them strictly as the spec requires.
+
+## Fix
+
+Three changes to src/lib/sentry-client.ts:
+
+1. prepareHeaders signature: added input as first parameter.
+
+2. prepareHeaders body: changed header source from init?.headers to
+   init?.headers ?? (input instanceof Request ? input.headers : undefined)
+   so that when the SDK calls fetch(request) with no init, we carry the
+   Request's headers (including Content-Type) into the new Headers instance
+   before adding Authorization and User-Agent.
+
+3. Method extraction: changed init?.method ?? 'GET' to
+   init?.method ?? (input instanceof Request ? input.method : 'GET')
+   so HTTP span tracing correctly records POST (not GET) for SDK calls that
+   pass only a Request object.
+
+## Affected commands
+
+sentry issue explain and sentry issue plan — both call triggerRootCauseAnalysis,
+which calls startSeerIssueFix (a POST with body), going through the SDK client
+path that triggers this bug.
