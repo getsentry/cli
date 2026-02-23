@@ -13,14 +13,14 @@
   ],
 
   "nextjs": {
-    "getting-started": [],
-    "errors": [],
-    "logs": [],
-    "tracing": [],
-    "replay": [],
-    "metrics": [],
+    "getting-started": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/pages-router/"],
+    "errors": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/pages-router/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/capturing-errors/"],
+    "logs": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/logs/"],
+    "tracing": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/tracing/"],
+    "replay": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/session-replay/"],
+    "metrics": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/metrics/"],
     "sourcemaps": [],
-    "profiling": []
+    "profiling": ["https://docs.sentry.io/platforms/javascript/guides/nextjs/profiling/browser/", "https://docs.sentry.io/platforms/javascript/guides/nextjs/profiling/node/"]
   },
 
   "express": {
