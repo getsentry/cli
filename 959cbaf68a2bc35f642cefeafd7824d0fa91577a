@@ -1,0 +1,39 @@
+## Implementation Plan: Homebrew Install Support (#228)
+
+### Problem
+The CLI had no Homebrew install option, making it harder to install and
+manage on macOS/Linux for users who prefer brew.
+
+### Approach
+
+#### 1. Craft brew target (.craft.yml)
+Added a `brew` target that Craft runs at release time to push a formula
+to the getsentry/homebrew-tools tap as `Formula/sentry.rb`:
+- `includeNames: '/^sentry-(darwin|linux)-(arm64|x64)$/'` filters to
+  the 4 relevant release binaries (excludes .gz, Windows exe, npm tarball)
+- Checksum keys are raw filenames (e.g. `{{checksums.sentry-darwin-arm64}}`)
+  because the filenames contain no dots and no version string — verified
+  against Craft source at src/targets/brew.ts (key = filename.replace(version, '__VERSION__'),
+  sanitizeObject only transforms dots to __)
+- Pre-release versions (dev, rc, alpha, etc.) are auto-skipped by Craft
+- Same-org tap (getsentry owns both repos) — direct commit path works
+
+#### 2. Upgrade system (src/lib/upgrade.ts)
+- Added `"brew"` to `InstallationMethod` union
+- `isHomebrewInstall()`: checks `process.execPath` for `/Cellar/`, which
+  is reliable for both Apple Silicon (/opt/homebrew) and Intel (/usr/local)
+- Homebrew checked before curl in legacy detection to avoid false matches
+- `fetchLatestVersion` and `versionExists` route brew to GitHub releases
+- `executeUpgradeHomebrew()`: runs `brew upgrade getsentry/tools/sentry`;
+  version pinning unsupported (Homebrew manages versions through the formula)
+- brew returns null from executeUpgrade (like package managers), so the
+  upgrade command uses `process.execPath` for post-upgrade setup
+
+#### 3. Docs
+- getting-started.mdx: Homebrew section between Install Script and Package Managers
+- commands/cli/upgrade.md: brew row in detection/method tables, --method options
+
+### What was NOT needed
+- No CI/workflow changes — Craft handles formula generation at release time
+- No changes to binary build — existing release artifacts are already correct
+- No manual tap repo setup — Craft creates the formula file on first release
