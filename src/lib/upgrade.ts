@@ -190,11 +190,6 @@ function isHomebrewInstall(): boolean {
  * @returns Detected installation method, or "unknown" if unable to determine
  */
 async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
-  // Check for Homebrew Cellar path before curl — both may match known bin dirs
-  if (isHomebrewInstall()) {
-    return "brew";
-  }
-
   // Check known curl install paths
   for (const dir of KNOWN_CURL_PATHS) {
     if (process.execPath.startsWith(dir)) {
