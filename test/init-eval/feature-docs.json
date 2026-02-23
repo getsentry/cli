@@ -1,0 +1,59 @@
+{
+  "$comment": [
+    "Maps each platform to doc URLs used as ground truth by the LLM judge.",
+    "",
+    "Structure: { platformId: { featureName: [url, ...] } }",
+    "  - Platform keys must match the `id` from helpers/platforms.ts",
+    "  - Feature names are free-form strings (e.g. 'getting-started', 'errors')",
+    "  - Each feature maps to an array of doc URLs (multiple pages allowed)",
+    "  - Empty arrays mean 'no docs yet'; the judge skips the follows-docs criterion",
+    "",
+    "To add a new platform: add a key with its feature objects.",
+    "To add a new feature: add a new key under the platform with a URL array."
+  ],
+
+  "nextjs": {
+    "getting-started": [],
+    "errors": [],
+    "logs": [],
+    "tracing": [],
+    "replay": [],
+    "metrics": [],
+    "sourcemaps": [],
+    "profiling": []
+  },
+
+  "express": {
+    "getting-started": ["https://docs.sentry.io/platforms/javascript/guides/express/"],
+    "errors": ["https://docs.sentry.io/platforms/javascript/guides/express/usage/"],
+    "tracing": ["https://docs.sentry.io/platforms/javascript/guides/express/tracing/"],
+    "logs": ["https://docs.sentry.io/platforms/javascript/guides/express/logs/"],
+    "metrics": ["https://docs.sentry.io/platforms/javascript/guides/express/metrics/"],
+    "profiling": ["https://docs.sentry.io/platforms/javascript/guides/express/profiling/"]
+  },
+
+  "python-flask": {
+    "getting-started": [],
+    "errors": [],
+    "tracing": [],
+    "logs": [],
+    "metrics": [],
+    "profiling": []
+  },
+
+  "sveltekit": {
+    "getting-started": [],
+    "errors": [],
+    "sourcemaps": [],
+    "replay": [],
+    "tracing": []
+  },
+
+  "react-vite": {
+    "getting-started": [],
+    "errors": [],
+    "sourcemaps": [],
+    "replay": [],
+    "tracing": []
+  }
+}
