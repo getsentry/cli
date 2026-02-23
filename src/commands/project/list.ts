@@ -23,7 +23,6 @@ import {
   type ParsedOrgProject,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
 import { getDefaultOrganization } from "../../lib/db/defaults.js";
 import {
   clearPaginationCursor,
@@ -39,6 +38,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_CURSOR_FLAG,
@@ -603,7 +603,7 @@ const projectListMeta: ListCommandMeta = {
   commandPrefix: "sentry project list",
 };
 
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("project", {
   docs: {
     brief: "List projects",
     fullDescription:

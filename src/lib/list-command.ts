@@ -13,10 +13,16 @@
  *   buildOrgListCommand
  */
 
-import type { Aliases, Command } from "@stricli/core";
+import type {
+  Aliases,
+  Command,
+  CommandContext,
+  CommandFunction,
+} from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
+import { warning } from "./formatters/colors.js";
 import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
 
 // ---------------------------------------------------------------------------
@@ -125,7 +131,157 @@ export function buildListLimitFlag(
 export const LIST_BASE_ALIASES: Aliases<string> = { n: "limit", c: "cursor" };
 
 // ---------------------------------------------------------------------------
-// Level B: full command builder for dispatchOrgScopedList-based commands
+// Level B: subcommand interception for plural aliases
+// ---------------------------------------------------------------------------
+
+let _subcommandsByRoute: Map<string, Set<string>> | undefined;
+
+/**
+ * Get the subcommand names for a given singular route (e.g. "project" → {"list", "view"}).
+ *
+ * Lazily walks the Stricli route map on first call. Uses `require()` to break
+ * the circular dependency: list-command → app → commands → list-command.
+ */
+function getSubcommandsForRoute(routeName: string): Set<string> {
+  if (!_subcommandsByRoute) {
+    _subcommandsByRoute = new Map();
+
+    const { routes } = require("../app.js") as {
+      routes: {
+        getAllEntries: () => readonly {
+          name: { original: string };
+          target: unknown;
+        }[];
+      };
+    };
+
+    for (const entry of routes.getAllEntries()) {
+      const target = entry.target as unknown as Record<string, unknown>;
+      if (typeof target?.getAllEntries === "function") {
+        const children = (
+          target.getAllEntries as () => readonly {
+            name: { original: string };
+          }[]
+        )();
+        const names = new Set<string>();
+        for (const child of children) {
+          names.add(child.name.original);
+        }
+        _subcommandsByRoute.set(entry.name.original, names);
+      }
+    }
+  }
+
+  return _subcommandsByRoute.get(routeName) ?? new Set();
+}
+
+/**
+ * Check if a positional target is actually a subcommand name passed through
+ * a plural alias (e.g. "list" from `sentry projects list`).
+ *
+ * When a plural alias like `sentry projects` maps directly to the list
+ * command, Stricli passes extra tokens as positional args. If the token
+ * matches a known subcommand of the singular route, we treat it as if no
+ * target was given (auto-detect) and print a command-specific hint.
+ *
+ * @param target - The raw positional argument
+ * @param stderr - Writable stream for the hint message
+ * @param routeName - Singular route name (e.g. "project", "issue")
+ * @returns The original target, or `undefined` if it was a subcommand name
+ */
+export function interceptSubcommand(
+  target: string | undefined,
+  stderr: { write(s: string): void },
+  routeName: string
+): string | undefined {
+  if (!target) {
+    return target;
+  }
+  const trimmed = target.trim();
+  if (trimmed && getSubcommandsForRoute(routeName).has(trimmed)) {
+    stderr.write(
+      warning(
+        `Tip: "${trimmed}" is a subcommand. Running: sentry ${routeName} ${trimmed}\n`
+      )
+    );
+    return;
+  }
+  return target;
+}
+
+// ---------------------------------------------------------------------------
+// Level C: list command builder with automatic subcommand interception
+// ---------------------------------------------------------------------------
+
+/** Base flags type (mirrors command.ts) */
+type BaseFlags = Readonly<Partial<Record<string, unknown>>>;
+
+/**
+ * Build a Stricli command for a list endpoint with automatic plural-alias
+ * interception.
+ *
+ * This is a drop-in replacement for `buildCommand` that wraps the command
+ * function to intercept subcommand names passed through plural aliases.
+ * For example, when `sentry projects list` passes "list" as a positional
+ * target to the project list command, it is intercepted and treated as
+ * auto-detect mode with a command-specific hint on stderr.
+ *
+ * Usage:
+ * ```ts
+ * // Before:
+ * import { buildCommand } from "../../lib/command.js";
+ * export const listCommand = buildCommand({ ... });
+ *
+ * // After:
+ * import { buildListCommand } from "../../lib/list-command.js";
+ * export const listCommand = buildListCommand("project", { ... });
+ * ```
+ *
+ * @param routeName - Singular route name (e.g. "project", "issue") for the
+ *   hint message and subcommand lookup
+ * @param builderArgs - Same arguments as `buildCommand` from `lib/command.js`
+ */
+export function buildListCommand<
+  const FLAGS extends BaseFlags = NonNullable<unknown>,
+  const ARGS extends readonly unknown[] = [],
+  const CONTEXT extends CommandContext = CommandContext,
+>(
+  routeName: string,
+  builderArgs: {
+    readonly parameters?: Record<string, unknown>;
+    readonly docs: {
+      readonly brief: string;
+      readonly fullDescription?: string;
+    };
+    readonly func: CommandFunction<FLAGS, ARGS, CONTEXT>;
+  }
+): Command<CONTEXT> {
+  const originalFunc = builderArgs.func;
+
+  // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
+  const wrappedFunc = function (this: CONTEXT, flags: FLAGS, ...args: any[]) {
+    // The first positional arg is always the target (org/project pattern).
+    // Intercept it to handle plural alias confusion.
+    if (
+      args.length > 0 &&
+      (typeof args[0] === "string" || args[0] === undefined)
+    ) {
+      // All list commands use SentryContext which has stderr at top level
+      const ctx = this as unknown as { stderr: { write(s: string): void } };
+      args[0] = interceptSubcommand(
+        args[0] as string | undefined,
+        ctx.stderr,
+        routeName
+      );
+    }
+    return originalFunc.call(this, flags, ...(args as unknown as ARGS));
+  } as typeof originalFunc;
+
+  return buildCommand({ ...builderArgs, func: wrappedFunc });
+}
+
+// ---------------------------------------------------------------------------
+// Level D: full command builder for dispatchOrgScopedList-based commands
 // ---------------------------------------------------------------------------
 
 /** Documentation strings for a list command built with `buildOrgListCommand`. */
@@ -151,9 +307,10 @@ export type OrgListCommandDocs = {
  */
 export function buildOrgListCommand<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
-  docs: OrgListCommandDocs
+  docs: OrgListCommandDocs,
+  routeName: string
 ): Command<SentryContext> {
-  return buildCommand({
+  return buildListCommand(routeName, {
     docs,
     parameters: {
       positional: LIST_TARGET_POSITIONAL,
