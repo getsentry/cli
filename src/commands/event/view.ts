@@ -209,19 +209,22 @@ export async function resolveEventTarget(
  * Resolve target when only an org is known (e.g., from a Sentry event URL).
  * Uses the eventids endpoint to find the project directly.
  *
- * Returns null if the event is not found in the given org.
- * Propagates auth/network errors — if the user provided an explicit org
- * via URL, errors should surface rather than silently resolving a different org.
+ * Throws a ContextError if the event is not found in the given org, with a
+ * message that names the org so the error is not misleading.
+ * Propagates auth/network errors from resolveEventInOrg.
  */
 /** @internal Exported for testing */
 export async function resolveOrgAllTarget(
   org: string,
   eventId: string,
   _cwd: string
-): Promise<ResolvedEventTarget | null> {
+): Promise<ResolvedEventTarget> {
   const resolved = await resolveEventInOrg(org, eventId);
   if (!resolved) {
-    return null;
+    throw new ContextError(
+      `Event ${eventId} in organization "${org}"`,
+      `sentry event view ${org}/ ${eventId}`
+    );
   }
   return {
     org: resolved.org,

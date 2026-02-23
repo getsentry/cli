@@ -1270,14 +1270,18 @@ export async function findEventAcrossOrgs(
     orgs.map((org) => resolveEventInOrg(org.slug, eventId))
   );
 
+  // First pass: return the first successful match
   for (const result of results) {
     if (result.status === "fulfilled" && result.value !== null) {
       return result.value;
     }
-    // Propagate auth errors immediately — they indicate a global problem
-    // (expired/missing token) rather than a per-org miss, so the user needs
-    // to know. Transient per-org failures (network, 5xx) are swallowed since
-    // other orgs may still succeed.
+  }
+
+  // Second pass (only reached when no org had the event): propagate
+  // AuthError since it indicates a global problem (expired/missing token).
+  // Transient per-org failures (network, 5xx) are swallowed — they are not
+  // global, and if the event existed in any accessible org it would have matched.
+  for (const result of results) {
     if (result.status === "rejected" && result.reason instanceof AuthError) {
       throw result.reason;
     }

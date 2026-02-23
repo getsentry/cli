@@ -544,12 +544,12 @@ describe("resolveOrgAllTarget", () => {
     expect(result?.prefetchedEvent?.eventID).toBe("abc123");
   });
 
-  test("returns null when event not found in explicit org", async () => {
+  test("throws ContextError when event not found in explicit org", async () => {
     resolveEventInOrgSpy.mockResolvedValue(null);
 
-    const result = await resolveOrgAllTarget("acme", "notfound", "/tmp");
-
-    expect(result).toBeNull();
+    await expect(
+      resolveOrgAllTarget("acme", "notfound", "/tmp")
+    ).rejects.toBeInstanceOf(ContextError);
   });
 
   test("propagates errors from resolveEventInOrg", async () => {
