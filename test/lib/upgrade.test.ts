@@ -502,19 +502,25 @@ describe("Homebrew detection (detectInstallationMethod)", () => {
     expect(method).toBe("brew");
   });
 
-  test("does not detect brew for non-Homebrew paths", async () => {
-    // Set a curl-like path (not under /Cellar/) and store brew as the DB
-    // install method — detection should prefer the stored method over a
-    // fresh re-detection, so we can verify the Cellar check without
-    // triggering the slow package-manager fallthrough.
+  test("Homebrew detection overrides stale stored install info", async () => {
+    // Simulate a user who previously had curl recorded in the DB but then
+    // switched to Homebrew — the /Cellar/ check should win.
+    const { setInstallInfo } = await import("../../src/lib/db/install-info.js");
+    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
+
     Object.defineProperty(process, "execPath", {
-      value: "/home/user/.sentry/bin/sentry",
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
       configurable: true,
     });
 
-    // Directly check: a path without /Cellar/ does NOT start with the Cellar string.
-    // This validates the negative case without triggering the full package manager
-    // detection chain (which is slow and not what we're testing here).
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("does not detect brew for non-Homebrew paths", async () => {
+    // Directly validate: a path without /Cellar/ is not a Homebrew install.
+    // We avoid calling detectInstallationMethod() with no stored info and a
+    // non-Cellar path because that triggers the slow package-manager fallthrough.
     expect("/home/user/.sentry/bin/sentry".includes("/Cellar/")).toBe(false);
     expect("/opt/homebrew/bin/sentry".includes("/Cellar/")).toBe(false);
   });

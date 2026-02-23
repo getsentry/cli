@@ -225,7 +225,14 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  * @returns Detected installation method, or "unknown" if unable to determine
  */
 export async function detectInstallationMethod(): Promise<InstallationMethod> {
-  // 1. Check stored info (fast path)
+  // Always check for Homebrew first — the stored install info may be stale
+  // (e.g. user previously had a curl install recorded, then switched to
+  // Homebrew). The realpath check is cheap and authoritative.
+  if (isHomebrewInstall()) {
+    return "brew";
+  }
+
+  // 1. Check stored info (fast path for non-Homebrew installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
