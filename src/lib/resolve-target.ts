@@ -795,7 +795,7 @@ export async function resolveProjectBySlug(
   if (found.length === 0) {
     throw new ContextError(`Project "${projectSlug}"`, usageHint, [
       isAllDigits(projectSlug)
-        ? "Numeric project IDs are not supported — use the project slug instead"
+        ? "No project with this ID was found — check the ID or use the project slug instead"
         : "Check that you have access to a project with this slug",
     ]);
   }
