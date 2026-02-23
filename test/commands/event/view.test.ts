@@ -547,20 +547,13 @@ describe("resolveOrgAllTarget", () => {
     expect(result?.prefetchedEvent?.eventID).toBe("abc123");
   });
 
-  test("falls back to auto-detect when event not found", async () => {
+  test("returns null when event not found in explicit org", async () => {
     resolveEventInOrgSpy.mockResolvedValue(null);
-    resolveOrgAndProjectSpy.mockResolvedValue({
-      org: "acme",
-      project: "cli",
-      orgDisplay: "acme",
-      projectDisplay: "cli",
-    });
 
     const result = await resolveOrgAllTarget("acme", "notfound", "/tmp");
 
-    expect(result?.org).toBe("acme");
-    expect(result?.project).toBe("cli");
-    expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
+    expect(result).toBeNull();
+    expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
   });
 
   test("falls back to auto-detect when resolveEventInOrg throws", async () => {
@@ -640,7 +633,7 @@ describe("resolveAutoDetectTarget", () => {
     expect(mockStderr.write).toHaveBeenCalledTimes(1);
     const hint = mockStderr.write.mock.calls[0][0] as string;
     expect(hint).toContain("acme/frontend");
-    expect(hint).toContain("sentry project set");
+    expect(hint).toContain("SENTRY_ORG=acme");
   });
 
   test("returns null when both auto-detect and cross-project fail", async () => {

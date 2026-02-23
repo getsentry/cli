@@ -227,9 +227,11 @@ export async function resolveOrgAllTarget(
       };
     }
   } catch {
-    // Auth or network errors — fall through to auto-detect
+    // Auth or network errors — fall through to auto-detect below
+    return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
   }
-  return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+  // Event not found in the explicit org — don't silently switch orgs
+  return null;
 }
 
 /**
@@ -251,7 +253,7 @@ export async function resolveAutoDetectTarget(
   if (resolved) {
     stderr.write(
       `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
-        `Run "sentry project set ${resolved.org}/${resolved.project}" to set as default.\n`
+        `Set SENTRY_ORG=${resolved.org} and SENTRY_PROJECT=${resolved.project} to skip this search.\n`
     );
     return {
       org: resolved.org,
