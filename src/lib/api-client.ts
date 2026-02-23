@@ -20,6 +20,7 @@ import {
   retrieveAProject,
   retrieveSeerIssueFixState,
   listYourOrganizations as sdkListOrganizations,
+  resolveAnEventId as sdkResolveAnEventId,
   startSeerIssueFix,
 } from "@sentry/api";
 import type { z } from "zod";
@@ -1206,6 +1207,72 @@ export async function getEvent(
 
   const data = unwrapResult(result, "Failed to get event");
   return data as unknown as SentryEvent;
+}
+
+/**
+ * Result of resolving an event ID to an org and project.
+ * Includes the full event so the caller can avoid a second API call.
+ */
+export type ResolvedEvent = {
+  org: string;
+  project: string;
+  event: SentryEvent;
+};
+
+/**
+ * Resolve an event ID to its org and project using the
+ * `/organizations/{org}/eventids/{event_id}/` endpoint.
+ *
+ * Returns the resolved org, project, and full event on success,
+ * or null if the event is not found in the given org.
+ */
+export async function resolveEventInOrg(
+  orgSlug: string,
+  eventId: string
+): Promise<ResolvedEvent | null> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await sdkResolveAnEventId({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, event_id: eventId },
+  });
+
+  if (!result.data) {
+    return null;
+  }
+
+  return {
+    org: result.data.organizationSlug,
+    project: result.data.projectSlug,
+    event: result.data.event as unknown as SentryEvent,
+  };
+}
+
+/**
+ * Search for an event across all accessible organizations by event ID.
+ *
+ * Fans out to every org in parallel using the eventids resolution endpoint.
+ * Returns the first match found, or null if the event is not accessible.
+ *
+ * @param eventId - The event ID (UUID) to look up
+ */
+export async function findEventAcrossOrgs(
+  eventId: string
+): Promise<ResolvedEvent | null> {
+  const orgs = await listOrganizations();
+
+  const results = await Promise.all(
+    orgs.map(async (org) => {
+      try {
+        return await resolveEventInOrg(org.slug, eventId);
+      } catch {
+        // 404 or permission errors — event not in this org
+        return null;
+      }
+    })
+  );
+
+  return results.find((r): r is ResolvedEvent => r !== null) ?? null;
 }
 
 /**

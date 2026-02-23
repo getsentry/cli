@@ -393,3 +393,75 @@ describe("resolveProjectBySlug", () => {
     });
   });
 });
+
+describe("cross-project event resolution", () => {
+  let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
+  let resolveEventInOrgSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
+    resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
+  });
+
+  afterEach(() => {
+    findEventAcrossOrgsSpy.mockRestore();
+    resolveEventInOrgSpy.mockRestore();
+  });
+
+  const sampleResolvedEvent = {
+    org: "acme",
+    project: "frontend",
+    event: {
+      id: "abc123",
+      eventID: "abc123def456",
+      groupID: "12345",
+      projectID: "67890",
+      message: "Something went wrong",
+      title: "Error",
+      location: null,
+      user: null,
+      tags: [],
+      platform: "node",
+      dateReceived: "2026-01-01T00:00:00Z",
+      contexts: null,
+      size: 100,
+      entries: [],
+      dist: null,
+      sdk: {},
+      context: null,
+      packages: {},
+      type: "error",
+      metadata: null,
+      errors: [],
+      occurrence: null,
+      _meta: {},
+    },
+  };
+
+  test("findEventAcrossOrgs returns resolved event with org and project", async () => {
+    findEventAcrossOrgsSpy.mockResolvedValue(sampleResolvedEvent);
+
+    const result = await apiClient.findEventAcrossOrgs("abc123def456");
+
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("frontend");
+    expect(result?.event.eventID).toBe("abc123def456");
+  });
+
+  test("findEventAcrossOrgs returns null when event not found", async () => {
+    findEventAcrossOrgsSpy.mockResolvedValue(null);
+
+    const result = await apiClient.findEventAcrossOrgs("notfound");
+
+    expect(result).toBeNull();
+  });
+
+  test("resolveEventInOrg returns null for not-found events", async () => {
+    resolveEventInOrgSpy.mockResolvedValue(null);
+
+    const result = await apiClient.resolveEventInOrg("acme", "notfound");
+
+    expect(result).toBeNull();
+  });
+});

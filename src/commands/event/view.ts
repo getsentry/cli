@@ -5,7 +5,12 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getEvent } from "../../lib/api-client.js";
+import {
+  findEventAcrossOrgs,
+  getEvent,
+  type ResolvedEvent,
+  resolveEventInOrg,
+} from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -142,6 +147,8 @@ export type ResolvedEventTarget = {
   orgDisplay: string;
   projectDisplay: string;
   detectedFrom?: string;
+  /** Pre-fetched event from cross-project resolution — avoids a second API call */
+  prefetchedEvent?: ResolvedEvent["event"];
 };
 
 export const viewCommand = buildCommand({
@@ -217,15 +224,53 @@ export const viewCommand = buildCommand({
         break;
       }
 
-      case ProjectSpecificationType.OrgAll:
-      // Org-only (e.g., from event URL that has no project slug).
-      // Fall through to auto-detect — SENTRY_URL is already set for
-      // self-hosted, and auto-detect will resolve the project from
-      // DSN, config defaults, or directory name inference.
-      // falls through
-      case ProjectSpecificationType.AutoDetect:
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+      case ProjectSpecificationType.OrgAll: {
+        // Org-only (e.g., from a Sentry event URL that has no project slug).
+        // Use the org from the URL + event ID to resolve the project directly.
+        const resolved = await resolveEventInOrg(parsed.org, eventId);
+        if (resolved) {
+          target = {
+            org: resolved.org,
+            project: resolved.project,
+            orgDisplay: parsed.org,
+            projectDisplay: resolved.project,
+            prefetchedEvent: resolved.event,
+          };
+        } else {
+          // Event not found in the given org — fall back to full auto-detect
+          target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+        }
         break;
+      }
+
+      case ProjectSpecificationType.AutoDetect: {
+        // Try the standard resolution cascade first (env vars, config defaults,
+        // DSN detection, directory name inference). If none apply, fan out
+        // across all accessible orgs using the eventids endpoint.
+        const autoTarget = await resolveOrgAndProject({
+          cwd,
+          usageHint: USAGE_HINT,
+        });
+        if (autoTarget) {
+          target = autoTarget;
+        } else {
+          const resolved = await findEventAcrossOrgs(eventId);
+          if (resolved) {
+            this.stderr.write(
+              `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
+                `Run "sentry project set ${resolved.org}/${resolved.project}" to set as default.\n`
+            );
+            target = {
+              org: resolved.org,
+              project: resolved.project,
+              orgDisplay: resolved.org,
+              projectDisplay: resolved.project,
+              prefetchedEvent: resolved.event,
+            };
+          }
+        }
+        break;
+      }
 
       default:
         // Exhaustive check - should never reach here
@@ -245,7 +290,11 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    const event = await getEvent(target.org, target.project, eventId);
+    // Use the pre-fetched event when cross-project resolution already fetched it,
+    // avoiding a redundant API call.
+    const event =
+      target.prefetchedEvent ??
+      (await getEvent(target.org, target.project, eventId));
 
     // Fetch span tree data (for both JSON and human output)
     // Skip when spans=0 (disabled via --spans no or --spans 0)
