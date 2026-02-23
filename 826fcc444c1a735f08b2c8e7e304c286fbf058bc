@@ -1,0 +1,45 @@
+## Implementation Plan
+
+### Problem
+7 `sentry * list` commands shared ~800 lines of duplicated logic: flag definitions
+(--limit, --json, --query, --sort), the JSON-vs-human output pipeline, empty-state
+handling, truncation notices, footer tips, cursor cache management, and multi-org
+fetch loops. Each command also had subtle inconsistencies (e.g. trace/list imported
+from @stricli/core directly, bypassing telemetry; listTeams/listRepositories silently
+truncated at 100 items via the @sentry/api SDK).
+
+### Approach
+Single `src/lib/list-helpers.ts` file with:
+1. `listCommand<T>()` factory — callers provide only what's unique (docs, fetch,
+   render, feature flags). The factory handles everything else.
+2. Supporting helpers reused across commands: fetchFromOrgs (parallel multi-org
+   fetch), resolveOrgsForList, resolveSingleTarget, makeValidateLimit,
+   resolveCursorFlag, updateCursorCache.
+
+### Key design decisions
+- Factory wraps `buildCommand` from `lib/command.ts` (not @stricli/core directly)
+  so telemetry is preserved.
+- Stricli flag defaults must be strings even for numeric flags (Stricli runs them
+  through `parse`).
+- `render` callback supports `void | Promise<void>` for async rendering needs.
+- `fetch` returning `nextCursor` is sufficient — factory calls `updateCursorCache`
+  automatically; no manual call needed in the fetch callback.
+- `features.cursor: true` requires `paginationKey` + `buildContextKey`; cursor
+  pagination only activates for single-org fetches (multi-org falls back to
+  paginate-all).
+- `project/list` was not fully migrated to the factory due to its 4 internal modes
+  and many test-facing exports; instead parallel fetch + shared org resolution were
+  applied to it directly.
+
+### API client changes
+- `listTeams` / `listRepositories` rewritten from @sentry/api SDK (which calls
+  `unwrapResult()` discarding response headers) to `orgScopedPaginateAll`.
+- `listIssues` similarly rewritten to bypass the SDK, enabling future cursor pagination.
+- New `listTeamsPaginated`, `listRepositoriesPaginated`, `listIssuesPaginated`
+  return `PaginatedResponse<T>` (data + nextCursor) for single-page cursor control.
+
+### Alternatives considered
+- Multiple helper files: rejected in favour of a single `list-helpers.ts` for
+  discoverability.
+- `fallback` option in dispatchOrgScopedList for shared mode handlers: tried and
+  reverted — added complexity, confusing name; explicit per-key assignment is clearer.
