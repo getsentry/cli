@@ -1,0 +1,46 @@
+## Implementation Plan
+
+### Problem
+Homebrew post-install errors on macOS:
+1. SQLiteError: unable to open database file (SQLITE_CANTOPEN) — from user 'bete'
+2. Warning: read-only database + EPERM on zsh completions — from user 'am'
+
+Root cause: `sudo brew install` creates root-owned ~/.sentry/ and
+~/.local/share/zsh/ files. The setup command had no error handling, so any
+failure aborted the entire post-install script.
+
+The ongoing 'attempt to write a readonly database' errors in Sentry telemetry
+(8 issues, 19 events, 100% macOS) are caused by the same root: root-owned
+~/.sentry/cli.db from a previous sudo install.
+
+### Investigation
+- Confirmed macOS TCC does NOT restrict ~/.sentry/ — these are Unix
+  permission errors, not sandbox denials
+- All 19 Sentry readonly DB events are macOS 26.2 (Tahoe) — explained by
+  macOS being the dominant platform + sudo brew being common there
+- Moving the config dir would not help — the same permission issues would
+  occur at any path if created by root
+
+### Fixes
+
+#### 1. Non-fatal setup steps (setup.ts)
+Added bestEffort() wrapper that catches errors from each setup step and
+logs a warning instead of crashing. Applies to: setInstallInfo(),
+handlePathModification(), handleCompletions(), handleAgentSkills().
+
+#### 2. Root-owned file detection in tryRepairReadonly (telemetry.ts)
+Before attempting chmod (which fails on root-owned files), check statSync().uid.
+If the file is owned by root (uid 0), emit a targeted message:
+  'sudo chown -R <username> ~/.sentry'  or  'sudo sentry cli fix'
+Username inferred from SUDO_USER > USER > USERNAME > os.userInfo().username.
+
+#### 3. Ownership repair in sentry cli fix (fix.ts)
+- checkOwnership() stats config dir + DB + WAL + SHM, returns files owned
+  by a different uid than the current process
+- handleOwnershipIssues() orchestrates:
+  - Runs FIRST, before permissions (chmod fails on root-owned files)
+  - Not root: prints sudo chown / sudo sentry cli fix instructions, exit 1
+  - Running as root (sudo sentry cli fix): calls resolveUid(username) via
+    'id -u <username>', then chown(path, targetUid, -1) on each file
+- safeHandleSchemaIssues() extracted to keep func complexity in check
+- Help text updated to document 'sudo sentry cli fix'
