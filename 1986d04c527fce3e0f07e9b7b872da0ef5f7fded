@@ -1,0 +1,39 @@
+## Implementation Plan
+
+### Problem
+Three UX issues with `sentry issue list` after the #274 auto-pagination work:
+
+1. CLI returns ~114 issues while UI shows 240 — mismatch because the Sentry API
+   defaults to 14d when statsPeriod is omitted, but users expect the UI's 90d window
+2. No feedback during multi-page fetches — with --limit 500 the CLI silently waits
+   through 5 API requests before printing anything
+3. Layout shift when event counts exceed 5 digits — COL_COUNT=5 uses padStart which
+   does not truncate, so 123456 overflows and right-shifts all subsequent columns
+
+### Changes
+
+**--period flag (issue/list.ts)**
+- Added `period: string` to ListFlags with default "90d" and alias -p
+- Plumbed statsPeriod through fetchIssuesForTarget, fetchOrgAllIssues, and
+  listIssuesAllPages options to all three API call paths
+- nextPageHint includes -p when period differs from the default
+
+**Pagination progress indicator (polling.ts + issue/list.ts)**
+- Added withProgress<T>() to polling.ts — wraps an async operation with an animated
+  braille spinner on stderr; reuses ANIMATION_INTERVAL_MS (50ms), formatProgressLine,
+  and truncateProgressMessage from the existing Seer polling infrastructure
+- Spinner message is updated via a setMessage callback, enabling live N/total counts
+- listIssuesAllPages gained an onPage callback option invoked after each page fetch
+- Both handleResolvedTargets and handleOrgAllIssues use withProgress; progress is
+  suppressed when limit <= API_MAX_PER_PAGE (single page, no wait) or in JSON mode
+
+**Count abbreviation (formatters/human.ts)**
+- Added abbreviateCount() helper: raw string → right-aligned 5-char column
+  values < 10K: padStart as before; ≥10K: K/M/B suffix with 1 decimal below 10×
+  threshold (1.2K, 12K, 1.2M, 12M, 1.2B …)
+- formatIssueRow uses abbreviateCount instead of padStart
+
+**Animation interval (polling.ts)**
+- Changed ANIMATION_INTERVAL_MS from 80ms to 50ms (20fps)
+- 10 braille frames × 50ms = 500ms full cycle, matching ora/inquirer standard
+- Applies to both the Seer polling spinner and the new pagination spinner
