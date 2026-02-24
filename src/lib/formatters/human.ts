@@ -339,7 +339,7 @@ function abbreviateCount(raw: string): string {
     withDecimal.length <= COL_COUNT
       ? withDecimal
       : `${Math.round(scaled)}${suffix}`;
-  return abbreviated.slice(0, COL_COUNT).padStart(COL_COUNT);
+  return abbreviated.padStart(COL_COUNT);
 }
 
 /** Column where title starts in single-project mode (no ALIAS column) */

@@ -98,7 +98,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
       tick += 1;
       setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
     };
-    setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
+    scheduleFrame();
   }
 
   try {
@@ -183,7 +183,7 @@ export async function withProgress<T>(
     tick += 1;
     setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
   };
-  setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
+  scheduleFrame();
 
   try {
     return await fn((msg) => {
