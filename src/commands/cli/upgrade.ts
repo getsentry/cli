@@ -4,13 +4,28 @@
  * Self-update the Sentry CLI to the latest or a specific version.
  * After upgrading, spawns the NEW binary with `cli setup` to update
  * completions, agent skills, and record installation metadata.
+ *
+ * Supports two release channels:
+ * - stable (default): tracks the latest GitHub release
+ * - nightly: tracks the rolling nightly prerelease built from main
+ *
+ * The channel can be set via --channel or by passing "nightly"/"stable"
+ * as the version argument. The choice is persisted in the local database
+ * so that subsequent bare `sentry cli upgrade` calls use the same channel.
  */
 
+import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
-import { releaseLock } from "../../lib/binary.js";
+import { determineInstallDir, releaseLock } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
+import { setInstallInfo } from "../../lib/db/install-info.js";
+import {
+  getReleaseChannel,
+  type ReleaseChannel,
+  setReleaseChannel,
+} from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
@@ -18,54 +33,88 @@ import {
   fetchLatestVersion,
   getCurlInstallPaths,
   type InstallationMethod,
+  NIGHTLY_TAG,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
 } from "../../lib/upgrade.js";
 
+/** Special version strings that select a channel rather than a specific release. */
+const CHANNEL_VERSIONS = new Set(["nightly", "stable"]);
+
 type UpgradeFlags = {
   readonly check: boolean;
+  readonly force: boolean;
   readonly method?: InstallationMethod;
+};
+
+/**
+ * Resolve effective channel and version arg from the positional `version`
+ * parameter. "nightly" and "stable" are treated as channel selectors, not
+ * literal version strings.
+ *
+ * @returns `{ channel, versionArg }` where versionArg is undefined when the
+ *   positional was a channel name (so we resolve to latest) or was omitted.
+ */
+function resolveChannelAndVersion(positional: string | undefined): {
+  channel: ReleaseChannel;
+  versionArg: string | undefined;
+} {
+  // "nightly" and "stable" as positional args select the channel rather than
+  // installing a specific version.
+  if (positional === "nightly" || positional === "stable") {
+    return {
+      channel: positional,
+      versionArg: undefined,
+    };
+  }
+
+  return {
+    channel: getReleaseChannel(),
+    versionArg: positional,
+  };
+}
+
+type ResolveTargetOptions = {
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  versionArg: string | undefined;
+  channelChanged: boolean;
+  flags: UpgradeFlags;
+  stdout: { write: (s: string) => void };
 };
 
 /**
  * Resolve the target version and handle check-only mode.
  *
  * @returns The target version string, or null if no upgrade should proceed
- *          (check-only mode or already up to date).
+ *          (check-only mode, already up to date without --force, or channel unchanged).
  */
 async function resolveTargetVersion(
-  method: InstallationMethod,
-  version: string | undefined,
-  stdout: { write: (s: string) => void },
-  check: boolean
+  opts: ResolveTargetOptions
 ): Promise<string | null> {
-  const latest = await fetchLatestVersion(method);
-  const target = version?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
+  const { method, channel, versionArg, channelChanged, flags, stdout } = opts;
+  const latest = await fetchLatestVersion(method, channel);
+  const target = versionArg?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
+  stdout.write(`Channel: ${channel}\n`);
   stdout.write(`Latest version: ${latest}\n`);
-  if (version) {
+  if (versionArg) {
     stdout.write(`Target version: ${target}\n`);
   }
 
-  if (check) {
-    if (CLI_VERSION === target) {
-      stdout.write("\nYou are already on the target version.\n");
-    } else {
-      const cmd = version
-        ? `sentry cli upgrade ${target}`
-        : "sentry cli upgrade";
-      stdout.write(`\nRun '${cmd}' to update.\n`);
-    }
-    return null;
+  if (flags.check) {
+    return handleCheckMode(target, versionArg, stdout);
   }
 
-  if (CLI_VERSION === target) {
+  // Skip if already on target — unless forced or switching channels
+  if (CLI_VERSION === target && !flags.force && !channelChanged) {
     stdout.write("\nAlready up to date.\n");
     return null;
   }
 
-  if (version) {
+  // Validate that a specific pinned version actually exists on GitHub/npm
+  if (versionArg && !CHANNEL_VERSIONS.has(versionArg)) {
     const exists = await versionExists(method, target);
     if (!exists) {
       throw new UpgradeError(
@@ -79,6 +128,40 @@ async function resolveTargetVersion(
 }
 
 /**
+ * Print check-only output and return null (no upgrade to perform).
+ */
+function handleCheckMode(
+  target: string,
+  versionArg: string | undefined,
+  stdout: { write: (s: string) => void }
+): null {
+  if (CLI_VERSION === target) {
+    stdout.write("\nYou are already on the target version.\n");
+  } else {
+    const cmd =
+      versionArg && !CHANNEL_VERSIONS.has(versionArg)
+        ? `sentry cli upgrade ${target}`
+        : "sentry cli upgrade";
+    stdout.write(`\nRun '${cmd}' to update.\n`);
+  }
+  return null;
+}
+
+/**
+ * Spawn the new binary with `cli setup` to update completions, agent skills,
+ * and record installation metadata.
+ */
+type SetupOptions = {
+  binaryPath: string;
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  /** Whether setup should handle binary placement (curl --install flow) */
+  install: boolean;
+  /** Pin the install directory (prevents relocation during upgrade) */
+  installDir?: string;
+};
+
+/**
  * Spawn the new binary with `cli setup` to update completions, agent skills,
  * and record installation metadata.
  *
@@ -89,19 +172,18 @@ async function resolveTargetVersion(
  *
  * For package manager upgrades: the binary is already in place, so setup only
  * updates completions, agent skills, and records metadata.
- *
- * @param binaryPath - Path to the new binary to spawn
- * @param method - Installation method to pass through to setup
- * @param install - Whether setup should handle binary placement (curl only)
- * @param installDir - Pin the install directory (prevents relocation during upgrade)
  */
-async function runSetupOnNewBinary(
-  binaryPath: string,
-  method: InstallationMethod,
-  install: boolean,
-  installDir?: string
-): Promise<void> {
-  const args = ["cli", "setup", "--method", method, "--no-modify-path"];
+async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
+  const { binaryPath, method, channel, install, installDir } = opts;
+  const args = [
+    "cli",
+    "setup",
+    "--method",
+    method,
+    "--channel",
+    channel,
+    "--no-modify-path",
+  ];
   if (install) {
     args.push("--install");
   }
@@ -124,16 +206,91 @@ async function runSetupOnNewBinary(
   }
 }
 
+/**
+ * Migrate from a package-manager or Homebrew install to a standalone binary
+ * when the user switches to the nightly channel.
+ *
+ * Nightly builds are distributed as standalone binaries only (GitHub release
+ * assets). When a user on brew/npm/pnpm/bun/yarn switches to nightly we:
+ *   1. Download the nightly binary to a temp path
+ *   2. Install it to `determineInstallDir()` (same logic as the curl installer)
+ *   3. Run setup on the new binary to update completions, PATH, and metadata
+ *   4. Warn about the old package-manager installation that may still be in PATH
+ */
+async function migrateToStandaloneForNightly(
+  method: InstallationMethod,
+  target: string,
+  stdout: { write: (s: string) => void }
+): Promise<void> {
+  stdout.write("\nNightly builds are only available as standalone binaries.\n");
+  stdout.write("Migrating to standalone installation...\n\n");
+
+  // Download nightly binary using the rolling "nightly" tag
+  const downloadResult = await executeUpgrade("curl", target, NIGHTLY_TAG);
+  if (!downloadResult) {
+    throw new UpgradeError(
+      "execution_failed",
+      "Failed to download nightly binary"
+    );
+  }
+
+  const installDir = determineInstallDir(homedir(), process.env);
+
+  try {
+    await runSetupOnNewBinary({
+      binaryPath: downloadResult.tempBinaryPath,
+      method: "curl",
+      channel: "nightly",
+      install: true,
+      installDir,
+    });
+  } finally {
+    releaseLock(downloadResult.lockPath);
+  }
+
+  // Update install info to reflect the new standalone method
+  const binaryFilename = process.platform === "win32" ? "sentry.exe" : "sentry";
+  setInstallInfo({
+    method: "curl",
+    path: `${installDir}/${binaryFilename}`,
+    version: target,
+  });
+
+  // Warn about the potentially shadowing old installation
+  const uninstallHints: Record<string, string> = {
+    npm: "npm uninstall -g sentry",
+    pnpm: "pnpm remove -g sentry",
+    bun: "bun remove -g sentry",
+    yarn: "yarn global remove sentry",
+    brew: "brew uninstall getsentry/tools/sentry",
+  };
+  const hint = uninstallHints[method];
+  stdout.write(
+    `\nNote: your ${method}-installed sentry may still appear earlier in PATH.\n`
+  );
+  if (hint) {
+    stdout.write(`      Consider removing it: ${hint}\n`);
+  }
+}
+
 export const upgradeCommand = buildCommand({
   docs: {
     brief: "Update the Sentry CLI to the latest version",
     fullDescription:
       "Check for updates and upgrade the Sentry CLI to the latest or a specific version.\n\n" +
       "By default, detects how the CLI was installed (npm, curl, etc.) and uses the same method to upgrade.\n\n" +
+      "Two release channels are supported:\n" +
+      "  stable  (default) Latest stable release\n" +
+      "  nightly           Built from main, updated on every commit\n\n" +
+      "The channel is persisted so that subsequent bare `sentry cli upgrade` calls\n" +
+      "use the same channel.\n\n" +
       "Examples:\n" +
-      "  sentry cli upgrade              # Update to latest version\n" +
-      "  sentry cli upgrade 0.5.0        # Update to specific version\n" +
+      "  sentry cli upgrade              # Update to latest (using persisted channel)\n" +
+      "  sentry cli upgrade nightly      # Switch to nightly channel and update\n" +
+      "  sentry cli upgrade stable       # Switch back to stable channel and update\n" +
+      "  sentry cli upgrade 0.5.0        # Install a specific stable version\n" +
       "  sentry cli upgrade --check      # Check for updates without installing\n" +
+      "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
       "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
   parameters: {
@@ -141,7 +298,8 @@ export const upgradeCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          brief: "Target version to install (defaults to latest)",
+          brief:
+            'Target version, or "nightly"/"stable" to switch channel (defaults to latest)',
           parse: String,
           placeholder: "version",
           optional: true,
@@ -152,6 +310,11 @@ export const upgradeCommand = buildCommand({
       check: {
         kind: "boolean",
         brief: "Check for updates without installing",
+        default: false,
+      },
+      force: {
+        kind: "boolean",
+        brief: "Force upgrade even if already on the latest version",
         default: false,
       },
       method: {
@@ -170,6 +333,20 @@ export const upgradeCommand = buildCommand({
   ): Promise<void> {
     const { stdout } = this;
 
+    // Resolve effective channel and version from positional
+    const { channel, versionArg } = resolveChannelAndVersion(version);
+
+    // Track whether the user is deliberately switching channels
+    const currentChannel = getReleaseChannel();
+    const channelChanged = channel !== currentChannel;
+
+    // Persist the channel so version-check and future upgrades respect it.
+    // We do this upfront — even if the download is skipped (e.g. --check) —
+    // so the preference is always recorded.
+    if (channelChanged || CHANNEL_VERSIONS.has(version ?? "")) {
+      setReleaseChannel(channel);
+    }
+
     // Resolve installation method (detects or uses user-specified)
     const method = flags.method ?? (await detectInstallationMethod());
 
@@ -177,9 +354,9 @@ export const upgradeCommand = buildCommand({
       throw new UpgradeError("unknown_method");
     }
 
-    // Homebrew manages versioning through the formula in the tap — the installed
-    // version is always whatever the formula specifies, not an arbitrary release.
-    if (method === "brew" && version) {
+    // Homebrew manages versioning through the formula — pinning a specific
+    // stable version is not supported via this command.
+    if (method === "brew" && versionArg && channel === "stable") {
       throw new UpgradeError(
         "unsupported_operation",
         "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
@@ -189,19 +366,32 @@ export const upgradeCommand = buildCommand({
     stdout.write(`Installation method: ${method}\n`);
     stdout.write(`Current version: ${CLI_VERSION}\n`);
 
-    const target = await resolveTargetVersion(
+    const target = await resolveTargetVersion({
       method,
-      version,
+      channel,
+      versionArg,
+      channelChanged,
+      flags,
       stdout,
-      flags.check
-    );
+    });
     if (!target) {
       return;
     }
 
-    // Execute upgrade: downloads new binary (curl) or installs via package manager
     stdout.write(`\nUpgrading to ${target}...\n`);
-    const downloadResult = await executeUpgrade(method, target);
+
+    // Nightly is GitHub-only. If the current install method is not curl,
+    // migrate to a standalone binary first then return — the migration
+    // handles setup internally.
+    if (channel === "nightly" && method !== "curl") {
+      await migrateToStandaloneForNightly(method, target, stdout);
+      stdout.write(`\nSuccessfully installed nightly ${target}.\n`);
+      return;
+    }
+
+    // Standard upgrade path: download (curl) or package manager
+    const downloadTag = channel === "nightly" ? NIGHTLY_TAG : undefined;
+    const downloadResult = await executeUpgrade(method, target, downloadTag);
 
     // Run setup on the new binary to update completions, agent skills,
     // and record installation metadata.
@@ -213,19 +403,25 @@ export const upgradeCommand = buildCommand({
       // the same lock path (ppid takeover), this is a harmless no-op.
       const currentInstallDir = dirname(getCurlInstallPaths().installPath);
       try {
-        await runSetupOnNewBinary(
-          downloadResult.tempBinaryPath,
+        await runSetupOnNewBinary({
+          binaryPath: downloadResult.tempBinaryPath,
           method,
-          true,
-          currentInstallDir
-        );
+          channel,
+          install: true,
+          installDir: currentInstallDir,
+        });
       } finally {
         releaseLock(downloadResult.lockPath);
       }
     } else if (method !== "brew") {
       // Package manager: binary already in place, just run setup.
       // Skip brew — Homebrew's post_install hook already runs setup.
-      await runSetupOnNewBinary(this.process.execPath, method, false);
+      await runSetupOnNewBinary({
+        binaryPath: this.process.execPath,
+        method,
+        channel,
+        install: false,
+      });
     }
 
     stdout.write(`\nSuccessfully upgraded to ${target}.\n`);

@@ -1,0 +1,77 @@
+/**
+ * Release Channel Storage Tests
+ */
+
+import { describe, expect, test } from "bun:test";
+import {
+  getReleaseChannel,
+  parseReleaseChannel,
+  setReleaseChannel,
+} from "../../../src/lib/db/release-channel.js";
+import { useTestConfigDir } from "../../helpers.js";
+
+useTestConfigDir("test-release-channel-");
+
+describe("getReleaseChannel", () => {
+  test("returns 'stable' when nothing is stored", () => {
+    expect(getReleaseChannel()).toBe("stable");
+  });
+
+  test("returns stored channel after set", () => {
+    setReleaseChannel("nightly");
+    expect(getReleaseChannel()).toBe("nightly");
+  });
+
+  test("returns 'stable' after explicitly setting stable", () => {
+    setReleaseChannel("nightly");
+    setReleaseChannel("stable");
+    expect(getReleaseChannel()).toBe("stable");
+  });
+});
+
+describe("setReleaseChannel", () => {
+  test("persists 'nightly'", () => {
+    setReleaseChannel("nightly");
+    expect(getReleaseChannel()).toBe("nightly");
+  });
+
+  test("persists 'stable'", () => {
+    setReleaseChannel("stable");
+    expect(getReleaseChannel()).toBe("stable");
+  });
+
+  test("overwrites previous channel", () => {
+    setReleaseChannel("nightly");
+    setReleaseChannel("stable");
+    expect(getReleaseChannel()).toBe("stable");
+
+    setReleaseChannel("nightly");
+    expect(getReleaseChannel()).toBe("nightly");
+  });
+});
+
+describe("parseReleaseChannel", () => {
+  test("accepts 'stable'", () => {
+    expect(parseReleaseChannel("stable")).toBe("stable");
+  });
+
+  test("accepts 'nightly'", () => {
+    expect(parseReleaseChannel("nightly")).toBe("nightly");
+  });
+
+  test("is case-insensitive", () => {
+    expect(parseReleaseChannel("STABLE")).toBe("stable");
+    expect(parseReleaseChannel("Nightly")).toBe("nightly");
+    expect(parseReleaseChannel("NIGHTLY")).toBe("nightly");
+  });
+
+  test("throws on unrecognized value", () => {
+    expect(() => parseReleaseChannel("beta")).toThrow(
+      "Invalid channel: beta. Must be one of: stable, nightly"
+    );
+  });
+
+  test("throws on empty string", () => {
+    expect(() => parseReleaseChannel("")).toThrow();
+  });
+});

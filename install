@@ -13,7 +13,7 @@ Usage: install [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 0.2.0)
+    -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
@@ -22,6 +22,7 @@ Environment Variables:
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
+    curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
@@ -80,21 +81,44 @@ if [[ "$os" == "windows" ]]; then
   fi
 fi
 
-# Resolve version
+# Resolve version and download tag.
+#
+# "nightly" is a special value that installs from the rolling nightly prerelease
+# built from the main branch. In this case:
+#   - `version`      holds the human-readable version string (e.g. "0.12.0-dev.1740393600")
+#   - `download_tag` holds the GitHub release tag to download from ("nightly")
+#
+# For stable releases both are the same version string (e.g. "0.5.0").
+channel="stable"
+download_tag=""
+
 if [[ -z "$requested_version" ]]; then
   version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
   if [[ -z "$version" ]]; then
     echo -e "${RED}Failed to fetch latest version${NC}"
     exit 1
   fi
+  download_tag="$version"
+elif [[ "$requested_version" == "nightly" ]]; then
+  channel="nightly"
+  download_tag="nightly"
+  version_json=$(curl -fsSL "https://github.com/getsentry/cli/releases/download/nightly/version.json")
+  version=$(echo "$version_json" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p')
+  if [[ -z "$version" ]]; then
+    echo -e "${RED}Failed to fetch nightly version${NC}"
+    exit 1
+  fi
 else
   version="$requested_version"
+  download_tag="$requested_version"
 fi
 
 # Strip leading 'v' if present (releases use version without 'v' prefix)
 version="${version#v}"
+download_tag="${download_tag#v}"
+
 filename="sentry-${os}-${arch}${suffix}"
-url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
+url="https://github.com/getsentry/cli/releases/download/${download_tag}/${filename}"
 
 # Download binary to a temp location
 tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
@@ -119,7 +143,9 @@ chmod +x "$tmp_binary"
 # Delegate installation and configuration to the binary itself.
 # setup --install handles: directory selection, binary placement, PATH,
 # completions, agent skills, and the welcome message.
-setup_args="--install --method curl"
+# --channel persists the release channel so future `sentry cli upgrade`
+# calls track the same channel without requiring a flag.
+setup_args="--install --method curl --channel $channel"
 if [[ "$no_modify_path" == "true" ]]; then
   setup_args="$setup_args --no-modify-path"
 fi
