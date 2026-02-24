@@ -494,7 +494,8 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const escapedQuery = flags.query
     ? escapeContextKeyValue(flags.query)
     : undefined;
-  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}|period:${flags.period}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
+  const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}|period:${escapedPeriod}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
   setContext([org], []);
@@ -598,19 +599,25 @@ async function handleResolvedTargets(
 
   const results = await withProgress(
     { stderr, message: "Fetching issues..." },
-    (setMessage) =>
-      Promise.all(
-        targets.map((t) =>
+    (setMessage) => {
+      const fetchedCounts = new Array<number>(targets.length).fill(0);
+      const totalLimit = flags.limit * targets.length;
+      return Promise.all(
+        targets.map((t, i) =>
           fetchIssuesForTarget(t, {
             query: flags.query,
             limit: flags.limit,
             sort: flags.sort,
             statsPeriod: flags.period,
-            onPage: (fetched, limit) =>
-              setMessage(`Fetching issues... ${fetched}/${limit}`),
+            onPage: (fetched) => {
+              fetchedCounts[i] = fetched;
+              const totalFetched = fetchedCounts.reduce((a, b) => a + b, 0);
+              setMessage(`Fetching issues... ${totalFetched}/${totalLimit}`);
+            },
           })
         )
-      )
+      );
+    }
   );
 
   const validResults: IssueListResult[] = [];
