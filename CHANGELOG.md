@@ -1,6 +1,30 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.12.0
+
+### New Features ✨
+
+- (event) Resolve ID across all orgs when no project context is available by @BYK in [#285](https://github.com/getsentry/cli/pull/285)
+- (release) Add Homebrew install support by @BYK in [#277](https://github.com/getsentry/cli/pull/277)
+- (setup) Install bash completions as fallback for unsupported shells by @BYK in [#282](https://github.com/getsentry/cli/pull/282)
+- Support SENTRY_ORG and SENTRY_PROJECT environment variables by @BYK in [#280](https://github.com/getsentry/cli/pull/280)
+
+### Bug Fixes 🐛
+
+- (fetch) Preserve Content-Type header for SDK requests on Node.js by @BYK in [#276](https://github.com/getsentry/cli/pull/276)
+- (help) Document target patterns and trailing-slash significance by @BYK in [#272](https://github.com/getsentry/cli/pull/272)
+- (issue-list) Auto-paginate --limit beyond 100 by @BYK in [#274](https://github.com/getsentry/cli/pull/274)
+- (npm) Add Node.js >= 22 version guard to npm bundle by @BYK in [#269](https://github.com/getsentry/cli/pull/269)
+- (telemetry) Fix commands importing buildCommand directly from @stricli/core by @BYK in [#275](https://github.com/getsentry/cli/pull/275)
+- Support numeric project IDs in project slug resolution by @BYK in [#284](https://github.com/getsentry/cli/pull/284)
+- Detect subcommand names passed as positional target patterns by @BYK in [#281](https://github.com/getsentry/cli/pull/281)
+- Improve error quality and prevent token leak in telemetry by @BYK in [#279](https://github.com/getsentry/cli/pull/279)
+
+### Internal Changes 🔧
+
+- (org) Use shared list-command constants in org list by @BYK in [#273](https://github.com/getsentry/cli/pull/273)
+
 ## 0.11.0
 
 ### New Features ✨
