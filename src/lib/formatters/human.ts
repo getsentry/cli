@@ -313,15 +313,15 @@ const COL_SEEN = 10;
 /** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
 const COL_FIX = 10;
 
-/** Quantifier suffixes indexed by groups of 3 digits */
-const QUANTIFIERS = ["", "K", "M", "B", "T"];
+/** Quantifier suffixes indexed by groups of 3 digits (K=10^3, M=10^6, …, E=10^18) */
+const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
 
 /**
  * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
- * Uses K/M/B/T suffixes for thousands/millions/billions/trillions.
+ * Uses K/M/B/T/P/E suffixes up to 10^18 (exa).
  *
- * The result is guaranteed to be at most COL_COUNT characters wide:
- * uses 1 decimal place when the leading digits + suffix fit, 0 otherwise.
+ * The decimal is only shown when scaled < 100 (e.g. "12.3K", "1.5M" but not "100M").
+ * The result is always exactly COL_COUNT characters wide.
  *
  * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
  */
@@ -333,11 +333,10 @@ function abbreviateCount(raw: string): string {
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
   const suffix = QUANTIFIERS[tier] ?? "";
   const scaled = n / 10 ** (tier * 3);
-  // Use 1 decimal when it fits within COL_COUNT, otherwise 0
-  const withDecimal = `${scaled.toFixed(1)}${suffix}`;
+  // Only show decimal when it adds information (scaled < 100), e.g. "12.3K" not "100.0K"
   const abbreviated =
-    withDecimal.length <= COL_COUNT
-      ? withDecimal
+    scaled < 100
+      ? `${scaled.toFixed(1)}${suffix}`
       : `${Math.round(scaled)}${suffix}`;
   return abbreviated.padStart(COL_COUNT);
 }
