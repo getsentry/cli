@@ -824,6 +824,214 @@ describe("findProjectsBySlug", () => {
   });
 });
 
+describe("resolveEventInOrg", () => {
+  const sampleEvent = {
+    id: "abc123",
+    eventID: "abc123def456",
+    groupID: "12345",
+    projectID: "67890",
+    message: "Something went wrong",
+    title: "Error",
+    location: null,
+    user: null,
+    tags: [],
+    platform: "node",
+    dateReceived: "2026-01-01T00:00:00Z",
+    contexts: null,
+    size: 100,
+    entries: [],
+    dist: null,
+    sdk: {},
+    context: null,
+    packages: {},
+    type: "error",
+    metadata: null,
+    errors: [],
+    occurrence: null,
+    _meta: {},
+  };
+
+  test("returns resolved event when found in org", async () => {
+    const { resolveEventInOrg } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/eventids/abc123def456/")) {
+        return new Response(
+          JSON.stringify({
+            organizationSlug: "acme",
+            projectSlug: "frontend",
+            groupId: "12345",
+            eventId: "abc123def456",
+            event: sampleEvent,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveEventInOrg("acme", "abc123def456");
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("frontend");
+    expect(result?.event.eventID).toBe("abc123def456");
+  });
+
+  test("returns null when event not found in org", async () => {
+    const { resolveEventInOrg } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveEventInOrg("acme", "notfound000000");
+    expect(result).toBeNull();
+  });
+});
+
+describe("findEventAcrossOrgs", () => {
+  const sampleEvent = {
+    id: "abc123",
+    eventID: "abc123def456",
+    groupID: "12345",
+    projectID: "67890",
+    message: "Something went wrong",
+    title: "Error",
+    location: null,
+    user: null,
+    tags: [],
+    platform: "node",
+    dateReceived: "2026-01-01T00:00:00Z",
+    contexts: null,
+    size: 100,
+    entries: [],
+    dist: null,
+    sdk: {},
+    context: null,
+    packages: {},
+    type: "error",
+    metadata: null,
+    errors: [],
+    occurrence: null,
+    _meta: {},
+  };
+
+  test("returns match from the org that has the event", async () => {
+    const { findEventAcrossOrgs } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/eventids/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "no-event-org", name: "No Event Org" },
+            { id: "2", slug: "has-event-org", name: "Has Event Org" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/has-event-org/eventids/abc123def456/")) {
+        return new Response(
+          JSON.stringify({
+            organizationSlug: "has-event-org",
+            projectSlug: "backend",
+            groupId: "12345",
+            eventId: "abc123def456",
+            event: sampleEvent,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await findEventAcrossOrgs("abc123def456");
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("has-event-org");
+    expect(result?.project).toBe("backend");
+  });
+
+  test("returns null when event not found in any org", async () => {
+    const { findEventAcrossOrgs } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/eventids/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await findEventAcrossOrgs("notfound000000");
+    expect(result).toBeNull();
+  });
+});
+
 describe("listTeamsPaginated", () => {
   beforeEach(async () => {
     await setOrgRegion("my-org", DEFAULT_SENTRY_URL);

@@ -5,7 +5,12 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getEvent } from "../../lib/api-client.js";
+import {
+  findEventAcrossOrgs,
+  getEvent,
+  type ResolvedEvent,
+  resolveEventInOrg,
+} from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -142,7 +147,125 @@ export type ResolvedEventTarget = {
   orgDisplay: string;
   projectDisplay: string;
   detectedFrom?: string;
+  /** Pre-fetched event from cross-project resolution — avoids a second API call */
+  prefetchedEvent?: ResolvedEvent["event"];
 };
+
+/** Options for resolving the event target */
+type ResolveTargetOptions = {
+  parsed: ReturnType<typeof parseOrgProjectArg>;
+  eventId: string;
+  cwd: string;
+  stderr: { write(s: string): void };
+};
+
+/**
+ * Resolve org/project context for the event view command.
+ *
+ * Handles all target types (explicit, search, org-all, auto-detect)
+ * including cross-project fallback via the eventids endpoint.
+ */
+/** @internal Exported for testing */
+export async function resolveEventTarget(
+  options: ResolveTargetOptions
+): Promise<ResolvedEventTarget | null> {
+  const { parsed, eventId, cwd, stderr } = options;
+
+  switch (parsed.type) {
+    case ProjectSpecificationType.Explicit:
+      return {
+        org: parsed.org,
+        project: parsed.project,
+        orgDisplay: parsed.org,
+        projectDisplay: parsed.project,
+      };
+
+    case ProjectSpecificationType.ProjectSearch: {
+      const resolved = await resolveProjectBySlug(
+        parsed.projectSlug,
+        USAGE_HINT,
+        `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
+        stderr
+      );
+      return {
+        ...resolved,
+        orgDisplay: resolved.org,
+        projectDisplay: resolved.project,
+      };
+    }
+
+    case ProjectSpecificationType.OrgAll:
+      return resolveOrgAllTarget(parsed.org, eventId, cwd);
+
+    case ProjectSpecificationType.AutoDetect:
+      return resolveAutoDetectTarget(eventId, cwd, stderr);
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * Resolve target when only an org is known (e.g., from a Sentry event URL).
+ * Uses the eventids endpoint to find the project directly.
+ *
+ * Throws a ContextError if the event is not found in the given org, with a
+ * message that names the org so the error is not misleading.
+ * Propagates auth/network errors from resolveEventInOrg.
+ */
+/** @internal Exported for testing */
+export async function resolveOrgAllTarget(
+  org: string,
+  eventId: string,
+  _cwd: string
+): Promise<ResolvedEventTarget> {
+  const resolved = await resolveEventInOrg(org, eventId);
+  if (!resolved) {
+    throw new ContextError(
+      `Event ${eventId} in organization "${org}"`,
+      `sentry event view ${org}/ ${eventId}`
+    );
+  }
+  return {
+    org: resolved.org,
+    project: resolved.project,
+    orgDisplay: org,
+    projectDisplay: resolved.project,
+    prefetchedEvent: resolved.event,
+  };
+}
+
+/**
+ * Resolve target via auto-detect cascade, falling back to cross-project
+ * event search across all accessible orgs.
+ */
+/** @internal Exported for testing */
+export async function resolveAutoDetectTarget(
+  eventId: string,
+  cwd: string,
+  stderr: { write(s: string): void }
+): Promise<ResolvedEventTarget | null> {
+  const autoTarget = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+  if (autoTarget) {
+    return autoTarget;
+  }
+
+  const resolved = await findEventAcrossOrgs(eventId);
+  if (resolved) {
+    stderr.write(
+      `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
+        `Use: sentry event view ${resolved.org}/${resolved.project} ${eventId}\n`
+    );
+    return {
+      org: resolved.org,
+      project: resolved.project,
+      orgDisplay: resolved.org,
+      projectDisplay: resolved.project,
+      prefetchedEvent: resolved.event,
+    };
+  }
+  return null;
+}
 
 export const viewCommand = buildCommand({
   docs: {
@@ -190,47 +313,12 @@ export const viewCommand = buildCommand({
     const { eventId, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
 
-    let target: ResolvedEventTarget | null = null;
-
-    switch (parsed.type) {
-      case ProjectSpecificationType.Explicit:
-        target = {
-          org: parsed.org,
-          project: parsed.project,
-          orgDisplay: parsed.org,
-          projectDisplay: parsed.project,
-        };
-        break;
-
-      case ProjectSpecificationType.ProjectSearch: {
-        const resolved = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
-          this.stderr
-        );
-        target = {
-          ...resolved,
-          orgDisplay: resolved.org,
-          projectDisplay: resolved.project,
-        };
-        break;
-      }
-
-      case ProjectSpecificationType.OrgAll:
-      // Org-only (e.g., from event URL that has no project slug).
-      // Fall through to auto-detect — SENTRY_URL is already set for
-      // self-hosted, and auto-detect will resolve the project from
-      // DSN, config defaults, or directory name inference.
-      // falls through
-      case ProjectSpecificationType.AutoDetect:
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        break;
-
-      default:
-        // Exhaustive check - should never reach here
-        throw new ContextError("Organization and project", USAGE_HINT);
-    }
+    const target = await resolveEventTarget({
+      parsed,
+      eventId,
+      cwd,
+      stderr: this.stderr,
+    });
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -245,7 +333,11 @@ export const viewCommand = buildCommand({
       return;
     }
 
-    const event = await getEvent(target.org, target.project, eventId);
+    // Use the pre-fetched event when cross-project resolution already fetched it,
+    // avoiding a redundant API call.
+    const event =
+      target.prefetchedEvent ??
+      (await getEvent(target.org, target.project, eventId));
 
     // Fetch span tree data (for both JSON and human output)
     // Skip when spans=0 (disabled via --spans no or --spans 0)
