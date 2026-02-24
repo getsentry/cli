@@ -623,7 +623,7 @@ describe("resolveAutoDetectTarget", () => {
     expect(mockStderr.write).toHaveBeenCalledTimes(1);
     const hint = mockStderr.write.mock.calls[0][0] as string;
     expect(hint).toContain("acme/frontend");
-    expect(hint).toContain("SENTRY_ORG=acme");
+    expect(hint).toContain("sentry event view acme/frontend");
   });
 
   test("returns null when both auto-detect and cross-project fail", async () => {

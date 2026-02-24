@@ -223,7 +223,7 @@ export async function resolveOrgAllTarget(
   if (!resolved) {
     throw new ContextError(
       `Event ${eventId} in organization "${org}"`,
-      `sentry event view ${org}/${eventId}`
+      `sentry event view ${org}/ ${eventId}`
     );
   }
   return {
@@ -254,7 +254,7 @@ export async function resolveAutoDetectTarget(
   if (resolved) {
     stderr.write(
       `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
-        `Set SENTRY_ORG=${resolved.org} and SENTRY_PROJECT=${resolved.project} to skip this search.\n`
+        `Use: sentry event view ${resolved.org}/${resolved.project} ${eventId}\n`
     );
     return {
       org: resolved.org,
