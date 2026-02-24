@@ -188,12 +188,12 @@ async function handleCompletions(
 
   if (fallbackMsg) {
     return [
-      `Completions: Your shell (${shell.type}) is not directly supported`,
+      `Completions: Your shell (${shell.name}) is not directly supported`,
       fallbackMsg,
     ];
   }
 
-  return [`Completions: Not supported for ${shell.type} shell`];
+  return [`Completions: Not supported for ${shell.name} shell`];
 }
 
 /**

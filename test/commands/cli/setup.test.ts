@@ -323,7 +323,7 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("not directly supported");
+    expect(combined).toContain("Your shell (xonsh) is not directly supported");
     expect(combined).toContain("bash completions as a fallback");
     expect(combined).toContain("bash-completion");
   });
@@ -346,7 +346,7 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("Not supported for unknown shell");
+    expect(combined).toContain("Not supported for xonsh shell");
   });
 
   test("silently skips completions for sh shell", async () => {
