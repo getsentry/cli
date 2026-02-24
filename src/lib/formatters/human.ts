@@ -335,13 +335,10 @@ function abbreviateCount(raw: string): string {
   if (Number.isNaN(n)) {
     // Non-numeric input: use a placeholder rather than passing through an
     // arbitrarily wide string that would break column alignment
-    Sentry.captureMessage(
-      `Unexpected non-numeric issue count: ${raw}`,
-      "warning"
-    );
+    Sentry.logger.warn(`Unexpected non-numeric issue count: ${raw}`);
     return "?".padStart(COL_COUNT);
   }
-  if (n < 10_000) {
+  if (raw.length <= COL_COUNT) {
     return raw.padStart(COL_COUNT);
   }
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
