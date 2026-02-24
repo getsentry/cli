@@ -54,6 +54,7 @@ import {
   type ListCommandMeta,
   type ModeHandler,
 } from "../../lib/org-list.js";
+import { withProgress } from "../../lib/polling.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
@@ -72,6 +73,7 @@ type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
+  readonly period: string;
   readonly json: boolean;
   readonly cursor?: string;
 };
@@ -391,7 +393,13 @@ async function resolveTargetsFromParsedArg(
  */
 async function fetchIssuesForTarget(
   target: ResolvedTarget,
-  options: { query?: string; limit: number; sort: SortValue }
+  options: {
+    query?: string;
+    limit: number;
+    sort: SortValue;
+    statsPeriod?: string;
+    onPage?: (fetched: number, limit: number) => void;
+  }
 ): Promise<FetchResult> {
   try {
     const { issues } = await listIssuesAllPages(
@@ -423,6 +431,9 @@ function nextPageHint(org: string, flags: ListFlags): string {
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
   }
+  if (flags.period !== "90d") {
+    parts.push(`-t ${flags.period}`);
+  }
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
 
@@ -434,8 +445,9 @@ function nextPageHint(org: string, flags: ListFlags): string {
  */
 async function fetchOrgAllIssues(
   org: string,
-  flags: Pick<ListFlags, "query" | "limit" | "sort">,
-  cursor: string | undefined
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period">,
+  cursor: string | undefined,
+  onPage?: (fetched: number, limit: number) => void
 ): Promise<IssuesPage> {
   // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
   if (cursor) {
@@ -445,6 +457,7 @@ async function fetchOrgAllIssues(
       cursor,
       perPage,
       sort: flags.sort,
+      statsPeriod: flags.period,
     });
     return { issues: response.data, nextCursor: response.nextCursor };
   }
@@ -454,6 +467,8 @@ async function fetchOrgAllIssues(
     query: flags.query,
     limit: flags.limit,
     sort: flags.sort,
+    statsPeriod: flags.period,
+    onPage,
   });
   return { issues, nextCursor };
 }
@@ -461,6 +476,7 @@ async function fetchOrgAllIssues(
 /** Options for {@link handleOrgAllIssues}. */
 type OrgAllIssuesOptions = {
   stdout: Writer;
+  stderr: Writer;
   org: string;
   flags: ListFlags;
   setContext: (orgs: string[], projects: string[]) => void;
@@ -473,7 +489,7 @@ type OrgAllIssuesOptions = {
  * never accidentally reused.
  */
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
-  const { stdout, org, flags, setContext } = options;
+  const { stdout, stderr, org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const escapedQuery = flags.query
     ? escapeContextKeyValue(flags.query)
@@ -483,7 +499,13 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
 
   setContext([org], []);
 
-  const { issues, nextCursor } = await fetchOrgAllIssues(org, flags, cursor);
+  const { issues, nextCursor } = await withProgress(
+    { stderr, message: "Fetching issues..." },
+    (setMessage) =>
+      fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
+        setMessage(`Fetching issues... ${fetched}/${limit}`)
+      )
+  );
 
   if (nextCursor) {
     setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
@@ -574,14 +596,21 @@ async function handleResolvedTargets(
     throw new ContextError("Organization and project", USAGE_HINT);
   }
 
-  const results = await Promise.all(
-    targets.map((t) =>
-      fetchIssuesForTarget(t, {
-        query: flags.query,
-        limit: flags.limit,
-        sort: flags.sort,
-      })
-    )
+  const results = await withProgress(
+    { stderr, message: "Fetching issues..." },
+    (setMessage) =>
+      Promise.all(
+        targets.map((t) =>
+          fetchIssuesForTarget(t, {
+            query: flags.query,
+            limit: flags.limit,
+            sort: flags.sort,
+            statsPeriod: flags.period,
+            onPage: (fetched, limit) =>
+              setMessage(`Fetching issues... ${fetched}/${limit}`),
+          })
+        )
+      )
   );
 
   const validResults: IssueListResult[] = [];
@@ -715,7 +744,9 @@ export const listCommand = buildListCommand("issue", {
       "The --limit flag specifies the number of results to fetch per project (max 1000). " +
       "When the limit exceeds the API page size (100), multiple requests are made " +
       "automatically. Use --cursor to paginate through larger result sets. " +
-      "Note: --cursor resumes from a single page to keep the cursor chain intact.",
+      "Note: --cursor resumes from a single page to keep the cursor chain intact.\n\n" +
+      "By default, only issues with activity in the last 90 days are shown. " +
+      "Use --period to adjust (e.g. --period 24h, --period 14d).",
   },
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
@@ -732,6 +763,12 @@ export const listCommand = buildListCommand("issue", {
         parse: parseSort,
         brief: "Sort by: date, new, freq, user",
         default: "date" as const,
+      },
+      period: {
+        kind: "parsed",
+        parse: String,
+        brief: "Time period for issue activity (e.g. 24h, 14d, 90d)",
+        default: "90d",
       },
       json: LIST_JSON_FLAG,
       cursor: {
@@ -757,7 +794,7 @@ export const listCommand = buildListCommand("issue", {
         optional: true,
       },
     },
-    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort" },
+    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort", t: "period" },
   },
   async func(
     this: SentryContext,
@@ -799,6 +836,7 @@ export const listCommand = buildListCommand("issue", {
         "org-all": (ctx) =>
           handleOrgAllIssues({
             stdout: ctx.stdout,
+            stderr,
             org: ctx.parsed.org,
             flags,
             setContext,

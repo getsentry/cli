@@ -313,6 +313,35 @@ const COL_SEEN = 10;
 /** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
 const COL_FIX = 10;
 
+/** Quantifier suffixes indexed by groups of 3 digits */
+const QUANTIFIERS = ["", "K", "M", "B", "T"];
+
+/**
+ * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
+ * Uses K/M/B/T suffixes for thousands/millions/billions/trillions.
+ *
+ * The result is guaranteed to be at most COL_COUNT characters wide:
+ * uses 1 decimal place when the leading digits + suffix fit, 0 otherwise.
+ *
+ * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
+ */
+function abbreviateCount(raw: string): string {
+  const n = Number(raw);
+  if (Number.isNaN(n) || n < 10_000) {
+    return raw.padStart(COL_COUNT);
+  }
+  const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
+  const suffix = QUANTIFIERS[tier] ?? "";
+  const scaled = n / 10 ** (tier * 3);
+  // Use 1 decimal when it fits within COL_COUNT, otherwise 0
+  const withDecimal = `${scaled.toFixed(1)}${suffix}`;
+  const abbreviated =
+    withDecimal.length <= COL_COUNT
+      ? withDecimal
+      : `${Math.round(scaled)}${suffix}`;
+  return abbreviated.slice(0, COL_COUNT).padStart(COL_COUNT);
+}
+
 /** Column where title starts in single-project mode (no ALIAS column) */
 const TITLE_START_COL =
   COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2 + COL_FIX + 2;
@@ -582,7 +611,7 @@ export function formatIssueRow(
   const rawLen = getShortIdDisplayLength(issue.shortId);
   const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
   const shortId = `${formattedShortId}${shortIdPadding}`;
-  const count = `${issue.count}`.padStart(COL_COUNT);
+  const count = abbreviateCount(`${issue.count}`);
   const seen = formatRelativeTime(issue.lastSeen);
 
   // Fixability column (color applied after padding to preserve alignment)
