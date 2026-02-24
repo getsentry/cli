@@ -5,6 +5,8 @@
  * Follows gh cli patterns for alignment and presentation.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import prettyMs from "pretty-ms";
 import type {
   Breadcrumb,
@@ -333,7 +335,11 @@ function abbreviateCount(raw: string): string {
   if (Number.isNaN(n)) {
     // Non-numeric input: use a placeholder rather than passing through an
     // arbitrarily wide string that would break column alignment
-    return "    ?";
+    Sentry.captureMessage(
+      `Unexpected non-numeric issue count: ${raw}`,
+      "warning"
+    );
+    return "?".padStart(COL_COUNT);
   }
   if (n < 10_000) {
     return raw.padStart(COL_COUNT);

@@ -83,31 +83,17 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
   } = options;
 
   const startTime = Date.now();
-  let tick = 0;
-  let currentMessage = initialMessage;
-
-  // Animation timer runs independently of polling for smooth spinner
-  let stopped = false;
-  if (!json) {
-    const scheduleFrame = () => {
-      if (stopped) {
-        return;
-      }
-      const display = truncateProgressMessage(currentMessage);
-      stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
-      tick += 1;
-      setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
-    };
-    scheduleFrame();
-  }
+  const spinner = json ? null : startSpinner(stderr, initialMessage);
 
   try {
     while (Date.now() - startTime < timeoutMs) {
       const state = await fetchState();
 
       if (state) {
-        // Update message for animation loop to display
-        currentMessage = getProgressMessage(state);
+        // Always call getProgressMessage (callers may rely on the callback
+        // being invoked), but only forward the result to the spinner.
+        const msg = getProgressMessage(state);
+        spinner?.setMessage(msg);
 
         if (shouldStop(state)) {
           return state;
@@ -119,12 +105,46 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
 
     throw new Error(timeoutMessage);
   } finally {
-    // Clean up animation timer
+    spinner?.stop();
     if (!json) {
-      stopped = true;
       stderr.write("\n");
     }
   }
+}
+
+/**
+ * Start an animated spinner that writes progress to stderr.
+ *
+ * Returns a controller with `setMessage` to update the displayed text
+ * and `stop` to halt the animation.
+ */
+function startSpinner(
+  stderr: Writer,
+  initialMessage: string
+): { setMessage: (msg: string) => void; stop: () => void } {
+  let currentMessage = initialMessage;
+  let tick = 0;
+  let stopped = false;
+
+  const scheduleFrame = () => {
+    if (stopped) {
+      return;
+    }
+    const display = truncateProgressMessage(currentMessage);
+    stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
+    tick += 1;
+    setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
+  };
+  scheduleFrame();
+
+  return {
+    setMessage: (msg: string) => {
+      currentMessage = msg;
+    },
+    stop: () => {
+      stopped = true;
+    },
+  };
 }
 
 /**
@@ -169,28 +189,12 @@ export async function withProgress<T>(
   options: WithProgressOptions,
   fn: (setMessage: (msg: string) => void) => Promise<T>
 ): Promise<T> {
-  const { stderr } = options;
-  let currentMessage = options.message;
-  let tick = 0;
-  let stopped = false;
-
-  const scheduleFrame = () => {
-    if (stopped) {
-      return;
-    }
-    const display = truncateProgressMessage(currentMessage);
-    stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
-    tick += 1;
-    setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
-  };
-  scheduleFrame();
+  const spinner = startSpinner(options.stderr, options.message);
 
   try {
-    return await fn((msg) => {
-      currentMessage = msg;
-    });
+    return await fn(spinner.setMessage);
   } finally {
-    stopped = true;
-    stderr.write("\r\x1b[K");
+    spinner.stop();
+    options.stderr.write("\r\x1b[K");
   }
 }

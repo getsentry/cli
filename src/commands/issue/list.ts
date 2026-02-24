@@ -600,7 +600,11 @@ async function handleResolvedTargets(
   const results = await withProgress(
     { stderr, message: "Fetching issues..." },
     (setMessage) => {
-      const fetchedCounts = new Array<number>(targets.length).fill(0);
+      // Track per-target previous counts to compute deltas — onPage reports the
+      // running total for each target, not increments, so we need the previous
+      // value to derive how many new items arrived per callback.
+      let totalFetched = 0;
+      const prevFetched = new Array<number>(targets.length).fill(0);
       const totalLimit = flags.limit * targets.length;
       return Promise.all(
         targets.map((t, i) =>
@@ -610,8 +614,8 @@ async function handleResolvedTargets(
             sort: flags.sort,
             statsPeriod: flags.period,
             onPage: (fetched) => {
-              fetchedCounts[i] = fetched;
-              const totalFetched = fetchedCounts.reduce((a, b) => a + b, 0);
+              totalFetched += fetched - (prevFetched[i] ?? 0);
+              prevFetched[i] = fetched;
               setMessage(`Fetching issues... ${totalFetched}/${totalLimit}`);
             },
           })
