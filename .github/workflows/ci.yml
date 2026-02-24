@@ -130,7 +130,6 @@ jobs:
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          post-pr-comment: true
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
