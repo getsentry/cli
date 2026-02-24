@@ -1,0 +1,20 @@
+## Implementation Plan
+
+### Problem
+When an unsupported shell is detected (e.g. xonsh), the setup completions
+message shows the literal string "unknown" — the internal ShellType value —
+rather than the actual shell name the user set in $SHELL.
+
+  Before: Completions: Your shell (unknown) is not directly supported
+  After:  Completions: Your shell (xonsh) is not directly supported
+
+### Solution
+Add a `name: string` field to `ShellInfo` (in shell.ts) populated from
+`basename($SHELL)` at detection time. Use `shell.name` in the two
+user-facing completion messages in handleCompletions() instead of
+`shell.type`. When $SHELL is unset, `name` falls back to the type string.
+
+### Files changed
+- src/lib/shell.ts      — added `name` field to ShellInfo, populated in detectShell()
+- src/commands/cli/setup.ts — use shell.name in unsupported/fallback messages
+- test/commands/cli/setup.test.ts — assert on the real shell name ("xonsh")
