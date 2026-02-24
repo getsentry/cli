@@ -320,8 +320,11 @@ const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
  * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
  * Uses K/M/B/T/P/E suffixes up to 10^18 (exa).
  *
- * The decimal is only shown when scaled < 100 (e.g. "12.3K", "1.5M" but not "100M").
- * The result is always exactly COL_COUNT characters wide.
+ * The decimal is only shown when the rounded value is < 100 (e.g. "12.3K",
+ * "1.5M" but not "100M"). The result is always exactly COL_COUNT chars wide.
+ *
+ * Note: `Number(raw)` loses precision above `Number.MAX_SAFE_INTEGER`
+ * (~9P / 9×10^15), which is far beyond any realistic Sentry event count.
  *
  * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
  */
@@ -340,12 +343,14 @@ function abbreviateCount(raw: string): string {
     return `${rounded1dp.toFixed(1)}${suffix}`.padStart(COL_COUNT);
   }
   const rounded = Math.round(scaled);
-  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95 → "1000K" → "1.0M")
+  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95K → "1.0M")
   if (rounded >= 1000 && tier < QUANTIFIERS.length - 1) {
     const nextSuffix = QUANTIFIERS[tier + 1] ?? "";
     return `${(rounded / 1000).toFixed(1)}${nextSuffix}`.padStart(COL_COUNT);
   }
-  return `${rounded}${suffix}`.padStart(COL_COUNT);
+  // At max tier with no promotion available: cap at 999 to guarantee COL_COUNT width
+  // (numbers > 10^21 are unreachable in practice for Sentry event counts)
+  return `${Math.min(rounded, 999)}${suffix}`.padStart(COL_COUNT);
 }
 
 /** Column where title starts in single-project mode (no ALIAS column) */
