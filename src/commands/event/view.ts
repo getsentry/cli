@@ -223,7 +223,7 @@ export async function resolveOrgAllTarget(
   if (!resolved) {
     throw new ContextError(
       `Event ${eventId} in organization "${org}"`,
-      `sentry event view ${org}/ ${eventId}`
+      `sentry event view ${org}/${eventId}`
     );
   }
   return {
