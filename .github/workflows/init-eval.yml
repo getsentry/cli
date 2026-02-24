@@ -1,6 +1,9 @@
 name: Init Eval
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       platform:
@@ -17,6 +20,10 @@ on:
           - react-vite
           - sveltekit
 
+concurrency:
+  group: init-eval-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   eval:
     name: Eval ${{ matrix.platform }}
@@ -27,9 +34,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ inputs.platform == 'all'
-          && fromJson('["express","nextjs","python-fastapi","python-flask","react-vite","sveltekit"]')
-          || fromJson(format('["{0}"]', inputs.platform)) }}
+        platform: ${{ (inputs.platform && inputs.platform != 'all')
+          && fromJson(format('["{0}"]', inputs.platform))
+          || fromJson('["express","nextjs","python-fastapi","python-flask","react-vite","sveltekit"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
