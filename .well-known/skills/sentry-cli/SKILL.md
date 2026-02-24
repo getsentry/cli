@@ -15,6 +15,7 @@ The CLI must be installed and authenticated before use.
 
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
+brew install getsentry/tools/sentry
 
 # Or install via npm/pnpm/bun
 npm install -g sentry
@@ -110,7 +111,7 @@ Work with Sentry organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 **Examples:**
@@ -143,7 +144,7 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <target>`
+#### `sentry project list <org/project>`
 
 List projects
 
@@ -166,7 +167,7 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <target>`
+#### `sentry project view <org/project>`
 
 View details of a project
 
@@ -195,13 +196,13 @@ sentry project view my-org/frontend -w
 
 Manage Sentry issues
 
-#### `sentry issue list <target>`
+#### `sentry issue list <org/project>`
 
 List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
@@ -435,13 +436,13 @@ Update the Sentry CLI to the latest version
 
 **Flags:**
 - `--check - Check for updates without installing`
-- `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+- `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 
 ### Repo
 
 Work with Sentry repositories
 
-#### `sentry repo list <target>`
+#### `sentry repo list <org/project>`
 
 List repositories
 
@@ -454,7 +455,7 @@ List repositories
 
 Work with Sentry teams
 
-#### `sentry team list <target>`
+#### `sentry team list <org/project>`
 
 List teams
 
@@ -482,7 +483,7 @@ sentry team list --json
 
 View Sentry logs
 
-#### `sentry log list <target>`
+#### `sentry log list <org/project>`
 
 List logs from a project
 
@@ -562,7 +563,7 @@ sentry log list --json | jq '.[] | select(.level == "error")'
 
 View distributed traces
 
-#### `sentry trace list <target>`
+#### `sentry trace list <org/project>`
 
 List recent traces in a project
 
@@ -585,13 +586,13 @@ View details of a specific trace
 
 List issues in a project
 
-#### `sentry issues <target>`
+#### `sentry issues <org/project>`
 
 List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to list - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
@@ -605,14 +606,14 @@ List organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 ### Projects
 
 List projects
 
-#### `sentry projects <target>`
+#### `sentry projects <org/project>`
 
 List projects
 
@@ -626,7 +627,7 @@ List projects
 
 List repositories
 
-#### `sentry repos <target>`
+#### `sentry repos <org/project>`
 
 List repositories
 
@@ -639,7 +640,7 @@ List repositories
 
 List teams
 
-#### `sentry teams <target>`
+#### `sentry teams <org/project>`
 
 List teams
 
@@ -652,7 +653,7 @@ List teams
 
 List logs from a project
 
-#### `sentry logs <target>`
+#### `sentry logs <org/project>`
 
 List logs from a project
 
@@ -666,7 +667,7 @@ List logs from a project
 
 List recent traces in a project
 
-#### `sentry traces <target>`
+#### `sentry traces <org/project>`
 
 List recent traces in a project
 

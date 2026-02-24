@@ -167,7 +167,7 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 
 
 
-<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;version></code></td><td>Target version to install (defaults to latest)</td></tr><tr><td><code dir="auto">--check</code></td><td>Check for updates without installing</td></tr><tr><td><code dir="auto">--method &#x3C;method></code></td><td>Force installation method: curl, npm, pnpm, bun, yarn</td></tr></tbody></table>
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;version></code></td><td>Target version to install (defaults to latest)</td></tr><tr><td><code dir="auto">--check</code></td><td>Check for updates without installing</td></tr><tr><td><code dir="auto">--method &#x3C;method></code></td><td>Force installation method: curl, brew, npm, pnpm, bun, yarn</td></tr></tbody></table>
 <h2 id="installation-detection">Installation Detection</h2>
 <p>The CLI auto-detects how it was installed and uses the same method to upgrade:</p>
 
@@ -199,7 +199,11 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 
 
 
-<table><thead><tr><th>Method</th><th>Detection</th></tr></thead><tbody><tr><td>curl</td><td>Binary located in <code dir="auto">~/.sentry/bin</code> (installed via cli.sentry.dev)</td></tr><tr><td>npm</td><td>Globally installed via <code dir="auto">npm install -g sentry</code></td></tr><tr><td>pnpm</td><td>Globally installed via <code dir="auto">pnpm add -g sentry</code></td></tr><tr><td>bun</td><td>Globally installed via <code dir="auto">bun install -g sentry</code></td></tr><tr><td>yarn</td><td>Globally installed via <code dir="auto">yarn global add sentry</code></td></tr></tbody></table>
+
+
+
+
+<table><thead><tr><th>Method</th><th>Detection</th></tr></thead><tbody><tr><td>curl</td><td>Binary located in <code dir="auto">~/.sentry/bin</code> (installed via cli.sentry.dev)</td></tr><tr><td>brew</td><td>Binary located in a Homebrew Cellar (installed via <code dir="auto">brew install getsentry/tools/sentry</code>)</td></tr><tr><td>npm</td><td>Globally installed via <code dir="auto">npm install -g sentry</code></td></tr><tr><td>pnpm</td><td>Globally installed via <code dir="auto">pnpm add -g sentry</code></td></tr><tr><td>bun</td><td>Globally installed via <code dir="auto">bun install -g sentry</code></td></tr><tr><td>yarn</td><td>Globally installed via <code dir="auto">yarn global add sentry</code></td></tr></tbody></table>
 <h2 id="examples">Examples</h2>
 <h3 id="check-for-updates">Check for updates</h3>
 <div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#B392F0">sentry</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">cli</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">upgrade</span><span style="--0:#E1E4E8"> </span><span style="--0:#79B8FF">--check</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry cli upgrade --check"><div></div></button></div></figure></div>
