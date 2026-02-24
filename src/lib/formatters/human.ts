@@ -333,10 +333,12 @@ function abbreviateCount(raw: string): string {
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
   const suffix = QUANTIFIERS[tier] ?? "";
   const scaled = n / 10 ** (tier * 3);
-  // Only show decimal when it adds information (scaled < 100), e.g. "12.3K" not "100.0K"
+  // Only show decimal when it adds information — check the rounded value to avoid
+  // "100.0K" when scaled is e.g. 99.95 (toFixed(1) rounds up to "100.0")
+  const rounded1dp = Number(scaled.toFixed(1));
   const abbreviated =
-    scaled < 100
-      ? `${scaled.toFixed(1)}${suffix}`
+    rounded1dp < 100
+      ? `${rounded1dp.toFixed(1)}${suffix}`
       : `${Math.round(scaled)}${suffix}`;
   return abbreviated.padStart(COL_COUNT);
 }

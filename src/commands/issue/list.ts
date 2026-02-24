@@ -494,7 +494,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const escapedQuery = flags.query
     ? escapeContextKeyValue(flags.query)
     : undefined;
-  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
+  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}|period:${flags.period}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
   setContext([org], []);
