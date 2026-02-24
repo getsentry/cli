@@ -15,6 +15,8 @@ export type ShellType = "bash" | "zsh" | "fish" | "sh" | "ash" | "unknown";
 export type ShellInfo = {
   /** Detected shell type */
   type: ShellType;
+  /** Display name for the shell (e.g. "xonsh", "bash"). Derived from $SHELL basename. */
+  name: string;
   /** Path to shell config file, if found */
   configFile: string | null;
   /** All candidate config files for this shell */
@@ -129,11 +131,13 @@ export function detectShell(
   xdgConfigHome?: string
 ): ShellInfo {
   const type = detectShellType(shellPath);
+  const name = shellPath ? basename(shellPath) : type;
   const configCandidates = getConfigCandidates(type, homeDir, xdgConfigHome);
   const configFile = findExistingConfigFile(configCandidates);
 
   return {
     type,
+    name,
     configFile,
     configCandidates,
   };
