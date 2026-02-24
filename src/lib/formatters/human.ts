@@ -333,14 +333,19 @@ function abbreviateCount(raw: string): string {
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
   const suffix = QUANTIFIERS[tier] ?? "";
   const scaled = n / 10 ** (tier * 3);
-  // Only show decimal when it adds information — check the rounded value to avoid
+  // Only show decimal when it adds information — compare the rounded value to avoid
   // "100.0K" when scaled is e.g. 99.95 (toFixed(1) rounds up to "100.0")
   const rounded1dp = Number(scaled.toFixed(1));
-  const abbreviated =
-    rounded1dp < 100
-      ? `${rounded1dp.toFixed(1)}${suffix}`
-      : `${Math.round(scaled)}${suffix}`;
-  return abbreviated.padStart(COL_COUNT);
+  if (rounded1dp < 100) {
+    return `${rounded1dp.toFixed(1)}${suffix}`.padStart(COL_COUNT);
+  }
+  const rounded = Math.round(scaled);
+  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95 → "1000K" → "1.0M")
+  if (rounded >= 1000 && tier < QUANTIFIERS.length - 1) {
+    const nextSuffix = QUANTIFIERS[tier + 1] ?? "";
+    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`.padStart(COL_COUNT);
+  }
+  return `${rounded}${suffix}`.padStart(COL_COUNT);
 }
 
 /** Column where title starts in single-project mode (no ALIAS column) */

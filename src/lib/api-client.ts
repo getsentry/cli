@@ -1097,7 +1097,7 @@ export async function listIssuesAllPages(
     });
 
     allResults.push(...response.data);
-    options.onPage?.(allResults.length, options.limit);
+    options.onPage?.(Math.min(allResults.length, options.limit), options.limit);
 
     // Stop if we've reached the requested limit or there are no more pages
     if (allResults.length >= options.limit || !response.nextCursor) {
