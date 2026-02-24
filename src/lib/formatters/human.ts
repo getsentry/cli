@@ -330,7 +330,12 @@ const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
  */
 function abbreviateCount(raw: string): string {
   const n = Number(raw);
-  if (Number.isNaN(n) || n < 10_000) {
+  if (Number.isNaN(n)) {
+    // Non-numeric input: use a placeholder rather than passing through an
+    // arbitrarily wide string that would break column alignment
+    return "    ?";
+  }
+  if (n < 10_000) {
     return raw.padStart(COL_COUNT);
   }
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
