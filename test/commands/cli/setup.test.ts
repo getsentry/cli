@@ -639,5 +639,39 @@ describe("sentry cli setup", () => {
       expect(combined).toContain("Setup complete!");
       expect(combined).not.toContain("Agent skills:");
     });
+
+    test("bestEffort catches errors from steps and setup still completes", async () => {
+      // Make the completions dir unwritable so installCompletions() fails.
+      // bestEffort() must catch the error and continue — setup still completes.
+      const { chmodSync: chmod } = await import("node:fs");
+      const homeDir = join(testDir, "home");
+      const xdgData = join(homeDir, ".local", "share");
+      mkdirSync(xdgData, { recursive: true });
+      // Create the zsh site-functions dir as unwritable so Bun.write() fails
+      const zshDir = join(xdgData, "zsh", "site-functions");
+      mkdirSync(zshDir, { recursive: true });
+      chmod(zshDir, 0o444); // read-only → completion write will throw
+
+      const { context, output } = createMockContext({
+        homeDir,
+        env: {
+          XDG_DATA_HOME: xdgData,
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/zsh",
+        },
+      });
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+        context
+      );
+
+      const combined = output.join("");
+      // Setup must complete even though the completions step threw
+      expect(combined).toContain("Setup complete!");
+
+      chmod(zshDir, 0o755);
+    });
   });
 });

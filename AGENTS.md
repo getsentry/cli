@@ -77,7 +77,7 @@ Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 | Write file | `await Bun.write(path, content)` | `fs.writeFileSync()` |
 | Check file exists | `await Bun.file(path).exists()` | `fs.existsSync()` |
 | Spawn process | `Bun.spawn()` | `child_process.spawn()` |
-| Shell commands | `Bun.$\`command\`` | `child_process.exec()` |
+| Shell commands | `Bun.$\`command\`` ⚠️ | `child_process.exec()` |
 | Find executable | `Bun.which("git")` | `which` package |
 | Glob patterns | `new Bun.Glob()` | `glob` / `fast-glob` packages |
 | Sleep | `await Bun.sleep(ms)` | `setTimeout` with Promise |
@@ -87,6 +87,12 @@ Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 ```typescript
 import { mkdirSync } from "node:fs";
 mkdirSync(dir, { recursive: true, mode: 0o700 });
+```
+
+**Exception**: `Bun.$` (shell tagged template) has no shim in `script/node-polyfills.ts` and will crash on the npm/node distribution. Until a shim is added, use `execSync` from `node:child_process` for shell commands that must work in both runtimes:
+```typescript
+import { execSync } from "node:child_process";
+const result = execSync("id -u username", { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] });
 ```
 
 ## Architecture
