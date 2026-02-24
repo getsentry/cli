@@ -556,7 +556,9 @@ describe("resolveOrgAllTarget", () => {
     const err = new Error("Auth failed");
     resolveEventInOrgSpy.mockRejectedValue(err);
 
-    expect(resolveOrgAllTarget("acme", "abc123", "/tmp")).rejects.toBe(err);
+    await expect(resolveOrgAllTarget("acme", "abc123", "/tmp")).rejects.toBe(
+      err
+    );
   });
 });
 
