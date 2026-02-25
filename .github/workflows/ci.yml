@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Commit timestamp used for deterministic nightly version strings.
+  # Defined at workflow level so build-binary and publish-nightly always agree.
+  COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+
 jobs:
   changes:
     name: Detect Changes
@@ -186,16 +191,12 @@ jobs:
         # string for a given commit.
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
-        env:
-          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            const ts = Math.floor(new Date(process.env.COMMIT_TIMESTAMP).getTime() / 1000);
-            pkg.version = pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts);
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          NIGHTLY=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          jq --arg v "$NIGHTLY" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
@@ -317,14 +318,10 @@ jobs:
         # Uses the commit timestamp — the same value as build-binary — so
         # version.json exactly matches the version baked into the binaries.
         id: version
-        env:
-          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
-          VERSION=$(node -e "
-            const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
-            const ts = Math.floor(new Date(process.env.COMMIT_TIMESTAMP).getTime() / 1000);
-            console.log(pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts));
-          ")
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Download all binary artifacts
         uses: actions/download-artifact@v4
@@ -357,8 +354,13 @@ jobs:
           **Version:** \`${{ steps.version.outputs.version }}\`
           **Commit:** ${{ github.sha }}"
 
-          # Upload/replace all .gz binaries and the version manifest
-          gh release upload nightly --clobber \
+          # Delete all existing assets first so removed/renamed files don't linger
+          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
+            gh release delete-asset nightly "$name" --yes
+          done
+
+          # Upload the new .gz binaries and the version manifest
+          gh release upload nightly \
             artifacts/dist-bin/*.gz \
             version.json
 
