@@ -1,6 +1,6 @@
 export const MASTRA_API_URL =
   process.env.SENTRY_WIZARD_API_URL ??
-  "http://sentry-init-agent.getsentry.workers.dev";
+  "https://sentry-init-agent.getsentry.workers.dev";
 
 export const WORKFLOW_ID = "sentry-wizard";
 
