@@ -11,6 +11,7 @@
 
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
+import { clearVersionCheckCache } from "./version-check.js";
 
 const KEY = "release_channel";
 
@@ -37,11 +38,19 @@ export function getReleaseChannel(): ReleaseChannel {
 /**
  * Persist the release channel.
  *
+ * If the channel has changed, the cached version-check result is also cleared
+ * so the next notification does not display a stale version from the old channel
+ * (e.g. a cached stable version labelled as a nightly update after switching).
+ *
  * @param channel - Channel to store
  */
 export function setReleaseChannel(channel: ReleaseChannel): void {
   const db = getDatabase();
+  const current = getReleaseChannel();
   runUpsert(db, "metadata", { key: KEY, value: channel }, ["key"]);
+  if (channel !== current) {
+    clearVersionCheckCache();
+  }
 }
 
 /**
