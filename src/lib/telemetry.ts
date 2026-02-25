@@ -264,6 +264,8 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
         (integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)
       ),
     environment,
+    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings)
+    enableLogs: true,
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,

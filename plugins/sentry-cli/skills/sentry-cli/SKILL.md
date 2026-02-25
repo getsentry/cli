@@ -204,6 +204,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
@@ -594,6 +595,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
