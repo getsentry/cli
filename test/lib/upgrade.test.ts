@@ -596,6 +596,52 @@ describe("executeUpgrade", () => {
   });
 });
 
+describe("detectInstallationMethod — stored info path", () => {
+  useTestConfigDir("test-detect-stored-");
+
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+    // Set execPath to a non-Homebrew, non-known-curl path so detection falls
+    // through to stored info
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/sentry",
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("returns stored method when install info has been persisted", async () => {
+    setInstallInfo({
+      method: "npm",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+  });
+
+  test("returns stored curl method", async () => {
+    setInstallInfo({
+      method: "curl",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("curl");
+  });
+});
+
 describe("Homebrew detection (detectInstallationMethod)", () => {
   let originalExecPath: string;
 
