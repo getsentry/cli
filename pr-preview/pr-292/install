@@ -84,9 +84,8 @@ fi
 # Resolve version and download tag.
 #
 # "nightly" is a special value that installs from the rolling nightly prerelease
-# built from the main branch. In this case:
-#   - `version`      holds the human-readable version string (e.g. "0.12.0-dev.1740393600")
-#   - `download_tag` holds the GitHub release tag to download from ("nightly")
+# built from the main branch. In this case both `version` and `download_tag`
+# are set to the literal string "nightly".
 #
 # For stable releases both are the same version string (e.g. "0.5.0").
 channel="stable"
@@ -122,7 +121,13 @@ tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
 # Clean up temp binary on failure (setup handles cleanup on success)
 trap 'rm -f "$tmp_binary"' EXIT
 
-echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+# For nightly the version string is literally "nightly", not a semver, so
+# skip the "v" prefix that's only meaningful for numbered releases.
+if [[ "$version" == "nightly" ]]; then
+  echo -e "${MUTED}Downloading sentry nightly...${NC}"
+else
+  echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+fi
 
 # Try gzip-compressed download first (~60% smaller, ~37 MB vs ~99 MB).
 # gunzip is POSIX and available on all Unix systems.
