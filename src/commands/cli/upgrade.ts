@@ -20,7 +20,6 @@ import type { SentryContext } from "../../context.js";
 import { determineInstallDir, releaseLock } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
-import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
   getReleaseChannel,
   type ReleaseChannel,
@@ -61,10 +60,11 @@ function resolveChannelAndVersion(positional: string | undefined): {
   versionArg: string | undefined;
 } {
   // "nightly" and "stable" as positional args select the channel rather than
-  // installing a specific version.
-  if (positional === "nightly" || positional === "stable") {
+  // installing a specific version. Match case-insensitively for convenience.
+  const lower = positional?.toLowerCase();
+  if (lower === "nightly" || lower === "stable") {
     return {
-      channel: positional,
+      channel: lower,
       versionArg: undefined,
     };
   }
@@ -113,9 +113,12 @@ async function resolveTargetVersion(
     return null;
   }
 
-  // Validate that a specific pinned version actually exists on GitHub/npm
+  // Validate that a specific pinned version actually exists.
+  // Nightly builds are GitHub-only, so always use curl (GitHub) lookup for
+  // nightly channel regardless of the current install method.
   if (versionArg && !CHANNEL_VERSIONS.has(versionArg)) {
-    const exists = await versionExists(method, target);
+    const lookupMethod = channel === "nightly" ? "curl" : method;
+    const exists = await versionExists(lookupMethod, target);
     if (!exists) {
       throw new UpgradeError(
         "version_not_found",
@@ -255,15 +258,9 @@ async function migrateToStandaloneForNightly(
     releaseLock(downloadResult.lockPath);
   }
 
-  // Update install info to reflect the new standalone method
-  const binaryFilename = process.platform === "win32" ? "sentry.exe" : "sentry";
-  setInstallInfo({
-    method: "curl",
-    path: `${installDir}/${binaryFilename}`,
-    version: target,
-  });
-
   // Warn about the potentially shadowing old installation
+  // Note: install info is already recorded by the child `setup --install`
+  // process, so no redundant setInstallInfo call is needed here.
   const uninstallHints: Record<string, string> = {
     npm: "npm uninstall -g sentry",
     pnpm: "pnpm remove -g sentry",
