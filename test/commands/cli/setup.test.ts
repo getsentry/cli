@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
+import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -673,5 +675,113 @@ describe("sentry cli setup", () => {
 
       chmod(zshDir, 0o755);
     });
+  });
+});
+
+describe("sentry cli setup — --channel flag", () => {
+  useTestConfigDir("test-setup-channel-");
+
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `setup-channel-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("persists 'nightly' channel when --channel nightly is passed", async () => {
+    const { context } = createMockContext({ homeDir: testDir });
+
+    expect(getReleaseChannel()).toBe("stable");
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    expect(getReleaseChannel()).toBe("nightly");
+  });
+
+  test("persists 'stable' channel when --channel stable is passed", async () => {
+    const { context } = createMockContext({ homeDir: testDir });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "stable",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    expect(getReleaseChannel()).toBe("stable");
+  });
+
+  test("logs channel when not in --install mode", async () => {
+    const { context, output } = createMockContext({ homeDir: testDir });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).toContain("Recorded release channel: nightly");
+  });
+
+  test("does not log channel in --install mode", async () => {
+    // In --install mode, the setup is silent about the channel
+    // (it's set during binary placement, before user sees output)
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "sentry.download"),
+    });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--install",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).not.toContain("Recorded release channel: nightly");
   });
 });

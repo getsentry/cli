@@ -13,6 +13,11 @@ import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
+import {
+  getReleaseChannel,
+  setReleaseChannel,
+} from "../../../src/lib/db/release-channel.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -290,6 +295,157 @@ describe("sentry cli upgrade", () => {
       const combined = output.join("");
       // Should match current version (after stripping v prefix) and report up to date
       expect(combined).toContain("Already up to date.");
+    });
+  });
+});
+
+describe("sentry cli upgrade — nightly channel", () => {
+  useTestConfigDir("test-upgrade-nightly-");
+
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `upgrade-nightly-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Mock fetch for the nightly version.json endpoint.
+   */
+  function mockNightlyVersion(version: string): void {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ version }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+  }
+
+  describe("resolveChannelAndVersion", () => {
+    test("'nightly' positional sets channel to nightly", async () => {
+      mockNightlyVersion(CLI_VERSION);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Channel: nightly");
+    });
+
+    test("'stable' positional sets channel to stable", async () => {
+      mockGitHubVersion(CLI_VERSION);
+      setReleaseChannel("nightly");
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "stable"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Channel: stable");
+    });
+
+    test("without positional, uses persisted channel", async () => {
+      setReleaseChannel("nightly");
+      mockNightlyVersion(CLI_VERSION);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Channel: nightly");
+    });
+  });
+
+  describe("channel persistence", () => {
+    test("persists nightly channel when 'nightly' positional is passed", async () => {
+      mockNightlyVersion(CLI_VERSION);
+
+      const { context } = createMockContext({ homeDir: testDir });
+
+      expect(getReleaseChannel()).toBe("stable");
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      expect(getReleaseChannel()).toBe("nightly");
+    });
+
+    test("persists stable channel when 'stable' positional resets from nightly", async () => {
+      setReleaseChannel("nightly");
+      mockGitHubVersion(CLI_VERSION);
+
+      const { context } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "stable"],
+        context
+      );
+
+      expect(getReleaseChannel()).toBe("stable");
+    });
+  });
+
+  describe("nightly --check mode", () => {
+    test("shows 'already on target' when current matches nightly latest", async () => {
+      mockNightlyVersion(CLI_VERSION);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Channel: nightly");
+      expect(combined).toContain(`Latest version: ${CLI_VERSION}`);
+      expect(combined).toContain("You are already on the target version");
+    });
+
+    test("shows upgrade hint when newer nightly available", async () => {
+      mockNightlyVersion("0.99.0-dev.9999999999");
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      const combined = output.join("");
+      expect(combined).toContain("Channel: nightly");
+      expect(combined).toContain("Latest version: 0.99.0-dev.9999999999");
+      expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
   });
 });

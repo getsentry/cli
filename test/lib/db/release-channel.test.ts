@@ -8,6 +8,11 @@ import {
   parseReleaseChannel,
   setReleaseChannel,
 } from "../../../src/lib/db/release-channel.js";
+import {
+  clearVersionCheckCache,
+  getVersionCheckInfo,
+  setVersionCheckInfo,
+} from "../../../src/lib/db/version-check.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("test-release-channel-");
@@ -73,5 +78,53 @@ describe("parseReleaseChannel", () => {
 
   test("throws on empty string", () => {
     expect(() => parseReleaseChannel("")).toThrow();
+  });
+});
+
+describe("clearVersionCheckCache", () => {
+  test("clears cached lastChecked and latestVersion", () => {
+    setVersionCheckInfo("1.0.0");
+    const before = getVersionCheckInfo();
+    expect(before.lastChecked).not.toBeNull();
+    expect(before.latestVersion).toBe("1.0.0");
+
+    clearVersionCheckCache();
+
+    const after = getVersionCheckInfo();
+    expect(after.lastChecked).toBeNull();
+    expect(after.latestVersion).toBeNull();
+  });
+
+  test("is idempotent (no error on double-clear)", () => {
+    clearVersionCheckCache();
+    expect(() => clearVersionCheckCache()).not.toThrow();
+    const info = getVersionCheckInfo();
+    expect(info.lastChecked).toBeNull();
+    expect(info.latestVersion).toBeNull();
+  });
+});
+
+describe("setReleaseChannel — cache-clearing side effect", () => {
+  test("clears version check cache when channel changes", () => {
+    setVersionCheckInfo("1.0.0");
+    expect(getVersionCheckInfo().latestVersion).toBe("1.0.0");
+
+    // Switching from default "stable" to "nightly" should clear the cache
+    setReleaseChannel("nightly");
+
+    const info = getVersionCheckInfo();
+    expect(info.lastChecked).toBeNull();
+    expect(info.latestVersion).toBeNull();
+  });
+
+  test("does not clear cache when channel is unchanged", () => {
+    setVersionCheckInfo("2.0.0");
+    expect(getVersionCheckInfo().latestVersion).toBe("2.0.0");
+
+    // Setting same channel again — cache should remain intact
+    setReleaseChannel("stable"); // default is stable, so this is unchanged
+    setReleaseChannel("stable"); // second set: now stored=stable, setting=stable → no change
+
+    expect(getVersionCheckInfo().latestVersion).toBe("2.0.0");
   });
 });
