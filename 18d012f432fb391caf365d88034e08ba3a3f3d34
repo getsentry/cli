@@ -1,0 +1,53 @@
+## Implementation Plan
+
+### Problem
+
+ContextError was being misused for ~15 callsites where the user *did*
+provide a value, but it couldn't be resolved. This produced confusing
+messages like 'Issue 99124558 is required.' (Sentry issue CLI-8C).
+
+ContextError is intended for 'you omitted a required value' — e.g.
+'Organization is required. Try: sentry org list'.
+
+### Part 1: New ResolutionError class
+
+Added ResolutionError to src/lib/errors.ts with constructor:
+  ResolutionError(resource, headline, hint, suggestions?)
+
+Output format:
+  ${resource} ${headline}.
+
+  Try:
+    ${hint}
+
+  Or:
+    - ${suggestion1}
+    - ${suggestion2}
+
+Examples of headlines: 'not found', 'is ambiguous',
+'could not be resolved without project context'.
+
+### Part 2: Migrate misused ContextError callsites
+
+Migrated 12 callsites across 4 files:
+- src/commands/issue/utils.ts (7): project not found, project ambiguous,
+  issue numeric 404, suffix-without-context
+- src/lib/resolve-target.ts (3): resolveProjectBySlug not found,
+  resolveOrgProjectTarget project not found/ambiguous
+- src/commands/event/view.ts (1): event not found in org
+  (also fixed errant space in command hint)
+- src/commands/issue/list.ts (1): project-search not found
+
+### Part 3: Fix command parameter misuse
+
+Two ContextError callsites were passing full explanatory prose as
+the 'command' parameter (rendered as 'Specify it using: No project...')
+— these were also converted to ResolutionError with proper structure.
+
+### Remaining ContextError usage (correct)
+
+ContextError is preserved where appropriate:
+- Missing Event/Log/Trace ID in positional args (user omitted it)
+- org-all mode requiring a specific project ('Project is required')
+- auto-detect failing to find org+project ('Organization and project is required')
+- Pagination cursor missing from cache
