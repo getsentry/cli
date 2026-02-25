@@ -25,6 +25,71 @@ import type {
 } from "./types.js";
 
 /**
+ * Shell metacharacters that enable chaining, piping, substitution, or redirection.
+ * All legitimate install commands are simple single commands that don't need these.
+ */
+const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> = [
+  { pattern: ";", label: "command chaining (;)" },
+  // Check multi-char operators before single `|` so labels are accurate
+  { pattern: "&&", label: "command chaining (&&)" },
+  { pattern: "||", label: "command chaining (||)" },
+  { pattern: "|", label: "piping (|)" },
+  { pattern: "`", label: "command substitution (`)" },
+  { pattern: "$(", label: "command substitution ($()" },
+  { pattern: "\n", label: "newline" },
+  { pattern: "\r", label: "carriage return" },
+];
+
+/**
+ * Executables that should never appear in a package install command.
+ */
+const BLOCKED_EXECUTABLES = new Set([
+  // Destructive
+  "rm", "rmdir", "del",
+  // Network/exfil
+  "curl", "wget", "nc", "ncat", "netcat", "socat", "telnet", "ftp",
+  // Privilege escalation
+  "sudo", "su", "doas",
+  // Permissions
+  "chmod", "chown", "chgrp",
+  // Process/system
+  "kill", "killall", "pkill", "shutdown", "reboot", "halt", "poweroff",
+  // Disk
+  "dd", "mkfs", "fdisk", "mount", "umount",
+  // Remote access
+  "ssh", "scp", "sftp",
+  // Shells
+  "bash", "sh", "zsh", "fish", "csh", "dash",
+  // Misc dangerous
+  "eval", "exec", "env", "xargs",
+]);
+
+/**
+ * Validate a command before execution.
+ * Returns an error message if the command is unsafe, or undefined if it's OK.
+ */
+export function validateCommand(command: string): string | undefined {
+  // Layer 1: Block shell metacharacters
+  for (const { pattern, label } of SHELL_METACHARACTER_PATTERNS) {
+    if (command.includes(pattern)) {
+      return `Blocked command: contains ${label} — "${command}"`;
+    }
+  }
+
+  // Layer 2: Block dangerous executables
+  const firstToken = command.trimStart().split(/\s+/)[0];
+  if (!firstToken) {
+    return `Blocked command: empty command`;
+  }
+  const executable = path.basename(firstToken);
+  if (BLOCKED_EXECUTABLES.has(executable)) {
+    return `Blocked command: disallowed executable "${executable}" — "${command}"`;
+  }
+
+  return undefined;
+}
+
+/**
  * Resolve a path relative to cwd and verify it's inside cwd.
  * Rejects path traversal attempts.
  */
@@ -190,6 +255,12 @@ async function runCommands(
       });
       continue;
     }
+
+    const validationError = validateCommand(command);
+    if (validationError) {
+      return { ok: false, error: validationError };
+    }
+
     const result = await runSingleCommand(command, cwd, timeoutMs);
     results.push(result);
     if (result.exitCode !== 0) {
