@@ -159,6 +159,9 @@ jobs:
   build-binary:
     name: Build Binary (${{ matrix.target }})
     needs: [lint, test-unit, nightly-version]
+    # Allow this job to run even when nightly-version is skipped (PRs / non-main pushes).
+    # Without this, GitHub skips dependents of skipped jobs by default.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
