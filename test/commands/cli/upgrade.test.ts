@@ -8,6 +8,8 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
@@ -134,6 +136,19 @@ function mockGitHubVersion(version: string): void {
 
     return new Response("Not Found", { status: 404 });
   });
+}
+
+/**
+ * Mock fetch for the nightly version.json endpoint.
+ */
+function mockNightlyVersion(version: string): void {
+  mockFetch(
+    async () =>
+      new Response(JSON.stringify({ version }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+  );
 }
 
 describe("sentry cli upgrade", () => {
@@ -318,19 +333,6 @@ describe("sentry cli upgrade — nightly channel", () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  /**
-   * Mock fetch for the nightly version.json endpoint.
-   */
-  function mockNightlyVersion(version: string): void {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify({ version }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })
-    );
-  }
-
   describe("resolveChannelAndVersion", () => {
     test("'nightly' positional sets channel to nightly", async () => {
       mockNightlyVersion(CLI_VERSION);
@@ -447,5 +449,258 @@ describe("sentry cli upgrade — nightly channel", () => {
       expect(combined).toContain("Latest version: 0.99.0-dev.9999999999");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Download + setup paths (Option B: Bun.spawn spy)
+//
+// These tests cover runSetupOnNewBinary and the full executeUpgrade flow by:
+//   1. Mocking fetch to return a fake binary payload for downloadBinaryToTemp
+//   2. Replacing Bun.spawn with a spy that resolves immediately with exit 0
+//
+// Bun.spawn is writable on the global Bun object, so it can be temporarily
+// replaced without mock.module.
+// ---------------------------------------------------------------------------
+
+describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => {
+  useTestConfigDir("test-upgrade-spawn-");
+
+  let testDir: string;
+  let originalSpawn: typeof Bun.spawn;
+  let spawnedArgs: string[][];
+
+  /** Default install paths (default curl dir) */
+  const defaultBinDir = join(homedir(), ".sentry", "bin");
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `upgrade-spawn-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(defaultBinDir, { recursive: true });
+
+    originalFetch = globalThis.fetch;
+    originalSpawn = Bun.spawn;
+    spawnedArgs = [];
+
+    // Replace Bun.spawn with a spy that immediately resolves with exit 0
+    Bun.spawn = ((cmd: string[], _opts: unknown) => {
+      spawnedArgs.push(cmd);
+      return { exited: Promise.resolve(0) };
+    }) as typeof Bun.spawn;
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    Bun.spawn = originalSpawn;
+    rmSync(testDir, { recursive: true, force: true });
+
+    // Clean up any temp binary files written to the default curl install path
+    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+    for (const suffix of ["", ".download", ".old", ".lock"]) {
+      try {
+        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+      } catch {
+        // Ignore
+      }
+    }
+  });
+
+  /**
+   * Mock fetch to serve both the GitHub latest-release version endpoint and a
+   * minimal valid gzipped binary for downloadBinaryToTemp.
+   */
+  function mockBinaryDownloadWithVersion(version: string): void {
+    const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic
+    const gzipped = Bun.gzipSync(fakeContent);
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("releases/latest")) {
+        return new Response(JSON.stringify({ tag_name: version }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // Binary download (.gz or raw)
+      return new Response(gzipped, { status: 200 });
+    });
+  }
+
+  test("runs setup on downloaded binary after curl upgrade", async () => {
+    mockBinaryDownloadWithVersion("99.99.99");
+
+    const { context, output } = createMockContext({ homeDir: testDir });
+
+    await run(app, ["cli", "upgrade", "--method", "curl"], context);
+
+    const combined = output.join("");
+    expect(combined).toContain("Upgrading to 99.99.99...");
+    expect(combined).toContain("Successfully upgraded to 99.99.99.");
+
+    // Verify Bun.spawn was called with the downloaded binary + setup args
+    expect(spawnedArgs.length).toBeGreaterThan(0);
+    const setupCall = spawnedArgs.find((args) => args.includes("setup"));
+    expect(setupCall).toBeDefined();
+    expect(setupCall).toContain("cli");
+    expect(setupCall).toContain("setup");
+    expect(setupCall).toContain("--method");
+    expect(setupCall).toContain("curl");
+    expect(setupCall).toContain("--install");
+  });
+
+  test("reports setup failure when Bun.spawn exits non-zero", async () => {
+    // Use a unified mock that handles both the version endpoint and binary download
+    const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
+    const gzipped = Bun.gzipSync(fakeContent);
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("releases/latest")) {
+        return new Response(JSON.stringify({ tag_name: "99.99.99" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // Binary download (both .gz and raw URLs)
+      return new Response(gzipped, { status: 200 });
+    });
+
+    Bun.spawn = ((_cmd: string[], _opts: unknown) => ({
+      exited: Promise.resolve(1),
+    })) as typeof Bun.spawn;
+
+    const { context, errors } = createMockContext({ homeDir: testDir });
+
+    await run(app, ["cli", "upgrade", "--method", "curl"], context);
+
+    expect(errors.join("")).toContain("Setup failed with exit code 1");
+  });
+
+  test("uses NIGHTLY_TAG download URL for nightly channel without versionArg", async () => {
+    const capturedUrls: string[] = [];
+    const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
+    const gzipped = Bun.gzipSync(fakeContent);
+
+    // Single unified mock: captures all URLs, serves version.json and binary download
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      capturedUrls.push(urlStr);
+      if (urlStr.includes("version.json")) {
+        return new Response(
+          JSON.stringify({ version: "0.99.0-dev.1234567890" }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      // Binary download — return gzipped content for all other URLs
+      return new Response(gzipped, { status: 200 });
+    });
+
+    // Set nightly channel; "nightly" positional triggers NIGHTLY_TAG for download
+    setReleaseChannel("nightly");
+
+    const { context } = createMockContext({ homeDir: testDir });
+
+    await run(app, ["cli", "upgrade", "--method", "curl", "nightly"], context);
+
+    // Download URL should use the rolling "nightly" tag
+    const downloadUrl = capturedUrls.find((u) => u.includes("/download/"));
+    expect(downloadUrl).toBeDefined();
+    expect(downloadUrl).toContain("/download/nightly/");
+  });
+
+  test("--force bypasses 'already up to date' and proceeds to download", async () => {
+    mockBinaryDownloadWithVersion(CLI_VERSION); // Same version — would normally short-circuit
+
+    const { context, output } = createMockContext({ homeDir: testDir });
+
+    await run(app, ["cli", "upgrade", "--method", "curl", "--force"], context);
+
+    const combined = output.join("");
+    // With --force, should NOT show "Already up to date"
+    expect(combined).not.toContain("Already up to date.");
+    // Should proceed to upgrade and succeed
+    expect(combined).toContain(`Upgrading to ${CLI_VERSION}...`);
+    expect(combined).toContain(`Successfully upgraded to ${CLI_VERSION}.`);
+  });
+});
+
+describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)", () => {
+  useTestConfigDir("test-upgrade-migrate-");
+
+  let testDir: string;
+  let originalSpawn: typeof Bun.spawn;
+
+  const defaultBinDir = join(homedir(), ".sentry", "bin");
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `upgrade-migrate-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(defaultBinDir, { recursive: true });
+
+    originalFetch = globalThis.fetch;
+    originalSpawn = Bun.spawn;
+
+    Bun.spawn = ((_cmd: string[], _opts: unknown) => ({
+      exited: Promise.resolve(0),
+    })) as typeof Bun.spawn;
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    Bun.spawn = originalSpawn;
+    rmSync(testDir, { recursive: true, force: true });
+
+    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+    for (const suffix of ["", ".download", ".old", ".lock"]) {
+      try {
+        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+      } catch {
+        // Ignore
+      }
+    }
+  });
+
+  test("migrates npm install to standalone binary for nightly channel", async () => {
+    const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
+    const gzipped = Bun.gzipSync(fakeContent);
+
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      // nightly version.json
+      if (urlStr.includes("version.json")) {
+        return new Response(
+          JSON.stringify({ version: "0.99.0-dev.1234567890" }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      // binary download (.gz)
+      if (urlStr.includes(".gz")) {
+        return new Response(gzipped, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    // Switch to nightly and use npm method → triggers migration
+    setReleaseChannel("nightly");
+
+    const { context, output } = createMockContext({ homeDir: testDir });
+
+    await run(app, ["cli", "upgrade", "--method", "npm", "nightly"], context);
+
+    const combined = output.join("");
+    expect(combined).toContain(
+      "Nightly builds are only available as standalone binaries."
+    );
+    expect(combined).toContain("Migrating to standalone installation...");
+    expect(combined).toContain("Successfully installed nightly");
+    // Warns about old npm install
+    expect(combined).toContain(
+      "npm-installed sentry may still appear earlier in PATH"
+    );
+    expect(combined).toContain("npm uninstall -g sentry");
   });
 });
