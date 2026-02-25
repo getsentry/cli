@@ -10,7 +10,11 @@ import { parsePositionalArgs } from "../../../src/commands/log/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 describe("parsePositionalArgs", () => {
@@ -138,11 +142,11 @@ describe("resolveProjectBySlug", () => {
   });
 
   describe("no projects found", () => {
-    test("throws ContextError when project not found", async () => {
+    test("throws ResolutionError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
-        ContextError
+        ResolutionError
       );
     });
 
@@ -153,11 +157,15 @@ describe("resolveProjectBySlug", () => {
         await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain('Project "frontend"');
-        expect((error as ContextError).message).toContain(
+        expect(error).toBeInstanceOf(ResolutionError);
+        expect((error as ResolutionError).message).toContain(
+          'Project "frontend"'
+        );
+        expect((error as ResolutionError).message).toContain(
           "Check that you have access"
         );
+        // Message says "not found", not "is required"
+        expect((error as ResolutionError).message).toContain("not found");
       }
     });
   });

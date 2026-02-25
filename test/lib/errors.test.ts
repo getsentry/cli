@@ -8,6 +8,7 @@ import {
   DeviceFlowError,
   formatError,
   getExitCode,
+  ResolutionError,
   SeerError,
   stringifyUnknown,
   UpgradeError,
@@ -128,6 +129,79 @@ describe("ContextError", () => {
     const formatted = err.format();
     expect(formatted).toContain("Resource is required.");
     expect(formatted).not.toContain("Or:");
+  });
+});
+
+describe("ResolutionError", () => {
+  test("format() includes 'not found' headline and Try hint", () => {
+    const err = new ResolutionError(
+      "Issue 99124558",
+      "not found",
+      "sentry issue view <org>/99124558",
+      [
+        "No issue with numeric ID 99124558 found",
+        "If this is a short ID suffix, try: sentry issue view <project>-99124558",
+      ]
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Issue 99124558 not found.");
+    expect(formatted).toContain("Try:");
+    expect(formatted).toContain("sentry issue view <org>/99124558");
+    expect(formatted).toContain("No issue with numeric ID 99124558 found");
+    expect(formatted).toContain("short ID suffix");
+    // Should NOT say "is required"
+    expect(formatted).not.toContain("is required");
+  });
+
+  test("format() works with 'is ambiguous' headline", () => {
+    const err = new ResolutionError(
+      "Project 'cli'",
+      "is ambiguous",
+      "sentry issue view <org>/cli-G",
+      ["Found in: sentry, acme"]
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Project 'cli' is ambiguous.");
+    expect(formatted).toContain("Try:");
+    expect(formatted).toContain("Or:");
+    expect(formatted).toContain("Found in: sentry, acme");
+  });
+
+  test("format() works with empty suggestions (no Or: section)", () => {
+    const err = new ResolutionError(
+      'Event abc123 in organization "acme"',
+      "not found",
+      "sentry event view acme/<project> abc123"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain(
+      'Event abc123 in organization "acme" not found.'
+    );
+    expect(formatted).toContain("Try:");
+    expect(formatted).not.toContain("Or:");
+  });
+
+  test("stores resource, headline, hint, and suggestions", () => {
+    const err = new ResolutionError(
+      "Issue suffix 'G'",
+      "could not be resolved without project context",
+      "sentry issue view <org>/<project>-G"
+    );
+    expect(err.resource).toBe("Issue suffix 'G'");
+    expect(err.headline).toBe("could not be resolved without project context");
+    expect(err.hint).toBe("sentry issue view <org>/<project>-G");
+    expect(err.suggestions).toEqual([]);
+  });
+
+  test("is a CliError subclass", () => {
+    const err = new ResolutionError(
+      "Issue 1",
+      "not found",
+      "sentry issue view 1"
+    );
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.name).toBe("ResolutionError");
+    expect(err.exitCode).toBe(1);
   });
 });
 

@@ -24,7 +24,11 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
@@ -221,11 +225,11 @@ describe("resolveProjectBySlug", () => {
   });
 
   describe("no projects found", () => {
-    test("throws ContextError when project not found", async () => {
+    test("throws ResolutionError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
-        ContextError
+        ResolutionError
       );
     });
 
@@ -236,11 +240,15 @@ describe("resolveProjectBySlug", () => {
         await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain('Project "frontend"');
-        expect((error as ContextError).message).toContain(
+        expect(error).toBeInstanceOf(ResolutionError);
+        expect((error as ResolutionError).message).toContain(
+          'Project "frontend"'
+        );
+        expect((error as ResolutionError).message).toContain(
           "Check that you have access"
         );
+        // Message says "not found", not "is required"
+        expect((error as ResolutionError).message).toContain("not found");
       }
     });
   });
@@ -352,10 +360,12 @@ describe("resolveProjectBySlug", () => {
         await resolveProjectBySlug("7275560680", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        const message = (error as ContextError).message;
+        expect(error).toBeInstanceOf(ResolutionError);
+        const message = (error as ResolutionError).message;
         expect(message).toContain('Project "7275560680"');
         expect(message).toContain("No project with this ID was found");
+        // Message says "not found", not "is required"
+        expect(message).toContain("not found");
       }
     });
 
@@ -544,12 +554,12 @@ describe("resolveOrgAllTarget", () => {
     expect(result?.prefetchedEvent?.eventID).toBe("abc123");
   });
 
-  test("throws ContextError when event not found in explicit org", async () => {
+  test("throws ResolutionError when event not found in explicit org", async () => {
     resolveEventInOrgSpy.mockResolvedValue(null);
 
     await expect(
       resolveOrgAllTarget("acme", "notfound", "/tmp")
-    ).rejects.toBeInstanceOf(ContextError);
+    ).rejects.toBeInstanceOf(ResolutionError);
   });
 
   test("propagates errors from resolveEventInOrg", async () => {

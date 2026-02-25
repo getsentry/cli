@@ -14,7 +14,7 @@ import {
 import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
-import { ApiError, ContextError } from "../../lib/errors.js";
+import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
@@ -140,15 +140,19 @@ async function resolveProjectSearch(
   const projects = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
-    throw new ContextError(`Project '${projectSlug}' not found`, commandHint, [
-      "No project with this slug found in any accessible organization",
-    ]);
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint,
+      ["No project with this slug found in any accessible organization"]
+    );
   }
 
   if (projects.length > 1) {
     const orgList = projects.map((p) => p.orgSlug).join(", ");
-    throw new ContextError(
-      `Project '${projectSlug}' found in multiple organizations`,
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "is ambiguous",
       commandHint,
       [
         `Found in: ${orgList}`,
@@ -159,7 +163,11 @@ async function resolveProjectSearch(
 
   const project = projects[0];
   if (!project) {
-    throw new ContextError(`Project '${projectSlug}' not found`, commandHint);
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint
+    );
   }
 
   const fullShortId = expandToFullShortId(suffix, project.slug);
@@ -181,8 +189,9 @@ async function resolveSuffixOnly(
 ): Promise<StrictResolvedIssue> {
   const target = await resolveOrgAndProject({ cwd });
   if (!target) {
-    throw new ContextError(
-      `Cannot resolve issue suffix '${suffix}' without project context`,
+    throw new ResolutionError(
+      `Issue suffix '${suffix}'`,
+      "could not be resolved without project context",
       commandHint
     );
   }
@@ -208,8 +217,9 @@ function resolveExplicitOrgSuffix(
   suffix: string,
   commandHint: string
 ): never {
-  throw new ContextError(
-    `Cannot resolve suffix '${suffix}' without project context`,
+  throw new ResolutionError(
+    `Issue suffix '${suffix}'`,
+    "could not be resolved without project context",
     commandHint,
     [
       `The format '${org}/${suffix}' requires a project to build the full issue ID.`,
@@ -243,7 +253,8 @@ export type ResolveIssueOptions = {
  *
  * @param options - Resolution options
  * @returns Object with org slug and full issue
- * @throws {ContextError} When required context cannot be resolved
+ * @throws {ContextError} When required context (org) is missing
+ * @throws {ResolutionError} When an issue or project could not be found or resolved
  */
 export async function resolveIssue(
   options: ResolveIssueOptions
@@ -263,10 +274,15 @@ export async function resolveIssue(
           // Improve on the generic "Issue not found" message by including the ID
           // and suggesting the short-ID format, since users often confuse numeric
           // group IDs with short-ID suffixes.
-          throw new ContextError(`Issue ${parsed.id}`, commandHint, [
-            `No issue with numeric ID ${parsed.id} found — you may not have access, or it may have been deleted.`,
-            `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.id}`,
-          ]);
+          throw new ResolutionError(
+            `Issue ${parsed.id}`,
+            "not found",
+            commandHint,
+            [
+              `No issue with numeric ID ${parsed.id} found — you may not have access, or it may have been deleted.`,
+              `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.id}`,
+            ]
+          );
         }
         throw err;
       }
@@ -286,10 +302,15 @@ export async function resolveIssue(
         return { org: parsed.org, issue };
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
-          throw new ContextError(`Issue ${parsed.numericId}`, commandHint, [
-            `No issue with numeric ID ${parsed.numericId} found in org '${parsed.org}' — you may not have access, or it may have been deleted.`,
-            `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
-          ]);
+          throw new ResolutionError(
+            `Issue ${parsed.numericId}`,
+            "not found",
+            commandHint,
+            [
+              `No issue with numeric ID ${parsed.numericId} found in org '${parsed.org}' — you may not have access, or it may have been deleted.`,
+              `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
+            ]
+          );
         }
         throw err;
       }

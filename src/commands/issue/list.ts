@@ -31,6 +31,7 @@ import {
   ApiError,
   AuthError,
   ContextError,
+  ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
 import {
@@ -352,10 +353,11 @@ async function resolveTargetsFromParsedArg(
       const matches = await findProjectsBySlug(parsed.projectSlug);
 
       if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry issue list <org>/${parsed.projectSlug}`
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "not found",
+          `sentry issue list <org>/${parsed.projectSlug}`,
+          ["No project with this slug found in any accessible organization"]
         );
       }
 

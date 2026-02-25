@@ -22,7 +22,7 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { validateLimit } from "../../../src/lib/arg-parsing.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TransactionListItem } from "../../../src/types/sentry.js";
@@ -150,7 +150,7 @@ describe("resolveOrgProjectFromArg", () => {
         "/tmp",
         "trace list"
       )
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("throws when multiple projects found", async () => {
@@ -167,8 +167,10 @@ describe("resolveOrgProjectFromArg", () => {
       );
       expect.unreachable("Should have thrown");
     } catch (error) {
-      expect(error).toBeInstanceOf(ContextError);
-      expect((error as ContextError).message).toContain("2 organizations");
+      expect(error).toBeInstanceOf(ResolutionError);
+      // Message says "is ambiguous", not "is required"
+      expect((error as ResolutionError).message).toContain("is ambiguous");
+      expect((error as ResolutionError).message).toContain("2 organizations");
     }
   });
 
