@@ -42,7 +42,7 @@ function safePath(cwd: string, relative: string): string {
 
 export async function handleLocalOp(
   payload: LocalOpPayload,
-  _options: WizardOptions
+  options: WizardOptions
 ): Promise<LocalOpResult> {
   try {
     switch (payload.operation) {
@@ -53,9 +53,9 @@ export async function handleLocalOp(
       case "file-exists-batch":
         return await fileExistsBatch(payload);
       case "run-commands":
-        return await runCommands(payload);
+        return await runCommands(payload, options.dryRun);
       case "apply-patchset":
-        return await applyPatchset(payload);
+        return await applyPatchset(payload, options.dryRun);
       default:
         return {
           ok: false,
@@ -167,7 +167,8 @@ function fileExistsBatch(payload: FileExistsBatchPayload): LocalOpResult {
 }
 
 async function runCommands(
-  payload: RunCommandsPayload
+  payload: RunCommandsPayload,
+  dryRun?: boolean
 ): Promise<LocalOpResult> {
   const { cwd, params } = payload;
   const timeoutMs = params.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
@@ -180,6 +181,15 @@ async function runCommands(
   }> = [];
 
   for (const command of params.commands) {
+    if (dryRun) {
+      results.push({
+        command,
+        exitCode: 0,
+        stdout: "(dry-run: skipped)",
+        stderr: "",
+      });
+      continue;
+    }
     const result = await runSingleCommand(command, cwd, timeoutMs);
     results.push(result);
     if (result.exitCode !== 0) {
@@ -251,7 +261,26 @@ function runSingleCommand(
   });
 }
 
-function applyPatchset(payload: ApplyPatchsetPayload): LocalOpResult {
+function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
+  const { cwd, params } = payload;
+  const applied: Array<{ path: string; action: string }> = [];
+
+  for (const patch of params.patches) {
+    safePath(cwd, patch.path);
+    applied.push({ path: patch.path, action: patch.action });
+  }
+
+  return { ok: true, data: { applied } };
+}
+
+function applyPatchset(
+  payload: ApplyPatchsetPayload,
+  dryRun?: boolean
+): LocalOpResult {
+  if (dryRun) {
+    return applyPatchsetDryRun(payload);
+  }
+
   const { cwd, params } = payload;
   const applied: Array<{ path: string; action: string }> = [];
 
@@ -260,7 +289,6 @@ function applyPatchset(payload: ApplyPatchsetPayload): LocalOpResult {
 
     switch (patch.action) {
       case "create": {
-        // Ensure parent directory exists
         const dir = path.dirname(absPath);
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(absPath, patch.patch, "utf-8");

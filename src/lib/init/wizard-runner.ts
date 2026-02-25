@@ -67,6 +67,15 @@ async function handleSuspendedStep(
   }
 
   if (payloadType === "interactive") {
+    // In dry-run mode, verification always fails because no files were written
+    // (the server skips apply-patchset). Auto-continue since this is expected.
+    if (options.dryRun && stepId === "verify-changes") {
+      return {
+        action: "continue",
+        _phase: nextPhase(stepPhases, stepId, ["apply"]),
+      };
+    }
+
     s.stop(label);
 
     const interactiveResult = await handleInteractive(
