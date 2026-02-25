@@ -102,12 +102,7 @@ if [[ -z "$requested_version" ]]; then
 elif [[ "$requested_version" == "nightly" ]]; then
   channel="nightly"
   download_tag="nightly"
-  version_json=$(curl -fsSL "https://github.com/getsentry/cli/releases/download/nightly/version.json")
-  version=$(echo "$version_json" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p')
-  if [[ -z "$version" ]]; then
-    echo -e "${RED}Failed to fetch nightly version${NC}"
-    exit 1
-  fi
+  version="nightly"
 else
   version="$requested_version"
   download_tag="$requested_version"

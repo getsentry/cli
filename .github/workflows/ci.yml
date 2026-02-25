@@ -181,13 +181,18 @@ jobs:
       - name: Set nightly version
         # Inject a nightly version into package.json before the build so it gets
         # baked into the binary. Only runs on direct pushes to main.
+        # Uses the commit timestamp (seconds since epoch) as a deterministic
+        # value so every matrix leg and publish-nightly produce the same version
+        # string for a given commit.
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
+        env:
+          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            const ts = Math.floor(Date.now() / 1000);
+            const ts = Math.floor(new Date(process.env.COMMIT_TIMESTAMP).getTime() / 1000);
             pkg.version = pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts);
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
@@ -309,11 +314,15 @@ jobs:
         with:
           sparse-checkout: package.json
       - name: Compute nightly version
+        # Uses the commit timestamp — the same value as build-binary — so
+        # version.json exactly matches the version baked into the binaries.
         id: version
+        env:
+          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
           VERSION=$(node -e "
             const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
-            const ts = Math.floor(Date.now() / 1000);
+            const ts = Math.floor(new Date(process.env.COMMIT_TIMESTAMP).getTime() / 1000);
             console.log(pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts));
           ")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

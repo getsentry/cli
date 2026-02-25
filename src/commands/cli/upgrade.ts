@@ -216,17 +216,24 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
  *   2. Install it to `determineInstallDir()` (same logic as the curl installer)
  *   3. Run setup on the new binary to update completions, PATH, and metadata
  *   4. Warn about the old package-manager installation that may still be in PATH
+ *
+ * @param versionArg - Specific version requested by the user, or undefined for
+ *   latest nightly. When a specific version is given, its release tag is used
+ *   instead of the rolling "nightly" tag so the correct binary is downloaded.
  */
 async function migrateToStandaloneForNightly(
   method: InstallationMethod,
   target: string,
-  stdout: { write: (s: string) => void }
+  stdout: { write: (s: string) => void },
+  versionArg: string | undefined
 ): Promise<void> {
   stdout.write("\nNightly builds are only available as standalone binaries.\n");
   stdout.write("Migrating to standalone installation...\n\n");
 
-  // Download nightly binary using the rolling "nightly" tag
-  const downloadResult = await executeUpgrade("curl", target, NIGHTLY_TAG);
+  // Use the rolling "nightly" tag for latest nightly; use the specific version
+  // tag if the user requested a pinned version.
+  const downloadTag = versionArg ? undefined : NIGHTLY_TAG;
+  const downloadResult = await executeUpgrade("curl", target, downloadTag);
   if (!downloadResult) {
     throw new UpgradeError(
       "execution_failed",
@@ -299,7 +306,7 @@ export const upgradeCommand = buildCommand({
       parameters: [
         {
           brief:
-            'Target version, or "nightly"/"stable" to switch channel (defaults to latest)',
+            'Specific version (e.g. 0.5.0), or "nightly"/"stable" to switch channel; omit to update within current channel',
           parse: String,
           placeholder: "version",
           optional: true,
@@ -384,13 +391,17 @@ export const upgradeCommand = buildCommand({
     // migrate to a standalone binary first then return — the migration
     // handles setup internally.
     if (channel === "nightly" && method !== "curl") {
-      await migrateToStandaloneForNightly(method, target, stdout);
+      await migrateToStandaloneForNightly(method, target, stdout, versionArg);
       stdout.write(`\nSuccessfully installed nightly ${target}.\n`);
       return;
     }
 
-    // Standard upgrade path: download (curl) or package manager
-    const downloadTag = channel === "nightly" ? NIGHTLY_TAG : undefined;
+    // Standard upgrade path: download (curl) or package manager.
+    // Use the rolling "nightly" tag only when upgrading to latest nightly
+    // (no specific version was requested). A specific version arg always
+    // uses its own tag so the correct release is downloaded.
+    const downloadTag =
+      channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
     const downloadResult = await executeUpgrade(method, target, downloadTag);
 
     // Run setup on the new binary to update completions, agent skills,
