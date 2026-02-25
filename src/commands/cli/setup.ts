@@ -16,6 +16,11 @@ import { installCompletions } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
+  parseReleaseChannel,
+  type ReleaseChannel,
+  setReleaseChannel,
+} from "../../lib/db/release-channel.js";
+import {
   addToGitHubPath,
   addToPath,
   detectShell,
@@ -32,6 +37,7 @@ import {
 type SetupFlags = {
   readonly install: boolean;
   readonly method?: InstallationMethod;
+  readonly channel?: ReleaseChannel;
   readonly "no-modify-path": boolean;
   readonly "no-completions": boolean;
   readonly "no-agent-skills": boolean;
@@ -292,6 +298,21 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
     );
   }
 
+  // 1b. Persist release channel (set by install script or upgrade command)
+  const channel = flags.channel;
+  if (channel) {
+    await bestEffort(
+      "Recording release channel",
+      () => {
+        setReleaseChannel(channel);
+        if (!flags.install) {
+          log(`Recorded release channel: ${channel}`);
+        }
+      },
+      warn
+    );
+  }
+
   // 2. Handle PATH modification
   if (!flags["no-modify-path"]) {
     await bestEffort(
@@ -363,6 +384,13 @@ export const setupCommand = buildCommand({
         parse: parseInstallationMethod,
         brief: "Installation method (curl, npm, pnpm, bun, yarn)",
         placeholder: "method",
+        optional: true,
+      },
+      channel: {
+        kind: "parsed",
+        parse: parseReleaseChannel,
+        brief: "Release channel to persist (stable or nightly)",
+        placeholder: "channel",
         optional: true,
       },
       "no-modify-path": {

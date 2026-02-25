@@ -15,19 +15,24 @@ import {
   isProcessRunning,
   releaseLock,
 } from "../../src/lib/binary.js";
-import { clearInstallInfo } from "../../src/lib/db/install-info.js";
+import {
+  clearInstallInfo,
+  setInstallInfo,
+} from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
+  fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
 } from "../../src/lib/upgrade.js";
+import { useTestConfigDir } from "../helpers.js";
 
 // Store original fetch for restoration
 let originalFetch: typeof globalThis.fetch;
@@ -224,6 +229,90 @@ describe("fetchLatestFromNpm", () => {
   });
 });
 
+describe("fetchLatestNightlyVersion", () => {
+  test("returns version from nightly version.json", async () => {
+    mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            version: "0.12.0-dev.1740393600",
+            sha: "abc123",
+            date: "2026-01-01",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
+    );
+
+    const version = await fetchLatestNightlyVersion();
+    expect(version).toBe("0.12.0-dev.1740393600");
+  });
+
+  test("throws on HTTP error", async () => {
+    mockFetch(
+      async () =>
+        new Response("Not Found", {
+          status: 404,
+        })
+    );
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "Failed to fetch nightly version: 404"
+    );
+  });
+
+  test("throws on network failure", async () => {
+    mockFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "Failed to connect to GitHub: fetch failed"
+    );
+  });
+
+  test("throws when no version in response", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ sha: "abc123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "No version found in nightly version.json"
+    );
+  });
+
+  test("respects AbortSignal", async () => {
+    const controller = new AbortController();
+    mockFetch(async (_url, init) => {
+      // Simulate a slow request that checks the signal
+      if (init?.signal?.aborted) {
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+      return new Response(
+        JSON.stringify({ version: "0.12.0-dev.1740393600" }),
+        { status: 200 }
+      );
+    });
+
+    // Abort before calling
+    controller.abort();
+
+    await expect(
+      fetchLatestNightlyVersion(controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
 describe("UpgradeError", () => {
   test("creates error with default message for unknown_method", () => {
     const error = new UpgradeError("unknown_method");
@@ -357,6 +446,46 @@ describe("fetchLatestVersion", () => {
     const version = await fetchLatestVersion("unknown");
     expect(version).toBe("2.0.0");
   });
+
+  test("uses nightly version.json when channel is nightly (curl method)", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ version: "0.12.0-dev.1740393600" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const version = await fetchLatestVersion("curl", "nightly");
+    expect(version).toBe("0.12.0-dev.1740393600");
+  });
+
+  test("uses nightly version.json when channel is nightly (npm method)", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ version: "0.12.0-dev.1740393600" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    // Even npm method should use nightly endpoint when channel=nightly
+    const version = await fetchLatestVersion("npm", "nightly");
+    expect(version).toBe("0.12.0-dev.1740393600");
+  });
+
+  test("defaults to stable channel (uses GitHub) when channel omitted", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "v3.0.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const version = await fetchLatestVersion("curl");
+    expect(version).toBe("3.0.0");
+  });
 });
 
 describe("versionExists", () => {
@@ -467,6 +596,52 @@ describe("executeUpgrade", () => {
   });
 });
 
+describe("detectInstallationMethod — stored info path", () => {
+  useTestConfigDir("test-detect-stored-");
+
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+    // Set execPath to a non-Homebrew, non-known-curl path so detection falls
+    // through to stored info
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/sentry",
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("returns stored method when install info has been persisted", async () => {
+    setInstallInfo({
+      method: "npm",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+  });
+
+  test("returns stored curl method", async () => {
+    setInstallInfo({
+      method: "curl",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("curl");
+  });
+});
+
 describe("Homebrew detection (detectInstallationMethod)", () => {
   let originalExecPath: string;
 
@@ -505,7 +680,6 @@ describe("Homebrew detection (detectInstallationMethod)", () => {
   test("Homebrew detection overrides stale stored install info", async () => {
     // Simulate a user who previously had curl recorded in the DB but then
     // switched to Homebrew — the /Cellar/ check should win.
-    const { setInstallInfo } = await import("../../src/lib/db/install-info.js");
     setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
 
     Object.defineProperty(process, "execPath", {
@@ -565,6 +739,63 @@ describe("getCurlInstallPaths", () => {
     const suffix = process.platform === "win32" ? ".exe" : "";
 
     expect(paths.installPath).toEndWith(`sentry${suffix}`);
+  });
+
+  describe("stored path branch", () => {
+    useTestConfigDir("test-curl-paths-stored-");
+
+    afterEach(() => {
+      clearInstallInfo();
+    });
+
+    test("uses stored path when install info has method=curl", () => {
+      const customPath = join(homedir(), "custom", "bin", "sentry");
+      setInstallInfo({ method: "curl", path: customPath, version: "1.0.0" });
+
+      const paths = getCurlInstallPaths();
+      expect(paths.installPath).toBe(customPath);
+      expect(paths.tempPath).toBe(`${customPath}.download`);
+    });
+
+    test("ignores stored path when method is not curl", () => {
+      // If stored method is e.g. "npm", the stored path branch is skipped
+      setInstallInfo({
+        method: "npm",
+        path: "/some/npm/path",
+        version: "1.0.0",
+      });
+
+      const paths = getCurlInstallPaths();
+      // Should NOT use the npm path
+      expect(paths.installPath).not.toBe("/some/npm/path");
+    });
+  });
+
+  describe("known curl path branch", () => {
+    let originalExecPath: string;
+
+    beforeEach(() => {
+      originalExecPath = process.execPath;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, "execPath", {
+        value: originalExecPath,
+        configurable: true,
+      });
+      clearInstallInfo();
+    });
+
+    test("uses execPath when it starts with a known curl install dir", () => {
+      const knownCurlPath = join(homedir(), ".local", "bin", "sentry");
+      Object.defineProperty(process, "execPath", {
+        value: knownCurlPath,
+        configurable: true,
+      });
+
+      const paths = getCurlInstallPaths();
+      expect(paths.installPath).toBe(knownCurlPath);
+    });
   });
 });
 

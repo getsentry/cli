@@ -39,6 +39,22 @@ export function getVersionCheckInfo(): VersionCheckInfo {
 }
 
 /**
+ * Clear the cached latest version.
+ *
+ * Should be called when the release channel changes so that stale version
+ * data from the previous channel is not shown in update notifications.
+ * The last-checked timestamp is also reset so a fresh check is triggered
+ * on the next CLI invocation.
+ */
+export function clearVersionCheckCache(): void {
+  const db = getDatabase();
+  db.query("DELETE FROM metadata WHERE key = ? OR key = ?").run(
+    KEY_LAST_CHECKED,
+    KEY_LATEST_VERSION
+  );
+}
+
+/**
  * Store the version check result.
  * Updates both the last checked timestamp and the latest known version.
  */

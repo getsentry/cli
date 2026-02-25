@@ -23,6 +23,7 @@ import {
 } from "./binary.js";
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
+import type { ReleaseChannel } from "./db/release-channel.js";
 import { UpgradeError } from "./errors.js";
 
 // Types
@@ -44,6 +45,16 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 /** GitHub API base URL for releases */
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/getsentry/cli/releases";
+
+/**
+ * Public URL for the nightly release's version manifest.
+ * This is a GitHub release asset on the rolling `nightly` prerelease.
+ */
+const NIGHTLY_VERSION_URL =
+  "https://github.com/getsentry/cli/releases/download/nightly/version.json";
+
+/** The git tag used for the rolling nightly release. */
+export const NIGHTLY_TAG = "nightly";
 
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
@@ -316,16 +327,65 @@ export async function fetchLatestFromNpm(): Promise<string> {
 }
 
 /**
- * Fetch the latest available version based on installation method.
- * curl and brew installations check GitHub releases; package managers check npm.
+ * Fetch the latest nightly version from the nightly release's version manifest.
+ *
+ * Downloads a small JSON file (`version.json`) from the rolling `nightly`
+ * GitHub prerelease. This file is uploaded by CI on every main-branch build
+ * and contains `{version, sha, date}`.
+ *
+ * The URL is a public GitHub release asset — no API token required.
+ *
+ * @param signal - Optional AbortSignal to cancel the request
+ * @returns Latest nightly version string (e.g. "0.12.0-dev.1740393600")
+ * @throws {UpgradeError} When fetch fails or response is invalid
+ */
+export async function fetchLatestNightlyVersion(
+  signal?: AbortSignal
+): Promise<string> {
+  const response = await fetchWithUpgradeError(
+    NIGHTLY_VERSION_URL,
+    { signal },
+    "GitHub"
+  );
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "network_error",
+      `Failed to fetch nightly version: ${response.status}`
+    );
+  }
+
+  const data = (await response.json()) as { version?: string };
+
+  if (!data.version) {
+    throw new UpgradeError(
+      "network_error",
+      "No version found in nightly version.json"
+    );
+  }
+
+  return data.version;
+}
+
+/**
+ * Fetch the latest available version based on installation method and channel.
+ *
+ * - nightly channel: fetches version.json from the rolling nightly release
+ * - curl/brew on stable: checks GitHub /releases/latest
+ * - package managers on stable: checks npm registry
  *
  * @param method - How the CLI was installed
+ * @param channel - Release channel ("stable" or "nightly"), defaults to "stable"
  * @returns Latest version string (without 'v' prefix)
  * @throws {UpgradeError} When version fetch fails
  */
 export function fetchLatestVersion(
-  method: InstallationMethod
+  method: InstallationMethod,
+  channel: ReleaseChannel = "stable"
 ): Promise<string> {
+  if (channel === "nightly") {
+    return fetchLatestNightlyVersion();
+  }
   return method === "curl" || method === "brew"
     ? fetchLatestFromGitHub()
     : fetchLatestFromNpm();
@@ -414,14 +474,18 @@ async function streamDecompressToFile(
  * process.ppid recognition in acquireLock — the parent's subsequent release
  * is then a harmless no-op.
  *
- * @param version - Target version to download
+ * @param version - Target version to download (used for display and comparison)
+ * @param downloadTag - Git tag to use in the download URL. Defaults to `version`.
+ *   Pass `NIGHTLY_TAG` ("nightly") when installing from the rolling nightly release
+ *   so the URL points to the prerelease assets regardless of the version string.
  * @returns The downloaded binary path and lock path to release
  * @throws {UpgradeError} When download fails
  */
 export async function downloadBinaryToTemp(
-  version: string
+  version: string,
+  downloadTag?: string
 ): Promise<DownloadResult> {
-  const url = getBinaryDownloadUrl(version);
+  const url = getBinaryDownloadUrl(downloadTag ?? version);
   const { tempPath, lockPath } = getCurlInstallPaths();
 
   acquireLock(lockPath);
@@ -572,17 +636,20 @@ function executeUpgradePackageManager(
  * spawn `setup` on the new binary for completions/agent skills.
  *
  * @param method - How the CLI was installed
- * @param version - Target version to install
+ * @param version - Target version to install (used for display)
+ * @param downloadTag - Git tag to download from. Defaults to `version`.
+ *   Pass `NIGHTLY_TAG` for nightly installs so the URL uses the "nightly" tag.
  * @returns Download result with paths (curl), or null (package manager)
  * @throws {UpgradeError} When method is unknown or installation fails
  */
 export async function executeUpgrade(
   method: InstallationMethod,
-  version: string
+  version: string,
+  downloadTag?: string
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return downloadBinaryToTemp(version);
+      return downloadBinaryToTemp(version, downloadTag);
     case "brew":
       await executeUpgradeHomebrew();
       return null;

@@ -13,7 +13,7 @@ Usage: install [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 0.2.0)
+    -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
@@ -22,6 +22,7 @@ Environment Variables:
 
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
+    curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
@@ -80,21 +81,38 @@ if [[ "$os" == "windows" ]]; then
   fi
 fi
 
-# Resolve version
+# Resolve version and download tag.
+#
+# "nightly" is a special value that installs from the rolling nightly prerelease
+# built from the main branch. In this case both `version` and `download_tag`
+# are set to the literal string "nightly".
+#
+# For stable releases both are the same version string (e.g. "0.5.0").
+channel="stable"
+download_tag=""
+
 if [[ -z "$requested_version" ]]; then
   version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
   if [[ -z "$version" ]]; then
     echo -e "${RED}Failed to fetch latest version${NC}"
     exit 1
   fi
+  download_tag="$version"
+elif [[ "$requested_version" == "nightly" ]]; then
+  channel="nightly"
+  download_tag="nightly"
+  version="nightly"
 else
   version="$requested_version"
+  download_tag="$requested_version"
 fi
 
 # Strip leading 'v' if present (releases use version without 'v' prefix)
 version="${version#v}"
+download_tag="${download_tag#v}"
+
 filename="sentry-${os}-${arch}${suffix}"
-url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
+url="https://github.com/getsentry/cli/releases/download/${download_tag}/${filename}"
 
 # Download binary to a temp location
 tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
@@ -103,7 +121,13 @@ tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
 # Clean up temp binary on failure (setup handles cleanup on success)
 trap 'rm -f "$tmp_binary"' EXIT
 
-echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+# For nightly the version string is literally "nightly", not a semver, so
+# skip the "v" prefix that's only meaningful for numbered releases.
+if [[ "$version" == "nightly" ]]; then
+  echo -e "${MUTED}Downloading sentry nightly...${NC}"
+else
+  echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+fi
 
 # Try gzip-compressed download first (~60% smaller, ~37 MB vs ~99 MB).
 # gunzip is POSIX and available on all Unix systems.
@@ -119,7 +143,9 @@ chmod +x "$tmp_binary"
 # Delegate installation and configuration to the binary itself.
 # setup --install handles: directory selection, binary placement, PATH,
 # completions, agent skills, and the welcome message.
-setup_args="--install --method curl"
+# --channel persists the release channel so future `sentry cli upgrade`
+# calls track the same channel without requiring a flag.
+setup_args="--install --method curl --channel $channel"
 if [[ "$no_modify_path" == "true" ]]; then
   setup_args="$setup_args --no-modify-path"
 fi

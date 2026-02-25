@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Commit timestamp used for deterministic nightly version strings.
+  # Defined at workflow level so build-binary and publish-nightly always agree.
+  COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+
 jobs:
   changes:
     name: Detect Changes
@@ -178,6 +183,20 @@ jobs:
           done
           echo "All install attempts failed"
           exit 1
+      - name: Set nightly version
+        # Inject a nightly version into package.json before the build so it gets
+        # baked into the binary. Only runs on direct pushes to main.
+        # Uses the commit timestamp (seconds since epoch) as a deterministic
+        # value so every matrix leg and publish-nightly produce the same version
+        # string for a given commit.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          NIGHTLY=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          jq --arg v "$NIGHTLY" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
@@ -282,17 +301,80 @@ jobs:
           name: gh-pages
           path: gh-pages.zip
 
+  publish-nightly:
+    name: Publish Nightly
+    # Only publish after a successful main-branch build+test. Skipped on PRs
+    # and release branches.
+    needs: [build-binary, test-e2e]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: package.json
+      - name: Compute nightly version
+        # Uses the commit timestamp — the same value as build-binary — so
+        # version.json exactly matches the version baked into the binaries.
+        id: version
+        run: |
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sentry-*
+          path: artifacts
+          merge-multiple: true
+      - name: Create version.json
+        run: |
+          cat > version.json <<EOF
+          {"version":"${{ steps.version.outputs.version }}","sha":"${{ github.sha }}","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+      - name: Create or update nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Create the release the first time; subsequent runs are a no-op
+          gh release create nightly \
+            --prerelease \
+            --title "Nightly" \
+            --notes "" \
+            2>/dev/null || true
+
+          # Update release notes with the latest version + commit
+          gh release edit nightly \
+            --prerelease \
+            --notes "Latest nightly build from the \`main\` branch.
+
+          **Version:** \`${{ steps.version.outputs.version }}\`
+          **Commit:** ${{ github.sha }}"
+
+          # Delete all existing assets first so removed/renamed files don't linger
+          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
+            gh release delete-asset nightly "$name" --yes
+          done
+
+          # Upload the new .gz binaries and the version manifest
+          gh release upload nightly \
+            artifacts/dist-bin/*.gz \
+            version.json
+
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e]
+    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, publish-nightly]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }}"
+          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"

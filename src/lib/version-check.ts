@@ -8,12 +8,13 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION } from "./constants.js";
+import { getReleaseChannel } from "./db/release-channel.js";
 import {
   getVersionCheckInfo,
   setVersionCheckInfo,
 } from "./db/version-check.js";
 import { cyan, muted } from "./formatters/colors.js";
-import { fetchLatestFromGitHub } from "./upgrade.js";
+import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
 
 /** Target check interval: ~24 hours */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -109,6 +110,8 @@ function checkForUpdateInBackgroundImpl(): void {
   pendingAbortController = new AbortController();
   const { signal } = pendingAbortController;
 
+  const channel = getReleaseChannel();
+
   Sentry.startSpanManual(
     {
       name: "version-check",
@@ -117,7 +120,10 @@ function checkForUpdateInBackgroundImpl(): void {
     },
     async (span) => {
       try {
-        const latestVersion = await fetchLatestFromGitHub(signal);
+        const latestVersion =
+          channel === "nightly"
+            ? await fetchLatestNightlyVersion(signal)
+            : await fetchLatestFromGitHub(signal);
         setVersionCheckInfo(latestVersion);
         span.setStatus({ code: 1 }); // OK
       } catch (error) {
@@ -158,7 +164,10 @@ function getUpdateNotificationImpl(): string | null {
       return null;
     }
 
-    return `\n${muted("Update available:")} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
+    const channel = getReleaseChannel();
+    const label =
+      channel === "nightly" ? "New nightly available:" : "Update available:";
+    return `\n${muted(label)} ${cyan(CLI_VERSION)} -> ${cyan(latestVersion)}  Run ${cyan('"sentry cli upgrade"')} to update.\n`;
   } catch (error) {
     // DB access failed - report to Sentry but don't crash CLI
     Sentry.captureException(error);
