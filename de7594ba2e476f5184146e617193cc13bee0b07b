@@ -1,0 +1,58 @@
+## Implementation Plan: Nightly Release Channel
+
+### Design Decisions
+- Nightly hosting: rolling GitHub prerelease tagged `nightly`, assets replaced via --clobber
+- Version format: `0.x.y-dev.<unix_seconds>` (e.g. `0.12.0-dev.1740393600`)
+- npm nightly: no — GitHub-only
+- Channel UX: `nightly`/`stable` as special positional version args on `upgrade`;
+  persisted in DB; --channel flag only on `setup` (used by the install script)
+- Install script: --version nightly reuses existing flag, no new top-level flags needed
+- Already up to date: skip unless --force, compare version.json against CLI_VERSION
+- Specific version + channel: leave persisted channel as-is
+- Non-curl → nightly: auto-migrate to standalone binary, warn about existing install
+- CI structure: preceding nightly-version job + publish-nightly job in ci.yml
+
+### Files Changed
+| File | Action | Description |
+|------|--------|-------------|
+| .github/workflows/ci.yml | Modify | nightly-version job, publish-nightly job, build-binary version injection, ci-status update |
+| install | Modify | --version nightly support; downloads from nightly tag; passes --channel to setup |
+| src/lib/db/release-channel.ts | New | getReleaseChannel(), setReleaseChannel(), parseReleaseChannel() |
+| src/commands/cli/setup.ts | Modify | --channel flag persists release channel on install |
+| src/commands/cli/upgrade.ts | Modify | nightly/stable as version args switch channels; --force flag; auto-migration from pkg managers |
+| src/lib/upgrade.ts | Modify | fetchLatestNightlyVersion(); downloadTag param; NIGHTLY_TAG constant |
+| src/lib/version-check.ts | Modify | channel-aware background check; nightly-specific notification label |
+| test/lib/db/release-channel.test.ts | New | 11 tests for channel persistence and parsing |
+| docs/src/content/docs/commands/cli/upgrade.md | Modify | Document nightly/stable positional args, --force flag |
+| docs/src/content/docs/getting-started.mdx | Modify | Add nightly install example |
+
+### CI Workflow Design
+nightly-version runs only on main pushes (skipped on PRs — skipped != failed).
+build-binary checks if nightly-version output is non-empty before injecting version.
+publish-nightly runs only after build-binary and test-e2e succeed on main.
+Rolling nightly release created once; assets replaced via gh release upload --clobber.
+
+### Nightly Download URL
+getBinaryDownloadUrl("nightly") reuses the same URL pattern as stable releases
+but with "nightly" as the tag. The .gz download + decompression logic is fully reused.
+
+### Version Comparison
+Bun.semver.order() handles nightly-to-nightly correctly: the unix timestamp in
+-dev.<ts> is a numeric pre-release identifier compared numerically.
+channelChanged=true bypasses the already-up-to-date check when switching channels.
+
+### User Flows
+  # Fresh nightly install
+  curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
+
+  # Switch existing install to nightly
+  sentry cli upgrade nightly
+
+  # Regular update (channel persisted)
+  sentry cli upgrade
+
+  # Force re-download even if up to date
+  sentry cli upgrade --force
+
+  # Switch back to stable
+  sentry cli upgrade stable
