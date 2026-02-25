@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as apiClient from "../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../src/lib/db/defaults.js";
-import { ContextError } from "../../src/lib/errors.js";
+import { ContextError, ResolutionError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
 import {
@@ -165,7 +165,7 @@ describe("resolveOrgProjectTarget", () => {
     expect(result).toEqual({ org: "found-org", project: "my-proj" });
   });
 
-  test("throws ContextError for project-search when no match", async () => {
+  test("throws ResolutionError for project-search when no match", async () => {
     findProjectsBySlugSpy.mockResolvedValue([]);
 
     const parsed = {
@@ -175,10 +175,10 @@ describe("resolveOrgProjectTarget", () => {
 
     await expect(
       resolveOrgProjectTarget(parsed, CWD, "trace list")
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
-  test("throws ContextError for project-search when multiple matches", async () => {
+  test("throws ResolutionError for project-search when multiple matches", async () => {
     findProjectsBySlugSpy.mockResolvedValue([
       { orgSlug: "org-a", slug: "my-proj", name: "My Project" },
       { orgSlug: "org-b", slug: "my-proj", name: "My Project" },
@@ -188,7 +188,7 @@ describe("resolveOrgProjectTarget", () => {
 
     await expect(
       resolveOrgProjectTarget(parsed, CWD, "trace list")
-    ).rejects.toThrow(ContextError);
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("resolves auto-detect when DSN detection succeeds", async () => {

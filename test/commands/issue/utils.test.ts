@@ -15,7 +15,7 @@ import {
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { ResolutionError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
@@ -306,7 +306,7 @@ describe("resolveOrgAndIssueId", () => {
     expect(result.issueId).toBe("444555666");
   });
 
-  test("throws ContextError for short suffix without project context", async () => {
+  test("throws ResolutionError for short suffix without project context", async () => {
     // Clear any defaults to ensure no project context
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
@@ -319,7 +319,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("Cannot resolve issue suffix");
+    ).rejects.toThrow("could not be resolved");
   });
 
   test("searches projects across orgs for project-suffix format", async () => {
@@ -571,7 +571,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("multiple organizations");
+    ).rejects.toThrow("is ambiguous");
   });
 
   test("short suffix auth error (401) propagates", async () => {
@@ -1285,7 +1285,7 @@ describe("resolveIssue: numeric 404 error handling", () => {
     globalThis.fetch = savedFetch;
   });
 
-  test("numeric 404 throws ContextError with ID and short-ID hint", async () => {
+  test("numeric 404 throws ResolutionError with ID and short-ID hint", async () => {
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ detail: "Issue not found" }), {
@@ -1299,9 +1299,11 @@ describe("resolveIssue: numeric 404 error handling", () => {
       command: "view",
     }).catch((e) => e);
 
-    expect(err).toBeInstanceOf(ContextError);
+    expect(err).toBeInstanceOf(ResolutionError);
     // Message includes the numeric ID
     expect(String(err)).toContain("123456789");
+    // Message says "not found", not "is required"
+    expect(String(err)).toContain("not found");
     // Suggests the short-ID format
     expect(String(err)).toContain("project>-123456789");
   });
@@ -1320,10 +1322,10 @@ describe("resolveIssue: numeric 404 error handling", () => {
         cwd: getResolveIssueConfigDir(),
         command: "view",
       })
-    ).rejects.not.toBeInstanceOf(ContextError);
+    ).rejects.not.toBeInstanceOf(ResolutionError);
   });
 
-  test("explicit-org-numeric 404 throws ContextError with org and ID", async () => {
+  test("explicit-org-numeric 404 throws ResolutionError with org and ID", async () => {
     // @ts-expect-error - partial mock
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ detail: "Issue not found" }), {
@@ -1337,11 +1339,13 @@ describe("resolveIssue: numeric 404 error handling", () => {
       command: "view",
     }).catch((e) => e);
 
-    expect(err).toBeInstanceOf(ContextError);
+    expect(err).toBeInstanceOf(ResolutionError);
     // Message includes the numeric ID
     expect(String(err)).toContain("999999999");
     // Message mentions the org
     expect(String(err)).toContain("my-org");
+    // Message says "not found", not "is required"
+    expect(String(err)).toContain("not found");
     // Suggests the short-ID format
     expect(String(err)).toContain("project>-999999999");
   });
@@ -1360,6 +1364,6 @@ describe("resolveIssue: numeric 404 error handling", () => {
         cwd: getResolveIssueConfigDir(),
         command: "view",
       })
-    ).rejects.not.toBeInstanceOf(ContextError);
+    ).rejects.not.toBeInstanceOf(ResolutionError);
   });
 });

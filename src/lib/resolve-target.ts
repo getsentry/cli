@@ -37,7 +37,12 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
-import { AuthError, ContextError, ValidationError } from "./errors.js";
+import {
+  AuthError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
@@ -793,11 +798,16 @@ export async function resolveProjectBySlug(
 ): Promise<{ org: string; project: string }> {
   const found = await findProjectsBySlug(projectSlug);
   if (found.length === 0) {
-    throw new ContextError(`Project "${projectSlug}"`, usageHint, [
-      isAllDigits(projectSlug)
-        ? "No project with this ID was found — check the ID or use the project slug instead"
-        : "Check that you have access to a project with this slug",
-    ]);
+    throw new ResolutionError(
+      `Project "${projectSlug}"`,
+      "not found",
+      usageHint,
+      [
+        isAllDigits(projectSlug)
+          ? "No project with this ID was found — check the ID or use the project slug instead"
+          : "Check that you have access to a project with this slug",
+      ]
+    );
   }
   if (found.length > 1) {
     const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
@@ -935,10 +945,11 @@ export async function resolveOrgProjectTarget(
       const matches = await findProjectsBySlug(parsed.projectSlug);
 
       if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry ${commandName} <org>/${parsed.projectSlug}`
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "not found",
+          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          ["No project with this slug found in any accessible organization"]
         );
       }
 
@@ -946,9 +957,11 @@ export async function resolveOrgProjectTarget(
         const options = matches
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
-        throw new ContextError(
-          "Project",
-          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "is ambiguous",
+          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          [`Found in ${matches.length} organizations. Specify one:\n${options}`]
         );
       }
 

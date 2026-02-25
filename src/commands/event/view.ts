@@ -19,7 +19,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
+import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
 import {
   resolveOrgAndProject,
@@ -221,9 +221,10 @@ export async function resolveOrgAllTarget(
 ): Promise<ResolvedEventTarget> {
   const resolved = await resolveEventInOrg(org, eventId);
   if (!resolved) {
-    throw new ContextError(
+    throw new ResolutionError(
       `Event ${eventId} in organization "${org}"`,
-      `sentry event view ${org}/ ${eventId}`
+      "not found",
+      `sentry event view ${org}/<project> ${eventId}`
     );
   }
   return {

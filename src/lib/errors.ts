@@ -164,6 +164,31 @@ function buildContextMessage(
 }
 
 /**
+ * Build the formatted resolution error message for entities that could not be found or resolved.
+ *
+ * @param resource - The entity that could not be resolved (e.g., "Issue 99124558")
+ * @param headline - Describes the failure (e.g., "not found", "is ambiguous", "could not be resolved")
+ * @param hint - Primary usage example or suggestion
+ * @param suggestions - Additional help bullets shown under "Or:"
+ * @returns Formatted multi-line error message
+ */
+function buildResolutionMessage(
+  resource: string,
+  headline: string,
+  hint: string,
+  suggestions: string[]
+): string {
+  const lines = [`${resource} ${headline}.`, "", "Try:", `  ${hint}`];
+  if (suggestions.length > 0) {
+    lines.push("", "Or:");
+    for (const s of suggestions) {
+      lines.push(`  - ${s}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
  * Missing required context errors (org, project, etc).
  *
  * Provides consistent error formatting with usage hints and alternatives.
@@ -192,6 +217,43 @@ export class ContextError extends CliError {
 
   override format(): string {
     // Message already contains the formatted output
+    return this.message;
+  }
+}
+
+/**
+ * Resolution errors for entities that exist but could not be found or resolved.
+ *
+ * Use this when the user provided a value but it could not be matched — as
+ * opposed to {@link ContextError}, which is for when the user omitted a
+ * required value entirely.
+ *
+ * @param resource - The entity that failed to resolve (e.g., "Issue 99124558", "Project 'cli'")
+ * @param headline - Short phrase describing the failure (e.g., "not found", "is ambiguous", "could not be resolved")
+ * @param hint - Primary usage example or suggestion (shown under "Try:")
+ * @param suggestions - Additional help bullets shown under "Or:" (defaults to empty)
+ */
+export class ResolutionError extends CliError {
+  readonly resource: string;
+  readonly headline: string;
+  readonly hint: string;
+  readonly suggestions: string[];
+
+  constructor(
+    resource: string,
+    headline: string,
+    hint: string,
+    suggestions: string[] = []
+  ) {
+    super(buildResolutionMessage(resource, headline, hint, suggestions));
+    this.name = "ResolutionError";
+    this.resource = resource;
+    this.headline = headline;
+    this.hint = hint;
+    this.suggestions = suggestions;
+  }
+
+  override format(): string {
     return this.message;
   }
 }
