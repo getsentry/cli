@@ -11,31 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  nightly-version:
-    name: Compute Nightly Version
-    # Only compute a nightly version on direct pushes to main — not on PRs or
-    # release branches. Downstream jobs (build-binary, publish-nightly) check
-    # whether this output is non-empty before acting on it; when this job is
-    # skipped the output is an empty string, so they behave as normal CI runs.
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: package.json
-      - id: version
-        name: Compute version
-        run: |
-          VERSION=$(node -e "
-            const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
-            const ts = Math.floor(Date.now() / 1000);
-            // Replace trailing -dev.<n> suffix with -dev.<unix_seconds>
-            console.log(pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts));
-          ")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
@@ -158,10 +133,7 @@ jobs:
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
-    needs: [lint, test-unit, nightly-version]
-    # Allow this job to run even when nightly-version is skipped (PRs / non-main pushes).
-    # Without this, GitHub skips dependents of skipped jobs by default.
-    if: ${{ !failure() && !cancelled() }}
+    needs: [lint, test-unit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -207,18 +179,18 @@ jobs:
           echo "All install attempts failed"
           exit 1
       - name: Set nightly version
-        # Inject the computed nightly version into package.json before the build
-        # so it gets baked into the binary. Only runs on main-branch pushes where
-        # nightly-version produced a non-empty output.
-        if: needs.nightly-version.outputs.version != ''
+        # Inject a nightly version into package.json before the build so it gets
+        # baked into the binary. Only runs on direct pushes to main.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         run: |
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = process.argv[1];
+            const ts = Math.floor(Date.now() / 1000);
+            pkg.version = pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts);
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          " "${{ needs.nightly-version.outputs.version }}"
+          "
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
@@ -326,13 +298,25 @@ jobs:
   publish-nightly:
     name: Publish Nightly
     # Only publish after a successful main-branch build+test. Skipped on PRs
-    # and release branches (nightly-version output will be empty).
-    needs: [nightly-version, build-binary, test-e2e]
+    # and release branches.
+    needs: [build-binary, test-e2e]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: package.json
+      - name: Compute nightly version
+        id: version
+        run: |
+          VERSION=$(node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf8'));
+            const ts = Math.floor(Date.now() / 1000);
+            console.log(pkg.version.replace(/-dev\.\d+$/, '-dev.' + ts));
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Download all binary artifacts
         uses: actions/download-artifact@v4
         with:
@@ -342,7 +326,7 @@ jobs:
       - name: Create version.json
         run: |
           cat > version.json <<EOF
-          {"version":"${{ needs.nightly-version.outputs.version }}","sha":"${{ github.sha }}","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          {"version":"${{ steps.version.outputs.version }}","sha":"${{ github.sha }}","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
           EOF
       - name: Create or update nightly release
         env:
@@ -361,7 +345,7 @@ jobs:
             --prerelease \
             --notes "Latest nightly build from the \`main\` branch.
 
-          **Version:** \`${{ needs.nightly-version.outputs.version }}\`
+          **Version:** \`${{ steps.version.outputs.version }}\`
           **Commit:** ${{ github.sha }}"
 
           # Upload/replace all .gz binaries and the version manifest
