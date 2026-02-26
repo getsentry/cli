@@ -203,22 +203,26 @@ export function mdRow(cells: readonly string[]): string {
 }
 
 /**
- * Wrap a user-supplied string in a backtick code span for use inside a
- * markdown table cell.
+ * Wrap a user-supplied string in a backtick code span.
  *
  * Inside a CommonMark code span, backslashes are **literal** (not escape
- * characters), so `\|` would render as `\|` rather than protecting the
- * table delimiter. Instead this helper:
+ * characters), so backslash-based escaping of special characters does not
+ * work. This helper sanitises the three characters that would otherwise break
+ * the span or the surrounding table structure:
  *
- * - Replaces `|` with `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) — visually
- *   identical but not a markdown table delimiter.
- * - Replaces newlines with a space — code spans cannot span lines.
+ * - Replaces `` ` `` with `ˋ` (U+02CB MODIFIER LETTER GRAVE ACCENT) —
+ *   visually identical in monospace fonts but never treated as a code-span
+ *   delimiter. Prevents exception messages like `Unexpected token \`` from
+ *   prematurely closing the span.
+ * - Replaces `|` with `│` (U+2502 BOX DRAWINGS LIGHT VERTICAL) — prevents
+ *   table column splitting when used inside a markdown table cell.
+ * - Replaces newlines with a space — code spans cannot span multiple lines.
  *
  * @param value - Raw string to format as a code span
- * @returns `` `value` `` with pipe and newline characters sanitised
+ * @returns `` `value` `` with backtick, pipe, and newline characters sanitised
  */
 export function safeCodeSpan(value: string): string {
-  return `\`${value.replace(/\|/g, "│").replace(/\n/g, " ")}\``;
+  return `\`${value.replace(/`/g, "ˋ").replace(/\|/g, "│").replace(/\n/g, " ")}\``;
 }
 
 /**

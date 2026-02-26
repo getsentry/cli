@@ -718,7 +718,7 @@ function formatStackFrameMarkdown(frame: StackFrame): string {
   const col = frame.colNo ?? "?";
   const inAppTag = frame.inApp ? " `[in-app]`" : "";
 
-  lines.push(`\`at ${fn} (${file}:${line}:${col})\`${inAppTag}`);
+  lines.push(`${safeCodeSpan(`at ${fn} (${file}:${line}:${col})`)}${inAppTag}`);
 
   if (frame.context && frame.context.length > 0) {
     lines.push("");
@@ -743,7 +743,7 @@ function formatExceptionValueMarkdown(exception: ExceptionValue): string {
 
   const type = exception.type || "Error";
   const value = exception.value || "";
-  lines.push(`**\`${type}: ${value}\`**`);
+  lines.push(`**${safeCodeSpan(`${type}: ${value}`)}**`);
 
   if (exception.mechanism) {
     const handled = exception.mechanism.handled ? "handled" : "unhandled";
