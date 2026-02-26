@@ -7,7 +7,7 @@
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
 import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
-import { renderMarkdown } from "./markdown.js";
+import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.

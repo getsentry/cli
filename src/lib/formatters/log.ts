@@ -7,7 +7,7 @@
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import { cyan, muted, red, yellow } from "./colors.js";
-import { renderMarkdown } from "./markdown.js";
+import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
 
 /** Color functions for log severity levels */
 const SEVERITY_COLORS: Record<string, (text: string) => string> = {
