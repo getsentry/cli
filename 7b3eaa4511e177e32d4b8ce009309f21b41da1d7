@@ -1,0 +1,42 @@
+## Investigation
+
+Two Sentry issues (CLI-9H, CLI-93) share the same root cause: users pass
+--field values using ':' as the separator instead of '='.
+
+- CLI-9H: `-F project:4510942921490432 -F id:7294283353 -F status:resolved` (PUT)
+- CLI-93: `-F since:2026-02-25T11:20:00` (GET)
+
+In both cases processField()/buildQueryParams() found no '=' and threw a raw
+Error with 'Expected key=value' — correct but unhelpful, and a crash either way.
+
+## Safety analysis
+
+Auto-correction is safe unconditionally because it only triggers when a field
+has NO '='. At that point the request would crash anyway, so there is no
+ambiguity and no risk of silently changing behaviour for valid inputs.
+
+Splitting on the *first* ':' is the right strategy: values that contain colons
+(ISO timestamps, URLs with ports) are preserved intact in the corrected value.
+
+## Implementation
+
+**Approach**: pre-process at the command level, keep parsers pure.
+
+1. Added `normalizeFields(fields, stderr)` in src/commands/api.ts
+   - Maps over each field; skips fields that already contain '=' or end with '[]'
+   - When a field has ':' at position > 0 (and no '='), rewrites to key=value
+     and emits a warning to stderr
+   - Fields with no ':' (truly uncorrectable) pass through for the parser to throw
+
+2. Called normalizeFields() in func() on both flags.field and flags['raw-field']
+   before prepareRequestOptions(), so the correction applies to body and query-param
+   paths uniformly.
+
+3. Upgraded 4 bare `throw new Error` sites in processField, buildQueryParams,
+   and buildRawQueryParams to `throw new ValidationError` so genuinely invalid
+   fields surface cleanly through the central error handler (no stack trace).
+
+4. Added 11 new tests for normalizeFields() covering: pass-through, empty-array
+   syntax, colon-correction (plain value, ISO timestamp, URL with port), multi-field
+   mixed correction, uncorrectable inputs, undefined/empty inputs.
+   Updated 3 existing error tests to assert ValidationError type.
