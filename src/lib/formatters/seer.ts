@@ -124,7 +124,7 @@ function buildRootCauseMarkdown(cause: RootCause, index: number): string {
     lines.push("**Reproduction steps:**");
     lines.push("");
     for (const step of cause.root_cause_reproduction) {
-      lines.push(`**${step.title}**`);
+      lines.push(`**${escapeMarkdownInline(step.title)}**`);
       lines.push("");
       // code_snippet_and_analysis may itself contain markdown (code fences,
       // inline code, etc.) — pass it through as-is so marked renders it.
@@ -270,7 +270,7 @@ export function formatSolution(solution: SolutionArtifact): string {
     for (let i = 0; i < solution.data.steps.length; i++) {
       const step = solution.data.steps[i];
       if (step) {
-        lines.push(`${i + 1}. **${step.title}**`);
+        lines.push(`${i + 1}. **${escapeMarkdownInline(step.title)}**`);
         lines.push("");
         // step.description may contain markdown — pass it through as-is
         lines.push(`   ${step.description.split("\n").join("\n   ")}`);
