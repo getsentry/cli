@@ -57,7 +57,7 @@ function makeManifest(overrides: Partial<OciManifest> = {}): OciManifest {
       },
     ],
     annotations: {
-      version: "0.0.0-nightly.1740000000",
+      version: "0.0.0-dev.1740000000",
       "org.opencontainers.image.source": "https://github.com/getsentry/cli",
     },
     ...overrides,
@@ -174,7 +174,7 @@ describe("fetchNightlyManifest", () => {
 describe("getNightlyVersion", () => {
   test("extracts version from manifest annotations", () => {
     const manifest = makeManifest();
-    expect(getNightlyVersion(manifest)).toBe("0.0.0-nightly.1740000000");
+    expect(getNightlyVersion(manifest)).toBe("0.0.0-dev.1740000000");
   });
 
   test("throws UpgradeError when version annotation is missing", () => {

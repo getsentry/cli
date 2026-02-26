@@ -1,7 +1,7 @@
 /**
  * Background version check for "new version available" notifications.
  *
- * For nightly builds (CLI_VERSION contains "-nightly."), checks GHCR for the
+ * For nightly builds (CLI_VERSION contains "-dev.<timestamp>"), checks GHCR for the
  * latest nightly version via the OCI manifest annotation. For stable builds,
  * checks GitHub Releases. Results are cached in the database and shown on
  * subsequent runs.

@@ -377,7 +377,7 @@ describe("fetchLatestVersion", () => {
       if (urlStr.includes("/manifests/nightly")) {
         return new Response(
           JSON.stringify({
-            annotations: { version: "0.0.0-nightly.1740393600" },
+            annotations: { version: "0.0.0-dev.1740393600" },
           }),
           { status: 200 }
         );
@@ -386,7 +386,7 @@ describe("fetchLatestVersion", () => {
     });
 
     const version = await fetchLatestVersion("curl", "nightly");
-    expect(version).toBe("0.0.0-nightly.1740393600");
+    expect(version).toBe("0.0.0-dev.1740393600");
   });
 
   test("uses GHCR manifest when channel is nightly (npm method)", async () => {
@@ -399,7 +399,7 @@ describe("fetchLatestVersion", () => {
       if (urlStr.includes("/manifests/nightly")) {
         return new Response(
           JSON.stringify({
-            annotations: { version: "0.0.0-nightly.1740393600" },
+            annotations: { version: "0.0.0-dev.1740393600" },
           }),
           { status: 200 }
         );
@@ -408,7 +408,7 @@ describe("fetchLatestVersion", () => {
     });
 
     const version = await fetchLatestVersion("npm", "nightly");
-    expect(version).toBe("0.0.0-nightly.1740393600");
+    expect(version).toBe("0.0.0-dev.1740393600");
   });
 
   test("defaults to stable channel (uses GitHub) when channel omitted", async () => {
@@ -1074,8 +1074,8 @@ describe("startCleanupOldBinary", () => {
 
 describe("isNightlyVersion", () => {
   test("returns true for nightly version strings", () => {
-    expect(isNightlyVersion("0.0.0-nightly.1740000000")).toBe(true);
-    expect(isNightlyVersion("0.0.0-nightly.1")).toBe(true);
+    expect(isNightlyVersion("0.0.0-dev.1740000000")).toBe(true);
+    expect(isNightlyVersion("0.0.0-dev.1")).toBe(true);
   });
 
   test("returns false for stable version strings", () => {
@@ -1104,7 +1104,7 @@ describe("fetchLatestNightlyVersion", () => {
           JSON.stringify({
             schemaVersion: 2,
             layers: [],
-            annotations: { version: "0.0.0-nightly.1740000000" },
+            annotations: { version: "0.0.0-dev.1740000000" },
           }),
           {
             status: 200,
@@ -1118,7 +1118,7 @@ describe("fetchLatestNightlyVersion", () => {
     });
 
     const version = await fetchLatestNightlyVersion();
-    expect(version).toBe("0.0.0-nightly.1740000000");
+    expect(version).toBe("0.0.0-dev.1740000000");
     expect(callCount).toBe(2); // token + manifest
   });
 
@@ -1219,7 +1219,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
                 annotations: { "org.opencontainers.image.title": title },
               },
             ],
-            annotations: { version: "0.0.0-nightly.1740000000" },
+            annotations: { version: "0.0.0-dev.1740000000" },
           }),
           { status: 200 }
         );
@@ -1231,7 +1231,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
       return new Response("Not Found", { status: 404 });
     });
 
-    const result = await executeUpgrade("curl", "0.0.0-nightly.1740000000");
+    const result = await executeUpgrade("curl", "0.0.0-dev.1740000000");
 
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("tempBinaryPath");

@@ -367,7 +367,7 @@ describe("sentry cli upgrade", () => {
 
   describe("nightly version check", () => {
     test("--check mode with 'nightly' positional fetches latest from GHCR", async () => {
-      const nightlyVersion = "0.0.0-nightly.1740000000";
+      const nightlyVersion = "0.0.0-dev.1740000000";
       // 'nightly' as positional switches channel to nightly — fetches from GHCR
       mockGhcrNightlyVersion(nightlyVersion);
 
@@ -386,7 +386,7 @@ describe("sentry cli upgrade", () => {
     });
 
     test("--check with 'nightly' positional shows upgrade hint when newer nightly available", async () => {
-      const nightlyVersion = "0.0.0-nightly.1740000000";
+      const nightlyVersion = "0.0.0-dev.1740000000";
       mockGhcrNightlyVersion(nightlyVersion);
 
       const { context, output } = createMockContext({ homeDir: testDir });
@@ -691,7 +691,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
         }
         return new Response(
           JSON.stringify({
-            annotations: { version: "0.99.0-nightly.1234567890" },
+            annotations: { version: "0.99.0-dev.1234567890" },
             layers: [
               {
                 digest: "sha256:abc123",
@@ -808,7 +808,7 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
         }
         return new Response(
           JSON.stringify({
-            annotations: { version: "0.99.0-nightly.1234567890" },
+            annotations: { version: "0.99.0-dev.1234567890" },
             layers: [
               {
                 digest: "sha256:abc456",

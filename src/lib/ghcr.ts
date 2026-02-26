@@ -156,7 +156,7 @@ export async function fetchNightlyManifest(
  * The version is set via `--annotation "version=<ver>"` during `oras push`.
  *
  * @param manifest - OCI manifest from {@link fetchNightlyManifest}
- * @returns Version string (e.g., "0.0.0-nightly.1740000000")
+ * @returns Version string (e.g., "0.13.0-dev.1740000000")
  * @throws {UpgradeError} When the version annotation is missing
  */
 export function getNightlyVersion(manifest: OciManifest): string {

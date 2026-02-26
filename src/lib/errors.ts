@@ -377,6 +377,20 @@ export class SeerError extends CliError {
 // Error Utilities
 
 /**
+ * Thrown when an operation is cancelled via an AbortSignal.
+ *
+ * Matches the `error.name === "AbortError"` convention used throughout the
+ * codebase (version-check.ts, sentry-client.ts, binary.ts) to detect and
+ * silently swallow cancellation errors.
+ */
+export class AbortError extends Error {
+  override name = "AbortError" as const;
+  constructor() {
+    super("The operation was aborted");
+  }
+}
+
+/**
  * Convert an unknown value to a human-readable string.
  *
  * Handles Error instances (`.message`), plain objects (`JSON.stringify`),

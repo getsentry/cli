@@ -227,12 +227,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [build-binary]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all binary artifacts
         uses: actions/download-artifact@v4
         with:
@@ -240,13 +235,10 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Install ORAS CLI
-        run: |
-          VERSION=1.2.3
-          curl -sfL "https://github.com/oras-project/oras/releases/download/v${VERSION}/oras_${VERSION}_linux_amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin oras
-
       - name: Compress binaries
+        # Build artifacts are raw binaries — compression for stable releases
+        # happens in Craft during publishing, not during build. GHCR nightly
+        # needs .gz for efficient OCI layers.
         run: |
           ls artifacts/
           for f in artifacts/sentry-linux-* artifacts/sentry-darwin-*; do
@@ -258,22 +250,28 @@ jobs:
           done
           ls artifacts/*.gz
 
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.2.3
+          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin oras < "$TARBALL"
+          rm "$TARBALL"
+
       - name: Compute nightly version
         id: version
         run: |
-          # Derive a deterministic Unix timestamp from the commit so that all
-          # jobs in this workflow run produce the same version string.
-          TS=$(date -d '${{ github.event.head_commit.timestamp }}' +%s 2>/dev/null \
-               || date -j -f "%Y-%m-%dT%H:%M:%S%z" '${{ github.event.head_commit.timestamp }}' +%s 2>/dev/null \
-               || echo ${{ github.run_number }})
-          VERSION="0.0.0-nightly.${TS}"
+          # The build-binary job bakes X.Y.Z-dev.<TS> into each binary using the
+          # same COMMIT_TIMESTAMP env var. Re-derive the version here so the GHCR
+          # manifest annotation matches the version string inside the binary.
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/package.json" \
+                    | awk -F'"' '/"version"/{print $4}')
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
-
-      - name: Create version.json
-        run: |
-          echo '{"version":"${{ steps.version.outputs.version }}"}' > version.json
-          cat version.json
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -285,8 +283,7 @@ jobs:
             --artifact-type application/vnd.sentry.cli.nightly \
             --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
             --annotation "version=${VERSION}" \
-            artifacts/*.gz \
-            version.json
+            artifacts/*.gz
 
   test-e2e:
     name: E2E Tests

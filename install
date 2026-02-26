@@ -13,8 +13,7 @@ Usage: install [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 0.2.0)
-        --nightly           Install the latest nightly build from GHCR
+    -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
@@ -25,13 +24,11 @@ Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
-    curl -fsSL https://cli.sentry.dev/install | bash -s -- --nightly
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
 }
 
 requested_version=""
-nightly=false
 no_modify_path=false
 no_completions=false
 while [[ $# -gt 0 ]]; do
@@ -45,10 +42,6 @@ while [[ $# -gt 0 ]]; do
         echo -e "${RED}Error: --version requires a version argument${NC}"
         exit 1
       fi
-      ;;
-    --nightly)
-      nightly=true
-      shift
       ;;
     --no-modify-path)
       no_modify_path=true
@@ -88,13 +81,6 @@ if [[ "$os" == "windows" ]]; then
   fi
 fi
 
-# Validate flag combinations
-if [[ "$nightly" == "true" && -n "$requested_version" ]]; then
-  echo -e "${RED}Error: --nightly and --version are mutually exclusive${NC}"
-  exit 1
-fi
-
-
 # Download binary to a temp location
 tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
 tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
@@ -103,7 +89,7 @@ version=""
 # Clean up temp binary on failure (setup handles cleanup on success)
 trap 'rm -f "$tmp_binary"' EXIT
 
-if [[ "$nightly" == "true" ]]; then
+if [[ "$requested_version" == "nightly" ]]; then
   # Nightly build: download from GHCR via OCI blob protocol.
   # No jq needed — parse JSON with awk.
   # ghcr.io blob downloads redirect to Azure Blob Storage. curl -L would
@@ -202,8 +188,9 @@ chmod +x "$tmp_binary"
 # completions, agent skills, and the welcome message.
 # --channel persists the release channel so future `sentry cli upgrade`
 # calls track the same channel without requiring a flag.
-channel="nightly"
-if [[ "$nightly" != "true" ]]; then
+if [[ "$requested_version" == "nightly" ]]; then
+  channel="nightly"
+else
   channel="stable"
 fi
 setup_args="--install --method curl --channel $channel"

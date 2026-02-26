@@ -24,7 +24,7 @@ import {
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
-import { UpgradeError } from "./errors.js";
+import { AbortError, UpgradeError } from "./errors.js";
 import {
   downloadNightlyBlob,
   fetchNightlyManifest,
@@ -334,7 +334,7 @@ export async function fetchLatestFromNpm(): Promise<string> {
  * only 2 HTTP requests total (token + manifest), no blob download needed.
  *
  * @param signal - Optional AbortSignal to cancel the requests
- * @returns Latest nightly version string (e.g., "0.0.0-nightly.1740000000")
+ * @returns Latest nightly version string (e.g., "0.13.0-dev.1740000000")
  * @throws {UpgradeError} When fetch fails or the version annotation is missing
  */
 export async function fetchLatestNightlyVersion(
@@ -343,13 +343,13 @@ export async function fetchLatestNightlyVersion(
   // AbortSignal is not threaded through ghcr helpers, but checking it before
   // each network call ensures we bail out promptly when the process exits.
   if (signal?.aborted) {
-    throw Object.assign(new Error("AbortError"), { name: "AbortError" });
+    throw new AbortError();
   }
 
   const token = await getAnonymousToken();
 
   if (signal?.aborted) {
-    throw Object.assign(new Error("AbortError"), { name: "AbortError" });
+    throw new AbortError();
   }
 
   const manifest = await fetchNightlyManifest(token);
@@ -359,13 +359,14 @@ export async function fetchLatestNightlyVersion(
 /**
  * Detect if the given version string represents a nightly build.
  *
- * Nightly versions follow the pattern `0.0.0-nightly.<timestamp>`.
+ * Nightly versions follow the pattern `X.Y.Z-dev.<timestamp>` (the same
+ * format the build system bakes in via `sed "s/-dev\.[0-9]*$/-dev.${TS}/"`).
  *
  * @param version - Version string to check
  * @returns true if the version is a nightly build
  */
 export function isNightlyVersion(version: string): boolean {
-  return version.includes("-nightly.");
+  return version.includes("-dev.");
 }
 
 /**
@@ -468,14 +469,11 @@ async function streamDecompressToFile(
  * @returns Filename of the gzip-compressed binary for this platform
  */
 function getNightlyGzFilename(): string {
-  let os: string;
-  if (process.platform === "darwin") {
-    os = "darwin";
-  } else if (process.platform === "win32") {
-    os = "windows";
-  } else {
-    os = "linux";
-  }
+  const platformNames: Record<string, string> = {
+    darwin: "darwin",
+    win32: "windows",
+  };
+  const os = platformNames[process.platform] ?? "linux";
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const suffix = process.platform === "win32" ? ".exe" : "";
   return `sentry-${os}-${arch}${suffix}.gz`;
