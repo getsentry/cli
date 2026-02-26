@@ -55,13 +55,25 @@ jobs:
       - name: Compute build matrix
         id: targets
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
-            echo 'matrix={"include":[{"target":"linux-x64","os":"ubuntu-latest","can-test":true}]}' >> "$GITHUB_OUTPUT"
-          else
-            # main, release/**, workflow_call: full cross-platform matrix
-            echo 'matrix={"include":[{"target":"darwin-arm64","os":"macos-latest","can-test":true},{"target":"linux-x64","os":"ubuntu-latest","can-test":true},{"target":"windows-x64","os":"windows-latest","can-test":true},{"target":"darwin-x64","os":"macos-latest","can-test":false},{"target":"linux-arm64","os":"ubuntu-latest","can-test":false}]}' >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo 'matrix<<MATRIX_EOF'
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
+              echo '{"include":[
+                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+              ]}'
+            else
+              # main, release/**, workflow_call: full cross-platform matrix
+              echo '{"include":[
+                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
+                {"target":"windows-x64",   "os":"windows-latest","can-test":true},
+                {"target":"darwin-x64",    "os":"macos-latest",  "can-test":false},
+                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+              ]}'
+            fi
+            echo 'MATRIX_EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: Compute nightly version
         id: nightly
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
