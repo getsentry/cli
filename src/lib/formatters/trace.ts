@@ -98,8 +98,8 @@ export function formatTraceTable(items: TransactionListItem[]): string {
       const transaction = item.transaction || "unknown";
       const duration = formatTraceDuration(item["transaction.duration"]);
       const when = formatRelativeTime(item.timestamp).trim();
-      // Escape pipe characters in cell values to avoid breaking the table
-      const safeTransaction = transaction.replace(/\|/g, "\\|");
+      // Escape special markdown characters in cell values to avoid breaking the table
+      const safeTransaction = escapeMarkdownCell(transaction);
       return `| \`${traceId}\` | ${safeTransaction} | ${duration} | ${when} |`;
     })
     .join("\n");

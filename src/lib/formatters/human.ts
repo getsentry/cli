@@ -32,7 +32,7 @@ import {
   muted,
   statusColor,
 } from "./colors.js";
-import { renderMarkdown } from "./markdown.js";
+import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
 
 // Status Formatting
 
@@ -806,12 +806,9 @@ function buildBreadcrumbsMarkdown(breadcrumbsEntry: BreadcrumbsEntry): string {
       message = `${message.slice(0, 77)}...`;
     }
 
-    // Escape pipe characters that would break the markdown table
-    const safeMessage = message.replace(/\|/g, "\\|");
-    const safeCategory = (breadcrumb.category ?? "default").replace(
-      /\|/g,
-      "\\|"
-    );
+    // Escape special markdown characters that would break the table cell
+    const safeMessage = escapeMarkdownCell(message);
+    const safeCategory = escapeMarkdownCell(breadcrumb.category ?? "default");
 
     lines.push(
       `| ${timestamp} | ${level} | ${safeCategory} | ${safeMessage} |`
@@ -1226,7 +1223,7 @@ export function formatEventDetails(
       sections.push("| Key | Value |");
       sections.push("|---|---|");
       for (const tag of event.tags) {
-        const safeVal = String(tag.value).replace(/\|/g, "\\|");
+        const safeVal = escapeMarkdownCell(String(tag.value));
         sections.push(`| \`${tag.key}\` | ${safeVal} |`);
       }
     }

@@ -96,7 +96,7 @@ export function formatLogTable(logs: SentryLog[]): string {
       const timestamp = formatTimestamp(log.timestamp);
       // Pre-render ANSI severity color — survives the cli-table3 pipeline
       const severity = formatSeverity(log.severity).trim();
-      const message = (log.message ?? "").replace(/\|/g, "\\|");
+      const message = escapeMarkdownCell(log.message ?? "");
       const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
       return `| ${timestamp} | ${severity} | ${message}${trace} |`;
     })

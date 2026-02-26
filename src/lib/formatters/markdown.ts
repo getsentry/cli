@@ -68,6 +68,19 @@ marked.use(
 );
 
 /**
+ * Escape a string for safe use inside a markdown table cell.
+ *
+ * Escapes backslashes first (so the escape character itself is not
+ * double-interpreted), then pipe characters (the table cell delimiter).
+ *
+ * @param value - Raw cell content
+ * @returns Markdown-safe string suitable for embedding in `| cell |` syntax
+ */
+export function escapeMarkdownCell(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
+/**
  * Render a markdown string as styled terminal output.
  *
  * Supports the full CommonMark spec:
