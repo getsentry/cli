@@ -190,10 +190,34 @@ export function safeCodeSpan(value: string): string {
 }
 
 /**
+ * Sanitise a pre-formatted table cell value for safe embedding in a raw
+ * markdown `| cell |` row.
+ *
+ * Unlike {@link escapeMarkdownCell}, this helper does **not** backslash-escape
+ * the backslash character. It is designed for values that may already contain
+ * inline markdown formatting (e.g. code spans) where `\\` would corrupt the
+ * rendered output. Instead of `\|`, pipe characters are replaced with
+ * `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) — visually identical but not a
+ * CommonMark table delimiter.
+ *
+ * @param value - Cell value that may include inline markdown (backtick spans,
+ *   bold, etc.)
+ * @returns Value with `|` replaced by `│` and newlines collapsed to a space
+ */
+function sanitizeKvCell(value: string): string {
+  return value.replace(/\n/g, " ").replace(/\|/g, "│");
+}
+
+/**
  * Build a key-value markdown table section with an optional heading.
  *
  * Each entry is rendered as `| **Label** | value |`.
  * Uses the blank-header-row pattern required by marked-terminal.
+ *
+ * Values are sanitised via {@link sanitizeKvCell} — callers may pass raw text
+ * or pre-formatted inline markdown (e.g. `` `code` ``, `**bold**`). Raw text
+ * values with user-supplied content should be wrapped in {@link safeCodeSpan}
+ * or {@link escapeMarkdownCell} before passing if precise escaping is needed.
  *
  * @param rows - `[label, value]` tuples
  * @param heading - Optional `### Heading` text (omit the `###` prefix)
@@ -211,7 +235,7 @@ export function mdKvTable(
   lines.push("| | |");
   lines.push("|---|---|");
   for (const [label, value] of rows) {
-    lines.push(`| **${label}** | ${escapeMarkdownCell(value)} |`);
+    lines.push(`| **${label}** | ${sanitizeKvCell(value)} |`);
   }
   return lines.join("\n");
 }
