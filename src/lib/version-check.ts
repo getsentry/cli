@@ -1,8 +1,10 @@
 /**
  * Background version check for "new version available" notifications.
  *
- * Checks GitHub releases for new versions without blocking CLI execution.
- * Results are cached in the database and shown on subsequent runs.
+ * For nightly builds (CLI_VERSION contains "-dev.<timestamp>"), checks GHCR for the
+ * latest nightly version via the OCI manifest annotation. For stable builds,
+ * checks GitHub Releases. Results are cached in the database and shown on
+ * subsequent runs.
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
@@ -120,6 +122,7 @@ function checkForUpdateInBackgroundImpl(): void {
     },
     async (span) => {
       try {
+        // Use GHCR for nightly channel; GitHub Releases for stable.
         const latestVersion =
           channel === "nightly"
             ? await fetchLatestNightlyVersion(signal)

@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# packages:write is needed for publish-nightly to push to GHCR
+permissions:
+  contents: read
+  packages: write
+
 env:
   # Commit timestamp used for deterministic nightly version strings.
   # Defined at workflow level so build-binary and publish-nightly always agree.
@@ -24,6 +29,8 @@ jobs:
     outputs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      build-targets: ${{ steps.targets.outputs.matrix }}
+      nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
@@ -45,6 +52,37 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - '.github/workflows/ci.yml'
+      - name: Compute build matrix
+        id: targets
+        run: |
+          {
+            echo 'matrix<<MATRIX_EOF'
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
+              echo '{"include":[
+                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+              ]}'
+            else
+              # main, release/**, workflow_call: full cross-platform matrix
+              echo '{"include":[
+                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
+                {"target":"windows-x64",   "os":"windows-latest","can-test":true},
+                {"target":"darwin-x64",    "os":"macos-latest",  "can-test":false},
+                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+              ]}'
+            fi
+            echo 'MATRIX_EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Compute nightly version
+        id: nightly
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: ${VERSION}"
 
   check-skill:
     name: Check SKILL.md
@@ -138,29 +176,11 @@ jobs:
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
-    needs: [lint, test-unit]
+    needs: [changes, lint, test-unit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Native builds (can run smoke test)
-          - target: darwin-arm64
-            os: macos-latest
-            can-test: true
-          - target: linux-x64
-            os: ubuntu-latest
-            can-test: true
-          - target: windows-x64
-            os: windows-latest
-            can-test: true
-          # Cross-compiled builds (cannot run smoke test)
-          - target: darwin-x64
-            os: macos-latest
-            can-test: false
-          - target: linux-arm64
-            os: ubuntu-latest
-            can-test: false
+      matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -184,22 +204,18 @@ jobs:
           echo "All install attempts failed"
           exit 1
       - name: Set nightly version
-        # Inject a nightly version into package.json before the build so it gets
-        # baked into the binary. Only runs on direct pushes to main.
-        # Uses the commit timestamp (seconds since epoch) as a deterministic
-        # value so every matrix leg and publish-nightly produce the same version
-        # string for a given commit.
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        # Inject the nightly version (computed once in the changes job) into
+        # package.json before the build so it gets baked into the binary.
+        if: needs.changes.outputs.nightly-version != ''
         shell: bash
         run: |
-          TS=$(date -d "$COMMIT_TIMESTAMP" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
-          NIGHTLY=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
-          jq --arg v "$NIGHTLY" '.version = $v' package.json > package.json.tmp
+          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' package.json > package.json.tmp
           mv package.json.tmp package.json
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          # Set on main/release branches so build.ts runs binpunch + creates .gz
+          RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
       - name: Smoke test
         if: matrix.can-test
@@ -210,11 +226,56 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
-      - name: Upload artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
-          path: dist-bin/sentry-*
+          path: |
+            dist-bin/sentry-*
+            !dist-bin/*.gz
+
+      - name: Upload compressed artifact
+        if: env.RELEASE_BUILD == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentry-${{ matrix.target }}-gz
+          path: dist-bin/*.gz
+
+  publish-nightly:
+    name: Publish Nightly to GHCR
+    # Only run on pushes to main, not on PRs or release branches
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download compressed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sentry-*-gz
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.2.3
+          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin oras < "$TARBALL"
+          rm "$TARBALL"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push to GHCR
+        run: |
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
+          oras push ghcr.io/getsentry/cli:nightly \
+            --artifact-type application/vnd.sentry.cli.nightly \
+            --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+            --annotation "version=${VERSION}" \
+            artifacts/*.gz
 
   test-e2e:
     name: E2E Tests
@@ -301,69 +362,6 @@ jobs:
           name: gh-pages
           path: gh-pages.zip
 
-  publish-nightly:
-    name: Publish Nightly
-    # Only publish after a successful main-branch build+test. Skipped on PRs
-    # and release branches.
-    needs: [build-binary, test-e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: package.json
-      - name: Compute nightly version
-        # Uses the commit timestamp — the same value as build-binary — so
-        # version.json exactly matches the version baked into the binaries.
-        id: version
-        run: |
-          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
-          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Download all binary artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: sentry-*
-          path: artifacts
-          merge-multiple: true
-      - name: Create version.json
-        run: |
-          cat > version.json <<EOF
-          {"version":"${{ steps.version.outputs.version }}","sha":"${{ github.sha }}","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-          EOF
-      - name: Create or update nightly release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # Create the release the first time; subsequent runs are a no-op
-          gh release create nightly \
-            --prerelease \
-            --title "Nightly" \
-            --notes "" \
-            2>/dev/null || true
-
-          # Update release notes with the latest version + commit
-          gh release edit nightly \
-            --prerelease \
-            --notes "Latest nightly build from the \`main\` branch.
-
-          **Version:** \`${{ steps.version.outputs.version }}\`
-          **Commit:** ${{ github.sha }}"
-
-          # Delete all existing assets first so removed/renamed files don't linger
-          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
-            gh release delete-asset nightly "$name" --yes
-          done
-
-          # Upload the new .gz binaries and the version manifest
-          gh release upload nightly \
-            artifacts/*.gz \
-            version.json
-
   ci-status:
     name: CI Status
     if: always()
@@ -374,6 +372,7 @@ jobs:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
+          # publish-nightly is skipped on PRs (if: github.ref == 'refs/heads/main') — that's expected
           results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then

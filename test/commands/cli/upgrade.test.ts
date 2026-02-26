@@ -99,6 +99,43 @@ function createMockContext(
 }
 
 /**
+ * Mock fetch to simulate GHCR manifest returning a specific nightly version.
+ * Handles token exchange and manifest fetch.
+ */
+function mockGhcrNightlyVersion(version: string): void {
+  mockFetch(async (url) => {
+    const urlStr = String(url);
+
+    // GHCR anonymous token exchange
+    if (urlStr.includes("ghcr.io/token")) {
+      return new Response(JSON.stringify({ token: "test-token" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    // GHCR OCI manifest for :nightly tag
+    if (urlStr.includes("/manifests/nightly")) {
+      return new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          layers: [],
+          annotations: { version },
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/vnd.oci.image.manifest.v1+json",
+          },
+        }
+      );
+    }
+
+    return new Response("Not Found", { status: 404 });
+  });
+}
+
+/**
  * Mock fetch to simulate GitHub releases API returning a specific version.
  * Handles the latest release endpoint, version-exists check, and npm registry.
  */
@@ -141,14 +178,29 @@ function mockGitHubVersion(version: string): void {
 /**
  * Mock fetch for the nightly version.json endpoint.
  */
+/**
+ * Mock fetch for GHCR nightly version checks (token exchange + manifest).
+ * Used by nightly channel tests — replaces the old GitHub version.json mock.
+ */
 function mockNightlyVersion(version: string): void {
-  mockFetch(
-    async () =>
-      new Response(JSON.stringify({ version }), {
+  mockFetch(async (url) => {
+    const urlStr = String(url);
+    if (urlStr.includes("ghcr.io/token")) {
+      return new Response(JSON.stringify({ token: "test-token" }), {
         status: 200,
         headers: { "content-type": "application/json" },
-      })
-  );
+      });
+    }
+    if (urlStr.includes("/manifests/nightly")) {
+      return new Response(JSON.stringify({ annotations: { version } }), {
+        status: 200,
+        headers: {
+          "content-type": "application/vnd.oci.image.manifest.v1+json",
+        },
+      });
+    }
+    return new Response("Not Found", { status: 404 });
+  });
 }
 
 describe("sentry cli upgrade", () => {
@@ -310,6 +362,44 @@ describe("sentry cli upgrade", () => {
       const combined = output.join("");
       // Should match current version (after stripping v prefix) and report up to date
       expect(combined).toContain("Already up to date.");
+    });
+  });
+
+  describe("nightly version check", () => {
+    test("--check mode with 'nightly' positional fetches latest from GHCR", async () => {
+      const nightlyVersion = "0.0.0-dev.1740000000";
+      // 'nightly' as positional switches channel to nightly — fetches from GHCR
+      mockGhcrNightlyVersion(nightlyVersion);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      const combined = output.join("");
+      // Should show nightly channel and latest version from GHCR
+      expect(combined).toContain("nightly");
+      expect(combined).toContain(nightlyVersion);
+    });
+
+    test("--check with 'nightly' positional shows upgrade hint when newer nightly available", async () => {
+      const nightlyVersion = "0.0.0-dev.1740000000";
+      mockGhcrNightlyVersion(nightlyVersion);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "nightly"],
+        context
+      );
+
+      const combined = output.join("");
+      // CLI_VERSION is "0.0.0-dev" (not matching nightlyVersion), show upgrade hint
+      expect(combined).toContain("sentry cli upgrade");
     });
   });
 });
@@ -577,36 +667,68 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     expect(errors.join("")).toContain("Setup failed with exit code 1");
   });
 
-  test("uses NIGHTLY_TAG download URL for nightly channel without versionArg", async () => {
+  test("downloads nightly binary from GHCR for nightly channel", async () => {
     const capturedUrls: string[] = [];
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
     const gzipped = Bun.gzipSync(fakeContent);
 
-    // Single unified mock: captures all URLs, serves version.json and binary download
+    // GHCR flow: token exchange → manifest → blob redirect → blob download
     mockFetch(async (url) => {
       const urlStr = String(url);
       capturedUrls.push(urlStr);
-      if (urlStr.includes("version.json")) {
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        let filename = "sentry-linux-x64.gz";
+        if (process.platform === "win32") {
+          filename = "sentry-windows-x64.exe.gz";
+        } else if (process.platform === "darwin") {
+          filename = "sentry-darwin-arm64.gz";
+        }
         return new Response(
-          JSON.stringify({ version: "0.99.0-dev.1234567890" }),
-          { status: 200, headers: { "content-type": "application/json" } }
+          JSON.stringify({
+            annotations: { version: "0.99.0-dev.1234567890" },
+            layers: [
+              {
+                digest: "sha256:abc123",
+                annotations: {
+                  "org.opencontainers.image.title": filename,
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/vnd.oci.image.manifest.v1+json",
+            },
+          }
         );
       }
-      // Binary download — return gzipped content for all other URLs
-      return new Response(gzipped, { status: 200 });
+      if (urlStr.includes("/blobs/sha256:abc123")) {
+        // Redirect to blob storage (GHCR blob endpoint returns 307)
+        return Response.redirect("https://blob.example.com/file.gz", 307);
+      }
+      if (urlStr.includes("blob.example.com")) {
+        return new Response(gzipped, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
     });
 
-    // Set nightly channel; "nightly" positional triggers NIGHTLY_TAG for download
-    setReleaseChannel("nightly");
-
+    // "nightly" positional switches channel to nightly
     const { context } = createMockContext({ homeDir: testDir });
 
     await run(app, ["cli", "upgrade", "--method", "curl", "nightly"], context);
 
-    // Download URL should use the rolling "nightly" tag
-    const downloadUrl = capturedUrls.find((u) => u.includes("/download/"));
-    expect(downloadUrl).toBeDefined();
-    expect(downloadUrl).toContain("/download/nightly/");
+    // Should have fetched from GHCR (token + manifest + blob)
+    expect(capturedUrls.some((u) => u.includes("ghcr.io/token"))).toBe(true);
+    expect(capturedUrls.some((u) => u.includes("/manifests/nightly"))).toBe(
+      true
+    );
   });
 
   test("--force bypasses 'already up to date' and proceeds to download", async () => {
@@ -668,17 +790,46 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
     const gzipped = Bun.gzipSync(fakeContent);
 
+    // Nightly is now distributed via GHCR (token → manifest → blob)
     mockFetch(async (url) => {
       const urlStr = String(url);
-      // nightly version.json
-      if (urlStr.includes("version.json")) {
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        let filename = "sentry-linux-x64.gz";
+        if (process.platform === "win32") {
+          filename = "sentry-windows-x64.exe.gz";
+        } else if (process.platform === "darwin") {
+          filename = "sentry-darwin-arm64.gz";
+        }
         return new Response(
-          JSON.stringify({ version: "0.99.0-dev.1234567890" }),
-          { status: 200, headers: { "content-type": "application/json" } }
+          JSON.stringify({
+            annotations: { version: "0.99.0-dev.1234567890" },
+            layers: [
+              {
+                digest: "sha256:abc456",
+                annotations: {
+                  "org.opencontainers.image.title": filename,
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/vnd.oci.image.manifest.v1+json",
+            },
+          }
         );
       }
-      // binary download (.gz)
-      if (urlStr.includes(".gz")) {
+      if (urlStr.includes("/blobs/sha256:abc456")) {
+        return Response.redirect("https://blob.example.com/nightly.gz", 307);
+      }
+      if (urlStr.includes("blob.example.com")) {
         return new Response(gzipped, { status: 200 });
       }
       return new Response("Not Found", { status: 404 });
