@@ -59,6 +59,15 @@ export const NIGHTLY_TAG = "nightly";
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 
+/** Maps `process.platform` to the OS name used in binary filenames. */
+const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  darwin: "darwin",
+  win32: "windows",
+});
+
+/** Fallback OS name when `process.platform` is not in {@link PLATFORM_NAMES}. */
+const DEFAULT_PLATFORM = "linux";
+
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
@@ -469,11 +478,7 @@ async function streamDecompressToFile(
  * @returns Filename of the gzip-compressed binary for this platform
  */
 function getNightlyGzFilename(): string {
-  const platformNames: Record<string, string> = {
-    darwin: "darwin",
-    win32: "windows",
-  };
-  const os = platformNames[process.platform] ?? "linux";
+  const os = PLATFORM_NAMES[process.platform] ?? DEFAULT_PLATFORM;
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const suffix = process.platform === "win32" ? ".exe" : "";
   return `sentry-${os}-${arch}${suffix}.gz`;

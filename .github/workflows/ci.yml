@@ -30,6 +30,7 @@ jobs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       build-targets: ${{ steps.targets.outputs.matrix }}
+      nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
@@ -61,6 +62,15 @@ jobs:
             # main, release/**, workflow_call: full cross-platform matrix
             echo 'matrix={"include":[{"target":"darwin-arm64","os":"macos-latest","can-test":true},{"target":"linux-x64","os":"ubuntu-latest","can-test":true},{"target":"windows-x64","os":"windows-latest","can-test":true},{"target":"darwin-x64","os":"macos-latest","can-test":false},{"target":"linux-arm64","os":"ubuntu-latest","can-test":false}]}' >> "$GITHUB_OUTPUT"
           fi
+      - name: Compute nightly version
+        id: nightly
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: ${VERSION}"
 
   check-skill:
     name: Check SKILL.md
@@ -182,18 +192,12 @@ jobs:
           echo "All install attempts failed"
           exit 1
       - name: Set nightly version
-        # Inject a nightly version into package.json before the build so it gets
-        # baked into the binary. Only runs on direct pushes to main.
-        # Uses the commit timestamp (seconds since epoch) as a deterministic
-        # value so every matrix leg and publish-nightly produce the same version
-        # string for a given commit.
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        # Inject the nightly version (computed once in the changes job) into
+        # package.json before the build so it gets baked into the binary.
+        if: needs.changes.outputs.nightly-version != ''
         shell: bash
         run: |
-          TS=$(date -d "$COMMIT_TIMESTAMP" +%s 2>/dev/null || date -jf "%Y-%m-%dT%H:%M:%SZ" "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
-          NIGHTLY=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
-          jq --arg v "$NIGHTLY" '.version = $v' package.json > package.json.tmp
+          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' package.json > package.json.tmp
           mv package.json.tmp package.json
       - name: Build
         env:
@@ -229,7 +233,7 @@ jobs:
     name: Publish Nightly to GHCR
     # Only run on pushes to main, not on PRs or release branches
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [build-binary]
+    needs: [changes, build-binary]
     runs-on: ubuntu-latest
     steps:
       - name: Download compressed artifacts
@@ -249,25 +253,12 @@ jobs:
           tar -xz -C /usr/local/bin oras < "$TARBALL"
           rm "$TARBALL"
 
-      - name: Compute nightly version
-        id: version
-        run: |
-          # The build-binary job bakes X.Y.Z-dev.<TS> into each binary using the
-          # same COMMIT_TIMESTAMP env var. Re-derive the version here so the GHCR
-          # manifest annotation matches the version string inside the binary.
-          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/package.json" \
-                    | awk -F'"' '/"version"/{print $4}')
-          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Nightly version: ${VERSION}"
-
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Push to GHCR
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
           oras push ghcr.io/getsentry/cli:nightly \
             --artifact-type application/vnd.sentry.cli.nightly \
             --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
