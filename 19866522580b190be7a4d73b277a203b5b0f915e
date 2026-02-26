@@ -1,0 +1,123 @@
+# Part 4: Improve Numeric Issue ID Resolution
+
+## Problem
+
+When a user runs `sentry issue view 99124558` (bare numeric ID):
+
+1. The unscoped `GET /api/0/issues/{id}/` call succeeds and returns the full issue object — including a `permalink` field that contains the org slug — but `resolveIssue` discards it and returns `org: undefined`.
+2. `explain` and `plan` commands call `resolveOrgAndIssueId`, which then throws `ContextError("Organization", ...)` — even though the issue was found.
+3. For `sentry issue view myorg/99124558`, the org is available but the API call is still unscoped (no region routing) — misleading error messages and wrong region.
+4. The `parseSentryUrl` utility doesn't handle subdomain-style permalinks (`https://my-org.sentry.io/issues/99124558/`), only the path-based format (`https://sentry.io/organizations/my-org/issues/99124558/`).
+
+## Five-part fix (A–E)
+
+### E — Fix `parseSentryUrl` for subdomain-style permalinks
+
+**File**: `src/lib/sentry-url-parser.ts`
+
+Add `matchSubdomainOrg()` helper and call it as final fallback in `parseSentryUrl`:
+
+```
+https://my-org.sentry.io/issues/99124558/  →  org="my-org", issueId="99124558"
+https://my-org.sentry.io/traces/abc.../   →  org="my-org", traceId="abc..."
+```
+
+Rules:
+- Only applies to hostnames ending in `.sentry.io`
+- Skip 2-char subdomains (`us`, `de`) — those are API region hosts, not orgs
+- Import `DEFAULT_SENTRY_HOST` from `./constants.js`
+
+### B — Add `getIssueInOrg(orgSlug, issueId)` to api-client.ts
+
+**File**: `src/lib/api-client.ts`
+
+New exported function using the SDK's `retrieveAnIssue` (already exported by `@sentry/api`) with region routing via `getOrgSdkConfig`, following the same pattern as `getIssueByShortId`:
+
+```typescript
+export async function getIssueInOrg(
+  orgSlug: string,
+  issueId: string
+): Promise<SentryIssue> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await retrieveAnIssue({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, issue_id: issueId },
+  });
+  return unwrapResult(result, "Failed to get issue") as unknown as SentryIssue;
+}
+```
+
+Add `retrieveAnIssue` to the SDK import at the top of the file.
+
+### C — Use org-scoped fetch in `explicit-org-numeric` case
+
+**File**: `src/commands/issue/utils.ts`, `explicit-org-numeric` case (~line 298)
+
+Change `getIssue(parsed.numericId)` → `getIssueInOrg(parsed.org, parsed.numericId)`.
+Import `getIssueInOrg` from api-client.
+
+This gives correct region routing and honest error messages ("not found in org X" actually scoped to org X).
+
+### D — Proactive org resolution for bare `numeric` case
+
+**File**: `src/commands/issue/utils.ts`, `numeric` case (~line 267)
+
+Before falling back to unscoped `getIssue`, try `resolveOrg({ cwd })`:
+- If org found: use `getIssueInOrg(org, id)` for region-aware fetch
+- If no org: fall back to unscoped `getIssue(id)` (preserves existing behaviour)
+
+Import `resolveOrg` from `../../lib/resolve-target.js`.
+
+```typescript
+case "numeric": {
+  // Try to resolve org from context (DSN/env/config defaults)
+  const resolved = await resolveOrg({ cwd });
+  try {
+    const issue = resolved
+      ? await getIssueInOrg(resolved.org, parsed.id)
+      : await getIssue(parsed.id);
+    const org = resolved?.org ?? extractOrgFromPermalink(issue.permalink);
+    return { org, issue };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      throw new ResolutionError(...);
+    }
+    throw err;
+  }
+}
+```
+
+### A — Extract org from `issue.permalink` as fallback
+
+**File**: `src/commands/issue/utils.ts`
+
+Add a small internal helper `extractOrgFromPermalink(permalink?: string): string | undefined` that calls `parseSentryUrl` and returns the `org` field.
+
+Use this in:
+1. The `numeric` case (when unscoped fetch succeeds but org is still undefined after D above)
+2. The `explicit-org-numeric` case (use `parsed.org` as primary, permalink as fallback validation — not strictly necessary but consistent)
+
+## Files to modify
+
+| File | Changes |
+|------|---------|
+| `src/lib/sentry-url-parser.ts` | Add `matchSubdomainOrg`, update `parseSentryUrl`, update JSDoc, add `DEFAULT_SENTRY_HOST` import |
+| `src/lib/api-client.ts` | Add `retrieveAnIssue` to SDK import; add `getIssueInOrg` after `getIssue` |
+| `src/commands/issue/utils.ts` | Import `getIssueInOrg`, `resolveOrg`; add `extractOrgFromPermalink` helper; update `numeric` and `explicit-org-numeric` cases |
+
+## Tests to add/update
+
+| File | What |
+|------|------|
+| `test/lib/sentry-url-parser.test.ts` | New tests for subdomain-style URLs (`my-org.sentry.io`) |
+| `test/lib/api-client.test.ts` (or new) | Unit test for `getIssueInOrg` |
+| `test/commands/issue/utils.test.ts` | Update `numeric` case: org should now be populated from permalink; update `explicit-org-numeric` case |
+
+## What changes for the user
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| `sentry issue view 99124558` (found) | Works, no org in output | Works, org resolved from permalink |
+| `sentry issue explain 99124558` | Fails: "Organization is required" | Works: org extracted from permalink |
+| `sentry issue view myorg/99124558` | Unscoped API call, wrong region possible | Org-scoped call with correct region routing |
+| `sentry issue view 99124558` in project dir | No DSN fallback | Tries DSN/env/config first, uses org-scoped call |
