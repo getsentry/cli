@@ -11,12 +11,17 @@ import {
   formatAutofixError,
   formatProgressLine,
   formatRootCauseList,
+  formatSolution,
   getProgressMessage,
   getSpinnerFrame,
   handleSeerApiError,
   truncateProgressMessage,
 } from "../../../src/lib/formatters/seer.js";
-import type { AutofixState, RootCause } from "../../../src/types/seer.js";
+import type {
+  AutofixState,
+  RootCause,
+  SolutionArtifact,
+} from "../../../src/types/seer.js";
 
 /** Strip ANSI escape codes */
 function stripAnsi(str: string): string {
@@ -317,5 +322,81 @@ describe("SeerError formatting", () => {
     // Should NOT contain broken URL patterns
     expect(formatted).not.toContain("undefined");
     expect(formatted).not.toContain("/seer/");
+  });
+});
+
+describe("formatSolution", () => {
+  function makeSolution(
+    overrides: Partial<SolutionArtifact["data"]> = {}
+  ): SolutionArtifact {
+    return {
+      key: "solution",
+      data: {
+        one_line_summary: "Add null check before accessing user.name",
+        steps: [
+          {
+            title: "Update the handler function",
+            description: "Check for null before accessing the property.",
+          },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  test("returns a string", () => {
+    const result = formatSolution(makeSolution());
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes summary text", () => {
+    const result = stripAnsi(formatSolution(makeSolution()));
+    expect(result).toContain("Add null check before accessing user.name");
+  });
+
+  test("includes Solution heading", () => {
+    const result = stripAnsi(formatSolution(makeSolution()));
+    expect(result).toContain("Solution");
+  });
+
+  test("includes step titles", () => {
+    const result = stripAnsi(
+      formatSolution(
+        makeSolution({
+          steps: [
+            { title: "Step One", description: "Do the first thing." },
+            { title: "Step Two", description: "Do the second thing." },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Step One");
+    expect(result).toContain("Step Two");
+    expect(result).toContain("Do the first thing");
+    expect(result).toContain("Do the second thing");
+  });
+
+  test("handles empty steps array", () => {
+    const result = stripAnsi(formatSolution(makeSolution({ steps: [] })));
+    expect(result).toContain("Solution");
+    expect(result).toContain("Add null check");
+    expect(result).not.toContain("Steps to implement");
+  });
+
+  test("preserves markdown in step descriptions", () => {
+    const result = stripAnsi(
+      formatSolution(
+        makeSolution({
+          steps: [
+            {
+              title: "Fix code",
+              description: "Change `foo()` to `bar()`\nThen redeploy.",
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Fix code");
+    expect(result).toContain("foo()");
   });
 });

@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   calculateOrgSlugWidth,
   calculateProjectColumnWidths,
+  formatEventDetails,
   formatFixability,
   formatFixabilityDetail,
   formatIssueDetails,
@@ -19,6 +20,7 @@ import {
   getSeerFixabilityLabel,
 } from "../../../src/lib/formatters/human.js";
 import type {
+  SentryEvent,
   SentryIssue,
   SentryOrganization,
   SentryProject,
@@ -603,5 +605,410 @@ describe("formatFixabilityDetail", () => {
   test("returns empty string for null or undefined", () => {
     expect(formatFixabilityDetail(null)).toBe("");
     expect(formatFixabilityDetail(undefined)).toBe("");
+  });
+});
+
+// Event Formatting Tests
+
+function createMockEvent(overrides: Partial<SentryEvent> = {}): SentryEvent {
+  return {
+    eventID: "abc123def456abc7890",
+    dateReceived: "2024-01-15T12:30:00Z",
+    ...overrides,
+  };
+}
+
+describe("formatEventDetails", () => {
+  test("returns a string", () => {
+    const result = formatEventDetails(createMockEvent());
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes event ID in header", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent()));
+    expect(result).toContain("abc123de");
+  });
+
+  test("includes custom header text", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent(), "My Custom Header")
+    );
+    expect(result).toContain("My Custom Header");
+  });
+
+  test("includes event ID and received date", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent()));
+    expect(result).toContain("abc123def456abc7890");
+    expect(result).toContain("Event ID");
+    expect(result).toContain("Received");
+  });
+
+  test("includes location when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent({ location: "app/main.py" }))
+    );
+    expect(result).toContain("Location");
+    expect(result).toContain("app/main.py");
+  });
+
+  test("includes trace context when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          contexts: { trace: { trace_id: "aabbccdd11223344" } },
+        })
+      )
+    );
+    expect(result).toContain("Trace");
+    expect(result).toContain("aabbccdd11223344");
+  });
+
+  test("includes SDK info when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          sdk: { name: "sentry.javascript.browser", version: "7.0.0" },
+        })
+      )
+    );
+    expect(result).toContain("SDK");
+    expect(result).toContain("sentry.javascript.browser");
+    expect(result).toContain("7.0.0");
+  });
+
+  test("includes release when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          release: { version: "1.0.0", shortVersion: "1.0.0" },
+        })
+      )
+    );
+    expect(result).toContain("Release");
+    expect(result).toContain("1.0.0");
+  });
+
+  test("includes user section when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: {
+            email: "test@example.com",
+            username: "testuser",
+            id: "42",
+            ip_address: "192.168.1.1",
+          },
+        })
+      )
+    );
+    expect(result).toContain("User");
+    expect(result).toContain("test@example.com");
+    expect(result).toContain("testuser");
+    expect(result).toContain("192.168.1.1");
+  });
+
+  test("includes user geo when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: {
+            email: "test@example.com",
+            geo: { city: "Berlin", region: "Berlin", country_code: "DE" },
+          },
+        })
+      )
+    );
+    expect(result).toContain("Location");
+    expect(result).toContain("Berlin");
+    expect(result).toContain("DE");
+  });
+
+  test("includes environment contexts when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          contexts: {
+            browser: { name: "Chrome", version: "120.0" },
+            os: { name: "Windows", version: "11" },
+            device: { family: "Desktop", brand: "Apple" },
+          },
+        })
+      )
+    );
+    expect(result).toContain("Environment");
+    expect(result).toContain("Chrome");
+    expect(result).toContain("Windows");
+    expect(result).toContain("Desktop");
+  });
+
+  test("includes request section when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "request",
+              data: {
+                url: "https://api.example.com/users",
+                method: "POST",
+                headers: [["User-Agent", "Mozilla/5.0"]],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Request");
+    expect(result).toContain("POST https://api.example.com/users");
+    expect(result).toContain("Mozilla/5.0");
+  });
+
+  test("includes stack trace when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "exception",
+              data: {
+                values: [
+                  {
+                    type: "TypeError",
+                    value: "Cannot read property",
+                    mechanism: { type: "generic", handled: false },
+                    stacktrace: {
+                      frames: [
+                        {
+                          function: "handleClick",
+                          filename: "app.js",
+                          lineNo: 42,
+                          colNo: 10,
+                          inApp: true,
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Stack Trace");
+    expect(result).toContain("TypeError: Cannot read property");
+    expect(result).toContain("handleClick");
+    expect(result).toContain("app.js");
+    expect(result).toContain("[in-app]");
+    expect(result).toContain("unhandled");
+  });
+
+  test("includes stack frame code context when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "exception",
+              data: {
+                values: [
+                  {
+                    type: "Error",
+                    value: "fail",
+                    stacktrace: {
+                      frames: [
+                        {
+                          function: "foo",
+                          filename: "bar.js",
+                          lineNo: 10,
+                          colNo: 1,
+                          context: [
+                            [9, "  const x = 1;"],
+                            [10, '  throw new Error("fail");'],
+                            [11, "}"],
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("const x = 1");
+    expect(result).toContain("throw new Error");
+  });
+
+  test("includes breadcrumbs when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  {
+                    timestamp: "2024-01-15T12:29:55Z",
+                    level: "info",
+                    category: "navigation",
+                    message: "User clicked button",
+                  },
+                  {
+                    timestamp: "2024-01-15T12:30:00Z",
+                    level: "error",
+                    category: "http",
+                    data: {
+                      url: "https://api.example.com/data",
+                      method: "GET",
+                      status_code: 500,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Breadcrumbs");
+    expect(result).toContain("navigation");
+    expect(result).toContain("User clicked button");
+    expect(result).toContain("GET");
+    expect(result).toContain("500");
+  });
+
+  test("includes replay link when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          tags: [{ key: "replayId", value: "replay-uuid-123" }],
+        }),
+        "Latest Event",
+        "https://acme.sentry.io/issues/789/"
+      )
+    );
+    expect(result).toContain("Replay");
+    expect(result).toContain("replay-uuid-123");
+    expect(result).toContain("https://acme.sentry.io/replays/replay-uuid-123/");
+  });
+
+  test("includes tags when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          tags: [
+            { key: "browser", value: "Chrome 120" },
+            { key: "os", value: "Windows 11" },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Tags");
+    expect(result).toContain("browser");
+    expect(result).toContain("Chrome 120");
+  });
+
+  test("handles minimal event", () => {
+    const result = formatEventDetails(
+      createMockEvent({ dateReceived: undefined })
+    );
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test("handles breadcrumb navigation data", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  {
+                    category: "navigation",
+                    data: { from: "/home", to: "/profile" },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("/home");
+    expect(result).toContain("/profile");
+  });
+
+  test("truncates long breadcrumb messages", () => {
+    const longMsg = "X".repeat(100);
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  { category: "console", message: longMsg, level: "info" },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).not.toContain(longMsg);
+    expect(result).toContain("...");
+  });
+
+  test("skips empty breadcrumbs array", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [{ type: "breadcrumbs", data: { values: [] } }],
+        })
+      )
+    );
+    expect(result).not.toContain("Breadcrumbs");
+  });
+
+  test("shows user name when available", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: { name: "John Doe" },
+        })
+      )
+    );
+    expect(result).toContain("Name");
+    expect(result).toContain("John Doe");
+  });
+
+  test("skips user section when user has no data", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent({ user: {} })));
+    expect(result).not.toContain("User");
+  });
+
+  test("skips environment section when no contexts", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent({ contexts: null }))
+    );
+    expect(result).not.toContain("Environment");
+  });
+
+  test("skips request section when no URL", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [{ type: "request", data: {} }],
+        })
+      )
+    );
+    expect(result).not.toContain("Request");
   });
 });

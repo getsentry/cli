@@ -7,6 +7,7 @@ import {
   formatLogDetails,
   formatLogRow,
   formatLogsHeader,
+  formatLogTable,
 } from "../../../src/lib/formatters/log.js";
 import type { DetailedSentryLog, SentryLog } from "../../../src/types/index.js";
 
@@ -385,5 +386,41 @@ describe("formatLogDetails", () => {
     expect(result).not.toContain("Context");
     expect(result).not.toContain("SDK");
     expect(result).not.toContain("Trace");
+  });
+});
+
+describe("formatLogTable", () => {
+  test("returns a string", () => {
+    const result = formatLogTable([createTestLog()]);
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes all log messages", () => {
+    const logs = [
+      createTestLog({ message: "First log" }),
+      createTestLog({ message: "Second log" }),
+    ];
+    const result = stripAnsi(formatLogTable(logs));
+    expect(result).toContain("First log");
+    expect(result).toContain("Second log");
+  });
+
+  test("includes severity levels", () => {
+    const result = stripAnsi(
+      formatLogTable([createTestLog({ severity: "error" })])
+    );
+    expect(result).toContain("ERROR");
+  });
+
+  test("includes trace IDs when present", () => {
+    const result = stripAnsi(
+      formatLogTable([createTestLog({ trace: "abcdef1234567890" })])
+    );
+    expect(result).toContain("abcdef12");
+  });
+
+  test("handles empty messages", () => {
+    const result = formatLogTable([createTestLog({ message: "" })]);
+    expect(typeof result).toBe("string");
   });
 });

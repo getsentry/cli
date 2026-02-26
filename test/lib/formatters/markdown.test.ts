@@ -8,7 +8,11 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  escapeMarkdownCell,
   isPlainOutput,
+  mdKvTable,
+  mdRow,
+  mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
 } from "../../../src/lib/formatters/markdown.js";
@@ -270,5 +274,123 @@ describe("renderInlineMarkdown", () => {
       expect(result).not.toContain("<p>");
       expect(result.trim()).toContain("hello world");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// escapeMarkdownCell
+// ---------------------------------------------------------------------------
+
+describe("escapeMarkdownCell", () => {
+  test("escapes pipe characters", () => {
+    expect(escapeMarkdownCell("foo|bar")).toBe("foo\\|bar");
+  });
+
+  test("escapes backslashes before pipes", () => {
+    expect(escapeMarkdownCell("a\\|b")).toBe("a\\\\\\|b");
+  });
+
+  test("returns unchanged string when no special chars", () => {
+    expect(escapeMarkdownCell("hello world")).toBe("hello world");
+  });
+
+  test("handles empty string", () => {
+    expect(escapeMarkdownCell("")).toBe("");
+  });
+
+  test("handles multiple pipes", () => {
+    const result = escapeMarkdownCell("a|b|c");
+    expect(result).toBe("a\\|b\\|c");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mdTableHeader
+// ---------------------------------------------------------------------------
+
+describe("mdTableHeader", () => {
+  test("generates header and separator rows", () => {
+    const result = mdTableHeader(["Name", "Value"]);
+    expect(result).toBe("| Name | Value |\n| --- | --- |");
+  });
+
+  test("right-aligns columns with : suffix", () => {
+    const result = mdTableHeader(["Label", "Count:"]);
+    expect(result).toBe("| Label | Count |\n| --- | ---: |");
+  });
+
+  test("strips : suffix from display name", () => {
+    const result = mdTableHeader(["Duration:"]);
+    expect(result).toContain("| Duration |");
+    expect(result).not.toContain("Duration:");
+  });
+
+  test("handles single column", () => {
+    const result = mdTableHeader(["Only"]);
+    expect(result).toBe("| Only |\n| --- |");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mdRow
+// ---------------------------------------------------------------------------
+
+describe("mdRow", () => {
+  test("plain mode: returns raw markdown cells", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
+      const result = mdRow(["**bold**", "`code`"]);
+      expect(result).toBe("| **bold** | `code` |\n");
+    });
+  });
+
+  test("rendered mode: applies inline rendering", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      const result = mdRow(["**bold**", "plain"]);
+      // Should contain ANSI codes for bold
+      expect(result).not.toBe("| **bold** | plain |\n");
+      expect(stripAnsi(result)).toContain("bold");
+      expect(stripAnsi(result)).toContain("plain");
+    });
+  });
+
+  test("produces pipe-delimited format", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
+      const result = mdRow(["a", "b", "c"]);
+      expect(result).toBe("| a | b | c |\n");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mdKvTable
+// ---------------------------------------------------------------------------
+
+describe("mdKvTable", () => {
+  test("generates key-value table rows", () => {
+    const result = mdKvTable([
+      ["Name", "Alice"],
+      ["Age", "30"],
+    ]);
+    expect(result).toContain("| | |");
+    expect(result).toContain("|---|---|");
+    expect(result).toContain("| **Name** | Alice |");
+    expect(result).toContain("| **Age** | 30 |");
+  });
+
+  test("includes heading when provided", () => {
+    const result = mdKvTable([["Key", "Val"]], "Details");
+    expect(result).toContain("### Details");
+    expect(result).toContain("| **Key** | Val |");
+  });
+
+  test("omits heading when not provided", () => {
+    const result = mdKvTable([["K", "V"]]);
+    expect(result).not.toContain("###");
+    expect(result).toContain("| **K** | V |");
+  });
+
+  test("handles single row", () => {
+    const result = mdKvTable([["Only", "Row"]]);
+    expect(result).toContain("| **Only** | Row |");
   });
 });

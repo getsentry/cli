@@ -1,7 +1,8 @@
 /**
  * Unit Tests for Trace Formatters
  *
- * Tests for formatTraceDuration, formatTracesHeader, formatTraceRow,
+ * Tests for formatTraceDuration, formatTraceTable,
+  formatTracesHeader, formatTraceRow,
  * computeTraceSummary, and formatTraceSummary.
  */
 
@@ -12,6 +13,7 @@ import {
   formatTraceRow,
   formatTraceSummary,
   formatTracesHeader,
+  formatTraceTable,
 } from "../../../src/lib/formatters/trace.js";
 import type {
   TraceSpan,
@@ -419,5 +421,44 @@ describe("formatTraceSummary", () => {
     ]);
     const output = stripAnsi(formatTraceSummary(summary));
     expect(output).not.toContain("Started");
+  });
+});
+
+describe("formatTraceTable", () => {
+  test("returns a string", () => {
+    const result = formatTraceTable([makeTransaction()]);
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes all transaction names", () => {
+    const items = [
+      makeTransaction({ transaction: "GET /api/users" }),
+      makeTransaction({ transaction: "POST /api/data" }),
+    ];
+    const result = stripAnsi(formatTraceTable(items));
+    expect(result).toContain("GET /api/users");
+    expect(result).toContain("POST /api/data");
+  });
+
+  test("includes trace IDs", () => {
+    const traceId = "a".repeat(32);
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ trace: traceId })])
+    );
+    expect(result).toContain(traceId);
+  });
+
+  test("includes formatted durations", () => {
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ "transaction.duration": 1500 })])
+    );
+    expect(result).toContain("1.50s");
+  });
+
+  test("shows 'unknown' for empty transaction", () => {
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ transaction: "" })])
+    );
+    expect(result).toContain("unknown");
   });
 });
