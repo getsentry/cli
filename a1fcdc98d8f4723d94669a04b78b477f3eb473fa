@@ -1,0 +1,146 @@
+# Plan: GHCR/ORAS Nightly Distribution
+
+Replace GitHub Releases with GitHub Container Registry (ORAS) for nightly
+binary distribution. Stable releases stay on GitHub Releases as-is.
+
+## Context
+
+- GitHub immutable releases prevent a rolling `nightly` tag on Releases
+  (can't modify assets, can't reuse tags after deletion)
+- GHCR supports freely overwritable tags via OCI artifacts
+- Verified locally: push, tag overwrite, anonymous pull all work
+- Package `ghcr.io/getsentry/cli` is already created and public
+
+## Key Design Decisions
+
+- **Version discovery from manifest annotation** — the OCI manifest has
+  `annotations.version` so checking the latest nightly version needs only
+  a token exchange + manifest fetch (2 requests). No need to download
+  `version.json` as a blob for version checks.
+- **No `jq` dependency** — install script uses `awk -F'"'` for JSON parsing
+- **Redirect quirk** — ghcr.io blob downloads return 307 to Azure Blob
+  Storage. `curl -L` forwards the auth header to Azure which returns 404.
+  Must manually extract redirect URL and follow without auth.
+
+## Implementation Steps
+
+### 1. CI Workflow — `publish-nightly` job
+
+**File:** `.github/workflows/ci.yml`
+
+- Add `packages: write` to workflow permissions
+- Install `oras` CLI (single binary, ~10 MB)
+- Replace `gh release create/upload` with:
+  ```yaml
+  oras push ghcr.io/getsentry/cli:nightly \
+    --artifact-type application/vnd.sentry.cli.nightly \
+    --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+    --annotation "version=$VERSION" \
+    artifacts/*.gz \
+    version.json
+  ```
+- Push all `.gz` binaries + `version.json` as OCI layers
+- Remove dead `gh release delete/create` code and `GH_TOKEN`/`GH_REPO` env
+
+### 2. New GHCR client module
+
+**File:** `src/lib/ghcr.ts` (new)
+
+Encapsulate the OCI download protocol:
+
+- `getAnonymousToken()` — token exchange with `ghcr.io/token`
+- `fetchNightlyManifest(token)` — OCI manifest for `:nightly` tag
+- `getNightlyVersion(manifest)` — extract from `annotations.version`
+- `downloadNightlyBlob(token, manifest, filename)` — find digest by
+  `org.opencontainers.image.title` annotation, get redirect URL,
+  follow without auth header
+- Constants: `GHCR_REPO`, `GHCR_TAG`
+
+### 3. Update upgrade module
+
+**File:** `src/lib/upgrade.ts`
+
+- Replace `fetchLatestNightlyVersion()` — use `ghcr.ts` manifest +
+  annotation (1 HTTP request after token vs 2 before)
+- Replace nightly path in `downloadBinaryToTemp()` — use `ghcr.ts` blob
+  download instead of GitHub Releases URL
+- Remove `NIGHTLY_TAG`, `NIGHTLY_VERSION_URL` constants
+- Stable channel stays on GitHub Releases — no changes
+
+### 4. Update version check
+
+**File:** `src/lib/version-check.ts`
+
+- Calls `fetchLatestNightlyVersion()` from upgrade.ts — should work with
+  no changes after step 3. Verify.
+
+### 5. Update install script
+
+**File:** `install`
+
+Replace nightly download section with GHCR flow. JSON parsing via `awk`:
+
+```bash
+# Token exchange
+TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:getsentry/cli:pull" \
+  | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="token"){print $(i+2);exit}}')
+
+# Manifest fetch
+MANIFEST=$(curl -sf \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+  "https://ghcr.io/v2/getsentry/cli/manifests/nightly")
+
+# Version from annotation
+version=$(echo "$MANIFEST" | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="version"){print $(i+2);exit}}')
+
+# Digest for platform binary
+digest=$(echo "$MANIFEST" | sed 's/},{/}\n{/g' \
+  | awk -F'"' '/sentry-linux-x64\.gz/{for(i=1;i<=NF;i++) if($i=="digest"){print $(i+2);exit}}')
+
+# Download blob (manual redirect — don't forward auth to Azure)
+redir_url=$(curl -s -w '\n%{redirect_url}' -o /dev/null \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://ghcr.io/v2/getsentry/cli/blobs/$digest" | tail -1)
+curl -sf "$redir_url" -o sentry.gz
+```
+
+No new dependencies — uses only `curl`, `awk`, `sed` (all POSIX).
+
+### 6. Tests
+
+- **`test/lib/ghcr.test.ts`** (new) — unit tests for GHCR client with
+  mocked fetch (token exchange, manifest parsing, blob redirect handling)
+- **`test/lib/upgrade.test.ts`** — update `fetchLatestNightlyVersion`
+  tests to expect GHCR calls instead of GitHub Releases
+- **`test/commands/cli/upgrade.test.ts`** — update nightly download tests
+
+### 7. Cleanup
+
+- Delete poisoned `nightly` release from GitHub Releases (if it exists)
+- Delete `nightly-test` tag from GHCR package (via GitHub UI)
+- PR note: package must be public (already done — one-time step)
+
+## Out of Scope
+
+- Stable release distribution (stays on GitHub Releases + Craft)
+- Homebrew formula (stays on GitHub Releases)
+- npm publishing (stays on npmjs.com)
+
+## Implementation Order
+
+1 → 2 → 3 → 5 → 6 → 4 (verify) → 7
+
+## Local Test Results (Feb 26 2026)
+
+| Test | Result |
+|------|--------|
+| `oras push` to `:nightly-test` | ✅ Works, `GITHUB_TOKEN` needs `write:packages` |
+| Tag overwrite (push twice) | ✅ Unchanged files deduped (`Exists` in output) |
+| Package visibility | ⚠️ Created as private, must make public once via GitHub UI |
+| Anonymous `oras pull` | ✅ Works after making package public |
+| Anonymous HTTP token exchange | ✅ `ghcr.io/token?scope=repository:getsentry/cli:pull` |
+| Anonymous manifest fetch | ✅ Returns layers with filenames + digests + annotations |
+| Anonymous blob download | ✅ But must NOT forward auth header to Azure redirect |
+| `curl -L` with auth header | ❌ Azure returns 404 (auth header leaks to redirect) |
+| Manual redirect + follow without auth | ✅ Works reliably |
