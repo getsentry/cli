@@ -23,7 +23,6 @@ export type Column<T> = {
   /** Column alignment. Defaults to "left". */
   align?: "left" | "right";
   /** Minimum column width (header width is always respected) */
-  minWidth?: number;
 };
 
 /**

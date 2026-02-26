@@ -30,10 +30,10 @@ type RepositoryWithOrg = SentryRepository & { orgSlug?: string };
 
 /** Column definitions for the repository table. */
 const REPO_COLUMNS: Column<RepositoryWithOrg>[] = [
-  { header: "ORG", value: (r) => r.orgSlug || "", minWidth: 3 },
-  { header: "NAME", value: (r) => r.name, minWidth: 4 },
-  { header: "PROVIDER", value: (r) => r.provider.name, minWidth: 8 },
-  { header: "STATUS", value: (r) => r.status, minWidth: 6 },
+  { header: "ORG", value: (r) => r.orgSlug || "" },
+  { header: "NAME", value: (r) => r.name },
+  { header: "PROVIDER", value: (r) => r.provider.name },
+  { header: "STATUS", value: (r) => r.status },
   { header: "URL", value: (r) => r.url || "" },
 ];
 

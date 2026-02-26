@@ -36,6 +36,7 @@ import {
 } from "./colors.js";
 import {
   escapeMarkdownCell,
+  escapeMarkdownInline,
   renderMarkdown,
   safeCodeSpan,
 } from "./markdown.js";
@@ -596,7 +597,7 @@ export function formatIssueRow(
 export function formatIssueDetails(issue: SentryIssue): string {
   const lines: string[] = [];
 
-  lines.push(`## ${issue.shortId}: ${issue.title}`);
+  lines.push(`## ${issue.shortId}: ${escapeMarkdownInline(issue.title ?? "")}`);
   lines.push("");
 
   // Key-value details as a table
@@ -688,7 +689,9 @@ export function formatIssueDetails(issue: SentryIssue): string {
     lines.push("");
     lines.push("**Message:**");
     lines.push("");
-    lines.push(`> ${issue.metadata.value.replace(/\n/g, "\n> ")}`);
+    lines.push(
+      `> ${escapeMarkdownInline(issue.metadata.value).replace(/\n/g, "\n> ")}`
+    );
   }
 
   if (issue.metadata?.filename) {
@@ -1143,7 +1146,9 @@ export function formatEventDetails(
   return withSerializeSpan("formatEventDetails", () => {
     const sections: string[] = [];
 
-    sections.push(`## ${header} (\`${event.eventID.slice(0, 8)}\`)`);
+    sections.push(
+      `## ${escapeMarkdownInline(header)} (\`${event.eventID.slice(0, 8)}\`)`
+    );
     sections.push("");
 
     // Basic info table

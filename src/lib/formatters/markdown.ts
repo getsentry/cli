@@ -136,6 +136,31 @@ export function escapeMarkdownCell(value: string): string {
 }
 
 /**
+ * Escape CommonMark inline emphasis characters in a string for safe use inside
+ * markdown headings, blockquotes, and other inline contexts.
+ *
+ * This prevents characters like `_` (emphasis trigger) and `*` (strong trigger)
+ * in user-supplied content from being consumed by the markdown parser.
+ * For example, a Python exception title `TypeError in __init__` would render as
+ * `TypeError in init` (underscores consumed as empty emphasis) without escaping.
+ *
+ * Escaped characters: `\`, `*`, `_`, `` ` ``, `[`, `]`.
+ *
+ * @param value - Raw text (e.g. issue title, exception message)
+ * @returns String safe for inline use inside a marked rendering context
+ */
+export function escapeMarkdownInline(value: string): string {
+  // Escape backslash first so we don't double-escape subsequent substitutions
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/`/g, "\\`")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
+/**
  * Build a raw markdown table header row + separator from column names.
  *
  * Column names ending with `:` are right-aligned (the `:` is stripped from
