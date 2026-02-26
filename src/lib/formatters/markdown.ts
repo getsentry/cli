@@ -122,14 +122,17 @@ export function isPlainOutput(): boolean {
 /**
  * Escape a string for safe use inside a markdown table cell.
  *
- * Escapes backslashes first (so the escape character itself is not
- * double-interpreted), then pipe characters (the table cell delimiter).
+ * - Escapes backslashes first (so the escape character itself is not
+ *   double-interpreted)
+ * - Escapes pipe characters (the table cell delimiter)
+ * - Replaces newlines with a space so multi-line values don't break the
+ *   single-row structure of a markdown table
  *
  * @param value - Raw cell content
  * @returns Markdown-safe string suitable for embedding in `| cell |` syntax
  */
 export function escapeMarkdownCell(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+  return value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 /**

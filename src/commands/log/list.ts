@@ -14,6 +14,7 @@ import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
   formatLogRow,
   formatLogsHeader,
+  formatLogTable,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -115,10 +116,7 @@ async function executeSingleFetch(
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
   const chronological = [...logs].reverse();
 
-  stdout.write(formatLogsHeader());
-  for (const log of chronological) {
-    stdout.write(formatLogRow(log));
-  }
+  stdout.write(`${formatLogTable(chronological)}\n`);
 
   // Show footer with tip if we hit the limit
   const hasMore = logs.length >= flags.limit;

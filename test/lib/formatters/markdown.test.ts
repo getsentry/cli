@@ -300,6 +300,11 @@ describe("escapeMarkdownCell", () => {
     expect(escapeMarkdownCell("")).toBe("");
   });
 
+  test("replaces newlines with a space to preserve row structure", () => {
+    expect(escapeMarkdownCell("line1\nline2")).toBe("line1 line2");
+    expect(escapeMarkdownCell("a\nb\nc")).toBe("a b c");
+  });
+
   test("handles multiple pipes", () => {
     const result = escapeMarkdownCell("a|b|c");
     expect(result).toBe("a\\|b\\|c");
