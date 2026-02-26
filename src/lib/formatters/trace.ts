@@ -9,9 +9,8 @@ import { formatRelativeTime } from "./human.js";
 import {
   divider,
   escapeMarkdownCell,
-  isPlainOutput,
+  mdRow,
   mdTableHeader,
-  renderInlineMarkdown,
   renderMarkdown,
 } from "./markdown.js";
 
@@ -47,13 +46,8 @@ export function formatTraceDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
-/** Column headers for the streaming trace table (Duration is right-aligned) */
-const TRACE_TABLE_COLS = [
-  "Trace ID",
-  "Transaction",
-  ["Duration", "right"] as const,
-  "When",
-] as const;
+/** Column headers for the streaming trace table (`:` suffix = right-aligned) */
+const TRACE_TABLE_COLS = ["Trace ID", "Transaction", "Duration:", "When"];
 
 /**
  * Format column header for traces list (used before per-row output).
@@ -64,15 +58,10 @@ const TRACE_TABLE_COLS = [
  * @returns Header string (includes trailing newline)
  */
 export function formatTracesHeader(): string {
-  if (isPlainOutput()) {
-    return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
-  }
-  const header = renderInlineMarkdown(
-    TRACE_TABLE_COLS.map((c) => `**${typeof c === "string" ? c : c[0]}**`).join(
-      "  "
-    )
+  const names = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? c.slice(0, -1) : c
   );
-  return `${header}\n${divider(96)}\n`;
+  return `${mdRow(names.map((n) => `**${n}**`))}${divider(96)}\n`;
 }
 
 /**
@@ -90,13 +79,7 @@ export function formatTraceRow(item: TransactionListItem): string {
   const transaction = escapeMarkdownCell(item.transaction || "unknown");
   const duration = formatTraceDuration(item["transaction.duration"]);
   const when = formatRelativeTime(item.timestamp).trim();
-  const cells = [traceId, transaction, duration, when];
-
-  if (isPlainOutput()) {
-    return `| ${cells.join(" | ")} |\n`;
-  }
-
-  return `| ${cells.map((c) => renderInlineMarkdown(c)).join(" | ")} |\n`;
+  return mdRow([traceId, transaction, duration, when]);
 }
 
 /**

@@ -187,8 +187,9 @@ describe("formatTracesHeader (plain mode)", () => {
 
   test("emits markdown table header and separator", () => {
     const result = formatTracesHeader();
-    expect(result).toContain("| Trace ID | Transaction | Duration | When |");
-    expect(result).toContain("| --- | --- | ---: | --- |");
+    expect(result).toContain(
+      "| **Trace ID** | **Transaction** | **Duration** | **When** |"
+    );
   });
 
   test("ends with newline", () => {

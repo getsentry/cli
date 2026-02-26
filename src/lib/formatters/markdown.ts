@@ -129,19 +129,65 @@ export function escapeMarkdownCell(value: string): string {
 }
 
 /**
- * Build a markdown table header row + separator from column definitions.
+ * Build a raw markdown table header row + separator from column names.
  *
- * @param cols - Column definitions: `[name]` or `[name, "right"]` for right-align
+ * Column names ending with `:` are right-aligned (the `:` is stripped from
+ * the displayed name and a `---:` separator is emitted instead of `---`).
+ *
+ * Used by batch-rendered tables that pipe the result through `renderMarkdown()`.
+ * For streaming table rows use {@link mdRow}.
+ *
+ * @param cols - Column names (append `:` for right-align, e.g. `"Duration:"`)
  * @returns Two-line string: `| A | B |\n| --- | ---: |`
  */
-export function mdTableHeader(
-  cols: ReadonlyArray<string | readonly [string, "right"]>
-): string {
-  const names = cols.map((c) => (typeof c === "string" ? c : c[0]));
-  const seps = cols.map((c) =>
-    typeof c !== "string" && c[1] === "right" ? "---:" : "---"
-  );
+export function mdTableHeader(cols: readonly string[]): string {
+  const names = cols.map((c) => (c.endsWith(":") ? c.slice(0, -1) : c));
+  const seps = cols.map((c) => (c.endsWith(":") ? "---:" : "---"));
   return `| ${names.join(" | ")} |\n| ${seps.join(" | ")} |`;
+}
+
+/**
+ * Build a markdown table row from cell values.
+ *
+ * In plain mode the cells are emitted as-is (raw CommonMark).
+ * In rendered mode each cell is passed through `renderInlineMarkdown()`
+ * so inline constructs like `**bold**` and `` `code` `` become ANSI-styled.
+ *
+ * @param cells - Cell values (may contain inline markdown)
+ * @returns `| a | b |\n`
+ */
+export function mdRow(cells: readonly string[]): string {
+  const out = isPlainOutput()
+    ? cells
+    : cells.map((c) => renderInlineMarkdown(c));
+  return `| ${out.join(" | ")} |\n`;
+}
+
+/**
+ * Build a key-value markdown table section with an optional heading.
+ *
+ * Each entry is rendered as `| **Label** | value |`.
+ * Uses the blank-header-row pattern required by marked-terminal.
+ *
+ * @param rows - `[label, value]` tuples
+ * @param heading - Optional `### Heading` text (omit the `###` prefix)
+ * @returns Raw markdown string (not rendered)
+ */
+export function mdKvTable(
+  rows: ReadonlyArray<readonly [string, string]>,
+  heading?: string
+): string {
+  const lines: string[] = [];
+  if (heading) {
+    lines.push(`### ${heading}`);
+    lines.push("");
+  }
+  lines.push("| | |");
+  lines.push("|---|---|");
+  for (const [label, value] of rows) {
+    lines.push(`| **${label}** | ${value} |`);
+  }
+  return lines.join("\n");
 }
 
 /**

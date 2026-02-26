@@ -10,9 +10,9 @@ import { cyan, muted, red, yellow } from "./colors.js";
 import {
   divider,
   escapeMarkdownCell,
-  isPlainOutput,
+  mdKvTable,
+  mdRow,
   mdTableHeader,
-  renderInlineMarkdown,
   renderMarkdown,
 } from "./markdown.js";
 
@@ -77,13 +77,7 @@ export function formatLogRow(log: SentryLog): string {
   const level = `**${(log.severity ?? "info").toUpperCase()}**`;
   const message = escapeMarkdownCell(log.message ?? "");
   const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
-  const cells = [timestamp, level, `${message}${trace}`];
-
-  if (isPlainOutput()) {
-    return `| ${cells.join(" | ")} |\n`;
-  }
-
-  return `| ${cells.map((c) => renderInlineMarkdown(c)).join(" | ")} |\n`;
+  return mdRow([timestamp, level, `${message}${trace}`]);
 }
 
 /**
@@ -95,13 +89,7 @@ export function formatLogRow(log: SentryLog): string {
  * @returns Header string (includes trailing newline)
  */
 export function formatLogsHeader(): string {
-  if (isPlainOutput()) {
-    return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
-  }
-  const header = renderInlineMarkdown(
-    LOG_TABLE_COLS.map((c) => `**${c}**`).join("  ")
-  );
-  return `${header}\n${divider(80)}\n`;
+  return `${mdRow(LOG_TABLE_COLS.map((c) => `**${c}**`))}${divider(80)}\n`;
 }
 
 /**
@@ -158,14 +146,13 @@ export function formatLogDetails(
   lines.push("");
 
   // Core fields table
-  const rows: string[] = [];
-  rows.push(`| **ID** | \`${logId}\` |`);
-  rows.push(`| **Timestamp** | ${formatTimestamp(log.timestamp)} |`);
-  rows.push(`| **Severity** | ${formatSeverityLabel(log.severity)} |`);
-
-  lines.push("| | |");
-  lines.push("|---|---|");
-  lines.push(...rows);
+  lines.push(
+    mdKvTable([
+      ["ID", `\`${logId}\``],
+      ["Timestamp", formatTimestamp(log.timestamp)],
+      ["Severity", formatSeverityLabel(log.severity)],
+    ])
+  );
 
   if (log.message) {
     lines.push("");
@@ -176,55 +163,42 @@ export function formatLogDetails(
 
   // Context section
   if (log.project || log.environment || log.release) {
-    lines.push("");
-    lines.push("### Context");
-    lines.push("");
-    const ctxRows: string[] = [];
+    const ctxRows: [string, string][] = [];
     if (log.project) {
-      ctxRows.push(`| **Project** | ${log.project} |`);
+      ctxRows.push(["Project", log.project]);
     }
     if (log.environment) {
-      ctxRows.push(`| **Environment** | ${log.environment} |`);
+      ctxRows.push(["Environment", log.environment]);
     }
     if (log.release) {
-      ctxRows.push(`| **Release** | ${log.release} |`);
+      ctxRows.push(["Release", log.release]);
     }
-    lines.push("| | |");
-    lines.push("|---|---|");
-    lines.push(...ctxRows);
+    lines.push("");
+    lines.push(mdKvTable(ctxRows, "Context"));
   }
 
   // SDK section
   const sdkName = log["sdk.name"];
   const sdkVersion = log["sdk.version"];
   if (sdkName || sdkVersion) {
-    lines.push("");
-    lines.push("### SDK");
-    lines.push("");
     // Wrap in backticks to prevent markdown from interpreting underscores/dashes
     const sdkInfo =
       sdkName && sdkVersion
         ? `\`${sdkName} ${sdkVersion}\``
         : `\`${sdkName ?? sdkVersion}\``;
-    lines.push("| | |");
-    lines.push("|---|---|");
-    lines.push(`| **SDK** | ${sdkInfo} |`);
+    lines.push("");
+    lines.push(mdKvTable([["SDK", sdkInfo]], "SDK"));
   }
 
   // Trace section
   if (log.trace) {
-    lines.push("");
-    lines.push("### Trace");
-    lines.push("");
-    const traceRows: string[] = [];
-    traceRows.push(`| **Trace ID** | \`${log.trace}\` |`);
+    const traceRows: [string, string][] = [["Trace ID", `\`${log.trace}\``]];
     if (log.span_id) {
-      traceRows.push(`| **Span ID** | \`${log.span_id}\` |`);
+      traceRows.push(["Span ID", `\`${log.span_id}\``]);
     }
-    traceRows.push(`| **Link** | ${buildTraceUrl(orgSlug, log.trace)} |`);
-    lines.push("| | |");
-    lines.push("|---|---|");
-    lines.push(...traceRows);
+    traceRows.push(["Link", buildTraceUrl(orgSlug, log.trace)]);
+    lines.push("");
+    lines.push(mdKvTable(traceRows, "Trace"));
   }
 
   // Source location section (OTel code attributes)
@@ -232,22 +206,18 @@ export function formatLogDetails(
   const codeFilePath = log["code.file.path"];
   const codeLineNumber = log["code.line.number"];
   if (codeFunction || codeFilePath) {
-    lines.push("");
-    lines.push("### Source Location");
-    lines.push("");
-    const srcRows: string[] = [];
+    const srcRows: [string, string][] = [];
     if (codeFunction) {
-      srcRows.push(`| **Function** | \`${codeFunction}\` |`);
+      srcRows.push(["Function", `\`${codeFunction}\``]);
     }
     if (codeFilePath) {
       const location = codeLineNumber
         ? `${codeFilePath}:${codeLineNumber}`
         : codeFilePath;
-      srcRows.push(`| **File** | \`${location}\` |`);
+      srcRows.push(["File", `\`${location}\``]);
     }
-    lines.push("| | |");
-    lines.push("|---|---|");
-    lines.push(...srcRows);
+    lines.push("");
+    lines.push(mdKvTable(srcRows, "Source Location"));
   }
 
   // OpenTelemetry section
@@ -255,22 +225,18 @@ export function formatLogDetails(
   const otelStatus = log["sentry.otel.status_code"];
   const otelScope = log["sentry.otel.instrumentation_scope.name"];
   if (otelKind || otelStatus || otelScope) {
-    lines.push("");
-    lines.push("### OpenTelemetry");
-    lines.push("");
-    const otelRows: string[] = [];
+    const otelRows: [string, string][] = [];
     if (otelKind) {
-      otelRows.push(`| **Kind** | ${otelKind} |`);
+      otelRows.push(["Kind", otelKind]);
     }
     if (otelStatus) {
-      otelRows.push(`| **Status** | ${otelStatus} |`);
+      otelRows.push(["Status", otelStatus]);
     }
     if (otelScope) {
-      otelRows.push(`| **Scope** | ${otelScope} |`);
+      otelRows.push(["Scope", otelScope]);
     }
-    lines.push("| | |");
-    lines.push("|---|---|");
-    lines.push(...otelRows);
+    lines.push("");
+    lines.push(mdKvTable(otelRows, "OpenTelemetry"));
   }
 
   return renderMarkdown(lines.join("\n"));
