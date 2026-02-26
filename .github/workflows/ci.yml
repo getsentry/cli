@@ -235,21 +235,6 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Compress binaries
-        # Build artifacts are raw binaries — compression for stable releases
-        # happens in Craft during publishing, not during build. GHCR nightly
-        # needs .gz for efficient OCI layers.
-        run: |
-          ls artifacts/
-          for f in artifacts/sentry-linux-* artifacts/sentry-darwin-*; do
-            gzip -k "$f"
-          done
-          # Windows binary — compress but keep .exe name visible in title
-          for f in artifacts/sentry-windows-*.exe; do
-            gzip -k "$f"
-          done
-          ls artifacts/*.gz
-
       - name: Install ORAS CLI
         run: |
           VERSION=1.2.3
