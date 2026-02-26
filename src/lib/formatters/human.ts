@@ -28,24 +28,26 @@ import {
   boldUnderline,
   type FixabilityTier,
   fixabilityColor,
+  green,
   levelColor,
   muted,
   statusColor,
+  yellow,
 } from "./colors.js";
 import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
 
 // Status Formatting
 
 const STATUS_ICONS: Record<IssueStatus, string> = {
-  resolved: "✓",
-  unresolved: "●",
-  ignored: "−",
+  resolved: green("✓"),
+  unresolved: yellow("●"),
+  ignored: muted("−"),
 };
 
 const STATUS_LABELS: Record<IssueStatus, string> = {
-  resolved: "✓ Resolved",
-  unresolved: "● Unresolved",
-  ignored: "− Ignored",
+  resolved: `${green("✓")} Resolved`,
+  unresolved: `${yellow("●")} Unresolved`,
+  ignored: `${muted("−")} Ignored`,
 };
 
 /** Maximum features to display before truncating with "... and N more" */

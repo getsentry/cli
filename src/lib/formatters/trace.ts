@@ -50,10 +50,41 @@ export function formatTraceDuration(ms: number): string {
 const TRACE_TABLE_COLS = ["Trace ID", "Transaction", "Duration:", "When"];
 
 /**
- * Format column header for traces list (used before per-row output).
+ * Extract the four cell values for a trace row.
  *
- * In plain mode: emits a markdown table header + separator row.
- * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ * Shared by {@link formatTraceRow} (streaming) and {@link formatTraceTable}
+ * (batch) so cell formatting stays consistent between the two paths.
+ *
+ * @param item - Transaction list item from the API
+ * @returns `[traceId, transaction, duration, when]` markdown-safe strings
+ */
+function buildTraceRowCells(
+  item: TransactionListItem
+): [string, string, string, string] {
+  return [
+    `\`${item.trace}\``,
+    escapeMarkdownCell(item.transaction || "unknown"),
+    formatTraceDuration(item["transaction.duration"]),
+    formatRelativeTime(item.timestamp).trim(),
+  ];
+}
+
+/**
+ * Format a single transaction row for streaming output (follow/live mode).
+ *
+ * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
+ * row so streamed output composes into a valid CommonMark document.
+ * In rendered mode (TTY): emits ANSI-styled text via `mdRow`.
+ *
+ * @param item - Transaction list item from the API
+ * @returns Formatted row string with newline
+ */
+export function formatTraceRow(item: TransactionListItem): string {
+  return mdRow(buildTraceRowCells(item));
+}
+
+/**
+ * Format column header for traces list (streaming mode).
  *
  * @returns Header string (includes trailing newline)
  */
@@ -65,27 +96,11 @@ export function formatTracesHeader(): string {
 }
 
 /**
- * Format a single transaction row for the traces list.
+ * Build a rendered markdown table for a batch list of trace transactions.
  *
- * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
- * row so streamed output composes into a valid CommonMark document.
- * In rendered mode (TTY): emits padded ANSI-colored text for live display.
- *
- * @param item - Transaction list item from the API
- * @returns Formatted row string with newline
- */
-export function formatTraceRow(item: TransactionListItem): string {
-  const traceId = `\`${item.trace}\``;
-  const transaction = escapeMarkdownCell(item.transaction || "unknown");
-  const duration = formatTraceDuration(item["transaction.duration"]);
-  const when = formatRelativeTime(item.timestamp).trim();
-  return mdRow([traceId, transaction, duration, when]);
-}
-
-/**
- * Build a markdown table for a list of trace transactions.
- *
- * Pre-rendered ANSI codes in cell values are preserved through the pipeline.
+ * Uses {@link buildTraceRowCells} to share cell formatting with
+ * {@link formatTraceRow}. Pre-rendered ANSI codes are preserved through the
+ * pipeline via cli-table3's `string-width`-aware column sizing.
  *
  * @param items - Transaction list items from the API
  * @returns Rendered terminal string with Unicode-bordered table
@@ -93,14 +108,10 @@ export function formatTraceRow(item: TransactionListItem): string {
 export function formatTraceTable(items: TransactionListItem[]): string {
   const rows = items
     .map((item) => {
-      const traceId = `\`${item.trace}\``;
-      const transaction = escapeMarkdownCell(item.transaction || "unknown");
-      const duration = formatTraceDuration(item["transaction.duration"]);
-      const when = formatRelativeTime(item.timestamp).trim();
+      const [traceId, transaction, duration, when] = buildTraceRowCells(item);
       return `| ${traceId} | ${transaction} | ${duration} | ${when} |`;
     })
     .join("\n");
-
   return renderMarkdown(`${mdTableHeader(TRACE_TABLE_COLS)}\n${rows}`);
 }
 

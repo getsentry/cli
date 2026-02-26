@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.13.0-dev.0",
+  "version": "0.14.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
