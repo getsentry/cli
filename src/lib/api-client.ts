@@ -15,6 +15,7 @@ import {
   queryExploreEventsInTableFormat,
   resolveAShortId,
   retrieveAnEventForAProject,
+  retrieveAnIssue,
   retrieveAnIssueEvent,
   retrieveAnOrganization,
   retrieveAProject,
@@ -1118,12 +1119,36 @@ export async function listIssuesAllPages(
 
 /**
  * Get a specific issue by numeric ID.
+ *
+ * Uses the legacy unscoped endpoint — no org context or region routing.
+ * Prefer {@link getIssueInOrg} when the org slug is known.
  */
 export function getIssue(issueId: string): Promise<SentryIssue> {
   // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
   // but the legacy endpoint /issues/{id}/ works without org context.
   // Use raw request for backward compatibility.
   return apiRequest<SentryIssue>(`/issues/${issueId}/`);
+}
+
+/**
+ * Get a specific issue by numeric ID, scoped to an organization.
+ *
+ * Uses the org-scoped SDK endpoint with region-aware routing.
+ * Preferred over {@link getIssue} when the org slug is available.
+ *
+ * @param orgSlug - Organization slug (used for region routing)
+ * @param issueId - Numeric issue ID
+ */
+export async function getIssueInOrg(
+  orgSlug: string,
+  issueId: string
+): Promise<SentryIssue> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await retrieveAnIssue({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, issue_id: issueId },
+  });
+  return unwrapResult(result, "Failed to get issue") as unknown as SentryIssue;
 }
 
 /**

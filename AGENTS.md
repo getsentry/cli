@@ -622,3 +622,16 @@ mock.module("./some-module", () => ({
 | Add E2E tests | `test/e2e/` |
 | Test helpers | `test/model-based/helpers.ts` |
 | Add documentation | `docs/src/content/docs/` |
+
+<!-- This section is auto-maintained by lore (https://github.com/BYK/opencode-lore) -->
+## Long-term Knowledge
+
+### Gotcha
+
+<!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
+* **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: In getsentry/cli tests, \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` inside the repo tree. When code calls \`detectDsn(cwd)\` with this temp dir as cwd (e.g., via \`resolveOrg({ cwd })\`), \`findProjectRoot\` walks up from \`.test-tmp/prefix-xxx\` and finds the repo's \`.git\` directory, causing DSN detection to scan the actual source code for Sentry DSNs. This can trigger network calls that hit test fetch mocks (returning 404s or unexpected responses), leading to 5-second test timeouts. Fix: always use \`useTestConfigDir(prefix, { isolateProjectRoot: true })\` when the test exercises any code path that might call \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\` with the config dir as cwd. The \`isolateProjectRoot\` option creates a \`.git\` directory inside the temp dir, stopping the upward walk immediately.
+<!-- lore:019c972c-9f0d-7c8e-95b1-7beda99c36a8 -->
+* **parseSentryUrl does not handle subdomain-style SaaS URLs**: The URL parser in src/lib/sentry-url-parser.ts now handles both path-based (\`/organizations/{org}/...\`) and subdomain-style (\`https://my-org.sentry.io/issues/123/\`) SaaS URLs. The \`matchSubdomainOrg()\` function extracts the org from the hostname when it ends with \`.sentry.io\`, supports \`/issues/{id}/\`, \`/issues/{id}/events/{eventId}/\`, and \`/traces/{traceId}/\` paths. Region subdomains (\`us\`, \`de\`) are filtered out by requiring org slugs to be longer than 2 characters. The \`baseUrl\` for subdomain URLs is the full \`scheme://host\` (e.g., \`https://my-org.sentry.io\`). \`DEFAULT\_SENTRY\_HOST\` is \`sentry.io\` (from constants.ts). The \`isSentrySaasUrl\` helper in sentry-urls.ts is imported to gate subdomain extraction to SaaS URLs only.
+<!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
+* **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution now uses a multi-step approach in \`resolveNumericIssue()\` (extracted from \`resolveIssue\` to reduce cognitive complexity). Resolution order: (1) \`resolveOrg({ cwd })\` tries DSN/env/config for org context, (2) if org found, uses \`getIssueInOrg(org, id)\` with region routing, (3) if no org, falls back to unscoped \`getIssue(id)\`, (4) extracts org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. The \`explicit-org-numeric\` case now uses \`getIssueInOrg(parsed.org, id)\` instead of the unscoped endpoint. \`getIssueInOrg\` was added to api-client.ts using the SDK's \`retrieveAnIssue\` with the standard \`getOrgSdkConfig + unwrapResult\` pattern. The \`resolveOrgAndIssueId\` wrapper (used by \`explain\`/\`plan\`) no longer throws "Organization is required" for bare numeric IDs when the permalink contains the org slug.
+<!-- End lore-managed section -->

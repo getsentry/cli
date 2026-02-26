@@ -110,6 +110,90 @@ describe("resolveOrgAndIssueId", () => {
     ).rejects.toThrow("Organization");
   });
 
+  test("resolves numeric ID when API response includes subdomain-style permalink", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+            // Org slug embedded in subdomain-style permalink
+            permalink: "https://my-org.sentry.io/issues/123456789/",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    // Org should be extracted from permalink — no longer throws
+    const result = await resolveOrgAndIssueId({
+      issueArg: "123456789",
+      cwd: getConfigDir(),
+      command: "explain",
+    });
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("123456789");
+  });
+
+  test("resolves numeric ID when API response includes path-style permalink", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/issues/55555555/")) {
+        return new Response(
+          JSON.stringify({
+            id: "55555555",
+            shortId: "BACKEND-XY",
+            title: "Another Issue",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "1",
+            userCount: 1,
+            // Path-style permalink (sentry.io/organizations/{org}/issues/{id}/)
+            permalink:
+              "https://sentry.io/organizations/acme-corp/issues/55555555/",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "55555555",
+      cwd: getConfigDir(),
+      command: "explain",
+    });
+    expect(result.org).toBe("acme-corp");
+    expect(result.issueId).toBe("55555555");
+  });
+
   test("resolves explicit org prefix (org/ISSUE-ID)", async () => {
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1271,7 +1355,9 @@ describe("ensureRootCauseAnalysis", () => {
 });
 
 describe("resolveIssue: numeric 404 error handling", () => {
-  const getResolveIssueConfigDir = useTestConfigDir("test-resolve-issue-");
+  const getResolveIssueConfigDir = useTestConfigDir("test-resolve-issue-", {
+    isolateProjectRoot: true,
+  });
 
   let savedFetch: typeof globalThis.fetch;
 
