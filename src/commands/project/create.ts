@@ -11,7 +11,7 @@ import {
   listTeams,
   tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
-import { parseOrgPrefixedArg } from "../../lib/arg-parsing.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
@@ -297,11 +297,29 @@ export const createCommand = buildCommand({
       throw new CliError(buildPlatformError(nameArg));
     }
 
-    const { org: explicitOrg, name } = parseOrgPrefixedArg(
-      nameArg,
-      "Project name",
-      USAGE_HINT
-    );
+    const parsed = parseOrgProjectArg(nameArg);
+
+    let explicitOrg: string | undefined;
+    let name: string;
+
+    switch (parsed.type) {
+      case "explicit":
+        explicitOrg = parsed.org;
+        name = parsed.project;
+        break;
+      case "project-search":
+        name = parsed.projectSlug;
+        break;
+      case "org-all":
+        throw new ContextError("Project name", USAGE_HINT);
+      case "auto-detect":
+        // Shouldn't happen — nameArg is a required positional
+        throw new ContextError("Project name", USAGE_HINT);
+      default: {
+        const _exhaustive: never = parsed;
+        throw new ContextError("Project name", String(_exhaustive));
+      }
+    }
 
     // Resolve organization
     const resolved = await resolveOrg({ org: explicitOrg, cwd });
