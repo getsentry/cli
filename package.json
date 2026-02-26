@@ -34,6 +34,7 @@
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
     "@types/bun": "latest",
+    "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/semver": "^7.7.1",
@@ -63,5 +64,9 @@
   "packageManager": "bun@1.3.9",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
+  },
+  "dependencies": {
+    "marked": "^15",
+    "marked-terminal": "^7.3.0"
   }
 }

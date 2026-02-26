@@ -2,7 +2,7 @@
  * Tests for human formatter utility functions
  *
  * These tests cover pure utility functions that don't depend on external state.
- * Functions tested: formatStatusIcon, formatStatusLabel, formatTable, divider,
+ * Functions tested: formatStatusIcon, formatStatusLabel,
  * formatRelativeTime, maskToken, formatDuration, formatExpiration
  */
 
@@ -15,13 +15,11 @@ import {
   stringMatching,
 } from "fast-check";
 import {
-  divider,
   formatDuration,
   formatExpiration,
   formatRelativeTime,
   formatStatusIcon,
   formatStatusLabel,
-  formatTable,
   maskToken,
 } from "../../../src/lib/formatters/human.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
@@ -85,105 +83,6 @@ describe("formatStatusLabel", () => {
   test("returns Unknown for unrecognized status", () => {
     const result = stripAnsi(formatStatusLabel("something-else"));
     expect(result).toBe("● Unknown");
-  });
-});
-
-// Table Formatting
-
-describe("formatTable", () => {
-  test("formats simple table with left alignment", () => {
-    const columns = [
-      { header: "NAME", width: 10 },
-      { header: "VALUE", width: 5 },
-    ];
-    const rows = [
-      ["Alice", "100"],
-      ["Bob", "200"],
-    ];
-
-    const result = formatTable(columns, rows);
-
-    expect(result).toHaveLength(3); // 1 header + 2 rows
-    expect(result[0]).toBe("NAME        VALUE");
-    expect(result[1]).toBe("Alice       100  ");
-    expect(result[2]).toBe("Bob         200  ");
-  });
-
-  test("formats table with right alignment", () => {
-    const columns = [
-      { header: "NAME", width: 10 },
-      { header: "COUNT", width: 5, align: "right" as const },
-    ];
-    const rows = [
-      ["Alice", "42"],
-      ["Bob", "7"],
-    ];
-
-    const result = formatTable(columns, rows);
-
-    expect(result[0]).toBe("NAME        COUNT");
-    expect(result[1]).toBe("Alice          42");
-    expect(result[2]).toBe("Bob             7");
-  });
-
-  test("handles empty rows", () => {
-    const columns = [{ header: "NAME", width: 10 }];
-    const rows: string[][] = [];
-
-    const result = formatTable(columns, rows);
-
-    expect(result).toHaveLength(1); // Just header
-    expect(result[0]).toBe("NAME      ");
-  });
-
-  test("handles mixed alignment", () => {
-    const columns = [
-      { header: "LEFT", width: 8, align: "left" as const },
-      { header: "RIGHT", width: 8, align: "right" as const },
-      { header: "DEFAULT", width: 8 },
-    ];
-    const rows = [["a", "b", "c"]];
-
-    const result = formatTable(columns, rows);
-
-    expect(result[0]).toBe("LEFT         RIGHT  DEFAULT ");
-    expect(result[1]).toBe("a                b  c       ");
-  });
-});
-
-// Divider
-
-describe("divider", () => {
-  test("creates divider with default length and character", () => {
-    const result = stripAnsi(divider());
-    expect(result).toBe("─".repeat(80));
-    expect(result.length).toBe(80);
-  });
-
-  test("creates divider with custom length", () => {
-    const result = stripAnsi(divider(40));
-    expect(result).toBe("─".repeat(40));
-    expect(result.length).toBe(40);
-  });
-
-  test("creates divider with custom character", () => {
-    const result = stripAnsi(divider(10, "="));
-    expect(result).toBe("=".repeat(10));
-  });
-
-  test("creates divider with both custom length and character", () => {
-    const result = stripAnsi(divider(5, "*"));
-    expect(result).toBe("*****");
-  });
-
-  test("property: divider length equals requested length", async () => {
-    await fcAssert(
-      property(integer({ min: 1, max: 200 }), (length) => {
-        const result = stripAnsi(divider(length));
-        expect(result.length).toBe(length);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
   });
 });
 

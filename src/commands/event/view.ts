@@ -54,11 +54,7 @@ type HumanOutputOptions = {
 function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
   const { event, detectedFrom, spanTreeLines } = options;
 
-  const lines = formatEventDetails(event, `Event ${event.eventID}`);
-
-  // Skip leading empty line for standalone display
-  const output = lines.slice(1);
-  stdout.write(`${output.join("\n")}\n`);
+  stdout.write(`${formatEventDetails(event, `Event ${event.eventID}`)}\n`);
 
   if (spanTreeLines && spanTreeLines.length > 0) {
     stdout.write(`${spanTreeLines.join("\n")}\n`);

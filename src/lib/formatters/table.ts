@@ -1,11 +1,14 @@
 /**
  * Generic column-based table renderer.
  *
- * Replaces the duplicated calculateColumnWidths / writeHeader / writeRows
- * pattern used across team, repo, and project list commands.
+ * Generates markdown tables and renders them through `renderMarkdown()` so
+ * all list commands get consistent Unicode-bordered tables via cli-table3.
+ * Pre-rendered ANSI escape codes in cell values are preserved — cli-table3
+ * uses string-width which correctly treats them as zero-width.
  */
 
 import type { Writer } from "../../types/index.js";
+import { renderMarkdown } from "./markdown.js";
 
 /**
  * Describes a single column in a table.
@@ -24,10 +27,32 @@ export type Column<T> = {
 };
 
 /**
- * Render items as a formatted table with auto-sized columns.
+ * Build a markdown table string from items and column definitions.
  *
- * Column widths are computed as `max(header.length, minWidth, longestValue)`.
- * Columns are separated by two spaces. No trailing separator after the last column.
+ * ANSI escape codes in cell values survive the markdown pipeline —
+ * cli-table3 uses `string-width` for column width calculation.
+ *
+ * @param items - Row data
+ * @param columns - Column definitions
+ * @returns Markdown table string
+ */
+export function buildMarkdownTable<T>(
+  items: T[],
+  columns: Column<T>[]
+): string {
+  const header = `| ${columns.map((c) => c.header).join(" | ")} |`;
+  const separator = `| ${columns.map((c) => (c.align === "right" ? "---:" : "---")).join(" | ")} |`;
+  const rows = items
+    .map((item) => `| ${columns.map((c) => c.value(item)).join(" | ")} |`)
+    .join("\n");
+  return `${header}\n${separator}\n${rows}`;
+}
+
+/**
+ * Render items as a formatted table with Unicode borders.
+ *
+ * Column widths are auto-sized by cli-table3. Columns are defined via the
+ * `columns` array; ANSI-colored cell values are preserved.
  *
  * @param stdout - Output writer
  * @param items - Row data
@@ -38,37 +63,5 @@ export function writeTable<T>(
   items: T[],
   columns: Column<T>[]
 ): void {
-  // Pre-compute widths
-  const widths = columns.map((col) => {
-    const headerLen = col.header.length;
-    const minLen = col.minWidth ?? 0;
-    const maxValue = items.reduce(
-      (max, item) => Math.max(max, col.value(item).length),
-      0
-    );
-    return Math.max(headerLen, minLen, maxValue);
-  });
-
-  // Header row
-  const headerCells = columns.map((col, i) =>
-    pad(col.header, widths[i] as number, col.align)
-  );
-  stdout.write(`${headerCells.join("  ")}\n`);
-
-  // Data rows
-  for (const item of items) {
-    const cells = columns.map((col, i) =>
-      pad(col.value(item), widths[i] as number, col.align)
-    );
-    stdout.write(`${cells.join("  ")}\n`);
-  }
-}
-
-/** Pad a string to width with the given alignment. */
-function pad(
-  value: string,
-  width: number,
-  align: "left" | "right" = "left"
-): string {
-  return align === "right" ? value.padStart(width) : value.padEnd(width);
+  stdout.write(`${renderMarkdown(buildMarkdownTable(items, columns))}\n`);
 }

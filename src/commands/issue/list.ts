@@ -35,7 +35,6 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import {
-  divider,
   type FormatShortIdOptions,
   formatIssueListHeader,
   formatIssueRow,
@@ -118,7 +117,7 @@ function writeListHeader(
 ): void {
   stdout.write(`${title}:\n\n`);
   stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
-  stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
+  stdout.write(muted(`${"─".repeat(isMultiProject ? 96 : 80)}\n`));
 }
 
 /** Issue with formatting options attached */

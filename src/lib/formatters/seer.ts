@@ -1,19 +1,18 @@
 /**
  * Seer Output Formatters
  *
- * Formatting utilities for Seer Autofix command output.
+ * Formatting utilities for Seer Autofix command output. All human-readable
+ * output is built as markdown and rendered via renderMarkdown().
  */
 
-import chalk from "chalk";
 import type {
   AutofixState,
   RootCause,
   SolutionArtifact,
 } from "../../types/seer.js";
 import { SeerError } from "../errors.js";
-import { cyan, green, muted, yellow } from "./colors.js";
-
-const bold = (text: string): string => chalk.bold(text);
+import { cyan } from "./colors.js";
+import { renderMarkdown } from "./markdown.js";
 
 // Spinner Frames
 
@@ -99,96 +98,66 @@ export function getProgressMessage(state: AutofixState): string {
 // Root Cause Formatting
 
 /**
- * Format a single reproduction step.
- */
-function formatReproductionStep(
-  step: { title: string; code_snippet_and_analysis: string },
-  index: number
-): string[] {
-  const lines: string[] = [];
-  lines.push(`  ${index + 1}. ${step.title}`);
-
-  // Indent the analysis
-  const analysisLines = step.code_snippet_and_analysis
-    .split("\n")
-    .map((line) => `     ${line}`);
-  lines.push(...analysisLines);
-
-  return lines;
-}
-
-/**
- * Format a single root cause for display.
+ * Build a markdown document for a single root cause.
  *
  * @param cause - Root cause to format
  * @param index - Index for display (used as cause ID)
- * @returns Array of formatted lines
+ * @returns Markdown string for this cause
  */
-export function formatRootCause(cause: RootCause, index: number): string[] {
+function buildRootCauseMarkdown(cause: RootCause, index: number): string {
   const lines: string[] = [];
 
-  // Cause header
-  lines.push(`${yellow(`Cause #${index}`)}: ${cause.description}`);
+  lines.push(`### Cause #${index}: ${cause.description}`);
+  lines.push("");
 
-  // Relevant repositories
   if (cause.relevant_repos && cause.relevant_repos.length > 0) {
-    lines.push(`  ${muted("Repository:")} ${cause.relevant_repos.join(", ")}`);
+    lines.push(`**Repository:** ${cause.relevant_repos.join(", ")}`);
+    lines.push("");
   }
 
-  // Reproduction steps
   if (
     cause.root_cause_reproduction &&
     cause.root_cause_reproduction.length > 0
   ) {
+    lines.push("**Reproduction steps:**");
     lines.push("");
-    lines.push(`  ${muted("Reproduction:")}`);
-    for (let i = 0; i < cause.root_cause_reproduction.length; i++) {
-      const step = cause.root_cause_reproduction[i];
-      if (step) {
-        lines.push(...formatReproductionStep(step, i));
-      }
+    for (const step of cause.root_cause_reproduction) {
+      lines.push(`**${step.title}**`);
+      lines.push("");
+      // code_snippet_and_analysis may itself contain markdown (code fences,
+      // inline code, etc.) — pass it through as-is so marked renders it.
+      lines.push(step.code_snippet_and_analysis);
+      lines.push("");
     }
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 /**
- * Format the root cause analysis header.
- *
- * @returns Array of formatted header lines
- */
-export function formatRootCauseHeader(): string[] {
-  return ["", green("Root Cause Analysis Complete"), muted("═".repeat(30)), ""];
-}
-
-/**
- * Format all root causes for display.
+ * Format all root causes as rendered terminal output.
  *
  * @param causes - Array of root causes
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
-export function formatRootCauseList(causes: RootCause[]): string[] {
+export function formatRootCauseList(causes: RootCause[]): string {
   const lines: string[] = [];
 
-  lines.push(...formatRootCauseHeader());
+  lines.push("## Root Cause Analysis Complete");
+  lines.push("");
 
   if (causes.length === 0) {
-    lines.push(muted("No root causes identified."));
-    return lines;
-  }
-
-  for (let i = 0; i < causes.length; i++) {
-    const cause = causes[i];
-    if (cause) {
-      if (i > 0) {
-        lines.push("");
+    lines.push("*No root causes identified.*");
+  } else {
+    for (let i = 0; i < causes.length; i++) {
+      const cause = causes[i];
+      if (cause) {
+        lines.push(buildRootCauseMarkdown(cause, i));
       }
-      lines.push(...formatRootCause(cause, i));
     }
   }
 
-  return lines;
+  return renderMarkdown(lines.join("\n"));
 }
 
 // Error Messages
@@ -265,53 +234,46 @@ export function formatAutofixError(status: number, detail?: string): string {
 // Solution Formatting
 
 /**
- * Format a solution artifact for human-readable display.
+ * Format a solution artifact as rendered terminal output.
  *
- * Output format:
- * Solution
- * ════════════════════════════════════════════════════════════
+ * Renders a markdown document:
  *
- * Summary:
- *   {one_line_summary}
+ * ## Solution
  *
- * Steps to implement:
- *   1. {title}
- *      {description}
+ * **Summary:** {one_line_summary}
  *
- *   2. {title}
- *      {description}
- *   ...
+ * ### Steps to implement
+ *
+ * 1. **{title}**
+ *
+ *    {description}
  *
  * @param solution - Solution artifact from autofix
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
-export function formatSolution(solution: SolutionArtifact): string[] {
+export function formatSolution(solution: SolutionArtifact): string {
   const lines: string[] = [];
 
-  // Header
-  lines.push("");
-  lines.push(bold("Solution"));
-  lines.push("═".repeat(60));
+  lines.push("## Solution");
   lines.push("");
 
-  // Summary
-  lines.push(yellow("Summary:"));
-  lines.push(`  ${solution.data.one_line_summary}`);
+  lines.push(`**Summary:** ${solution.data.one_line_summary}`);
   lines.push("");
 
-  // Steps to implement
   if (solution.data.steps.length > 0) {
-    lines.push(cyan("Steps to implement:"));
+    lines.push("### Steps to implement");
     lines.push("");
     for (let i = 0; i < solution.data.steps.length; i++) {
       const step = solution.data.steps[i];
       if (step) {
-        lines.push(`  ${i + 1}. ${bold(step.title)}`);
-        lines.push(`     ${muted(step.description)}`);
+        lines.push(`${i + 1}. **${step.title}**`);
+        lines.push("");
+        // step.description may contain markdown — pass it through as-is
+        lines.push(`   ${step.description.split("\n").join("\n   ")}`);
         lines.push("");
       }
     }
   }
 
-  return lines;
+  return renderMarkdown(lines.join("\n"));
 }

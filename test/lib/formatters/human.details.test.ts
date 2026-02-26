@@ -128,42 +128,44 @@ describe("formatOrgDetails", () => {
       isEarlyAdopter: true,
     });
 
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("acme: Acme Corp");
-    expect(lines.some((l) => l.includes("Slug:       acme"))).toBe(true);
-    expect(lines.some((l) => l.includes("Name:       Acme Corp"))).toBe(true);
-    expect(lines.some((l) => l.includes("ID:         123"))).toBe(true);
-    expect(lines.some((l) => l.includes("2FA:        Required"))).toBe(true);
-    expect(lines.some((l) => l.includes("Early Adopter: Yes"))).toBe(true);
+    // Header contains slug and name
+    expect(lines[0]).toContain("acme");
+    expect(lines[0]).toContain("Acme Corp");
+
+    // Table rows contain the right values
+    expect(result).toContain("acme");
+    expect(result).toContain("Acme Corp");
+    expect(result).toContain("123");
+    expect(result).toContain("Required");
+    expect(result).toContain("Yes");
   });
 
   test("formats organization without 2FA", () => {
     const org = createMockOrg({ require2FA: false, isEarlyAdopter: false });
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
 
-    expect(lines.some((l) => l.includes("2FA:        Not required"))).toBe(
-      true
-    );
-    expect(lines.some((l) => l.includes("Early Adopter: No"))).toBe(true);
+    expect(result).toContain("Not required");
+    expect(result).toContain("No");
   });
 
   test("includes features when present", () => {
     const org = createMockOrg({
       features: ["feature-a", "feature-b", "feature-c"],
     });
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
 
-    expect(lines.some((l) => l.includes("Features (3)"))).toBe(true);
-    expect(lines.some((l) => l.includes("feature-a"))).toBe(true);
+    expect(result).toContain("Features");
+    expect(result).toContain("feature-a");
   });
 
   test("handles missing dateCreated", () => {
     const org = createMockOrg({ dateCreated: undefined });
-    const lines = formatOrgDetails(org).map(stripAnsi);
-
-    // Should not throw and should not include Created line
-    expect(lines.some((l) => l.startsWith("Created:"))).toBe(false);
+    // Should not throw
+    const result = stripAnsi(formatOrgDetails(org));
+    expect(result).not.toContain("Created");
   });
 });
 
@@ -267,35 +269,34 @@ describe("formatProjectDetails", () => {
       status: "active",
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
+    const result = stripAnsi(formatProjectDetails(project));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("frontend: Frontend App");
-    expect(lines.some((l) => l.includes("Slug:       frontend"))).toBe(true);
-    expect(lines.some((l) => l.includes("Name:       Frontend App"))).toBe(
-      true
-    );
-    expect(lines.some((l) => l.includes("ID:         456"))).toBe(true);
-    expect(lines.some((l) => l.includes("Platform:   javascript"))).toBe(true);
-    expect(lines.some((l) => l.includes("Status:     active"))).toBe(true);
+    // Header contains slug and name
+    expect(lines[0]).toContain("frontend");
+    expect(lines[0]).toContain("Frontend App");
+
+    // Table rows contain the right values
+    expect(result).toContain("frontend");
+    expect(result).toContain("Frontend App");
+    expect(result).toContain("456");
+    expect(result).toContain("javascript");
+    expect(result).toContain("active");
   });
 
   test("includes DSN when provided", () => {
     const project = createMockProject();
     const dsn = "https://abc123@sentry.io/456";
 
-    const lines = formatProjectDetails(project, dsn).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes(`DSN:        ${dsn}`))).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project, dsn));
+    expect(result).toContain(dsn);
   });
 
   test("shows 'No DSN available' when DSN is null", () => {
     const project = createMockProject();
 
-    const lines = formatProjectDetails(project, null).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("DSN:        No DSN available"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project, null));
+    expect(result).toContain("No DSN available");
   });
 
   test("includes organization context when present", () => {
@@ -303,11 +304,9 @@ describe("formatProjectDetails", () => {
       organization: { slug: "acme", name: "Acme Corp" },
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Organization: Acme Corp (acme)"))
-    ).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("Acme Corp");
+    expect(result).toContain("acme");
   });
 
   test("includes capability flags", () => {
@@ -318,34 +317,26 @@ describe("formatProjectDetails", () => {
       hasMonitors: true,
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Sessions:  Yes"))).toBe(true);
-    expect(lines.some((l) => l.includes("Replays:   Yes"))).toBe(true);
-    expect(lines.some((l) => l.includes("Profiles:  No"))).toBe(true);
-    expect(lines.some((l) => l.includes("Monitors:  Yes"))).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("Sessions");
+    expect(result).toContain("Replays");
+    expect(result).toContain("Profiles");
+    expect(result).toContain("Monitors");
   });
 
   test("handles missing firstEvent", () => {
     const project = createMockProject({ firstEvent: undefined });
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("First Event: No events yet"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("No events yet");
   });
 
   test("formats firstEvent date when present", () => {
     const project = createMockProject({
       firstEvent: "2024-06-15T10:30:00Z",
     });
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.startsWith("First Event:"))).toBe(true);
-    // Should contain a formatted date (locale-dependent)
-    expect(lines.some((l) => l.includes("2024") || l.includes("15"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project));
+    // Should contain year (locale-dependent format)
+    expect(result).toContain("2024");
   });
 });
 
@@ -362,13 +353,19 @@ describe("formatIssueDetails", () => {
       userCount: 25,
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
+    const result = stripAnsi(formatIssueDetails(issue));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("PROJ-ABC: Test Error");
-    expect(lines.some((l) => l.includes("Status:"))).toBe(true);
-    expect(lines.some((l) => l.includes("Level:      error"))).toBe(true);
-    expect(lines.some((l) => l.includes("Events:     100"))).toBe(true);
-    expect(lines.some((l) => l.includes("Users:      25"))).toBe(true);
+    // Header contains shortId and title
+    expect(lines[0]).toContain("PROJ-ABC");
+    expect(lines[0]).toContain("Test Error");
+
+    // Table contains key fields
+    expect(result).toContain("Status");
+    expect(result).toContain("Level");
+    expect(result).toContain("error");
+    expect(result).toContain("100");
+    expect(result).toContain("25");
   });
 
   test("includes substatus when present", () => {
@@ -377,23 +374,21 @@ describe("formatIssueDetails", () => {
       substatus: "ongoing",
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("(Ongoing)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Ongoing");
   });
 
   test("includes priority when present", () => {
     const issue = createMockIssue({ priority: "high" });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Priority:   High"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Priority");
+    expect(result).toContain("High");
   });
 
   test("shows unhandled indicator", () => {
     const issue = createMockIssue({ isUnhandled: true });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("(unhandled)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("unhandled");
   });
 
   test("includes project info when present", () => {
@@ -401,11 +396,9 @@ describe("formatIssueDetails", () => {
       project: { slug: "frontend", name: "Frontend App" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Project:    Frontend App (frontend)"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Frontend App");
+    expect(result).toContain("frontend");
   });
 
   test("formats single release correctly", () => {
@@ -414,9 +407,9 @@ describe("formatIssueDetails", () => {
       lastRelease: { shortVersion: "1.0.0" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l === "Release:    1.0.0")).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("1.0.0");
+    expect(result).toContain("Release");
   });
 
   test("formats release range when different", () => {
@@ -425,11 +418,10 @@ describe("formatIssueDetails", () => {
       lastRelease: { shortVersion: "2.0.0" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Releases:   1.0.0 -> 2.0.0"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("1.0.0");
+    expect(result).toContain("2.0.0");
+    expect(result).toContain("→");
   });
 
   test("includes assignee name", () => {
@@ -437,25 +429,20 @@ describe("formatIssueDetails", () => {
       assignedTo: { name: "John Doe" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Assignee:   John Doe"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("John Doe");
   });
 
   test("shows Unassigned when no assignee", () => {
     const issue = createMockIssue({ assignedTo: undefined });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Assignee:   Unassigned"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Unassigned");
   });
 
   test("includes culprit when present", () => {
     const issue = createMockIssue({ culprit: "app.js in handleClick" });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Culprit:    app.js in handleClick"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("app.js in handleClick");
   });
 
   test("includes metadata message when present", () => {
@@ -463,12 +450,9 @@ describe("formatIssueDetails", () => {
       metadata: { value: "Cannot read property 'x' of null" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l === "Message:")).toBe(true);
-    expect(
-      lines.some((l) => l.includes("Cannot read property 'x' of null"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Message");
+    expect(result).toContain("Cannot read property");
   });
 
   test("includes metadata filename and function", () => {
@@ -476,10 +460,9 @@ describe("formatIssueDetails", () => {
       metadata: { filename: "src/app.js", function: "handleClick" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("File:       src/app.js"))).toBe(true);
-    expect(lines.some((l) => l.includes("Function:   handleClick"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("src/app.js");
+    expect(result).toContain("handleClick");
   });
 
   test("includes permalink", () => {
@@ -487,11 +470,8 @@ describe("formatIssueDetails", () => {
       permalink: "https://sentry.io/issues/123",
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Link:       https://sentry.io/issues/123"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("https://sentry.io/issues/123");
   });
 
   test("handles missing optional fields gracefully", () => {
@@ -509,46 +489,47 @@ describe("formatIssueDetails", () => {
     });
 
     // Should not throw
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.length).toBeGreaterThan(5);
-    expect(lines.some((l) => l.includes("Platform:   unknown"))).toBe(true);
-    expect(lines.some((l) => l.includes("Type:       unknown"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result.length).toBeGreaterThan(50);
+    expect(result).toContain("Platform");
+    expect(result).toContain("unknown");
+    expect(result).toContain("Type");
   });
 
   test("includes fixability with percentage when seerFixabilityScore is present", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.7 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: High (70%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("High");
+    expect(result).toContain("70%");
   });
 
   test("omits fixability when seerFixabilityScore is null", () => {
     const issue = createMockIssue({ seerFixabilityScore: null });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).not.toContain("Fixability");
   });
 
   test("omits fixability when seerFixabilityScore is undefined", () => {
     const issue = createMockIssue({ seerFixabilityScore: undefined });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).not.toContain("Fixability");
   });
 
   test("shows med label for medium score", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.5 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: Med (50%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("Med");
+    expect(result).toContain("50%");
   });
 
   test("shows low label for low score", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.1 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: Low (10%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("Low");
+    expect(result).toContain("10%");
   });
 });
 

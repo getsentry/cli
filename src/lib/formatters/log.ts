@@ -7,7 +7,7 @@
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import { cyan, muted, red, yellow } from "./colors.js";
-import { divider } from "./human.js";
+import { renderMarkdown } from "./markdown.js";
 
 /** Color functions for log severity levels */
 const SEVERITY_COLORS: Record<string, (text: string) => string> = {
@@ -71,13 +71,38 @@ export function formatLogRow(log: SentryLog): string {
 }
 
 /**
- * Format column header for logs list.
+ * Format column header for logs list (used in streaming/follow mode).
  *
- * @returns Header line with column titles and divider
+ * @returns Header line with column titles and separator
  */
 export function formatLogsHeader(): string {
   const header = muted("TIMESTAMP            LEVEL    MESSAGE");
-  return `${header}\n${divider(80)}\n`;
+  return `${header}\n${muted("─".repeat(80))}\n`;
+}
+
+/**
+ * Build a markdown table for a list of log entries.
+ *
+ * Pre-rendered ANSI codes in cell values (e.g. colored severity) are preserved.
+ *
+ * @param logs - Log entries to display
+ * @returns Rendered terminal string with Unicode-bordered table
+ */
+export function formatLogTable(logs: SentryLog[]): string {
+  const header = "| Timestamp | Level | Message |";
+  const separator = "| --- | --- | --- |";
+  const rows = logs
+    .map((log) => {
+      const timestamp = formatTimestamp(log.timestamp);
+      // Pre-render ANSI severity color — survives the cli-table3 pipeline
+      const severity = formatSeverity(log.severity).trim();
+      const message = (log.message ?? "").replace(/\|/g, "\\|");
+      const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+      return `| ${timestamp} | ${severity} | ${message}${trace} |`;
+    })
+    .join("\n");
+
+  return renderMarkdown(`${header}\n${separator}\n${rows}`);
 }
 
 /**
@@ -92,88 +117,93 @@ function formatSeverityLabel(severity: string | null | undefined): string {
   return colorFn(level.toUpperCase());
 }
 
-/** Minimum width for header separator line */
-const MIN_HEADER_WIDTH = 20;
-
 /**
- * Format detailed log entry for display.
+ * Format detailed log entry for display as rendered markdown.
  * Shows all available fields in a structured format.
  *
  * @param log - The detailed log entry to format
  * @param orgSlug - Organization slug for building trace URLs
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: log detail formatting requires multiple conditional sections
 export function formatLogDetails(
   log: DetailedSentryLog,
   orgSlug: string
-): string[] {
-  const lines: string[] = [];
+): string {
   const logId = log["sentry.item_id"];
+  const lines: string[] = [];
 
-  // Header
-  const headerText = `Log ${logId.slice(0, 12)}...`;
-  const separatorWidth = Math.max(
-    MIN_HEADER_WIDTH,
-    Math.min(80, headerText.length)
-  );
-  lines.push(headerText);
-  lines.push(muted("═".repeat(separatorWidth)));
+  lines.push(`## Log \`${logId.slice(0, 12)}...\``);
   lines.push("");
 
-  // Core fields
-  lines.push(`ID:         ${logId}`);
-  lines.push(`Timestamp:  ${formatTimestamp(log.timestamp)}`);
-  lines.push(`Severity:   ${formatSeverityLabel(log.severity)}`);
+  // Core fields table
+  const rows: string[] = [];
+  rows.push(`| **ID** | \`${logId}\` |`);
+  rows.push(`| **Timestamp** | ${formatTimestamp(log.timestamp)} |`);
+  rows.push(`| **Severity** | ${formatSeverityLabel(log.severity)} |`);
 
-  // Message (may be multi-line or long)
+  lines.push("| | |");
+  lines.push("|---|---|");
+  lines.push(...rows);
+
   if (log.message) {
     lines.push("");
-    lines.push("Message:");
-    lines.push(`  ${log.message}`);
+    lines.push("**Message:**");
+    lines.push("");
+    lines.push(`> ${log.message.replace(/\n/g, "\n> ")}`);
   }
-  lines.push("");
 
   // Context section
   if (log.project || log.environment || log.release) {
-    lines.push(muted("─── Context ───"));
     lines.push("");
+    lines.push("### Context");
+    lines.push("");
+    const ctxRows: string[] = [];
     if (log.project) {
-      lines.push(`Project:      ${log.project}`);
+      ctxRows.push(`| **Project** | ${log.project} |`);
     }
     if (log.environment) {
-      lines.push(`Environment:  ${log.environment}`);
+      ctxRows.push(`| **Environment** | ${log.environment} |`);
     }
     if (log.release) {
-      lines.push(`Release:      ${log.release}`);
+      ctxRows.push(`| **Release** | ${log.release} |`);
     }
-    lines.push("");
+    lines.push("| | |");
+    lines.push("|---|---|");
+    lines.push(...ctxRows);
   }
 
   // SDK section
   const sdkName = log["sdk.name"];
   const sdkVersion = log["sdk.version"];
   if (sdkName || sdkVersion) {
-    lines.push(muted("─── SDK ───"));
     lines.push("");
+    lines.push("### SDK");
+    lines.push("");
+    // Wrap in backticks to prevent markdown from interpreting underscores/dashes
     const sdkInfo =
       sdkName && sdkVersion
-        ? `${sdkName} ${sdkVersion}`
-        : sdkName || sdkVersion;
-    lines.push(`SDK:          ${sdkInfo}`);
-    lines.push("");
+        ? `\`${sdkName} ${sdkVersion}\``
+        : `\`${sdkName ?? sdkVersion}\``;
+    lines.push("| | |");
+    lines.push("|---|---|");
+    lines.push(`| **SDK** | ${sdkInfo} |`);
   }
 
   // Trace section
   if (log.trace) {
-    lines.push(muted("─── Trace ───"));
     lines.push("");
-    lines.push(`Trace ID:     ${log.trace}`);
+    lines.push("### Trace");
+    lines.push("");
+    const traceRows: string[] = [];
+    traceRows.push(`| **Trace ID** | \`${log.trace}\` |`);
     if (log.span_id) {
-      lines.push(`Span ID:      ${log.span_id}`);
+      traceRows.push(`| **Span ID** | \`${log.span_id}\` |`);
     }
-    lines.push(`Link:         ${buildTraceUrl(orgSlug, log.trace)}`);
-    lines.push("");
+    traceRows.push(`| **Link** | ${buildTraceUrl(orgSlug, log.trace)} |`);
+    lines.push("| | |");
+    lines.push("|---|---|");
+    lines.push(...traceRows);
   }
 
   // Source location section (OTel code attributes)
@@ -181,38 +211,46 @@ export function formatLogDetails(
   const codeFilePath = log["code.file.path"];
   const codeLineNumber = log["code.line.number"];
   if (codeFunction || codeFilePath) {
-    lines.push(muted("─── Source Location ───"));
     lines.push("");
+    lines.push("### Source Location");
+    lines.push("");
+    const srcRows: string[] = [];
     if (codeFunction) {
-      lines.push(`Function:     ${codeFunction}`);
+      srcRows.push(`| **Function** | \`${codeFunction}\` |`);
     }
     if (codeFilePath) {
       const location = codeLineNumber
         ? `${codeFilePath}:${codeLineNumber}`
         : codeFilePath;
-      lines.push(`File:         ${location}`);
+      srcRows.push(`| **File** | \`${location}\` |`);
     }
-    lines.push("");
+    lines.push("| | |");
+    lines.push("|---|---|");
+    lines.push(...srcRows);
   }
 
-  // OpenTelemetry section (if any OTel fields are present)
+  // OpenTelemetry section
   const otelKind = log["sentry.otel.kind"];
   const otelStatus = log["sentry.otel.status_code"];
   const otelScope = log["sentry.otel.instrumentation_scope.name"];
   if (otelKind || otelStatus || otelScope) {
-    lines.push(muted("─── OpenTelemetry ───"));
     lines.push("");
+    lines.push("### OpenTelemetry");
+    lines.push("");
+    const otelRows: string[] = [];
     if (otelKind) {
-      lines.push(`Kind:         ${otelKind}`);
+      otelRows.push(`| **Kind** | ${otelKind} |`);
     }
     if (otelStatus) {
-      lines.push(`Status:       ${otelStatus}`);
+      otelRows.push(`| **Status** | ${otelStatus} |`);
     }
     if (otelScope) {
-      lines.push(`Scope:        ${otelScope}`);
+      otelRows.push(`| **Scope** | ${otelScope} |`);
     }
-    lines.push("");
+    lines.push("| | |");
+    lines.push("|---|---|");
+    lines.push(...otelRows);
   }
 
-  return lines;
+  return renderMarkdown(lines.join("\n"));
 }

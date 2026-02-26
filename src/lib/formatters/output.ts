@@ -12,8 +12,8 @@ import { writeJson } from "./json.js";
 type WriteOutputOptions<T> = {
   /** Output JSON format instead of human-readable */
   json: boolean;
-  /** Function to format data as human-readable lines */
-  formatHuman: (data: T) => string[];
+  /** Function to format data as a rendered string or string array */
+  formatHuman: (data: T) => string | string[];
   /** Optional source description if data was auto-detected */
   detectedFrom?: string;
 };
@@ -36,8 +36,9 @@ export function writeOutput<T>(
     return;
   }
 
-  const lines = options.formatHuman(data);
-  stdout.write(`${lines.join("\n")}\n`);
+  const output = options.formatHuman(data);
+  const text = Array.isArray(output) ? output.join("\n") : output;
+  stdout.write(`${text}\n`);
 
   if (options.detectedFrom) {
     stdout.write(`\nDetected from ${options.detectedFrom}\n`);

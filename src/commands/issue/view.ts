@@ -57,17 +57,13 @@ type HumanOutputOptions = {
 function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
   const { issue, event, spanTreeLines } = options;
 
-  const issueLines = formatIssueDetails(issue);
-  stdout.write(`${issueLines.join("\n")}\n`);
+  stdout.write(`${formatIssueDetails(issue)}\n`);
 
   if (event) {
     // Pass issue permalink for constructing replay links
-    const eventLines = formatEventDetails(
-      event,
-      "Latest Event",
-      issue.permalink
+    stdout.write(
+      `${formatEventDetails(event, "Latest Event", issue.permalink)}\n`
     );
-    stdout.write(`${eventLines.join("\n")}\n`);
   }
 
   if (spanTreeLines && spanTreeLines.length > 0) {

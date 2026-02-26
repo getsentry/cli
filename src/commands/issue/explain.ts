@@ -107,8 +107,7 @@ export const explainCommand = buildCommand({
       }
 
       // Human-readable output
-      const lines = formatRootCauseList(causes);
-      stdout.write(`${lines.join("\n")}\n`);
+      stdout.write(`${formatRootCauseList(causes)}\n`);
       writeFooter(
         stdout,
         `To create a plan, run: sentry issue plan ${issueArg}`

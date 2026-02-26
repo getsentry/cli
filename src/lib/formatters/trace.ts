@@ -6,7 +6,8 @@
 
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
 import { muted } from "./colors.js";
-import { divider, formatRelativeTime } from "./human.js";
+import { formatRelativeTime } from "./human.js";
+import { renderMarkdown } from "./markdown.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -41,15 +42,15 @@ export function formatTraceDuration(ms: number): string {
 }
 
 /**
- * Format column header for traces list.
+ * Format column header for traces list (used before per-row output).
  *
- * @returns Header line with column titles and divider
+ * @returns Header line with column titles and separator
  */
 export function formatTracesHeader(): string {
   const header = muted(
     "TRACE ID                          TRANSACTION                    DURATION    WHEN"
   );
-  return `${header}\n${divider(96)}\n`;
+  return `${header}\n${muted("─".repeat(96))}\n`;
 }
 
 /** Maximum transaction name length before truncation */
@@ -78,6 +79,32 @@ export function formatTraceRow(item: TransactionListItem): string {
   const when = formatRelativeTime(item.timestamp);
 
   return `${traceId}  ${transaction}  ${duration}  ${when}\n`;
+}
+
+/**
+ * Build a markdown table for a list of trace transactions.
+ *
+ * Pre-rendered ANSI codes in cell values are preserved through the pipeline.
+ *
+ * @param items - Transaction list items from the API
+ * @returns Rendered terminal string with Unicode-bordered table
+ */
+export function formatTraceTable(items: TransactionListItem[]): string {
+  const header = "| Trace ID | Transaction | Duration | When |";
+  const separator = "| --- | --- | ---: | --- |";
+  const rows = items
+    .map((item) => {
+      const traceId = item.trace;
+      const transaction = item.transaction || "unknown";
+      const duration = formatTraceDuration(item["transaction.duration"]);
+      const when = formatRelativeTime(item.timestamp).trim();
+      // Escape pipe characters in cell values to avoid breaking the table
+      const safeTransaction = transaction.replace(/\|/g, "\\|");
+      return `| \`${traceId}\` | ${safeTransaction} | ${duration} | ${when} |`;
+    })
+    .join("\n");
+
+  return renderMarkdown(`${header}\n${separator}\n${rows}`);
 }
 
 /** Trace summary computed from a span tree */
@@ -200,43 +227,31 @@ export function computeTraceSummary(
   };
 }
 
-/** Minimum width for header separator line */
-const MIN_HEADER_WIDTH = 20;
-
 /**
- * Format trace summary for human-readable display.
+ * Format trace summary for human-readable display as rendered markdown.
  * Shows metadata including root transaction, duration, span count, and projects.
  *
  * @param summary - Computed trace summary
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
-export function formatTraceSummary(summary: TraceSummary): string[] {
-  const lines: string[] = [];
-
-  // Header
-  const headerText = `Trace ${summary.traceId}`;
-  const separatorWidth = Math.max(
-    MIN_HEADER_WIDTH,
-    Math.min(80, headerText.length)
-  );
-  lines.push(headerText);
-  lines.push(muted("═".repeat(separatorWidth)));
-  lines.push("");
+export function formatTraceSummary(summary: TraceSummary): string {
+  const rows: string[] = [];
 
   if (summary.rootTransaction) {
-    const opPrefix = summary.rootOp ? `[${summary.rootOp}] ` : "";
-    lines.push(`Root:        ${opPrefix}${summary.rootTransaction}`);
+    const opPrefix = summary.rootOp ? `[\`${summary.rootOp}\`] ` : "";
+    rows.push(`| **Root** | ${opPrefix}${summary.rootTransaction} |`);
   }
-  lines.push(`Duration:    ${formatTraceDuration(summary.duration)}`);
-  lines.push(`Span Count:  ${summary.spanCount}`);
+  rows.push(`| **Duration** | ${formatTraceDuration(summary.duration)} |`);
+  rows.push(`| **Spans** | ${summary.spanCount} |`);
   if (summary.projects.length > 0) {
-    lines.push(`Projects:    ${summary.projects.join(", ")}`);
+    rows.push(`| **Projects** | ${summary.projects.join(", ")} |`);
   }
   if (Number.isFinite(summary.startTimestamp) && summary.startTimestamp > 0) {
     const date = new Date(summary.startTimestamp * 1000);
-    lines.push(`Started:     ${date.toLocaleString("sv-SE")}`);
+    rows.push(`| **Started** | ${date.toLocaleString("sv-SE")} |`);
   }
-  lines.push("");
 
-  return lines;
+  const table = `| | |\n|---|---|\n${rows.join("\n")}`;
+  const md = `## Trace \`${summary.traceId}\`\n\n${table}\n`;
+  return renderMarkdown(md);
 }

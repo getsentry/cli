@@ -167,31 +167,29 @@ function createDetailedTestLog(
 describe("formatLogDetails", () => {
   test("formats basic log entry with header", () => {
     const log = createDetailedTestLog();
-    const lines = formatLogDetails(log, "test-org");
-    const result = lines.join("\n");
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
-    expect(result).toContain("Log test-log-id");
-    expect(result).toContain("═"); // Header separator
+    // Header contains log ID prefix
+    expect(result).toContain("Log");
+    expect(result).toContain("test-log-id");
   });
 
   test("includes ID, timestamp, and severity", () => {
     const log = createDetailedTestLog();
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
-    expect(result).toContain("ID:");
+    expect(result).toContain("ID");
     expect(result).toContain("test-log-id-123456789012345678901234");
-    expect(result).toContain("Timestamp:");
-    expect(result).toContain("Severity:");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Severity");
     expect(result).toContain("INFO");
   });
 
   test("includes message when present", () => {
     const log = createDetailedTestLog({ message: "Custom error message" });
-    const lines = formatLogDetails(log, "test-org");
-    const result = lines.join("\n");
+    const result = formatLogDetails(log, "test-org");
 
-    expect(result).toContain("Message:");
+    expect(result).toContain("Message");
     expect(result).toContain("Custom error message");
   });
 
@@ -201,15 +199,14 @@ describe("formatLogDetails", () => {
       environment: "staging",
       release: "2.0.0",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("Context");
-    expect(result).toContain("Project:");
+    expect(result).toContain("Project");
     expect(result).toContain("my-project");
-    expect(result).toContain("Environment:");
+    expect(result).toContain("Environment");
     expect(result).toContain("staging");
-    expect(result).toContain("Release:");
+    expect(result).toContain("Release");
     expect(result).toContain("2.0.0");
   });
 
@@ -218,8 +215,7 @@ describe("formatLogDetails", () => {
       "sdk.name": "sentry.python",
       "sdk.version": "2.0.0",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("SDK");
     expect(result).toContain("sentry.python");
@@ -231,15 +227,14 @@ describe("formatLogDetails", () => {
       trace: "trace123abc456def789",
       span_id: "span-abc-123",
     });
-    const lines = formatLogDetails(log, "my-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "my-org"));
 
     expect(result).toContain("Trace");
-    expect(result).toContain("Trace ID:");
+    expect(result).toContain("Trace ID");
     expect(result).toContain("trace123abc456def789");
-    expect(result).toContain("Span ID:");
+    expect(result).toContain("Span ID");
     expect(result).toContain("span-abc-123");
-    expect(result).toContain("Link:");
+    expect(result).toContain("Link");
     expect(result).toContain("my-org/traces/trace123abc456def789");
   });
 
@@ -249,13 +244,12 @@ describe("formatLogDetails", () => {
       "code.file.path": "src/api/handler.ts",
       "code.line.number": "42",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("Source Location");
-    expect(result).toContain("Function:");
+    expect(result).toContain("Function");
     expect(result).toContain("handleRequest");
-    expect(result).toContain("File:");
+    expect(result).toContain("File");
     expect(result).toContain("src/api/handler.ts:42");
   });
 
@@ -265,15 +259,14 @@ describe("formatLogDetails", () => {
       "sentry.otel.status_code": "OK",
       "sentry.otel.instrumentation_scope.name": "express",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("OpenTelemetry");
-    expect(result).toContain("Kind:");
+    expect(result).toContain("Kind");
     expect(result).toContain("server");
-    expect(result).toContain("Status:");
+    expect(result).toContain("Status");
     expect(result).toContain("OK");
-    expect(result).toContain("Scope:");
+    expect(result).toContain("Scope");
     expect(result).toContain("express");
   });
 
@@ -287,13 +280,12 @@ describe("formatLogDetails", () => {
       "sdk.name": null,
       "sdk.version": null,
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     // Should still have basic info
-    expect(result).toContain("ID:");
-    expect(result).toContain("Timestamp:");
-    expect(result).toContain("Severity:");
+    expect(result).toContain("ID");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Severity");
 
     // Should not have optional sections
     expect(result).not.toContain("Context");

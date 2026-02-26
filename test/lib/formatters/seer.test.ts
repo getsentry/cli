@@ -10,7 +10,6 @@ import {
   createSeerError,
   formatAutofixError,
   formatProgressLine,
-  formatRootCause,
   formatRootCauseList,
   getProgressMessage,
   getSpinnerFrame,
@@ -18,6 +17,12 @@ import {
   truncateProgressMessage,
 } from "../../../src/lib/formatters/seer.js";
 import type { AutofixState, RootCause } from "../../../src/types/seer.js";
+
+/** Strip ANSI escape codes */
+function stripAnsi(str: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI control chars
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 describe("getSpinnerFrame", () => {
   test("returns a spinner character", () => {
@@ -131,61 +136,61 @@ describe("getProgressMessage", () => {
   });
 });
 
-describe("formatRootCause", () => {
+describe("formatRootCauseList", () => {
   test("formats a basic root cause", () => {
-    const cause: RootCause = {
-      id: 0,
-      description:
-        "Database connection timeout due to missing pool configuration",
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description:
+          "Database connection timeout due to missing pool configuration",
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.join("\n")).toContain("Database connection timeout");
-    expect(lines.join("\n")).toContain("Cause #0");
+    const output = stripAnsi(formatRootCauseList(causes));
+    expect(output.length).toBeGreaterThan(0);
+    expect(output).toContain("Database connection timeout");
   });
 
   test("includes relevant repos when present", () => {
-    const cause: RootCause = {
-      id: 0,
-      description: "Test cause",
-      relevant_repos: ["org/repo1", "org/repo2"],
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description: "Test cause",
+        relevant_repos: ["org/repo1", "org/repo2"],
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("org/repo1");
   });
 
   test("includes reproduction steps when present", () => {
-    const cause: RootCause = {
-      id: 0,
-      description: "Test cause",
-      root_cause_reproduction: [
-        {
-          title: "Step 1",
-          code_snippet_and_analysis: "User makes API request",
-        },
-        {
-          title: "Step 2",
-          code_snippet_and_analysis: "Database query times out",
-        },
-      ],
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description: "Test cause",
+        root_cause_reproduction: [
+          {
+            title: "Step 1",
+            code_snippet_and_analysis: "User makes API request",
+          },
+          {
+            title: "Step 2",
+            code_snippet_and_analysis: "Database query times out",
+          },
+        ],
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("Step 1");
     expect(output).toContain("User makes API request");
   });
-});
 
-describe("formatRootCauseList", () => {
   test("formats single cause", () => {
     const causes: RootCause[] = [{ id: 0, description: "Single root cause" }];
 
-    const lines = formatRootCauseList(causes);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("Single root cause");
   });
 
@@ -195,15 +200,13 @@ describe("formatRootCauseList", () => {
       { id: 1, description: "Second cause" },
     ];
 
-    const lines = formatRootCauseList(causes);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("First cause");
     expect(output).toContain("Second cause");
   });
 
   test("handles empty causes array", () => {
-    const lines = formatRootCauseList([]);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList([]));
     expect(output).toContain("No root causes");
   });
 });

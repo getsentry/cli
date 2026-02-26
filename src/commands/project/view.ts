@@ -15,7 +15,6 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import {
-  divider,
   formatProjectDetails,
   writeJson,
   writeOutput,
@@ -183,13 +182,11 @@ function writeMultipleProjects(
     const target = targets[i];
 
     if (i > 0) {
-      stdout.write(`\n${divider(60)}\n\n`);
+      stdout.write(`\n${"─".repeat(60)}\n\n`);
     }
 
     if (project) {
-      const details = formatProjectDetails(project, dsn);
-      stdout.write(details.join("\n"));
-      stdout.write("\n");
+      stdout.write(`${formatProjectDetails(project, dsn)}\n`);
       if (target?.detectedFrom) {
         stdout.write(`\nDetected from: ${target.detectedFrom}\n`);
       }

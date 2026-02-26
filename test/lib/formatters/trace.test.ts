@@ -250,7 +250,7 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("abc123def456", [
       makeSpan({ start_timestamp: 1000.0, timestamp: 1001.0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
+    const output = stripAnsi(formatTraceSummary(summary));
     expect(output).toContain("abc123def456");
   });
 
@@ -261,16 +261,17 @@ describe("formatTraceSummary", () => {
         "transaction.op": "http.server",
       }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("[http.server] GET /api/users");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("http.server");
+    expect(output).toContain("GET /api/users");
   });
 
   test("shows duration", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 1000.0, timestamp: 1001.24 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Duration:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Duration");
     expect(output).toContain("1.24s");
   });
 
@@ -278,8 +279,8 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 0, timestamp: 0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Duration:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Duration");
     expect(output).toContain("—");
   });
 
@@ -287,16 +288,17 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ children: [makeSpan(), makeSpan()] }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Span Count:  3");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Spans");
+    expect(output).toContain("3");
   });
 
   test("shows projects when present", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ project_slug: "my-app" }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Projects:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Projects");
     expect(output).toContain("my-app");
   });
 
@@ -307,15 +309,15 @@ describe("formatTraceSummary", () => {
         timestamp: 1_700_000_001.0,
       }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Started:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Started");
   });
 
   test("omits start time when no valid timestamps", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 0, timestamp: 0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).not.toContain("Started:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).not.toContain("Started");
   });
 });
