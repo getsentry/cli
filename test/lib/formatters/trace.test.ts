@@ -129,10 +129,10 @@ describe("formatTracesHeader (rendered mode)", () => {
 
   test("contains column titles", () => {
     const header = stripAnsi(formatTracesHeader());
-    expect(header).toContain("TRACE ID");
-    expect(header).toContain("TRANSACTION");
-    expect(header).toContain("DURATION");
-    expect(header).toContain("WHEN");
+    expect(header).toContain("Trace ID");
+    expect(header).toContain("Transaction");
+    expect(header).toContain("Duration");
+    expect(header).toContain("When");
   });
 
   test("ends with newline", () => {
@@ -164,12 +164,11 @@ describe("formatTraceRow (rendered mode)", () => {
     expect(row).toContain("245ms");
   });
 
-  test("truncates long transaction names", () => {
+  test("includes full transaction name in markdown row", () => {
     const longName = "A".repeat(50);
     const row = formatTraceRow(makeTransaction({ transaction: longName }));
-    // Should be truncated to 30 chars
-    expect(row).not.toContain(longName);
-    expect(row).toContain("A".repeat(30));
+    // Full name preserved in markdown table cell
+    expect(row).toContain(longName);
   });
 
   test("shows 'unknown' for empty transaction", () => {

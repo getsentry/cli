@@ -5,11 +5,12 @@
  */
 
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
-import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
 import {
+  divider,
   escapeMarkdownCell,
   isPlainOutput,
+  mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
 } from "./markdown.js";
@@ -46,6 +47,14 @@ export function formatTraceDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
+/** Column headers for the streaming trace table (Duration is right-aligned) */
+const TRACE_TABLE_COLS = [
+  "Trace ID",
+  "Transaction",
+  ["Duration", "right"] as const,
+  "When",
+] as const;
+
 /**
  * Format column header for traces list (used before per-row output).
  *
@@ -56,22 +65,15 @@ export function formatTraceDuration(ms: number): string {
  */
 export function formatTracesHeader(): string {
   if (isPlainOutput()) {
-    return "| Trace ID | Transaction | Duration | When |\n| --- | --- | ---: | --- |\n";
+    return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
   }
-  const header = muted(
-    "TRACE ID                          TRANSACTION                    DURATION    WHEN"
+  const header = renderInlineMarkdown(
+    TRACE_TABLE_COLS.map((c) => `**${typeof c === "string" ? c : c[0]}**`).join(
+      "  "
+    )
   );
-  return `${header}\n${muted("─".repeat(96))}\n`;
+  return `${header}\n${divider(96)}\n`;
 }
-
-/** Maximum transaction name length before truncation */
-const MAX_TRANSACTION_LENGTH = 30;
-
-/** Column width for trace ID display */
-const TRACE_ID_WIDTH = 32;
-
-/** Column width for duration display */
-const DURATION_WIDTH = 10;
 
 /**
  * Format a single transaction row for the traces list.
@@ -84,23 +86,17 @@ const DURATION_WIDTH = 10;
  * @returns Formatted row string with newline
  */
 export function formatTraceRow(item: TransactionListItem): string {
+  const traceId = `\`${item.trace}\``;
+  const transaction = escapeMarkdownCell(item.transaction || "unknown");
+  const duration = formatTraceDuration(item["transaction.duration"]);
+  const when = formatRelativeTime(item.timestamp).trim();
+  const cells = [traceId, transaction, duration, when];
+
   if (isPlainOutput()) {
-    const traceId = renderInlineMarkdown(`\`${item.trace}\``);
-    const transaction = escapeMarkdownCell(item.transaction || "unknown");
-    const duration = formatTraceDuration(item["transaction.duration"]);
-    const when = formatRelativeTime(item.timestamp).trim();
-    return `| ${traceId} | ${transaction} | ${duration} | ${when} |\n`;
+    return `| ${cells.join(" | ")} |\n`;
   }
 
-  const traceId = item.trace.slice(0, TRACE_ID_WIDTH).padEnd(TRACE_ID_WIDTH);
-  const transaction = (item.transaction || "unknown")
-    .slice(0, MAX_TRANSACTION_LENGTH)
-    .padEnd(MAX_TRANSACTION_LENGTH);
-  const duration = formatTraceDuration(item["transaction.duration"]).padStart(
-    DURATION_WIDTH
-  );
-  const when = formatRelativeTime(item.timestamp);
-  return `${traceId}  ${transaction}  ${duration}  ${when}\n`;
+  return `| ${cells.map((c) => renderInlineMarkdown(c)).join(" | ")} |\n`;
 }
 
 /**
@@ -112,21 +108,17 @@ export function formatTraceRow(item: TransactionListItem): string {
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatTraceTable(items: TransactionListItem[]): string {
-  const header = "| Trace ID | Transaction | Duration | When |";
-  const separator = "| --- | --- | ---: | --- |";
   const rows = items
     .map((item) => {
-      const traceId = item.trace;
-      const transaction = item.transaction || "unknown";
+      const traceId = `\`${item.trace}\``;
+      const transaction = escapeMarkdownCell(item.transaction || "unknown");
       const duration = formatTraceDuration(item["transaction.duration"]);
       const when = formatRelativeTime(item.timestamp).trim();
-      // Escape special markdown characters in cell values to avoid breaking the table
-      const safeTransaction = escapeMarkdownCell(transaction);
-      return `| \`${traceId}\` | ${safeTransaction} | ${duration} | ${when} |`;
+      return `| ${traceId} | ${transaction} | ${duration} | ${when} |`;
     })
     .join("\n");
 
-  return renderMarkdown(`${header}\n${separator}\n${rows}`);
+  return renderMarkdown(`${mdTableHeader(TRACE_TABLE_COLS)}\n${rows}`);
 }
 
 /** Trace summary computed from a span tree */

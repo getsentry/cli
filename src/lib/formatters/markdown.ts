@@ -23,6 +23,7 @@
 import chalk from "chalk";
 import { type MarkedExtension, marked } from "marked";
 import { markedTerminal as _markedTerminal } from "marked-terminal";
+import { muted } from "./colors.js";
 
 // @types/marked-terminal@6 describes the legacy class-based API; the package's
 // actual markedTerminal() returns a {renderer, useNewRenderer} MarkedExtension
@@ -125,6 +126,34 @@ export function isPlainOutput(): boolean {
  */
 export function escapeMarkdownCell(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
+/**
+ * Build a markdown table header row + separator from column definitions.
+ *
+ * @param cols - Column definitions: `[name]` or `[name, "right"]` for right-align
+ * @returns Two-line string: `| A | B |\n| --- | ---: |`
+ */
+export function mdTableHeader(
+  cols: ReadonlyArray<string | readonly [string, "right"]>
+): string {
+  const names = cols.map((c) => (typeof c === "string" ? c : c[0]));
+  const seps = cols.map((c) =>
+    typeof c !== "string" && c[1] === "right" ? "---:" : "---"
+  );
+  return `| ${names.join(" | ")} |\n| ${seps.join(" | ")} |`;
+}
+
+/**
+ * Render a muted horizontal rule for streaming header separators.
+ *
+ * Centralises the divider character so all headers share a single style.
+ *
+ * @param width - Number of characters (defaults to 80)
+ * @returns Muted string of box-drawing dashes
+ */
+export function divider(width = 80): string {
+  return muted("\u2500".repeat(width));
 }
 
 /**

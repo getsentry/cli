@@ -3,7 +3,7 @@
   "version": "0.13.0-dev.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/getsentry/cli.git"
+    "url": "git+https://github.com/getsentry/cli.git"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",

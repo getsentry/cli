@@ -8,8 +8,10 @@ import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import { cyan, muted, red, yellow } from "./colors.js";
 import {
+  divider,
   escapeMarkdownCell,
   isPlainOutput,
+  mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
 } from "./markdown.js";
@@ -24,6 +26,9 @@ const SEVERITY_COLORS: Record<string, (text: string) => string> = {
   debug: muted,
   trace: muted,
 };
+
+/** Column headers for the streaming log table */
+const LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
 
 /**
  * Format severity level with appropriate color.
@@ -68,23 +73,17 @@ function formatTimestamp(timestamp: string): string {
  * @returns Formatted log line with newline
  */
 export function formatLogRow(log: SentryLog): string {
+  const timestamp = formatTimestamp(log.timestamp);
+  const level = `**${(log.severity ?? "info").toUpperCase()}**`;
+  const message = escapeMarkdownCell(log.message ?? "");
+  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+  const cells = [timestamp, level, `${message}${trace}`];
+
   if (isPlainOutput()) {
-    const timestamp = formatTimestamp(log.timestamp);
-    const severity = renderInlineMarkdown(
-      `**${(log.severity ?? "info").toUpperCase()}**`
-    );
-    const message = escapeMarkdownCell(log.message ?? "");
-    const trace = log.trace
-      ? ` ${renderInlineMarkdown(`\`[${log.trace.slice(0, 8)}]\``)}`
-      : "";
-    return `| ${timestamp} | ${severity} | ${message}${trace} |\n`;
+    return `| ${cells.join(" | ")} |\n`;
   }
 
-  const timestamp = formatTimestamp(log.timestamp);
-  const severity = formatSeverity(log.severity);
-  const message = log.message ?? "";
-  const trace = log.trace ? muted(` [${log.trace.slice(0, 8)}]`) : "";
-  return `${timestamp}  ${severity}  ${message}${trace}\n`;
+  return `| ${cells.map((c) => renderInlineMarkdown(c)).join(" | ")} |\n`;
 }
 
 /**
@@ -97,10 +96,12 @@ export function formatLogRow(log: SentryLog): string {
  */
 export function formatLogsHeader(): string {
   if (isPlainOutput()) {
-    return "| Timestamp | Level | Message |\n| --- | --- | --- |\n";
+    return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
   }
-  const header = muted("TIMESTAMP            LEVEL    MESSAGE");
-  return `${header}\n${muted("─".repeat(80))}\n`;
+  const header = renderInlineMarkdown(
+    LOG_TABLE_COLS.map((c) => `**${c}**`).join("  ")
+  );
+  return `${header}\n${divider(80)}\n`;
 }
 
 /**
@@ -112,12 +113,9 @@ export function formatLogsHeader(): string {
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatLogTable(logs: SentryLog[]): string {
-  const header = "| Timestamp | Level | Message |";
-  const separator = "| --- | --- | --- |";
   const rows = logs
     .map((log) => {
       const timestamp = formatTimestamp(log.timestamp);
-      // Pre-render ANSI severity color — survives the cli-table3 pipeline
       const severity = formatSeverity(log.severity).trim();
       const message = escapeMarkdownCell(log.message ?? "");
       const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
@@ -125,7 +123,7 @@ export function formatLogTable(logs: SentryLog[]): string {
     })
     .join("\n");
 
-  return renderMarkdown(`${header}\n${separator}\n${rows}`);
+  return renderMarkdown(`${mdTableHeader(LOG_TABLE_COLS)}\n${rows}`);
 }
 
 /**
@@ -156,7 +154,7 @@ export function formatLogDetails(
   const logId = log["sentry.item_id"];
   const lines: string[] = [];
 
-  lines.push(`## Log \`${logId.slice(0, 12)}...\``);
+  lines.push(`## Log \`${logId.slice(0, 6)}...${logId.slice(-6)}\``);
   lines.push("");
 
   // Core fields table

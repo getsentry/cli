@@ -156,9 +156,9 @@ describe("formatLogsHeader (rendered mode)", () => {
   test("contains column titles", () => {
     const result = stripAnsi(formatLogsHeader());
 
-    expect(result).toContain("TIMESTAMP");
-    expect(result).toContain("LEVEL");
-    expect(result).toContain("MESSAGE");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Level");
+    expect(result).toContain("Message");
   });
 
   test("contains divider line", () => {
