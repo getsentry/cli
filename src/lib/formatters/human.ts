@@ -1282,12 +1282,14 @@ export function calculateOrgSlugWidth(orgs: SentryOrganization[]): number {
 export function formatOrgDetails(org: SentryOrganization): string {
   const lines: string[] = [];
 
-  lines.push(`## ${org.slug}: ${org.name || "(unnamed)"}`);
+  lines.push(
+    `## ${escapeMarkdownInline(org.slug)}: ${escapeMarkdownInline(org.name || "(unnamed)")}`
+  );
   lines.push("");
 
   const rows: string[] = [];
   rows.push(`| **Slug** | \`${org.slug || "(none)"}\` |`);
-  rows.push(`| **Name** | ${org.name || "(unnamed)"} |`);
+  rows.push(`| **Name** | ${escapeMarkdownCell(org.name || "(unnamed)")} |`);
   rows.push(`| **ID** | ${org.id} |`);
   if (org.dateCreated) {
     rows.push(
@@ -1360,14 +1362,20 @@ export function formatProjectDetails(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`## ${project.slug}: ${project.name || "(unnamed)"}`);
+  lines.push(
+    `## ${escapeMarkdownInline(project.slug)}: ${escapeMarkdownInline(project.name || "(unnamed)")}`
+  );
   lines.push("");
 
   const rows: string[] = [];
   rows.push(`| **Slug** | \`${project.slug || "(none)"}\` |`);
-  rows.push(`| **Name** | ${project.name || "(unnamed)"} |`);
+  rows.push(
+    `| **Name** | ${escapeMarkdownCell(project.name || "(unnamed)")} |`
+  );
   rows.push(`| **ID** | ${project.id} |`);
-  rows.push(`| **Platform** | ${project.platform || "Not set"} |`);
+  rows.push(
+    `| **Platform** | ${escapeMarkdownCell(project.platform || "Not set")} |`
+  );
   rows.push(`| **DSN** | \`${dsn || "No DSN available"}\` |`);
   rows.push(`| **Status** | ${project.status} |`);
   if (project.dateCreated) {
@@ -1377,7 +1385,7 @@ export function formatProjectDetails(
   }
   if (project.organization) {
     rows.push(
-      `| **Organization** | ${project.organization.name} (\`${project.organization.slug}\`) |`
+      `| **Organization** | ${escapeMarkdownCell(project.organization.name)} (${safeCodeSpan(project.organization.slug)}) |`
     );
   }
   if (project.firstEvent) {

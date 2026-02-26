@@ -10,6 +10,7 @@ import { cyan, muted, red, yellow } from "./colors.js";
 import {
   divider,
   escapeMarkdownCell,
+  escapeMarkdownInline,
   mdKvTable,
   mdRow,
   mdTableHeader,
@@ -160,7 +161,7 @@ export function formatLogDetails(
     lines.push("");
     lines.push("**Message:**");
     lines.push("");
-    lines.push(`> ${log.message.replace(/\n/g, "\n> ")}`);
+    lines.push(`> ${escapeMarkdownInline(log.message).replace(/\n/g, "\n> ")}`);
   }
 
   // Context section
