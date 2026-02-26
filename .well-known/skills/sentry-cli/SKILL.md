@@ -15,6 +15,7 @@ The CLI must be installed and authenticated before use.
 
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
 brew install getsentry/tools/sentry
 
 # Or install via npm/pnpm/bun
@@ -204,6 +205,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
@@ -425,6 +427,7 @@ Configure shell integration
 **Flags:**
 - `--install - Install the binary from a temp location to the system path`
 - `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
+- `--channel <value> - Release channel to persist (stable or nightly)`
 - `--no-modify-path - Skip PATH modification`
 - `--no-completions - Skip shell completion installation`
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
@@ -436,6 +439,7 @@ Update the Sentry CLI to the latest version
 
 **Flags:**
 - `--check - Check for updates without installing`
+- `--force - Force upgrade even if already on the latest version`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 
 ### Repo
@@ -594,6 +598,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
