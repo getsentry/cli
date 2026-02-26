@@ -48,3 +48,6 @@ docs/.astro
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# OpenCode
+.opencode/
