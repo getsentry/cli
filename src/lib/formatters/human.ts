@@ -1152,11 +1152,12 @@ export function formatEventDetails(
     }
 
     if (event.sdk?.name || event.sdk?.version) {
+      // Wrap in backtick code span — SDK names like sentry.python.aws_lambda
+      // contain underscores that markdown would otherwise render as emphasis.
       const sdkName = event.sdk.name ?? "unknown";
       const sdkVersion = event.sdk.version ?? "";
-      infoRows.push(
-        `| **SDK** | ${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""} |`
-      );
+      const sdkInfo = `${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""}`;
+      infoRows.push(`| **SDK** | \`${sdkInfo}\` |`);
     }
 
     if (event.release?.shortVersion) {

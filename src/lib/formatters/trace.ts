@@ -247,7 +247,9 @@ export function formatTraceSummary(summary: TraceSummary): string {
 
   if (summary.rootTransaction) {
     const opPrefix = summary.rootOp ? `[\`${summary.rootOp}\`] ` : "";
-    rows.push(`| **Root** | ${opPrefix}${summary.rootTransaction} |`);
+    rows.push(
+      `| **Root** | ${opPrefix}${escapeMarkdownCell(summary.rootTransaction)} |`
+    );
   }
   rows.push(`| **Duration** | ${formatTraceDuration(summary.duration)} |`);
   rows.push(`| **Spans** | ${summary.spanCount} |`);
