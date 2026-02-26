@@ -12,7 +12,7 @@ import type {
 } from "../../types/seer.js";
 import { SeerError } from "../errors.js";
 import { cyan } from "./colors.js";
-import { renderMarkdown } from "./markdown.js";
+import { escapeMarkdownInline, renderMarkdown } from "./markdown.js";
 
 // Spinner Frames
 
@@ -107,7 +107,9 @@ export function getProgressMessage(state: AutofixState): string {
 function buildRootCauseMarkdown(cause: RootCause, index: number): string {
   const lines: string[] = [];
 
-  lines.push(`### Cause #${index}: ${cause.description}`);
+  lines.push(
+    `### Cause #${index}: ${escapeMarkdownInline(cause.description ?? "")}`
+  );
   lines.push("");
 
   if (cause.relevant_repos && cause.relevant_repos.length > 0) {
@@ -257,7 +259,9 @@ export function formatSolution(solution: SolutionArtifact): string {
   lines.push("## Solution");
   lines.push("");
 
-  lines.push(`**Summary:** ${solution.data.one_line_summary}`);
+  lines.push(
+    `**Summary:** ${escapeMarkdownInline(solution.data.one_line_summary ?? "")}`
+  );
   lines.push("");
 
   if (solution.data.steps.length > 0) {
