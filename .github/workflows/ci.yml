@@ -29,6 +29,7 @@ jobs:
     outputs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      build-targets: ${{ steps.targets.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
@@ -50,6 +51,16 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - '.github/workflows/ci.yml'
+      - name: Compute build matrix
+        id: targets
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
+            echo 'matrix={"include":[{"target":"linux-x64","os":"ubuntu-latest","can-test":true}]}' >> "$GITHUB_OUTPUT"
+          else
+            # main, release/**, workflow_call: full cross-platform matrix
+            echo 'matrix={"include":[{"target":"darwin-arm64","os":"macos-latest","can-test":true},{"target":"linux-x64","os":"ubuntu-latest","can-test":true},{"target":"windows-x64","os":"windows-latest","can-test":true},{"target":"darwin-x64","os":"macos-latest","can-test":false},{"target":"linux-arm64","os":"ubuntu-latest","can-test":false}]}' >> "$GITHUB_OUTPUT"
+          fi
 
   check-skill:
     name: Check SKILL.md
@@ -143,29 +154,11 @@ jobs:
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
-    needs: [lint, test-unit]
+    needs: [changes, lint, test-unit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Native builds (can run smoke test)
-          - target: darwin-arm64
-            os: macos-latest
-            can-test: true
-          - target: linux-x64
-            os: ubuntu-latest
-            can-test: true
-          - target: windows-x64
-            os: windows-latest
-            can-test: true
-          # Cross-compiled builds (cannot run smoke test)
-          - target: darwin-x64
-            os: macos-latest
-            can-test: false
-          - target: linux-arm64
-            os: ubuntu-latest
-            can-test: false
+      matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -205,6 +198,8 @@ jobs:
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          # Set on main/release branches so build.ts runs binpunch + creates .gz
+          RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
       - name: Smoke test
         if: matrix.can-test
@@ -215,11 +210,20 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
-      - name: Upload artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
-          path: dist-bin/sentry-*
+          path: |
+            dist-bin/sentry-*
+            !dist-bin/*.gz
+
+      - name: Upload compressed artifact
+        if: env.RELEASE_BUILD == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentry-${{ matrix.target }}-gz
+          path: dist-bin/*.gz
 
   publish-nightly:
     name: Publish Nightly to GHCR
@@ -228,10 +232,10 @@ jobs:
     needs: [build-binary]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all binary artifacts
+      - name: Download compressed artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: sentry-*
+          pattern: sentry-*-gz
           path: artifacts
           merge-multiple: true
 

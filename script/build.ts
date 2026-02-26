@@ -99,18 +99,20 @@ async function buildTarget(target: BuildTarget): Promise<boolean> {
 
   console.log(`    -> ${outfile}`);
 
-  // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
-  // Must run before gzip so the compressed output benefits from zeroed regions.
-  const hpStats = processBinary(outfile);
-  if (hpStats && hpStats.removedEntries > 0) {
-    console.log(
-      `    -> hole-punched ${hpStats.removedEntries}/${hpStats.totalEntries} ICU entries`
-    );
-  }
+  // On main and release branches (RELEASE_BUILD=1), binpunch and compress.
+  // Skipped on PRs where only linux-x64 is built for smoke/e2e tests.
+  if (process.env.RELEASE_BUILD) {
+    // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
+    // Must run before gzip so the compressed output benefits from zeroed regions.
+    const hpStats = processBinary(outfile);
+    if (hpStats && hpStats.removedEntries > 0) {
+      console.log(
+        `    -> hole-punched ${hpStats.removedEntries}/${hpStats.totalEntries} ICU entries`
+      );
+    }
 
-  // In CI, create gzip-compressed copies for release downloads.
-  // With hole-punch, reduces download size by ~70% (99 MB → 28 MB).
-  if (process.env.CI) {
+    // Create gzip-compressed copies for release downloads / GHCR nightly.
+    // With hole-punch, reduces download size by ~70% (99 MB → 28 MB).
     const binary = await Bun.file(outfile).arrayBuffer();
     const compressed = await gzipAsync(Buffer.from(binary), { level: 6 });
     await Bun.write(`${outfile}.gz`, compressed);
