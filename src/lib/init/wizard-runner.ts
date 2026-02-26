@@ -13,7 +13,12 @@ import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { formatBanner } from "../help.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
-import { MASTRA_API_URL, SENTRY_DOCS_URL, WORKFLOW_ID } from "./constants.js";
+import {
+  MASTRA_API_URL,
+  SENTRY_DOCS_URL,
+  VERIFY_CHANGES_STEP,
+  WORKFLOW_ID,
+} from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
 import { handleLocalOp } from "./local-ops.js";
@@ -24,12 +29,12 @@ import type {
   WorkflowRunResult,
 } from "./types.js";
 
-type StepSpinner = ReturnType<typeof spinner>;
+type Spinner = ReturnType<typeof spinner>;
 
 type StepContext = {
   payload: unknown;
   stepId: string;
-  s: StepSpinner;
+  spin: Spinner;
   options: WizardOptions;
 };
 
@@ -47,7 +52,7 @@ async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, s, options } = ctx;
+  const { payload, stepId, spin, options } = ctx;
   const { type: payloadType, operation } = payload as {
     type: string;
     operation?: string;
@@ -56,7 +61,7 @@ async function handleSuspendedStep(
 
   if (payloadType === "local-op") {
     const detail = operation ? ` (${operation})` : "";
-    s.message(`${label}${detail}...`);
+    spin.message(`${label}${detail}...`);
 
     const localResult = await handleLocalOp(payload as LocalOpPayload, options);
 
@@ -69,21 +74,21 @@ async function handleSuspendedStep(
   if (payloadType === "interactive") {
     // In dry-run mode, verification always fails because no files were written
     // (the server skips apply-patchset). Auto-continue since this is expected.
-    if (options.dryRun && stepId === "verify-changes") {
+    if (options.dryRun && stepId === VERIFY_CHANGES_STEP) {
       return {
         action: "continue",
         _phase: nextPhase(stepPhases, stepId, ["apply"]),
       };
     }
 
-    s.stop(label);
+    spin.stop(label);
 
     const interactiveResult = await handleInteractive(
       payload as InteractivePayload,
       options
     );
 
-    s.start("Processing...");
+    spin.start("Processing...");
 
     return {
       ...interactiveResult,
@@ -91,7 +96,7 @@ async function handleSuspendedStep(
     };
   }
 
-  s.stop("Error", 1);
+  spin.stop("Error", 1);
   log.error(`Unknown suspend payload type "${payloadType}"`);
   cancel("Setup failed");
   throw new WizardCancelledError();
@@ -144,17 +149,17 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   const workflow = client.getWorkflow(WORKFLOW_ID);
   const run = await workflow.createRun();
 
-  const s = spinner();
+  const spin = spinner();
 
   let result: WorkflowRunResult;
   try {
-    s.start("Connecting to wizard...");
+    spin.start("Connecting to wizard...");
     result = (await run.startAsync({
       inputData: { directory, force, yes, dryRun, features },
       tracingOptions,
     })) as WorkflowRunResult;
   } catch (err) {
-    s.stop("Connection failed", 1);
+    spin.stop("Connection failed", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
     return;
@@ -169,14 +174,14 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
       const payload = extractSuspendPayload(result, stepId);
       if (!payload) {
-        s.stop("Error", 1);
+        spin.stop("Error", 1);
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
         return;
       }
 
       const resumeData = await handleSuspendedStep(
-        { payload, stepId, s, options },
+        { payload, stepId, spin, options },
         stepPhases
       );
 
@@ -190,25 +195,25 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     if (err instanceof WizardCancelledError) {
       return;
     }
-    s.stop("Cancelled", 1);
+    spin.stop("Cancelled", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
     return;
   }
 
-  handleFinalResult(result, s);
+  handleFinalResult(result, spin);
 }
 
-function handleFinalResult(result: WorkflowRunResult, s: StepSpinner): void {
+function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
   const output = result as unknown as Record<string, unknown>;
   const inner = (output.result as Record<string, unknown>) ?? output;
   const hasError = result.status !== "success" || inner.exitCode;
 
   if (hasError) {
-    s.stop("Failed", 1);
+    spin.stop("Failed", 1);
     formatError(output);
   } else {
-    s.stop("Done");
+    spin.stop("Done");
     formatResult(output);
   }
 }

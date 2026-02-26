@@ -11,7 +11,7 @@ export type WizardOptions = {
   stdin: NodeJS.ReadStream & { fd: 0 };
 };
 
-// ── Local-op suspend payloads ──────────────────────────────
+// Local-op suspend payloads
 
 export type LocalOpPayload =
   | ListDirPayload
@@ -80,7 +80,7 @@ export type LocalOpResult = {
   data?: unknown;
 };
 
-// ── Interactive suspend payloads ───────────────────────────
+// Interactive suspend payloads
 
 export type InteractivePayload = {
   type: "interactive";
@@ -89,7 +89,7 @@ export type InteractivePayload = {
   [key: string]: unknown;
 };
 
-// ── Workflow run result ────────────────────────────────────
+// Workflow run result
 
 export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";

@@ -11,7 +11,7 @@ import path from "node:path";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_FILE_BYTES,
-  MAX_STDOUT_BYTES,
+  MAX_OUTPUT_BYTES,
 } from "./constants.js";
 import type {
   ApplyPatchsetPayload,
@@ -298,14 +298,14 @@ function runSingleCommand(
     let stderrLen = 0;
 
     child.stdout.on("data", (chunk: Buffer) => {
-      if (stdoutLen < MAX_STDOUT_BYTES) {
+      if (stdoutLen < MAX_OUTPUT_BYTES) {
         stdoutChunks.push(chunk);
         stdoutLen += chunk.length;
       }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      if (stderrLen < MAX_STDOUT_BYTES) {
+      if (stderrLen < MAX_OUTPUT_BYTES) {
         stderrChunks.push(chunk);
         stderrLen += chunk.length;
       }
@@ -323,10 +323,10 @@ function runSingleCommand(
     child.on("close", (code) => {
       const stdout = Buffer.concat(stdoutChunks)
         .toString("utf-8")
-        .slice(0, MAX_STDOUT_BYTES);
+        .slice(0, MAX_OUTPUT_BYTES);
       const stderr = Buffer.concat(stderrChunks)
         .toString("utf-8")
-        .slice(0, MAX_STDOUT_BYTES);
+        .slice(0, MAX_OUTPUT_BYTES);
       resolve({ command, exitCode: code ?? 1, stdout, stderr });
     });
   });
