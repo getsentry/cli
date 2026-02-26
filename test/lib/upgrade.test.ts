@@ -22,8 +22,10 @@ import {
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
+  fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
+  isNightlyVersion,
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
@@ -901,5 +903,175 @@ describe("startCleanupOldBinary", () => {
 
     // Should not throw when called again
     expect(() => startCleanupOldBinary()).not.toThrow();
+  });
+});
+
+describe("isNightlyVersion", () => {
+  test("returns true for nightly version strings", () => {
+    expect(isNightlyVersion("0.0.0-nightly.1740000000")).toBe(true);
+    expect(isNightlyVersion("0.0.0-nightly.1")).toBe(true);
+  });
+
+  test("returns false for stable version strings", () => {
+    expect(isNightlyVersion("1.0.0")).toBe(false);
+    expect(isNightlyVersion("0.13.0")).toBe(false);
+    expect(isNightlyVersion("2.0.0-beta.1")).toBe(false);
+    expect(isNightlyVersion("0.0.0-dev")).toBe(false);
+  });
+});
+
+describe("fetchLatestNightlyVersion", () => {
+  test("returns version from GHCR manifest annotation", async () => {
+    // Mock the two requests: token exchange + manifest fetch
+    let callCount = 0;
+    mockFetch(async (url) => {
+      callCount += 1;
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
+            annotations: { version: "0.0.0-nightly.1740000000" },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+            },
+          }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const version = await fetchLatestNightlyVersion();
+    expect(version).toBe("0.0.0-nightly.1740000000");
+    expect(callCount).toBe(2); // token + manifest
+  });
+
+  test("throws UpgradeError when GHCR token exchange fails", async () => {
+    mockFetch(async () => new Response("Unauthorized", { status: 401 }));
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "GHCR token exchange failed: HTTP 401"
+    );
+  });
+
+  test("throws UpgradeError when manifest has no version annotation", async () => {
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ schemaVersion: 2, layers: [], annotations: {} }),
+        { status: 200 }
+      );
+    });
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "Nightly manifest has no version annotation"
+    );
+  });
+
+  test("aborts early if signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fetchLatestNightlyVersion(controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("executeUpgrade with curl method (nightly)", () => {
+  const binDir = join(homedir(), ".sentry", "bin");
+
+  function getTestPaths() {
+    return getCurlInstallPaths();
+  }
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(binDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getTestPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+  });
+
+  test("downloads and decompresses nightly binary from GHCR", async () => {
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
+    const gzipped = Bun.gzipSync(mockBinaryContent);
+
+    // Mock: token exchange + manifest + blob (200 with gzipped content)
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        let os = "linux";
+        if (process.platform === "darwin") os = "darwin";
+        else if (process.platform === "win32") os = "windows";
+        const arch = process.arch === "arm64" ? "arm64" : "x64";
+        const suffix = process.platform === "win32" ? ".exe" : "";
+        const title = `sentry-${os}-${arch}${suffix}.gz`;
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [
+              {
+                digest: "sha256:blobdigest",
+                mediaType: "application/octet-stream",
+                size: gzipped.byteLength,
+                annotations: { "org.opencontainers.image.title": title },
+              },
+            ],
+            annotations: { version: "0.0.0-nightly.1740000000" },
+          }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("/blobs/")) {
+        // Return gzipped blob directly (no redirect needed for test)
+        return new Response(gzipped, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const result = await executeUpgrade("curl", "0.0.0-nightly.1740000000");
+
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("tempBinaryPath");
+
+    // Verify decompressed content matches original
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 });

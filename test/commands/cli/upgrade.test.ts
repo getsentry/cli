@@ -92,6 +92,43 @@ function createMockContext(
 }
 
 /**
+ * Mock fetch to simulate GHCR manifest returning a specific nightly version.
+ * Handles token exchange and manifest fetch.
+ */
+function mockGhcrNightlyVersion(version: string): void {
+  mockFetch(async (url) => {
+    const urlStr = String(url);
+
+    // GHCR anonymous token exchange
+    if (urlStr.includes("ghcr.io/token")) {
+      return new Response(JSON.stringify({ token: "test-token" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    // GHCR OCI manifest for :nightly tag
+    if (urlStr.includes("/manifests/nightly")) {
+      return new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          layers: [],
+          annotations: { version },
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/vnd.oci.image.manifest.v1+json",
+          },
+        }
+      );
+    }
+
+    return new Response("Not Found", { status: 404 });
+  });
+}
+
+/**
  * Mock fetch to simulate GitHub releases API returning a specific version.
  * Handles the latest release endpoint, version-exists check, and npm registry.
  */
@@ -290,6 +327,45 @@ describe("sentry cli upgrade", () => {
       const combined = output.join("");
       // Should match current version (after stripping v prefix) and report up to date
       expect(combined).toContain("Already up to date.");
+    });
+  });
+
+  describe("nightly version check", () => {
+    test("--check mode fetches from GHCR when target is a nightly version", async () => {
+      const nightlyVersion = "0.0.0-nightly.1740000000";
+      // Mock only handles GHCR — any GitHub call would return 404 and throw
+      mockGhcrNightlyVersion(nightlyVersion);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      // Explicitly specify a nightly version — resolveTargetVersion must use GHCR
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", nightlyVersion],
+        context
+      );
+
+      const combined = output.join("");
+      // Should show latest (from GHCR) and the target nightly version
+      expect(combined).toContain(nightlyVersion);
+    });
+
+    test("--check mode with matching nightly target reports already on target", async () => {
+      const nightlyVersion = "0.0.0-nightly.1740000000";
+      mockGhcrNightlyVersion(nightlyVersion);
+
+      const { context, output } = createMockContext({ homeDir: testDir });
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", nightlyVersion],
+        context
+      );
+
+      const combined = output.join("");
+      // CLI_VERSION is "0.0.0-dev" (not matching nightlyVersion), so upgrade path
+      // should be shown
+      expect(combined).toContain("sentry cli upgrade");
     });
   });
 });

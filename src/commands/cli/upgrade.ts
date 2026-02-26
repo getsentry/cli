@@ -15,9 +15,11 @@ import { UpgradeError } from "../../lib/errors.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
+  fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
   type InstallationMethod,
+  isNightlyVersion,
   parseInstallationMethod,
   VERSION_PREFIX_REGEX,
   versionExists,
@@ -27,6 +29,27 @@ type UpgradeFlags = {
   readonly check: boolean;
   readonly method?: InstallationMethod;
 };
+
+/**
+ * Fetch the latest available version for the given channel.
+ *
+ * Uses GHCR (nightly channel) when the current CLI is a nightly build or
+ * the user explicitly requested a nightly version. Otherwise uses the stable
+ * channel (GitHub Releases for curl/brew, npm registry for others).
+ *
+ * @param method - Installation method (determines registry for stable)
+ * @param targetIsNightly - true when the user-specified target is a nightly version
+ * @returns Latest version string
+ */
+function fetchLatestForChannel(
+  method: InstallationMethod,
+  targetIsNightly: boolean
+): Promise<string> {
+  if (isNightlyVersion(CLI_VERSION) || targetIsNightly) {
+    return fetchLatestNightlyVersion();
+  }
+  return fetchLatestVersion(method);
+}
 
 /**
  * Resolve the target version and handle check-only mode.
@@ -40,8 +63,11 @@ async function resolveTargetVersion(
   stdout: { write: (s: string) => void },
   check: boolean
 ): Promise<string | null> {
-  const latest = await fetchLatestVersion(method);
-  const target = version?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
+  const strippedVersion = version?.replace(VERSION_PREFIX_REGEX, "");
+  const targetIsNightly =
+    strippedVersion !== undefined && isNightlyVersion(strippedVersion);
+  const latest = await fetchLatestForChannel(method, targetIsNightly);
+  const target = strippedVersion ?? latest;
 
   stdout.write(`Latest version: ${latest}\n`);
   if (version) {

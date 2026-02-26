@@ -14,6 +14,7 @@ Usage: install [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 0.2.0)
+        --nightly           Install the latest nightly build from GHCR
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
 
@@ -23,11 +24,13 @@ Environment Variables:
 Examples:
     curl -fsSL https://cli.sentry.dev/install | bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.2.0
+    curl -fsSL https://cli.sentry.dev/install | bash -s -- --nightly
     SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
 EOF
 }
 
 requested_version=""
+nightly=false
 no_modify_path=false
 no_completions=false
 while [[ $# -gt 0 ]]; do
@@ -41,6 +44,10 @@ while [[ $# -gt 0 ]]; do
         echo -e "${RED}Error: --version requires a version argument${NC}"
         exit 1
       fi
+      ;;
+    --nightly)
+      nightly=true
+      shift
       ;;
     --no-modify-path)
       no_modify_path=true
@@ -80,38 +87,110 @@ if [[ "$os" == "windows" ]]; then
   fi
 fi
 
-# Resolve version
-if [[ -z "$requested_version" ]]; then
-  version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
-  if [[ -z "$version" ]]; then
-    echo -e "${RED}Failed to fetch latest version${NC}"
-    exit 1
-  fi
-else
-  version="$requested_version"
+# Validate flag combinations
+if [[ "$nightly" == "true" && -n "$requested_version" ]]; then
+  echo -e "${RED}Error: --nightly and --version are mutually exclusive${NC}"
+  exit 1
 fi
-
-# Strip leading 'v' if present (releases use version without 'v' prefix)
-version="${version#v}"
-filename="sentry-${os}-${arch}${suffix}"
-url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
 
 # Download binary to a temp location
 tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
 tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
+version=""
 
 # Clean up temp binary on failure (setup handles cleanup on success)
 trap 'rm -f "$tmp_binary"' EXIT
 
-echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+if [[ "$nightly" == "true" ]]; then
+  # Nightly build: download from GHCR via OCI blob protocol.
+  # No jq needed — parse JSON with awk.
+  # ghcr.io blob downloads redirect to Azure Blob Storage. curl -L would
+  # forward the Authorization header to Azure, which returns 404. Instead,
+  # extract the redirect URL and follow it without the auth header.
 
-# Try gzip-compressed download first (~60% smaller, ~37 MB vs ~99 MB).
-# gunzip is POSIX and available on all Unix systems.
-# Falls back to raw binary if the .gz asset doesn't exist yet.
-if curl -fsSL "${url}.gz" 2>/dev/null | gunzip > "$tmp_binary" 2>/dev/null; then
-  : # Compressed download succeeded
+  echo -e "${MUTED}Fetching nightly build from GHCR...${NC}"
+
+  # Step 1: Get anonymous pull token
+  GHCR_TOKEN=$(curl -sf \
+    "https://ghcr.io/token?scope=repository:getsentry/cli:pull" \
+    | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="token"){print $(i+2);exit}}')
+  if [[ -z "$GHCR_TOKEN" ]]; then
+    echo -e "${RED}Failed to get GHCR token${NC}"
+    exit 1
+  fi
+
+  # Step 2: Fetch the OCI manifest for the :nightly tag
+  MANIFEST=$(curl -sf \
+    -H "Authorization: Bearer $GHCR_TOKEN" \
+    -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+    "https://ghcr.io/v2/getsentry/cli/manifests/nightly")
+  if [[ -z "$MANIFEST" ]]; then
+    echo -e "${RED}Failed to fetch nightly manifest from GHCR${NC}"
+    exit 1
+  fi
+
+  # Step 3: Extract version from manifest annotation
+  version=$(echo "$MANIFEST" \
+    | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="version"){print $(i+2);exit}}')
+  if [[ -z "$version" ]]; then
+    echo -e "${RED}Failed to extract version from nightly manifest${NC}"
+    exit 1
+  fi
+
+  echo -e "${MUTED}Installing nightly sentry ${version}...${NC}"
+
+  # Step 4: Find the blob digest for this platform's .gz file
+  gz_filename="sentry-${os}-${arch}${suffix}.gz"
+  digest=$(echo "$MANIFEST" \
+    | sed 's/},{/}\n{/g' \
+    | awk -F'"' "/\"${gz_filename//./\\.}"'/{for(i=1;i<=NF;i++) if($i=="digest"){print $(i+2);exit}}')
+  if [[ -z "$digest" ]]; then
+    echo -e "${RED}No nightly build found for ${gz_filename}${NC}"
+    exit 1
+  fi
+
+  # Step 5: Get the redirect URL from the blob endpoint (don't use -L: auth
+  # header must NOT be forwarded to the Azure Blob Storage redirect target)
+  redir_url=$(curl -s -w '\n%{redirect_url}' -o /dev/null \
+    -H "Authorization: Bearer $GHCR_TOKEN" \
+    "https://ghcr.io/v2/getsentry/cli/blobs/${digest}" | tail -1)
+  if [[ -z "$redir_url" ]]; then
+    echo -e "${RED}Failed to get blob redirect URL from GHCR${NC}"
+    exit 1
+  fi
+
+  # Step 6: Download the .gz blob and decompress (without auth header)
+  curl -sf "$redir_url" | gunzip > "$tmp_binary"
+
 else
-  curl -fsSL --progress-bar "$url" -o "$tmp_binary"
+  # Stable build: resolve version and download from GitHub Releases.
+
+  if [[ -z "$requested_version" ]]; then
+    version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest \
+      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+    if [[ -z "$version" ]]; then
+      echo -e "${RED}Failed to fetch latest version${NC}"
+      exit 1
+    fi
+  else
+    version="$requested_version"
+  fi
+
+  # Strip leading 'v' if present (releases use version without 'v' prefix)
+  version="${version#v}"
+  filename="sentry-${os}-${arch}${suffix}"
+  url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
+
+  echo -e "${MUTED}Downloading sentry v${version}...${NC}"
+
+  # Try gzip-compressed download first (~60% smaller, ~37 MB vs ~99 MB).
+  # gunzip is POSIX and available on all Unix systems.
+  # Falls back to raw binary if the .gz asset doesn't exist yet.
+  if curl -fsSL "${url}.gz" 2>/dev/null | gunzip > "$tmp_binary" 2>/dev/null; then
+    : # Compressed download succeeded
+  else
+    curl -fsSL --progress-bar "$url" -o "$tmp_binary"
+  fi
 fi
 
 chmod +x "$tmp_binary"

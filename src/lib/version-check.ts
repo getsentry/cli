@@ -1,8 +1,10 @@
 /**
  * Background version check for "new version available" notifications.
  *
- * Checks GitHub releases for new versions without blocking CLI execution.
- * Results are cached in the database and shown on subsequent runs.
+ * For nightly builds (CLI_VERSION contains "-nightly."), checks GHCR for the
+ * latest nightly version via the OCI manifest annotation. For stable builds,
+ * checks GitHub Releases. Results are cached in the database and shown on
+ * subsequent runs.
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
@@ -13,7 +15,11 @@ import {
   setVersionCheckInfo,
 } from "./db/version-check.js";
 import { cyan, muted } from "./formatters/colors.js";
-import { fetchLatestFromGitHub } from "./upgrade.js";
+import {
+  fetchLatestFromGitHub,
+  fetchLatestNightlyVersion,
+  isNightlyVersion,
+} from "./upgrade.js";
 
 /** Target check interval: ~24 hours */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -117,7 +123,10 @@ function checkForUpdateInBackgroundImpl(): void {
     },
     async (span) => {
       try {
-        const latestVersion = await fetchLatestFromGitHub(signal);
+        // Use GHCR for nightly builds; GitHub Releases for stable builds.
+        const latestVersion = isNightlyVersion(CLI_VERSION)
+          ? await fetchLatestNightlyVersion(signal)
+          : await fetchLatestFromGitHub(signal);
         setVersionCheckInfo(latestVersion);
         span.setStatus({ code: 1 }); // OK
       } catch (error) {
