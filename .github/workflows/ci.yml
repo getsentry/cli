@@ -235,7 +235,7 @@ jobs:
             !dist-bin/*.gz
 
       - name: Upload compressed artifact
-        if: env.RELEASE_BUILD == '1'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}-gz
