@@ -5,7 +5,7 @@
  * computeTraceSummary, and formatTraceSummary.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   computeTraceSummary,
   formatTraceDuration,
@@ -24,6 +24,38 @@ import type {
 function stripAnsi(str: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
   return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Force rendered (TTY) mode for a describe block */
+function useRenderedMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
+
+/** Force plain mode for a describe block */
+function usePlainMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
 }
 
 /**
@@ -92,7 +124,9 @@ describe("formatTraceDuration", () => {
   });
 });
 
-describe("formatTracesHeader", () => {
+describe("formatTracesHeader (rendered mode)", () => {
+  useRenderedMode();
+
   test("contains column titles", () => {
     const header = stripAnsi(formatTracesHeader());
     expect(header).toContain("TRACE ID");
@@ -107,7 +141,9 @@ describe("formatTracesHeader", () => {
   });
 });
 
-describe("formatTraceRow", () => {
+describe("formatTraceRow (rendered mode)", () => {
+  useRenderedMode();
+
   test("includes trace ID", () => {
     const traceId = "a".repeat(32);
     const row = formatTraceRow(makeTransaction({ trace: traceId }));
@@ -144,6 +180,70 @@ describe("formatTraceRow", () => {
   test("ends with newline", () => {
     const row = formatTraceRow(makeTransaction());
     expect(row.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("formatTracesHeader (plain mode)", () => {
+  usePlainMode();
+
+  test("emits markdown table header and separator", () => {
+    const result = formatTracesHeader();
+    expect(result).toContain("| Trace ID | Transaction | Duration | When |");
+    expect(result).toContain("| --- | --- | ---: | --- |");
+  });
+
+  test("ends with newline", () => {
+    expect(formatTracesHeader()).toEndWith("\n");
+  });
+});
+
+describe("formatTraceRow (plain mode)", () => {
+  usePlainMode();
+
+  test("emits a markdown table row", () => {
+    const row = formatTraceRow(makeTransaction());
+    expect(row).toMatch(/^\|.+\|.+\|.+\|.+\|\n$/);
+  });
+
+  test("includes trace ID", () => {
+    const traceId = "a".repeat(32);
+    const row = formatTraceRow(makeTransaction({ trace: traceId }));
+    expect(row).toContain(traceId);
+  });
+
+  test("includes transaction name", () => {
+    const row = formatTraceRow(
+      makeTransaction({ transaction: "POST /api/data" })
+    );
+    expect(row).toContain("POST /api/data");
+  });
+
+  test("includes formatted duration", () => {
+    const row = formatTraceRow(
+      makeTransaction({ "transaction.duration": 245 })
+    );
+    expect(row).toContain("245ms");
+  });
+
+  test("does not truncate long transaction names (no column padding in plain mode)", () => {
+    const longName = "A".repeat(50);
+    const row = formatTraceRow(makeTransaction({ transaction: longName }));
+    expect(row).toContain(longName);
+  });
+
+  test("escapes pipe characters in transaction name", () => {
+    const row = formatTraceRow(makeTransaction({ transaction: "GET /a|b" }));
+    expect(row).toContain("GET /a\\|b");
+  });
+
+  test("shows 'unknown' for empty transaction", () => {
+    const row = formatTraceRow(makeTransaction({ transaction: "" }));
+    expect(row).toContain("unknown");
+  });
+
+  test("ends with newline", () => {
+    const row = formatTraceRow(makeTransaction());
+    expect(row).toEndWith("\n");
   });
 });
 

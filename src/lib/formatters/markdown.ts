@@ -2,12 +2,22 @@
  * Markdown-to-Terminal Renderer
  *
  * Central utility for rendering markdown content as styled terminal output
- * using `marked` + `marked-terminal`. Provides a single `renderMarkdown()`
- * function that all formatters can use for rich text output.
+ * using `marked` + `marked-terminal`. Provides `renderMarkdown()` and
+ * `renderInlineMarkdown()` for rich text output, with automatic plain-mode
+ * fallback when stdout is not a TTY or the user has opted out of rich output.
  *
  * Pre-rendered ANSI escape codes embedded in markdown source (e.g. inside
  * table cells) survive the pipeline — `cli-table3` computes column widths
  * via `string-width`, which correctly treats ANSI codes as zero-width.
+ *
+ * ## Output mode resolution (highest → lowest priority)
+ *
+ * 1. `SENTRY_PLAIN_OUTPUT=1` → plain (raw CommonMark)
+ * 2. `SENTRY_PLAIN_OUTPUT=0` → rendered (force rich, even when piped)
+ * 3. `NO_COLOR=1` (or any truthy value) → plain
+ * 4. `NO_COLOR=0` (or any falsy value) → rendered
+ * 5. `!process.stdout.isTTY` → plain
+ * 6. default (TTY, no overrides) → rendered
  */
 
 import chalk from "chalk";
@@ -68,6 +78,43 @@ marked.use(
 );
 
 /**
+ * Returns true if an env var value should be treated as "truthy" for
+ * purposes of enabling/disabling output modes.
+ *
+ * Falsy values: `"0"`, `"false"`, `""` (case-insensitive).
+ * Everything else (e.g. `"1"`, `"true"`, `"yes"`) is truthy.
+ */
+function isTruthyEnv(val: string): boolean {
+  const normalized = val.toLowerCase().trim();
+  return normalized !== "0" && normalized !== "false" && normalized !== "";
+}
+
+/**
+ * Determines whether output should be plain CommonMark markdown (no ANSI).
+ *
+ * Evaluated fresh on each call so tests can flip env vars between assertions
+ * and changes to `process.stdout.isTTY` are picked up immediately.
+ *
+ * Priority (highest first):
+ * 1. `SENTRY_PLAIN_OUTPUT` — explicit project-specific override
+ * 2. `NO_COLOR` — widely-supported standard for disabling styled output
+ * 3. `process.stdout.isTTY` — auto-detect interactive terminal
+ */
+export function isPlainOutput(): boolean {
+  const plain = process.env.SENTRY_PLAIN_OUTPUT;
+  if (plain !== undefined) {
+    return isTruthyEnv(plain);
+  }
+
+  const noColor = process.env.NO_COLOR;
+  if (noColor !== undefined) {
+    return isTruthyEnv(noColor);
+  }
+
+  return !process.stdout.isTTY;
+}
+
+/**
  * Escape a string for safe use inside a markdown table cell.
  *
  * Escapes backslashes first (so the escape character itself is not
@@ -81,7 +128,8 @@ export function escapeMarkdownCell(value: string): string {
 }
 
 /**
- * Render a markdown string as styled terminal output.
+ * Render a full markdown document as styled terminal output, or return the
+ * raw CommonMark string when in plain mode.
  *
  * Supports the full CommonMark spec:
  * - Headings, bold, italic, strikethrough
@@ -96,8 +144,30 @@ export function escapeMarkdownCell(value: string): string {
  * Pre-rendered ANSI escape codes in the input are preserved.
  *
  * @param md - Markdown source text
- * @returns Styled terminal string with trailing whitespace trimmed
+ * @returns Styled terminal string (TTY) or raw CommonMark (non-TTY / plain mode)
  */
 export function renderMarkdown(md: string): string {
+  if (isPlainOutput()) {
+    return md.trimEnd();
+  }
   return (marked.parse(md) as string).trimEnd();
+}
+
+/**
+ * Render inline markdown (bold, code spans, emphasis, links) as styled
+ * terminal output, or return the raw markdown string when in plain mode.
+ *
+ * Unlike `renderMarkdown()`, this uses `marked.parseInline()` which handles
+ * only inline-level constructs — no paragraph wrapping, no block elements.
+ * Suitable for styling individual table cell values in streaming formatters
+ * that write rows incrementally rather than as a complete table.
+ *
+ * @param md - Inline markdown text
+ * @returns Styled string (TTY) or raw markdown text (non-TTY / plain mode)
+ */
+export function renderInlineMarkdown(md: string): string {
+  if (isPlainOutput()) {
+    return md;
+  }
+  return marked.parseInline(md) as string;
 }

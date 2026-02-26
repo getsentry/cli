@@ -7,7 +7,12 @@
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import { cyan, muted, red, yellow } from "./colors.js";
-import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  renderInlineMarkdown,
+  renderMarkdown,
+} from "./markdown.js";
 
 /** Color functions for log severity levels */
 const SEVERITY_COLORS: Record<string, (text: string) => string> = {
@@ -55,27 +60,45 @@ function formatTimestamp(timestamp: string): string {
 /**
  * Format a single log entry for human-readable output.
  *
- * Format: "TIMESTAMP  SEVERITY  MESSAGE [trace_id]"
- * Example: "2024-01-30 14:32:15  ERROR    Failed to connect [abc12345]"
+ * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
+ * row so streamed output composes into a valid CommonMark document.
+ * In rendered mode (TTY): emits padded ANSI-colored text for live display.
  *
  * @param log - The log entry to format
  * @returns Formatted log line with newline
  */
 export function formatLogRow(log: SentryLog): string {
+  if (isPlainOutput()) {
+    const timestamp = formatTimestamp(log.timestamp);
+    const severity = renderInlineMarkdown(
+      `**${(log.severity ?? "info").toUpperCase()}**`
+    );
+    const message = escapeMarkdownCell(log.message ?? "");
+    const trace = log.trace
+      ? ` ${renderInlineMarkdown(`\`[${log.trace.slice(0, 8)}]\``)}`
+      : "";
+    return `| ${timestamp} | ${severity} | ${message}${trace} |\n`;
+  }
+
   const timestamp = formatTimestamp(log.timestamp);
   const severity = formatSeverity(log.severity);
   const message = log.message ?? "";
   const trace = log.trace ? muted(` [${log.trace.slice(0, 8)}]`) : "";
-
   return `${timestamp}  ${severity}  ${message}${trace}\n`;
 }
 
 /**
  * Format column header for logs list (used in streaming/follow mode).
  *
- * @returns Header line with column titles and separator
+ * In plain mode: emits a markdown table header + separator row.
+ * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ *
+ * @returns Header string (includes trailing newline)
  */
 export function formatLogsHeader(): string {
+  if (isPlainOutput()) {
+    return "| Timestamp | Level | Message |\n| --- | --- | --- |\n";
+  }
   const header = muted("TIMESTAMP            LEVEL    MESSAGE");
   return `${header}\n${muted("─".repeat(80))}\n`;
 }

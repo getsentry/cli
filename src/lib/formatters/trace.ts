@@ -7,7 +7,12 @@
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
 import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
-import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  renderInlineMarkdown,
+  renderMarkdown,
+} from "./markdown.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -44,9 +49,15 @@ export function formatTraceDuration(ms: number): string {
 /**
  * Format column header for traces list (used before per-row output).
  *
- * @returns Header line with column titles and separator
+ * In plain mode: emits a markdown table header + separator row.
+ * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ *
+ * @returns Header string (includes trailing newline)
  */
 export function formatTracesHeader(): string {
+  if (isPlainOutput()) {
+    return "| Trace ID | Transaction | Duration | When |\n| --- | --- | ---: | --- |\n";
+  }
   const header = muted(
     "TRACE ID                          TRANSACTION                    DURATION    WHEN"
   );
@@ -65,10 +76,22 @@ const DURATION_WIDTH = 10;
 /**
  * Format a single transaction row for the traces list.
  *
+ * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
+ * row so streamed output composes into a valid CommonMark document.
+ * In rendered mode (TTY): emits padded ANSI-colored text for live display.
+ *
  * @param item - Transaction list item from the API
  * @returns Formatted row string with newline
  */
 export function formatTraceRow(item: TransactionListItem): string {
+  if (isPlainOutput()) {
+    const traceId = renderInlineMarkdown(`\`${item.trace}\``);
+    const transaction = escapeMarkdownCell(item.transaction || "unknown");
+    const duration = formatTraceDuration(item["transaction.duration"]);
+    const when = formatRelativeTime(item.timestamp).trim();
+    return `| ${traceId} | ${transaction} | ${duration} | ${when} |\n`;
+  }
+
   const traceId = item.trace.slice(0, TRACE_ID_WIDTH).padEnd(TRACE_ID_WIDTH);
   const transaction = (item.transaction || "unknown")
     .slice(0, MAX_TRANSACTION_LENGTH)
@@ -77,7 +100,6 @@ export function formatTraceRow(item: TransactionListItem): string {
     DURATION_WIDTH
   );
   const when = formatRelativeTime(item.timestamp);
-
   return `${traceId}  ${transaction}  ${duration}  ${when}\n`;
 }
 

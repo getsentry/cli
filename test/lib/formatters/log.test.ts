@@ -2,13 +2,45 @@
  * Tests for log formatters
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   formatLogDetails,
   formatLogRow,
   formatLogsHeader,
 } from "../../../src/lib/formatters/log.js";
 import type { DetailedSentryLog, SentryLog } from "../../../src/types/index.js";
+
+/** Force rendered (TTY) mode for a describe block */
+function useRenderedMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
+
+/** Force plain mode for a describe block */
+function usePlainMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
 
 function createTestLog(overrides: Partial<SentryLog> = {}): SentryLog {
   return {
@@ -28,7 +60,9 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-describe("formatLogRow", () => {
+describe("formatLogRow (rendered mode)", () => {
+  useRenderedMode();
+
   test("formats basic log entry", () => {
     const log = createTestLog();
     const result = formatLogRow(log);
@@ -116,7 +150,9 @@ describe("formatLogRow", () => {
   });
 });
 
-describe("formatLogsHeader", () => {
+describe("formatLogsHeader (rendered mode)", () => {
+  useRenderedMode();
+
   test("contains column titles", () => {
     const result = stripAnsi(formatLogsHeader());
 
@@ -135,6 +171,65 @@ describe("formatLogsHeader", () => {
   test("ends with newline", () => {
     const result = formatLogsHeader();
     expect(result).toEndWith("\n");
+  });
+});
+
+describe("formatLogRow (plain mode)", () => {
+  usePlainMode();
+
+  test("emits a markdown table row", () => {
+    const log = createTestLog();
+    const result = formatLogRow(log);
+    expect(result).toMatch(/^\|.+\|.+\|.+\|\n$/);
+  });
+
+  test("contains timestamp, severity, message", () => {
+    const log = createTestLog({
+      severity: "error",
+      message: "connection failed",
+    });
+    const result = formatLogRow(log);
+    expect(result).toContain("connection failed");
+    expect(result).toContain("ERROR");
+    expect(result).toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  test("contains trace ID as inline code", () => {
+    const log = createTestLog({ trace: "abc123def456" });
+    const result = formatLogRow(log);
+    expect(result).toContain("[abc123de]");
+  });
+
+  test("omits trace cell when trace is null", () => {
+    const log = createTestLog({ trace: null });
+    const result = formatLogRow(log);
+    expect(result).not.toContain("[");
+  });
+
+  test("escapes pipe characters in message", () => {
+    const log = createTestLog({ message: "a|b" });
+    const result = formatLogRow(log);
+    // Raw pipe in message must be escaped so it doesn't break the table
+    expect(result).toContain("a\\|b");
+  });
+
+  test("ends with newline", () => {
+    const result = formatLogRow(createTestLog());
+    expect(result).toEndWith("\n");
+  });
+});
+
+describe("formatLogsHeader (plain mode)", () => {
+  usePlainMode();
+
+  test("emits markdown table header and separator", () => {
+    const result = formatLogsHeader();
+    expect(result).toContain("| Timestamp | Level | Message |");
+    expect(result).toContain("| --- | --- | --- |");
+  });
+
+  test("ends with newline", () => {
+    expect(formatLogsHeader()).toEndWith("\n");
   });
 });
 
