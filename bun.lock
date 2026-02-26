@@ -4,10 +4,6 @@
   "workspaces": {
     "": {
       "name": "sentry",
-      "dependencies": {
-        "marked": "^15",
-        "marked-terminal": "^7.3.0",
-      },
       "devDependencies": {
         "@biomejs/biome": "2.3.8",
         "@sentry/api": "^0.1.0",
@@ -26,6 +22,8 @@
         "esbuild": "^0.25.0",
         "fast-check": "^4.5.3",
         "ignore": "^7.0.5",
+        "marked": "^15",
+        "marked-terminal": "^7.3.0",
         "p-limit": "^7.2.0",
         "pretty-ms": "^9.3.0",
         "qrcode-terminal": "^0.12.0",

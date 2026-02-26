@@ -1,29 +1,9 @@
 {
   "name": "sentry",
-  "version": "0.14.0-dev.0",
-  "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
-  "type": "module",
-  "bin": {
-    "sentry": "./dist/bin.cjs"
-  },
-  "files": [
-    "dist/bin.cjs"
-  ],
-  "scripts": {
-    "dev": "bun run src/bin.ts",
-    "build": "bun run script/build.ts --single",
-    "build:all": "bun run script/build.ts",
-    "bundle": "bun run script/bundle.ts",
-    "typecheck": "tsc --noEmit",
-    "lint": "bunx ultracite check",
-    "lint:fix": "bunx ultracite fix",
-    "test": "bun run test:unit && bun run test:isolated",
-    "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
-    "test:isolated": "bun test test/isolated",
-    "test:e2e": "bun test test/e2e",
-    "generate:skill": "bun run script/generate-skill.ts",
-    "check:skill": "bun run script/check-skill.ts",
-    "check:deps": "bun run script/check-no-deps.ts"
+  "version": "0.13.0-dev.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getsentry/cli.git"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
@@ -43,6 +23,8 @@
     "esbuild": "^0.25.0",
     "fast-check": "^4.5.3",
     "ignore": "^7.0.5",
+    "marked": "^15",
+    "marked-terminal": "^7.3.0",
     "p-limit": "^7.2.0",
     "pretty-ms": "^9.3.0",
     "qrcode-terminal": "^0.12.0",
@@ -53,20 +35,36 @@
     "uuidv7": "^1.1.0",
     "zod": "^3.24.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/getsentry/cli.git"
+  "bin": {
+    "sentry": "./dist/bin.cjs"
   },
-  "license": "FSL-1.1-Apache-2.0",
+  "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
     "node": ">=22"
   },
+  "files": [
+    "dist/bin.cjs"
+  ],
+  "license": "FSL-1.1-Apache-2.0",
   "packageManager": "bun@1.3.9",
   "patchedDependencies": {
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
   },
-  "dependencies": {
-    "marked": "^15",
-    "marked-terminal": "^7.3.0"
-  }
+  "scripts": {
+    "dev": "bun run src/bin.ts",
+    "build": "bun run script/build.ts --single",
+    "build:all": "bun run script/build.ts",
+    "bundle": "bun run script/bundle.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "bunx ultracite check",
+    "lint:fix": "bunx ultracite fix",
+    "test": "bun run test:unit && bun run test:isolated",
+    "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
+    "test:isolated": "bun test test/isolated",
+    "test:e2e": "bun test test/e2e",
+    "generate:skill": "bun run script/generate-skill.ts",
+    "check:skill": "bun run script/check-skill.ts",
+    "check:deps": "bun run script/check-no-deps.ts"
+  },
+  "type": "module"
 }
