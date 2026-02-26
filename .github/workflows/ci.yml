@@ -361,7 +361,7 @@ jobs:
 
           # Upload the new .gz binaries and the version manifest
           gh release upload nightly \
-            artifacts/dist-bin/*.gz \
+            artifacts/*.gz \
             version.json
 
   ci-status:
