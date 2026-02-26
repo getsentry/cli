@@ -1,0 +1,22 @@
+## Implementation Plan
+
+### Problem
+`getsentry/codecov-action@main` has `enable-tests: true` by default, which
+searches for JUnit XML files matching `**/*.junit.xml`. Since the project
+produced no JUnit output, it emitted 3 warnings on every CI run:
+- "No files found matching pattern: **/*.junit.xml"
+- "No JUnit XML files found matching pattern: **/*.junit.xml"
+- "Please ensure your test framework is generating JUnit XML output."
+
+### Solution
+Bun's test runner natively supports JUnit XML output via `bunfig.toml`.
+Enabling it gives the codecov action something to find and unlocks test result
+reporting (test counts, pass rate, test deltas vs base branch) for free.
+
+### Changes
+- `bunfig.toml`: added `[test.reporter]` section with `junit = "test-results.junit.xml"`
+- `.gitignore`: added `*.junit.xml` under the test artifacts section so the
+  generated file is not accidentally committed from local runs
+
+No CI workflow changes needed — the codecov action's default glob
+`**/*.junit.xml` already matches the output path.
