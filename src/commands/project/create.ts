@@ -60,15 +60,20 @@ const PLATFORMS = [
 
 /**
  * Convert a project name to its expected Sentry slug.
- * Sentry slugs are lowercase, with non-alphanumeric runs replaced by hyphens.
+ * Aligned with Sentry's canonical implementation:
+ * https://github.com/getsentry/sentry/blob/master/static/app/utils/slugify.tsx
  *
  * @example slugify("My Cool App") // "my-cool-app"
  * @example slugify("my-app")      // "my-app"
+ * @example slugify("Café Project") // "cafe-project"
+ * @example slugify("my_app")      // "my_app"
  */
 function slugify(name: string): string {
   return name
+    .normalize("NFKD")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^a-z0-9_\s-]/g, "")
+    .replace(/[-\s]+/g, "-")
     .replace(/^-|-$/g, "");
 }
 
