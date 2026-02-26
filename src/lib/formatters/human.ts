@@ -34,7 +34,11 @@ import {
   statusColor,
   yellow,
 } from "./colors.js";
-import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
+import {
+  escapeMarkdownCell,
+  renderMarkdown,
+  safeCodeSpan,
+} from "./markdown.js";
 
 // Status Formatting
 
@@ -620,31 +624,35 @@ export function formatIssueDetails(issue: SentryIssue): string {
     levelLine += " (unhandled)";
   }
   rows.push(`| **Level** | ${levelLine} |`);
-  rows.push(`| **Platform** | ${issue.platform ?? "unknown"} |`);
-  rows.push(`| **Type** | ${issue.type ?? "unknown"} |`);
-  rows.push(`| **Assignee** | ${issue.assignedTo?.name ?? "Unassigned"} |`);
+  rows.push(
+    `| **Platform** | ${escapeMarkdownCell(issue.platform ?? "unknown")} |`
+  );
+  rows.push(`| **Type** | ${escapeMarkdownCell(issue.type ?? "unknown")} |`);
+  rows.push(
+    `| **Assignee** | ${escapeMarkdownCell(String(issue.assignedTo?.name ?? "Unassigned"))} |`
+  );
 
   if (issue.project) {
     rows.push(
-      `| **Project** | ${issue.project.name} (\`${issue.project.slug}\`) |`
+      `| **Project** | ${escapeMarkdownCell(issue.project.name ?? "(unknown)")} (${safeCodeSpan(issue.project.slug ?? "")}) |`
     );
   }
 
   const firstReleaseVersion = issue.firstRelease?.shortVersion;
   const lastReleaseVersion = issue.lastRelease?.shortVersion;
   if (firstReleaseVersion || lastReleaseVersion) {
+    const first = escapeMarkdownCell(String(firstReleaseVersion ?? ""));
+    const last = escapeMarkdownCell(String(lastReleaseVersion ?? ""));
     if (firstReleaseVersion && lastReleaseVersion) {
       if (firstReleaseVersion === lastReleaseVersion) {
-        rows.push(`| **Release** | ${firstReleaseVersion} |`);
+        rows.push(`| **Release** | ${first} |`);
       } else {
-        rows.push(
-          `| **Releases** | ${firstReleaseVersion} → ${lastReleaseVersion} |`
-        );
+        rows.push(`| **Releases** | ${first} → ${last} |`);
       }
     } else if (lastReleaseVersion) {
-      rows.push(`| **Release** | ${lastReleaseVersion} |`);
+      rows.push(`| **Release** | ${last} |`);
     } else if (firstReleaseVersion) {
-      rows.push(`| **Release** | ${firstReleaseVersion} |`);
+      rows.push(`| **Release** | ${first} |`);
     }
   }
 
@@ -667,10 +675,10 @@ export function formatIssueDetails(issue: SentryIssue): string {
   }
 
   if (issue.culprit) {
-    rows.push(`| **Culprit** | \`${issue.culprit}\` |`);
+    rows.push(`| **Culprit** | ${safeCodeSpan(issue.culprit)} |`);
   }
 
-  rows.push(`| **Link** | ${issue.permalink} |`);
+  rows.push(`| **Link** | ${escapeMarkdownCell(issue.permalink ?? "")} |`);
 
   lines.push("| | |");
   lines.push("|---|---|");
@@ -1000,13 +1008,17 @@ function buildEnvironmentMarkdown(event: SentryEvent): string {
   if (contexts.browser) {
     const name = contexts.browser.name || "Unknown Browser";
     const version = contexts.browser.version || "";
-    rows.push(`| **Browser** | ${name}${version ? ` ${version}` : ""} |`);
+    rows.push(
+      `| **Browser** | ${escapeMarkdownCell(`${name}${version ? ` ${version}` : ""}`)} |`
+    );
   }
 
   if (contexts.os) {
     const name = contexts.os.name || "Unknown OS";
     const version = contexts.os.version || "";
-    rows.push(`| **OS** | ${name}${version ? ` ${version}` : ""} |`);
+    rows.push(
+      `| **OS** | ${escapeMarkdownCell(`${name}${version ? ` ${version}` : ""}`)} |`
+    );
   }
 
   if (contexts.device) {
@@ -1014,7 +1026,7 @@ function buildEnvironmentMarkdown(event: SentryEvent): string {
     const brand = contexts.device.brand || "";
     if (family || brand) {
       const device = brand ? `${family} (${brand})` : family;
-      rows.push(`| **Device** | ${device} |`);
+      rows.push(`| **Device** | ${escapeMarkdownCell(device)} |`);
     }
   }
 
@@ -1050,19 +1062,19 @@ function buildUserMarkdown(event: SentryEvent): string {
   const rows: string[] = [];
 
   if (user.name) {
-    rows.push(`| **Name** | ${user.name} |`);
+    rows.push(`| **Name** | ${escapeMarkdownCell(user.name)} |`);
   }
   if (user.email) {
-    rows.push(`| **Email** | ${user.email} |`);
+    rows.push(`| **Email** | ${escapeMarkdownCell(user.email)} |`);
   }
   if (user.username) {
-    rows.push(`| **Username** | ${user.username} |`);
+    rows.push(`| **Username** | ${escapeMarkdownCell(user.username)} |`);
   }
   if (user.id) {
-    rows.push(`| **ID** | ${user.id} |`);
+    rows.push(`| **ID** | ${escapeMarkdownCell(user.id)} |`);
   }
   if (user.ip_address) {
-    rows.push(`| **IP** | ${user.ip_address} |`);
+    rows.push(`| **IP** | ${escapeMarkdownCell(user.ip_address)} |`);
   }
 
   if (user.geo) {
@@ -1078,7 +1090,7 @@ function buildUserMarkdown(event: SentryEvent): string {
       parts.push(`(${geo.country_code})`);
     }
     if (parts.length > 0) {
-      rows.push(`| **Location** | ${parts.join(", ")} |`);
+      rows.push(`| **Location** | ${escapeMarkdownCell(parts.join(", "))} |`);
     }
   }
 
@@ -1143,12 +1155,12 @@ export function formatEventDetails(
       );
     }
     if (event.location) {
-      infoRows.push(`| **Location** | \`${event.location}\` |`);
+      infoRows.push(`| **Location** | ${safeCodeSpan(event.location)} |`);
     }
 
     const traceCtx = event.contexts?.trace;
     if (traceCtx?.trace_id) {
-      infoRows.push(`| **Trace** | \`${traceCtx.trace_id}\` |`);
+      infoRows.push(`| **Trace** | ${safeCodeSpan(traceCtx.trace_id)} |`);
     }
 
     if (event.sdk?.name || event.sdk?.version) {
@@ -1161,7 +1173,9 @@ export function formatEventDetails(
     }
 
     if (event.release?.shortVersion) {
-      infoRows.push(`| **Release** | ${event.release.shortVersion} |`);
+      infoRows.push(
+        `| **Release** | ${escapeMarkdownCell(event.release.shortVersion)} |`
+      );
     }
 
     if (infoRows.length > 0) {

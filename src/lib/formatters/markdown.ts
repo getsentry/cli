@@ -171,6 +171,25 @@ export function mdRow(cells: readonly string[]): string {
 }
 
 /**
+ * Wrap a user-supplied string in a backtick code span for use inside a
+ * markdown table cell.
+ *
+ * Inside a CommonMark code span, backslashes are **literal** (not escape
+ * characters), so `\|` would render as `\|` rather than protecting the
+ * table delimiter. Instead this helper:
+ *
+ * - Replaces `|` with `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) — visually
+ *   identical but not a markdown table delimiter.
+ * - Replaces newlines with a space — code spans cannot span lines.
+ *
+ * @param value - Raw string to format as a code span
+ * @returns `` `value` `` with pipe and newline characters sanitised
+ */
+export function safeCodeSpan(value: string): string {
+  return `\`${value.replace(/\|/g, "│").replace(/\n/g, " ")}\``;
+}
+
+/**
  * Build a key-value markdown table section with an optional heading.
  *
  * Each entry is rendered as `| **Label** | value |`.
@@ -192,7 +211,7 @@ export function mdKvTable(
   lines.push("| | |");
   lines.push("|---|---|");
   for (const [label, value] of rows) {
-    lines.push(`| **${label}** | ${value} |`);
+    lines.push(`| **${label}** | ${escapeMarkdownCell(value)} |`);
   }
   return lines.join("\n");
 }
