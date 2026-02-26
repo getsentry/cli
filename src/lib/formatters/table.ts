@@ -8,7 +8,7 @@
  */
 
 import type { Writer } from "../../types/index.js";
-import { renderMarkdown } from "./markdown.js";
+import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
 
 /**
  * Describes a single column in a table.
@@ -29,8 +29,10 @@ export type Column<T> = {
 /**
  * Build a markdown table string from items and column definitions.
  *
- * ANSI escape codes in cell values survive the markdown pipeline —
- * cli-table3 uses `string-width` for column width calculation.
+ * Cell values are escaped via {@link escapeMarkdownCell} so pipe and
+ * backslash characters in API-supplied strings don't break the table.
+ * Pre-rendered ANSI codes survive the pipeline — cli-table3 uses
+ * `string-width` for column width calculation.
  *
  * @param items - Row data
  * @param columns - Column definitions
@@ -43,7 +45,10 @@ export function buildMarkdownTable<T>(
   const header = `| ${columns.map((c) => c.header).join(" | ")} |`;
   const separator = `| ${columns.map((c) => (c.align === "right" ? "---:" : "---")).join(" | ")} |`;
   const rows = items
-    .map((item) => `| ${columns.map((c) => c.value(item)).join(" | ")} |`)
+    .map(
+      (item) =>
+        `| ${columns.map((c) => escapeMarkdownCell(c.value(item))).join(" | ")} |`
+    )
     .join("\n");
   return `${header}\n${separator}\n${rows}`;
 }

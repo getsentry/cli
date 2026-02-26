@@ -97,8 +97,10 @@ function isTruthyEnv(val: string): boolean {
  * and changes to `process.stdout.isTTY` are picked up immediately.
  *
  * Priority (highest first):
- * 1. `SENTRY_PLAIN_OUTPUT` — explicit project-specific override
- * 2. `NO_COLOR` — widely-supported standard for disabling styled output
+ * 1. `SENTRY_PLAIN_OUTPUT` — explicit project-specific override (custom
+ *    semantics: `"0"` / `"false"` / `""` force color on)
+ * 2. `NO_COLOR` — follows the no-color.org spec: any **non-empty** value
+ *    disables color, regardless of its content (including `"0"` / `"false"`)
  * 3. `process.stdout.isTTY` — auto-detect interactive terminal
  */
 export function isPlainOutput(): boolean {
@@ -107,9 +109,11 @@ export function isPlainOutput(): boolean {
     return isTruthyEnv(plain);
   }
 
+  // no-color.org spec: presence of a non-empty value disables color.
+  // Unlike SENTRY_PLAIN_OUTPUT, "0" and "false" still mean "disable color".
   const noColor = process.env.NO_COLOR;
   if (noColor !== undefined) {
-    return isTruthyEnv(noColor);
+    return noColor !== "";
   }
 
   return !process.stdout.isTTY;

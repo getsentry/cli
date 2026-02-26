@@ -678,7 +678,7 @@ export function formatIssueDetails(issue: SentryIssue): string {
     lines.push("");
     lines.push("**Message:**");
     lines.push("");
-    lines.push(`> ${issue.metadata.value}`);
+    lines.push(`> ${issue.metadata.value.replace(/\n/g, "\n> ")}`);
   }
 
   if (issue.metadata?.filename) {

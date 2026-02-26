@@ -144,7 +144,7 @@ describe("isPlainOutput", () => {
       });
     });
 
-    test("=true → plain (case-insensitive)", () => {
+    test("=True → plain (any non-empty value per spec)", () => {
       withEnv(
         { SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: "True" },
         true,
@@ -154,23 +154,25 @@ describe("isPlainOutput", () => {
       );
     });
 
-    test("=0 → rendered", () => {
+    // Per no-color.org spec (updated 2026-02-09): any non-empty value disables
+    // color, including "0" and "false". Only empty string leaves color enabled.
+    test("=0 → plain (non-empty value disables color per spec)", () => {
       withEnv({ SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: "0" }, false, () => {
-        expect(isPlainOutput()).toBe(false);
+        expect(isPlainOutput()).toBe(true);
       });
     });
 
-    test("=false → rendered (case-insensitive)", () => {
+    test("=false → plain (non-empty value disables color per spec)", () => {
       withEnv(
         { SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: "false" },
         false,
         () => {
-          expect(isPlainOutput()).toBe(false);
+          expect(isPlainOutput()).toBe(true);
         }
       );
     });
 
-    test("='' → rendered (empty string is falsy)", () => {
+    test("='' → rendered (empty string leaves color enabled)", () => {
       withEnv({ SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: "" }, false, () => {
         expect(isPlainOutput()).toBe(false);
       });
