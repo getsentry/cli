@@ -15,6 +15,7 @@ import {
   buildRawQueryParams,
   handleResponse,
   normalizeEndpoint,
+  normalizeFields,
   parseFieldKey,
   parseFields,
   parseHeaders,
@@ -26,6 +27,7 @@ import {
   writeVerboseRequest,
   writeVerboseResponse,
 } from "../../src/commands/api.js";
+import { ValidationError } from "../../src/lib/errors.js";
 import type { Writer } from "../../src/types/index.js";
 
 /**
@@ -241,7 +243,8 @@ describe("parseFields", () => {
     });
   });
 
-  test("throws for invalid field format without equals", () => {
+  test("throws ValidationError for invalid field format without equals", () => {
+    expect(() => parseFields(["invalid"])).toThrow(ValidationError);
     expect(() => parseFields(["invalid"])).toThrow(/Invalid field format/);
     expect(() => parseFields(["no-equals"])).toThrow(/Invalid field format/);
   });
@@ -278,6 +281,91 @@ describe("parseFields", () => {
     expect(() => parseFields(["items[key]=value", "items[]=item"])).toThrow(
       /expected array type/
     );
+  });
+});
+
+describe("normalizeFields", () => {
+  test("passes through fields that already have '='", () => {
+    const stderr = createMockWriter();
+    expect(
+      normalizeFields(["status=resolved", "project=my-proj"], stderr)
+    ).toEqual(["status=resolved", "project=my-proj"]);
+    expect(stderr.output).toBe("");
+  });
+
+  test("passes through empty-array syntax 'key[]' without warning", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields(["tags[]"], stderr)).toEqual(["tags[]"]);
+    expect(stderr.output).toBe("");
+  });
+
+  test("corrects ':' separator and emits warning — CLI-9H case", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields(["project:4510942921490432"], stderr)).toEqual([
+      "project=4510942921490432",
+    ]);
+    expect(stderr.output).toContain("project=4510942921490432");
+    expect(stderr.output).toContain("warning:");
+  });
+
+  test("corrects ':' separator on timestamp values, preserving colons in value — CLI-93 case", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields(["since:2026-02-25T11:20:00"], stderr)).toEqual([
+      "since=2026-02-25T11:20:00",
+    ]);
+    expect(stderr.output).toContain("since=2026-02-25T11:20:00");
+  });
+
+  test("corrects ':' separator on URL values, preserving colons in value", () => {
+    const stderr = createMockWriter();
+    expect(
+      normalizeFields(["url:https://example.com:8080/path"], stderr)
+    ).toEqual(["url=https://example.com:8080/path"]);
+    expect(stderr.output).toContain("url=https://example.com:8080/path");
+  });
+
+  test("corrects ':' separator and emits one warning per field", () => {
+    const stderr = createMockWriter();
+    normalizeFields(["status:resolved", "project:my-proj"], stderr);
+    const warnings = stderr.output
+      .split("\n")
+      .filter((l) => l.includes("warning:"));
+    expect(warnings).toHaveLength(2);
+  });
+
+  test("returns field unchanged when no '=' and no ':' (parser will throw)", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields(["invalid"], stderr)).toEqual(["invalid"]);
+    expect(stderr.output).toBe("");
+  });
+
+  test("returns field unchanged when ':' is the first character", () => {
+    // Empty key — uncorrectable, let parser throw
+    const stderr = createMockWriter();
+    expect(normalizeFields([":value"], stderr)).toEqual([":value"]);
+    expect(stderr.output).toBe("");
+  });
+
+  test("returns undefined when given undefined", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields(undefined, stderr)).toBeUndefined();
+  });
+
+  test("returns empty array when given empty array", () => {
+    const stderr = createMockWriter();
+    expect(normalizeFields([], stderr)).toEqual([]);
+  });
+
+  test("mixes corrected and pass-through fields correctly", () => {
+    const stderr = createMockWriter();
+    expect(
+      normalizeFields(["status:resolved", "limit=10", "tags[]"], stderr)
+    ).toEqual(["status=resolved", "limit=10", "tags[]"]);
+    // Only the one corrected field emits a warning
+    const warnings = stderr.output
+      .split("\n")
+      .filter((l) => l.includes("warning:"));
+    expect(warnings).toHaveLength(1);
   });
 });
 
@@ -394,7 +482,8 @@ describe("buildQueryParams", () => {
     expect(buildQueryParams(["query=a=b"])).toEqual({ query: "a=b" });
   });
 
-  test("throws for invalid field format", () => {
+  test("throws ValidationError for invalid field format", () => {
+    expect(() => buildQueryParams(["invalid"])).toThrow(ValidationError);
     expect(() => buildQueryParams(["invalid"])).toThrow(/Invalid field format/);
     expect(() => buildQueryParams(["no-equals"])).toThrow(
       /Invalid field format/
@@ -487,7 +576,8 @@ describe("buildRawQueryParams", () => {
     expect(buildRawQueryParams(["query=a=b=c"])).toEqual({ query: "a=b=c" });
   });
 
-  test("throws for invalid field format without equals", () => {
+  test("throws ValidationError for invalid field format without equals", () => {
+    expect(() => buildRawQueryParams(["invalid"])).toThrow(ValidationError);
     expect(() => buildRawQueryParams(["invalid"])).toThrow(
       /Invalid field format/
     );
