@@ -25,6 +25,13 @@ import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { UpgradeError } from "./errors.js";
+import {
+  downloadNightlyBlob,
+  fetchNightlyManifest,
+  findLayerByFilename,
+  getAnonymousToken,
+  getNightlyVersion,
+} from "./ghcr.js";
 
 // Types
 
@@ -46,14 +53,7 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/getsentry/cli/releases";
 
-/**
- * Public URL for the nightly release's version manifest.
- * This is a GitHub release asset on the rolling `nightly` prerelease.
- */
-const NIGHTLY_VERSION_URL =
-  "https://github.com/getsentry/cli/releases/download/nightly/version.json";
-
-/** The git tag used for the rolling nightly release. */
+/** The git tag used for the rolling nightly GitHub release (stable fallback only). */
 export const NIGHTLY_TAG = "nightly";
 
 /** npm registry base URL */
@@ -327,50 +327,51 @@ export async function fetchLatestFromNpm(): Promise<string> {
 }
 
 /**
- * Fetch the latest nightly version from the nightly release's version manifest.
+ * Fetch the latest nightly version from GHCR.
  *
- * Downloads a small JSON file (`version.json`) from the rolling `nightly`
- * GitHub prerelease. This file is uploaded by CI on every main-branch build
- * and contains `{version, sha, date}`.
+ * Performs an anonymous token exchange then fetches the OCI manifest for the
+ * `:nightly` tag. The version is extracted from the manifest annotation —
+ * only 2 HTTP requests total (token + manifest), no blob download needed.
  *
- * The URL is a public GitHub release asset — no API token required.
- *
- * @param signal - Optional AbortSignal to cancel the request
- * @returns Latest nightly version string (e.g. "0.12.0-dev.1740393600")
- * @throws {UpgradeError} When fetch fails or response is invalid
+ * @param signal - Optional AbortSignal to cancel the requests
+ * @returns Latest nightly version string (e.g., "0.0.0-nightly.1740000000")
+ * @throws {UpgradeError} When fetch fails or the version annotation is missing
  */
 export async function fetchLatestNightlyVersion(
   signal?: AbortSignal
 ): Promise<string> {
-  const response = await fetchWithUpgradeError(
-    NIGHTLY_VERSION_URL,
-    { signal },
-    "GitHub"
-  );
-
-  if (!response.ok) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to fetch nightly version: ${response.status}`
-    );
+  // AbortSignal is not threaded through ghcr helpers, but checking it before
+  // each network call ensures we bail out promptly when the process exits.
+  if (signal?.aborted) {
+    throw Object.assign(new Error("AbortError"), { name: "AbortError" });
   }
 
-  const data = (await response.json()) as { version?: string };
+  const token = await getAnonymousToken();
 
-  if (!data.version) {
-    throw new UpgradeError(
-      "network_error",
-      "No version found in nightly version.json"
-    );
+  if (signal?.aborted) {
+    throw Object.assign(new Error("AbortError"), { name: "AbortError" });
   }
 
-  return data.version;
+  const manifest = await fetchNightlyManifest(token);
+  return getNightlyVersion(manifest);
+}
+
+/**
+ * Detect if the given version string represents a nightly build.
+ *
+ * Nightly versions follow the pattern `0.0.0-nightly.<timestamp>`.
+ *
+ * @param version - Version string to check
+ * @returns true if the version is a nightly build
+ */
+export function isNightlyVersion(version: string): boolean {
+  return version.includes("-nightly.");
 }
 
 /**
  * Fetch the latest available version based on installation method and channel.
  *
- * - nightly channel: fetches version.json from the rolling nightly release
+ * - nightly channel: fetches version from GHCR manifest annotation
  * - curl/brew on stable: checks GitHub /releases/latest
  * - package managers on stable: checks npm registry
  *
@@ -458,12 +459,114 @@ async function streamDecompressToFile(
 }
 
 /**
- * Download the new binary to a temporary path and return its location.
- * Used by the upgrade command to download before spawning setup --install.
+ * Build the gzip filename for the current platform binary.
+ *
+ * Nightly builds are stored in GHCR as `sentry-<os>-<arch>.gz` (or
+ * `sentry-windows-x64.exe.gz` on Windows). This filename is the
+ * `org.opencontainers.image.title` annotation on the matching OCI layer.
+ *
+ * @returns Filename of the gzip-compressed binary for this platform
+ */
+function getNightlyGzFilename(): string {
+  let os: string;
+  if (process.platform === "darwin") {
+    os = "darwin";
+  } else if (process.platform === "win32") {
+    os = "windows";
+  } else {
+    os = "linux";
+  }
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  return `sentry-${os}-${arch}${suffix}.gz`;
+}
+
+/**
+ * Download a nightly binary from GHCR and decompress it to `destPath`.
+ *
+ * Fetches an anonymous token, retrieves the OCI manifest, finds the layer
+ * matching this platform's `.gz` filename, then downloads and decompresses
+ * the blob in-stream.
+ *
+ * @param destPath - File path to write the decompressed binary
+ * @throws {UpgradeError} When GHCR fetch or blob download fails
+ */
+async function downloadNightlyToPath(destPath: string): Promise<void> {
+  const token = await getAnonymousToken();
+  const manifest = await fetchNightlyManifest(token);
+  const filename = getNightlyGzFilename();
+  const layer = findLayerByFilename(manifest, filename);
+  const response = await downloadNightlyBlob(token, layer.digest);
+
+  if (!response.body) {
+    throw new UpgradeError(
+      "execution_failed",
+      "GHCR blob response had no body"
+    );
+  }
+  await streamDecompressToFile(response.body, destPath);
+}
+
+/**
+ * Download a stable binary from GitHub Releases and write it to `destPath`.
  *
  * Tries the gzip-compressed URL first (`{url}.gz`, ~37 MB vs ~99 MB),
  * falling back to the raw binary URL on any failure. The compressed
  * download is streamed through DecompressionStream for minimal memory usage.
+ *
+ * @param version - Stable version string (without 'v' prefix)
+ * @param destPath - File path to write the binary (decompressed if gzip)
+ * @throws {UpgradeError} When both download attempts fail
+ */
+async function downloadStableToPath(
+  version: string,
+  destPath: string
+): Promise<void> {
+  const url = getBinaryDownloadUrl(version);
+  const headers = getGitHubHeaders();
+
+  // Try gzip-compressed download first (~60% smaller)
+  try {
+    const gzResponse = await fetchWithUpgradeError(
+      `${url}.gz`,
+      { headers },
+      "GitHub"
+    );
+    if (gzResponse.ok && gzResponse.body) {
+      await streamDecompressToFile(gzResponse.body, destPath);
+      return;
+    }
+  } catch {
+    // Fall through to raw download
+  }
+
+  // Fall back to raw (uncompressed) binary
+  const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "execution_failed",
+      `Failed to download binary: HTTP ${response.status}`
+    );
+  }
+
+  // Fully consume the response body before writing to disk.
+  // Bun.write(path, Response) with a large streaming body can exit the
+  // process before the download completes (Bun event-loop bug).
+  // See: https://github.com/oven-sh/bun/issues/13237
+  const body = await response.arrayBuffer();
+  await Bun.write(destPath, body);
+}
+
+/**
+ * Download the new binary to a temporary path and return its location.
+ * Used by the upgrade command to download before spawning setup --install.
+ *
+ * For **nightly** versions (detected via {@link isNightlyVersion}), downloads
+ * from GHCR using the OCI blob download protocol via {@link downloadNightlyToPath}.
+ *
+ * For **stable** versions, downloads from GitHub Releases via
+ * {@link downloadStableToPath}.
  *
  * The lock is held on success so concurrent upgrades are blocked during the
  * download→spawn→install pipeline. The caller MUST release the lock after the
@@ -485,7 +588,6 @@ export async function downloadBinaryToTemp(
   version: string,
   downloadTag?: string
 ): Promise<DownloadResult> {
-  const url = getBinaryDownloadUrl(downloadTag ?? version);
   const { tempPath, lockPath } = getCurlInstallPaths();
 
   acquireLock(lockPath);
@@ -498,41 +600,11 @@ export async function downloadBinaryToTemp(
       // Ignore if doesn't exist
     }
 
-    const headers = getGitHubHeaders();
-
-    // Try gzip-compressed download first (~60% smaller)
-    let downloaded = false;
-    try {
-      const gzResponse = await fetchWithUpgradeError(
-        `${url}.gz`,
-        { headers },
-        "GitHub"
-      );
-      if (gzResponse.ok && gzResponse.body) {
-        await streamDecompressToFile(gzResponse.body, tempPath);
-        downloaded = true;
-      }
-    } catch {
-      // Fall through to raw download
-    }
-
-    // Fall back to raw (uncompressed) binary
-    if (!downloaded) {
-      const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
-
-      if (!response.ok) {
-        throw new UpgradeError(
-          "execution_failed",
-          `Failed to download binary: HTTP ${response.status}`
-        );
-      }
-
-      // Fully consume the response body before writing to disk.
-      // Bun.write(path, Response) with a large streaming body can exit the
-      // process before the download completes (Bun event-loop bug).
-      // See: https://github.com/oven-sh/bun/issues/13237
-      const body = await response.arrayBuffer();
-      await Bun.write(tempPath, body);
+    if (isNightlyVersion(version)) {
+      // Nightly binaries are on GHCR — downloadTag is not used for nightly
+      await downloadNightlyToPath(tempPath);
+    } else {
+      await downloadStableToPath(downloadTag ?? version, tempPath);
     }
 
     // Set executable permission (Unix only)

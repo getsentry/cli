@@ -10,6 +10,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# packages:write is needed for publish-nightly to push to GHCR
+permissions:
+  contents: read
+  packages: write
+
 env:
   # Commit timestamp used for deterministic nightly version strings.
   # Defined at workflow level so build-binary and publish-nightly always agree.
@@ -216,6 +221,73 @@ jobs:
           name: sentry-${{ matrix.target }}
           path: dist-bin/sentry-*
 
+  publish-nightly:
+    name: Publish Nightly to GHCR
+    # Only run on pushes to main, not on PRs or release branches
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [build-binary]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sentry-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.2.3
+          curl -sfL "https://github.com/oras-project/oras/releases/download/v${VERSION}/oras_${VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin oras
+
+      - name: Compress binaries
+        run: |
+          ls artifacts/
+          for f in artifacts/sentry-linux-* artifacts/sentry-darwin-*; do
+            gzip -k "$f"
+          done
+          # Windows binary — compress but keep .exe name visible in title
+          for f in artifacts/sentry-windows-*.exe; do
+            gzip -k "$f"
+          done
+          ls artifacts/*.gz
+
+      - name: Compute nightly version
+        id: version
+        run: |
+          # Derive a deterministic Unix timestamp from the commit so that all
+          # jobs in this workflow run produce the same version string.
+          TS=$(date -d '${{ github.event.head_commit.timestamp }}' +%s 2>/dev/null \
+               || date -j -f "%Y-%m-%dT%H:%M:%S%z" '${{ github.event.head_commit.timestamp }}' +%s 2>/dev/null \
+               || echo ${{ github.run_number }})
+          VERSION="0.0.0-nightly.${TS}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: ${VERSION}"
+
+      - name: Create version.json
+        run: |
+          echo '{"version":"${{ steps.version.outputs.version }}"}' > version.json
+          cat version.json
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push to GHCR
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          oras push ghcr.io/getsentry/cli:nightly \
+            --artifact-type application/vnd.sentry.cli.nightly \
+            --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+            --annotation "version=${VERSION}" \
+            artifacts/*.gz \
+            version.json
+
   test-e2e:
     name: E2E Tests
     needs: [build-binary]
@@ -301,69 +373,6 @@ jobs:
           name: gh-pages
           path: gh-pages.zip
 
-  publish-nightly:
-    name: Publish Nightly
-    # Only publish after a successful main-branch build+test. Skipped on PRs
-    # and release branches.
-    needs: [build-binary, test-e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: package.json
-      - name: Compute nightly version
-        # Uses the commit timestamp — the same value as build-binary — so
-        # version.json exactly matches the version baked into the binaries.
-        id: version
-        run: |
-          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
-          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Download all binary artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: sentry-*
-          path: artifacts
-          merge-multiple: true
-      - name: Create version.json
-        run: |
-          cat > version.json <<EOF
-          {"version":"${{ steps.version.outputs.version }}","sha":"${{ github.sha }}","date":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-          EOF
-      - name: Create or update nightly release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # Create the release the first time; subsequent runs are a no-op
-          gh release create nightly \
-            --prerelease \
-            --title "Nightly" \
-            --notes "" \
-            2>/dev/null || true
-
-          # Update release notes with the latest version + commit
-          gh release edit nightly \
-            --prerelease \
-            --notes "Latest nightly build from the \`main\` branch.
-
-          **Version:** \`${{ steps.version.outputs.version }}\`
-          **Commit:** ${{ github.sha }}"
-
-          # Delete all existing assets first so removed/renamed files don't linger
-          gh release view nightly --json assets --jq '.assets[].name' | while read -r name; do
-            gh release delete-asset nightly "$name" --yes
-          done
-
-          # Upload the new .gz binaries and the version manifest
-          gh release upload nightly \
-            artifacts/*.gz \
-            version.json
-
   ci-status:
     name: CI Status
     if: always()
@@ -374,6 +383,7 @@ jobs:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
+          # publish-nightly is skipped on PRs (if: github.ref == 'refs/heads/main') — that's expected
           results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then

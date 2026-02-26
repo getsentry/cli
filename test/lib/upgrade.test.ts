@@ -28,6 +28,7 @@ import {
   fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
+  isNightlyVersion,
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
@@ -229,89 +230,8 @@ describe("fetchLatestFromNpm", () => {
   });
 });
 
-describe("fetchLatestNightlyVersion", () => {
-  test("returns version from nightly version.json", async () => {
-    mockFetch(
-      async () =>
-        new Response(
-          JSON.stringify({
-            version: "0.12.0-dev.1740393600",
-            sha: "abc123",
-            date: "2026-01-01",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-    );
-
-    const version = await fetchLatestNightlyVersion();
-    expect(version).toBe("0.12.0-dev.1740393600");
-  });
-
-  test("throws on HTTP error", async () => {
-    mockFetch(
-      async () =>
-        new Response("Not Found", {
-          status: 404,
-        })
-    );
-
-    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
-    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
-      "Failed to fetch nightly version: 404"
-    );
-  });
-
-  test("throws on network failure", async () => {
-    mockFetch(async () => {
-      throw new TypeError("fetch failed");
-    });
-
-    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
-    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
-      "Failed to connect to GitHub: fetch failed"
-    );
-  });
-
-  test("throws when no version in response", async () => {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify({ sha: "abc123" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
-
-    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
-      "No version found in nightly version.json"
-    );
-  });
-
-  test("respects AbortSignal", async () => {
-    const controller = new AbortController();
-    mockFetch(async (_url, init) => {
-      // Simulate a slow request that checks the signal
-      if (init?.signal?.aborted) {
-        const err = new Error("The operation was aborted");
-        err.name = "AbortError";
-        throw err;
-      }
-      return new Response(
-        JSON.stringify({ version: "0.12.0-dev.1740393600" }),
-        { status: 200 }
-      );
-    });
-
-    // Abort before calling
-    controller.abort();
-
-    await expect(
-      fetchLatestNightlyVersion(controller.signal)
-    ).rejects.toMatchObject({ name: "AbortError" });
-  });
-});
+// fetchLatestNightlyVersion tests are in the dedicated describe block
+// below (around line 1153) which tests the GHCR-based implementation.
 
 describe("UpgradeError", () => {
   test("creates error with default message for unknown_method", () => {
@@ -447,31 +367,48 @@ describe("fetchLatestVersion", () => {
     expect(version).toBe("2.0.0");
   });
 
-  test("uses nightly version.json when channel is nightly (curl method)", async () => {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify({ version: "0.12.0-dev.1740393600" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
+  test("uses GHCR manifest when channel is nightly (curl method)", async () => {
+    // Nightly version is now fetched from GHCR manifest annotation, not version.json
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.0.0-nightly.1740393600" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
 
     const version = await fetchLatestVersion("curl", "nightly");
-    expect(version).toBe("0.12.0-dev.1740393600");
+    expect(version).toBe("0.0.0-nightly.1740393600");
   });
 
-  test("uses nightly version.json when channel is nightly (npm method)", async () => {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify({ version: "0.12.0-dev.1740393600" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
+  test("uses GHCR manifest when channel is nightly (npm method)", async () => {
+    // Even npm method uses GHCR when channel=nightly (nightly is curl-only distribution)
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.0.0-nightly.1740393600" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
 
-    // Even npm method should use nightly endpoint when channel=nightly
     const version = await fetchLatestVersion("npm", "nightly");
-    expect(version).toBe("0.12.0-dev.1740393600");
+    expect(version).toBe("0.0.0-nightly.1740393600");
   });
 
   test("defaults to stable channel (uses GitHub) when channel omitted", async () => {
@@ -1132,5 +1069,175 @@ describe("startCleanupOldBinary", () => {
 
     // Should not throw when called again
     expect(() => startCleanupOldBinary()).not.toThrow();
+  });
+});
+
+describe("isNightlyVersion", () => {
+  test("returns true for nightly version strings", () => {
+    expect(isNightlyVersion("0.0.0-nightly.1740000000")).toBe(true);
+    expect(isNightlyVersion("0.0.0-nightly.1")).toBe(true);
+  });
+
+  test("returns false for stable version strings", () => {
+    expect(isNightlyVersion("1.0.0")).toBe(false);
+    expect(isNightlyVersion("0.13.0")).toBe(false);
+    expect(isNightlyVersion("2.0.0-beta.1")).toBe(false);
+    expect(isNightlyVersion("0.0.0-dev")).toBe(false);
+  });
+});
+
+describe("fetchLatestNightlyVersion", () => {
+  test("returns version from GHCR manifest annotation", async () => {
+    // Mock the two requests: token exchange + manifest fetch
+    let callCount = 0;
+    mockFetch(async (url) => {
+      callCount += 1;
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
+            annotations: { version: "0.0.0-nightly.1740000000" },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+            },
+          }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const version = await fetchLatestNightlyVersion();
+    expect(version).toBe("0.0.0-nightly.1740000000");
+    expect(callCount).toBe(2); // token + manifest
+  });
+
+  test("throws UpgradeError when GHCR token exchange fails", async () => {
+    mockFetch(async () => new Response("Unauthorized", { status: 401 }));
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "GHCR token exchange failed: HTTP 401"
+    );
+  });
+
+  test("throws UpgradeError when manifest has no version annotation", async () => {
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ schemaVersion: 2, layers: [], annotations: {} }),
+        { status: 200 }
+      );
+    });
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "Nightly manifest has no version annotation"
+    );
+  });
+
+  test("aborts early if signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fetchLatestNightlyVersion(controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("executeUpgrade with curl method (nightly)", () => {
+  const binDir = join(homedir(), ".sentry", "bin");
+
+  function getTestPaths() {
+    return getCurlInstallPaths();
+  }
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(binDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getTestPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+  });
+
+  test("downloads and decompresses nightly binary from GHCR", async () => {
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
+    const gzipped = Bun.gzipSync(mockBinaryContent);
+
+    // Mock: token exchange + manifest + blob (200 with gzipped content)
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        let os = "linux";
+        if (process.platform === "darwin") os = "darwin";
+        else if (process.platform === "win32") os = "windows";
+        const arch = process.arch === "arm64" ? "arm64" : "x64";
+        const suffix = process.platform === "win32" ? ".exe" : "";
+        const title = `sentry-${os}-${arch}${suffix}.gz`;
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [
+              {
+                digest: "sha256:blobdigest",
+                mediaType: "application/octet-stream",
+                size: gzipped.byteLength,
+                annotations: { "org.opencontainers.image.title": title },
+              },
+            ],
+            annotations: { version: "0.0.0-nightly.1740000000" },
+          }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("/blobs/")) {
+        // Return gzipped blob directly (no redirect needed for test)
+        return new Response(gzipped, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const result = await executeUpgrade("curl", "0.0.0-nightly.1740000000");
+
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("tempBinaryPath");
+
+    // Verify decompressed content matches original
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 });
