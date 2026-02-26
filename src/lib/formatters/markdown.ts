@@ -156,17 +156,24 @@ export function mdTableHeader(cols: readonly string[]): string {
 /**
  * Build a markdown table row from cell values.
  *
- * In plain mode the cells are emitted as-is (raw CommonMark).
- * In rendered mode each cell is passed through `renderInlineMarkdown()`
- * so inline constructs like `**bold**` and `` `code` `` become ANSI-styled.
+ * In plain mode the cells are emitted as-is (raw CommonMark), so callers
+ * should pre-escape pipe characters via {@link escapeMarkdownCell}.
  *
- * @param cells - Cell values (may contain inline markdown)
+ * In rendered mode each cell is passed through `renderInlineMarkdown()` so
+ * inline constructs like `**bold**` and `` `code` `` become ANSI-styled.
+ * After rendering, any remaining `|` characters (including those that
+ * `marked.parseInline` unescapes from CommonMark `\|` escapes) are replaced
+ * with `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) so they do not visually
+ * corrupt the pipe-delimited column structure in the terminal output.
+ *
+ * @param cells - Cell values (may contain inline markdown or escaped pipes)
  * @returns `| a | b |\n`
  */
 export function mdRow(cells: readonly string[]): string {
-  const out = isPlainOutput()
-    ? cells
-    : cells.map((c) => renderInlineMarkdown(c));
+  if (isPlainOutput()) {
+    return `| ${cells.join(" | ")} |\n`;
+  }
+  const out = cells.map((c) => renderInlineMarkdown(c).replace(/\|/g, "│"));
   return `| ${out.join(" | ")} |\n`;
 }
 
