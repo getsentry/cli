@@ -22,7 +22,6 @@ export type Column<T> = {
   value: (item: T) => string;
   /** Column alignment. Defaults to "left". */
   align?: "left" | "right";
-  /** Minimum column width (header width is always respected) */
 };
 
 /**

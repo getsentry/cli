@@ -74,7 +74,9 @@ function formatTimestamp(timestamp: string): string {
  */
 export function formatLogRow(log: SentryLog): string {
   const timestamp = formatTimestamp(log.timestamp);
-  const level = `**${(log.severity ?? "info").toUpperCase()}**`;
+  // Use formatSeverity() for per-level ANSI color (red/yellow/cyan/muted),
+  // matching the batch-mode formatLogTable path.
+  const level = formatSeverity(log.severity);
   const message = escapeMarkdownCell(log.message ?? "");
   const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
   return mdRow([timestamp, level, `${message}${trace}`]);
