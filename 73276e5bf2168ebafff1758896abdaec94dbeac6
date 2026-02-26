@@ -1,0 +1,59 @@
+Implementation Plan: marked-terminal rendering integration
+
+## Goal
+Pipe all CLI terminal output through marked-terminal so every human-readable
+view uses consistent markdown-based rendering with Unicode tables and styled
+headings instead of ad-hoc string padding.
+
+## Priorities (as specified)
+1. Pipe all Seer output through marked-terminal
+2. Convert all existing highlighting to markdown syntax
+3. Move all table logic to markdown tables
+
+## Approach
+
+### New utility (src/lib/formatters/markdown.ts)
+Central renderMarkdown(md: string): string using marked + markedTerminal.
+Sentinel color palette: magenta/bold/underline headings, cyan subheadings,
+yellow code spans, gray blockquotes. Exported via formatters/index.ts barrel.
+
+### Formatter migration (string[] -> string)
+All detail-view formatters now build a markdown string and call renderMarkdown():
+- formatIssueDetails, formatEventDetails, formatOrgDetails, formatProjectDetails
+  (human.ts) — markdown tables with blank header row + separator + data rows
+- formatLogDetails (log.ts) — sectioned markdown: Log header, Context, SDK,
+  Trace, Source Location, OpenTelemetry
+- formatTraceSummary (trace.ts) — markdown table with Duration/Spans/Projects
+- formatRootCauseList, formatSolution (seer.ts) — markdown with fenced code blocks
+
+### Table pattern
+All key-value tables use the blank-header pattern required by marked-terminal:
+  | | |
+  |---|---|
+  | **Label** | value |
+
+### Streaming lists stay row-by-row
+formatLogRow/formatTraceRow/formatLogsHeader/formatTracesHeader remain as
+incremental string writes — incompatible with batch markdown table rendering
+used in follow/watch polling loops.
+
+### Removed dead code
+- divider() function removed from human.ts (replaced with muted('─'.repeat(N)))
+- formatTable() (old string-column helper) removed from human.ts
+- formatSimpleSpanTree() still returns string[] (event stacktrace, not a table)
+
+## Key bugs fixed during implementation
+- SDK section in log.ts: table separator was after data row (invalid markdown) — fixed
+- SDK names with underscores/dashes (e.g. 'sentry.python_sdk _-') stripped by
+  markdown emphasis rules — fixed by wrapping SDK value in backtick code span
+- Context section in log.ts: same separator ordering issue — fixed
+
+## Test updates
+All formatter tests updated for string return type:
+- Removed .join('\n') calls on formatXxx() results
+- Replaced .map(stripAnsi) with stripAnsi(result)
+- Replaced Array.isArray checks with typeof === 'string'
+- Changed line-exact matches to content-based .toContain() checks
+- Updated label names: 'Span Count:' -> 'Spans', 'Duration:' -> 'Duration', etc.
+- Removed formatRootCause describe block (function replaced by formatRootCauseList)
+- Removed formatTable and divider describe blocks (functions removed)
