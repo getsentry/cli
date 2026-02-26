@@ -153,7 +153,7 @@ Create a new project
 - `-t, --team <value> - Team to create the project under`
 - `--json - Output as JSON`
 
-#### `sentry project list <org>`
+#### `sentry project list <org/project>`
 
 List projects
 
