@@ -269,13 +269,18 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Push to GHCR
+        # Push from inside the artifacts directory so ORAS records bare
+        # filenames (e.g. "sentry-linux-x64.gz") as layer titles, not
+        # "artifacts/sentry-linux-x64.gz". The CLI matches layers by
+        # filename in findLayerByFilename().
+        working-directory: artifacts
         run: |
           VERSION="${{ needs.changes.outputs.nightly-version }}"
           oras push ghcr.io/getsentry/cli:nightly \
             --artifact-type application/vnd.sentry.cli.nightly \
             --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
             --annotation "version=${VERSION}" \
-            artifacts/*.gz
+            *.gz
 
   test-e2e:
     name: E2E Tests
