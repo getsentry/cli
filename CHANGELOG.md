@@ -1,6 +1,28 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.13.0
+
+### New Features ✨
+
+- (issue-list) Add --period flag, pagination progress, and count abbreviation by @BYK in [#289](https://github.com/getsentry/cli/pull/289)
+- (nightly) Distribute via GHCR instead of GitHub Releases by @BYK in [#298](https://github.com/getsentry/cli/pull/298)
+- (upgrade) Add nightly release channel by @BYK in [#292](https://github.com/getsentry/cli/pull/292)
+
+### Bug Fixes 🐛
+
+- (brew) Handle root-owned config dir from sudo installs by @BYK in [#288](https://github.com/getsentry/cli/pull/288)
+- (ci) Use github context for compressed artifact upload condition by @BYK in [#299](https://github.com/getsentry/cli/pull/299)
+- (errors) Add ResolutionError for not-found/ambiguous resolution failures by @BYK in [#293](https://github.com/getsentry/cli/pull/293)
+- (issue) Improve numeric issue ID resolution with org context and region routing by @BYK in [#294](https://github.com/getsentry/cli/pull/294)
+- (setup) Show actual shell name instead of "unknown" for unsupported shells by @BYK in [#287](https://github.com/getsentry/cli/pull/287)
+- Optimized the docs images by @MathurAditya724 in [#291](https://github.com/getsentry/cli/pull/291)
+
+### Internal Changes 🔧
+
+- Correct nightly artifact path in publish-nightly job by @BYK in [#295](https://github.com/getsentry/cli/pull/295)
+- Only showing status about changed files in codecov by @MathurAditya724 in [#286](https://github.com/getsentry/cli/pull/286)
+
 ## 0.12.0
 
 ### New Features ✨
