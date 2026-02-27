@@ -1,0 +1,79 @@
+## Implementation Plan
+
+### Problem
+`issue list` in multi-target mode (auto-detect, explicit, project-search) passed
+`--limit` as a **per-project** cap, so 10 detected projects with `--limit 25`
+would fetch up to 250 issues. This is impractical to scroll, and the progress
+message showed `5/250` which felt wrong. The progress format also used `X/Y`
+where Y is the requested limit, making results look incomplete when fewer issues
+exist than the limit.
+
+### Goals
+1. `--limit` becomes a **global** cap across all detected projects.
+2. Fair distribution: divide budget evenly; redistribute surplus from exhausted
+   projects to those with more.
+3. Project representation guarantee: at least 1 issue per project before filling
+   remaining slots by global sort.
+4. Cursor pagination for multi-target mode via a compound cursor (one cursor per
+   project, JSON-encoded into a single stored string).
+5. Better progress messages: `"Fetching issues from N projects, X and counting (up to Y)..."`
+
+### Algorithm: Two-phase fetch
+
+**Phase 1**: `quota = ceil(limit / numTargets)`. Fetch all targets in parallel.
+
+**Phase 2** (only if `totalFetched < limit`): Identify targets that hit their
+quota AND have a `nextCursor`. Distribute surplus evenly (`extraQuota =
+ceil(surplus / numExpandable)`). Fetch one more page from each expandable
+target, resuming via cursor.
+
+After both phases: sort all issues globally, run `trimWithProjectGuarantee` to
+trim to `limit` while ensuring each project gets ≥1 representative.
+
+### Compound cursor
+
+Stored as JSON in the existing `pagination_cursors` table:
+```json
+[{"org":"my-org","project":"frontend","cursor":"1735689600:0:0"},
+ {"org":"my-org","project":"backend","cursor":null}]
+```
+`null` means the project was exhausted. Context key includes a fingerprint of
+all target `org/project` pairs so a cursor from one search is never reused for
+a different set of targets.
+
+On `-c last` resume: decode stored JSON, map each entry to its target, pass as
+`startCursors` to `fetchWithBudget`. New targets (not in stored cursor) start
+fresh. Exhausted targets (cursor=null) are skipped in Phase 1 but can still
+contribute via Phase 2 redistribution if they had results last time.
+
+### Changes
+
+**`src/lib/api-client.ts`**
+- `listIssuesAllPages`: add optional `startCursor` param — seeds the internal
+  pagination loop's cursor instead of starting from `undefined`.
+
+**`src/commands/issue/list.ts`**
+- `IssueListResult`: add `hasMore?: boolean` and `nextCursor?: string`.
+- `fetchIssuesForTarget`: thread `startCursor` through to `listIssuesAllPages`;
+  return `hasMore` + `nextCursor` from the result.
+- `runPhase2`: extracted helper that fetches extra quota from expandable targets
+  and merges results back into the Phase 1 array in-place.
+- `fetchWithBudget`: orchestrates Phase 1 + Phase 2, fires `onProgress` after
+  each phase.
+- `trimWithProjectGuarantee`: two-pass algorithm — pass 1 selects first unseen
+  project from sorted list, pass 2 fills remaining slots from top of sorted list.
+- `encodeCompoundCursor` / `decodeCompoundCursor`: JSON encode/decode for the
+  compound cursor string stored in SQLite.
+- `buildMultiTargetContextKey`: builds a context key that includes target
+  fingerprint, sort, query, period, and host.
+- `handleResolvedTargets`: replaces old `Promise.all` + per-project limit with
+  `fetchWithBudget`; adds compound cursor store/restore; uses
+  `trimWithProjectGuarantee`; always emits `{data, hasMore}` JSON (aligning
+  with org-all mode); shows "More available — use -n N or -c last" footer.
+- `handleOrgAllIssues`: progress messages changed from `X/Y` to
+  `"X and counting (up to Y)"` format.
+- Command description updated to reflect global limit semantics.
+
+**`test/commands/issue/list.test.ts`**
+- Updated two tests whose assertions assumed old JSON schema (`issues` key /
+  plain array) to expect the new `{data, hasMore}` wrapper.
