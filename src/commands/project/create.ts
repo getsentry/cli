@@ -14,11 +14,15 @@ import {
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
-import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import {
+  writeFooter,
+  writeJson,
+  writeKeyValue,
+} from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { fetchOrgListHint, resolveTeam } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject, SentryTeam, Writer } from "../../types/index.js";
+import type { SentryProject, SentryTeam } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -209,20 +213,6 @@ async function createProjectWithErrors(
       );
     }
     throw error;
-  }
-}
-
-/**
- * Write key-value pairs with aligned columns.
- * Used for human-readable output after resource creation.
- */
-function writeKeyValue(
-  stdout: Writer,
-  pairs: [label: string, value: string][]
-): void {
-  const maxLabel = Math.max(...pairs.map(([l]) => l.length));
-  for (const [label, value] of pairs) {
-    stdout.write(`  ${label.padEnd(maxLabel + 2)}${value}\n`);
   }
 }
 
