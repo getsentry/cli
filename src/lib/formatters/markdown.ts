@@ -70,8 +70,10 @@ marked.use(
     // Unescape HTML entities produced by the markdown parser
     unescape: true,
 
-    // Render emoji shortcodes (e.g. :tada:)
-    emoji: true,
+    // Disabled — we never use emoji shortcodes, and node-emoji pulls in
+    // emojilib (208KB) which marked-terminal statically imports regardless
+    // of this setting. The npm bundle stubs it out via esbuild plugin.
+    emoji: false,
 
     // Two-space tabs for code blocks
     tab: 2,

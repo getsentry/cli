@@ -31,12 +31,8 @@ import {
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
-import {
-  calculateProjectColumnWidths,
-  formatProjectRow,
-  writeFooter,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   buildListCommand,
   buildListLimitFlag,
@@ -148,41 +144,6 @@ export function filterByPlatform(
 }
 
 /**
- * Write the column header row for project list output.
- */
-export function writeHeader(
-  stdout: Writer,
-  orgWidth: number,
-  slugWidth: number,
-  nameWidth: number
-): void {
-  const org = "ORG".padEnd(orgWidth);
-  const project = "PROJECT".padEnd(slugWidth);
-  const name = "NAME".padEnd(nameWidth);
-  stdout.write(`${org}  ${project}  ${name}  PLATFORM\n`);
-}
-
-export type WriteRowsOptions = {
-  stdout: Writer;
-  projects: ProjectWithOrg[];
-  orgWidth: number;
-  slugWidth: number;
-  nameWidth: number;
-};
-
-/**
- * Write formatted project rows to stdout.
- */
-export function writeRows(options: WriteRowsOptions): void {
-  const { stdout, projects, orgWidth, slugWidth, nameWidth } = options;
-  for (const project of projects) {
-    stdout.write(
-      `${formatProjectRow(project, { orgWidth, slugWidth, nameWidth })}\n`
-    );
-  }
-}
-
-/**
  * Build a context key for pagination cursor validation.
  * Captures the query parameters that affect result ordering,
  * so cursors from different queries are not accidentally reused.
@@ -264,15 +225,20 @@ async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
   return { orgs: [] };
 }
 
-/** Display projects in table format with header and rows */
+/** Column definitions for the project table. */
+const PROJECT_COLUMNS: Column<ProjectWithOrg>[] = [
+  { header: "ORG", value: (p) => p.orgSlug || "" },
+  { header: "PROJECT", value: (p) => p.slug },
+  { header: "NAME", value: (p) => p.name },
+  { header: "PLATFORM", value: (p) => p.platform || "" },
+];
+
+/** Display projects in table format. */
 export function displayProjectTable(
   stdout: Writer,
   projects: ProjectWithOrg[]
 ): void {
-  const { orgWidth, slugWidth, nameWidth } =
-    calculateProjectColumnWidths(projects);
-  writeHeader(stdout, orgWidth, slugWidth, nameWidth);
-  writeRows({ stdout, projects, orgWidth, slugWidth, nameWidth });
+  writeTable(stdout, projects, PROJECT_COLUMNS);
 }
 
 /**

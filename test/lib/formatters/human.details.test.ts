@@ -7,16 +7,12 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  calculateOrgSlugWidth,
-  calculateProjectColumnWidths,
   formatEventDetails,
   formatFixability,
   formatFixabilityDetail,
   formatIssueDetails,
   formatOrgDetails,
-  formatOrgRow,
   formatProjectDetails,
-  formatProjectRow,
   getSeerFixabilityLabel,
 } from "../../../src/lib/formatters/human.js";
 import type {
@@ -86,40 +82,6 @@ function createMockIssue(overrides: Partial<SentryIssue> = {}): SentryIssue {
 
 // Organization Formatting Tests
 
-describe("calculateOrgSlugWidth", () => {
-  test("returns minimum width of 4 for empty array", () => {
-    expect(calculateOrgSlugWidth([])).toBe(4);
-  });
-
-  test("returns max slug length when longer than minimum", () => {
-    const orgs = [
-      createMockOrg({ slug: "ab" }),
-      createMockOrg({ slug: "longer-org-slug" }),
-      createMockOrg({ slug: "medium" }),
-    ];
-    expect(calculateOrgSlugWidth(orgs)).toBe(15); // "longer-org-slug".length
-  });
-
-  test("returns minimum when all slugs are shorter", () => {
-    const orgs = [createMockOrg({ slug: "ab" }), createMockOrg({ slug: "xy" })];
-    expect(calculateOrgSlugWidth(orgs)).toBe(4); // minimum is 4
-  });
-});
-
-describe("formatOrgRow", () => {
-  test("formats organization row with padding", () => {
-    const org = createMockOrg({ slug: "acme", name: "Acme Inc" });
-    const result = formatOrgRow(org, 10);
-    expect(result).toBe("acme        Acme Inc");
-  });
-
-  test("handles long slug correctly", () => {
-    const org = createMockOrg({ slug: "very-long-org", name: "Test" });
-    const result = formatOrgRow(org, 15);
-    expect(result).toBe("very-long-org    Test");
-  });
-});
-
 describe("formatOrgDetails", () => {
   test("formats basic organization details", () => {
     const org = createMockOrg({
@@ -172,94 +134,6 @@ describe("formatOrgDetails", () => {
 });
 
 // Project Formatting Tests
-
-describe("calculateProjectColumnWidths", () => {
-  test("returns minimum widths for empty array", () => {
-    const result = calculateProjectColumnWidths([]);
-    expect(result.orgWidth).toBe(3);
-    expect(result.slugWidth).toBe(7);
-    expect(result.nameWidth).toBe(4);
-  });
-
-  test("calculates widths based on content", () => {
-    const projects = [
-      createMockProject({
-        orgSlug: "acme-corp",
-        slug: "frontend-app",
-        name: "Frontend Application",
-      }),
-      createMockProject({ orgSlug: "beta", slug: "api", name: "API" }),
-    ];
-
-    const result = calculateProjectColumnWidths(projects);
-
-    expect(result.orgWidth).toBe(9); // "acme-corp".length
-    expect(result.slugWidth).toBe(12); // "frontend-app".length
-    expect(result.nameWidth).toBe(20); // "Frontend Application".length
-  });
-
-  test("handles missing orgSlug", () => {
-    const projects = [
-      createMockProject({ orgSlug: undefined, slug: "test", name: "Test" }),
-    ];
-
-    const result = calculateProjectColumnWidths(projects);
-    expect(result.orgWidth).toBe(3); // minimum
-  });
-});
-
-describe("formatProjectRow", () => {
-  test("formats project row with all columns", () => {
-    const project = createMockProject({
-      orgSlug: "acme",
-      slug: "frontend",
-      name: "Frontend",
-      platform: "javascript",
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 8,
-      slugWidth: 10,
-      nameWidth: 10,
-    });
-
-    expect(result).toBe("acme      frontend    Frontend    javascript");
-  });
-
-  test("handles missing platform", () => {
-    const project = createMockProject({
-      orgSlug: "acme",
-      slug: "api",
-      name: "API",
-      platform: undefined,
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 5,
-      slugWidth: 5,
-      nameWidth: 5,
-    });
-
-    expect(result).toBe("acme   api    API    ");
-  });
-
-  test("handles missing orgSlug", () => {
-    const project = createMockProject({
-      orgSlug: undefined,
-      slug: "test",
-      name: "Test",
-      platform: "python",
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 5,
-      slugWidth: 5,
-      nameWidth: 5,
-    });
-
-    expect(result).toBe("       test   Test   python");
-  });
-});
 
 describe("formatProjectDetails", () => {
   test("formats basic project details", () => {

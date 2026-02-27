@@ -1257,23 +1257,6 @@ export function formatEventDetails(
 // Organization Formatting
 
 /**
- * Format organization for list display
- */
-export function formatOrgRow(
-  org: SentryOrganization,
-  slugWidth: number
-): string {
-  return `${org.slug.padEnd(slugWidth)}  ${org.name}`;
-}
-
-/**
- * Calculate max slug width from organizations
- */
-export function calculateOrgSlugWidth(orgs: SentryOrganization[]): number {
-  return Math.max(...orgs.map((o) => o.slug.length), 4);
-}
-
-/**
  * Format detailed organization information as rendered markdown.
  *
  * @param org - The Sentry organization to format
@@ -1309,44 +1292,6 @@ export function formatOrgDetails(org: SentryOrganization): string {
   }
 
   return renderMarkdown(lines.join("\n"));
-}
-
-// Project Formatting
-
-type ProjectRowOptions = {
-  orgWidth: number;
-  slugWidth: number;
-  nameWidth: number;
-};
-
-/**
- * Format project for list display
- */
-export function formatProjectRow(
-  project: SentryProject & { orgSlug?: string },
-  options: ProjectRowOptions
-): string {
-  const { orgWidth, slugWidth, nameWidth } = options;
-  const org = (project.orgSlug || "").padEnd(orgWidth);
-  const slug = project.slug.padEnd(slugWidth);
-  const name = project.name.padEnd(nameWidth);
-  const platform = project.platform || "";
-  return `${org}  ${slug}  ${name}  ${platform}`;
-}
-
-/**
- * Calculate column widths for project list display
- */
-export function calculateProjectColumnWidths(
-  projects: Array<SentryProject & { orgSlug?: string }>
-): { orgWidth: number; slugWidth: number; nameWidth: number } {
-  const orgWidth = Math.max(
-    ...projects.map((p) => (p.orgSlug || "").length),
-    3
-  );
-  const slugWidth = Math.max(...projects.map((p) => p.slug.length), 7);
-  const nameWidth = Math.max(...projects.map((p) => p.name.length), 4);
-  return { orgWidth, slugWidth, nameWidth };
 }
 
 /**
