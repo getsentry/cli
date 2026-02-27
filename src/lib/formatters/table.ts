@@ -10,7 +10,11 @@
  */
 
 import type { Writer } from "../../types/index.js";
-import { escapeMarkdownCell, isPlainOutput } from "./markdown.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  renderInlineMarkdown,
+} from "./markdown.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
 /**
@@ -71,7 +75,9 @@ export function writeTable<T>(
   }
 
   const headers = columns.map((c) => c.header);
-  const rows = items.map((item) => columns.map((c) => c.value(item)));
+  const rows = items.map((item) =>
+    columns.map((c) => renderInlineMarkdown(c.value(item)))
+  );
   const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
 
   stdout.write(renderTextTable(headers, rows, { alignments }));

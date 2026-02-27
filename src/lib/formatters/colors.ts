@@ -36,6 +36,27 @@ export const underline = (text: string): string => chalk.underline(text);
 export const boldUnderline = (text: string): string =>
   chalk.bold.underline(text);
 
+/**
+ * Wrap text in an OSC 8 terminal hyperlink.
+ *
+ * On terminals that support OSC 8 (iTerm2, Windows Terminal, VS Code,
+ * most modern emulators), the text becomes clickable. On terminals that
+ * don't, the escape sequences are silently ignored and the text renders
+ * normally.
+ *
+ * `string-width` treats OSC 8 sequences as zero-width, so column sizing
+ * in tables is not affected.
+ *
+ * @param text - Display text
+ * @param url - Target URL
+ * @returns Text wrapped in OSC 8 hyperlink escape sequences
+ */
+export function terminalLink(text: string, url: string): string {
+  // OSC 8 ; params ; URI ST  text  OSC 8 ; ; ST
+  // Using BEL () as string terminator for broad compatibility
+  return `]8;;${url}${text}]8;;`;
+}
+
 // Semantic Helpers
 
 /** Format success messages (green) */
