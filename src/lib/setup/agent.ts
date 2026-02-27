@@ -12,6 +12,7 @@ import type {
   AgentSession,
   AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
+import { error, muted } from "../formatters/colors.js";
 import { SENTRY_SETUP_SYSTEM_PROMPT } from "./system-prompt.js";
 
 /** Environment variable names for common model provider API keys. */
@@ -111,55 +112,244 @@ export async function createSetupSession(
   return session;
 }
 
-/** Extract a human-readable string from a tool result object. */
-function extractResultSummary(result: unknown): string {
-  if (typeof result === "string") {
-    return result;
-  }
-  if (result !== null && typeof result === "object" && "content" in result) {
-    return String((result as { content: unknown }).content);
-  }
-  return "Tool failed";
+/** Spinner frames — braille pattern matching the rest of the CLI (polling.ts) */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** Animation interval matching the CLI standard (50ms = 20fps) */
+const ANIMATION_INTERVAL_MS = 50;
+
+/**
+ * Animated spinner that shows the agent is working.
+ *
+ * Displays a braille spinner with a message on stderr. The spinner
+ * line is overwritten in-place using `\r\x1b[K` so it doesn't spam
+ * the terminal. Call `stop()` before writing any other output to
+ * stderr to avoid garbled lines.
+ */
+function createSpinner(stderr: { write(s: string): void }) {
+  let message = "Thinking...";
+  let tick = 0;
+  let stopped = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const render = () => {
+    if (stopped) {
+      return;
+    }
+    const frame = SPINNER_FRAMES[tick % SPINNER_FRAMES.length];
+    stderr.write(`\r\x1b[K${muted(`${frame} ${message}`)}`);
+    tick += 1;
+    timer = setTimeout(render, ANIMATION_INTERVAL_MS);
+    timer.unref();
+  };
+
+  return {
+    start: (msg?: string) => {
+      if (msg) {
+        message = msg;
+      }
+      stopped = false;
+      tick = 0;
+      render();
+    },
+    update: (msg: string) => {
+      message = msg;
+    },
+    stop: () => {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      stderr.write("\r\x1b[K");
+    },
+  };
 }
 
-/** Handle a single agent session event, writing formatted output to stdout/stderr. */
-function handleSessionEvent(
-  event: AgentSessionEvent,
-  stdout: { write(s: string): void },
-  stderr: { write(s: string): void }
-): void {
-  if (event.type === "message_update") {
-    const msgEvent = event.assistantMessageEvent;
-    if (msgEvent.type === "text_delta") {
-      stdout.write(msgEvent.delta);
+/**
+ * Format tool args into a concise, human-readable description.
+ *
+ * Tool args follow the Pi SDK schemas:
+ * - bash: `{ command: string }`
+ * - read: `{ path: string }`
+ * - edit: `{ path: string, oldText, newText }`
+ * - write: `{ path: string, content }`
+ */
+function formatToolDescription(toolName: string, args: unknown): string {
+  if (args === null || typeof args !== "object") {
+    return toolName;
+  }
+  const a = args as Record<string, unknown>;
+
+  switch (toolName) {
+    case "bash": {
+      const cmd = typeof a.command === "string" ? a.command : "";
+      // Truncate long commands to keep the line readable
+      const truncated = cmd.length > 120 ? `${cmd.slice(0, 117)}...` : cmd;
+      return `$ ${truncated}`;
     }
-    // thinking_delta is intentionally skipped for V1
-    return;
-  }
-
-  if (event.type === "tool_execution_start") {
-    stderr.write(`\n⚡ ${event.toolName}\n`);
-    return;
-  }
-
-  if (event.type === "tool_execution_end" && event.isError) {
-    const summary = extractResultSummary(event.result);
-    stderr.write(`\n❌ ${event.toolName} failed: ${summary}\n`);
-    return;
-  }
-
-  if (event.type === "agent_end" && "error" in event && event.error) {
-    stderr.write(`\n❌ Agent error: ${String(event.error)}\n`);
+    case "read":
+      return `read ${a.path ?? ""}`;
+    case "edit":
+      return `edit ${a.path ?? ""}`;
+    case "write":
+      return `write ${a.path ?? ""}`;
+    case "grep":
+      return `grep ${typeof a.pattern === "string" ? `"${a.pattern}" ` : ""}${a.path ?? ""}`;
+    case "find":
+      return `find ${a.pattern ?? a.path ?? ""}`;
+    case "ls":
+      return `ls ${a.path ?? "."}`;
+    default:
+      return toolName;
   }
 }
 
 /**
+ * Extract a human-readable error string from a tool result.
+ *
+ * Tool results can be plain strings, or structured objects with a `content`
+ * array (Pi SDK ToolResult format). This handles both without `[object Object]`.
+ */
+function extractErrorSummary(result: unknown): string {
+  if (typeof result === "string") {
+    return result;
+  }
+  if (result !== null && typeof result === "object") {
+    // Pi SDK ToolResult: { content: [{ type: "text", text: "..." }] }
+    if (
+      "content" in result &&
+      Array.isArray((result as { content: unknown }).content)
+    ) {
+      const parts = (
+        result as { content: Array<{ type?: string; text?: string }> }
+      ).content;
+      const texts = parts
+        .filter((p) => p.type === "text" && typeof p.text === "string")
+        .map((p) => p.text);
+      if (texts.length > 0) {
+        return texts.join("\n");
+      }
+    }
+    // Fallback: try .message (Error-like) or .text
+    if (
+      "message" in result &&
+      typeof (result as { message: unknown }).message === "string"
+    ) {
+      return (result as { message: string }).message;
+    }
+    if (
+      "text" in result &&
+      typeof (result as { text: unknown }).text === "string"
+    ) {
+      return (result as { text: string }).text;
+    }
+  }
+  return "Unknown error";
+}
+
+/** Output targets for the event handler. */
+type EventHandlerIO = {
+  stdout: { write(s: string): void };
+  stderr: { write(s: string): void };
+};
+
+/** Handle tool_execution_start: print a description and restart spinner. */
+function handleToolStart(
+  event: { toolName: string; args: unknown },
+  spinner: ReturnType<typeof createSpinner>,
+  io: EventHandlerIO
+): void {
+  spinner.stop();
+  const desc = formatToolDescription(event.toolName, event.args);
+  io.stderr.write(`${muted(desc)}\n`);
+  spinner.start(`Running ${event.toolName}...`);
+}
+
+/** Handle tool_execution_end: show errors if any and restart spinner. */
+function handleToolEnd(
+  event: { result: unknown; isError: boolean },
+  spinner: ReturnType<typeof createSpinner>,
+  io: EventHandlerIO
+): void {
+  spinner.stop();
+  if (event.isError) {
+    const summary = extractErrorSummary(event.result);
+    const firstLine = summary.split("\n")[0] ?? summary;
+    const truncated =
+      firstLine.length > 200 ? `${firstLine.slice(0, 197)}...` : firstLine;
+    io.stderr.write(`${error("✗")} ${muted(truncated)}\n`);
+  }
+  spinner.start("Thinking...");
+}
+
+/**
+ * Create an event handler that formats agent output for the terminal.
+ *
+ * Shows a spinner while the agent is thinking/working, prints tool calls
+ * with descriptive summaries, and streams text deltas to stdout.
+ */
+function createEventHandler(
+  stdout: { write(s: string): void },
+  stderr: { write(s: string): void }
+) {
+  const spinner = createSpinner(stderr);
+  const io: EventHandlerIO = { stdout, stderr };
+
+  return {
+    handle: (event: AgentSessionEvent) => {
+      switch (event.type) {
+        case "agent_start":
+          spinner.start("Thinking...");
+          break;
+        case "agent_end":
+          spinner.stop();
+          if ("error" in event && event.error) {
+            stderr.write(`\n${error("Error:")} ${String(event.error)}\n`);
+          }
+          break;
+        case "message_update":
+          if (event.assistantMessageEvent.type === "text_delta") {
+            spinner.stop();
+            stdout.write(event.assistantMessageEvent.delta);
+          }
+          break;
+        case "tool_execution_start":
+          handleToolStart(event, spinner, io);
+          break;
+        case "tool_execution_end":
+          handleToolEnd(event, spinner, io);
+          break;
+        default:
+          break;
+      }
+    },
+    stop: () => spinner.stop(),
+  };
+}
+
+/**
+ * Initial prompt sent automatically when the setup wizard starts.
+ *
+ * Triggers the agent's Phase 1 (Detect) without waiting for user input,
+ * so `sentry setup` immediately scans the project and proposes a plan.
+ */
+const INITIAL_PROMPT =
+  "Scan this project, detect the language and framework, check for any existing " +
+  "Sentry setup, and recommend what Sentry features to add.";
+
+/**
  * Run an interactive REPL loop for the Sentry setup wizard.
  *
- * Subscribes to session events and streams agent output to stdout. Tool
- * execution summaries are written to stderr so they don't interfere with
- * the agent's text output. The loop continues until the user types "exit",
- * "quit", sends EOF (Ctrl+D), or presses Ctrl+C when not streaming.
+ * Sends an initial prompt immediately so the agent starts scanning the project
+ * without waiting for user input. Then enters a REPL loop where agent output
+ * streams to stdout, tool summaries go to stderr, and the user can type
+ * follow-up questions.
+ *
+ * The loop continues until the user types "exit", "quit", sends EOF (Ctrl+D),
+ * or presses Ctrl+C when not streaming.
  *
  * Ctrl+C while the agent is streaming aborts the current turn and re-prompts.
  *
@@ -174,8 +364,9 @@ export async function runSetupRepl(
   stdout: { write(s: string): void },
   stderr: { write(s: string): void }
 ): Promise<void> {
+  const handler = createEventHandler(stdout, stderr);
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    handleSessionEvent(event, stdout, stderr);
+    handler.handle(event);
   });
 
   // biome-ignore lint/suspicious/noExplicitAny: readline types don't align with NodeJS.ReadStream fd-branded type
@@ -200,6 +391,7 @@ export async function runSetupRepl(
   // emits the "SIGINT" event, so we must listen on the process directly.
   // The handler is removed in the finally block to avoid accumulation.
   const sigintHandler = () => {
+    handler.stop();
     if (session.isStreaming) {
       stderr.write("\n^C\n");
       session.abort().catch((_err: unknown) => {
@@ -224,6 +416,10 @@ export async function runSetupRepl(
   });
 
   try {
+    // Fire the initial prompt immediately — the agent starts scanning
+    // the project without waiting for user input
+    await session.prompt(INITIAL_PROMPT);
+
     // Main REPL loop
     while (true) {
       let input: string;
@@ -249,6 +445,7 @@ export async function runSetupRepl(
       await session.prompt(trimmed);
     }
   } finally {
+    handler.stop();
     process.removeListener("SIGINT", sigintHandler);
     if (!exited) {
       exited = true;

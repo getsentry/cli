@@ -63,10 +63,7 @@ export const setupCommand = buildCommand({
 
     const session = await createSetupSession(cwd, skillPaths);
 
-    stdout.write("Setting up Sentry for your project...\n");
-    stdout.write(
-      "AI assistant ready. Type your questions or press Ctrl+D to exit.\n"
-    );
+    stdout.write("Setting up Sentry for your project...\n\n");
 
     await runSetupRepl(session, this.stdin, stdout, stderr);
 
