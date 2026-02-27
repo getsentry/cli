@@ -798,6 +798,8 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const termWidth = process.stdout.columns || 80;
   const issuesWithOpts = issues.map((issue) => ({
     issue,
+    // org-all: org context comes from the `org` param; issue.organization may be absent
+    orgSlug: org,
     formatOptions: {
       projectSlug: issue.project?.slug ?? "",
       isMultiProject: true,
@@ -1139,9 +1141,8 @@ export const listCommand = buildListCommand("issue", {
           }
           return value;
         },
-        // Issue-specific cursor brief: cursor only works in <org>/ mode
         brief:
-          'Pagination cursor — only for <org>/ mode (use "last" to continue)',
+          'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
       },
     },
@@ -1180,6 +1181,9 @@ export const listCommand = buildListCommand("issue", {
       cwd,
       flags,
       parsed,
+      // Multi-target modes (auto-detect, explicit, project-search) handle
+      // compound cursor pagination themselves via handleResolvedTargets.
+      allowCursorInModes: ["auto-detect", "explicit", "project-search"],
       overrides: {
         "auto-detect": resolveAndHandle,
         explicit: resolveAndHandle,

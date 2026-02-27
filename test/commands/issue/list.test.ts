@@ -446,22 +446,29 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     clearPaginationCursorSpy.mockRestore();
   });
 
-  test("throws ValidationError when --cursor used outside org-all mode", async () => {
+  test("--cursor is accepted in multi-target (explicit) mode", async () => {
+    // Previously, --cursor threw ValidationError for non-org-all modes.
+    // Now multi-target modes support compound cursor pagination, so --cursor
+    // is accepted in auto-detect, explicit, and project-search modes.
     const orgAllFunc = (await listCommand.loader()) as unknown as (
       this: unknown,
       flags: Record<string, unknown>,
       target?: string
     ) => Promise<void>;
 
+    listIssuesPaginatedSpy.mockResolvedValue({ data: [], nextCursor: undefined });
+
     const { context } = createOrgAllContext();
 
+    // Using a real-looking cursor value (not "last") bypasses DB lookup.
+    // The command should resolve, fetch, and complete without throwing.
     await expect(
       orgAllFunc.call(
         context,
-        { limit: 10, sort: "date", json: false, cursor: "some-cursor" },
-        "my-org/my-project"
+        { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
+        "test-org/test-project"
       )
-    ).rejects.toThrow(ValidationError);
+    ).resolves.toBeUndefined();
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
