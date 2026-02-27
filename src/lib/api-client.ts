@@ -1072,6 +1072,8 @@ export async function listIssuesAllPages(
     limit: number;
     sort?: "date" | "new" | "freq" | "user";
     statsPeriod?: string;
+    /** Resume pagination from this cursor instead of starting from the beginning. */
+    startCursor?: string;
     /** Called after each page is fetched. Useful for progress indicators. */
     onPage?: (fetched: number, limit: number) => void;
   }
@@ -1083,7 +1085,7 @@ export async function listIssuesAllPages(
   }
 
   const allResults: SentryIssue[] = [];
-  let cursor: string | undefined;
+  let cursor: string | undefined = options.startCursor;
 
   // Use the smaller of the requested limit and the API max as page size
   const perPage = Math.min(options.limit, API_MAX_PER_PAGE);

@@ -289,9 +289,9 @@ describe("issue list: partial failure handling", () => {
     await func.call(context, { limit: 10, sort: "date", json: true }, "myproj");
 
     const output = JSON.parse(stdout.output);
-    expect(output).toHaveProperty("issues");
+    expect(output).toHaveProperty("data");
     expect(output).toHaveProperty("errors");
-    expect(output.issues.length).toBe(1);
+    expect(output.data.length).toBe(1);
     expect(output.errors.length).toBe(1);
     expect(output.errors[0].status).toBe(400);
   });
@@ -364,7 +364,7 @@ describe("issue list: partial failure handling", () => {
     expect(stderr.output).toContain("Showing results from 1 project(s)");
   });
 
-  test("JSON output is plain array when no failures", async () => {
+  test("JSON output wraps in {data, hasMore} object", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       if (req.url.includes("/issues/")) {
@@ -384,8 +384,10 @@ describe("issue list: partial failure handling", () => {
     await func.call(context, { limit: 10, sort: "date", json: true });
 
     const output = JSON.parse(stdout.output);
-    // Should be a plain array, not an object with issues/errors keys
-    expect(Array.isArray(output)).toBe(true);
+    // Multi-target mode always wraps in {data, hasMore} for consistency with org-all mode
+    expect(output).toHaveProperty("data");
+    expect(output).toHaveProperty("hasMore");
+    expect(Array.isArray(output.data)).toBe(true);
   });
 });
 
