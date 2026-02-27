@@ -1,14 +1,17 @@
 /**
  * Markdown-to-Terminal Renderer
  *
- * Central utility for rendering markdown content as styled terminal output
- * using `marked` + `marked-terminal`. Provides `renderMarkdown()` and
- * `renderInlineMarkdown()` for rich text output, with automatic plain-mode
- * fallback when stdout is not a TTY or the user has opted out of rich output.
+ * Custom renderer that walks `marked` tokens and produces ANSI-styled
+ * terminal output using `chalk`. Replaces `marked-terminal` to eliminate
+ * its ~970KB dependency chain (cli-highlight, node-emoji, cli-table3,
+ * parse5) while giving us full control over table rendering.
  *
- * Pre-rendered ANSI escape codes embedded in markdown source (e.g. inside
- * table cells) survive the pipeline — `cli-table3` computes column widths
- * via `string-width`, which correctly treats ANSI codes as zero-width.
+ * Table rendering delegates to the text-table module which uses
+ * OpenTUI-inspired column fitting algorithms and Unicode box-drawing
+ * borders.
+ *
+ * Pre-rendered ANSI escape codes embedded in markdown source are preserved
+ * — `string-width` correctly treats them as zero-width.
  *
  * ## Output mode resolution (highest → lowest priority)
  *
@@ -21,64 +24,12 @@
  */
 
 import chalk from "chalk";
-import { type MarkedExtension, marked } from "marked";
-import { markedTerminal as _markedTerminal } from "marked-terminal";
+import { highlight as cliHighlight } from "cli-highlight";
+import { marked, type Token, type Tokens } from "marked";
 import { muted } from "./colors.js";
+import { type Alignment, renderTextTable } from "./text-table.js";
 
-// @types/marked-terminal@6 describes the legacy class-based API; the package's
-// actual markedTerminal() returns a {renderer, useNewRenderer} MarkedExtension
-// object compatible with marked@15's marked.use().
-const markedTerminal = _markedTerminal as unknown as (
-  options?: Parameters<typeof _markedTerminal>[0]
-) => MarkedExtension;
-
-/** Sentinel-inspired color palette (mirrors colors.ts) */
-const COLORS = {
-  red: "#fe4144",
-  green: "#83da90",
-  yellow: "#FDB81B",
-  blue: "#226DFC",
-  cyan: "#79B8FF",
-  muted: "#898294",
-} as const;
-
-marked.use(
-  markedTerminal({
-    // Map markdown elements to our Sentinel palette
-    code: chalk.hex(COLORS.yellow),
-    blockquote: chalk.hex(COLORS.muted).italic,
-    heading: chalk.hex(COLORS.cyan).bold,
-    firstHeading: chalk.hex(COLORS.cyan).bold,
-    hr: chalk.hex(COLORS.muted),
-    listitem: chalk.reset,
-    table: chalk.reset,
-    paragraph: chalk.reset,
-    strong: chalk.bold,
-    em: chalk.italic,
-    codespan: chalk.hex(COLORS.yellow),
-    del: chalk.dim.gray.strikethrough,
-    link: chalk.hex(COLORS.blue),
-    href: chalk.hex(COLORS.blue).underline,
-
-    // No "§ " section prefix before headings
-    showSectionPrefix: false,
-
-    // Standard 80-column width; no reflow (let terminal wrap naturally)
-    width: 80,
-    reflowText: false,
-
-    // Unescape HTML entities produced by the markdown parser
-    unescape: true,
-
-    // Disabled — we never use emoji shortcodes, and node-emoji pulls in
-    // emojilib (208KB) which marked-terminal statically imports regardless
-    // of this setting. The npm bundle stubs it out via esbuild plugin.
-    emoji: false,
-
-    // Two-space tabs for code blocks
-    tab: 2,
-  })
-);
+// ──────────────────────────── Environment ─────────────────────────────
 
 /**
  * Returns true if an env var value should be treated as "truthy" for
@@ -121,38 +72,23 @@ export function isPlainOutput(): boolean {
   return !process.stdout.isTTY;
 }
 
+// ──────────────────────────── Escape helpers ──────────────────────────
+
 /**
  * Escape a string for safe use inside a markdown table cell.
  *
- * - Escapes backslashes first (so the escape character itself is not
- *   double-interpreted)
- * - Escapes pipe characters (the table cell delimiter)
- * - Replaces newlines with a space so multi-line values don't break the
- *   single-row structure of a markdown table
- *
- * @param value - Raw cell content
- * @returns Markdown-safe string suitable for embedding in `| cell |` syntax
+ * Collapses newlines, escapes backslashes, then pipes.
  */
 export function escapeMarkdownCell(value: string): string {
   return value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 /**
- * Escape CommonMark inline emphasis characters in a string for safe use inside
- * markdown headings, blockquotes, and other inline contexts.
+ * Escape CommonMark inline emphasis characters.
  *
- * This prevents characters like `_` (emphasis trigger) and `*` (strong trigger)
- * in user-supplied content from being consumed by the markdown parser.
- * For example, a Python exception title `TypeError in __init__` would render as
- * `TypeError in init` (underscores consumed as empty emphasis) without escaping.
- *
- * Escaped characters: `\`, `*`, `_`, `` ` ``, `[`, `]`.
- *
- * @param value - Raw text (e.g. issue title, exception message)
- * @returns String safe for inline use inside a marked rendering context
+ * Prevents `_`, `*`, `` ` ``, `[`, `]` from being consumed by the parser.
  */
 export function escapeMarkdownInline(value: string): string {
-  // Escape backslash first so we don't double-escape subsequent substitutions
   return value
     .replace(/\\/g, "\\\\")
     .replace(/\*/g, "\\*")
@@ -163,16 +99,19 @@ export function escapeMarkdownInline(value: string): string {
 }
 
 /**
+ * Wrap a string in a backtick code span, sanitising characters that
+ * would break the span or surrounding table structure.
+ */
+export function safeCodeSpan(value: string): string {
+  return `\`${value.replace(/`/g, "\u02CB").replace(/\|/g, "\u2502").replace(/\n/g, " ")}\``;
+}
+
+// ──────────────────────── Streaming table helpers ─────────────────────
+
+/**
  * Build a raw markdown table header row + separator from column names.
  *
- * Column names ending with `:` are right-aligned (the `:` is stripped from
- * the displayed name and a `---:` separator is emitted instead of `---`).
- *
- * Used by batch-rendered tables that pipe the result through `renderMarkdown()`.
- * For streaming table rows use {@link mdRow}.
- *
- * @param cols - Column names (append `:` for right-align, e.g. `"Duration:"`)
- * @returns Two-line string: `| A | B |\n| --- | ---: |`
+ * Column names ending with `:` are right-aligned (the `:` is stripped).
  */
 export function mdTableHeader(cols: readonly string[]): string {
   const names = cols.map((c) => (c.endsWith(":") ? c.slice(0, -1) : c));
@@ -181,85 +120,26 @@ export function mdTableHeader(cols: readonly string[]): string {
 }
 
 /**
- * Build a markdown table row from cell values.
- *
- * In plain mode the cells are emitted as-is (raw CommonMark), so callers
- * should pre-escape pipe characters via {@link escapeMarkdownCell}.
- *
- * In rendered mode each cell is passed through `renderInlineMarkdown()` so
- * inline constructs like `**bold**` and `` `code` `` become ANSI-styled.
- * After rendering, any remaining `|` characters (including those that
- * `marked.parseInline` unescapes from CommonMark `\|` escapes) are replaced
- * with `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) so they do not visually
- * corrupt the pipe-delimited column structure in the terminal output.
- *
- * @param cells - Cell values (may contain inline markdown or escaped pipes)
- * @returns `| a | b |\n`
+ * Build a streaming markdown table row. In plain mode emits raw markdown;
+ * in rendered mode applies inline styling and replaces `|` with `│`.
  */
 export function mdRow(cells: readonly string[]): string {
   if (isPlainOutput()) {
     return `| ${cells.join(" | ")} |\n`;
   }
-  const out = cells.map((c) => renderInlineMarkdown(c).replace(/\|/g, "│"));
+  const out = cells.map((c) =>
+    renderInline(marked.lexer(c).flatMap(flattenInline)).replace(
+      /\|/g,
+      "\u2502"
+    )
+  );
   return `| ${out.join(" | ")} |\n`;
-}
-
-/**
- * Wrap a user-supplied string in a backtick code span.
- *
- * Inside a CommonMark code span, backslashes are **literal** (not escape
- * characters), so backslash-based escaping of special characters does not
- * work. This helper sanitises the three characters that would otherwise break
- * the span or the surrounding table structure:
- *
- * - Replaces `` ` `` with `ˋ` (U+02CB MODIFIER LETTER GRAVE ACCENT) —
- *   visually identical in monospace fonts but never treated as a code-span
- *   delimiter. Prevents exception messages like `Unexpected token \`` from
- *   prematurely closing the span.
- * - Replaces `|` with `│` (U+2502 BOX DRAWINGS LIGHT VERTICAL) — prevents
- *   table column splitting when used inside a markdown table cell.
- * - Replaces newlines with a space — code spans cannot span multiple lines.
- *
- * @param value - Raw string to format as a code span
- * @returns `` `value` `` with backtick, pipe, and newline characters sanitised
- */
-export function safeCodeSpan(value: string): string {
-  return `\`${value.replace(/`/g, "ˋ").replace(/\|/g, "│").replace(/\n/g, " ")}\``;
-}
-
-/**
- * Sanitise a pre-formatted table cell value for safe embedding in a raw
- * markdown `| cell |` row.
- *
- * Unlike {@link escapeMarkdownCell}, this helper does **not** backslash-escape
- * the backslash character. It is designed for values that may already contain
- * inline markdown formatting (e.g. code spans) where `\\` would corrupt the
- * rendered output. Instead of `\|`, pipe characters are replaced with
- * `│` (U+2502, BOX DRAWINGS LIGHT VERTICAL) — visually identical but not a
- * CommonMark table delimiter.
- *
- * @param value - Cell value that may include inline markdown (backtick spans,
- *   bold, etc.)
- * @returns Value with `|` replaced by `│` and newlines collapsed to a space
- */
-function sanitizeKvCell(value: string): string {
-  return value.replace(/\n/g, " ").replace(/\|/g, "│");
 }
 
 /**
  * Build a key-value markdown table section with an optional heading.
  *
  * Each entry is rendered as `| **Label** | value |`.
- * Uses the blank-header-row pattern required by marked-terminal.
- *
- * Values are sanitised via {@link sanitizeKvCell} — callers may pass raw text
- * or pre-formatted inline markdown (e.g. `` `code` ``, `**bold**`). Raw text
- * values with user-supplied content should be wrapped in {@link safeCodeSpan}
- * or {@link escapeMarkdownCell} before passing if precise escaping is needed.
- *
- * @param rows - `[label, value]` tuples
- * @param heading - Optional `### Heading` text (omit the `###` prefix)
- * @returns Raw markdown string (not rendered)
  */
 export function mdKvTable(
   rows: ReadonlyArray<readonly [string, string]>,
@@ -273,38 +153,253 @@ export function mdKvTable(
   lines.push("| | |");
   lines.push("|---|---|");
   for (const [label, value] of rows) {
-    lines.push(`| **${label}** | ${sanitizeKvCell(value)} |`);
+    lines.push(
+      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\|/g, "\u2502")} |`
+    );
   }
   return lines.join("\n");
 }
 
 /**
- * Render a muted horizontal rule for streaming header separators.
- *
- * Centralises the divider character so all headers share a single style.
- *
- * @param width - Number of characters (defaults to 80)
- * @returns Muted string of box-drawing dashes
+ * Render a muted horizontal rule.
  */
 export function divider(width = 80): string {
   return muted("\u2500".repeat(width));
 }
 
+// ──────────────────────── Inline token rendering ─────────────────────
+
+/** Sentinel-inspired color palette */
+const COLORS = {
+  yellow: "#FDB81B",
+  blue: "#226DFC",
+  cyan: "#79B8FF",
+  muted: "#898294",
+} as const;
+
 /**
- * Render a full markdown document as styled terminal output, or return the
- * raw CommonMark string when in plain mode.
+ * Syntax-highlight a code block. Falls back to uniform yellow if the
+ * language is unknown or highlighting fails.
+ */
+function highlightCode(code: string, language?: string): string {
+  try {
+    return cliHighlight(code, { language, ignoreIllegals: true });
+  } catch {
+    return chalk.hex(COLORS.yellow)(code);
+  }
+}
+
+/**
+ * Flatten a top-level token's inline content. Paragraphs and other block
+ * tokens that wrap inline tokens are unwrapped; bare inline tokens pass
+ * through as-is.
+ */
+function flattenInline(token: Token): Token[] {
+  if (
+    "tokens" in token &&
+    token.tokens &&
+    token.type !== "strong" &&
+    token.type !== "em" &&
+    token.type !== "link"
+  ) {
+    return token.tokens;
+  }
+  return [token];
+}
+
+/**
+ * Render an array of inline tokens into an ANSI-styled string.
  *
- * Supports the full CommonMark spec:
- * - Headings, bold, italic, strikethrough
- * - Fenced code blocks with syntax highlighting (via cli-highlight)
- * - Inline code spans
- * - Tables rendered with Unicode box-drawing (via cli-table3)
- * - Ordered and unordered lists
- * - Blockquotes
- * - Links and images
- * - Horizontal rules
+ * Handles: strong, em, codespan, link, text, br, del, escape, html.
+ */
+function renderInline(tokens: Token[]): string {
+  return tokens
+    .map((token) => {
+      switch (token.type) {
+        case "strong":
+          return chalk.bold(renderInline((token as Tokens.Strong).tokens));
+        case "em":
+          return chalk.italic(renderInline((token as Tokens.Em).tokens));
+        case "codespan":
+          return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
+        case "link": {
+          const link = token as Tokens.Link;
+          const linkText = renderInline(link.tokens);
+          const href = link.href ? ` (${link.href})` : "";
+          return chalk.hex(COLORS.blue)(`${linkText}${href}`);
+        }
+        case "del":
+          return chalk.dim.gray.strikethrough(
+            renderInline((token as Tokens.Del).tokens)
+          );
+        case "br":
+          return "\n";
+        case "escape":
+          return (token as Tokens.Escape).text;
+        case "text":
+          // Text tokens may themselves contain sub-tokens (e.g. from
+          // autolinked URLs or inline markup inside list items)
+          if ("tokens" in token && (token as Tokens.Text).tokens) {
+            return renderInline((token as Tokens.Text).tokens ?? []);
+          }
+          return (token as Tokens.Text).text;
+        case "html":
+          return ""; // Strip inline HTML
+        default:
+          return (token as { raw?: string }).raw ?? "";
+      }
+    })
+    .join("");
+}
+
+// ──────────────────────── Block token rendering ──────────────────────
+
+/**
+ * Render an array of block-level tokens into ANSI-styled terminal output.
  *
- * Pre-rendered ANSI escape codes in the input are preserved.
+ * Handles: heading, paragraph, code, blockquote, list, table, hr, space.
+ */
+function renderBlocks(tokens: Token[]): string {
+  const parts: string[] = [];
+
+  for (const token of tokens) {
+    switch (token.type) {
+      case "heading": {
+        const t = token as Tokens.Heading;
+        const text = renderInline(t.tokens);
+        if (t.depth <= 2) {
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+        } else {
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+        }
+        parts.push("");
+        break;
+      }
+      case "paragraph": {
+        const t = token as Tokens.Paragraph;
+        parts.push(renderInline(t.tokens));
+        parts.push("");
+        break;
+      }
+      case "code": {
+        const t = token as Tokens.Code;
+        const highlighted = highlightCode(t.text, t.lang ?? undefined);
+        const lines = highlighted.split("\n").map((l) => `  ${l}`);
+        parts.push(lines.join("\n"));
+        parts.push("");
+        break;
+      }
+      case "blockquote": {
+        const t = token as Tokens.Blockquote;
+        const inner = renderBlocks(t.tokens).trim();
+        const quoted = inner
+          .split("\n")
+          .map((l) => chalk.hex(COLORS.muted).italic(`  ${l}`))
+          .join("\n");
+        parts.push(quoted);
+        parts.push("");
+        break;
+      }
+      case "list": {
+        const t = token as Tokens.List;
+        parts.push(renderList(t));
+        parts.push("");
+        break;
+      }
+      case "table": {
+        const t = token as Tokens.Table;
+        parts.push(renderTableToken(t));
+        break;
+      }
+      case "hr":
+        parts.push(muted("\u2500".repeat(40)));
+        parts.push("");
+        break;
+      case "space":
+        // Intentional blank line — skip
+        break;
+      default: {
+        // Unknown block type — emit raw text as fallback
+        const raw = (token as { raw?: string }).raw;
+        if (raw) {
+          parts.push(raw);
+        }
+      }
+    }
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Render a list token (ordered or unordered) with proper indentation.
+ */
+function renderList(list: Tokens.List, depth = 0): string {
+  const indent = "  ".repeat(depth);
+  const lines: string[] = [];
+
+  for (let i = 0; i < list.items.length; i++) {
+    const item = list.items[i];
+    if (!item) {
+      continue;
+    }
+    const start = Number(list.start ?? 1);
+    const bullet = list.ordered ? `${start + i}.` : "•";
+    const body = item.tokens
+      .map((t) => {
+        if (t.type === "list") {
+          return renderList(t as Tokens.List, depth + 1);
+        }
+        if (t.type === "text" && "tokens" in t && (t as Tokens.Text).tokens) {
+          return renderInline((t as Tokens.Text).tokens ?? []);
+        }
+        if ("tokens" in t && (t as Tokens.Generic).tokens) {
+          return renderInline(((t as Tokens.Generic).tokens as Token[]) ?? []);
+        }
+        return (t as { raw?: string }).raw ?? "";
+      })
+      .join("\n");
+
+    lines.push(`${indent}${bullet} ${body}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Render a markdown table token using the text-table renderer.
+ *
+ * Converts marked's `Tokens.Table` into headers + rows + alignments and
+ * delegates to `renderTextTable()` for column fitting and box drawing.
+ */
+function renderTableToken(table: Tokens.Table): string {
+  const headers = table.header.map((cell) => renderInline(cell.tokens));
+  const rows = table.rows.map((row) =>
+    row.map((cell) => renderInline(cell.tokens))
+  );
+
+  const alignments: Alignment[] = table.align.map((a) => {
+    if (a === "right") {
+      return "right";
+    }
+    if (a === "center") {
+      return "center";
+    }
+    return "left";
+  });
+
+  return renderTextTable(headers, rows, { alignments });
+}
+
+// ──────────────────────── Public API ─────────────────────────────────
+
+/**
+ * Render a full markdown document as styled terminal output, or return
+ * the raw CommonMark string when in plain mode.
+ *
+ * Uses `marked.lexer()` to tokenize and a custom block/inline renderer
+ * for ANSI output. Tables are rendered with Unicode box-drawing borders
+ * via the text-table module.
  *
  * @param md - Markdown source text
  * @returns Styled terminal string (TTY) or raw CommonMark (non-TTY / plain mode)
@@ -313,17 +408,13 @@ export function renderMarkdown(md: string): string {
   if (isPlainOutput()) {
     return md.trimEnd();
   }
-  return (marked.parse(md) as string).trimEnd();
+  const tokens = marked.lexer(md);
+  return renderBlocks(tokens).trimEnd();
 }
 
 /**
  * Render inline markdown (bold, code spans, emphasis, links) as styled
  * terminal output, or return the raw markdown string when in plain mode.
- *
- * Unlike `renderMarkdown()`, this uses `marked.parseInline()` which handles
- * only inline-level constructs — no paragraph wrapping, no block elements.
- * Suitable for styling individual table cell values in streaming formatters
- * that write rows incrementally rather than as a complete table.
  *
  * @param md - Inline markdown text
  * @returns Styled string (TTY) or raw markdown text (non-TTY / plain mode)
@@ -332,5 +423,6 @@ export function renderInlineMarkdown(md: string): string {
   if (isPlainOutput()) {
     return md;
   }
-  return marked.parseInline(md) as string;
+  const tokens = marked.lexer(md);
+  return renderInline(tokens.flatMap(flattenInline));
 }

@@ -1,14 +1,17 @@
 /**
  * Generic column-based table renderer.
  *
- * Generates markdown tables and renders them through `renderMarkdown()` so
- * all list commands get consistent Unicode-bordered tables via cli-table3.
- * Pre-rendered ANSI escape codes in cell values are preserved — cli-table3
- * uses string-width which correctly treats them as zero-width.
+ * Provides `writeTable()` for rendering structured data as Unicode-bordered
+ * tables directly via the text-table renderer, and `buildMarkdownTable()`
+ * for producing raw CommonMark table syntax (used in plain/non-TTY mode).
+ *
+ * ANSI escape codes in cell values are preserved — `string-width` correctly
+ * treats them as zero-width for column sizing.
  */
 
 import type { Writer } from "../../types/index.js";
-import { escapeMarkdownCell, renderMarkdown } from "./markdown.js";
+import { escapeMarkdownCell, isPlainOutput } from "./markdown.js";
+import { type Alignment, renderTextTable } from "./text-table.js";
 
 /**
  * Describes a single column in a table.
@@ -25,16 +28,12 @@ export type Column<T> = {
 };
 
 /**
- * Build a markdown table string from items and column definitions.
+ * Build a raw CommonMark table string from items and column definitions.
  *
  * Cell values are escaped via {@link escapeMarkdownCell} so pipe and
  * backslash characters in API-supplied strings don't break the table.
- * Pre-rendered ANSI codes survive the pipeline — cli-table3 uses
- * `string-width` for column width calculation.
  *
- * @param items - Row data
- * @param columns - Column definitions
- * @returns Markdown table string
+ * Used for plain/non-TTY output mode.
  */
 export function buildMarkdownTable<T>(
   items: T[],
@@ -52,10 +51,10 @@ export function buildMarkdownTable<T>(
 }
 
 /**
- * Render items as a formatted table with Unicode borders.
+ * Render items as a formatted table.
  *
- * Column widths are auto-sized by cli-table3. Columns are defined via the
- * `columns` array; ANSI-colored cell values are preserved.
+ * In TTY mode: renders directly via text-table with Unicode box borders.
+ * In plain mode: emits raw CommonMark table syntax.
  *
  * @param stdout - Output writer
  * @param items - Row data
@@ -66,5 +65,14 @@ export function writeTable<T>(
   items: T[],
   columns: Column<T>[]
 ): void {
-  stdout.write(`${renderMarkdown(buildMarkdownTable(items, columns))}\n`);
+  if (isPlainOutput()) {
+    stdout.write(`${buildMarkdownTable(items, columns)}\n`);
+    return;
+  }
+
+  const headers = columns.map((c) => c.header);
+  const rows = items.map((item) => columns.map((c) => c.value(item)));
+  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
+
+  stdout.write(renderTextTable(headers, rows, { alignments }));
 }

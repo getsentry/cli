@@ -31,7 +31,6 @@ if (!SENTRY_CLIENT_ID) {
 
 // Regex patterns for esbuild plugin (must be top-level for performance)
 const BUN_SQLITE_FILTER = /^bun:sqlite$/;
-const NODE_EMOJI_FILTER = /^node-emoji$/;
 const ANY_FILTER = /.*/;
 
 // Plugin to replace bun:sqlite with our node:sqlite polyfill
@@ -60,32 +59,8 @@ const bunSqlitePlugin: Plugin = {
   },
 };
 
-/**
- * Plugin to stub out `node-emoji` — a 208KB emoji library that
- * `marked-terminal` statically imports but we never use (emoji: false).
- * The static `import * as emoji from 'node-emoji'` prevents tree-shaking,
- * so we replace it with a no-op stub at build time.
- */
-const nodeEmojiStubPlugin: Plugin = {
-  name: "node-emoji-stub",
-  setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: NODE_EMOJI_FILTER }, () => ({
-      path: "node-emoji",
-      namespace: "node-emoji-stub",
-    }));
-
-    pluginBuild.onLoad(
-      { filter: ANY_FILTER, namespace: "node-emoji-stub" },
-      () => ({
-        contents: "export function get(s) { return s; }",
-        loader: "js",
-      })
-    );
-  },
-};
-
 // Configure Sentry plugin for source map uploads (production builds only)
-const plugins: Plugin[] = [bunSqlitePlugin, nodeEmojiStubPlugin];
+const plugins: Plugin[] = [bunSqlitePlugin];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
