@@ -937,7 +937,15 @@ async function handleResolvedTargets(
       }
       return `${r.data.target.org}/${r.data.target.project}` === key;
     });
-    return result?.success ? (result.data.nextCursor ?? null) : null;
+    if (result?.success) {
+      // Successful fetch: null = exhausted (no more pages), string = has more
+      return result.data.nextCursor ?? null;
+    }
+    // Target failed this fetch — preserve the cursor it was given so the next
+    // `-c last` retries from the same position rather than skipping it entirely.
+    // If no start cursor was given (first-page failure), null means not retried
+    // via cursor; the user can run without -c last to restart all projects.
+    return startCursors.get(key) ?? null;
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
   if (hasAnyCursor) {
