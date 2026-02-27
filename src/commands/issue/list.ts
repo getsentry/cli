@@ -618,49 +618,37 @@ function trimWithProjectGuarantee(
   return issues.filter((_, i) => selected.has(i));
 }
 
-/**
- * A per-project cursor entry stored in the compound cursor.
- * `cursor: null` means the project was exhausted (no more pages).
- */
-type ProjectCursorEntry = {
-  org: string;
-  project: string;
-  cursor: string | null;
-};
+/** Separator for compound cursor entries (pipe — not present in Sentry cursors). */
+const CURSOR_SEP = "|";
 
 /**
- * Encode per-project cursors as a single JSON string for storage in the
- * `pagination_cursors` table.
+ * Encode per-target cursors as a pipe-separated string for storage.
+ *
+ * The position of each entry matches the **sorted** target order encoded in
+ * the context key fingerprint, so we only need to store the cursor values —
+ * no org/project metadata is needed in the cursor string itself.
+ *
+ * Empty string = project exhausted (no more pages).
+ *
+ * @example "1735689600:0:0||1735689601:0:0" — 3 targets, middle one exhausted
  */
-function encodeCompoundCursor(entries: ProjectCursorEntry[]): string {
-  return JSON.stringify(entries);
+function encodeCompoundCursor(cursors: (string | null)[]): string {
+  return cursors.map((c) => c ?? "").join(CURSOR_SEP);
 }
 
 /**
- * Decode a compound cursor string back to per-project entries.
- * Returns an empty array if the string is not valid compound cursor JSON
- * (e.g. a legacy single-project cursor or corrupted data).
+ * Decode a compound cursor string back to an array of per-target cursors.
+ *
+ * Returns `null` for exhausted entries (empty segments) and `string` for active
+ * cursors. Returns an empty array if `raw` is empty or looks like a legacy
+ * JSON cursor (starts with `[`), causing a fresh start.
  */
-function decodeCompoundCursor(raw: string): ProjectCursorEntry[] {
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      Array.isArray(parsed) &&
-      parsed.every(
-        (e) =>
-          typeof e === "object" &&
-          e !== null &&
-          typeof e.org === "string" &&
-          typeof e.project === "string" &&
-          (e.cursor === null || typeof e.cursor === "string")
-      )
-    ) {
-      return parsed as ProjectCursorEntry[];
-    }
-  } catch {
-    // Fall through to return empty array
+function decodeCompoundCursor(raw: string): (string | null)[] {
+  // Guard against legacy JSON compound cursors or corrupted data
+  if (!raw || raw.startsWith("[")) {
+    return [];
   }
-  return [];
+  return raw.split(CURSOR_SEP).map((s) => (s === "" ? null : s));
 }
 
 /**
@@ -873,7 +861,10 @@ async function handleResolvedTargets(
   const contextKey = buildMultiTargetContextKey(targets, flags);
 
   // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
+  // Sorted target keys must match the order used in buildMultiTargetContextKey.
+  const sortedTargetKeys = targets.map((t) => `${t.org}/${t.project}`).sort();
   const startCursors = new Map<string, string>();
+  const exhaustedTargets = new Set<string>();
   if (flags.cursor) {
     const rawCursor = resolveOrgCursor(
       flags.cursor,
@@ -881,15 +872,28 @@ async function handleResolvedTargets(
       contextKey
     );
     if (rawCursor) {
-      for (const entry of decodeCompoundCursor(rawCursor)) {
-        if (entry.cursor) {
-          startCursors.set(`${entry.org}/${entry.project}`, entry.cursor);
+      const decoded = decodeCompoundCursor(rawCursor);
+      for (let i = 0; i < decoded.length && i < sortedTargetKeys.length; i++) {
+        const cursor = decoded[i];
+        // biome-ignore lint/style/noNonNullAssertion: i is within bounds
+        const key = sortedTargetKeys[i]!;
+        if (cursor) {
+          startCursors.set(key, cursor);
+        } else {
+          // null = project was exhausted on previous page — skip it entirely
+          exhaustedTargets.add(key);
         }
       }
     }
   }
 
-  const targetCount = targets.length;
+  // Filter out exhausted targets so they are not re-fetched from scratch (Comment 2 fix).
+  const activeTargets =
+    exhaustedTargets.size > 0
+      ? targets.filter((t) => !exhaustedTargets.has(`${t.org}/${t.project}`))
+      : targets;
+
+  const targetCount = activeTargets.length;
   const baseMessage =
     targetCount > 1
       ? `Fetching issues from ${targetCount} projects`
@@ -899,7 +903,7 @@ async function handleResolvedTargets(
     { stderr, message: `${baseMessage} (up to ${flags.limit})...` },
     (setMessage) =>
       fetchWithBudget(
-        targets,
+        activeTargets,
         {
           query: flags.query,
           limit: flags.limit,
@@ -916,24 +920,26 @@ async function handleResolvedTargets(
   );
 
   // Store compound cursor so `-c last` can resume from each project's position.
-  const cursorEntries: ProjectCursorEntry[] = targets.map((t) => {
-    const result = results.find(
-      (r) =>
-        r.success &&
-        r.data.target.org === t.org &&
-        r.data.target.project === t.project
-    );
-    const nextCursor = result?.success
-      ? (result.data.nextCursor ?? null)
-      : null;
-    return { org: t.org, project: t.project, cursor: nextCursor };
+  // Cursors are stored in the same sorted order as buildMultiTargetContextKey.
+  const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
+    // Exhausted targets from previous page stay exhausted
+    if (exhaustedTargets.has(key)) {
+      return null;
+    }
+    const result = results.find((r) => {
+      if (!r.success) {
+        return false;
+      }
+      return `${r.data.target.org}/${r.data.target.project}` === key;
+    });
+    return result?.success ? (result.data.nextCursor ?? null) : null;
   });
-  const hasAnyCursor = cursorEntries.some((e) => e.cursor !== null);
+  const hasAnyCursor = cursorValues.some((c) => c !== null);
   if (hasAnyCursor) {
     setPaginationCursor(
       PAGINATION_KEY,
       contextKey,
-      encodeCompoundCursor(cursorEntries)
+      encodeCompoundCursor(cursorValues)
     );
   } else {
     clearPaginationCursor(PAGINATION_KEY, contextKey);
@@ -1000,6 +1006,7 @@ async function handleResolvedTargets(
   );
   const trimmed = issuesWithOptions.length < allIssuesWithOptions.length;
   const hasMoreToShow = hasMore || hasAnyCursor || trimmed;
+  const canPaginate = hasAnyCursor;
 
   if (flags.json) {
     const allIssues = issuesWithOptions.map((i) => i.issue);
@@ -1054,11 +1061,10 @@ async function handleResolvedTargets(
 
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
-    stdout.write(
-      muted(
-        `\nMore issues available — use -n ${higherLimit} or -c last for more.\n`
-      )
-    );
+    const hint = canPaginate
+      ? `use -n ${higherLimit} or -c last for more.`
+      : `use -n ${higherLimit} to see more.`;
+    stdout.write(muted(`\nMore issues available — ${hint}\n`));
   }
 
   if (footer) {
