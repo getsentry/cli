@@ -113,8 +113,14 @@ if(parseInt(process.versions.node)<22){console.error("Error: sentry requires Nod
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
-  // Only externalize Node.js built-ins - bundle all npm packages
-  external: ["node:*"],
+  // Externalize Node.js built-ins and pi-coding-agent (resolved from node_modules at runtime)
+  external: [
+    "node:*",
+    "@mariozechner/pi-coding-agent",
+    "@mariozechner/pi-agent-core",
+    "@mariozechner/pi-ai",
+    "@mariozechner/pi-tui",
+  ],
   metafile: true,
   plugins,
 });
