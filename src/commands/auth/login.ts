@@ -67,7 +67,8 @@ export const loginCommand = buildCommand({
         );
       }
 
-      // Try to get user info (works with API tokens, may not work with OAuth App tokens)
+      // Fetch and cache user info via /auth/ (works with all token types).
+      // A transient failure here must not block login — the token is already valid.
       let user: Awaited<ReturnType<typeof getCurrentUser>> | undefined;
       try {
         user = await getCurrentUser();
@@ -78,7 +79,7 @@ export const loginCommand = buildCommand({
           name: user.name,
         });
       } catch {
-        // Ignore - user info is optional, token may not have permission
+        // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
       stdout.write(`${success("✓")} Authenticated with API token\n`);

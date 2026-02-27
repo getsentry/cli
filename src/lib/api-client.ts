@@ -9,17 +9,19 @@
  */
 
 import {
-  listAnOrganization_sIssues,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
+  listAProject_sTeams,
   queryExploreEventsInTableFormat,
   resolveAShortId,
   retrieveAnEventForAProject,
+  retrieveAnIssue,
   retrieveAnIssueEvent,
   retrieveAnOrganization,
   retrieveAProject,
   retrieveSeerIssueFixState,
   listYourOrganizations as sdkListOrganizations,
+  resolveAnEventId as sdkResolveAnEventId,
   startSeerIssueFix,
 } from "@sentry/api";
 import type { z } from "zod";
@@ -48,7 +50,7 @@ import {
 } from "../types/index.js";
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { ApiError, AuthError } from "./errors.js";
+import { ApiError, AuthError, stringifyUnknown } from "./errors.js";
 import { resolveOrgRegion } from "./region.js";
 import {
   getApiBaseUrl,
@@ -84,8 +86,8 @@ function throwApiError(
   const status = response?.status ?? 0;
   const detail =
     error && typeof error === "object" && "detail" in error
-      ? String((error as { detail: unknown }).detail)
-      : String(error);
+      ? stringifyUnknown((error as { detail: unknown }).detail)
+      : stringifyUnknown(error);
   throw new ApiError(
     `${context}: ${status} ${response?.statusText ?? "Unknown"}`,
     status,
@@ -197,7 +199,7 @@ function extractLinkAttr(segment: string, attr: string): string | undefined {
  * Maximum number of pages to follow when auto-paginating.
  *
  * Safety limit to prevent runaway pagination when the API returns an unexpectedly
- * large number of pages. At 100 items/page this allows up to 5,000 items, which
+ * large number of pages. At API_MAX_PER_PAGE items/page this allows up to 5,000 items, which
  * covers even the largest organizations. Override with SENTRY_MAX_PAGINATION_PAGES
  * env var for edge cases.
  */
@@ -205,6 +207,12 @@ const MAX_PAGINATION_PAGES = Math.max(
   1,
   Number(process.env.SENTRY_MAX_PAGINATION_PAGES) || 50
 );
+
+/**
+ * Sentry API's maximum items per page.
+ * Requests for more items are silently capped server-side.
+ */
+export const API_MAX_PER_PAGE = 100;
 
 /**
  * Paginated API response with cursor metadata.
@@ -304,9 +312,23 @@ export async function apiRequestToRegion<T>(
   }
 
   const data = await response.json();
-  const validated = schema ? schema.parse(data) : (data as T);
 
-  return { data: validated, headers: response.headers };
+  if (schema) {
+    const result = schema.safeParse(data);
+    if (!result.success) {
+      // Treat schema validation failures as API errors so they surface cleanly
+      // through the central error handler rather than showing a raw ZodError
+      // stack trace. This guards against unexpected API response format changes.
+      throw new ApiError(
+        `Unexpected response format from ${endpoint}`,
+        response.status,
+        result.error.message
+      );
+    }
+    return { data: result.data, headers: response.headers };
+  }
+
+  return { data: data as T, headers: response.headers };
 }
 
 /**
@@ -497,13 +519,13 @@ async function orgScopedRequestPaginated<T>(
  *
  * @param endpoint - API endpoint path containing the org slug
  * @param options - Request options (schema must validate an array type)
- * @param perPage - Number of items per API page (default: 100)
+ * @param perPage - Number of items per API page (default: API_MAX_PER_PAGE)
  * @returns Combined array of all results across all pages
  */
 async function orgScopedPaginateAll<T>(
   endpoint: string,
   options: ApiRequestOptions<T[]>,
-  perPage = 100
+  perPage = API_MAX_PER_PAGE
 ): Promise<T[]> {
   const allResults: T[] = [];
   let cursor: string | undefined;
@@ -640,7 +662,7 @@ export function listProjectsPaginated(
     `/organizations/${orgSlug}/projects/`,
     {
       params: {
-        per_page: options.perPage ?? 100,
+        per_page: options.perPage ?? API_MAX_PER_PAGE,
         cursor: options.cursor,
       },
     }
@@ -686,6 +708,78 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 }
 
 /**
+ * List teams in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of teams with cursor metadata
+ */
+export function listTeamsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryTeam[]>> {
+  return orgScopedRequestPaginated<SentryTeam[]>(
+    `/organizations/${orgSlug}/teams/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
+ * List teams that have access to a specific project.
+ *
+ * Uses the project-scoped endpoint (`/projects/{org}/{project}/teams/`) which
+ * returns only the teams with access to that project, not all teams in the org.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Teams with access to the project
+ */
+export async function listProjectTeams(
+  orgSlug: string,
+  projectSlug: string
+): Promise<SentryTeam[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAProject_sTeams({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+  const data = unwrapResult(result, "Failed to list project teams");
+  return data as unknown as SentryTeam[];
+}
+
+/**
+ * List repositories in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of repositories with cursor metadata
+ */
+export function listRepositoriesPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryRepository[]>> {
+  return orgScopedRequestPaginated<SentryRepository[]>(
+    `/organizations/${orgSlug}/repos/`,
+    {
+      params: {
+        per_page: options.perPage ?? 25,
+        cursor: options.cursor,
+      },
+    }
+  );
+}
+
+/**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
@@ -698,6 +792,7 @@ export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectWithOrg[]> {
   const orgs = await listOrganizations();
+  const isNumericId = isAllDigits(projectSlug);
 
   // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
@@ -705,8 +800,13 @@ export async function findProjectsBySlug(
       try {
         const project = await getProject(org.slug, projectSlug);
         // The API accepts project_id_or_slug, so a numeric input could
-        // resolve by ID. Verify the returned slug actually matches.
-        if (project.slug !== projectSlug) {
+        // resolve by ID instead of slug. When the input is all digits,
+        // accept the match (the user passed a numeric project ID).
+        // For non-numeric inputs, verify the slug actually matches to
+        // avoid false positives from coincidental ID collisions.
+        // Note: Sentry enforces that project slugs must start with a letter,
+        // so an all-digits input can only ever be a numeric ID, never a slug.
+        if (!isNumericId && project.slug !== projectSlug) {
           return null;
         }
         return { ...project, orgSlug: org.slug };
@@ -896,51 +996,159 @@ export async function getProjectKeys(
 // Issue functions
 
 /**
- * List issues for a project.
- * Uses the org-scoped endpoint (the project-scoped one is deprecated).
- * Uses region-aware routing for multi-region support.
+ * List issues for a project with pagination control.
+ * Returns a single page of results with cursor metadata for manual pagination.
+ * Uses the org-scoped endpoint with a `project:{slug}` filter.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param options - Query and pagination options
+ * @returns Single page of issues with cursor metadata
  */
-export async function listIssues(
+export function listIssuesPaginated(
   orgSlug: string,
   projectSlug: string,
   options: {
     query?: string;
     cursor?: string;
-    limit?: number;
+    perPage?: number;
     sort?: "date" | "new" | "freq" | "user";
     statsPeriod?: string;
   } = {}
-): Promise<SentryIssue[]> {
-  const config = await getOrgSdkConfig(orgSlug);
-
-  // Build query with project filter: "project:{slug}" prefix
-  const projectFilter = `project:${projectSlug}`;
+): Promise<PaginatedResponse<SentryIssue[]>> {
+  // Only add project filter when projectSlug is non-empty; an empty slug would
+  // produce "project:" (a truthy string that .filter(Boolean) won't remove),
+  // sending a malformed query to the API for org-wide listing.
+  const projectFilter = projectSlug ? `project:${projectSlug}` : "";
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  const result = await listAnOrganization_sIssues({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-    query: {
-      query: fullQuery,
-      cursor: options.cursor,
-      limit: options.limit,
+  return orgScopedRequestPaginated<SentryIssue[]>(
+    `/organizations/${orgSlug}/issues/`,
+    {
+      params: {
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
+        query: fullQuery || undefined,
+        cursor: options.cursor,
+        per_page: options.perPage ?? 25,
+        sort: options.sort,
+        statsPeriod: options.statsPeriod,
+      },
+    }
+  );
+}
+
+/** Result from {@link listIssuesAllPages}. */
+export type IssuesPage = {
+  issues: SentryIssue[];
+  /**
+   * Cursor for the next page of results, if more exist beyond the returned
+   * issues. `undefined` when all matching issues have been returned OR when
+   * the last page was trimmed to fit `limit` (cursor would skip items).
+   */
+  nextCursor?: string;
+};
+
+/**
+ * Auto-paginate through issues up to the requested limit.
+ *
+ * The Sentry API caps `per_page` at {@link API_MAX_PER_PAGE} server-side. When the caller
+ * requests more than that, this function transparently fetches multiple
+ * pages using cursor-based pagination and returns the combined result.
+ *
+ * Safety-bounded by {@link MAX_PAGINATION_PAGES} to prevent runaway requests.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug (empty string for org-wide)
+ * @param options - Query, sort, and limit options
+ * @returns Issues (up to `limit` items) and a cursor for the next page if available
+ */
+export async function listIssuesAllPages(
+  orgSlug: string,
+  projectSlug: string,
+  options: {
+    query?: string;
+    limit: number;
+    sort?: "date" | "new" | "freq" | "user";
+    statsPeriod?: string;
+    /** Called after each page is fetched. Useful for progress indicators. */
+    onPage?: (fetched: number, limit: number) => void;
+  }
+): Promise<IssuesPage> {
+  if (options.limit < 1) {
+    throw new Error(
+      `listIssuesAllPages: limit must be at least 1, got ${options.limit}`
+    );
+  }
+
+  const allResults: SentryIssue[] = [];
+  let cursor: string | undefined;
+
+  // Use the smaller of the requested limit and the API max as page size
+  const perPage = Math.min(options.limit, API_MAX_PER_PAGE);
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const response = await listIssuesPaginated(orgSlug, projectSlug, {
+      query: options.query,
+      cursor,
+      perPage,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
-    },
-  });
+    });
 
-  const data = unwrapResult(result, "Failed to list issues");
-  return data as unknown as SentryIssue[];
+    allResults.push(...response.data);
+    options.onPage?.(Math.min(allResults.length, options.limit), options.limit);
+
+    // Stop if we've reached the requested limit or there are no more pages
+    if (allResults.length >= options.limit || !response.nextCursor) {
+      // If we overshot the limit, trim and don't return a nextCursor —
+      // the cursor would point past the trimmed items, causing skips.
+      if (allResults.length > options.limit) {
+        return { issues: allResults.slice(0, options.limit) };
+      }
+      return { issues: allResults, nextCursor: response.nextCursor };
+    }
+
+    cursor = response.nextCursor;
+  }
+
+  // Safety limit reached — return what we have, no nextCursor
+  return { issues: allResults.slice(0, options.limit) };
 }
 
 /**
  * Get a specific issue by numeric ID.
+ *
+ * Uses the legacy unscoped endpoint — no org context or region routing.
+ * Prefer {@link getIssueInOrg} when the org slug is known.
  */
 export function getIssue(issueId: string): Promise<SentryIssue> {
   // The @sentry/api SDK's retrieveAnIssue requires org slug in path,
   // but the legacy endpoint /issues/{id}/ works without org context.
   // Use raw request for backward compatibility.
   return apiRequest<SentryIssue>(`/issues/${issueId}/`);
+}
+
+/**
+ * Get a specific issue by numeric ID, scoped to an organization.
+ *
+ * Uses the org-scoped SDK endpoint with region-aware routing.
+ * Preferred over {@link getIssue} when the org slug is available.
+ *
+ * @param orgSlug - Organization slug (used for region routing)
+ * @param issueId - Numeric issue ID
+ */
+export async function getIssueInOrg(
+  orgSlug: string,
+  issueId: string
+): Promise<SentryIssue> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await retrieveAnIssue({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, issue_id: issueId },
+  });
+  return unwrapResult(result, "Failed to get issue") as unknown as SentryIssue;
 }
 
 /**
@@ -1030,6 +1238,86 @@ export async function getEvent(
 }
 
 /**
+ * Result of resolving an event ID to an org and project.
+ * Includes the full event so the caller can avoid a second API call.
+ */
+export type ResolvedEvent = {
+  org: string;
+  project: string;
+  event: SentryEvent;
+};
+
+/**
+ * Resolve an event ID to its org and project using the
+ * `/organizations/{org}/eventids/{event_id}/` endpoint.
+ *
+ * Returns the resolved org, project, and full event on success,
+ * or null if the event is not found in the given org.
+ */
+export async function resolveEventInOrg(
+  orgSlug: string,
+  eventId: string
+): Promise<ResolvedEvent | null> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await sdkResolveAnEventId({
+    ...config,
+    path: { organization_id_or_slug: orgSlug, event_id: eventId },
+  });
+
+  try {
+    const data = unwrapResult(result, "Failed to resolve event ID");
+    return {
+      org: data.organizationSlug,
+      project: data.projectSlug,
+      event: data.event as unknown as SentryEvent,
+    };
+  } catch (error) {
+    // 404 means the event doesn't exist in this org — not an error
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Search for an event across all accessible organizations by event ID.
+ *
+ * Fans out to every org in parallel using the eventids resolution endpoint.
+ * Returns the first match found, or null if the event is not accessible.
+ *
+ * @param eventId - The event ID (UUID) to look up
+ */
+export async function findEventAcrossOrgs(
+  eventId: string
+): Promise<ResolvedEvent | null> {
+  const orgs = await listOrganizations();
+
+  const results = await Promise.allSettled(
+    orgs.map((org) => resolveEventInOrg(org.slug, eventId))
+  );
+
+  // First pass: return the first successful match
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value !== null) {
+      return result.value;
+    }
+  }
+
+  // Second pass (only reached when no org had the event): propagate
+  // AuthError since it indicates a global problem (expired/missing token).
+  // Transient per-org failures (network, 5xx) are swallowed — they are not
+  // global, and if the event existed in any accessible org it would have matched.
+  for (const result of results) {
+    if (result.status === "rejected" && result.reason instanceof AuthError) {
+      throw result.reason;
+    }
+  }
+  return null;
+}
+
+/**
  * Get detailed trace with nested children structure.
  * This is an internal endpoint not covered by the public API.
  * Uses region-aware routing for multi-region support.
@@ -1114,6 +1402,9 @@ export async function listTransactions(
         dataset: "transactions",
         field: TRANSACTION_FIELDS,
         project: isNumericProject ? projectSlug : undefined,
+        // Convert empty string to undefined so ky omits the param entirely;
+        // sending `query=` causes the Sentry API to behave differently than
+        // omitting the parameter.
         query: fullQuery || undefined,
         per_page: options.limit || 10,
         statsPeriod: options.statsPeriod ?? "7d",
@@ -1237,12 +1528,15 @@ export async function triggerSolutionPlanning(
 
 /**
  * Get the currently authenticated user's information.
- * Uses the /users/me/ endpoint on the control silo.
+ *
+ * Uses the `/auth/` endpoint on the control silo, which works with all token
+ * types (OAuth, API tokens, OAuth App tokens). Unlike `/users/me/`, this
+ * endpoint does not return 403 for OAuth tokens.
  */
 export async function getCurrentUser(): Promise<SentryUser> {
   const { data } = await apiRequestToRegion<SentryUser>(
     getControlSiloUrl(),
-    "/users/me/",
+    "/auth/",
     { schema: SentryUserSchema }
   );
   return data;
@@ -1306,7 +1600,7 @@ export async function listLogs(
       field: LOG_FIELDS,
       project: isNumericProject ? [Number(projectSlug)] : undefined,
       query: fullQuery || undefined,
-      per_page: options.limit || 100,
+      per_page: options.limit || API_MAX_PER_PAGE,
       statsPeriod: options.statsPeriod ?? "7d",
       sort: "-timestamp",
     },

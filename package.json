@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.11.0-dev.0",
+  "version": "0.14.0-dev.0",
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "type": "module",
   "bin": {
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
-    "test": "bun test",
+    "test": "bun run test:unit && bun run test:isolated",
     "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:isolated": "bun test test/isolated",
     "test:e2e": "bun test test/e2e",

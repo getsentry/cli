@@ -10,7 +10,11 @@ import { parsePositionalArgs } from "../../../src/commands/trace/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 describe("parsePositionalArgs", () => {
@@ -58,6 +62,42 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("slash-separated org/project/traceId (single arg)", () => {
+    test("parses org/project/traceId as target + trace ID", () => {
+      const result = parsePositionalArgs([
+        "sentry/cli/aaaa1111bbbb2222cccc3333dddd4444",
+      ]);
+      expect(result.targetArg).toBe("sentry/cli");
+      expect(result.traceId).toBe("aaaa1111bbbb2222cccc3333dddd4444");
+    });
+
+    test("handles hyphenated org and project slugs", () => {
+      const result = parsePositionalArgs([
+        "my-org/my-project/deadbeef12345678",
+      ]);
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.traceId).toBe("deadbeef12345678");
+    });
+
+    test("one slash (org/project, missing trace ID) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli"])).toThrow(ContextError);
+    });
+
+    test("trailing slash (org/project/) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["sentry/cli/"])).toThrow(ContextError);
+    });
+
+    test("one-slash ContextError mentions Trace ID", () => {
+      try {
+        parsePositionalArgs(["sentry/cli"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Trace ID");
+      }
+    });
+  });
+
   describe("edge cases", () => {
     test("handles more than two args (ignores extras)", () => {
       const result = parsePositionalArgs([
@@ -90,11 +130,11 @@ describe("resolveProjectBySlug", () => {
   });
 
   describe("no projects found", () => {
-    test("throws ContextError when project not found", async () => {
+    test("throws ResolutionError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue([]);
 
       await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
-        ContextError
+        ResolutionError
       );
     });
 
@@ -105,11 +145,15 @@ describe("resolveProjectBySlug", () => {
         await resolveProjectBySlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain('Project "frontend"');
-        expect((error as ContextError).message).toContain(
+        expect(error).toBeInstanceOf(ResolutionError);
+        expect((error as ResolutionError).message).toContain(
+          'Project "frontend"'
+        );
+        expect((error as ResolutionError).message).toContain(
           "Check that you have access"
         );
+        // Message says "not found", not "is required"
+        expect((error as ResolutionError).message).toContain("not found");
       }
     });
   });

@@ -22,6 +22,12 @@
 curl -fsSL https://cli.sentry.dev/install | bash
 ```
 
+### Homebrew
+
+```bash
+brew install getsentry/tools/sentry
+```
+
 ### Package Managers
 
 ```bash

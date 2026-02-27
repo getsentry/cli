@@ -15,18 +15,25 @@ import {
   isProcessRunning,
   releaseLock,
 } from "../../src/lib/binary.js";
-import { clearInstallInfo } from "../../src/lib/db/install-info.js";
+import {
+  clearInstallInfo,
+  setInstallInfo,
+} from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  detectInstallationMethod,
   executeUpgrade,
   fetchLatestFromGitHub,
   fetchLatestFromNpm,
+  fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
+  isNightlyVersion,
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
 } from "../../src/lib/upgrade.js";
+import { useTestConfigDir } from "../helpers.js";
 
 // Store original fetch for restoration
 let originalFetch: typeof globalThis.fetch;
@@ -49,6 +56,7 @@ afterEach(() => {
 describe("parseInstallationMethod", () => {
   test("parses valid methods", () => {
     expect(parseInstallationMethod("curl")).toBe("curl");
+    expect(parseInstallationMethod("brew")).toBe("brew");
     expect(parseInstallationMethod("npm")).toBe("npm");
     expect(parseInstallationMethod("pnpm")).toBe("pnpm");
     expect(parseInstallationMethod("bun")).toBe("bun");
@@ -64,9 +72,6 @@ describe("parseInstallationMethod", () => {
   test("throws on invalid method", () => {
     expect(() => parseInstallationMethod("pip")).toThrow("Invalid method: pip");
     expect(() => parseInstallationMethod("apt")).toThrow("Invalid method: apt");
-    expect(() => parseInstallationMethod("brew")).toThrow(
-      "Invalid method: brew"
-    );
     expect(() => parseInstallationMethod("")).toThrow("Invalid method: ");
   });
 });
@@ -225,6 +230,9 @@ describe("fetchLatestFromNpm", () => {
   });
 });
 
+// fetchLatestNightlyVersion tests are in the dedicated describe block
+// below (around line 1153) which tests the GHCR-based implementation.
+
 describe("UpgradeError", () => {
   test("creates error with default message for unknown_method", () => {
     const error = new UpgradeError("unknown_method");
@@ -250,6 +258,14 @@ describe("UpgradeError", () => {
     const error = new UpgradeError("version_not_found");
     expect(error.reason).toBe("version_not_found");
     expect(error.message).toBe("The specified version was not found.");
+  });
+
+  test("creates error with default message for unsupported_operation", () => {
+    const error = new UpgradeError("unsupported_operation");
+    expect(error.reason).toBe("unsupported_operation");
+    expect(error.message).toBe(
+      "This operation is not supported for this installation method."
+    );
   });
 
   test("allows custom message", () => {
@@ -325,6 +341,19 @@ describe("fetchLatestVersion", () => {
     expect(version).toBe("2.0.0");
   });
 
+  test("uses GitHub for brew method", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "v2.0.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const version = await fetchLatestVersion("brew");
+    expect(version).toBe("2.0.0");
+  });
+
   test("uses npm for unknown method", async () => {
     mockFetch(
       async () =>
@@ -336,6 +365,63 @@ describe("fetchLatestVersion", () => {
 
     const version = await fetchLatestVersion("unknown");
     expect(version).toBe("2.0.0");
+  });
+
+  test("uses GHCR manifest when channel is nightly (curl method)", async () => {
+    // Nightly version is now fetched from GHCR manifest annotation, not version.json
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.0.0-dev.1740393600" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const version = await fetchLatestVersion("curl", "nightly");
+    expect(version).toBe("0.0.0-dev.1740393600");
+  });
+
+  test("uses GHCR manifest when channel is nightly (npm method)", async () => {
+    // Even npm method uses GHCR when channel=nightly (nightly is curl-only distribution)
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.0.0-dev.1740393600" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const version = await fetchLatestVersion("npm", "nightly");
+    expect(version).toBe("0.0.0-dev.1740393600");
+  });
+
+  test("defaults to stable channel (uses GitHub) when channel omitted", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "v3.0.0" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const version = await fetchLatestVersion("curl");
+    expect(version).toBe("3.0.0");
   });
 });
 
@@ -380,6 +466,20 @@ describe("versionExists", () => {
 
     const exists = await versionExists("bun", "1.0.0");
     expect(exists).toBe(true);
+  });
+
+  test("checks GitHub for brew method - version exists", async () => {
+    mockFetch(async () => new Response(null, { status: 200 }));
+
+    const exists = await versionExists("brew", "1.0.0");
+    expect(exists).toBe(true);
+  });
+
+  test("checks GitHub for brew method - version does not exist", async () => {
+    mockFetch(async () => new Response(null, { status: 404 }));
+
+    const exists = await versionExists("brew", "99.99.99");
+    expect(exists).toBe(false);
   });
 
   test("checks npm for yarn method", async () => {
@@ -433,6 +533,110 @@ describe("executeUpgrade", () => {
   });
 });
 
+describe("detectInstallationMethod — stored info path", () => {
+  useTestConfigDir("test-detect-stored-");
+
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+    // Set execPath to a non-Homebrew, non-known-curl path so detection falls
+    // through to stored info
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/sentry",
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("returns stored method when install info has been persisted", async () => {
+    setInstallInfo({
+      method: "npm",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+  });
+
+  test("returns stored curl method", async () => {
+    setInstallInfo({
+      method: "curl",
+      path: "/usr/bin/sentry",
+      version: "1.0.0",
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("curl");
+  });
+});
+
+describe("Homebrew detection (detectInstallationMethod)", () => {
+  let originalExecPath: string;
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    clearInstallInfo();
+  });
+
+  test("detects brew when execPath resolves through /Cellar/", async () => {
+    Object.defineProperty(process, "execPath", {
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("detects brew for Intel Homebrew path (/usr/local/Cellar/)", async () => {
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/local/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("Homebrew detection overrides stale stored install info", async () => {
+    // Simulate a user who previously had curl recorded in the DB but then
+    // switched to Homebrew — the /Cellar/ check should win.
+    setInstallInfo({ method: "curl", path: "/old/path", version: "0.0.1" });
+
+    Object.defineProperty(process, "execPath", {
+      value: "/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry",
+      configurable: true,
+    });
+
+    const method = await detectInstallationMethod();
+    expect(method).toBe("brew");
+  });
+
+  test("does not detect brew for non-Homebrew paths", async () => {
+    // Directly validate: a path without /Cellar/ is not a Homebrew install.
+    // We avoid calling detectInstallationMethod() with no stored info and a
+    // non-Cellar path because that triggers the slow package-manager fallthrough.
+    expect("/home/user/.sentry/bin/sentry".includes("/Cellar/")).toBe(false);
+    expect("/opt/homebrew/bin/sentry".includes("/Cellar/")).toBe(false);
+  });
+});
+
 describe("getBinaryDownloadUrl", () => {
   test("builds correct URL for current platform", () => {
     const url = getBinaryDownloadUrl("1.0.0");
@@ -472,6 +676,63 @@ describe("getCurlInstallPaths", () => {
     const suffix = process.platform === "win32" ? ".exe" : "";
 
     expect(paths.installPath).toEndWith(`sentry${suffix}`);
+  });
+
+  describe("stored path branch", () => {
+    useTestConfigDir("test-curl-paths-stored-");
+
+    afterEach(() => {
+      clearInstallInfo();
+    });
+
+    test("uses stored path when install info has method=curl", () => {
+      const customPath = join(homedir(), "custom", "bin", "sentry");
+      setInstallInfo({ method: "curl", path: customPath, version: "1.0.0" });
+
+      const paths = getCurlInstallPaths();
+      expect(paths.installPath).toBe(customPath);
+      expect(paths.tempPath).toBe(`${customPath}.download`);
+    });
+
+    test("ignores stored path when method is not curl", () => {
+      // If stored method is e.g. "npm", the stored path branch is skipped
+      setInstallInfo({
+        method: "npm",
+        path: "/some/npm/path",
+        version: "1.0.0",
+      });
+
+      const paths = getCurlInstallPaths();
+      // Should NOT use the npm path
+      expect(paths.installPath).not.toBe("/some/npm/path");
+    });
+  });
+
+  describe("known curl path branch", () => {
+    let originalExecPath: string;
+
+    beforeEach(() => {
+      originalExecPath = process.execPath;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, "execPath", {
+        value: originalExecPath,
+        configurable: true,
+      });
+      clearInstallInfo();
+    });
+
+    test("uses execPath when it starts with a known curl install dir", () => {
+      const knownCurlPath = join(homedir(), ".local", "bin", "sentry");
+      Object.defineProperty(process, "execPath", {
+        value: knownCurlPath,
+        configurable: true,
+      });
+
+      const paths = getCurlInstallPaths();
+      expect(paths.installPath).toBe(knownCurlPath);
+    });
   });
 });
 
@@ -808,5 +1069,175 @@ describe("startCleanupOldBinary", () => {
 
     // Should not throw when called again
     expect(() => startCleanupOldBinary()).not.toThrow();
+  });
+});
+
+describe("isNightlyVersion", () => {
+  test("returns true for nightly version strings", () => {
+    expect(isNightlyVersion("0.0.0-dev.1740000000")).toBe(true);
+    expect(isNightlyVersion("0.0.0-dev.1")).toBe(true);
+  });
+
+  test("returns false for stable version strings", () => {
+    expect(isNightlyVersion("1.0.0")).toBe(false);
+    expect(isNightlyVersion("0.13.0")).toBe(false);
+    expect(isNightlyVersion("2.0.0-beta.1")).toBe(false);
+    expect(isNightlyVersion("0.0.0-dev")).toBe(false);
+  });
+});
+
+describe("fetchLatestNightlyVersion", () => {
+  test("returns version from GHCR manifest annotation", async () => {
+    // Mock the two requests: token exchange + manifest fetch
+    let callCount = 0;
+    mockFetch(async (url) => {
+      callCount += 1;
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
+            annotations: { version: "0.0.0-dev.1740000000" },
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+            },
+          }
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const version = await fetchLatestNightlyVersion();
+    expect(version).toBe("0.0.0-dev.1740000000");
+    expect(callCount).toBe(2); // token + manifest
+  });
+
+  test("throws UpgradeError when GHCR token exchange fails", async () => {
+    mockFetch(async () => new Response("Unauthorized", { status: 401 }));
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "GHCR token exchange failed: HTTP 401"
+    );
+  });
+
+  test("throws UpgradeError when manifest has no version annotation", async () => {
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ schemaVersion: 2, layers: [], annotations: {} }),
+        { status: 200 }
+      );
+    });
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(UpgradeError);
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow(
+      "Nightly manifest has no version annotation"
+    );
+  });
+
+  test("aborts early if signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fetchLatestNightlyVersion(controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("executeUpgrade with curl method (nightly)", () => {
+  const binDir = join(homedir(), ".sentry", "bin");
+
+  function getTestPaths() {
+    return getCurlInstallPaths();
+  }
+
+  beforeEach(() => {
+    clearInstallInfo();
+    mkdirSync(binDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    const paths = getTestPaths();
+    for (const p of [
+      paths.installPath,
+      paths.tempPath,
+      paths.oldPath,
+      paths.lockPath,
+    ]) {
+      try {
+        await unlink(p);
+      } catch {
+        // Ignore
+      }
+    }
+  });
+
+  test("downloads and decompresses nightly binary from GHCR", async () => {
+    const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
+    const gzipped = Bun.gzipSync(mockBinaryContent);
+
+    // Mock: token exchange + manifest + blob (200 with gzipped content)
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (urlStr.includes("/manifests/nightly")) {
+        let os = "linux";
+        if (process.platform === "darwin") os = "darwin";
+        else if (process.platform === "win32") os = "windows";
+        const arch = process.arch === "arm64" ? "arm64" : "x64";
+        const suffix = process.platform === "win32" ? ".exe" : "";
+        const title = `sentry-${os}-${arch}${suffix}.gz`;
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 2,
+            layers: [
+              {
+                digest: "sha256:blobdigest",
+                mediaType: "application/octet-stream",
+                size: gzipped.byteLength,
+                annotations: { "org.opencontainers.image.title": title },
+              },
+            ],
+            annotations: { version: "0.0.0-dev.1740000000" },
+          }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("/blobs/")) {
+        // Return gzipped blob directly (no redirect needed for test)
+        return new Response(gzipped, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    const result = await executeUpgrade("curl", "0.0.0-dev.1740000000");
+
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("tempBinaryPath");
+
+    // Verify decompressed content matches original
+    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 });

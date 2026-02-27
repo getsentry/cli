@@ -132,7 +132,7 @@ export class ConfigError extends CliError {
 
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
-  "Set SENTRY_DSN environment variable",
+  "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
 ] as const;
 
 /**
@@ -158,6 +158,31 @@ function buildContextMessage(
     lines.push("", "Or:");
     for (const alt of alternatives) {
       lines.push(`  - ${alt}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Build the formatted resolution error message for entities that could not be found or resolved.
+ *
+ * @param resource - The entity that could not be resolved (e.g., "Issue 99124558")
+ * @param headline - Describes the failure (e.g., "not found", "is ambiguous", "could not be resolved")
+ * @param hint - Primary usage example or suggestion
+ * @param suggestions - Additional help bullets shown under "Or:"
+ * @returns Formatted multi-line error message
+ */
+function buildResolutionMessage(
+  resource: string,
+  headline: string,
+  hint: string,
+  suggestions: string[]
+): string {
+  const lines = [`${resource} ${headline}.`, "", "Try:", `  ${hint}`];
+  if (suggestions.length > 0) {
+    lines.push("", "Or:");
+    for (const s of suggestions) {
+      lines.push(`  - ${s}`);
     }
   }
   return lines.join("\n");
@@ -192,6 +217,43 @@ export class ContextError extends CliError {
 
   override format(): string {
     // Message already contains the formatted output
+    return this.message;
+  }
+}
+
+/**
+ * Resolution errors for entities that exist but could not be found or resolved.
+ *
+ * Use this when the user provided a value but it could not be matched — as
+ * opposed to {@link ContextError}, which is for when the user omitted a
+ * required value entirely.
+ *
+ * @param resource - The entity that failed to resolve (e.g., "Issue 99124558", "Project 'cli'")
+ * @param headline - Short phrase describing the failure (e.g., "not found", "is ambiguous", "could not be resolved")
+ * @param hint - Primary usage example or suggestion (shown under "Try:")
+ * @param suggestions - Additional help bullets shown under "Or:" (defaults to empty)
+ */
+export class ResolutionError extends CliError {
+  readonly resource: string;
+  readonly headline: string;
+  readonly hint: string;
+  readonly suggestions: string[];
+
+  constructor(
+    resource: string,
+    headline: string,
+    hint: string,
+    suggestions: string[] = []
+  ) {
+    super(buildResolutionMessage(resource, headline, hint, suggestions));
+    this.name = "ResolutionError";
+    this.resource = resource;
+    this.headline = headline;
+    this.hint = hint;
+    this.suggestions = suggestions;
+  }
+
+  override format(): string {
     return this.message;
   }
 }
@@ -232,6 +294,7 @@ export class DeviceFlowError extends CliError {
 
 export type UpgradeErrorReason =
   | "unknown_method"
+  | "unsupported_operation"
   | "network_error"
   | "execution_failed"
   | "version_not_found";
@@ -249,6 +312,8 @@ export class UpgradeError extends CliError {
     const defaultMessages: Record<UpgradeErrorReason, string> = {
       unknown_method:
         "Could not detect installation method. Use --method to specify.",
+      unsupported_operation:
+        "This operation is not supported for this installation method.",
       network_error: "Failed to fetch version information.",
       execution_failed: "Upgrade command failed.",
       version_not_found: "The specified version was not found.",
@@ -312,8 +377,52 @@ export class SeerError extends CliError {
 // Error Utilities
 
 /**
+ * Thrown when an operation is cancelled via an AbortSignal.
+ *
+ * Matches the `error.name === "AbortError"` convention used throughout the
+ * codebase (version-check.ts, sentry-client.ts, binary.ts) to detect and
+ * silently swallow cancellation errors.
+ */
+export class AbortError extends Error {
+  override name = "AbortError" as const;
+  constructor() {
+    super("The operation was aborted");
+  }
+}
+
+/**
+ * Convert an unknown value to a human-readable string.
+ *
+ * Handles Error instances (`.message`), plain objects (`JSON.stringify`),
+ * strings (as-is), and other primitives (`String()`).
+ * Use this instead of bare `String(value)` when the value might be a
+ * plain object — `String({})` produces the unhelpful `"[object Object]"`.
+ *
+ * @param value - Any thrown or unknown value
+ * @returns Human-readable string representation
+ */
+export function stringifyUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (value && typeof value === "object") {
+    // JSON.stringify can throw on circular references or BigInt values.
+    // Fall back to String() which is always safe.
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+/**
  * Format any error for user display.
- * Uses CliError.format() for CLI errors, message for standard errors.
+ * Uses CliError.format() for CLI errors, falls back to stringifyUnknown.
  *
  * @param error - Any thrown value
  * @returns Formatted error string
@@ -322,10 +431,7 @@ export function formatError(error: unknown): string {
   if (error instanceof CliError) {
     return error.format();
   }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
+  return stringifyUnknown(error);
 }
 
 /**

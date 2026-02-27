@@ -6,8 +6,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { buildSearchParams, rawApiRequest } from "../../src/lib/api-client.js";
+import {
+  buildSearchParams,
+  listIssuesPaginated,
+  listRepositoriesPaginated,
+  listTeamsPaginated,
+  rawApiRequest,
+} from "../../src/lib/api-client.js";
+import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
+import { setOrgRegion } from "../../src/lib/db/regions.js";
 import { useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("test-api-");
@@ -720,5 +728,541 @@ describe("findProjectsBySlug", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].orgSlug).toBe("acme");
+  });
+
+  test("resolves numeric project ID when slug differs", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Regions endpoint
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // Organizations list
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme Corp" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // getProject for acme/7275560680 - API resolves by numeric ID,
+      // returns project with a different slug
+      if (url.includes("/projects/acme/7275560680/")) {
+        return new Response(
+          JSON.stringify({
+            id: "7275560680",
+            slug: "frontend",
+            name: "Frontend",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Numeric ID should resolve even though returned slug differs
+    const results = await findProjectsBySlug("7275560680");
+    expect(results).toHaveLength(1);
+    expect(results[0].slug).toBe("frontend");
+    expect(results[0].orgSlug).toBe("acme");
+  });
+
+  test("rejects non-numeric input when returned slug differs", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/projects/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme Corp" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // API returns project with different slug (coincidental ID match)
+      if (url.includes("/projects/acme/wrong-slug/")) {
+        return new Response(
+          JSON.stringify({ id: "999", slug: "actual-slug", name: "Actual" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Non-numeric input with slug mismatch should be rejected
+    const results = await findProjectsBySlug("wrong-slug");
+    expect(results).toHaveLength(0);
+  });
+});
+
+describe("resolveEventInOrg", () => {
+  const sampleEvent = {
+    id: "abc123",
+    eventID: "abc123def456",
+    groupID: "12345",
+    projectID: "67890",
+    message: "Something went wrong",
+    title: "Error",
+    location: null,
+    user: null,
+    tags: [],
+    platform: "node",
+    dateReceived: "2026-01-01T00:00:00Z",
+    contexts: null,
+    size: 100,
+    entries: [],
+    dist: null,
+    sdk: {},
+    context: null,
+    packages: {},
+    type: "error",
+    metadata: null,
+    errors: [],
+    occurrence: null,
+    _meta: {},
+  };
+
+  test("returns resolved event when found in org", async () => {
+    const { resolveEventInOrg } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/eventids/abc123def456/")) {
+        return new Response(
+          JSON.stringify({
+            organizationSlug: "acme",
+            projectSlug: "frontend",
+            groupId: "12345",
+            eventId: "abc123def456",
+            event: sampleEvent,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveEventInOrg("acme", "abc123def456");
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("frontend");
+    expect(result?.event.eventID).toBe("abc123def456");
+  });
+
+  test("returns null when event not found in org", async () => {
+    const { resolveEventInOrg } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveEventInOrg("acme", "notfound000000");
+    expect(result).toBeNull();
+  });
+});
+
+describe("findEventAcrossOrgs", () => {
+  const sampleEvent = {
+    id: "abc123",
+    eventID: "abc123def456",
+    groupID: "12345",
+    projectID: "67890",
+    message: "Something went wrong",
+    title: "Error",
+    location: null,
+    user: null,
+    tags: [],
+    platform: "node",
+    dateReceived: "2026-01-01T00:00:00Z",
+    contexts: null,
+    size: 100,
+    entries: [],
+    dist: null,
+    sdk: {},
+    context: null,
+    packages: {},
+    type: "error",
+    metadata: null,
+    errors: [],
+    occurrence: null,
+    _meta: {},
+  };
+
+  test("returns match from the org that has the event", async () => {
+    const { findEventAcrossOrgs } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/eventids/")) {
+        return new Response(
+          JSON.stringify([
+            { id: "1", slug: "no-event-org", name: "No Event Org" },
+            { id: "2", slug: "has-event-org", name: "Has Event Org" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/has-event-org/eventids/abc123def456/")) {
+        return new Response(
+          JSON.stringify({
+            organizationSlug: "has-event-org",
+            projectSlug: "backend",
+            groupId: "12345",
+            eventId: "abc123def456",
+            event: sampleEvent,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await findEventAcrossOrgs("abc123def456");
+    expect(result).not.toBeNull();
+    expect(result?.org).toBe("has-event-org");
+    expect(result?.project).toBe("backend");
+  });
+
+  test("returns null when event not found in any org", async () => {
+    const { findEventAcrossOrgs } = await import("../../src/lib/api-client.js");
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/users/me/regions/")) {
+        return new Response(
+          JSON.stringify({
+            regions: [{ name: "us", url: "https://us.sentry.io" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/organizations/") && !url.includes("/eventids/")) {
+        return new Response(
+          JSON.stringify([{ id: "1", slug: "acme", name: "Acme" }]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await findEventAcrossOrgs("notfound000000");
+    expect(result).toBeNull();
+  });
+});
+
+describe("listTeamsPaginated", () => {
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns teams and nextCursor from Link header", async () => {
+    const teamData = [
+      { id: "1", slug: "backend", name: "Backend", memberCount: 5 },
+      { id: "2", slug: "frontend", name: "Frontend", memberCount: 3 },
+    ];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/teams/")) {
+        return new Response(JSON.stringify(teamData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/teams/>; rel="next"; results="true"; cursor="100:1:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    const result = await listTeamsPaginated("my-org");
+    expect(result.data).toHaveLength(2);
+    expect(result.nextCursor).toBe("100:1:0");
+  });
+
+  test("returns no nextCursor when Link header has results=false", async () => {
+    const teamData = [
+      { id: "1", slug: "backend", name: "Backend", memberCount: 5 },
+    ];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/teams/")) {
+        return new Response(JSON.stringify(teamData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/teams/>; rel="previous"; results="false"; cursor="100:0:1", <https://sentry.io/api/0/teams/>; rel="next"; results="false"; cursor="100:1:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    const result = await listTeamsPaginated("my-org");
+    expect(result.data).toHaveLength(1);
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("passes cursor and perPage as query params", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/teams/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    await listTeamsPaginated("my-org", { cursor: "100:2:0", perPage: 10 });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("cursor")).toBe("100:2:0");
+    expect(url.searchParams.get("per_page")).toBe("10");
+  });
+});
+
+describe("listRepositoriesPaginated", () => {
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns repos and nextCursor from Link header", async () => {
+    const repoData = [
+      {
+        id: "1",
+        name: "getsentry/sentry",
+        provider: { name: "GitHub" },
+        status: "active",
+      },
+    ];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/repos/")) {
+        return new Response(JSON.stringify(repoData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/repos/>; rel="next"; results="true"; cursor="0:1:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    const result = await listRepositoriesPaginated("my-org");
+    expect(result.data).toHaveLength(1);
+    expect(result.nextCursor).toBe("0:1:0");
+  });
+
+  test("passes cursor and perPage as query params", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/repos/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    await listRepositoriesPaginated("my-org", { cursor: "0:2:0", perPage: 5 });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("cursor")).toBe("0:2:0");
+    expect(url.searchParams.get("per_page")).toBe("5");
+  });
+});
+
+describe("listIssuesPaginated", () => {
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns issues and nextCursor from Link header", async () => {
+    const issueData = [
+      { id: "1", shortId: "PROJ-1", title: "Test Error", status: "unresolved" },
+    ];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/issues/")) {
+        return new Response(JSON.stringify(issueData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/issues/>; rel="next"; results="true"; cursor="0:1:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    const result = await listIssuesPaginated("my-org", "my-proj");
+    expect(result.data).toHaveLength(1);
+    expect(result.nextCursor).toBe("0:1:0");
+  });
+
+  test("includes project filter in query param", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/issues/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    await listIssuesPaginated("my-org", "my-proj");
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("query")).toContain("project:my-proj");
+  });
+
+  test("combines project filter with custom query", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/issues/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    await listIssuesPaginated("my-org", "my-proj", { query: "is:unresolved" });
+
+    const url = new URL(capturedUrl);
+    const query = url.searchParams.get("query") ?? "";
+    expect(query).toContain("project:my-proj");
+    expect(query).toContain("is:unresolved");
+  });
+
+  test("passes cursor, perPage, and sort as query params", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/issues/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+
+    await listIssuesPaginated("my-org", "my-proj", {
+      cursor: "0:3:0",
+      perPage: 20,
+      sort: "freq",
+    });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("cursor")).toBe("0:3:0");
+    expect(url.searchParams.get("per_page")).toBe("20");
+    expect(url.searchParams.get("sort")).toBe("freq");
   });
 });

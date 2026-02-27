@@ -9,13 +9,14 @@
  * No PII is collected. Opt-out via SENTRY_CLI_NO_TELEMETRY=1 environment variable.
  */
 
-import { chmodSync } from "node:fs";
+import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { ApiError, AuthError } from "./errors.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+import { getRealUsername } from "./utils.js";
 
 export type { Span } from "@sentry/bun";
 
@@ -263,6 +264,8 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
         (integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)
       ),
     environment,
+    // Enable Sentry structured logs for non-exception telemetry (e.g., unexpected input warnings)
+    enableLogs: true,
     // Sample all events for CLI telemetry (low volume)
     tracesSampleRate: 1,
     sampleRate: 1,
@@ -363,6 +366,12 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 }
 
 /**
+ * Flag names whose values must never be sent to telemetry.
+ * Values for these flags are replaced with "[REDACTED]" regardless of content.
+ */
+const SENSITIVE_FLAGS = new Set(["token"]);
+
+/**
  * Set command flags as telemetry tags.
  *
  * Converts flag names from camelCase to kebab-case and sets them as tags
@@ -372,6 +381,9 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
  * - Boolean flags: only when true
  * - String/number flags: only when defined and non-empty
  * - Array flags: only when non-empty
+ *
+ * Sensitive flags (e.g., `--token`) have their values replaced with
+ * "[REDACTED]" to prevent secrets from reaching telemetry.
  *
  * Call this at the start of command func() to instrument flag usage.
  *
@@ -409,6 +421,12 @@ export function setFlagContext(flags: Record<string, unknown>): void {
 
     // Convert camelCase to kebab-case for consistency with CLI flag names
     const kebabKey = key.replace(/([A-Z])/g, "-$1").toLowerCase();
+
+    // Redact sensitive flag values (e.g., API tokens) — never send secrets to telemetry
+    if (SENSITIVE_FLAGS.has(kebabKey)) {
+      Sentry.setTag(`flag.${kebabKey}`, "[REDACTED]");
+      continue;
+    }
 
     // Set the tag with flag. prefix
     // For booleans, just set "true"; for other types, convert to string
@@ -655,20 +673,53 @@ function chmodIfExists(filePath: string, mode: number): void {
   }
 }
 
+/**
+ * Check whether the file at `filePath` is owned by root (uid 0).
+ * Returns false if the file doesn't exist, can't be stat'd, or if running on
+ * Windows where `fs.stat().uid` always returns 0 regardless of ownership.
+ */
+function isOwnedByRoot(filePath: string): boolean {
+  // Windows fs.stat() always reports uid 0 — skip the check entirely.
+  if (process.platform === "win32") {
+    return false;
+  }
+  try {
+    return statSync(filePath).uid === 0;
+  } catch {
+    return false;
+  }
+}
+
 function tryRepairReadonly(): boolean {
   if (repairAttempted) {
     return false;
   }
   repairAttempted = true;
 
-  try {
-    const dbPath = resolveDbPath();
+  const dbPath = resolveDbPath();
+  const { dirname } = require("node:path") as {
+    dirname: (p: string) => string;
+  };
+  const configDir = dirname(dbPath);
 
+  // If the config dir or DB file is root-owned, chmod won't help.
+  // Emit an actionable message telling the user to run sudo chown.
+  if (isOwnedByRoot(configDir) || isOwnedByRoot(dbPath)) {
+    const username = getRealUsername();
+    // Disable the generic warning — we're emitting a better one here.
+    warnReadonlyDatabaseOnce = noop;
+    process.stderr.write(
+      "\nWarning: Sentry CLI config directory is owned by root.\n" +
+        `  Path:  ${configDir}\n` +
+        `  Fix:   sudo chown -R ${username} "${configDir}"\n` +
+        "  Or:    sudo sentry cli fix\n\n"
+    );
+    return false;
+  }
+
+  try {
     // Repair config directory (needs rwx for WAL/SHM creation)
-    const { dirname } = require("node:path") as {
-      dirname: (p: string) => string;
-    };
-    chmodSync(dirname(dbPath), 0o700);
+    chmodSync(configDir, 0o700);
 
     // Repair database file and journal files
     chmodSync(dbPath, 0o600);

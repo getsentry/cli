@@ -8,18 +8,32 @@
 import type { SentryContext } from "../../context.js";
 import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
+  API_MAX_PER_PAGE,
   findProjectsBySlug,
-  listIssues,
+  type IssuesPage,
+  listIssuesAllPages,
+  listIssuesPaginated,
   listProjects,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import {
+  clearPaginationCursor,
+  escapeContextKeyValue,
+  resolveOrgCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
 import {
   clearProjectAliases,
   setProjectAliases,
 } from "../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
-import { ApiError, AuthError, ContextError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import {
   divider,
   type FormatShortIdOptions,
@@ -29,20 +43,40 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  buildListCommand,
+  buildListLimitFlag,
+  LIST_BASE_ALIASES,
+  LIST_JSON_FLAG,
+  LIST_TARGET_POSITIONAL,
+  targetPatternExplanation,
+} from "../../lib/list-command.js";
+import {
+  dispatchOrgScopedList,
+  type ListCommandMeta,
+  type ModeHandler,
+} from "../../lib/org-list.js";
+import { withProgress } from "../../lib/polling.js";
+import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
+import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type {
   ProjectAliasEntry,
   SentryIssue,
   Writer,
 } from "../../types/index.js";
 
+/** Command key for pagination cursor storage */
+export const PAGINATION_KEY = "issue-list";
+
 type ListFlags = {
   readonly query?: string;
   readonly limit: number;
   readonly sort: "date" | "new" | "freq" | "user";
+  readonly period: string;
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 type SortValue = "date" | "new" | "freq" | "user";
@@ -52,8 +86,14 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
 
-/** Error type classification for fetch failures */
-type FetchErrorType = "permission" | "network" | "unknown";
+/** Matches strings that are all digits — used to detect invalid cursor values */
+const ALL_DIGITS_RE = /^\d+$/;
+
+/**
+ * Maximum --limit value (user-facing ceiling for practical CLI response times).
+ * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
+ */
+const MAX_LIMIT = 1000;
 
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
@@ -241,7 +281,7 @@ function getComparator(
 
 type FetchResult =
   | { success: true; data: IssueListResult }
-  | { success: false; errorType: FetchErrorType };
+  | { success: false; error: Error };
 
 /** Result of resolving targets from parsed argument */
 type TargetResolutionResult = {
@@ -313,10 +353,11 @@ async function resolveTargetsFromParsedArg(
       const matches = await findProjectsBySlug(parsed.projectSlug);
 
       if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry issue list <org>/${parsed.projectSlug}`
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "not found",
+          `sentry issue list <org>/${parsed.projectSlug}`,
+          ["No project with this slug found in any accessible organization"]
         );
       }
 
@@ -349,61 +390,379 @@ async function resolveTargetsFromParsedArg(
  *
  * @param target - Resolved org/project target
  * @param options - Query options (query, limit, sort)
- * @returns Success with issues, or failure with error type classification
+ * @returns Success with issues, or failure with the original error preserved
  * @throws {AuthError} When user is not authenticated
  */
 async function fetchIssuesForTarget(
   target: ResolvedTarget,
-  options: { query?: string; limit: number; sort: SortValue }
+  options: {
+    query?: string;
+    limit: number;
+    sort: SortValue;
+    statsPeriod?: string;
+    onPage?: (fetched: number, limit: number) => void;
+  }
 ): Promise<FetchResult> {
   try {
-    const issues = await listIssues(target.org, target.project, options);
+    const { issues } = await listIssuesAllPages(
+      target.org,
+      target.project,
+      options
+    );
     return { success: true, data: { target, issues } };
   } catch (error) {
     // Auth errors should propagate - user needs to authenticate
     if (error instanceof AuthError) {
       throw error;
     }
-    // Classify error type for better user messaging
-    // 401/403 are permission errors
-    if (
-      error instanceof ApiError &&
-      (error.status === 401 || error.status === 403)
-    ) {
-      return { success: false, errorType: "permission" };
-    }
-    // Network errors (fetch failures, timeouts)
-    if (error instanceof TypeError && error.message.includes("fetch")) {
-      return { success: false, errorType: "network" };
-    }
-    return { success: false, errorType: "unknown" };
+
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
   }
 }
 
-export const listCommand = buildCommand({
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(org: string, flags: ListFlags): string {
+  const base = `sentry issue list ${org}/ -c last`;
+  const parts: string[] = [];
+  if (flags.sort !== "date") {
+    parts.push(`--sort ${flags.sort}`);
+  }
+  if (flags.query) {
+    parts.push(`-q "${flags.query}"`);
+  }
+  if (flags.period !== "90d") {
+    parts.push(`-t ${flags.period}`);
+  }
+  return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
+
+/**
+ * Fetch org-wide issues, auto-paginating from the start or resuming from a cursor.
+ *
+ * When `cursor` is provided (--cursor resume), fetches a single page to keep the
+ * cursor chain intact. Otherwise auto-paginates up to the requested limit.
+ */
+async function fetchOrgAllIssues(
+  org: string,
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "period">,
+  cursor: string | undefined,
+  onPage?: (fetched: number, limit: number) => void
+): Promise<IssuesPage> {
+  // When resuming with --cursor, fetch a single page so the cursor chain stays intact.
+  if (cursor) {
+    const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+    const response = await listIssuesPaginated(org, "", {
+      query: flags.query,
+      cursor,
+      perPage,
+      sort: flags.sort,
+      statsPeriod: flags.period,
+    });
+    return { issues: response.data, nextCursor: response.nextCursor };
+  }
+
+  // No cursor — auto-paginate from the beginning via the shared helper.
+  const { issues, nextCursor } = await listIssuesAllPages(org, "", {
+    query: flags.query,
+    limit: flags.limit,
+    sort: flags.sort,
+    statsPeriod: flags.period,
+    onPage,
+  });
+  return { issues, nextCursor };
+}
+
+/** Options for {@link handleOrgAllIssues}. */
+type OrgAllIssuesOptions = {
+  stdout: Writer;
+  stderr: Writer;
+  org: string;
+  flags: ListFlags;
+  setContext: (orgs: string[], projects: string[]) => void;
+};
+
+/**
+ * Handle org-all mode for issues: cursor-paginated listing of all issues in an org.
+ *
+ * Uses a sort+query-aware context key so cursors from different searches are
+ * never accidentally reused.
+ */
+async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
+  const { stdout, stderr, org, flags, setContext } = options;
+  // Encode sort + query in context key so cursors from different searches don't collide.
+  const escapedQuery = flags.query
+    ? escapeContextKeyValue(flags.query)
+    : undefined;
+  const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}|period:${escapedPeriod}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
+  const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+
+  setContext([org], []);
+
+  const { issues, nextCursor } = await withProgress(
+    { stderr, message: "Fetching issues..." },
+    (setMessage) =>
+      fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
+        setMessage(`Fetching issues... ${fetched}/${limit}`)
+      )
+  );
+
+  if (nextCursor) {
+    setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
+  } else {
+    clearPaginationCursor(PAGINATION_KEY, contextKey);
+  }
+
+  const hasMore = !!nextCursor;
+
+  if (flags.json) {
+    const output = hasMore
+      ? { data: issues, nextCursor, hasMore: true }
+      : { data: issues, hasMore: false };
+    writeJson(stdout, output);
+    return;
+  }
+
+  if (issues.length === 0) {
+    if (hasMore) {
+      stdout.write(
+        `No issues on this page. Try the next page: ${nextPageHint(org, flags)}\n`
+      );
+    } else {
+      stdout.write(`No issues found in organization '${org}'.\n`);
+    }
+    return;
+  }
+
+  // isMultiProject=true: org-all shows issues from every project, so the ALIAS
+  // column is needed to identify which project each issue belongs to.
+  writeListHeader(stdout, `Issues in ${org}`, true);
+  const termWidth = process.stdout.columns || 80;
+  const issuesWithOpts = issues.map((issue) => ({
+    issue,
+    formatOptions: {
+      projectSlug: issue.project?.slug ?? "",
+      isMultiProject: true,
+    },
+  }));
+  writeIssueRows(stdout, issuesWithOpts, termWidth);
+
+  if (hasMore) {
+    stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
+    stdout.write(`Next page: ${nextPageHint(org, flags)}\n`);
+  } else {
+    stdout.write(`\nShowing ${issues.length} issues\n`);
+  }
+}
+
+/** Options for {@link handleResolvedTargets}. */
+type ResolvedTargetsOptions = {
+  stdout: Writer;
+  stderr: Writer;
+  parsed: ReturnType<typeof parseOrgProjectArg>;
+  flags: ListFlags;
+  cwd: string;
+  setContext: (orgs: string[], projects: string[]) => void;
+};
+
+/**
+ * Handle auto-detect, explicit, and project-search modes.
+ *
+ * All three share the same flow: resolve targets → fetch issues in parallel →
+ * merge results → display. Only the target resolution step differs.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target issue resolution, error handling, and display logic
+async function handleResolvedTargets(
+  options: ResolvedTargetsOptions
+): Promise<void> {
+  const { stdout, stderr, parsed, flags, cwd, setContext } = options;
+
+  const { targets, footer, skippedSelfHosted, detectedDsns } =
+    await resolveTargetsFromParsedArg(parsed, cwd);
+
+  const orgs = [...new Set(targets.map((t) => t.org))];
+  const projects = [...new Set(targets.map((t) => t.project))];
+  setContext(orgs, projects);
+
+  if (targets.length === 0) {
+    if (skippedSelfHosted) {
+      throw new ContextError(
+        "Organization and project",
+        `${USAGE_HINT}\n\n` +
+          `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
+          "You may not have access to these projects, or you can specify the target explicitly."
+      );
+    }
+    throw new ContextError("Organization and project", USAGE_HINT);
+  }
+
+  const results = await withProgress(
+    { stderr, message: "Fetching issues..." },
+    (setMessage) => {
+      // Track per-target previous counts to compute deltas — onPage reports the
+      // running total for each target, not increments, so we need the previous
+      // value to derive how many new items arrived per callback.
+      let totalFetched = 0;
+      const prevFetched = new Array<number>(targets.length).fill(0);
+      const totalLimit = flags.limit * targets.length;
+      return Promise.all(
+        targets.map((t, i) =>
+          fetchIssuesForTarget(t, {
+            query: flags.query,
+            limit: flags.limit,
+            sort: flags.sort,
+            statsPeriod: flags.period,
+            onPage: (fetched) => {
+              totalFetched += fetched - (prevFetched[i] ?? 0);
+              prevFetched[i] = fetched;
+              setMessage(`Fetching issues... ${totalFetched}/${totalLimit}`);
+            },
+          })
+        )
+      );
+    }
+  );
+
+  const validResults: IssueListResult[] = [];
+  const failures: Error[] = [];
+
+  for (const result of results) {
+    if (result.success) {
+      validResults.push(result.data);
+    } else {
+      failures.push(result.error);
+    }
+  }
+
+  if (validResults.length === 0 && failures.length > 0) {
+    // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
+    const first = failures[0]!;
+    const prefix = `Failed to fetch issues from ${targets.length} project(s)`;
+
+    // Propagate ApiError so telemetry sees the original status code
+    if (first instanceof ApiError) {
+      throw new ApiError(
+        `${prefix}: ${first.message}`,
+        first.status,
+        first.detail,
+        first.endpoint
+      );
+    }
+
+    throw new Error(`${prefix}.\n${first.message}`);
+  }
+
+  const isMultiProject = validResults.length > 1;
+  const isSingleProject = validResults.length === 1;
+  const firstTarget = validResults[0]?.target;
+
+  const { aliasMap, entries } = isMultiProject
+    ? buildProjectAliasMap(validResults)
+    : { aliasMap: new Map<string, string>(), entries: {} };
+
+  if (isMultiProject) {
+    const fingerprint = createDsnFingerprint(detectedDsns ?? []);
+    await setProjectAliases(entries, fingerprint);
+  } else {
+    await clearProjectAliases();
+  }
+
+  const issuesWithOptions = attachFormatOptions(
+    validResults,
+    aliasMap,
+    isMultiProject
+  );
+
+  issuesWithOptions.sort((a, b) => getComparator(flags.sort)(a.issue, b.issue));
+
+  if (flags.json) {
+    const allIssues = issuesWithOptions.map((i) => i.issue);
+    if (failures.length > 0) {
+      writeJson(stdout, {
+        issues: allIssues,
+        errors: failures.map((e) =>
+          e instanceof ApiError
+            ? { status: e.status, message: e.message }
+            : { message: e.message }
+        ),
+      });
+    } else {
+      writeJson(stdout, allIssues);
+    }
+    return;
+  }
+
+  if (failures.length > 0) {
+    stderr.write(
+      muted(
+        `\nNote: Failed to fetch issues from ${failures.length} project(s). Showing results from ${validResults.length} project(s).\n`
+      )
+    );
+  }
+
+  if (issuesWithOptions.length === 0) {
+    stdout.write("No issues found.\n");
+    if (footer) {
+      stdout.write(`\n${footer}\n`);
+    }
+    return;
+  }
+
+  const title =
+    isSingleProject && firstTarget
+      ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
+      : `Issues from ${validResults.length} projects`;
+
+  writeListHeader(stdout, title, isMultiProject);
+
+  const termWidth = process.stdout.columns || 80;
+  writeIssueRows(stdout, issuesWithOptions, termWidth);
+
+  let footerMode: "single" | "multi" | "none" = "none";
+  if (isMultiProject) {
+    footerMode = "multi";
+  } else if (isSingleProject) {
+    footerMode = "single";
+  }
+  writeListFooter(stdout, footerMode);
+
+  if (footer) {
+    stdout.write(`\n${footer}\n`);
+  }
+}
+
+/** Metadata for the shared dispatch infrastructure. */
+const issueListMeta: ListCommandMeta = {
+  paginationKey: PAGINATION_KEY,
+  entityName: "issue",
+  entityPlural: "issues",
+  commandPrefix: "sentry issue list",
+};
+
+export const listCommand = buildListCommand("issue", {
   docs: {
     brief: "List issues in a project",
     fullDescription:
       "List issues from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry issue list               # auto-detect from DSN or config\n" +
       "  sentry issue list <org>/<proj>  # explicit org and project\n" +
-      "  sentry issue list <org>/        # all projects in org\n" +
+      "  sentry issue list <org>/        # all projects in org (trailing / required)\n" +
       "  sentry issue list <project>     # find project across all orgs\n\n" +
-      "In monorepos with multiple Sentry projects, shows issues from all detected projects.",
+      `${targetPatternExplanation()}\n\n` +
+      "In monorepos with multiple Sentry projects, shows issues from all detected projects.\n\n" +
+      "The --limit flag specifies the number of results to fetch per project (max 1000). " +
+      "When the limit exceeds the API page size (100), multiple requests are made " +
+      "automatically. Use --cursor to paginate through larger result sets. " +
+      "Note: --cursor resumes from a single page to keep the cursor chain intact.\n\n" +
+      "By default, only issues with activity in the last 90 days are shown. " +
+      "Use --period to adjust (e.g. --period 24h, --period 14d).",
   },
   parameters: {
-    positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <org>/, or <project>",
-          parse: String,
-          optional: true,
-        },
-      ],
-    },
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
       query: {
         kind: "parsed",
@@ -411,171 +770,91 @@ export const listCommand = buildCommand({
         brief: "Search query (Sentry search syntax)",
         optional: true,
       },
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of issues to return",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "10",
-      },
+      limit: buildListLimitFlag("issues", "25"),
       sort: {
         kind: "parsed",
         parse: parseSort,
         brief: "Sort by: date, new, freq, user",
         default: "date" as const,
       },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
+      period: {
+        kind: "parsed",
+        parse: String,
+        brief: "Time period for issue activity (e.g. 24h, 14d, 90d)",
+        default: "90d",
+      },
+      json: LIST_JSON_FLAG,
+      cursor: {
+        kind: "parsed",
+        parse: (value: string) => {
+          // "last" is the magic keyword to resume from the saved cursor
+          if (value === "last") {
+            return value;
+          }
+          // Sentry pagination cursors are opaque strings like "1735689600:0:0".
+          // Plain integers are not valid cursors — catch this early so the user
+          // gets a clear error rather than a cryptic 400 from the API.
+          if (ALL_DIGITS_RE.test(value)) {
+            throw new Error(
+              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+            );
+          }
+          return value;
+        },
+        // Issue-specific cursor brief: cursor only works in <org>/ mode
+        brief:
+          'Pagination cursor — only for <org>/ mode (use "last" to continue)',
+        optional: true,
       },
     },
-    aliases: { q: "query", s: "sort", n: "limit" },
+    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort", t: "period" },
   },
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command entry point with inherent complexity
   async func(
     this: SentryContext,
     flags: ListFlags,
     target?: string
   ): Promise<void> {
-    const { stdout, cwd, setContext } = this;
+    const { stdout, stderr, cwd, setContext } = this;
 
-    // Parse positional argument to determine resolution strategy
     const parsed = parseOrgProjectArg(target);
 
-    // Resolve targets based on parsed argument type
-    const { targets, footer, skippedSelfHosted, detectedDsns } =
-      await resolveTargetsFromParsedArg(parsed, cwd);
-
-    // Set telemetry context with unique orgs and projects
-    const orgs = [...new Set(targets.map((t) => t.org))];
-    const projects = [...new Set(targets.map((t) => t.project))];
-    setContext(orgs, projects);
-
-    if (targets.length === 0) {
-      if (skippedSelfHosted) {
-        throw new ContextError(
-          "Organization and project",
-          `${USAGE_HINT}\n\n` +
-            `Note: Found ${skippedSelfHosted} DSN(s) that could not be resolved.\n` +
-            "You may not have access to these projects, or you can specify the target explicitly."
-        );
-      }
-      throw new ContextError("Organization and project", USAGE_HINT);
+    // Validate --limit range. Auto-pagination handles the API's 100-per-page
+    // cap transparently, but we cap the total at MAX_LIMIT for practical CLI
+    // response times. Use --cursor for paginating through larger result sets.
+    if (flags.limit < 1) {
+      throw new ValidationError("--limit must be at least 1.", "limit");
     }
-
-    // Fetch issues from all targets in parallel
-    const results = await Promise.all(
-      targets.map((t) =>
-        fetchIssuesForTarget(t, {
-          query: flags.query,
-          limit: flags.limit,
-          sort: flags.sort,
-        })
-      )
-    );
-
-    // Separate successful fetches from failures
-    const validResults: IssueListResult[] = [];
-    const errorTypes = new Set<FetchErrorType>();
-
-    for (const result of results) {
-      if (result.success) {
-        validResults.push(result.data);
-      } else {
-        errorTypes.add(result.errorType);
-      }
-    }
-
-    if (validResults.length === 0) {
-      // Build error message based on what types of errors we saw
-      if (errorTypes.has("permission")) {
-        throw new Error(
-          `Failed to fetch issues from ${targets.length} project(s).\n` +
-            "You don't have permission to access these projects.\n\n" +
-            "Try running 'sentry auth status' to verify your authentication."
-        );
-      }
-      if (errorTypes.has("network")) {
-        throw new Error(
-          `Failed to fetch issues from ${targets.length} project(s).\n` +
-            "Network connection failed. Check your internet connection."
-        );
-      }
-      throw new Error(
-        `Failed to fetch issues from ${targets.length} project(s).`
+    if (flags.limit > MAX_LIMIT) {
+      throw new ValidationError(
+        `--limit cannot exceed ${MAX_LIMIT}. ` +
+          "Use --cursor to paginate through larger result sets.",
+        "limit"
       );
     }
 
-    // Determine display mode
-    const isMultiProject = validResults.length > 1;
-    const isSingleProject = validResults.length === 1;
-    const firstTarget = validResults[0]?.target;
+    // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
+    const resolveAndHandle: ModeHandler<any> = (ctx) =>
+      handleResolvedTargets({ ...ctx, flags, stderr, setContext });
 
-    // Build project alias map and cache it for multi-project mode
-    const { aliasMap, entries } = isMultiProject
-      ? buildProjectAliasMap(validResults)
-      : {
-          aliasMap: new Map<string, string>(),
-          entries: {},
-        };
-
-    if (isMultiProject) {
-      const fingerprint = createDsnFingerprint(detectedDsns ?? []);
-      await setProjectAliases(entries, fingerprint);
-    } else {
-      await clearProjectAliases();
-    }
-
-    // Attach formatting options to each issue
-    const issuesWithOptions = attachFormatOptions(
-      validResults,
-      aliasMap,
-      isMultiProject
-    );
-
-    // Sort by user preference
-    issuesWithOptions.sort((a, b) =>
-      getComparator(flags.sort)(a.issue, b.issue)
-    );
-
-    // JSON output
-    if (flags.json) {
-      const allIssues = issuesWithOptions.map((i) => i.issue);
-      writeJson(stdout, allIssues);
-      return;
-    }
-
-    if (issuesWithOptions.length === 0) {
-      stdout.write("No issues found.\n");
-      if (footer) {
-        stdout.write(`\n${footer}\n`);
-      }
-      return;
-    }
-
-    // Header depends on single vs multiple projects
-    const title =
-      isSingleProject && firstTarget
-        ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
-        : `Issues from ${validResults.length} projects`;
-
-    writeListHeader(stdout, title, isMultiProject);
-
-    const termWidth = process.stdout.columns || 80;
-    writeIssueRows(stdout, issuesWithOptions, termWidth);
-
-    // Footer mode
-    let footerMode: "single" | "multi" | "none" = "none";
-    if (isMultiProject) {
-      footerMode = "multi";
-    } else if (isSingleProject) {
-      footerMode = "single";
-    }
-    writeListFooter(stdout, footerMode);
-
-    if (footer) {
-      stdout.write(`\n${footer}\n`);
-    }
+    await dispatchOrgScopedList({
+      config: issueListMeta,
+      stdout,
+      cwd,
+      flags,
+      parsed,
+      overrides: {
+        "auto-detect": resolveAndHandle,
+        explicit: resolveAndHandle,
+        "project-search": resolveAndHandle,
+        "org-all": (ctx) =>
+          handleOrgAllIssues({
+            stdout: ctx.stdout,
+            stderr,
+            org: ctx.parsed.org,
+            flags,
+            setContext,
+          }),
+      },
+    });
   },
 });

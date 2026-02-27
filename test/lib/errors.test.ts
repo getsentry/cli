@@ -8,7 +8,9 @@ import {
   DeviceFlowError,
   formatError,
   getExitCode,
+  ResolutionError,
   SeerError,
+  stringifyUnknown,
   UpgradeError,
   ValidationError,
 } from "../../src/lib/errors.js";
@@ -107,7 +109,9 @@ describe("ContextError", () => {
     expect(formatted).toContain(
       "Run from a directory with a Sentry-configured project"
     );
-    expect(formatted).toContain("Set SENTRY_DSN environment variable");
+    expect(formatted).toContain(
+      "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables"
+    );
   });
 
   test("format() includes custom alternatives", () => {
@@ -125,6 +129,79 @@ describe("ContextError", () => {
     const formatted = err.format();
     expect(formatted).toContain("Resource is required.");
     expect(formatted).not.toContain("Or:");
+  });
+});
+
+describe("ResolutionError", () => {
+  test("format() includes 'not found' headline and Try hint", () => {
+    const err = new ResolutionError(
+      "Issue 99124558",
+      "not found",
+      "sentry issue view <org>/99124558",
+      [
+        "No issue with numeric ID 99124558 found",
+        "If this is a short ID suffix, try: sentry issue view <project>-99124558",
+      ]
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Issue 99124558 not found.");
+    expect(formatted).toContain("Try:");
+    expect(formatted).toContain("sentry issue view <org>/99124558");
+    expect(formatted).toContain("No issue with numeric ID 99124558 found");
+    expect(formatted).toContain("short ID suffix");
+    // Should NOT say "is required"
+    expect(formatted).not.toContain("is required");
+  });
+
+  test("format() works with 'is ambiguous' headline", () => {
+    const err = new ResolutionError(
+      "Project 'cli'",
+      "is ambiguous",
+      "sentry issue view <org>/cli-G",
+      ["Found in: sentry, acme"]
+    );
+    const formatted = err.format();
+    expect(formatted).toContain("Project 'cli' is ambiguous.");
+    expect(formatted).toContain("Try:");
+    expect(formatted).toContain("Or:");
+    expect(formatted).toContain("Found in: sentry, acme");
+  });
+
+  test("format() works with empty suggestions (no Or: section)", () => {
+    const err = new ResolutionError(
+      'Event abc123 in organization "acme"',
+      "not found",
+      "sentry event view acme/<project> abc123"
+    );
+    const formatted = err.format();
+    expect(formatted).toContain(
+      'Event abc123 in organization "acme" not found.'
+    );
+    expect(formatted).toContain("Try:");
+    expect(formatted).not.toContain("Or:");
+  });
+
+  test("stores resource, headline, hint, and suggestions", () => {
+    const err = new ResolutionError(
+      "Issue suffix 'G'",
+      "could not be resolved without project context",
+      "sentry issue view <org>/<project>-G"
+    );
+    expect(err.resource).toBe("Issue suffix 'G'");
+    expect(err.headline).toBe("could not be resolved without project context");
+    expect(err.hint).toBe("sentry issue view <org>/<project>-G");
+    expect(err.suggestions).toEqual([]);
+  });
+
+  test("is a CliError subclass", () => {
+    const err = new ResolutionError(
+      "Issue 1",
+      "not found",
+      "sentry issue view 1"
+    );
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.name).toBe("ResolutionError");
+    expect(err.exitCode).toBe(1);
   });
 });
 
@@ -253,6 +330,60 @@ describe("SeerError", () => {
   });
 });
 
+describe("stringifyUnknown", () => {
+  test("returns strings as-is", () => {
+    expect(stringifyUnknown("hello")).toBe("hello");
+    expect(stringifyUnknown("")).toBe("");
+  });
+
+  test("extracts message from Error instances", () => {
+    expect(stringifyUnknown(new Error("something broke"))).toBe(
+      "something broke"
+    );
+    expect(stringifyUnknown(new TypeError("bad type"))).toBe("bad type");
+  });
+
+  test("serializes plain objects to JSON", () => {
+    expect(stringifyUnknown({ code: "not_found" })).toBe(
+      '{"code":"not_found"}'
+    );
+    expect(stringifyUnknown({ detail: { message: "Forbidden" } })).toBe(
+      '{"detail":{"message":"Forbidden"}}'
+    );
+  });
+
+  test("serializes empty objects", () => {
+    expect(stringifyUnknown({})).toBe("{}");
+  });
+
+  test("serializes arrays to JSON", () => {
+    expect(stringifyUnknown(["error1", "error2"])).toBe('["error1","error2"]');
+  });
+
+  test("converts primitives via String()", () => {
+    expect(stringifyUnknown(42)).toBe("42");
+    expect(stringifyUnknown(null)).toBe("null");
+    expect(stringifyUnknown(undefined)).toBe("undefined");
+    expect(stringifyUnknown(true)).toBe("true");
+    expect(stringifyUnknown(0)).toBe("0");
+  });
+
+  test("falls back to String() for circular references", () => {
+    const circular: Record<string, unknown> = { name: "loop" };
+    circular.self = circular;
+    // Should not throw — falls back to String() which returns [object Object]
+    expect(() => stringifyUnknown(circular)).not.toThrow();
+    expect(stringifyUnknown(circular)).toBe("[object Object]");
+  });
+
+  test("falls back to String() for BigInt values", () => {
+    const obj = { count: BigInt(42) };
+    // JSON.stringify throws on BigInt — should fall back gracefully
+    expect(() => stringifyUnknown(obj)).not.toThrow();
+    expect(stringifyUnknown(obj)).toBe("[object Object]");
+  });
+});
+
 describe("formatError", () => {
   test("uses format() for CliError subclasses", () => {
     const err = new ApiError("API failed", 500, "Server error");
@@ -269,6 +400,11 @@ describe("formatError", () => {
     expect(formatError(42)).toBe("42");
     expect(formatError(null)).toBe("null");
     expect(formatError(undefined)).toBe("undefined");
+  });
+
+  test("serializes plain objects instead of [object Object]", () => {
+    expect(formatError({ code: "not_found" })).toBe('{"code":"not_found"}');
+    expect(formatError({})).toBe("{}");
   });
 });
 

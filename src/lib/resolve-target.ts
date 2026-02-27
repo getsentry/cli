@@ -2,13 +2,15 @@
  * Target Resolution
  *
  * Shared utilities for resolving organization and project context from
- * various sources: CLI flags, config defaults, and DSN detection.
+ * various sources: CLI flags, environment variables, config defaults,
+ * and DSN detection.
  *
  * Resolution priority (highest to lowest):
  * 1. Explicit CLI flags
- * 2. Config defaults
- * 3. DSN auto-detection (source code, .env files, environment variables)
- * 4. Directory name inference (matches project slugs with word boundaries)
+ * 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+ * 3. Config defaults
+ * 4. DSN auto-detection (source code, .env files, environment variables)
+ * 5. Directory name inference (matches project slugs with word boundaries)
  */
 
 import { basename } from "node:path";
@@ -18,6 +20,7 @@ import {
   findProjectsBySlug,
   getProject,
 } from "./api-client.js";
+import { type ParsedOrgProject, parseOrgProjectArg } from "./arg-parsing.js";
 import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
 import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
@@ -34,7 +37,14 @@ import {
   formatMultipleProjectsFooter,
   getDsnSourceDescription,
 } from "./dsn/index.js";
-import { AuthError, ContextError, ValidationError } from "./errors.js";
+import {
+  AuthError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "./errors.js";
+import { warning } from "./formatters/colors.js";
+import { isAllDigits } from "./utils.js";
 
 /**
  * Resolved organization and project target for API calls.
@@ -461,6 +471,55 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
 }
 
 /**
+ * Read org/project from SENTRY_ORG and SENTRY_PROJECT environment variables.
+ *
+ * SENTRY_PROJECT supports the `<org>/<project>` combo notation (presence of
+ * `/` distinguishes it from a plain project slug). When the combo form is
+ * used, SENTRY_ORG is ignored.
+ *
+ * @returns Resolved org+project, org-only, or null if no env vars are set
+ */
+function resolveFromEnvVars(): {
+  org: string;
+  project?: string;
+  detectedFrom: string;
+} | null {
+  const rawProject = process.env.SENTRY_PROJECT?.trim();
+
+  // SENTRY_PROJECT=org/project combo takes priority.
+  // If the value contains a slash it is always treated as combo notation;
+  // a malformed combo (empty org or project part) is discarded entirely
+  // so it cannot leak a slash into a project slug.
+  if (rawProject?.includes("/")) {
+    const slashIdx = rawProject.indexOf("/");
+    const org = rawProject.slice(0, slashIdx);
+    const project = rawProject.slice(slashIdx + 1);
+    if (org && project) {
+      return { org, project, detectedFrom: "SENTRY_PROJECT env var" };
+    }
+    // Malformed combo — fall through without using rawProject as a slug
+    const envOrg = process.env.SENTRY_ORG?.trim();
+    return envOrg ? { org: envOrg, detectedFrom: "SENTRY_ORG env var" } : null;
+  }
+
+  const envOrg = process.env.SENTRY_ORG?.trim();
+
+  if (envOrg && rawProject) {
+    return {
+      org: envOrg,
+      project: rawProject,
+      detectedFrom: "SENTRY_ORG / SENTRY_PROJECT env vars",
+    };
+  }
+
+  if (envOrg) {
+    return { org: envOrg, detectedFrom: "SENTRY_ORG env var" };
+  }
+
+  return null;
+}
+
+/**
  * Resolve all targets for monorepo-aware commands.
  *
  * When multiple DSNs are detected, resolves all of them in parallel
@@ -468,9 +527,10 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
  *
  * Resolution priority:
  * 1. Explicit org and project - returns single target
- * 2. Config defaults - returns single target
- * 3. DSN auto-detection - may return multiple targets
- * 4. Directory name inference - matches project slugs with word boundaries
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars - returns single target
+ * 3. Config defaults - returns single target
+ * 4. DSN auto-detection - may return multiple targets
+ * 5. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns All resolved targets and optional footer message
@@ -503,7 +563,23 @@ export async function resolveAllTargets(
     );
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars?.project) {
+    return {
+      targets: [
+        {
+          org: envVars.org,
+          project: envVars.project,
+          orgDisplay: envVars.org,
+          projectDisplay: envVars.project,
+          detectedFrom: envVars.detectedFrom,
+        },
+      ],
+    };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
@@ -519,11 +595,11 @@ export async function resolveAllTargets(
     };
   }
 
-  // 3. DSN auto-detection (may find multiple in monorepos)
+  // 4. DSN auto-detection (may find multiple in monorepos)
   const detection = await detectAllDsns(cwd);
 
   if (detection.all.length === 0) {
-    // 4. Fallback: infer from directory name
+    // 5. Fallback: infer from directory name
     return inferFromDirectoryName(cwd);
   }
 
@@ -575,9 +651,10 @@ export async function resolveAllTargets(
  *
  * Resolution priority:
  * 1. Explicit org and project - both must be provided together
- * 2. Config defaults
- * 3. DSN auto-detection
- * 4. Directory name inference - matches project slugs with word boundaries
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars
+ * 3. Config defaults
+ * 4. DSN auto-detection
+ * 5. Directory name inference - matches project slugs with word boundaries
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns Resolved target, or null if resolution failed
@@ -606,7 +683,19 @@ export async function resolveOrgAndProject(
     );
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars?.project) {
+    return {
+      org: envVars.org,
+      project: envVars.project,
+      orgDisplay: envVars.org,
+      projectDisplay: envVars.project,
+      detectedFrom: envVars.detectedFrom,
+    };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
   if (defaultOrg && defaultProject) {
@@ -618,7 +707,7 @@ export async function resolveOrgAndProject(
     };
   }
 
-  // 3. DSN auto-detection
+  // 4. DSN auto-detection
   try {
     const dsnResult = await resolveFromDsn(cwd);
     if (dsnResult) {
@@ -628,23 +717,21 @@ export async function resolveOrgAndProject(
     // Fall through to directory inference
   }
 
-  // 4. Fallback: infer from directory name
+  // 5. Fallback: infer from directory name
   const inferred = await inferFromDirectoryName(cwd);
-  if (inferred.targets.length > 0) {
-    const [first] = inferred.targets;
-    if (first) {
-      // If multiple matches, note it in detectedFrom
-      return {
-        ...first,
-        detectedFrom:
-          inferred.targets.length > 1
-            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
-            : first.detectedFrom,
-      };
-    }
+  const [first] = inferred.targets;
+  if (!first) {
+    return null;
   }
 
-  return null;
+  // If multiple matches, note it in detectedFrom
+  return {
+    ...first,
+    detectedFrom:
+      inferred.targets.length > 1
+        ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
+        : first.detectedFrom,
+  };
 }
 
 /**
@@ -652,8 +739,9 @@ export async function resolveOrgAndProject(
  *
  * Resolution priority:
  * 1. Positional argument
- * 2. Config defaults
- * 3. DSN auto-detection
+ * 2. SENTRY_ORG / SENTRY_PROJECT env vars
+ * 3. Config defaults
+ * 4. DSN auto-detection
  *
  * @param options - Resolution options with flag and cwd
  * @returns Resolved org, or null if resolution failed
@@ -668,13 +756,19 @@ export async function resolveOrg(
     return { org };
   }
 
-  // 2. Config defaults
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars) {
+    return { org: envVars.org, detectedFrom: envVars.detectedFrom };
+  }
+
+  // 3. Config defaults
   const defaultOrg = await getDefaultOrganization();
   if (defaultOrg) {
     return { org: defaultOrg };
   }
 
-  // 3. DSN auto-detection
+  // 4. DSN auto-detection
   try {
     return await resolveOrgFromDsn(cwd);
   } catch {
@@ -699,13 +793,21 @@ export async function resolveOrg(
 export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
-  disambiguationExample?: string
+  disambiguationExample?: string,
+  stderr?: { write(s: string): void }
 ): Promise<{ org: string; project: string }> {
   const found = await findProjectsBySlug(projectSlug);
   if (found.length === 0) {
-    throw new ContextError(`Project "${projectSlug}"`, usageHint, [
-      "Check that you have access to a project with this slug",
-    ]);
+    throw new ResolutionError(
+      `Project "${projectSlug}"`,
+      "not found",
+      usageHint,
+      [
+        isAllDigits(projectSlug)
+          ? "No project with this ID was found — check the ID or use the project slug instead"
+          : "Check that you have access to a project with this slug",
+      ]
+    );
   }
   if (found.length > 1) {
     const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
@@ -718,8 +820,189 @@ export async function resolveProjectBySlug(
     );
   }
   const foundProject = found[0] as (typeof found)[0];
+
+  // When a numeric project ID resolved successfully, hint about using the slug
+  if (stderr && isAllDigits(projectSlug) && foundProject.slug !== projectSlug) {
+    stderr.write(
+      warning(
+        `Tip: Resolved project ID ${projectSlug} to ${foundProject.orgSlug}/${foundProject.slug}. ` +
+          "Use the slug form for faster lookups.\n"
+      )
+    );
+  }
+
   return {
     org: foundProject.orgSlug,
     project: foundProject.slug,
   };
+}
+
+/** Result of resolving organizations to fetch from for listing commands */
+export type OrgListResolution = {
+  /** Organization slugs to list from */
+  orgs: string[];
+  /** Optional multi-org footer to display after listing */
+  footer?: string;
+  /** Number of self-hosted DSNs that could not be resolved */
+  skippedSelfHosted?: number;
+};
+
+/**
+ * Resolve which organizations to fetch data from for listing commands (team, repo).
+ *
+ * Resolution priority:
+ * 1. Explicit org flag → use that single org
+ * 2. Config default org → use that org
+ * 3. DSN auto-detection → extract unique orgs from detected targets
+ * 4. No context found → empty list (caller must decide to show all orgs or error)
+ *
+ * @param orgFlag - Explicit org slug from CLI positional arg, or undefined
+ * @param cwd - Current working directory for DSN detection
+ * @returns Orgs to fetch and optional display metadata
+ */
+export async function resolveOrgsForListing(
+  orgFlag: string | undefined,
+  cwd: string
+): Promise<OrgListResolution> {
+  if (orgFlag) {
+    return { orgs: [orgFlag] };
+  }
+
+  // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
+  const envVars = resolveFromEnvVars();
+  if (envVars) {
+    return { orgs: [envVars.org] };
+  }
+
+  const defaultOrg = await getDefaultOrganization();
+  if (defaultOrg) {
+    return { orgs: [defaultOrg] };
+  }
+
+  try {
+    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
+      cwd,
+    });
+
+    if (targets.length > 0) {
+      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      return { orgs: uniqueOrgs, footer, skippedSelfHosted };
+    }
+
+    return { orgs: [], skippedSelfHosted };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+  }
+
+  return { orgs: [] };
+}
+
+/** Resolved org and project returned by `resolveOrgProjectTarget` */
+export type ResolvedOrgProject = {
+  /** Organization slug */
+  org: string;
+  /** Project slug */
+  project: string;
+};
+
+/**
+ * Resolve an org/project target for commands that require a single project
+ * (trace list, log list). Rejects `org-all` mode since these commands require
+ * a specific project.
+ *
+ * Handles:
+ * - explicit `<org>/<project>` → use directly
+ * - project-search `<project>` → find project across all orgs
+ * - auto-detect → use DSN detection or config defaults
+ * - org-all `<org>/` → throw ContextError asking for a specific project
+ *
+ * @param parsed - Parsed org/project argument
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "trace list")
+ * @returns Resolved org and project slugs
+ * @throws {ContextError} When target cannot be resolved or org-all is used
+ */
+export async function resolveOrgProjectTarget(
+  parsed: ParsedOrgProject,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgProject> {
+  const usageHint = `sentry ${commandName} <org>/<project>`;
+
+  switch (parsed.type) {
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
+
+    case "org-all":
+      throw new ContextError(
+        "Project",
+        `Please specify a project: sentry ${commandName} ${parsed.org}/<project>`
+      );
+
+    case "project-search": {
+      const matches = await findProjectsBySlug(parsed.projectSlug);
+
+      if (matches.length === 0) {
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "not found",
+          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          ["No project with this slug found in any accessible organization"]
+        );
+      }
+
+      if (matches.length > 1) {
+        const options = matches
+          .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
+          .join("\n");
+        throw new ResolutionError(
+          `Project '${parsed.projectSlug}'`,
+          "is ambiguous",
+          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          [`Found in ${matches.length} organizations. Specify one:\n${options}`]
+        );
+      }
+
+      const match = matches[0] as (typeof matches)[number];
+      return { org: match.orgSlug, project: match.slug };
+    }
+
+    case "auto-detect": {
+      const resolved = await resolveOrgAndProject({
+        cwd,
+        usageHint,
+      });
+      if (!resolved) {
+        throw new ContextError("Organization and project", usageHint);
+      }
+      return { org: resolved.org, project: resolved.project };
+    }
+
+    default: {
+      const _exhaustiveCheck: never = parsed;
+      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
+    }
+  }
+}
+
+/**
+ * Resolve an org/project target from a raw CLI argument string for commands
+ * that require a single project (trace list, log list).
+ *
+ * Convenience wrapper around `resolveOrgProjectTarget` that also calls
+ * `parseOrgProjectArg` on the raw string argument.
+ *
+ * @param target - Raw CLI argument string (or undefined for auto-detect)
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "trace list")
+ * @returns Resolved org and project slugs
+ */
+export function resolveOrgProjectFromArg(
+  target: string | undefined,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgProject> {
+  return resolveOrgProjectTarget(parseOrgProjectArg(target), cwd, commandName);
 }

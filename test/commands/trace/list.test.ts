@@ -17,49 +17,45 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import {
-  listCommand,
-  parseSort,
-  resolveTraceTarget,
-  validateLimit,
-} from "../../../src/commands/trace/list.js";
+import { listCommand, parseSort } from "../../../src/commands/trace/list.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { validateLimit } from "../../../src/lib/arg-parsing.js";
+import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TransactionListItem } from "../../../src/types/sentry.js";
 
 // ============================================================================
-// validateLimit
+// validateLimit (shared utility from arg-parsing.ts)
 // ============================================================================
 
 describe("validateLimit", () => {
   test("returns number for valid value", () => {
-    expect(validateLimit("1")).toBe(1);
-    expect(validateLimit("500")).toBe(500);
-    expect(validateLimit("1000")).toBe(1000);
+    expect(validateLimit("1", 1, 1000)).toBe(1);
+    expect(validateLimit("500", 1, 1000)).toBe(500);
+    expect(validateLimit("1000", 1, 1000)).toBe(1000);
   });
 
   test("returns number for boundary values", () => {
-    expect(validateLimit("1")).toBe(1);
-    expect(validateLimit("1000")).toBe(1000);
+    expect(validateLimit("1", 1, 1000)).toBe(1);
+    expect(validateLimit("1000", 1, 1000)).toBe(1000);
   });
 
   test("throws for value below minimum", () => {
-    expect(() => validateLimit("0")).toThrow("must be between");
-    expect(() => validateLimit("-1")).toThrow("must be between");
+    expect(() => validateLimit("0", 1, 1000)).toThrow("must be between");
+    expect(() => validateLimit("-1", 1, 1000)).toThrow("must be between");
   });
 
   test("throws for value above maximum", () => {
-    expect(() => validateLimit("1001")).toThrow("must be between");
-    expect(() => validateLimit("9999")).toThrow("must be between");
+    expect(() => validateLimit("1001", 1, 1000)).toThrow("must be between");
+    expect(() => validateLimit("9999", 1, 1000)).toThrow("must be between");
   });
 
   test("throws for non-numeric value", () => {
-    expect(() => validateLimit("abc")).toThrow("must be between");
-    expect(() => validateLimit("")).toThrow("must be between");
+    expect(() => validateLimit("abc", 1, 1000)).toThrow("must be between");
+    expect(() => validateLimit("", 1, 1000)).toThrow("must be between");
   });
 });
 
@@ -84,10 +80,10 @@ describe("parseSort", () => {
 });
 
 // ============================================================================
-// resolveTraceTarget
+// resolveOrgProjectFromArg (via shared resolve-target.ts)
 // ============================================================================
 
-describe("resolveTraceTarget", () => {
+describe("resolveOrgProjectFromArg", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
@@ -102,21 +98,29 @@ describe("resolveTraceTarget", () => {
   });
 
   test("returns explicit org/project directly", async () => {
-    const result = await resolveTraceTarget("my-org/my-project", "/tmp");
+    const result = await resolveTarget.resolveOrgProjectFromArg(
+      "my-org/my-project",
+      "/tmp",
+      "trace list"
+    );
     expect(result).toEqual({ org: "my-org", project: "my-project" });
     expect(findProjectsBySlugSpy).not.toHaveBeenCalled();
     expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
   });
 
   test("throws for org-all target (org/ without project)", async () => {
-    await expect(resolveTraceTarget("my-org/", "/tmp")).rejects.toThrow(
-      ContextError
-    );
+    await expect(
+      resolveTarget.resolveOrgProjectFromArg("my-org/", "/tmp", "trace list")
+    ).rejects.toThrow(ContextError);
   });
 
   test("throws ContextError with project hint for org-all", async () => {
     try {
-      await resolveTraceTarget("my-org/", "/tmp");
+      await resolveTarget.resolveOrgProjectFromArg(
+        "my-org/",
+        "/tmp",
+        "trace list"
+      );
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ContextError);
@@ -129,16 +133,24 @@ describe("resolveTraceTarget", () => {
       { slug: "frontend", orgSlug: "acme", id: "1", name: "Frontend" },
     ] as ProjectWithOrg[]);
 
-    const result = await resolveTraceTarget("frontend", "/tmp");
+    const result = await resolveTarget.resolveOrgProjectFromArg(
+      "frontend",
+      "/tmp",
+      "trace list"
+    );
     expect(result).toEqual({ org: "acme", project: "frontend" });
   });
 
   test("throws when no project found", async () => {
     findProjectsBySlugSpy.mockResolvedValue([]);
 
-    await expect(resolveTraceTarget("nonexistent", "/tmp")).rejects.toThrow(
-      ContextError
-    );
+    await expect(
+      resolveTarget.resolveOrgProjectFromArg(
+        "nonexistent",
+        "/tmp",
+        "trace list"
+      )
+    ).rejects.toThrow(ResolutionError);
   });
 
   test("throws when multiple projects found", async () => {
@@ -148,11 +160,17 @@ describe("resolveTraceTarget", () => {
     ] as ProjectWithOrg[]);
 
     try {
-      await resolveTraceTarget("frontend", "/tmp");
+      await resolveTarget.resolveOrgProjectFromArg(
+        "frontend",
+        "/tmp",
+        "trace list"
+      );
       expect.unreachable("Should have thrown");
     } catch (error) {
-      expect(error).toBeInstanceOf(ContextError);
-      expect((error as ContextError).message).toContain("2 organizations");
+      expect(error).toBeInstanceOf(ResolutionError);
+      // Message says "is ambiguous", not "is required"
+      expect((error as ResolutionError).message).toContain("is ambiguous");
+      expect((error as ResolutionError).message).toContain("2 organizations");
     }
   });
 
@@ -162,7 +180,11 @@ describe("resolveTraceTarget", () => {
       project: "detected-project",
     });
 
-    const result = await resolveTraceTarget(undefined, "/tmp");
+    const result = await resolveTarget.resolveOrgProjectFromArg(
+      undefined,
+      "/tmp",
+      "trace list"
+    );
     expect(result).toEqual({
       org: "detected-org",
       project: "detected-project",
@@ -176,9 +198,9 @@ describe("resolveTraceTarget", () => {
   test("throws when auto-detect returns null", async () => {
     resolveOrgAndProjectSpy.mockResolvedValue(null);
 
-    await expect(resolveTraceTarget(undefined, "/tmp")).rejects.toThrow(
-      ContextError
-    );
+    await expect(
+      resolveTarget.resolveOrgProjectFromArg(undefined, "/tmp", "trace list")
+    ).rejects.toThrow(ContextError);
   });
 });
 

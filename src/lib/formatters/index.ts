@@ -11,4 +11,5 @@ export * from "./json.js";
 export * from "./log.js";
 export * from "./output.js";
 export * from "./seer.js";
+export * from "./table.js";
 export * from "./trace.js";

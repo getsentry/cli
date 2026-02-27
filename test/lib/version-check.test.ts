@@ -3,6 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { setReleaseChannel } from "../../src/lib/db/release-channel.js";
 import {
   getVersionCheckInfo,
   setVersionCheckInfo,
@@ -118,6 +119,27 @@ describe("getUpdateNotification", () => {
     expect(notification).toContain("Update available:");
     expect(notification).toContain("99.0.0");
     expect(notification).toContain("sentry cli upgrade");
+  });
+
+  test("uses 'New nightly available:' label when on nightly channel", () => {
+    setReleaseChannel("nightly");
+    setVersionCheckInfo("99.0.0");
+    const notification = getUpdateNotification();
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("New nightly available:");
+    expect(notification).not.toContain("Update available:");
+    expect(notification).toContain("99.0.0");
+  });
+
+  test("uses 'Update available:' label when on stable channel", () => {
+    setReleaseChannel("stable");
+    setVersionCheckInfo("99.0.0");
+    const notification = getUpdateNotification();
+
+    expect(notification).not.toBeNull();
+    expect(notification).toContain("Update available:");
+    expect(notification).not.toContain("New nightly available:");
   });
 });
 

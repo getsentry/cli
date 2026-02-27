@@ -4,11 +4,15 @@
  * View detailed information about a distributed trace.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
-import { parseOrgProjectArg, spansFlag } from "../../lib/arg-parsing.js";
+import {
+  parseOrgProjectArg,
+  parseSlashSeparatedArg,
+  spansFlag,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
   computeTraceSummary,
@@ -55,8 +59,12 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    // Single arg - must be trace ID
-    return { traceId: first, targetArg: undefined };
+    const { id: traceId, targetArg } = parseSlashSeparatedArg(
+      first,
+      "Trace ID",
+      USAGE_HINT
+    );
+    return { traceId, targetArg };
   }
 
   const second = args[1];
@@ -162,7 +170,8 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`
+          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`,
+          this.stderr
         );
         break;
 

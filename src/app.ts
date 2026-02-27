@@ -5,9 +5,11 @@ import {
   buildApplication,
   buildRouteMap,
   text_en,
+  UnexpectedPositionalError,
 } from "@stricli/core";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
+import { whoamiCommand } from "./commands/auth/whoami.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
@@ -27,8 +29,27 @@ import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
 import { listCommand as traceListCommand } from "./commands/trace/list.js";
 import { CLI_VERSION } from "./lib/constants.js";
-import { AuthError, CliError, getExitCode } from "./lib/errors.js";
-import { error as errorColor } from "./lib/formatters/colors.js";
+import {
+  AuthError,
+  CliError,
+  getExitCode,
+  stringifyUnknown,
+} from "./lib/errors.js";
+import { error as errorColor, warning } from "./lib/formatters/colors.js";
+
+/**
+ * Plural alias → singular route name mapping.
+ * Used to suggest the correct command when users type e.g. `sentry projects view cli`.
+ */
+const PLURAL_TO_SINGULAR: Record<string, string> = {
+  issues: "issue",
+  orgs: "org",
+  projects: "project",
+  repos: "repo",
+  teams: "team",
+  logs: "log",
+  traces: "trace",
+};
 
 /** Top-level route map containing all CLI commands */
 export const routes = buildRouteMap({
@@ -53,6 +74,7 @@ export const routes = buildRouteMap({
     teams: teamListCommand,
     logs: logListCommand,
     traces: traceListCommand,
+    whoami: whoamiCommand,
   },
   defaultCommand: "help",
   docs: {
@@ -72,6 +94,27 @@ export const routes = buildRouteMap({
  */
 const customText: ApplicationText = {
   ...text_en,
+  exceptionWhileParsingArguments: (
+    exc: unknown,
+    ansiColor: boolean
+  ): string => {
+    // When a plural alias receives extra positional args (e.g. `sentry projects view cli`),
+    // Stricli throws UnexpectedPositionalError because the list command only accepts 1 arg.
+    // Detect this and suggest the singular form.
+    if (exc instanceof UnexpectedPositionalError) {
+      const args = process.argv.slice(2);
+      const firstArg = args[0];
+      if (firstArg && firstArg in PLURAL_TO_SINGULAR) {
+        const singular = PLURAL_TO_SINGULAR[firstArg];
+        const rest = args.slice(1).join(" ");
+        const hint = ansiColor
+          ? warning(`\nDid you mean: sentry ${singular} ${rest}\n`)
+          : `\nDid you mean: sentry ${singular} ${rest}\n`;
+        return `${text_en.exceptionWhileParsingArguments(exc, ansiColor)}${hint}`;
+      }
+    }
+    return text_en.exceptionWhileParsingArguments(exc, ansiColor);
+  },
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
     // Re-throw AuthError("not_authenticated") for auto-login flow in bin.ts
     // Don't capture to Sentry - it's an expected state (user not logged in), not an error
@@ -90,7 +133,7 @@ const customText: ApplicationText = {
     if (exc instanceof Error) {
       return `Unexpected error: ${exc.stack ?? exc.message}`;
     }
-    return `Unexpected error: ${String(exc)}`;
+    return `Unexpected error: ${stringifyUnknown(exc)}`;
   },
 };
 

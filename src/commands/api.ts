@@ -5,9 +5,10 @@
  * Similar to 'gh api' for GitHub.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { rawApiRequest } from "../lib/api-client.js";
+import { buildCommand } from "../lib/command.js";
+import { ValidationError } from "../lib/errors.js";
 import type { Writer } from "../types/index.js";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -296,11 +297,66 @@ export function setNestedValue(
 }
 
 /**
+ * Auto-correct fields that use ':' instead of '=' as the separator, and warn
+ * the user on stderr.
+ *
+ * This recovers from a common mistake where users write Sentry search-query
+ * style syntax (`-F status:resolved`) instead of the required key=value form
+ * (`-F status=resolved`).  The correction is safe to apply unconditionally
+ * because this function is only called for fields that have already been
+ * confirmed to contain no '=' — at that point the request would fail anyway.
+ *
+ * Splitting on the *first* ':' is intentional so that values that themselves
+ * contain colons (e.g. ISO timestamps, URLs) are preserved intact:
+ *   `since:2026-02-25T11:20:00` → key=`since`, value=`2026-02-25T11:20:00`
+ *
+ * Fields with no ':' (truly uncorrectable) are returned unchanged so that the
+ * downstream parser can throw its normal error.
+ *
+ * @param fields - Raw field strings from --field or --raw-field flags
+ * @param stderr - Writer to emit warnings on (command's stderr)
+ * @returns New array with corrected field strings (or the original array if no
+ *   corrections were needed)
+ * @internal Exported for testing
+ */
+export function normalizeFields(
+  fields: string[] | undefined,
+  stderr: Writer
+): string[] | undefined {
+  if (!fields || fields.length === 0) {
+    return fields;
+  }
+
+  return fields.map((field) => {
+    // Already valid: has '=' or is the empty-array syntax "key[]"
+    if (field.includes("=") || field.endsWith("[]")) {
+      return field;
+    }
+
+    const colonIndex = field.indexOf(":");
+    // ':' must exist and not be the very first character (that would make an
+    // empty key, which the parser rejects regardless)
+    if (colonIndex > 0) {
+      const key = field.substring(0, colonIndex);
+      const value = field.substring(colonIndex + 1);
+      const corrected = `${key}=${value}`;
+      stderr.write(
+        `warning: field '${field}' looks like it uses ':' instead of '=' — interpreting as '${corrected}'\n`
+      );
+      return corrected;
+    }
+
+    // No correction possible; let the downstream parser throw.
+    return field;
+  });
+}
+
+/**
  * Process a single field string and set its value in the result object.
  * @param result - Target object to modify
  * @param field - Field string in "key=value" or "key[]" format
  * @param raw - If true, keep value as string (no JSON parsing)
- * @throws {Error} When field format is invalid
+ * @throws {ValidationError} When field format is invalid
  */
 function processField(
   result: Record<string, unknown>,
@@ -315,7 +371,10 @@ function processField(
       setNestedValue(result, field, undefined);
       return;
     }
-    throw new Error(`Invalid field format: ${field}. Expected key=value`);
+    throw new ValidationError(
+      `Invalid field format: ${field}. Expected key=value`,
+      "field"
+    );
   }
 
   const key = field.substring(0, eqIndex);
@@ -377,14 +436,17 @@ export function buildQueryParams(
   for (const field of fields) {
     const eqIndex = field.indexOf("=");
     if (eqIndex === -1) {
-      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+      throw new ValidationError(
+        `Invalid field format: ${field}. Expected key=value`,
+        "field"
+      );
     }
 
     const key = field.substring(0, eqIndex);
 
     // Validate key format (same validation as parseFieldKey for consistency)
     if (!FIELD_KEY_REGEX.test(key)) {
-      throw new Error(`Invalid field key format: ${key}`);
+      throw new ValidationError(`Invalid field key format: ${key}`, "field");
     }
 
     const rawValue = field.substring(eqIndex + 1);
@@ -409,7 +471,7 @@ export function buildQueryParams(
  *
  * @param fields - Array of "key=value" strings
  * @returns Record suitable for URLSearchParams
- * @throws {Error} When field doesn't contain "=" or key is empty
+ * @throws {ValidationError} When field doesn't contain "=" or key is empty
  * @internal Exported for testing
  */
 export function buildRawQueryParams(
@@ -420,12 +482,18 @@ export function buildRawQueryParams(
   for (const field of fields) {
     const eqIndex = field.indexOf("=");
     if (eqIndex === -1) {
-      throw new Error(`Invalid field format: ${field}. Expected key=value`);
+      throw new ValidationError(
+        `Invalid field format: ${field}. Expected key=value`,
+        "field"
+      );
     }
 
     const key = field.substring(0, eqIndex);
     if (key === "") {
-      throw new Error("Invalid field key format: key cannot be empty");
+      throw new ValidationError(
+        "Invalid field key format: key cannot be empty",
+        "field"
+      );
     }
 
     const value = field.substring(eqIndex + 1);
@@ -796,7 +864,7 @@ export const apiCommand = buildCommand({
     flags: ApiFlags,
     endpoint: string
   ): Promise<void> {
-    const { stdout, stdin } = this;
+    const { stdout, stderr, stdin } = this;
 
     // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -810,12 +878,13 @@ export const apiCommand = buildCommand({
       // --input takes precedence for body content
       body = await buildBodyFromInput(flags.input, stdin);
     } else {
+      // Auto-correct ':'-separated fields (e.g. -F status:resolved → -F status=resolved)
+      // before routing to body or params so the correction applies everywhere.
+      const field = normalizeFields(flags.field, stderr);
+      const rawField = normalizeFields(flags["raw-field"], stderr);
+
       // Route fields to body or params based on HTTP method
-      const options = prepareRequestOptions(
-        flags.method,
-        flags.field,
-        flags["raw-field"]
-      );
+      const options = prepareRequestOptions(flags.method, field, rawField);
       body = options.body;
       params = options.params;
     }

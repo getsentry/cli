@@ -16,10 +16,16 @@ import { installCompletions } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
+  parseReleaseChannel,
+  type ReleaseChannel,
+  setReleaseChannel,
+} from "../../lib/db/release-channel.js";
+import {
   addToGitHubPath,
   addToPath,
   detectShell,
   getPathCommand,
+  isBashAvailable,
   isInPath,
   type ShellInfo,
 } from "../../lib/shell.js";
@@ -31,6 +37,7 @@ import {
 type SetupFlags = {
   readonly install: boolean;
   readonly method?: InstallationMethod;
+  readonly channel?: ReleaseChannel;
   readonly "no-modify-path": boolean;
   readonly "no-completions": boolean;
   readonly "no-agent-skills": boolean;
@@ -118,30 +125,81 @@ async function handlePathModification(
 }
 
 /**
+ * Attempt to install bash completions as a fallback for unsupported shells.
+ *
+ * Many custom shells (xonsh, nushell, etc.) can load bash completions,
+ * so this is a useful fallback when the user's shell isn't directly supported.
+ *
+ * @param pathEnv - The PATH to search for bash, forwarded from the process env.
+ */
+async function tryBashCompletionFallback(
+  homeDir: string,
+  xdgDataHome: string | undefined,
+  pathEnv: string | undefined
+): Promise<string | null> {
+  if (!isBashAvailable(pathEnv)) {
+    return null;
+  }
+
+  const fallback = await installCompletions("bash", homeDir, xdgDataHome);
+  if (!fallback) {
+    // Defensive: installCompletions returns null only if the shell type has no
+    // completion script or path configured. "bash" is always supported, but
+    // we guard here in case that changes in future.
+    return null;
+  }
+  const action = fallback.created ? "Installed" : "Updated";
+  return `      ${action} bash completions as a fallback: ${fallback.path}`;
+}
+
+/**
  * Handle shell completion installation.
+ *
+ * For unsupported shells (xonsh, nushell, etc.), falls back to installing
+ * bash completions if bash is available on the system. Uses the provided
+ * PATH env to check for bash so the call is testable without side effects.
  */
 async function handleCompletions(
   shell: ShellInfo,
   homeDir: string,
   xdgDataHome: string | undefined,
-  log: Logger
-): Promise<void> {
+  pathEnv: string | undefined
+): Promise<string[]> {
   const location = await installCompletions(shell.type, homeDir, xdgDataHome);
 
   if (location) {
     const action = location.created ? "Installed to" : "Updated";
-    log(`Completions: ${action} ${location.path}`);
+    const lines = [`Completions: ${action} ${location.path}`];
 
     // Zsh may need fpath hint
     if (shell.type === "zsh") {
       const completionDir = dirname(location.path);
-      log(
+      lines.push(
         `      You may need to add to .zshrc: fpath=(${completionDir} $fpath)`
       );
     }
-  } else if (shell.type !== "sh" && shell.type !== "ash") {
-    log(`Completions: Not supported for ${shell.type} shell`);
+    return lines;
   }
+
+  // sh/ash are minimal POSIX shells — completions aren't expected
+  if (shell.type === "sh" || shell.type === "ash") {
+    return [];
+  }
+
+  const fallbackMsg = await tryBashCompletionFallback(
+    homeDir,
+    xdgDataHome,
+    pathEnv
+  );
+
+  if (fallbackMsg) {
+    return [
+      `Completions: Your shell (${shell.name}) is not directly supported`,
+      fallbackMsg,
+    ];
+  }
+
+  return [`Completions: Not supported for ${shell.name} shell`];
 }
 
 /**
@@ -175,6 +233,122 @@ function printWelcomeMessage(
   log("  sentry --help      See all available commands");
   log("");
   log("https://cli.sentry.dev");
+}
+
+type WarnLogger = (step: string, error: unknown) => void;
+
+/**
+ * Run a best-effort setup step, logging a warning on failure instead of aborting.
+ *
+ * Post-install configuration steps (recording install info, shell completions,
+ * agent skills) are non-essential. Permission errors are common when Homebrew
+ * runs post-install (e.g. root-owned ~/.sentry from a previous `sudo brew install`,
+ * restricted ~/.local/share). The binary is already installed — these are
+ * nice-to-have side effects that should never crash setup.
+ */
+async function bestEffort(
+  stepName: string,
+  fn: () => void | Promise<void>,
+  warn: WarnLogger
+): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    warn(stepName, error);
+  }
+}
+
+/** Options for configuration steps, grouped to stay within parameter limits */
+type ConfigStepOptions = {
+  readonly flags: SetupFlags;
+  readonly binaryPath: string;
+  readonly binaryDir: string;
+  readonly homeDir: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly log: Logger;
+  readonly warn: WarnLogger;
+};
+
+/**
+ * Run all best-effort configuration steps after binary installation.
+ *
+ * Each step is independently guarded so a failure in one (e.g. DB permission
+ * error) doesn't prevent the others from running.
+ */
+async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
+  const { flags, binaryPath, binaryDir, homeDir, env, log, warn } = opts;
+  const shell = detectShell(env.SHELL, homeDir, env.XDG_CONFIG_HOME);
+
+  // 1. Record installation info
+  const method = flags.method;
+  if (method) {
+    await bestEffort(
+      "Recording installation info",
+      () => {
+        setInstallInfo({
+          method,
+          path: binaryPath,
+          version: CLI_VERSION,
+        });
+        if (!flags.install) {
+          log(`Recorded installation method: ${method}`);
+        }
+      },
+      warn
+    );
+  }
+
+  // 1b. Persist release channel (set by install script or upgrade command)
+  const channel = flags.channel;
+  if (channel) {
+    await bestEffort(
+      "Recording release channel",
+      () => {
+        setReleaseChannel(channel);
+        if (!flags.install) {
+          log(`Recorded release channel: ${channel}`);
+        }
+      },
+      warn
+    );
+  }
+
+  // 2. Handle PATH modification
+  if (!flags["no-modify-path"]) {
+    await bestEffort(
+      "PATH modification",
+      () => handlePathModification(binaryDir, shell, env, log),
+      warn
+    );
+  }
+
+  // 3. Install shell completions
+  if (!flags["no-completions"]) {
+    await bestEffort(
+      "Shell completions",
+      async () => {
+        const completionLines = await handleCompletions(
+          shell,
+          homeDir,
+          env.XDG_DATA_HOME,
+          env.PATH
+        );
+        for (const line of completionLines) {
+          log(line);
+        }
+      },
+      warn
+    );
+  }
+
+  // 4. Install agent skills (auto-detected, silent when no agent found)
+  if (!flags["no-agent-skills"]) {
+    await bestEffort(
+      "Agent skills",
+      () => handleAgentSkills(homeDir, log),
+      warn
+    );
+  }
 }
 
 export const setupCommand = buildCommand({
@@ -212,6 +386,13 @@ export const setupCommand = buildCommand({
         placeholder: "method",
         optional: true,
       },
+      channel: {
+        kind: "parsed",
+        parse: parseReleaseChannel,
+        brief: "Release channel to persist (stable or nightly)",
+        placeholder: "channel",
+        optional: true,
+      },
       "no-modify-path": {
         kind: "boolean",
         brief: "Skip PATH modification",
@@ -236,12 +417,18 @@ export const setupCommand = buildCommand({
   },
   async func(this: SentryContext, flags: SetupFlags): Promise<void> {
     const { process, homeDir } = this;
-    const { stdout } = process;
+    const { stdout, stderr } = process;
 
     const log: Logger = (msg: string) => {
       if (!flags.quiet) {
         stdout.write(`${msg}\n`);
       }
+    };
+
+    const warn: WarnLogger = (step, error) => {
+      const msg =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      stderr.write(`Warning: ${step} failed: ${msg}\n`);
     };
 
     let binaryPath = process.execPath;
@@ -259,38 +446,16 @@ export const setupCommand = buildCommand({
       binaryDir = result.binaryDir;
     }
 
-    const shell = detectShell(
-      process.env.SHELL,
+    // 1–4. Run best-effort configuration steps
+    await runConfigurationSteps({
+      flags,
+      binaryPath,
+      binaryDir,
       homeDir,
-      process.env.XDG_CONFIG_HOME
-    );
-
-    // 1. Record installation info
-    if (flags.method) {
-      setInstallInfo({
-        method: flags.method,
-        path: binaryPath,
-        version: CLI_VERSION,
-      });
-      if (!flags.install) {
-        log(`Recorded installation method: ${flags.method}`);
-      }
-    }
-
-    // 2. Handle PATH modification
-    if (!flags["no-modify-path"]) {
-      await handlePathModification(binaryDir, shell, process.env, log);
-    }
-
-    // 3. Install shell completions
-    if (!flags["no-completions"]) {
-      await handleCompletions(shell, homeDir, process.env.XDG_DATA_HOME, log);
-    }
-
-    // 4. Install agent skills (auto-detected, silent when no agent found)
-    if (!flags["no-agent-skills"]) {
-      await handleAgentSkills(homeDir, log);
-    }
+      env: process.env,
+      log,
+      warn,
+    });
 
     // 5. Print welcome message (fresh install) or completion message
     if (!flags.quiet) {

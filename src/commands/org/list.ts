@@ -6,7 +6,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { listOrganizations } from "../../lib/api-client.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
+import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import {
@@ -15,6 +15,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { buildListLimitFlag, LIST_JSON_FLAG } from "../../lib/list-command.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -69,19 +70,11 @@ export const listCommand = buildCommand({
   },
   parameters: {
     flags: {
-      limit: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Maximum number of organizations to list",
-        // Stricli requires string defaults (raw CLI input); numberParser converts to number
-        default: "30",
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output JSON",
-        default: false,
-      },
+      limit: buildListLimitFlag("organizations"),
+      json: LIST_JSON_FLAG,
     },
+    // Only -n for --limit; no -c since org list has no --cursor flag
+    aliases: { n: "limit" },
   },
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
     const { stdout } = this;

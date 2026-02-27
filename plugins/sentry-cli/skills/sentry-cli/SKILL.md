@@ -15,6 +15,8 @@ The CLI must be installed and authenticated before use.
 
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
+brew install getsentry/tools/sentry
 
 # Or install via npm/pnpm/bun
 npm install -g sentry
@@ -94,6 +96,13 @@ sentry auth status
 
 Print the stored authentication token
 
+#### `sentry auth whoami`
+
+Show the currently authenticated user
+
+**Flags:**
+- `--json - Output as JSON`
+
 ### Org
 
 Work with Sentry organizations
@@ -103,7 +112,7 @@ Work with Sentry organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 **Examples:**
@@ -136,7 +145,7 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
-#### `sentry project list <target>`
+#### `sentry project list <org/project>`
 
 List projects
 
@@ -159,7 +168,7 @@ sentry project list <org-slug>
 sentry project list --platform javascript
 ```
 
-#### `sentry project view <target>`
+#### `sentry project view <org/project>`
 
 View details of a project
 
@@ -188,15 +197,17 @@ sentry project view my-org/frontend -w
 
 Manage Sentry issues
 
-#### `sentry issue list <target>`
+#### `sentry issue list <org/project>`
 
 List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `--json - Output as JSON`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
+- `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 **Examples:**
 
@@ -416,6 +427,7 @@ Configure shell integration
 **Flags:**
 - `--install - Install the binary from a temp location to the system path`
 - `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
+- `--channel <value> - Release channel to persist (stable or nightly)`
 - `--no-modify-path - Skip PATH modification`
 - `--no-completions - Skip shell completion installation`
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
@@ -427,31 +439,34 @@ Update the Sentry CLI to the latest version
 
 **Flags:**
 - `--check - Check for updates without installing`
-- `--method <value> - Installation method to use (curl, npm, pnpm, bun, yarn)`
+- `--force - Force upgrade even if already on the latest version`
+- `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 
 ### Repo
 
 Work with Sentry repositories
 
-#### `sentry repo list <org>`
+#### `sentry repo list <org/project>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Team
 
 Work with Sentry teams
 
-#### `sentry team list <org>`
+#### `sentry team list <org/project>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 
@@ -472,7 +487,7 @@ sentry team list --json
 
 View Sentry logs
 
-#### `sentry log list <target>`
+#### `sentry log list <org/project>`
 
 List logs from a project
 
@@ -552,7 +567,7 @@ sentry log list --json | jq '.[] | select(.level == "error")'
 
 View distributed traces
 
-#### `sentry trace list <target>`
+#### `sentry trace list <org/project>`
 
 List recent traces in a project
 
@@ -589,15 +604,17 @@ Initialize Sentry in your project
 
 List issues in a project
 
-#### `sentry issues <target>`
+#### `sentry issues <org/project>`
 
 List issues in a project
 
 **Flags:**
 - `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to return - (default: "10")`
+- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `--json - Output as JSON`
+- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
+- `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
 
 ### Orgs
 
@@ -608,14 +625,14 @@ List organizations
 List organizations
 
 **Flags:**
-- `--limit <value> - Maximum number of organizations to list - (default: "30")`
+- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
 
 ### Projects
 
 List projects
 
-#### `sentry projects <target>`
+#### `sentry projects <org/project>`
 
 List projects
 
@@ -629,31 +646,33 @@ List projects
 
 List repositories
 
-#### `sentry repos <org>`
+#### `sentry repos <org/project>`
 
 List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Teams
 
 List teams
 
-#### `sentry teams <org>`
+#### `sentry teams <org/project>`
 
 List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### Logs
 
 List logs from a project
 
-#### `sentry logs <target>`
+#### `sentry logs <org/project>`
 
 List logs from a project
 
@@ -667,7 +686,7 @@ List logs from a project
 
 List recent traces in a project
 
-#### `sentry traces <target>`
+#### `sentry traces <org/project>`
 
 List recent traces in a project
 
@@ -675,6 +694,17 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `--json - Output as JSON`
+
+### Whoami
+
+Show the currently authenticated user
+
+#### `sentry whoami`
+
+Show the currently authenticated user
+
+**Flags:**
 - `--json - Output as JSON`
 
 ## Output Formats

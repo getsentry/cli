@@ -4,11 +4,14 @@
  * View detailed information about a Sentry log entry.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getLog } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  parseOrgProjectArg,
+  parseSlashSeparatedArg,
+} from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
+import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
 import {
@@ -48,8 +51,12 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    // Single arg - must be log ID
-    return { logId: first, targetArg: undefined };
+    const { id: logId, targetArg } = parseSlashSeparatedArg(
+      first,
+      "Log ID",
+      USAGE_HINT
+    );
+    return { logId, targetArg };
   }
 
   const second = args[1];
@@ -153,7 +160,8 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry log view <org>/${parsed.projectSlug} ${logId}`
+          `sentry log view <org>/${parsed.projectSlug} ${logId}`,
+          this.stderr
         );
         break;
 

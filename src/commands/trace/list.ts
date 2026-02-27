@@ -4,18 +4,20 @@
  * List recent traces from Sentry projects.
  */
 
-import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, listTransactions } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { ContextError } from "../../lib/errors.js";
+import { listTransactions } from "../../lib/api-client.js";
+import { validateLimit } from "../../lib/arg-parsing.js";
 import {
   formatTraceRow,
   formatTracesHeader,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  buildListCommand,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
+import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -29,9 +31,6 @@ type SortValue = "date" | "duration";
 /** Accepted values for the --sort flag */
 const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
 
-/** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry trace list <org>/<project>";
-
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
 
@@ -41,18 +40,14 @@ const MIN_LIMIT = 1;
 /** Default number of traces to show */
 const DEFAULT_LIMIT = 20;
 
+/** Command name used in resolver error messages */
+const COMMAND_NAME = "trace list";
+
 /**
- * Validate that --limit value is within allowed range.
- *
- * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
- * @internal Exported for testing
+ * Parse --limit flag, delegating range validation to shared utility.
  */
-export function validateLimit(value: string): number {
-  const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
-    throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
-  }
-  return num;
+function parseLimit(value: string): number {
+  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
 }
 
 /**
@@ -70,92 +65,16 @@ export function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
-/** Resolved org and project for trace commands */
-type ResolvedTraceTarget = {
-  org: string;
-  project: string;
-};
-
-/**
- * Resolve org/project from parsed argument or auto-detection.
- *
- * Handles:
- * - explicit: "org/project" -> use directly
- * - project-search: "project" -> find project across all orgs
- * - auto-detect: no input -> use DSN detection or config defaults
- *
- * @throws {ContextError} When target cannot be resolved
- * @internal Exported for testing
- */
-export async function resolveTraceTarget(
-  target: string | undefined,
-  cwd: string
-): Promise<ResolvedTraceTarget> {
-  const parsed = parseOrgProjectArg(target);
-
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-
-    case "org-all":
-      throw new ContextError(
-        "Project",
-        `Please specify a project: sentry trace list ${parsed.org}/<project>`
-      );
-
-    case "project-search": {
-      const matches = await findProjectsBySlug(parsed.projectSlug);
-
-      if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry trace list <org>/${parsed.projectSlug}`
-        );
-      }
-
-      if (matches.length > 1) {
-        const options = matches
-          .map((m) => `  sentry trace list ${m.orgSlug}/${m.slug}`)
-          .join("\n");
-        throw new ContextError(
-          "Project",
-          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
-        );
-      }
-
-      // Safe: we checked matches.length === 1 above, so first element exists
-      const match = matches[0] as (typeof matches)[number];
-      return { org: match.orgSlug, project: match.slug };
-    }
-
-    case "auto-detect": {
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      return { org: resolved.org, project: resolved.project };
-    }
-
-    default: {
-      const _exhaustiveCheck: never = parsed;
-      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-    }
-  }
-}
-
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("trace", {
   docs: {
     brief: "List recent traces in a project",
     fullDescription:
       "List recent traces from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry trace list               # auto-detect from DSN or config\n" +
       "  sentry trace list <org>/<proj>  # explicit org and project\n" +
       "  sentry trace list <project>     # find project across all orgs\n\n" +
+      `${TARGET_PATTERN_NOTE}\n\n` +
       "Examples:\n" +
       "  sentry trace list                     # List last 10 traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
@@ -167,8 +86,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },
@@ -177,7 +96,7 @@ export const listCommand = buildCommand({
     flags: {
       limit: {
         kind: "parsed",
-        parse: validateLimit,
+        parse: parseLimit,
         brief: `Number of traces (${MIN_LIMIT}-${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
@@ -209,7 +128,11 @@ export const listCommand = buildCommand({
     const { stdout, cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
-    const { org, project } = await resolveTraceTarget(target, cwd);
+    const { org, project } = await resolveOrgProjectFromArg(
+      target,
+      cwd,
+      COMMAND_NAME
+    );
     setContext([org], [project]);
 
     const traces = await listTransactions(org, project, {

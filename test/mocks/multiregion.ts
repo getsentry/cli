@@ -204,7 +204,14 @@ function createControlSiloRoutes(
   options: MultiRegionOptions
 ): MockRoute[] {
   const routes: MockRoute[] = [
-    // User info (always available on control silo)
+    // Auth / current user via /auth/ endpoint (works with all token types)
+    {
+      method: "GET",
+      path: "/api/0/auth/",
+      response: userFixture,
+    },
+
+    // User info via legacy /users/me/ endpoint (kept for backward compatibility)
     {
       method: "GET",
       path: "/api/0/users/me/",

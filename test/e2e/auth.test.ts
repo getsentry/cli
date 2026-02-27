@@ -102,6 +102,46 @@ describe("sentry auth login --token", () => {
   });
 });
 
+describe("sentry auth whoami", () => {
+  test("requires authentication", async () => {
+    const result = await ctx.run(["auth", "whoami"]);
+
+    const output = result.stdout + result.stderr;
+    expect(output).toMatch(/not authenticated/i);
+    expect(result.exitCode).toBe(1);
+  });
+
+  test("shows current user identity", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["auth", "whoami"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("test@example.com");
+  });
+
+  test("supports --json output", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["auth", "whoami", "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.id).toBe("12345");
+    expect(json.email).toBe("test@example.com");
+    expect(json.username).toBe("testuser");
+  });
+
+  test("sentry whoami top-level alias works", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run(["whoami"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("test@example.com");
+  });
+});
+
 describe("sentry auth logout", () => {
   test(
     "clears stored auth",

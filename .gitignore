@@ -17,6 +17,7 @@ coverage
 
 # test artifacts
 .test-tmp
+*.junit.xml
 
 # logs
 logs
@@ -42,8 +43,14 @@ docs/dist
 docs/node_modules
 docs/.astro
 
+# local planning notes (not for version control)
+.plans
+
 # IntelliJ based IDEs
 .idea
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# OpenCode
+.opencode/

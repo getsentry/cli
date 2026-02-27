@@ -5,6 +5,8 @@
  * Follows gh cli patterns for alignment and presentation.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import prettyMs from "pretty-ms";
 import type {
   Breadcrumb,
@@ -313,6 +315,52 @@ const COL_SEEN = 10;
 /** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
 const COL_FIX = 10;
 
+/** Quantifier suffixes indexed by groups of 3 digits (K=10^3, M=10^6, …, E=10^18) */
+const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
+
+/**
+ * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
+ * Uses K/M/B/T/P/E suffixes up to 10^18 (exa).
+ *
+ * The decimal is only shown when the rounded value is < 100 (e.g. "12.3K",
+ * "1.5M" but not "100M"). The result is always exactly COL_COUNT chars wide.
+ *
+ * Note: `Number(raw)` loses precision above `Number.MAX_SAFE_INTEGER`
+ * (~9P / 9×10^15), which is far beyond any realistic Sentry event count.
+ *
+ * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
+ */
+function abbreviateCount(raw: string): string {
+  const n = Number(raw);
+  if (Number.isNaN(n)) {
+    // Non-numeric input: use a placeholder rather than passing through an
+    // arbitrarily wide string that would break column alignment
+    Sentry.logger.warn(`Unexpected non-numeric issue count: ${raw}`);
+    return "?".padStart(COL_COUNT);
+  }
+  if (raw.length <= COL_COUNT) {
+    return raw.padStart(COL_COUNT);
+  }
+  const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
+  const suffix = QUANTIFIERS[tier] ?? "";
+  const scaled = n / 10 ** (tier * 3);
+  // Only show decimal when it adds information — compare the rounded value to avoid
+  // "100.0K" when scaled is e.g. 99.95 (toFixed(1) rounds up to "100.0")
+  const rounded1dp = Number(scaled.toFixed(1));
+  if (rounded1dp < 100) {
+    return `${rounded1dp.toFixed(1)}${suffix}`.padStart(COL_COUNT);
+  }
+  const rounded = Math.round(scaled);
+  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95K → "1.0M")
+  if (rounded >= 1000 && tier < QUANTIFIERS.length - 1) {
+    const nextSuffix = QUANTIFIERS[tier + 1] ?? "";
+    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`.padStart(COL_COUNT);
+  }
+  // At max tier with no promotion available: cap at 999 to guarantee COL_COUNT width
+  // (numbers > 10^21 are unreachable in practice for Sentry event counts)
+  return `${Math.min(rounded, 999)}${suffix}`.padStart(COL_COUNT);
+}
+
 /** Column where title starts in single-project mode (no ALIAS column) */
 const TITLE_START_COL =
   COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2 + COL_FIX + 2;
@@ -582,7 +630,7 @@ export function formatIssueRow(
   const rawLen = getShortIdDisplayLength(issue.shortId);
   const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
   const shortId = `${formattedShortId}${shortIdPadding}`;
-  const count = `${issue.count}`.padStart(COL_COUNT);
+  const count = abbreviateCount(`${issue.count}`);
   const seen = formatRelativeTime(issue.lastSeen);
 
   // Fixability column (color applied after padding to preserve alignment)
