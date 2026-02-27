@@ -13,7 +13,12 @@ import {
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError, CliError, ContextError } from "../../lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  CliError,
+  ContextError,
+} from "../../lib/errors.js";
 import {
   writeFooter,
   writeJson,
@@ -132,6 +137,9 @@ async function handleCreateProject404(
   try {
     teams = await listTeams(orgSlug);
   } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
     listTeamsError = error;
   }
 
