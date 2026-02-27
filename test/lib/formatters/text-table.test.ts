@@ -256,3 +256,76 @@ describe("renderTextTable", () => {
     });
   });
 });
+
+describe("truncate option", () => {
+  test("truncates long cells to one line with ellipsis", () => {
+    const out = renderTextTable(
+      ["Name"],
+      [["This is a very long cell value that should be truncated"]],
+      { maxWidth: 20, truncate: true }
+    );
+    const dataLines = out
+      .split("\n")
+      .filter(
+        (l) =>
+          l.includes("\u2502") &&
+          !l.includes("Name") &&
+          !l.includes("\u2500") &&
+          l.trim().length > 2
+      );
+    // Should be exactly 1 data line (not wrapped to multiple)
+    expect(dataLines.length).toBe(1);
+    // Should contain ellipsis
+    expect(dataLines[0]).toContain("\u2026");
+  });
+
+  test("does not truncate short cells", () => {
+    const out = renderTextTable(["Name"], [["Hi"]], {
+      maxWidth: 40,
+      truncate: true,
+    });
+    expect(out).toContain("Hi");
+    expect(out).not.toContain("\u2026");
+  });
+
+  test("headers are never truncated", () => {
+    const out = renderTextTable(
+      ["Very Long Header Name"],
+      [["This is an even longer cell value that should be truncated"]],
+      { maxWidth: 30, truncate: true }
+    );
+    // Header should not have ellipsis (only data rows truncate)
+    const headerLine = out
+      .split("\n")
+      .find((l) => l.includes("Very Long Header"));
+    expect(headerLine).toBeDefined();
+    expect(headerLine).not.toContain("\u2026");
+  });
+});
+
+describe("minWidths option", () => {
+  test("prevents column from shrinking below minimum", () => {
+    const out = renderTextTable(
+      ["Short", "Long Column Header"],
+      [["data", "other data"]],
+      { maxWidth: 25, minWidths: [10, 0] }
+    );
+    // First column should maintain at least 10-char content width
+    // (10 + 2 padding = 12 total column width)
+    const dataLine = out.split("\n").find((l) => l.includes("data"));
+    expect(dataLine).toBeDefined();
+    // The "Short" column should have enough space for "data" + padding
+    expect(out).toContain("data");
+  });
+
+  test("TITLE column absorbs shrink when SHORT ID has minWidth", () => {
+    const out = renderTextTable(
+      ["ID", "TITLE"],
+      [["SPOTLIGHT-WEB-28", "Very long error message that gets truncated"]],
+      { maxWidth: 50, minWidths: [20, 0], truncate: true }
+    );
+    expect(out).toContain("SPOTLIGHT-WEB-28");
+    // TITLE should be truncated, not SHORT ID
+    expect(out).toContain("\u2026");
+  });
+});

@@ -29,6 +29,10 @@ export type Column<T> = {
   value: (item: T) => string;
   /** Column alignment. Defaults to "left". */
   align?: "left" | "right";
+  /** Minimum content width. Column will not shrink below this. */
+  minWidth?: number;
+  /** Truncate long values with "\u2026" instead of wrapping. @default false */
+  truncate?: boolean;
 };
 
 /**
@@ -69,10 +73,17 @@ export function buildMarkdownTable<T>(
  * @param items - Row data
  * @param columns - Column definitions (ordering determines display order)
  */
+/** Options for writeTable. */
+export type WriteTableOptions = {
+  /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
+  truncate?: boolean;
+};
+
 export function writeTable<T>(
   stdout: Writer,
   items: T[],
-  columns: Column<T>[]
+  columns: Column<T>[],
+  options?: WriteTableOptions
 ): void {
   if (isPlainOutput()) {
     stdout.write(`${buildMarkdownTable(items, columns)}\n`);
@@ -85,5 +96,13 @@ export function writeTable<T>(
   );
   const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
 
-  stdout.write(renderTextTable(headers, rows, { alignments }));
+  const minWidths = columns.map((c) => c.minWidth ?? 0);
+
+  stdout.write(
+    renderTextTable(headers, rows, {
+      alignments,
+      minWidths,
+      truncate: options?.truncate,
+    })
+  );
 }

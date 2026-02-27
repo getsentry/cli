@@ -34,6 +34,10 @@ export type TextTableOptions = {
   alignments?: Array<Alignment | null>;
   /** Whether to include a separator row after the header. @default true */
   headerSeparator?: boolean;
+  /** Per-column minimum content widths. Columns will not shrink below these. */
+  minWidths?: number[];
+  /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
+  truncate?: boolean;
 };
 
 /**
@@ -59,6 +63,8 @@ export function renderTextTable(
     maxWidth = process.stdout.columns || 80,
     alignments = [],
     headerSeparator = true,
+    minWidths = [],
+    truncate = false,
   } = options;
 
   const border = BorderChars[borderStyle];
@@ -68,33 +74,30 @@ export function renderTextTable(
   }
 
   // Measure intrinsic column widths from all content
-  const intrinsicWidths = measureIntrinsicWidths(
-    headers,
-    rows,
-    colCount,
-    cellPadding
-  );
+  const intrinsicWidths = measureIntrinsicWidths(headers, rows, colCount, {
+    cellPadding,
+    minWidths,
+  });
 
   // Fit columns to available width
   // Border overhead: outerLeft(1) + outerRight(1) + innerSeparators(colCount-1)
   const borderOverhead = 2 + (colCount - 1);
   const maxContentWidth = Math.max(colCount, maxWidth - borderOverhead);
-  const columnWidths = fitColumns(
-    intrinsicWidths,
-    maxContentWidth,
+  const columnWidths = fitColumns(intrinsicWidths, maxContentWidth, {
     cellPadding,
-    columnFitter
-  );
+    fitter: columnFitter,
+    minWidths,
+  });
 
   // Build all rows (header + optional separator + data rows)
   const allRows: string[][][] = [];
 
   // Header row
-  allRows.push(wrapRow(headers, columnWidths, cellPadding));
+  allRows.push(wrapRow(headers, columnWidths, cellPadding, false));
 
   // Data rows
   for (const row of rows) {
-    allRows.push(wrapRow(row, columnWidths, cellPadding));
+    allRows.push(wrapRow(row, columnWidths, cellPadding, truncate));
   }
 
   // Render the grid
@@ -117,8 +120,9 @@ function measureIntrinsicWidths(
   headers: string[],
   rows: string[][],
   colCount: number,
-  cellPadding: number
+  ctx: { cellPadding: number; minWidths: number[] }
 ): number[] {
+  const { cellPadding, minWidths } = ctx;
   const pad = cellPadding * 2;
   const widths: number[] = [];
 
@@ -134,8 +138,9 @@ function measureIntrinsicWidths(
       }
     }
 
-    // Minimum: padding + 1 char
-    widths.push(Math.max(maxW, pad + 1));
+    // Minimum: padding + 1 char, or per-column minWidth + padding
+    const colMin = (minWidths[c] ?? 0) + pad;
+    widths.push(Math.max(maxW, pad + 1, colMin));
   }
 
   return widths;
@@ -150,9 +155,13 @@ function measureIntrinsicWidths(
 function fitColumns(
   intrinsicWidths: number[],
   maxContentWidth: number,
-  cellPadding: number,
-  fitter: "proportional" | "balanced"
+  ctx: {
+    cellPadding: number;
+    fitter: "proportional" | "balanced";
+    minWidths: number[];
+  }
 ): number[] {
+  const { cellPadding, fitter, minWidths } = ctx;
   const totalIntrinsic = intrinsicWidths.reduce((s, w) => s + w, 0);
 
   if (totalIntrinsic <= maxContentWidth) {
@@ -160,9 +169,19 @@ function fitColumns(
   }
 
   if (fitter === "balanced") {
-    return fitBalanced(intrinsicWidths, maxContentWidth, cellPadding);
+    return fitBalanced(
+      intrinsicWidths,
+      maxContentWidth,
+      cellPadding,
+      minWidths
+    );
   }
-  return fitProportional(intrinsicWidths, maxContentWidth, cellPadding);
+  return fitProportional(
+    intrinsicWidths,
+    maxContentWidth,
+    cellPadding,
+    minWidths
+  );
 }
 
 /**
@@ -174,17 +193,25 @@ function fitColumns(
 function fitProportional(
   widths: number[],
   target: number,
-  cellPadding: number
+  cellPadding: number,
+  minWidths: number[] = []
 ): number[] {
-  const minWidth = 1 + cellPadding * 2;
-  const baseWidths = widths.map((w) => Math.max(minWidth, Math.floor(w)));
+  const globalMin = 1 + cellPadding * 2;
+  const colMins = widths.map((_, i) =>
+    Math.max(globalMin, (minWidths[i] ?? 0) + cellPadding * 2)
+  );
+  const baseWidths = widths.map((w, i) =>
+    Math.max(colMins[i] ?? globalMin, Math.floor(w))
+  );
   const totalBase = baseWidths.reduce((s, w) => s + w, 0);
 
   if (totalBase <= target) {
     return baseWidths;
   }
 
-  const floorWidths = baseWidths.map((w) => Math.min(w, minWidth + 1));
+  const floorWidths = baseWidths.map((w, i) =>
+    Math.min(w, (colMins[i] ?? globalMin) + 1)
+  );
   const floorTotal = floorWidths.reduce((s, w) => s + w, 0);
   const clampedTarget = Math.max(floorTotal, target);
 
@@ -216,18 +243,26 @@ function fitProportional(
 function fitBalanced(
   widths: number[],
   target: number,
-  cellPadding: number
+  cellPadding: number,
+  minWidths: number[] = []
 ): number[] {
-  const minWidth = 1 + cellPadding * 2;
-  const baseWidths = widths.map((w) => Math.max(minWidth, Math.floor(w)));
+  const globalMin = 1 + cellPadding * 2;
+  const colMins = widths.map((_, i) =>
+    Math.max(globalMin, (minWidths[i] ?? 0) + cellPadding * 2)
+  );
+  const baseWidths = widths.map((w, i) =>
+    Math.max(colMins[i] ?? globalMin, Math.floor(w))
+  );
   const totalBase = baseWidths.reduce((s, w) => s + w, 0);
 
   if (totalBase <= target) {
     return baseWidths;
   }
 
-  const evenShare = Math.max(minWidth, Math.floor(target / baseWidths.length));
-  const floorWidths = baseWidths.map((w) => Math.min(w, evenShare));
+  const evenShare = Math.max(globalMin, Math.floor(target / baseWidths.length));
+  const floorWidths = baseWidths.map((w, i) =>
+    Math.min(w, Math.max(evenShare, colMins[i] ?? globalMin))
+  );
   const floorTotal = floorWidths.reduce((s, w) => s + w, 0);
   const clampedTarget = Math.max(floorTotal, target);
 
@@ -338,7 +373,8 @@ function allocateShrink(params: ShrinkParams): number[] {
 function wrapRow(
   cells: string[],
   columnWidths: number[],
-  cellPadding: number
+  cellPadding: number,
+  truncate: boolean
 ): string[][] {
   const wrappedCells: string[][] = [];
   for (let c = 0; c < columnWidths.length; c++) {
@@ -349,7 +385,17 @@ function wrapRow(
       continue;
     }
     const wrapped = wrapAnsi(text, contentWidth, { hard: true, trim: false });
-    wrappedCells.push(wrapped.split("\n"));
+    const lines = wrapped.split("\n");
+    if (truncate && lines.length > 1) {
+      // Re-wrap to contentWidth-1 so the ellipsis fits within the column
+      const shorter = wrapAnsi(text, Math.max(1, contentWidth - 1), {
+        hard: true,
+        trim: false,
+      });
+      wrappedCells.push([`${shorter.split("\n")[0] ?? ""}\u2026`]);
+    } else {
+      wrappedCells.push(lines);
+    }
   }
   return wrappedCells;
 }
