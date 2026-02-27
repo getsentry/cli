@@ -23,7 +23,7 @@ import { setDefaults } from "../../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError, ValidationError } from "../../../src/lib/errors.js";
+import { ApiError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
@@ -456,7 +456,10 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       target?: string
     ) => Promise<void>;
 
-    listIssuesPaginatedSpy.mockResolvedValue({ data: [], nextCursor: undefined });
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [],
+      nextCursor: undefined,
+    });
 
     const { context } = createOrgAllContext();
 
