@@ -21,67 +21,58 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+/** Strip both ANSI escape codes and markdown bold markers. */
+function stripFormatting(s: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
+  return s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\*\*/g, "");
+}
+
 describe("formatShortId edge cases", () => {
   test("handles empty options object", () => {
-    expect(stripAnsi(formatShortId("CRAFT-G", {}))).toBe("CRAFT-G");
+    expect(stripFormatting(formatShortId("CRAFT-G", {}))).toBe("CRAFT-G");
   });
 
   test("handles undefined options", () => {
-    expect(stripAnsi(formatShortId("CRAFT-G", undefined))).toBe("CRAFT-G");
+    expect(stripFormatting(formatShortId("CRAFT-G", undefined))).toBe(
+      "CRAFT-G"
+    );
   });
 
   test("handles mismatched project slug gracefully", () => {
     const result = formatShortId("CRAFT-G", { projectSlug: "other" });
-    expect(stripAnsi(result)).toBe("CRAFT-G");
+    expect(stripFormatting(result)).toBe("CRAFT-G");
   });
 
   test("handles legacy string parameter", () => {
     const result = formatShortId("CRAFT-G", "craft");
-    expect(stripAnsi(result)).toBe("CRAFT-G");
+    expect(stripFormatting(result)).toBe("CRAFT-G");
   });
 });
 
-describe("formatShortId ANSI formatting", () => {
-  // Note: These tests verify formatting is applied when colors are enabled.
-  // In CI/test environments without TTY, chalk may disable colors.
-  // Run with FORCE_COLOR=1 to test color output.
-
-  // Helper to check for ANSI escape codes
-  function hasAnsiCodes(str: string): boolean {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
-    return /\x1b\[[0-9;]*m/.test(str);
-  }
-
-  // Check if colors are enabled (chalk respects FORCE_COLOR env)
-  const colorsEnabled = process.env.FORCE_COLOR === "1";
-
+describe("formatShortId formatting", () => {
   test("single project mode applies formatting to suffix", () => {
     const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
-    // Content is always correct
-    expect(stripAnsi(result)).toBe("CRAFT-G");
-    // ANSI codes only present when colors enabled
-    if (colorsEnabled) {
-      expect(hasAnsiCodes(result)).toBe(true);
-      expect(result.length).toBeGreaterThan(stripAnsi(result).length);
-    }
+    expect(stripFormatting(result)).toBe("CRAFT-G");
+    // Suffix should be wrapped in markdown bold
+    expect(result).toContain("**G**");
   });
 
   test("multi-project mode applies formatting to suffix", () => {
     const result = formatShortId("SPOTLIGHT-ELECTRON-4Y", {
       projectSlug: "spotlight-electron",
       projectAlias: "e",
+      isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-    if (colorsEnabled) {
-      expect(hasAnsiCodes(result)).toBe(true);
-      expect(result.length).toBeGreaterThan(stripAnsi(result).length);
-    }
+    expect(stripFormatting(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
+    // Alias char and suffix should be bold
+    expect(result).toContain("**E**");
+    expect(result).toContain("**4Y**");
   });
 
   test("no formatting when no options provided", () => {
     const result = formatShortId("CRAFT-G");
-    expect(hasAnsiCodes(result)).toBe(false);
     expect(result).toBe("CRAFT-G");
+    expect(result).not.toContain("**");
   });
 });
 
@@ -97,7 +88,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       isMultiProject: true,
     });
     // Content is always correct - the text should be unchanged
-    expect(stripAnsi(result)).toBe("API-APP-5");
+    expect(stripFormatting(result)).toBe("API-APP-5");
   });
 
   test("highlights alias with embedded dash correctly", () => {
@@ -107,7 +98,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       projectAlias: "x-a",
       isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("X-AB-5");
+    expect(stripFormatting(result)).toBe("X-AB-5");
   });
 
   test("highlights single char alias at start of multi-part short ID", () => {
@@ -116,7 +107,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       projectAlias: "w",
       isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("CLI-WEBSITE-4");
+    expect(stripFormatting(result)).toBe("CLI-WEBSITE-4");
   });
 
   test("highlights single char alias in simple short ID", () => {
@@ -125,7 +116,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       projectAlias: "c",
       isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("CLI-25");
+    expect(stripFormatting(result)).toBe("CLI-25");
   });
 
   test("handles org-prefixed alias format", () => {
@@ -134,7 +125,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       projectAlias: "o1/d",
       isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("DASHBOARD-A3");
+    expect(stripFormatting(result)).toBe("DASHBOARD-A3");
   });
 
   test("falls back gracefully when alias doesn't match", () => {
@@ -143,7 +134,7 @@ describe("formatShortId multi-project alias highlighting", () => {
       projectAlias: "xyz",
       isMultiProject: true,
     });
-    expect(stripAnsi(result)).toBe("CLI-25");
+    expect(stripFormatting(result)).toBe("CLI-25");
   });
 });
 
@@ -185,7 +176,8 @@ describe("writeIssueTable", () => {
     writeIssueTable(writer, rows, false);
     const text = stripAnsi(output());
     expect(text).not.toContain("ALIAS");
-    expect(text).toContain("DASHBOARD-A3");
+    expect(text).toContain("DASHBOARD-");
+    expect(text).toContain("A3");
     expect(text).toContain("Test issue");
   });
 

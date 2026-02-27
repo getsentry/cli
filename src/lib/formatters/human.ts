@@ -26,7 +26,6 @@ import type {
 } from "../../types/index.js";
 import { withSerializeSpan } from "../telemetry.js";
 import {
-  boldUnderline,
   type FixabilityTier,
   fixabilityColor,
   green,
@@ -310,20 +309,20 @@ function formatShortIdWithAlias(
       if (part?.startsWith(aliasUpper)) {
         const result = projectParts.map((p, idx) => {
           if (idx === i) {
-            return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
+            return `**${p.slice(0, aliasLen)}**${p.slice(aliasLen)}`;
           }
           return p;
         });
-        return `${result.join("-")}-${boldUnderline(issueSuffix)}`;
+        return `${result.join("-")}-**${issueSuffix}**`;
       }
     }
   }
 
   const projectPortion = projectParts.join("-");
   if (projectPortion.startsWith(aliasUpper)) {
-    const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
+    const highlighted = `**${projectPortion.slice(0, aliasLen)}**`;
     const rest = projectPortion.slice(aliasLen);
-    return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
+    return `${highlighted}${rest}-**${issueSuffix}**`;
   }
 
   return null;
@@ -360,7 +359,7 @@ export function formatShortId(
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
       const suffix = shortId.slice(prefix.length);
-      return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
+      return `${prefix}**${suffix.toUpperCase()}**`;
     }
   }
 
@@ -424,11 +423,12 @@ export function writeIssueTable(
   columns.push(
     {
       header: "SHORT ID",
-      value: ({ issue }) => {
+      value: ({ issue, formatOptions }) => {
+        const formatted = formatShortId(issue.shortId, formatOptions);
         if (issue.permalink) {
-          return `[**${issue.shortId}**](${issue.permalink})`;
+          return `[${formatted}](${issue.permalink})`;
         }
-        return `**${issue.shortId}**`;
+        return formatted;
       },
     },
     {

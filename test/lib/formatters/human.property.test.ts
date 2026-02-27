@@ -30,6 +30,11 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+/** Strip both ANSI escape codes and markdown bold markers. */
+function stripFormatting(s: string): string {
+  return stripAnsi(s).replace(/\*\*/g, "");
+}
+
 // Arbitraries
 
 /** Project slug (lowercase, alphanumeric with hyphens) */
@@ -60,7 +65,7 @@ describe("formatShortId properties", () => {
     await fcAssert(
       property(shortIdArb, (shortId) => {
         const result = formatShortId(shortId);
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -70,7 +75,7 @@ describe("formatShortId properties", () => {
     await fcAssert(
       property(shortIdArb, (shortId) => {
         const result = formatShortId(shortId);
-        expect(stripAnsi(result).length).toBe(shortId.length);
+        expect(stripFormatting(result).length).toBe(shortId.length);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -81,7 +86,7 @@ describe("formatShortId properties", () => {
       property(tuple(projectSlugArb, suffixArb), ([project, suffix]) => {
         const shortId = `${project}-${suffix}`;
         const result = formatShortId(shortId, { projectSlug: project });
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -96,7 +101,7 @@ describe("formatShortId properties", () => {
           projectSlug: project,
           projectAlias: alias,
         });
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
