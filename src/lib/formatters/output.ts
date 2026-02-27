@@ -55,3 +55,20 @@ export function writeFooter(stdout: Writer, text: string): void {
   stdout.write("\n");
   stdout.write(`${muted(text)}\n`);
 }
+
+/**
+ * Write key-value pairs with aligned columns.
+ * Used for human-readable output after resource creation.
+ */
+export function writeKeyValue(
+  stdout: Writer,
+  pairs: [label: string, value: string][]
+): void {
+  if (pairs.length === 0) {
+    return;
+  }
+  const maxLabel = Math.max(...pairs.map(([l]) => l.length));
+  for (const [label, value] of pairs) {
+    stdout.write(`  ${label.padEnd(maxLabel + 2)}${value}\n`);
+  }
+}

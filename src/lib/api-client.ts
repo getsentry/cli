@@ -9,6 +9,8 @@
  */
 
 import {
+  createANewProject,
+  listAnOrganization_sRepositories,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   listAProject_sTeams,
@@ -460,6 +462,7 @@ export async function listOrganizationsInRegion(
 /** Regex patterns for extracting org slugs from endpoint paths */
 const ORG_ENDPOINT_REGEX = /\/organizations\/([^/]+)\//;
 const PROJECT_ENDPOINT_REGEX = /\/projects\/([^/]+)\//;
+const TEAM_ENDPOINT_REGEX = /\/teams\/([^/]+)\//;
 
 /**
  * Extract organization slug from an endpoint path.
@@ -476,6 +479,12 @@ function extractOrgSlugFromEndpoint(endpoint: string): string | null {
   const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
   if (projectMatch?.[1]) {
     return projectMatch[1];
+  }
+
+  // Try team path: /teams/{org}/{team}/...
+  const teamMatch = endpoint.match(TEAM_ENDPOINT_REGEX);
+  if (teamMatch?.[1]) {
+    return teamMatch[1];
   }
 
   return null;
@@ -682,13 +691,13 @@ export type ProjectWithOrg = SentryProject & {
 export async function listRepositories(
   orgSlug: string
 ): Promise<SentryRepository[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  const { data } = await apiRequestToRegion<SentryRepository[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/repos/`
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listAnOrganization_sRepositories({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+  const data = unwrapResult(result, "Failed to list repositories");
+  return data as unknown as SentryRepository[];
 }
 
 /**
@@ -705,6 +714,40 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 
   const data = unwrapResult(result, "Failed to list teams");
   return data as unknown as SentryTeam[];
+}
+
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export async function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await createANewProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      team_id_or_slug: teamSlug,
+    },
+    body,
+  });
+  const data = unwrapResult(result, "Failed to create project");
+  return data as unknown as SentryProject;
 }
 
 /**
@@ -994,6 +1037,30 @@ export async function getProjectKeys(
 }
 
 // Issue functions
+
+/**
+ * Fetch the primary DSN for a project.
+ * Returns the public DSN of the first active key, or null on any error.
+ *
+ * Best-effort: failures are silently swallowed so callers can treat
+ * DSN display as optional (e.g., after project creation or in views).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Public DSN string, or null if unavailable
+ */
+export async function tryGetPrimaryDsn(
+  orgSlug: string,
+  projectSlug: string
+): Promise<string | null> {
+  try {
+    const keys = await getProjectKeys(orgSlug, projectSlug);
+    const activeKey = keys.find((k) => k.isActive);
+    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * List issues for a project with pagination control.
