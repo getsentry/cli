@@ -222,7 +222,7 @@ export const createCommand = buildCommand({
     fullDescription:
       "Create a new Sentry project in an organization.\n\n" +
       "The name supports org/name syntax to specify the organization explicitly.\n" +
-      "If omitted, the org is auto-detected from config defaults or DSN.\n\n" +
+      "If omitted, the org is auto-detected from config defaults.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
       "automatically. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
@@ -316,7 +316,6 @@ export const createCommand = buildCommand({
     if (!resolved) {
       throw new ContextError("Organization", USAGE_HINT, [
         `Include org in name: ${USAGE_HINT}`,
-        "Run from a directory with a Sentry DSN configured",
       ]);
     }
     const orgSlug = resolved.org;
