@@ -10,7 +10,11 @@
  */
 
 import type { Writer } from "../../types/index.js";
-import { escapeMarkdownCell, isPlainOutput } from "./markdown.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  renderInlineMarkdown,
+} from "./markdown.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
 /**
@@ -53,7 +57,12 @@ export function buildMarkdownTable<T>(
 /**
  * Render items as a formatted table.
  *
- * In TTY mode: renders directly via text-table with Unicode box borders.
+ * Cell values are markdown strings — in TTY mode they are rendered through
+ * \ before column sizing, so \,
+ * \code\, and \ in cell values render as styled/clickable text.
+ * Pre-existing ANSI codes (e.g. chalk colors) pass through the markdown
+ * parser untouched.
+ *
  * In plain mode: emits raw CommonMark table syntax.
  *
  * @param stdout - Output writer
@@ -71,7 +80,9 @@ export function writeTable<T>(
   }
 
   const headers = columns.map((c) => c.header);
-  const rows = items.map((item) => columns.map((c) => c.value(item)));
+  const rows = items.map((item) =>
+    columns.map((c) => renderInlineMarkdown(c.value(item)))
+  );
   const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
 
   stdout.write(renderTextTable(headers, rows, { alignments }));

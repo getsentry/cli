@@ -26,7 +26,7 @@
 import chalk from "chalk";
 import { highlight as cliHighlight } from "cli-highlight";
 import { marked, type Token, type Tokens } from "marked";
-import { muted } from "./colors.js";
+import { muted, terminalLink } from "./colors.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
 // ──────────────────────────── Environment ─────────────────────────────
@@ -225,8 +225,8 @@ function renderInline(tokens: Token[]): string {
         case "link": {
           const link = token as Tokens.Link;
           const linkText = renderInline(link.tokens);
-          const href = link.href ? ` (${link.href})` : "";
-          return chalk.hex(COLORS.blue)(`${linkText}${href}`);
+          const styled = chalk.hex(COLORS.blue)(linkText);
+          return link.href ? terminalLink(styled, link.href) : styled;
         }
         case "del":
           return chalk.dim.gray.strikethrough(

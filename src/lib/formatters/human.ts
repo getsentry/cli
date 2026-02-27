@@ -33,7 +33,6 @@ import {
   levelColor,
   muted,
   statusColor,
-  terminalLink,
   yellow,
 } from "./colors.js";
 import {
@@ -425,12 +424,11 @@ export function writeIssueTable(
   columns.push(
     {
       header: "SHORT ID",
-      value: ({ issue, formatOptions }) => {
-        const formatted = formatShortId(issue.shortId, formatOptions);
+      value: ({ issue }) => {
         if (issue.permalink) {
-          return terminalLink(formatted, issue.permalink);
+          return `[**${issue.shortId}**](${issue.permalink})`;
         }
-        return formatted;
+        return `**${issue.shortId}**`;
       },
     },
     {
