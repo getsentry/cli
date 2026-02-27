@@ -316,7 +316,6 @@ export const createCommand = buildCommand({
     if (!resolved) {
       throw new ContextError("Organization", USAGE_HINT, [
         `Include org in name: ${USAGE_HINT}`,
-        "Set a default: sentry org view <org>",
         "Run from a directory with a Sentry DSN configured",
       ]);
     }
