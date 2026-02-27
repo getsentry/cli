@@ -45,7 +45,7 @@ export const setupCommand = buildCommand({
       return;
     }
 
-    if (!checkPiAuth()) {
+    if (!(await checkPiAuth())) {
       stderr.write(
         "No AI model provider configured.\n\n" +
           "To use sentry setup, you need an API key for a model provider.\n" +

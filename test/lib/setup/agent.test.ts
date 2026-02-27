@@ -3,6 +3,7 @@
  *
  * Tests cover:
  * - checkPiAuth() — detects configured model provider credentials via env vars
+ *   and AuthStorage (auth.json)
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -42,30 +43,25 @@ describe("checkPiAuth", () => {
     }
   });
 
-  test("returns true when ANTHROPIC_API_KEY is set", () => {
+  test("returns true when ANTHROPIC_API_KEY is set", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test-key";
-    expect(checkPiAuth()).toBe(true);
+    expect(await checkPiAuth()).toBe(true);
   });
 
-  test("returns true when GEMINI_API_KEY is set", () => {
+  test("returns true when GEMINI_API_KEY is set", async () => {
     process.env.GEMINI_API_KEY = "gemini-test-key";
-    expect(checkPiAuth()).toBe(true);
+    expect(await checkPiAuth()).toBe(true);
   });
 
-  test("returns true when OPENAI_API_KEY is set", () => {
+  test("returns true when OPENAI_API_KEY is set", async () => {
     process.env.OPENAI_API_KEY = "sk-openai-test-key";
-    expect(checkPiAuth()).toBe(true);
+    expect(await checkPiAuth()).toBe(true);
   });
 
-  test("returns false when no provider env var is configured", () => {
-    // All vars cleared in beforeEach; AuthStorage.list() will return [] for a
-    // missing/empty auth.json, so checkPiAuth should return false.
-    // We guard against a real auth file by checking the env-var fast path only —
-    // the test may return true if the developer has auth stored via `pi auth`.
-    // In that case we skip rather than fail.
-    const result = checkPiAuth();
-    // If it's true, a real auth.json exists on the machine — that's acceptable.
-    // We only assert false when we're certain no credentials are present.
+  test("returns a boolean when no env vars are set", async () => {
+    // All env vars cleared in beforeEach. Result depends on whether
+    // ~/.pi/agent/auth.json exists with credentials on this machine.
+    const result = await checkPiAuth();
     expect(typeof result).toBe("boolean");
   });
 });

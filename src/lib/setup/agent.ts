@@ -30,19 +30,27 @@ const PROVIDER_ENV_VARS = [
  *
  * Checks common environment variables first for a fast path, then falls back
  * to reading AuthStorage (which reads ~/.pi/agent/auth.json) to detect keys
- * stored via `pi auth`.
+ * stored via `pi auth` or OAuth login.
  *
  * @returns `true` if at least one provider credential is found, `false` otherwise.
  */
-export function checkPiAuth(): boolean {
-  // Check well-known environment variables — covers the common case without
-  // requiring a dynamic import of the Pi SDK.
+export async function checkPiAuth(): Promise<boolean> {
+  // Fast path: check well-known environment variables
   for (const envVar of PROVIDER_ENV_VARS) {
     if (process.env[envVar]) {
       return true;
     }
   }
-  return false;
+
+  // Slower path: check ~/.pi/agent/auth.json via AuthStorage
+  // This catches OAuth tokens and keys stored via `pi auth`
+  try {
+    const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+    const authStorage = AuthStorage.create();
+    return authStorage.list().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -68,9 +76,14 @@ export async function createSetupSession(
     ModelRegistry,
     SessionManager,
   } = await import("@mariozechner/pi-coding-agent");
+  const { getModel } = await import("@mariozechner/pi-ai");
 
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
+
+  // Default to flagship models: Opus 4.6 primary, GPT-5.3 Codex as Ctrl+P alternative
+  const defaultModel = getModel("anthropic", "claude-opus-4-6");
+  const altModel = getModel("openai", "gpt-5.3-codex");
 
   const loader = new DefaultResourceLoader({
     cwd,
@@ -87,6 +100,12 @@ export async function createSetupSession(
     authStorage,
     modelRegistry,
     tools: createCodingTools(cwd),
+    model: defaultModel,
+    thinkingLevel: "high" as const,
+    scopedModels: [
+      { model: defaultModel, thinkingLevel: "high" as const },
+      { model: altModel, thinkingLevel: "high" as const },
+    ],
   });
 
   return session;
