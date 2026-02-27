@@ -79,7 +79,7 @@ type ListFlags = {
   readonly cursor?: string;
 };
 
-type SortValue = "date" | "new" | "freq" | "user";
+/** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
 
 const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
@@ -122,8 +122,10 @@ function writeListHeader(
 }
 
 /** Issue with formatting options attached */
-type IssueWithOptions = {
+/** @internal */ export type IssueWithOptions = {
   issue: SentryIssue;
+  /** Org slug — used as part of the per-project key in trimWithProjectGuarantee. */
+  orgSlug: string;
   formatOptions: FormatShortIdOptions;
 };
 
@@ -169,13 +171,17 @@ function writeListFooter(
 }
 
 /** Issue list with target context */
-type IssueListResult = {
+/** @internal */ export type IssueListResult = {
   target: ResolvedTarget;
   issues: SentryIssue[];
+  /** Whether the project has more issues beyond what was fetched. */
+  hasMore?: boolean;
+  /** Cursor to resume fetching from this project (for Phase 2 / next page). */
+  nextCursor?: string;
 };
 
 /** Result of building project aliases */
-type AliasMapResult = {
+/** @internal */ export type AliasMapResult = {
   aliasMap: Map<string, string>;
   entries: Record<string, ProjectAliasEntry>;
 };
@@ -235,6 +241,7 @@ function attachFormatOptions(
       const alias = aliasMap.get(key);
       return {
         issue,
+        orgSlug: result.target.org,
         formatOptions: {
           projectSlug: result.target.project,
           projectAlias: alias,
@@ -389,8 +396,8 @@ async function resolveTargetsFromParsedArg(
  * Fetch issues for a single target project.
  *
  * @param target - Resolved org/project target
- * @param options - Query options (query, limit, sort)
- * @returns Success with issues, or failure with the original error preserved
+ * @param options - Query options (query, limit, sort, optional resume cursor)
+ * @returns Success with issues + pagination state, or failure with error preserved
  * @throws {AuthError} When user is not authenticated
  */
 async function fetchIssuesForTarget(
@@ -400,16 +407,21 @@ async function fetchIssuesForTarget(
     limit: number;
     sort: SortValue;
     statsPeriod?: string;
+    /** Resume from this cursor (Phase 2 redistribution or next-page resume). */
+    startCursor?: string;
     onPage?: (fetched: number, limit: number) => void;
   }
 ): Promise<FetchResult> {
   try {
-    const { issues } = await listIssuesAllPages(
+    const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
       options
     );
-    return { success: true, data: { target, issues } };
+    return {
+      success: true,
+      data: { target, issues, hasMore: !!nextCursor, nextCursor },
+    };
   } catch (error) {
     // Auth errors should propagate - user needs to authenticate
     if (error instanceof AuthError) {
@@ -421,6 +433,250 @@ async function fetchIssuesForTarget(
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
+}
+
+/**
+ * Execute Phase 2 of the budget fetch: redistribute surplus to expandable targets
+ * and merge the additional results back into `phase1` in place.
+ */
+async function runPhase2(
+  targets: ResolvedTarget[],
+  phase1: FetchResult[],
+  expandableIndices: number[],
+  context: {
+    surplus: number;
+    options: Omit<BudgetFetchOptions, "limit" | "startCursors">;
+  }
+): Promise<void> {
+  const { surplus, options } = context;
+  const extraQuota = Math.max(1, Math.ceil(surplus / expandableIndices.length));
+
+  const phase2 = await Promise.all(
+    expandableIndices.map((i) => {
+      // expandableIndices only contains indices where r.success && r.data.nextCursor
+      // biome-ignore lint/style/noNonNullAssertion: guaranteed by expandableIndices filter
+      const target = targets[i]!;
+      const r = phase1[i] as { success: true; data: IssueListResult };
+      // biome-ignore lint/style/noNonNullAssertion: same guarantee
+      const cursor = r.data.nextCursor!;
+      return fetchIssuesForTarget(target, {
+        ...options,
+        limit: extraQuota,
+        startCursor: cursor,
+      });
+    })
+  );
+
+  for (let j = 0; j < expandableIndices.length; j++) {
+    // biome-ignore lint/style/noNonNullAssertion: j is within expandableIndices bounds
+    const i = expandableIndices[j]!;
+    const p2 = phase2[j];
+    const p1 = phase1[i];
+    if (p1?.success && p2?.success) {
+      p1.data.issues.push(...p2.data.issues);
+      p1.data.hasMore = p2.data.hasMore;
+      p1.data.nextCursor = p2.data.nextCursor;
+    }
+  }
+}
+
+/**
+ * Options for {@link fetchWithBudget}.
+ */
+type BudgetFetchOptions = {
+  query?: string;
+  limit: number;
+  sort: SortValue;
+  statsPeriod?: string;
+  /** Per-target cursors from a previous page (compound cursor resume). */
+  startCursors?: Map<string, string>;
+};
+
+/**
+ * Fetch issues from multiple targets within a global limit budget.
+ *
+ * Uses a two-phase strategy:
+ * 1. Phase 1: distribute `ceil(limit / numTargets)` quota per target, fetch in parallel.
+ * 2. Phase 2: if total fetched < limit and some targets have more, redistribute
+ *    the surplus among those expandable targets and fetch one more page each.
+ *
+ * Targets with a `startCursor` in `options.startCursors` resume from that cursor
+ * instead of starting fresh — used for compound cursor pagination (−c last).
+ *
+ * @param targets - Resolved org/project targets to fetch from
+ * @param options - Query + budget options
+ * @param onProgress - Called after Phase 1 and Phase 2 with total fetched so far
+ * @returns Merged fetch results and whether any target has further pages
+ */
+async function fetchWithBudget(
+  targets: ResolvedTarget[],
+  options: BudgetFetchOptions,
+  onProgress: (fetched: number) => void
+): Promise<{ results: FetchResult[]; hasMore: boolean }> {
+  const { limit, startCursors } = options;
+  const quota = Math.max(1, Math.ceil(limit / targets.length));
+
+  // Phase 1: fetch quota from each target in parallel
+  const phase1 = await Promise.all(
+    targets.map((t) =>
+      fetchIssuesForTarget(t, {
+        ...options,
+        limit: quota,
+        startCursor: startCursors?.get(`${t.org}/${t.project}`),
+      })
+    )
+  );
+
+  let totalFetched = 0;
+  for (const r of phase1) {
+    if (r.success) {
+      totalFetched += r.data.issues.length;
+    }
+  }
+  onProgress(totalFetched);
+
+  const surplus = limit - totalFetched;
+  if (surplus <= 0) {
+    return {
+      results: phase1,
+      hasMore: phase1.some((r) => r.success && r.data.hasMore),
+    };
+  }
+
+  // Identify targets that hit their quota and have a cursor to continue
+  const expandableIndices: number[] = [];
+  for (let i = 0; i < phase1.length; i++) {
+    const r = phase1[i];
+    if (r?.success && r.data.issues.length >= quota && r.data.nextCursor) {
+      expandableIndices.push(i);
+    }
+  }
+
+  if (expandableIndices.length === 0) {
+    return { results: phase1, hasMore: false };
+  }
+
+  await runPhase2(targets, phase1, expandableIndices, { surplus, options });
+
+  totalFetched = 0;
+  for (const r of phase1) {
+    if (r.success) {
+      totalFetched += r.data.issues.length;
+    }
+  }
+  onProgress(totalFetched);
+
+  return {
+    results: phase1,
+    hasMore: phase1.some((r) => r.success && r.data.hasMore),
+  };
+}
+
+/**
+ * Trim an array of issues to the global limit while guaranteeing at least one
+ * issue per project (when possible).
+ *
+ * Algorithm:
+ * 1. Walk the globally-sorted list, taking the first issue from each unseen
+ *    project until `limit` slots are filled or all projects are represented.
+ * 2. Fill remaining slots from the top of the sorted list, skipping already-
+ *    selected issues.
+ * 3. Return the final set in original sorted order.
+ *
+ * When there are more projects than the limit, the projects whose first issue
+ * ranks highest in the sorted order get representation.
+ *
+ * @param issues - Globally sorted array (input order is preserved in output)
+ * @param limit - Maximum number of issues to return
+ * @returns Trimmed array in the same sorted order
+ */
+function trimWithProjectGuarantee(
+  issues: IssueWithOptions[],
+  limit: number
+): IssueWithOptions[] {
+  if (issues.length <= limit) {
+    return issues;
+  }
+
+  const seenProjects = new Set<string>();
+  const guaranteed = new Set<number>();
+
+  // Pass 1: pick one representative per project from the sorted list
+  for (let i = 0; i < issues.length && guaranteed.size < limit; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
+    const projectKey = `${issues[i]!.orgSlug}/${issues[i]!.formatOptions.projectSlug ?? ""}`;
+    if (!seenProjects.has(projectKey)) {
+      seenProjects.add(projectKey);
+      guaranteed.add(i);
+    }
+  }
+
+  // Pass 2: fill remaining budget from the top of the sorted list
+  const selected = new Set<number>(guaranteed);
+  for (let i = 0; i < issues.length && selected.size < limit; i++) {
+    selected.add(i);
+  }
+
+  // Return in original sorted order
+  return issues.filter((_, i) => selected.has(i));
+}
+
+/** Separator for compound cursor entries (pipe — not present in Sentry cursors). */
+const CURSOR_SEP = "|";
+
+/**
+ * Encode per-target cursors as a pipe-separated string for storage.
+ *
+ * The position of each entry matches the **sorted** target order encoded in
+ * the context key fingerprint, so we only need to store the cursor values —
+ * no org/project metadata is needed in the cursor string itself.
+ *
+ * Empty string = project exhausted (no more pages).
+ *
+ * @example "1735689600:0:0||1735689601:0:0" — 3 targets, middle one exhausted
+ */
+function encodeCompoundCursor(cursors: (string | null)[]): string {
+  return cursors.map((c) => c ?? "").join(CURSOR_SEP);
+}
+
+/**
+ * Decode a compound cursor string back to an array of per-target cursors.
+ *
+ * Returns `null` for exhausted entries (empty segments) and `string` for active
+ * cursors. Returns an empty array if `raw` is empty or looks like a legacy
+ * JSON cursor (starts with `[`), causing a fresh start.
+ */
+function decodeCompoundCursor(raw: string): (string | null)[] {
+  // Guard against legacy JSON compound cursors or corrupted data
+  if (!raw || raw.startsWith("[")) {
+    return [];
+  }
+  return raw.split(CURSOR_SEP).map((s) => (s === "" ? null : s));
+}
+
+/**
+ * Build a compound cursor context key that encodes the full target set, sort,
+ * query, and period so that a cursor from one search is never reused for a
+ * different search.
+ */
+function buildMultiTargetContextKey(
+  targets: ResolvedTarget[],
+  flags: Pick<ListFlags, "sort" | "query" | "period">
+): string {
+  const host = getApiBaseUrl();
+  const targetFingerprint = targets
+    .map((t) => `${t.org}/${t.project}`)
+    .sort()
+    .join(",");
+  const escapedQuery = flags.query
+    ? escapeContextKeyValue(flags.query)
+    : undefined;
+  const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  return (
+    `host:${host}|type:multi:${targetFingerprint}` +
+    `|sort:${flags.sort}|period:${escapedPeriod}` +
+    (escapedQuery ? `|q:${escapedQuery}` : "")
+  );
 }
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */
@@ -503,10 +759,12 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   setContext([org], []);
 
   const { issues, nextCursor } = await withProgress(
-    { stderr, message: "Fetching issues..." },
+    { stderr, message: `Fetching issues (up to ${flags.limit})...` },
     (setMessage) =>
       fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
-        setMessage(`Fetching issues... ${fetched}/${limit}`)
+        setMessage(
+          `Fetching issues, ${fetched} and counting (up to ${limit})...`
+        )
       )
   );
 
@@ -543,6 +801,8 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const termWidth = process.stdout.columns || 80;
   const issuesWithOpts = issues.map((issue) => ({
     issue,
+    // org-all: org context comes from the `org` param; issue.organization may be absent
+    orgSlug: org,
     formatOptions: {
       projectSlug: issue.project?.slug ?? "",
       isMultiProject: true,
@@ -571,10 +831,12 @@ type ResolvedTargetsOptions = {
 /**
  * Handle auto-detect, explicit, and project-search modes.
  *
- * All three share the same flow: resolve targets → fetch issues in parallel →
- * merge results → display. Only the target resolution step differs.
+ * All three share the same flow: resolve targets → fetch issues within the
+ * global limit budget → merge → trim with project guarantee → display.
+ * Cursor pagination uses a compound cursor (one cursor per project, encoded
+ * as a JSON string) so `-c last` works across multi-target results.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target issue resolution, error handling, and display logic
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target resolution, compound cursor, error handling, and display logic
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<void> {
@@ -599,32 +861,102 @@ async function handleResolvedTargets(
     throw new ContextError("Organization and project", USAGE_HINT);
   }
 
-  const results = await withProgress(
-    { stderr, message: "Fetching issues..." },
-    (setMessage) => {
-      // Track per-target previous counts to compute deltas — onPage reports the
-      // running total for each target, not increments, so we need the previous
-      // value to derive how many new items arrived per callback.
-      let totalFetched = 0;
-      const prevFetched = new Array<number>(targets.length).fill(0);
-      const totalLimit = flags.limit * targets.length;
-      return Promise.all(
-        targets.map((t, i) =>
-          fetchIssuesForTarget(t, {
-            query: flags.query,
-            limit: flags.limit,
-            sort: flags.sort,
-            statsPeriod: flags.period,
-            onPage: (fetched) => {
-              totalFetched += fetched - (prevFetched[i] ?? 0);
-              prevFetched[i] = fetched;
-              setMessage(`Fetching issues... ${totalFetched}/${totalLimit}`);
-            },
-          })
-        )
-      );
+  // Build a compound cursor context key that encodes the full target set +
+  // search parameters so a cursor from one search is never reused for another.
+  const contextKey = buildMultiTargetContextKey(targets, flags);
+
+  // Resolve per-target start cursors from the stored compound cursor (--cursor resume).
+  // Sorted target keys must match the order used in buildMultiTargetContextKey.
+  const sortedTargetKeys = targets.map((t) => `${t.org}/${t.project}`).sort();
+  const startCursors = new Map<string, string>();
+  const exhaustedTargets = new Set<string>();
+  if (flags.cursor) {
+    const rawCursor = resolveOrgCursor(
+      flags.cursor,
+      PAGINATION_KEY,
+      contextKey
+    );
+    if (rawCursor) {
+      const decoded = decodeCompoundCursor(rawCursor);
+      for (let i = 0; i < decoded.length && i < sortedTargetKeys.length; i++) {
+        const cursor = decoded[i];
+        // biome-ignore lint/style/noNonNullAssertion: i is within bounds
+        const key = sortedTargetKeys[i]!;
+        if (cursor) {
+          startCursors.set(key, cursor);
+        } else {
+          // null = project was exhausted on previous page — skip it entirely
+          exhaustedTargets.add(key);
+        }
+      }
     }
+  }
+
+  // Filter out exhausted targets so they are not re-fetched from scratch (Comment 2 fix).
+  const activeTargets =
+    exhaustedTargets.size > 0
+      ? targets.filter((t) => !exhaustedTargets.has(`${t.org}/${t.project}`))
+      : targets;
+
+  const targetCount = activeTargets.length;
+  const baseMessage =
+    targetCount > 1
+      ? `Fetching issues from ${targetCount} projects`
+      : "Fetching issues";
+
+  const { results, hasMore } = await withProgress(
+    { stderr, message: `${baseMessage} (up to ${flags.limit})...` },
+    (setMessage) =>
+      fetchWithBudget(
+        activeTargets,
+        {
+          query: flags.query,
+          limit: flags.limit,
+          sort: flags.sort,
+          statsPeriod: flags.period,
+          startCursors,
+        },
+        (fetched) => {
+          setMessage(
+            `${baseMessage}, ${fetched} and counting (up to ${flags.limit})...`
+          );
+        }
+      )
   );
+
+  // Store compound cursor so `-c last` can resume from each project's position.
+  // Cursors are stored in the same sorted order as buildMultiTargetContextKey.
+  const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
+    // Exhausted targets from previous page stay exhausted
+    if (exhaustedTargets.has(key)) {
+      return null;
+    }
+    const result = results.find((r) => {
+      if (!r.success) {
+        return false;
+      }
+      return `${r.data.target.org}/${r.data.target.project}` === key;
+    });
+    if (result?.success) {
+      // Successful fetch: null = exhausted (no more pages), string = has more
+      return result.data.nextCursor ?? null;
+    }
+    // Target failed this fetch — preserve the cursor it was given so the next
+    // `-c last` retries from the same position rather than skipping it entirely.
+    // If no start cursor was given (first-page failure), null means not retried
+    // via cursor; the user can run without -c last to restart all projects.
+    return startCursors.get(key) ?? null;
+  });
+  const hasAnyCursor = cursorValues.some((c) => c !== null);
+  if (hasAnyCursor) {
+    setPaginationCursor(
+      PAGINATION_KEY,
+      contextKey,
+      encodeCompoundCursor(cursorValues)
+    );
+  } else {
+    clearPaginationCursor(PAGINATION_KEY, contextKey);
+  }
 
   const validResults: IssueListResult[] = [];
   const failures: Error[] = [];
@@ -670,28 +1002,39 @@ async function handleResolvedTargets(
     await clearProjectAliases();
   }
 
-  const issuesWithOptions = attachFormatOptions(
+  const allIssuesWithOptions = attachFormatOptions(
     validResults,
     aliasMap,
     isMultiProject
   );
 
-  issuesWithOptions.sort((a, b) => getComparator(flags.sort)(a.issue, b.issue));
+  allIssuesWithOptions.sort((a, b) =>
+    getComparator(flags.sort)(a.issue, b.issue)
+  );
+
+  // Trim to the global limit with project representation guarantee
+  const issuesWithOptions = trimWithProjectGuarantee(
+    allIssuesWithOptions,
+    flags.limit
+  );
+  const trimmed = issuesWithOptions.length < allIssuesWithOptions.length;
+  const hasMoreToShow = hasMore || hasAnyCursor || trimmed;
+  const canPaginate = hasAnyCursor;
 
   if (flags.json) {
     const allIssues = issuesWithOptions.map((i) => i.issue);
+    const output: Record<string, unknown> = {
+      data: allIssues,
+      hasMore: hasMoreToShow,
+    };
     if (failures.length > 0) {
-      writeJson(stdout, {
-        issues: allIssues,
-        errors: failures.map((e) =>
-          e instanceof ApiError
-            ? { status: e.status, message: e.message }
-            : { message: e.message }
-        ),
-      });
-    } else {
-      writeJson(stdout, allIssues);
+      output.errors = failures.map((e) =>
+        e instanceof ApiError
+          ? { status: e.status, message: e.message }
+          : { message: e.message }
+      );
     }
+    writeJson(stdout, output);
     return;
   }
 
@@ -729,6 +1072,26 @@ async function handleResolvedTargets(
   }
   writeListFooter(stdout, footerMode);
 
+  if (hasMoreToShow) {
+    const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+    const canIncreaseLimit = higherLimit > flags.limit;
+    const hintParts: string[] = [];
+    if (canIncreaseLimit) {
+      hintParts.push(`-n ${higherLimit}`);
+    }
+    if (canPaginate) {
+      hintParts.push("-c last");
+    }
+    // Only print the hint when there is at least one actionable option
+    if (hintParts.length > 0) {
+      stdout.write(
+        muted(
+          `\nMore issues available — use ${hintParts.join(" or ")} for more.\n`
+        )
+      );
+    }
+  }
+
   if (footer) {
     stdout.write(`\n${footer}\n`);
   }
@@ -740,6 +1103,23 @@ const issueListMeta: ListCommandMeta = {
   entityName: "issue",
   entityPlural: "issues",
   commandPrefix: "sentry issue list",
+};
+
+/**
+ * @internal Exported for testing only. Not part of the public API.
+ */
+export const __testing = {
+  trimWithProjectGuarantee,
+  encodeCompoundCursor,
+  decodeCompoundCursor,
+  buildMultiTargetContextKey,
+  buildProjectAliasMap,
+  getComparator,
+  compareDates,
+  parseSort,
+  CURSOR_SEP,
+  MAX_LIMIT,
+  VALID_SORT_VALUES,
 };
 
 export const listCommand = buildListCommand("issue", {
@@ -754,10 +1134,10 @@ export const listCommand = buildListCommand("issue", {
       "  sentry issue list <project>     # find project across all orgs\n\n" +
       `${targetPatternExplanation()}\n\n` +
       "In monorepos with multiple Sentry projects, shows issues from all detected projects.\n\n" +
-      "The --limit flag specifies the number of results to fetch per project (max 1000). " +
-      "When the limit exceeds the API page size (100), multiple requests are made " +
-      "automatically. Use --cursor to paginate through larger result sets. " +
-      "Note: --cursor resumes from a single page to keep the cursor chain intact.\n\n" +
+      "The --limit flag specifies the total number of issues to display (max 1000). " +
+      "When multiple projects are detected, the limit is distributed evenly across them. " +
+      "Projects with fewer issues than their share give their surplus to others. " +
+      "Use --cursor / -c last to paginate through larger result sets.\n\n" +
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).",
   },
@@ -801,9 +1181,8 @@ export const listCommand = buildListCommand("issue", {
           }
           return value;
         },
-        // Issue-specific cursor brief: cursor only works in <org>/ mode
         brief:
-          'Pagination cursor — only for <org>/ mode (use "last" to continue)',
+          'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
       },
     },
@@ -842,6 +1221,9 @@ export const listCommand = buildListCommand("issue", {
       cwd,
       flags,
       parsed,
+      // Multi-target modes (auto-detect, explicit, project-search) handle
+      // compound cursor pagination themselves via handleResolvedTargets.
+      allowCursorInModes: ["auto-detect", "explicit", "project-search"],
       overrides: {
         "auto-detect": resolveAndHandle,
         explicit: resolveAndHandle,

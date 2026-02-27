@@ -282,11 +282,13 @@ describe("multi-region", () => {
         ]);
 
         expect(result.exitCode).toBe(0);
-        const data = JSON.parse(result.stdout);
-        expect(Array.isArray(data)).toBe(true);
+        // Multi-target mode wraps output in {data, hasMore} object
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed).toHaveProperty("data");
+        expect(Array.isArray(parsed.data)).toBe(true);
 
         // Should contain Berlin issue
-        const shortIds = data.map((i: { shortId: string }) => i.shortId);
+        const shortIds = parsed.data.map((i: { shortId: string }) => i.shortId);
         expect(shortIds).toContain("BERLIN-APP-1A");
       },
       { timeout: TEST_TIMEOUT }

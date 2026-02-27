@@ -721,6 +721,14 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
    * modes fall back to the defaults from {@link buildDefaultHandlers}.
    */
   overrides?: ModeOverrides;
+  /**
+   * Mode types that support cursor pagination in addition to `"org-all"`.
+   *
+   * By default, `--cursor` is rejected in all non-`"org-all"` modes. Callers
+   * that implement their own cursor handling (e.g. compound cursors in
+   * `issue list`) can list those mode types here to bypass the guard.
+   */
+  allowCursorInModes?: readonly ParsedOrgProject["type"][];
 };
 
 /**
@@ -737,8 +745,12 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
 ): Promise<void> {
   const { config, stdout, cwd, flags, parsed, overrides } = options;
 
-  // Cursor pagination is only supported in org-all mode
-  if (flags.cursor && parsed.type !== "org-all") {
+  // Cursor pagination is only supported in org-all mode (or caller-allowlisted modes)
+  const cursorAllowedModes: readonly ParsedOrgProject["type"][] = [
+    "org-all",
+    ...(options.allowCursorInModes ?? []),
+  ];
+  if (flags.cursor && !cursorAllowedModes.includes(parsed.type)) {
     const hint =
       parsed.type === "project-search"
         ? `\n\nDid you mean '${config.commandPrefix} ${parsed.projectSlug}/'? ` +
