@@ -1066,10 +1066,22 @@ async function handleResolvedTargets(
 
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
-    const hint = canPaginate
-      ? `use -n ${higherLimit} or -c last for more.`
-      : `use -n ${higherLimit} to see more.`;
-    stdout.write(muted(`\nMore issues available — ${hint}\n`));
+    const canIncreaseLimit = higherLimit > flags.limit;
+    const hintParts: string[] = [];
+    if (canIncreaseLimit) {
+      hintParts.push(`-n ${higherLimit}`);
+    }
+    if (canPaginate) {
+      hintParts.push("-c last");
+    }
+    // Only print the hint when there is at least one actionable option
+    if (hintParts.length > 0) {
+      stdout.write(
+        muted(
+          `\nMore issues available — use ${hintParts.join(" or ")} for more.\n`
+        )
+      );
+    }
   }
 
   if (footer) {
