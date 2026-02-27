@@ -124,6 +124,8 @@ function writeListHeader(
 /** Issue with formatting options attached */
 /** @internal */ export type IssueWithOptions = {
   issue: SentryIssue;
+  /** Org slug — used as part of the per-project key in trimWithProjectGuarantee. */
+  orgSlug: string;
   formatOptions: FormatShortIdOptions;
 };
 
@@ -239,6 +241,7 @@ function attachFormatOptions(
       const alias = aliasMap.get(key);
       return {
         issue,
+        orgSlug: result.target.org,
         formatOptions: {
           projectSlug: result.target.project,
           projectAlias: alias,
@@ -601,7 +604,7 @@ function trimWithProjectGuarantee(
   // Pass 1: pick one representative per project from the sorted list
   for (let i = 0; i < issues.length && guaranteed.size < limit; i++) {
     // biome-ignore lint/style/noNonNullAssertion: i is within bounds
-    const projectKey = issues[i]!.formatOptions.projectSlug ?? "";
+    const projectKey = `${issues[i]!.orgSlug}/${issues[i]!.formatOptions.projectSlug ?? ""}`;
     if (!seenProjects.has(projectKey)) {
       seenProjects.add(projectKey);
       guaranteed.add(i);
