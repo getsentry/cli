@@ -141,6 +141,19 @@ function safePath(cwd: string, relative: string): string {
   return resolved;
 }
 
+/**
+ * Pre-compute directory listing before the first API call.
+ * Uses the same parameters the server's discover-context step would request.
+ */
+export function precomputeDirListing(directory: string): LocalOpResult {
+  return listDir({
+    type: "local-op",
+    operation: "list-dir",
+    cwd: directory,
+    params: { path: ".", recursive: true, maxDepth: 3, maxEntries: 500 },
+  });
+}
+
 export async function handleLocalOp(
   payload: LocalOpPayload,
   options: WizardOptions
