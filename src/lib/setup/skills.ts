@@ -32,17 +32,11 @@ export async function fetchSentrySkills(stderr: {
     return [];
   }
 
-  // Register cleanup handlers so the temp dir is removed even on signal
+  // Register a one-shot exit handler so the temp dir is removed on any exit path
+  // (normal exit, uncaught exception, or signal-induced exit). We use once() so
+  // the handler does not accumulate across multiple fetchSentrySkills() calls.
   const cleanup = () => rmSync(tempDir, { recursive: true, force: true });
-  process.on("exit", cleanup);
-  process.on("SIGINT", () => {
-    cleanup();
-    process.exit(130);
-  });
-  process.on("SIGTERM", () => {
-    cleanup();
-    process.exit(143);
-  });
+  process.once("exit", cleanup);
 
   // Download the tarball
   let tarballBytes: ArrayBuffer;

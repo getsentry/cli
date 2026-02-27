@@ -12,14 +12,6 @@ import type {
   AgentSession,
   AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
-import {
-  AuthStorage,
-  createAgentSession,
-  createCodingTools,
-  DefaultResourceLoader,
-  ModelRegistry,
-  SessionManager,
-} from "@mariozechner/pi-coding-agent";
 import { SENTRY_SETUP_SYSTEM_PROMPT } from "./system-prompt.js";
 
 /** Environment variable names for common model provider API keys. */
@@ -43,22 +35,14 @@ const PROVIDER_ENV_VARS = [
  * @returns `true` if at least one provider credential is found, `false` otherwise.
  */
 export function checkPiAuth(): boolean {
-  // Fast path: check well-known environment variables
+  // Check well-known environment variables — covers the common case without
+  // requiring a dynamic import of the Pi SDK.
   for (const envVar of PROVIDER_ENV_VARS) {
     if (process.env[envVar]) {
       return true;
     }
   }
-
-  // Slower path: read auth.json via AuthStorage
-  try {
-    const authStorage = AuthStorage.create();
-    const providers = authStorage.list();
-    return providers.length > 0;
-  } catch {
-    // If auth storage is unreadable, assume not configured
-    return false;
-  }
+  return false;
 }
 
 /**
@@ -76,6 +60,15 @@ export async function createSetupSession(
   cwd: string,
   skillPaths: string[]
 ): Promise<AgentSession> {
+  const {
+    AuthStorage,
+    createAgentSession,
+    createCodingTools,
+    DefaultResourceLoader,
+    ModelRegistry,
+    SessionManager,
+  } = await import("@mariozechner/pi-coding-agent");
+
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
 
@@ -170,13 +163,24 @@ export async function runSetupRepl(
   const rl = createInterface({ input: stdin as any, terminal: false });
 
   const question = (prompt: string): Promise<string> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       stdout.write(prompt);
-      rl.once("line", resolve);
+      const onLine = (line: string) => {
+        rl.removeListener("close", onClose);
+        resolve(line);
+      };
+      const onClose = () => {
+        rl.removeListener("line", onLine);
+        reject(new Error("readline closed"));
+      };
+      rl.once("line", onLine);
+      rl.once("close", onClose);
     });
 
-  // Handle Ctrl+C: abort if streaming, exit if idle
-  rl.on("SIGINT", () => {
+  // Handle Ctrl+C at the process level. readline with terminal:false never
+  // emits the "SIGINT" event, so we must listen on the process directly.
+  // The handler is removed in the finally block to avoid accumulation.
+  const sigintHandler = () => {
     if (session.isStreaming) {
       stderr.write("\n^C\n");
       session.abort().catch((_err: unknown) => {
@@ -186,7 +190,8 @@ export async function runSetupRepl(
       stdout.write("\n");
       rl.close();
     }
-  });
+  };
+  process.on("SIGINT", sigintHandler);
 
   // Track whether cleanup has run to prevent double-cleanup
   let exited = false;
@@ -225,6 +230,7 @@ export async function runSetupRepl(
       await session.prompt(trimmed);
     }
   } finally {
+    process.removeListener("SIGINT", sigintHandler);
     if (!exited) {
       exited = true;
       rl.close();
