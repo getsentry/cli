@@ -274,50 +274,100 @@ function flattenInline(token: Token): Token[] {
 }
 
 /**
+ * Render a single inline token to an ANSI string.
+ */
+function renderOneInline(token: Token): string {
+  switch (token.type) {
+    case "strong":
+      return chalk.bold(renderInline((token as Tokens.Strong).tokens));
+    case "em":
+      return chalk.italic(renderInline((token as Tokens.Em).tokens));
+    case "codespan":
+      return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
+    case "link": {
+      const link = token as Tokens.Link;
+      const linkText = renderInline(link.tokens);
+      const styled = chalk.hex(COLORS.blue)(linkText);
+      return link.href ? terminalLink(styled, link.href) : styled;
+    }
+    case "del":
+      return chalk.dim.gray.strikethrough(
+        renderInline((token as Tokens.Del).tokens)
+      );
+    case "br":
+      return "\n";
+    case "escape":
+      return (token as Tokens.Escape).text;
+    case "text":
+      if ("tokens" in token && (token as Tokens.Text).tokens) {
+        return renderInline((token as Tokens.Text).tokens ?? []);
+      }
+      return (token as Tokens.Text).text;
+    case "html": {
+      const raw = (token as Tokens.HTML).raw ?? (token as Tokens.HTML).text;
+      return renderHtmlToken(raw);
+    }
+    default:
+      return (token as { raw?: string }).raw ?? "";
+  }
+}
+
+/**
  * Render an array of inline tokens into an ANSI-styled string.
  *
- * Handles: strong, em, codespan, link, text, br, del, escape, html.
+ * Handles paired color tags (`<red>\u2026</red>`) that `marked` emits as
+ * separate `html` tokens (open, inner tokens, close). Buffers inner
+ * tokens until the matching close tag, then applies the color function.
+ *
+ * Also handles: strong, em, codespan, link, text, br, del, escape.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: paired color tag buffering
 function renderInline(tokens: Token[]): string {
-  return tokens
-    .map((token) => {
-      switch (token.type) {
-        case "strong":
-          return chalk.bold(renderInline((token as Tokens.Strong).tokens));
-        case "em":
-          return chalk.italic(renderInline((token as Tokens.Em).tokens));
-        case "codespan":
-          return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
-        case "link": {
-          const link = token as Tokens.Link;
-          const linkText = renderInline(link.tokens);
-          const styled = chalk.hex(COLORS.blue)(linkText);
-          return link.href ? terminalLink(styled, link.href) : styled;
-        }
-        case "del":
-          return chalk.dim.gray.strikethrough(
-            renderInline((token as Tokens.Del).tokens)
-          );
-        case "br":
-          return "\n";
-        case "escape":
-          return (token as Tokens.Escape).text;
-        case "text":
-          // Text tokens may themselves contain sub-tokens (e.g. from
-          // autolinked URLs or inline markup inside list items)
-          if ("tokens" in token && (token as Tokens.Text).tokens) {
-            return renderInline((token as Tokens.Text).tokens ?? []);
+  const parts: string[] = [];
+  let i = 0;
+
+  while (i < tokens.length) {
+    const token = tokens[i] as Token;
+
+    // Check for color tag open: <red>, <green>, etc.
+    if (token.type === "html") {
+      const raw = (
+        (token as Tokens.HTML).raw ?? (token as Tokens.HTML).text
+      ).trim();
+      const openMatch = RE_OPEN_TAG.exec(raw);
+      if (openMatch) {
+        const tagName = (openMatch[1] ?? "").toLowerCase();
+        const colorFn = COLOR_TAGS[tagName];
+        if (colorFn) {
+          // Collect inner tokens until matching </tag>
+          const closeTag = `</${openMatch[1]}>`;
+          const inner: Token[] = [];
+          i += 1;
+          while (i < tokens.length) {
+            const t = tokens[i] as Token;
+            if (
+              t.type === "html" &&
+              ((t as Tokens.HTML).raw ?? (t as Tokens.HTML).text)
+                .trim()
+                .toLowerCase() === closeTag.toLowerCase()
+            ) {
+              i += 1; // consume close tag
+              break;
+            }
+            inner.push(t);
+            i += 1;
           }
-          return (token as Tokens.Text).text;
-        case "html": {
-          const raw = (token as Tokens.HTML).raw ?? (token as Tokens.HTML).text;
-          return renderHtmlToken(raw);
+          parts.push(colorFn(renderInline(inner)));
+          continue;
         }
-        default:
-          return (token as { raw?: string }).raw ?? "";
       }
-    })
-    .join("");
+    }
+
+    parts.push(renderOneInline(token));
+    i += 1;
+  }
+
+  return parts.join("");
 }
 
 // ──────────────────────── Block token rendering ──────────────────────

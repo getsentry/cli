@@ -8,13 +8,17 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  colorTag,
+  divider,
   escapeMarkdownCell,
+  escapeMarkdownInline,
   isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
+  safeCodeSpan,
 } from "../../../src/lib/formatters/markdown.js";
 
 // ---------------------------------------------------------------------------
@@ -399,5 +403,243 @@ describe("mdKvTable", () => {
   test("handles single row", () => {
     const result = mdKvTable([["Only", "Row"]]);
     expect(result).toContain("| **Only** | Row |");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// colorTag
+// ---------------------------------------------------------------------------
+
+describe("colorTag", () => {
+  test("wraps text in HTML-style tag", () => {
+    expect(colorTag("red", "ERROR")).toBe("<red>ERROR</red>");
+  });
+
+  test("works with all supported tags", () => {
+    for (const tag of [
+      "red",
+      "green",
+      "yellow",
+      "blue",
+      "magenta",
+      "cyan",
+      "muted",
+    ] as const) {
+      const result = colorTag(tag, "text");
+      expect(result).toBe(`<${tag}>text</${tag}>`);
+    }
+  });
+
+  test("rendered mode: strips color tags and preserves content", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      const result = renderInlineMarkdown(colorTag("red", "ERROR"));
+      // Tags are consumed by the renderer (not present as raw HTML)
+      expect(result).not.toContain("<red>");
+      expect(result).not.toContain("</red>");
+      expect(stripAnsi(result)).toContain("ERROR");
+    });
+  });
+
+  test("plain mode: tags are stripped leaving bare text", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
+      const result = renderInlineMarkdown(colorTag("red", "ERROR"));
+      expect(result).toContain("<red>ERROR</red>");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// escapeMarkdownInline
+// ---------------------------------------------------------------------------
+
+describe("escapeMarkdownInline", () => {
+  test("escapes underscores", () => {
+    expect(escapeMarkdownInline("hello_world")).toBe("hello\\_world");
+  });
+
+  test("escapes asterisks", () => {
+    expect(escapeMarkdownInline("*bold*")).toBe("\\*bold\\*");
+  });
+
+  test("escapes backticks", () => {
+    expect(escapeMarkdownInline("`code`")).toBe("\\`code\\`");
+  });
+
+  test("escapes square brackets", () => {
+    expect(escapeMarkdownInline("[link]")).toBe("\\[link\\]");
+  });
+
+  test("escapes backslashes", () => {
+    expect(escapeMarkdownInline("a\\b")).toBe("a\\\\b");
+  });
+
+  test("returns unchanged string with no special chars", () => {
+    expect(escapeMarkdownInline("hello world")).toBe("hello world");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// safeCodeSpan
+// ---------------------------------------------------------------------------
+
+describe("safeCodeSpan", () => {
+  test("wraps value in backticks", () => {
+    expect(safeCodeSpan("hello")).toBe("`hello`");
+  });
+
+  test("replaces internal backticks with modifier letter", () => {
+    const result = safeCodeSpan("a`b");
+    expect(result).not.toContain("`b");
+    expect(result.startsWith("`")).toBe(true);
+    expect(result.endsWith("`")).toBe(true);
+  });
+
+  test("replaces pipe with unicode vertical bar", () => {
+    const result = safeCodeSpan("a|b");
+    expect(result).not.toContain("|");
+    expect(result).toContain("\u2502");
+  });
+
+  test("replaces newlines with spaces", () => {
+    const result = safeCodeSpan("line1\nline2");
+    expect(result).not.toContain("\n");
+    expect(result).toContain("line1 line2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// divider
+// ---------------------------------------------------------------------------
+
+describe("divider", () => {
+  test("returns horizontal rule of default width", () => {
+    const result = divider();
+    expect(stripAnsi(result)).toBe("\u2500".repeat(80));
+  });
+
+  test("accepts custom width", () => {
+    const result = divider(40);
+    expect(stripAnsi(result)).toBe("\u2500".repeat(40));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderMarkdown: block-level rendering
+// ---------------------------------------------------------------------------
+
+describe("renderMarkdown blocks (rendered mode)", () => {
+  function rendered(md: string): string {
+    let result = "";
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      result = renderMarkdown(md);
+    });
+    return result;
+  }
+
+  test("renders headings", () => {
+    const result = rendered("## My Heading");
+    expect(stripAnsi(result)).toContain("My Heading");
+  });
+
+  test("renders paragraphs", () => {
+    const result = rendered("Hello paragraph text.");
+    expect(stripAnsi(result)).toContain("Hello paragraph text.");
+  });
+
+  test("renders code blocks with language", () => {
+    const result = rendered("```python\nprint('hello')\n```");
+    expect(stripAnsi(result)).toContain("print");
+    expect(stripAnsi(result)).toContain("hello");
+  });
+
+  test("renders code blocks without language", () => {
+    const result = rendered("```\nsome code\n```");
+    expect(stripAnsi(result)).toContain("some code");
+  });
+
+  test("renders blockquotes", () => {
+    const result = rendered("> This is a quote");
+    expect(stripAnsi(result)).toContain("This is a quote");
+  });
+
+  test("renders unordered lists", () => {
+    const result = rendered("- Item A\n- Item B");
+    expect(stripAnsi(result)).toContain("Item A");
+    expect(stripAnsi(result)).toContain("Item B");
+  });
+
+  test("renders ordered lists", () => {
+    const result = rendered("1. First\n2. Second");
+    expect(stripAnsi(result)).toContain("First");
+    expect(stripAnsi(result)).toContain("Second");
+  });
+
+  test("renders horizontal rules", () => {
+    const result = rendered("---");
+    expect(result).toContain("\u2500");
+  });
+
+  test("renders markdown tables as box tables", () => {
+    const result = rendered("| A | B |\n|---|---|\n| 1 | 2 |");
+    expect(stripAnsi(result)).toContain("A");
+    expect(stripAnsi(result)).toContain("B");
+    expect(stripAnsi(result)).toContain("1");
+    expect(stripAnsi(result)).toContain("2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderInlineMarkdown: inline token rendering
+// ---------------------------------------------------------------------------
+
+describe("renderInlineMarkdown inline tokens (rendered mode)", () => {
+  function rendered(md: string): string {
+    let result = "";
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      result = renderInlineMarkdown(md);
+    });
+    return result;
+  }
+
+  test("renders italic", () => {
+    const result = rendered("*italic text*");
+    expect(stripAnsi(result)).toContain("italic text");
+    // Should have ANSI codes
+    expect(result).not.toBe("*italic text*");
+  });
+
+  test("renders links", () => {
+    const result = rendered("[click](https://example.com)");
+    expect(stripAnsi(result)).toContain("click");
+  });
+
+  test("renders strikethrough", () => {
+    const result = rendered("~~deleted~~");
+    expect(stripAnsi(result)).toContain("deleted");
+  });
+
+  test("renders color tags", () => {
+    const result = rendered("<red>ERROR</red>");
+    // Tags are consumed by the renderer (not present as raw HTML)
+    expect(result).not.toContain("<red>");
+    expect(result).not.toContain("</red>");
+    expect(stripAnsi(result)).toContain("ERROR");
+  });
+
+  test("unknown HTML tags are stripped", () => {
+    const result = rendered("<banana>fruit</banana>");
+    expect(stripAnsi(result)).toContain("fruit");
+  });
+
+  test("bare open tags are dropped", () => {
+    const result = rendered("before <red> after");
+    expect(stripAnsi(result)).toContain("before");
+    expect(stripAnsi(result)).toContain("after");
+  });
+
+  test("bare close tags are dropped", () => {
+    const result = rendered("before </red> after");
+    expect(stripAnsi(result)).toContain("before");
+    expect(stripAnsi(result)).toContain("after");
   });
 });

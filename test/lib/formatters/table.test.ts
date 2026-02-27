@@ -91,3 +91,62 @@ describe("writeTable", () => {
     expect(output).toContain("x");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plain-mode output (raw markdown tables)
+// ---------------------------------------------------------------------------
+
+describe("writeTable (plain mode)", () => {
+  const saved = {
+    plain: process.env.SENTRY_PLAIN_OUTPUT,
+    noColor: process.env.NO_COLOR,
+  };
+
+  function withPlain(fn: () => void): void {
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+    process.env.NO_COLOR = undefined;
+    try {
+      fn();
+    } finally {
+      if (saved.plain !== undefined) {
+        process.env.SENTRY_PLAIN_OUTPUT = saved.plain;
+      } else {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+      if (saved.noColor !== undefined) {
+        process.env.NO_COLOR = saved.noColor;
+      } else {
+        delete process.env.NO_COLOR;
+      }
+    }
+  }
+
+  test("emits raw markdown table", () => {
+    withPlain(() => {
+      const write = mock(() => true);
+      writeTable(
+        { write },
+        [{ name: "alice", count: 1, status: "ok" }],
+        columns
+      );
+      const output = write.mock.calls.map((c) => c[0]).join("");
+      // Should contain pipe-delimited markdown format
+      expect(output).toContain("|");
+      expect(output).toContain("NAME");
+      expect(output).toContain("alice");
+    });
+  });
+
+  test("escapes pipe characters in cell values", () => {
+    withPlain(() => {
+      const cols: Column<{ v: string }>[] = [
+        { header: "VAL", value: (r) => r.v },
+      ];
+      const write = mock(() => true);
+      writeTable({ write }, [{ v: "a|b" }], cols);
+      const output = write.mock.calls.map((c) => c[0]).join("");
+      // Pipe should be escaped
+      expect(output).toContain("a\\|b");
+    });
+  });
+});
