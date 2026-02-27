@@ -28,40 +28,76 @@ import type {
  * Shell metacharacters that enable chaining, piping, substitution, or redirection.
  * All legitimate install commands are simple single commands that don't need these.
  */
-const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> = [
-  { pattern: ";", label: "command chaining (;)" },
-  // Check multi-char operators before single `|` so labels are accurate
-  { pattern: "&&", label: "command chaining (&&)" },
-  { pattern: "||", label: "command chaining (||)" },
-  { pattern: "|", label: "piping (|)" },
-  { pattern: "`", label: "command substitution (`)" },
-  { pattern: "$(", label: "command substitution ($()" },
-  { pattern: "\n", label: "newline" },
-  { pattern: "\r", label: "carriage return" },
-];
+const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
+  [
+    { pattern: ";", label: "command chaining (;)" },
+    // Check multi-char operators before single `|` so labels are accurate
+    { pattern: "&&", label: "command chaining (&&)" },
+    { pattern: "||", label: "command chaining (||)" },
+    { pattern: "|", label: "piping (|)" },
+    { pattern: "`", label: "command substitution (`)" },
+    { pattern: "$(", label: "command substitution ($()" },
+    { pattern: "\n", label: "newline" },
+    { pattern: "\r", label: "carriage return" },
+  ];
+
+const WHITESPACE_RE = /\s+/;
 
 /**
  * Executables that should never appear in a package install command.
  */
 const BLOCKED_EXECUTABLES = new Set([
   // Destructive
-  "rm", "rmdir", "del",
+  "rm",
+  "rmdir",
+  "del",
   // Network/exfil
-  "curl", "wget", "nc", "ncat", "netcat", "socat", "telnet", "ftp",
+  "curl",
+  "wget",
+  "nc",
+  "ncat",
+  "netcat",
+  "socat",
+  "telnet",
+  "ftp",
   // Privilege escalation
-  "sudo", "su", "doas",
+  "sudo",
+  "su",
+  "doas",
   // Permissions
-  "chmod", "chown", "chgrp",
+  "chmod",
+  "chown",
+  "chgrp",
   // Process/system
-  "kill", "killall", "pkill", "shutdown", "reboot", "halt", "poweroff",
+  "kill",
+  "killall",
+  "pkill",
+  "shutdown",
+  "reboot",
+  "halt",
+  "poweroff",
   // Disk
-  "dd", "mkfs", "fdisk", "mount", "umount",
+  "dd",
+  "mkfs",
+  "fdisk",
+  "mount",
+  "umount",
   // Remote access
-  "ssh", "scp", "sftp",
+  "ssh",
+  "scp",
+  "sftp",
   // Shells
-  "bash", "sh", "zsh", "fish", "csh", "dash",
+  "bash",
+  "sh",
+  "zsh",
+  "fish",
+  "csh",
+  "dash",
   // Misc dangerous
-  "eval", "exec", "env", "xargs",
+  "eval",
+  "exec",
+  "env",
+  "xargs",
 ]);
 
 /**
@@ -77,16 +113,16 @@ export function validateCommand(command: string): string | undefined {
   }
 
   // Layer 2: Block dangerous executables
-  const firstToken = command.trimStart().split(/\s+/)[0];
+  const firstToken = command.trimStart().split(WHITESPACE_RE)[0];
   if (!firstToken) {
-    return `Blocked command: empty command`;
+    return "Blocked command: empty command";
   }
   const executable = path.basename(firstToken);
   if (BLOCKED_EXECUTABLES.has(executable)) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
   }
 
-  return undefined;
+  return;
 }
 
 /**

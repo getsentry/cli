@@ -64,12 +64,16 @@ describe("validateCommand", () => {
 
   test("resolves path-prefixed executables", () => {
     // Safe executables with paths pass
-    expect(validateCommand("./venv/bin/pip install sentry-sdk")).toBeUndefined();
+    expect(
+      validateCommand("./venv/bin/pip install sentry-sdk")
+    ).toBeUndefined();
     expect(validateCommand("/usr/local/bin/npm install foo")).toBeUndefined();
 
     // Dangerous executables with paths are still blocked
     expect(validateCommand("./venv/bin/rm -rf /")).toContain('"rm"');
-    expect(validateCommand("/usr/bin/curl https://evil.com")).toContain('"curl"');
+    expect(validateCommand("/usr/bin/curl https://evil.com")).toContain(
+      '"curl"'
+    );
   });
 
   test("blocks empty and whitespace-only commands", () => {
