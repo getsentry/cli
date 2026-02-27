@@ -22,6 +22,7 @@ import type {
   SentryProject,
   StackFrame,
   TraceSpan,
+  Writer,
 } from "../../types/index.js";
 import { withSerializeSpan } from "../telemetry.js";
 import {
@@ -40,6 +41,7 @@ import {
   renderMarkdown,
   safeCodeSpan,
 } from "./markdown.js";
+import { type Column, writeTable } from "./table.js";
 
 // Status Formatting
 
@@ -209,7 +211,7 @@ export function formatStatusLabel(status: string | undefined): string {
  */
 export function formatRelativeTime(dateString: string | undefined): string {
   if (!dateString) {
-    return muted("—").padEnd(10);
+    return muted("—");
   }
 
   const date = new Date(dateString);
@@ -231,163 +233,45 @@ export function formatRelativeTime(dateString: string | undefined): string {
     text = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
-  return text.padEnd(10);
+  return text;
 }
 
 // Issue Formatting
-
-/** Column widths for issue list table */
-const COL_LEVEL = 7;
-const COL_ALIAS = 15;
-const COL_SHORT_ID = 22;
-const COL_COUNT = 5;
-const COL_SEEN = 10;
-/** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
-const COL_FIX = 10;
 
 /** Quantifier suffixes indexed by groups of 3 digits (K=10^3, M=10^6, …, E=10^18) */
 const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
 
 /**
- * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
- * Uses K/M/B/T/P/E suffixes up to 10^18 (exa).
+ * Abbreviate large numbers with K/M/B/T/P/E suffixes (up to 10^18).
  *
  * The decimal is only shown when the rounded value is < 100 (e.g. "12.3K",
- * "1.5M" but not "100M"). The result is always exactly COL_COUNT chars wide.
+ * "1.5M" but not "100M").
  *
- * Note: `Number(raw)` loses precision above `Number.MAX_SAFE_INTEGER`
- * (~9P / 9×10^15), which is far beyond any realistic Sentry event count.
- *
- * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
+ * @param raw - Stringified count
+ * @returns Abbreviated string without padding
  */
 function abbreviateCount(raw: string): string {
   const n = Number(raw);
   if (Number.isNaN(n)) {
-    // Non-numeric input: use a placeholder rather than passing through an
-    // arbitrarily wide string that would break column alignment
     Sentry.logger.warn(`Unexpected non-numeric issue count: ${raw}`);
-    return "?".padStart(COL_COUNT);
+    return "?";
   }
-  if (raw.length <= COL_COUNT) {
-    return raw.padStart(COL_COUNT);
+  if (n < 1000) {
+    return raw;
   }
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
   const suffix = QUANTIFIERS[tier] ?? "";
   const scaled = n / 10 ** (tier * 3);
-  // Only show decimal when it adds information — compare the rounded value to avoid
-  // "100.0K" when scaled is e.g. 99.95 (toFixed(1) rounds up to "100.0")
   const rounded1dp = Number(scaled.toFixed(1));
   if (rounded1dp < 100) {
-    return `${rounded1dp.toFixed(1)}${suffix}`.padStart(COL_COUNT);
+    return `${rounded1dp.toFixed(1)}${suffix}`;
   }
   const rounded = Math.round(scaled);
-  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95K → "1.0M")
   if (rounded >= 1000 && tier < QUANTIFIERS.length - 1) {
     const nextSuffix = QUANTIFIERS[tier + 1] ?? "";
-    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`.padStart(COL_COUNT);
+    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`;
   }
-  // At max tier with no promotion available: cap at 999 to guarantee COL_COUNT width
-  // (numbers > 10^21 are unreachable in practice for Sentry event counts)
-  return `${Math.min(rounded, 999)}${suffix}`.padStart(COL_COUNT);
-}
-
-/** Column where title starts in single-project mode (no ALIAS column) */
-const TITLE_START_COL =
-  COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2 + COL_FIX + 2;
-
-/** Column where title starts in multi-project mode (with ALIAS column) */
-const TITLE_START_COL_MULTI =
-  COL_LEVEL +
-  1 +
-  COL_ALIAS +
-  1 +
-  COL_SHORT_ID +
-  1 +
-  COL_COUNT +
-  2 +
-  COL_SEEN +
-  2 +
-  COL_FIX +
-  2;
-
-/**
- * Format the header row for issue list table.
- * Uses same column widths as data rows to ensure alignment.
- *
- * @param isMultiProject - Whether to include ALIAS column for multi-project mode
- */
-export function formatIssueListHeader(isMultiProject = false): string {
-  if (isMultiProject) {
-    return (
-      "LEVEL".padEnd(COL_LEVEL) +
-      " " +
-      "ALIAS".padEnd(COL_ALIAS) +
-      " " +
-      "SHORT ID".padEnd(COL_SHORT_ID) +
-      " " +
-      "COUNT".padStart(COL_COUNT) +
-      "  " +
-      "SEEN".padEnd(COL_SEEN) +
-      "  " +
-      "FIXABILITY".padEnd(COL_FIX) +
-      "  " +
-      "TITLE"
-    );
-  }
-  return (
-    "LEVEL".padEnd(COL_LEVEL) +
-    " " +
-    "SHORT ID".padEnd(COL_SHORT_ID) +
-    " " +
-    "COUNT".padStart(COL_COUNT) +
-    "  " +
-    "SEEN".padEnd(COL_SEEN) +
-    "  " +
-    "FIXABILITY".padEnd(COL_FIX) +
-    "  " +
-    "TITLE"
-  );
-}
-
-/**
- * Wrap long text with indentation for continuation lines.
- * Breaks at word boundaries when possible.
- *
- * @param text - Text to wrap
- * @param startCol - Column where text starts (for indenting continuation lines)
- * @param termWidth - Terminal width
- */
-function wrapTitle(text: string, startCol: number, termWidth: number): string {
-  const availableWidth = termWidth - startCol;
-
-  // No wrapping needed or terminal too narrow
-  if (text.length <= availableWidth || availableWidth < 20) {
-    return text;
-  }
-
-  const indent = " ".repeat(startCol);
-  const lines: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= availableWidth) {
-      lines.push(remaining);
-      break;
-    }
-
-    // Find break point (prefer word boundary)
-    let breakAt = availableWidth;
-    const lastSpace = remaining.lastIndexOf(" ", availableWidth);
-    if (lastSpace > availableWidth * 0.5) {
-      breakAt = lastSpace;
-    }
-
-    lines.push(remaining.slice(0, breakAt).trimEnd());
-    remaining = remaining.slice(breakAt).trimStart();
-  }
-
-  // First line has no indent, continuation lines do
-  return lines.join(`\n${indent}`);
+  return `${Math.min(rounded, 999)}${suffix}`;
 }
 
 /**
@@ -406,42 +290,24 @@ export type FormatShortIdOptions = {
  * Format short ID for multi-project mode by highlighting the alias characters.
  * Only highlights the specific characters that form the alias:
  * - CLI-25 with alias "c" → **C**LI-**25**
- * - CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4**
- * - API-APP-5 with alias "ap" → API-**AP**P-**5** (searches backwards to find correct part)
- * - X-AB-5 with alias "x-a" → **X-A**B-**5** (handles aliases with embedded dashes)
  *
- * @returns Formatted string if alias matches, null otherwise (to fall back to default)
+ * @returns Formatted string with ANSI highlights, or null if no match found
  */
 function formatShortIdWithAlias(
-  upperShortId: string,
+  shortId: string,
   projectAlias: string
 ): string | null {
-  // Extract project part of alias (handle "o1/d" format for collision cases)
-  const aliasProjectPart = projectAlias.includes("/")
-    ? projectAlias.split("/").pop()
-    : projectAlias;
-
-  if (!aliasProjectPart) {
-    return null;
-  }
-
-  const parts = upperShortId.split("-");
-  if (parts.length < 2) {
-    return null;
-  }
-
-  const aliasUpper = aliasProjectPart.toUpperCase();
+  const aliasUpper = projectAlias.toUpperCase();
   const aliasLen = aliasUpper.length;
-  const projectParts = parts.slice(0, -1);
-  const issueSuffix = parts.at(-1) ?? "";
 
-  // Method 1: For aliases without dashes, search backwards through project parts
-  // This handles cases like "api-app" where alias "ap" should match "APP" not "API"
+  const parts = shortId.split("-");
+  const issueSuffix = parts.pop() ?? "";
+  const projectParts = parts;
+
   if (!aliasUpper.includes("-")) {
     for (let i = projectParts.length - 1; i >= 0; i--) {
       const part = projectParts[i];
       if (part?.startsWith(aliasUpper)) {
-        // Found match - highlight alias prefix in this part and the issue suffix
         const result = projectParts.map((p, idx) => {
           if (idx === i) {
             return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
@@ -453,11 +319,8 @@ function formatShortIdWithAlias(
     }
   }
 
-  // Method 2: For aliases with dashes (or if Method 1 found no match),
-  // match against the joined project portion
   const projectPortion = projectParts.join("-");
   if (projectPortion.startsWith(aliasUpper)) {
-    // Highlight first aliasLen chars of project portion, plus issue suffix
     const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
     const rest = projectPortion.slice(aliasLen);
     return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
@@ -473,21 +336,19 @@ function formatShortIdWithAlias(
  * - Multi-project: CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4** (alias chars highlighted)
  *
  * @param shortId - Full short ID (e.g., "CLI-25", "CLI-WEBSITE-4")
- * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
+ * @param options - Formatting options (projectSlug and/or projectAlias)
  * @returns Formatted short ID with highlights
  */
 export function formatShortId(
   shortId: string,
   options?: FormatShortIdOptions | string
 ): string {
-  // Handle legacy string parameter (projectSlug only)
   const opts: FormatShortIdOptions =
     typeof options === "string" ? { projectSlug: options } : (options ?? {});
 
   const { projectSlug, projectAlias, isMultiProject } = opts;
   const upperShortId = shortId.toUpperCase();
 
-  // In multi-project mode with an alias, highlight the part that the alias represents
   if (isMultiProject && projectAlias) {
     const formatted = formatShortIdWithAlias(upperShortId, projectAlias);
     if (formatted) {
@@ -495,7 +356,6 @@ export function formatShortId(
     }
   }
 
-  // Single-project mode or fallback: highlight just the issue suffix
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
@@ -505,14 +365,6 @@ export function formatShortId(
   }
 
   return upperShortId;
-}
-
-/**
- * Calculate the raw display length of a formatted short ID (without ANSI codes).
- * In all modes, we display the full shortId (just with different styling).
- */
-function getShortIdDisplayLength(shortId: string): number {
-  return shortId.length;
 }
 
 /**
@@ -531,60 +383,77 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
   return `${projectAlias}-${suffix}`;
 }
 
+/** Row data prepared for the issue table */
+export type IssueTableRow = {
+  issue: SentryIssue;
+  formatOptions: FormatShortIdOptions;
+};
+
 /**
- * Format a single issue for list display.
- * Wraps long titles with proper indentation.
+ * Write an issue list as a Unicode-bordered markdown table.
  *
- * @param issue - Issue to format
- * @param termWidth - Terminal width for wrapping (default 80)
- * @param shortIdOptions - Options for formatting the short ID (projectSlug and/or projectAlias)
+ * Columns are conditionally included based on `isMultiProject` mode.
+ * Cell values are pre-colored with ANSI codes which survive the
+ * cli-table3 rendering pipeline.
+ *
+ * @param stdout - Output writer
+ * @param rows - Issues with formatting options
+ * @param isMultiProject - Whether to include the ALIAS column
  */
-export function formatIssueRow(
-  issue: SentryIssue,
-  termWidth = 80,
-  shortIdOptions?: FormatShortIdOptions | string
-): string {
-  // Handle legacy string parameter (projectSlug only)
-  const opts: FormatShortIdOptions =
-    typeof shortIdOptions === "string"
-      ? { projectSlug: shortIdOptions }
-      : (shortIdOptions ?? {});
+export function writeIssueTable(
+  stdout: Writer,
+  rows: IssueTableRow[],
+  isMultiProject: boolean
+): void {
+  const columns: Column<IssueTableRow>[] = [
+    {
+      header: "LEVEL",
+      value: ({ issue }) =>
+        levelColor((issue.level ?? "unknown").toUpperCase(), issue.level),
+    },
+  ];
 
-  const { isMultiProject, projectAlias } = opts;
-
-  const levelText = (issue.level ?? "unknown").toUpperCase().padEnd(COL_LEVEL);
-  const level = levelColor(levelText, issue.level);
-  const formattedShortId = formatShortId(issue.shortId, opts);
-
-  // Calculate raw display length (without ANSI codes) for padding
-  const rawLen = getShortIdDisplayLength(issue.shortId);
-  const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
-  const shortId = `${formattedShortId}${shortIdPadding}`;
-  const count = abbreviateCount(`${issue.count}`);
-  const seen = formatRelativeTime(issue.lastSeen);
-
-  // Fixability column (color applied after padding to preserve alignment)
-  const fixText = formatFixability(issue.seerFixabilityScore);
-  const fixPadding = " ".repeat(Math.max(0, COL_FIX - fixText.length));
-  const score = issue.seerFixabilityScore;
-  const fix =
-    fixText && score !== null && score !== undefined
-      ? fixabilityColor(fixText, getSeerFixabilityLabel(score)) + fixPadding
-      : fixPadding;
-
-  // Multi-project mode: include ALIAS column
   if (isMultiProject) {
-    const aliasShorthand = computeAliasShorthand(issue.shortId, projectAlias);
-    const aliasPadding = " ".repeat(
-      Math.max(0, COL_ALIAS - aliasShorthand.length)
-    );
-    const alias = `${aliasShorthand}${aliasPadding}`;
-    const title = wrapTitle(issue.title, TITLE_START_COL_MULTI, termWidth);
-    return `${level} ${alias} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
+    columns.push({
+      header: "ALIAS",
+      value: ({ issue, formatOptions }) =>
+        computeAliasShorthand(issue.shortId, formatOptions.projectAlias),
+    });
   }
 
-  const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
-  return `${level} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
+  columns.push(
+    {
+      header: "SHORT ID",
+      value: ({ issue, formatOptions }) =>
+        formatShortId(issue.shortId, formatOptions),
+    },
+    {
+      header: "COUNT",
+      value: ({ issue }) => abbreviateCount(`${issue.count}`),
+      align: "right",
+    },
+    {
+      header: "SEEN",
+      value: ({ issue }) => formatRelativeTime(issue.lastSeen),
+    },
+    {
+      header: "FIXABILITY",
+      value: ({ issue }) => {
+        const text = formatFixability(issue.seerFixabilityScore);
+        const score = issue.seerFixabilityScore;
+        if (text && score !== null && score !== undefined) {
+          return fixabilityColor(text, getSeerFixabilityLabel(score));
+        }
+        return "";
+      },
+    },
+    {
+      header: "TITLE",
+      value: ({ issue }) => issue.title,
+    }
+  );
+
+  writeTable(stdout, rows, columns);
 }
 
 /**

@@ -65,7 +65,7 @@ function buildTraceRowCells(
     `\`${item.trace}\``,
     escapeMarkdownCell(item.transaction || "unknown"),
     formatTraceDuration(item["transaction.duration"]),
-    formatRelativeTime(item.timestamp).trim(),
+    formatRelativeTime(item.timestamp),
   ];
 }
 

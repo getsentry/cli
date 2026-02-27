@@ -35,11 +35,9 @@ import {
   ValidationError,
 } from "../../lib/errors.js";
 import {
-  divider,
-  type FormatShortIdOptions,
-  formatIssueListHeader,
-  formatIssueRow,
+  type IssueTableRow,
   muted,
+  writeIssueTable,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
@@ -111,14 +109,8 @@ function parseSort(value: string): SortValue {
  * @param title - Section title
  * @param isMultiProject - Whether to show ALIAS column for multi-project mode
  */
-function writeListHeader(
-  stdout: Writer,
-  title: string,
-  isMultiProject = false
-): void {
+function writeListHeader(stdout: Writer, title: string): void {
   stdout.write(`${title}:\n\n`);
-  stdout.write(muted(`${formatIssueListHeader(isMultiProject)}\n`));
-  stdout.write(`${divider(isMultiProject ? 96 : 80)}\n`);
 }
 
 /** Issue with formatting options attached */
@@ -128,19 +120,6 @@ function writeListHeader(
   orgSlug: string;
   formatOptions: FormatShortIdOptions;
 };
-
-/**
- * Write formatted issue rows to stdout.
- */
-function writeIssueRows(
-  stdout: Writer,
-  issues: IssueWithOptions[],
-  termWidth: number
-): void {
-  for (const { issue, formatOptions } of issues) {
-    stdout.write(`${formatIssueRow(issue, termWidth, formatOptions)}\n`);
-  }
-}
 
 /**
  * Write footer with usage tip.
@@ -234,7 +213,7 @@ function attachFormatOptions(
   results: IssueListResult[],
   aliasMap: Map<string, string>,
   isMultiProject: boolean
-): IssueWithOptions[] {
+): IssueTableRow[] {
   return results.flatMap((result) =>
     result.issues.map((issue) => {
       const key = `${result.target.org}/${result.target.project}`;
@@ -797,9 +776,8 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
 
   // isMultiProject=true: org-all shows issues from every project, so the ALIAS
   // column is needed to identify which project each issue belongs to.
-  writeListHeader(stdout, `Issues in ${org}`, true);
-  const termWidth = process.stdout.columns || 80;
-  const issuesWithOpts = issues.map((issue) => ({
+  writeListHeader(stdout, `Issues in ${org}`);
+  const issuesWithOpts: IssueTableRow[] = issues.map((issue) => ({
     issue,
     // org-all: org context comes from the `org` param; issue.organization may be absent
     orgSlug: org,
@@ -808,7 +786,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
       isMultiProject: true,
     },
   }));
-  writeIssueRows(stdout, issuesWithOpts, termWidth);
+  writeIssueTable(stdout, issuesWithOpts, true);
 
   if (hasMore) {
     stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
@@ -1059,10 +1037,8 @@ async function handleResolvedTargets(
       ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
       : `Issues from ${validResults.length} projects`;
 
-  writeListHeader(stdout, title, isMultiProject);
-
-  const termWidth = process.stdout.columns || 80;
-  writeIssueRows(stdout, issuesWithOptions, termWidth);
+  writeListHeader(stdout, title);
+  writeIssueTable(stdout, issuesWithOptions, isMultiProject);
 
   let footerMode: "single" | "multi" | "none" = "none";
   if (isMultiProject) {

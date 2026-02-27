@@ -8,9 +8,10 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  formatIssueRow,
   formatShortId,
   formatUserIdentity,
+  type IssueTableRow,
+  writeIssueTable,
 } from "../../../src/lib/formatters/human.js";
 import type { SentryIssue } from "../../../src/types/index.js";
 
@@ -146,7 +147,7 @@ describe("formatShortId multi-project alias highlighting", () => {
   });
 });
 
-describe("formatIssueRow", () => {
+describe("writeIssueTable", () => {
   const mockIssue: SentryIssue = {
     id: "123",
     shortId: "DASHBOARD-A3",
@@ -160,43 +161,79 @@ describe("formatIssueRow", () => {
     permalink: "https://sentry.io/issues/123",
   };
 
-  test("single project mode does not include alias column", () => {
-    const row = formatIssueRow(mockIssue, 80, {
-      projectSlug: "dashboard",
-    });
-    // Should not have alias shorthand format
-    expect(stripAnsi(row)).not.toContain("o1:d-a3");
+  function capture(): {
+    writer: { write: (s: string) => boolean };
+    output: () => string;
+  } {
+    let buf = "";
+    return {
+      writer: {
+        write: (s: string) => {
+          buf += s;
+          return true;
+        },
+      },
+      output: () => buf,
+    };
+  }
+
+  test("single project mode does not include ALIAS column", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      { issue: mockIssue, formatOptions: { projectSlug: "dashboard" } },
+    ];
+    writeIssueTable(writer, rows, false);
+    const text = stripAnsi(output());
+    expect(text).not.toContain("ALIAS");
+    expect(text).toContain("DASHBOARD-A3");
+    expect(text).toContain("Test issue");
   });
 
-  test("multi-project mode includes alias column", () => {
-    const row = formatIssueRow(mockIssue, 120, {
-      projectSlug: "dashboard",
-      projectAlias: "o1:d",
-      isMultiProject: true,
-    });
-    // Should contain the alias shorthand
-    expect(stripAnsi(row)).toContain("o1:d-a3");
+  test("multi-project mode includes ALIAS column with alias shorthand", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: mockIssue,
+        formatOptions: {
+          projectSlug: "dashboard",
+          projectAlias: "o1:d",
+          isMultiProject: true,
+        },
+      },
+    ];
+    writeIssueTable(writer, rows, true);
+    const text = stripAnsi(output());
+    expect(text).toContain("ALIAS");
+    expect(text).toContain("o1:d-a3");
   });
 
-  test("alias shorthand is lowercase", () => {
-    const row = formatIssueRow(mockIssue, 120, {
-      projectSlug: "dashboard",
-      projectAlias: "o1:d",
-      isMultiProject: true,
-    });
-    // The alias shorthand should be lowercase
-    expect(stripAnsi(row)).toContain("o1:d-a3");
-    expect(stripAnsi(row)).not.toContain("O1:D-A3");
+  test("table contains all essential columns", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      { issue: mockIssue, formatOptions: { projectSlug: "dashboard" } },
+    ];
+    writeIssueTable(writer, rows, false);
+    const text = stripAnsi(output());
+    for (const col of [
+      "LEVEL",
+      "SHORT ID",
+      "COUNT",
+      "SEEN",
+      "FIXABILITY",
+      "TITLE",
+    ]) {
+      expect(text).toContain(col);
+    }
   });
 
-  test("unique alias format works in multi-project mode", () => {
-    const row = formatIssueRow(mockIssue, 120, {
-      projectSlug: "dashboard",
-      projectAlias: "d",
-      isMultiProject: true,
-    });
-    // Should contain simple alias shorthand
-    expect(stripAnsi(row)).toContain("d-a3");
+  test("level and title values appear in output", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [{ issue: mockIssue, formatOptions: {} }];
+    writeIssueTable(writer, rows, false);
+    const text = stripAnsi(output());
+    expect(text).toContain("ERROR");
+    expect(text).toContain("Test issue");
+    expect(text).toContain("42");
   });
 });
 

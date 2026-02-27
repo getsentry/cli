@@ -18,7 +18,6 @@ import {
 import {
   formatFixability,
   formatFixabilityDetail,
-  formatIssueListHeader,
   formatShortId,
   formatUserIdentity,
   getSeerFixabilityLabel,
@@ -237,36 +236,6 @@ describe("formatUserIdentity properties", () => {
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
-  });
-});
-
-describe("formatIssueListHeader properties", () => {
-  test("multi-project mode always includes ALIAS column", () => {
-    const header = formatIssueListHeader(true);
-    expect(header).toContain("ALIAS");
-  });
-
-  test("single-project mode never includes ALIAS column", () => {
-    const header = formatIssueListHeader(false);
-    expect(header).not.toContain("ALIAS");
-  });
-
-  test("both modes include essential columns", async () => {
-    const essentialColumns = [
-      "LEVEL",
-      "SHORT ID",
-      "COUNT",
-      "SEEN",
-      "FIXABILITY",
-      "TITLE",
-    ];
-
-    for (const isMultiProject of [true, false]) {
-      const header = formatIssueListHeader(isMultiProject);
-      for (const col of essentialColumns) {
-        expect(header).toContain(col);
-      }
-    }
   });
 });
 
