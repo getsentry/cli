@@ -256,7 +256,7 @@ type EventHandlerIO = {
   stderr: { write(s: string): void };
 };
 
-/** Handle tool_execution_start: print a description and restart spinner. */
+/** Handle tool_execution_start: print a [tool] prefixed description and restart spinner. */
 function handleToolStart(
   event: { toolName: string; args: unknown },
   spinner: ReturnType<typeof createSpinner>,
@@ -264,7 +264,7 @@ function handleToolStart(
 ): void {
   spinner.stop();
   const desc = formatToolDescription(event.toolName, event.args);
-  io.stderr.write(`${muted(desc)}\n`);
+  io.stderr.write(`${muted(`[tool] ${desc}`)}\n`);
   spinner.start(`Running ${event.toolName}...`);
 }
 
@@ -280,7 +280,7 @@ function handleToolEnd(
     const firstLine = summary.split("\n")[0] ?? summary;
     const truncated =
       firstLine.length > 200 ? `${firstLine.slice(0, 197)}...` : firstLine;
-    io.stderr.write(`${error("✗")} ${muted(truncated)}\n`);
+    io.stderr.write(`${muted("[tool] ")}${error("✗")} ${muted(truncated)}\n`);
   }
   spinner.start("Thinking...");
 }
@@ -298,6 +298,19 @@ function createEventHandler(
   const spinner = createSpinner(stderr);
   const io: EventHandlerIO = { stdout, stderr };
 
+  /** Track what was last written so we can insert blank lines at transitions. */
+  let lastOutput: "text" | "tool" | "none" = "none";
+
+  /** Insert a blank line when transitioning between text and tool output. */
+  const transition = (to: "text" | "tool" | "none") => {
+    if (lastOutput === "tool" && to === "text") {
+      stdout.write("\n");
+    } else if (lastOutput === "text" && to === "tool") {
+      stderr.write("\n");
+    }
+    lastOutput = to;
+  };
+
   return {
     handle: (event: AgentSessionEvent) => {
       switch (event.type) {
@@ -309,18 +322,22 @@ function createEventHandler(
           if ("error" in event && event.error) {
             stderr.write(`\n${error("Error:")} ${String(event.error)}\n`);
           }
+          lastOutput = "none";
           break;
         case "message_update":
           if (event.assistantMessageEvent.type === "text_delta") {
             spinner.stop();
+            transition("text");
             stdout.write(event.assistantMessageEvent.delta);
           }
           break;
         case "tool_execution_start":
+          transition("tool");
           handleToolStart(event, spinner, io);
           break;
         case "tool_execution_end":
           handleToolEnd(event, spinner, io);
+          lastOutput = "tool";
           break;
         default:
           break;
