@@ -25,16 +25,9 @@ import type {
   Writer,
 } from "../../types/index.js";
 import { withSerializeSpan } from "../telemetry.js";
+import { type FixabilityTier, muted } from "./colors.js";
 import {
-  type FixabilityTier,
-  fixabilityColor,
-  green,
-  levelColor,
-  muted,
-  statusColor,
-  yellow,
-} from "./colors.js";
-import {
+  colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
   renderMarkdown,
@@ -42,18 +35,37 @@ import {
 } from "./markdown.js";
 import { type Column, writeTable } from "./table.js";
 
+// Color tag maps
+
+/** Markdown color tags for issue level values */
+const LEVEL_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
+  fatal: "red",
+  error: "red",
+  warning: "yellow",
+  info: "cyan",
+  debug: "muted",
+};
+
+/** Markdown color tags for Seer fixability tiers */
+const FIXABILITY_TAGS: Record<FixabilityTier, Parameters<typeof colorTag>[0]> =
+  {
+    high: "green",
+    med: "yellow",
+    low: "red",
+  };
+
 // Status Formatting
 
 const STATUS_ICONS: Record<IssueStatus, string> = {
-  resolved: green("✓"),
-  unresolved: yellow("●"),
-  ignored: muted("−"),
+  resolved: colorTag("green", "✓"),
+  unresolved: colorTag("yellow", "●"),
+  ignored: colorTag("muted", "−"),
 };
 
 const STATUS_LABELS: Record<IssueStatus, string> = {
-  resolved: `${green("✓")} Resolved`,
-  unresolved: `${yellow("●")} Unresolved`,
-  ignored: `${muted("−")} Ignored`,
+  resolved: `${colorTag("green", "✓")} Resolved`,
+  unresolved: `${colorTag("yellow", "●")} Unresolved`,
+  ignored: `${colorTag("muted", "−")} Ignored`,
 };
 
 /** Maximum features to display before truncating with "... and N more" */
@@ -179,22 +191,15 @@ function formatFeaturesMarkdown(features: string[] | undefined): string {
  * Get status icon for an issue status
  */
 export function formatStatusIcon(status: string | undefined): string {
-  if (!status) {
-    return statusColor("●", status);
-  }
-  return STATUS_ICONS[status as IssueStatus] ?? statusColor("●", status);
+  return STATUS_ICONS[status as IssueStatus] ?? colorTag("yellow", "●");
 }
 
 /**
  * Get full status label for an issue status
  */
 export function formatStatusLabel(status: string | undefined): string {
-  if (!status) {
-    return `${statusColor("●", status)} Unknown`;
-  }
   return (
-    STATUS_LABELS[status as IssueStatus] ??
-    `${statusColor("●", status)} Unknown`
+    STATUS_LABELS[status as IssueStatus] ?? `${colorTag("yellow", "●")} Unknown`
   );
 }
 
@@ -407,8 +412,12 @@ export function writeIssueTable(
   const columns: Column<IssueTableRow>[] = [
     {
       header: "LEVEL",
-      value: ({ issue }) =>
-        levelColor((issue.level ?? "unknown").toUpperCase(), issue.level),
+      value: ({ issue }) => {
+        const level = (issue.level ?? "unknown").toLowerCase();
+        const tag = LEVEL_TAGS[level];
+        const label = level.toUpperCase();
+        return tag ? colorTag(tag, label) : label;
+      },
     },
   ];
 
@@ -446,7 +455,8 @@ export function writeIssueTable(
         const text = formatFixability(issue.seerFixabilityScore);
         const score = issue.seerFixabilityScore;
         if (text && score !== null && score !== undefined) {
-          return fixabilityColor(text, getSeerFixabilityLabel(score));
+          const tier = getSeerFixabilityLabel(score);
+          return colorTag(FIXABILITY_TAGS[tier], text);
         }
         return "";
       },
@@ -490,7 +500,9 @@ export function formatIssueDetails(issue: SentryIssue): string {
   ) {
     const tier = getSeerFixabilityLabel(issue.seerFixabilityScore);
     const fixDetail = formatFixabilityDetail(issue.seerFixabilityScore);
-    rows.push(`| **Fixability** | ${fixabilityColor(fixDetail, tier)} |`);
+    rows.push(
+      `| **Fixability** | ${colorTag(FIXABILITY_TAGS[tier], fixDetail)} |`
+    );
   }
 
   let levelLine = issue.level ?? "unknown";

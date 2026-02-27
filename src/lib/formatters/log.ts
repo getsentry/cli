@@ -6,8 +6,8 @@
 
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
-import { cyan, muted, red, yellow } from "./colors.js";
 import {
+  colorTag,
   divider,
   escapeMarkdownCell,
   escapeMarkdownInline,
@@ -17,31 +17,32 @@ import {
   renderMarkdown,
 } from "./markdown.js";
 
-/** Color functions for log severity levels */
-const SEVERITY_COLORS: Record<string, (text: string) => string> = {
-  fatal: red,
-  error: red,
-  warning: yellow,
-  warn: yellow,
-  info: cyan,
-  debug: muted,
-  trace: muted,
+/** Markdown color tag names for log severity levels */
+const SEVERITY_TAGS: Record<string, string> = {
+  fatal: "red",
+  error: "red",
+  warning: "yellow",
+  warn: "yellow",
+  info: "cyan",
+  debug: "muted",
+  trace: "muted",
 };
 
 /** Column headers for the streaming log table */
 const LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
 
 /**
- * Format severity level with appropriate color.
+ * Format severity level with appropriate color tag.
  * Pads to 7 characters for alignment (longest: "warning").
  *
  * @param severity - The log severity level
- * @returns Colored and padded severity string
+ * @returns Markdown color-tagged and padded severity string
  */
 function formatSeverity(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
-  const colorFn = SEVERITY_COLORS[level] ?? ((s: string) => s);
-  return colorFn(level.toUpperCase().padEnd(7));
+  const tag = SEVERITY_TAGS[level];
+  const label = level.toUpperCase().padEnd(7);
+  return tag ? colorTag(tag as Parameters<typeof colorTag>[0], label) : label;
 }
 
 /**
@@ -118,15 +119,16 @@ export function formatLogTable(logs: SentryLog[]): string {
 }
 
 /**
- * Format severity level with color for detailed view (not padded).
+ * Format severity level with color tag for detailed view (not padded).
  *
  * @param severity - The log severity level
- * @returns Colored severity string
+ * @returns Markdown color-tagged severity string
  */
 function formatSeverityLabel(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
-  const colorFn = SEVERITY_COLORS[level] ?? ((s: string) => s);
-  return colorFn(level.toUpperCase());
+  const tag = SEVERITY_TAGS[level];
+  const label = level.toUpperCase();
+  return tag ? colorTag(tag as Parameters<typeof colorTag>[0], label) : label;
 }
 
 /**

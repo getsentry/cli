@@ -171,11 +171,77 @@ export function divider(width = 80): string {
 
 /** Sentinel-inspired color palette */
 const COLORS = {
+  red: "#fe4144",
+  green: "#83da90",
   yellow: "#FDB81B",
   blue: "#226DFC",
+  magenta: "#FF45A8",
   cyan: "#79B8FF",
   muted: "#898294",
 } as const;
+
+/**
+ * Semantic HTML color tags supported in markdown strings.
+ *
+ * Formatters can embed `<red>text</red>`, `<green>text</green>`, etc. in
+ * any markdown string and the custom renderer will apply the corresponding
+ * ANSI color. In plain (non-TTY) mode the tags are stripped, leaving only
+ * the inner text.
+ *
+ * Supported tags: red, green, yellow, blue, magenta, cyan, muted
+ */
+const COLOR_TAGS: Record<string, (text: string) => string> = {
+  red: (t) => chalk.hex(COLORS.red)(t),
+  green: (t) => chalk.hex(COLORS.green)(t),
+  yellow: (t) => chalk.hex(COLORS.yellow)(t),
+  blue: (t) => chalk.hex(COLORS.blue)(t),
+  magenta: (t) => chalk.hex(COLORS.magenta)(t),
+  cyan: (t) => chalk.hex(COLORS.cyan)(t),
+  muted: (t) => chalk.hex(COLORS.muted)(t),
+};
+
+/**
+ * Wrap text in a semantic color tag for use in markdown strings.
+ *
+ * In TTY mode the tag is rendered as an ANSI color by the custom renderer.
+ * In plain mode the tag is stripped and only the inner text is emitted.
+ *
+ * @example
+ * colorTag("red", "ERROR")   // → "<red>ERROR</red>"
+ * colorTag("green", "✓")     // → "<green>✓</green>"
+ */
+export function colorTag(tag: keyof typeof COLOR_TAGS, text: string): string {
+  return `<${tag}>${text}</${tag}>`;
+}
+
+// Pre-compiled regexes for HTML color tag parsing (module-level for performance)
+const RE_OPEN_TAG = /^<([a-z]+)>$/i;
+const RE_CLOSE_TAG = /^<\/([a-z]+)>$/i;
+const RE_SELF_TAG = /^<([a-z]+)>([\s\S]*?)<\/\1>$/i;
+
+/**
+ * Render an inline HTML token as a color-tagged string.
+ *
+ * Handles self-contained `<tag>text</tag>` forms. Bare open/close
+ * tags are dropped (marked emits them as separate tokens; the
+ * self-contained form is produced by `colorTag()`).
+ */
+function renderHtmlToken(raw: string): string {
+  const trimmed = raw.trim();
+  if (RE_OPEN_TAG.test(trimmed) || RE_CLOSE_TAG.test(trimmed)) {
+    return "";
+  }
+  const m = RE_SELF_TAG.exec(trimmed);
+  if (m) {
+    const tagName = m[1];
+    const inner = m[2];
+    if (tagName !== undefined && inner !== undefined) {
+      const colorFn = COLOR_TAGS[tagName.toLowerCase()];
+      return colorFn ? colorFn(inner) : inner;
+    }
+  }
+  return "";
+}
 
 /**
  * Syntax-highlight a code block. Falls back to uniform yellow if the
@@ -243,8 +309,10 @@ function renderInline(tokens: Token[]): string {
             return renderInline((token as Tokens.Text).tokens ?? []);
           }
           return (token as Tokens.Text).text;
-        case "html":
-          return ""; // Strip inline HTML
+        case "html": {
+          const raw = (token as Tokens.HTML).raw ?? (token as Tokens.HTML).text;
+          return renderHtmlToken(raw);
+        }
         default:
           return (token as { raw?: string }).raw ?? "";
       }
