@@ -36,7 +36,7 @@ const BANNER_GRADIENT = [
  * Format the banner with a vertical gradient effect.
  * Each row gets progressively darker purple.
  */
-function formatBanner(): string {
+export function formatBanner(): string {
   return BANNER_ROWS.map((row, i) => {
     const color = BANNER_GRADIENT[i] ?? "#B4A4DE";
     return chalk.hex(color)(row);

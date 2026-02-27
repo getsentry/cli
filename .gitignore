@@ -1,5 +1,6 @@
 # dependencies (bun install)
 node_modules
+package-lock.json
 
 # output
 out
@@ -35,6 +36,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 .turbo
+.mastra
 
 # docs
 docs/dist
