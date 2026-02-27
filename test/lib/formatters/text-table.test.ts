@@ -329,3 +329,30 @@ describe("minWidths option", () => {
     expect(out).toContain("\u2026");
   });
 });
+
+describe("shrinkable option", () => {
+  test("non-shrinkable column keeps intrinsic width", () => {
+    const out = renderTextTable(
+      ["FIXED", "ELASTIC"],
+      [["SPOTLIGHT-WEB-28", "A very long title that should absorb all shrink"]],
+      { maxWidth: 50, shrinkable: [false, true] }
+    );
+    // The FIXED column should show the full value without wrapping
+    expect(out).toContain("SPOTLIGHT-WEB-28");
+    // Check no line has SPOTLIGHT-WEB-28 split across lines
+    const dataLines = out.split("\n").filter((l) => l.includes("SPOTLIGHT"));
+    expect(dataLines.length).toBe(1);
+  });
+
+  test("elastic column absorbs all shrink", () => {
+    const out = renderTextTable(
+      ["FIXED", "ELASTIC"],
+      [["keep-me", "shrink this very long text value please"]],
+      { maxWidth: 30, shrinkable: [false, true] }
+    );
+    // FIXED column should be intact
+    expect(out).toContain("keep-me");
+    const fixedLines = out.split("\n").filter((l) => l.includes("keep-me"));
+    expect(fixedLines.length).toBe(1);
+  });
+});

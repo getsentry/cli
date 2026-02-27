@@ -36,6 +36,8 @@ export type TextTableOptions = {
   headerSeparator?: boolean;
   /** Per-column minimum content widths. Columns will not shrink below these. */
   minWidths?: number[];
+  /** Per-column shrinkable flags. Non-shrinkable columns keep intrinsic width. */
+  shrinkable?: boolean[];
   /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
   truncate?: boolean;
 };
@@ -64,6 +66,7 @@ export function renderTextTable(
     alignments = [],
     headerSeparator = true,
     minWidths = [],
+    shrinkable = [],
     truncate = false,
   } = options;
 
@@ -87,6 +90,7 @@ export function renderTextTable(
     cellPadding,
     fitter: columnFitter,
     minWidths,
+    shrinkable,
   });
 
   // Build all rows (header + optional separator + data rows)
@@ -159,29 +163,46 @@ function fitColumns(
     cellPadding: number;
     fitter: "proportional" | "balanced";
     minWidths: number[];
+    shrinkable: boolean[];
   }
 ): number[] {
-  const { cellPadding, fitter, minWidths } = ctx;
+  const { cellPadding, fitter, minWidths, shrinkable: shrinkFlags } = ctx;
   const totalIntrinsic = intrinsicWidths.reduce((s, w) => s + w, 0);
 
   if (totalIntrinsic <= maxContentWidth) {
     return intrinsicWidths;
   }
 
-  if (fitter === "balanced") {
-    return fitBalanced(
-      intrinsicWidths,
-      maxContentWidth,
-      cellPadding,
-      minWidths
-    );
-  }
-  return fitProportional(
-    intrinsicWidths,
-    maxContentWidth,
-    cellPadding,
-    minWidths
+  // Separate fixed (non-shrinkable) and elastic (shrinkable) columns.
+  // Fixed columns keep their intrinsic width; elastic ones share the rest.
+  const isFixed = intrinsicWidths.map((_, i) => shrinkFlags[i] === false);
+  const fixedTotal = intrinsicWidths.reduce(
+    (s, w, i) => s + (isFixed[i] ? w : 0),
+    0
   );
+  const elasticTarget = maxContentWidth - fixedTotal;
+  const elasticWidths = intrinsicWidths.filter((_, i) => !isFixed[i]);
+  const elasticMins = minWidths.filter((_, i) => !isFixed[i]);
+
+  if (elasticWidths.length === 0 || elasticTarget <= 0) {
+    return intrinsicWidths;
+  }
+
+  const fitFn = fitter === "balanced" ? fitBalanced : fitProportional;
+  const fitted = fitFn(elasticWidths, elasticTarget, cellPadding, elasticMins);
+
+  // Merge fixed and fitted widths back into the original column order
+  const result: number[] = [];
+  let ei = 0;
+  for (let i = 0; i < intrinsicWidths.length; i++) {
+    if (isFixed[i]) {
+      result.push(intrinsicWidths[i] ?? 0);
+    } else {
+      result.push(fitted[ei] ?? 0);
+      ei += 1;
+    }
+  }
+  return result;
 }
 
 /**

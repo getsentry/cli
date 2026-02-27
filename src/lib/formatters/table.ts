@@ -31,6 +31,8 @@ export type Column<T> = {
   align?: "left" | "right";
   /** Minimum content width. Column will not shrink below this. */
   minWidth?: number;
+  /** Whether this column can be shrunk when the table exceeds terminal width. @default true */
+  shrinkable?: boolean;
   /** Truncate long values with "\u2026" instead of wrapping. @default false */
   truncate?: boolean;
 };
@@ -97,11 +99,13 @@ export function writeTable<T>(
   const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
 
   const minWidths = columns.map((c) => c.minWidth ?? 0);
+  const shrinkable = columns.map((c) => c.shrinkable ?? true);
 
   stdout.write(
     renderTextTable(headers, rows, {
       alignments,
       minWidths,
+      shrinkable,
       truncate: options?.truncate,
     })
   );

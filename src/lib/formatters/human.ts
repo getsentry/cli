@@ -438,9 +438,9 @@ export function writeIssueTable(
   columns.push(
     {
       header: "SHORT ID",
-      // Prevent the balanced fitter from squeezing short IDs — they are the
-      // primary identifier users copy for `sentry issue view <ID>`.
-      minWidth: 20,
+      // Short IDs are the primary identifier users copy for
+      // `sentry issue view <ID>` — never shrink or truncate them.
+      shrinkable: false,
       value: ({ issue, formatOptions }) => {
         const formatted = formatShortId(issue.shortId, formatOptions);
         if (issue.permalink) {
@@ -476,7 +476,7 @@ export function writeIssueTable(
     }
   );
 
-  writeTable(stdout, rows, columns, { truncate: true });
+  writeTable(stdout, rows, columns);
 }
 
 /**
