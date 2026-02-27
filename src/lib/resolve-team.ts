@@ -70,7 +70,7 @@ export async function resolveTeam(
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 404) {
-        await buildOrgFailureError(orgSlug, error, options);
+        return buildOrgFailureError(orgSlug, error, options);
       }
       // 403, 5xx, etc. — can't determine if org is wrong or something else
       throw new CliError(

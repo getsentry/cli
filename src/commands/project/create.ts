@@ -213,7 +213,7 @@ async function createProjectWithErrors(
         throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
-        await handleCreateProject404(orgSlug, teamSlug, name, platform);
+        return handleCreateProject404(orgSlug, teamSlug, name, platform);
       }
       throw new CliError(
         `Failed to create project '${name}' in ${orgSlug}.\n\n` +
