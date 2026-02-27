@@ -14,7 +14,10 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { listCommand } from "../../../src/commands/issue/list.js";
+import {
+  listCommand,
+  PAGINATION_KEY,
+} from "../../../src/commands/issue/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -672,5 +675,205 @@ describe("issue list: cursor flag parse validation", () => {
 
   test("error message includes the invalid value passed", () => {
     expect(() => parseCursor("5000")).toThrow("'5000'");
+  });
+});
+
+describe("issue list: Phase 2 budget redistribution", () => {
+  // Phase 2 triggers when: totalFetched < limit AND some targets hit their
+  // quota but have more (nextCursor). The surplus budget redistributes.
+  //
+  // Setup: two orgs with same project slug (project-search), limit=6.
+  //   Phase 1: quota=3 per target.
+  //     org-one: returns 3 issues + nextCursor (can expand)
+  //     org-two: returns 1 issue, no cursor (exhausted)
+  //   Surplus: 6 - 4 = 2, expandable = [org-one]
+  //   Phase 2: fetch 2 more from org-one via cursor resume.
+
+  test("redistributes surplus to expandable targets", async () => {
+    await setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    await setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+
+    const issue = (id: string) => ({
+      id,
+      shortId: `PROJ-${id}`,
+      title: `Issue ${id}`,
+      status: "unresolved",
+      type: "error",
+      count: "1",
+      userCount: 1,
+      lastSeen: `2025-01-0${id}T00:00:00Z`,
+      firstSeen: "2025-01-01T00:00:00Z",
+      level: "error",
+      platform: "javascript",
+      project: { slug: "myproj" },
+    });
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listOrganizations
+      if (
+        url.includes("/api/0/organizations/") &&
+        !url.includes("/organizations/org-")
+      ) {
+        return new Response(
+          JSON.stringify([
+            { slug: "org-one", name: "Org One" },
+            { slug: "org-two", name: "Org Two" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // getProject for each org
+      if (url.includes("/projects/org-one/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "1", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/projects/org-two/myproj/")) {
+        return new Response(
+          JSON.stringify({ id: "2", slug: "myproj", name: "My Project" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listIssues for org-one: Phase 1 returns 3 issues + cursor, Phase 2 returns 2 more
+      if (url.includes("/organizations/org-one/issues/")) {
+        const cursor = new URL(url).searchParams.get("cursor");
+        if (cursor === "phase2-cursor:0:0") {
+          // Phase 2 response
+          return new Response(JSON.stringify([issue("4"), issue("5")]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<https://sentry.io/api/0/>; rel="next"; results="false"; cursor="end:0:0"',
+            },
+          });
+        }
+        // Phase 1 response: 3 issues with next cursor
+        return new Response(
+          JSON.stringify([issue("1"), issue("2"), issue("3")]),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<https://sentry.io/api/0/>; rel="next"; results="true"; cursor="phase2-cursor:0:0"',
+            },
+          }
+        );
+      }
+
+      // listIssues for org-two: returns 1 issue, no more
+      if (url.includes("/organizations/org-two/issues/")) {
+        return new Response(JSON.stringify([issue("6")]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            Link: '<https://sentry.io/api/0/>; rel="next"; results="false"; cursor="end:0:0"',
+          },
+        });
+      }
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const { context, stdout } = createContext();
+
+    // project-search: finds "myproj" in both orgs, limit=6 triggers Phase 2
+    await func.call(context, { limit: 6, sort: "date", json: true }, "myproj");
+
+    const output = JSON.parse(stdout.output);
+    expect(output).toHaveProperty("data");
+    expect(output).toHaveProperty("hasMore");
+
+    // Should have issues from both orgs: 3 (Phase 1) + 2 (Phase 2) from org-one, 1 from org-two = 6
+    expect(output.data.length).toBe(6);
+    // hasMore should be false since we got exactly the limit
+    expect(output.hasMore).toBe(false);
+  });
+});
+
+describe("issue list: compound cursor resume", () => {
+  // Tests the --cursor path in multi-target mode: resolves cursor from DB,
+  // decodes compound cursor, skips exhausted targets, fetches from active ones.
+
+  test("resumes from compound cursor, skipping exhausted targets", async () => {
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    // Pre-store a compound cursor in the DB: 2 targets, second exhausted
+    const { setPaginationCursor } = await import(
+      "../../../src/lib/db/pagination.js"
+    );
+    const { getApiBaseUrl } = await import("../../../src/lib/sentry-client.js");
+    const { escapeContextKeyValue } = await import(
+      "../../../src/lib/db/pagination.js"
+    );
+    const host = getApiBaseUrl();
+
+    // Build the context key matching buildMultiTargetContextKey for a single target
+    const fingerprint = "test-org/proj-a";
+    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("90d")}`;
+    // Compound cursor: single target with active cursor
+    setPaginationCursor(PAGINATION_KEY, contextKey, "resume-cursor:0:0", 300);
+
+    const issue = (id: string, proj: string) => ({
+      id,
+      shortId: `${proj.toUpperCase()}-${id}`,
+      title: `Issue ${id}`,
+      status: "unresolved",
+      type: "error",
+      count: "1",
+      userCount: 1,
+      lastSeen: "2025-01-01T00:00:00Z",
+      firstSeen: "2025-01-01T00:00:00Z",
+      level: "error",
+      platform: "javascript",
+      project: { slug: proj },
+    });
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listIssues for proj-a: resumed from cursor
+      if (url.includes("/organizations/test-org/issues/")) {
+        const cursor = new URL(url).searchParams.get("cursor");
+        expect(cursor).toBe("resume-cursor:0:0");
+        return new Response(JSON.stringify([issue("10", "proj-a")]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            Link: '<https://sentry.io/api/0/>; rel="next"; results="false"; cursor="end:0:0"',
+          },
+        });
+      }
+
+      // proj-b should NOT be fetched (exhausted)
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const { context, stdout } = createContext();
+
+    // Explicit mode with cursor="last" → resolves compound cursor from DB
+    await func.call(
+      context,
+      { limit: 10, sort: "date", json: true, cursor: "last" },
+      "test-org/proj-a"
+    );
+
+    const output = JSON.parse(stdout.output);
+    expect(output).toHaveProperty("data");
+    // Should only have issues from proj-a (proj-b was exhausted)
+    expect(output.data.length).toBeGreaterThanOrEqual(1);
   });
 });

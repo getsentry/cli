@@ -79,7 +79,7 @@ type ListFlags = {
   readonly cursor?: string;
 };
 
-type SortValue = "date" | "new" | "freq" | "user";
+/** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
 
 const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
@@ -122,7 +122,7 @@ function writeListHeader(
 }
 
 /** Issue with formatting options attached */
-type IssueWithOptions = {
+/** @internal */ export type IssueWithOptions = {
   issue: SentryIssue;
   formatOptions: FormatShortIdOptions;
 };
@@ -169,7 +169,7 @@ function writeListFooter(
 }
 
 /** Issue list with target context */
-type IssueListResult = {
+/** @internal */ export type IssueListResult = {
   target: ResolvedTarget;
   issues: SentryIssue[];
   /** Whether the project has more issues beyond what was fetched. */
@@ -179,7 +179,7 @@ type IssueListResult = {
 };
 
 /** Result of building project aliases */
-type AliasMapResult = {
+/** @internal */ export type AliasMapResult = {
   aliasMap: Map<string, string>;
   entries: Record<string, ProjectAliasEntry>;
 };
@@ -1080,6 +1080,23 @@ const issueListMeta: ListCommandMeta = {
   entityName: "issue",
   entityPlural: "issues",
   commandPrefix: "sentry issue list",
+};
+
+/**
+ * @internal Exported for testing only. Not part of the public API.
+ */
+export const __testing = {
+  trimWithProjectGuarantee,
+  encodeCompoundCursor,
+  decodeCompoundCursor,
+  buildMultiTargetContextKey,
+  buildProjectAliasMap,
+  getComparator,
+  compareDates,
+  parseSort,
+  CURSOR_SEP,
+  MAX_LIMIT,
+  VALID_SORT_VALUES,
 };
 
 export const listCommand = buildListCommand("issue", {
