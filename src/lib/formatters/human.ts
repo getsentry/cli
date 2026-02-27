@@ -301,7 +301,13 @@ function formatShortIdWithAlias(
   shortId: string,
   projectAlias: string
 ): string | null {
-  const aliasUpper = projectAlias.toUpperCase();
+  // Extract the project part of the alias — cross-org collision aliases use
+  // the format "o1/d" where only "d" should match against the short ID parts.
+  const aliasPart = projectAlias.includes("/")
+    ? (projectAlias.split("/").pop() ?? projectAlias)
+    : projectAlias;
+
+  const aliasUpper = aliasPart.toUpperCase();
   const aliasLen = aliasUpper.length;
 
   const parts = shortId.split("-");
