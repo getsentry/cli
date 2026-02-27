@@ -21,6 +21,7 @@ import {
   retrieveAnIssueEvent,
   retrieveAnOrganization,
   retrieveAProject,
+  retrieveATeam,
   retrieveSeerIssueFixState,
   listYourOrganizations as sdkListOrganizations,
   resolveAnEventId as sdkResolveAnEventId,
@@ -714,6 +715,28 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
 
   const data = unwrapResult(result, "Failed to list teams");
   return data as unknown as SentryTeam[];
+}
+
+/**
+ * Get a single team by slug.
+ * Uses region-aware routing for multi-region support.
+ */
+export async function getTeam(
+  orgSlug: string,
+  teamSlug: string
+): Promise<SentryTeam> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveATeam({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      team_id_or_slug: teamSlug,
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get team");
+  return data as unknown as SentryTeam;
 }
 
 /** Request body for creating a new project */
