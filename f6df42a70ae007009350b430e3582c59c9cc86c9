@@ -1,0 +1,48 @@
+Implementation Plan: SDK migration for listIssuesPaginated
+
+## Problem
+
+`listIssuesPaginated` used a hand-rolled `orgScopedRequestPaginated` call
+with manually typed query parameters. This meant:
+1. The sort type (`"date"|"new"|"freq"|"user"`) was out of sync with the SDK
+   (missing "inbox" and "trends")
+2. The `limit` vs `per_page` parameter name difference was invisible to
+   TypeScript — it was caught only by runtime observation
+3. No compile-time guarantee that query params match the API contract
+
+## Approach
+
+Migrate to `listAnOrganization_sIssues` from `@sentry/api`, following the
+same pattern already used by logs/transactions. Key decisions:
+
+1. **`unwrapPaginatedResult`**: Unlike `unwrapResult` (which discards the
+   Response), this helper preserves the raw Response to extract the Link
+   header via `parseLinkHeader`. The SDK result carries `response` as an
+   untyped field, accessed via a cast — necessary because the SDK's
+   RequestResult type doesn't expose it in fields mode.
+
+2. **`IssueSort` type**: Derived with `NonNullable<...>["sort"]` from the
+   SDK's `ListAnOrganizationSissuesData` query type. Now covers all 6 sorts
+   (date, new, freq, user, inbox, trends) and updates automatically if the
+   SDK adds more.
+
+3. **No callers changed**: `listIssuesPaginated`'s public signature is
+   unchanged except sort is now typed as `IssueSort` (a superset). The
+   function went from sync (returns Promise directly) to async (awaits
+   getOrgSdkConfig), which is transparent to all callers.
+
+4. **Cast on result**: The SDK returns a union type that includes `response`
+   at runtime but TypeScript doesn't expose it in the fields-mode type. The
+   cast `result as {data: ...; error: ...}` is safe because unwrapResult
+   handles both success/error branches and unwrapPaginatedResult reads
+   `response` before calling it.
+
+## Files Changed
+
+- src/lib/api-client.ts
+  - Added `ListAnOrganizationSissuesData` import (type-only)
+  - Added `listAnOrganization_sIssues` import
+  - Added `unwrapPaginatedResult<T>` helper (~10 lines)
+  - Exported `IssueSort` type derived from SDK
+  - Rewrote `listIssuesPaginated` body to use SDK + unwrapPaginatedResult
+  - Updated `listIssuesAllPages` sort param to `IssueSort`
