@@ -9,7 +9,7 @@ import type { IssueLevel, IssueStatus } from "../../types/index.js";
 
 // Color Palette (Full Sentinel palette)
 
-const COLORS = {
+export const COLORS = {
   red: "#fe4144",
   green: "#83da90",
   yellow: "#FDB81B",

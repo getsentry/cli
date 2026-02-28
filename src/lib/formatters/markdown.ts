@@ -26,7 +26,7 @@
 import chalk from "chalk";
 import { highlight as cliHighlight } from "cli-highlight";
 import { marked, type Token, type Tokens } from "marked";
-import { muted, terminalLink } from "./colors.js";
+import { COLORS, muted, terminalLink } from "./colors.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
 // ──────────────────────────── Environment ─────────────────────────────
@@ -184,17 +184,6 @@ export function divider(width = 80): string {
 }
 
 // ──────────────────────── Inline token rendering ─────────────────────
-
-/** Sentinel-inspired color palette */
-const COLORS = {
-  red: "#fe4144",
-  green: "#83da90",
-  yellow: "#FDB81B",
-  blue: "#226DFC",
-  magenta: "#FF45A8",
-  cyan: "#79B8FF",
-  muted: "#898294",
-} as const;
 
 /**
  * Semantic HTML color tags supported in markdown strings.
