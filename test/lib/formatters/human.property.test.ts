@@ -30,9 +30,9 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-/** Strip both ANSI escape codes and markdown bold markers. */
+/** Strip ANSI escape codes for content testing. */
 function stripFormatting(s: string): string {
-  return stripAnsi(s).replace(/\*\*/g, "");
+  return stripAnsi(s);
 }
 
 // Arbitraries
