@@ -537,3 +537,178 @@ function horizontalLine(
   const segments = columnWidths.map((w) => chars.horizontal.repeat(w));
   return `${chars.left}${segments.join(chars.junction)}${chars.right}`;
 }
+
+/** Options for creating a streaming table. */
+export type StreamingTableOptions = {
+  /** Border style. @default "rounded" */
+  borderStyle?: BorderStyle;
+  /** Horizontal cell padding (each side). @default 1 */
+  cellPadding?: number;
+  /** Maximum table width in columns. @default process.stdout.columns or 80 */
+  maxWidth?: number;
+  /** Per-column alignment (indexed by column). Defaults to "left". */
+  alignments?: Array<Alignment | null>;
+  /** Per-column minimum content widths. Columns will not shrink below these. */
+  minWidths?: number[];
+  /** Per-column shrinkable flags. Non-shrinkable columns keep intrinsic width. */
+  shrinkable?: boolean[];
+  /** Truncate cells to one line with "…" instead of wrapping. @default true */
+  truncate?: boolean;
+  /**
+   * Hint rows used for column width measurement.
+   * Pass representative sample data so column widths are computed correctly
+   * without needing the full dataset upfront.
+   */
+  hintRows?: string[][];
+};
+
+/**
+ * A bordered table that renders incrementally — header first, then one row
+ * at a time, then a bottom border at the end. Column widths are fixed at
+ * construction time based on headers + optional hint rows.
+ *
+ * Usage:
+ * ```ts
+ * const table = new StreamingTable(["Time", "Level", "Message"], opts);
+ * writer.write(table.header());
+ * writer.write(table.row(["2026-02-28 10:00", "ERROR", "something broke"]));
+ * writer.write(table.footer());
+ * ```
+ *
+ * In plain-output mode (non-TTY), emits raw CommonMark markdown table syntax
+ * so piped/redirected output remains a valid document.
+ */
+export class StreamingTable {
+  /** @internal */ readonly columnWidths: number[];
+  /** @internal */ readonly border: BorderCharacters;
+  /** @internal */ readonly cellPadding: number;
+  /** @internal */ readonly alignments: Array<Alignment | null>;
+  /** @internal */ readonly headers: string[];
+  /** @internal */ readonly truncate: boolean;
+
+  constructor(headers: string[], options: StreamingTableOptions = {}) {
+    const {
+      borderStyle = "rounded",
+      cellPadding = 1,
+      maxWidth = process.stdout.columns || 80,
+      alignments = [],
+      minWidths = [],
+      shrinkable = [],
+      truncate = true,
+      hintRows = [],
+    } = options;
+
+    this.headers = headers;
+    this.border = BorderChars[borderStyle];
+    this.cellPadding = cellPadding;
+    this.alignments = alignments;
+    this.truncate = truncate;
+
+    const colCount = headers.length;
+    const intrinsicWidths = measureIntrinsicWidths(
+      headers,
+      hintRows,
+      colCount,
+      { cellPadding, minWidths }
+    );
+
+    const borderOverhead = 2 + (colCount - 1);
+    const maxContentWidth = Math.max(colCount, maxWidth - borderOverhead);
+    this.columnWidths = fitColumns(intrinsicWidths, maxContentWidth, {
+      cellPadding,
+      fitter: "balanced",
+      minWidths,
+      shrinkable,
+    });
+  }
+
+  /**
+   * Render the top border, header row, and header separator.
+   * Call once at the start of streaming.
+   */
+  header(): string {
+    const { border, columnWidths, cellPadding, alignments, headers } = this;
+    const hz = border.horizontal;
+    const lines: string[] = [];
+
+    // Top border
+    lines.push(
+      horizontalLine(columnWidths, {
+        left: border.topLeft,
+        junction: border.topT,
+        right: border.topRight,
+        horizontal: hz,
+      })
+    );
+
+    // Header cells
+    const wrappedHeader = wrapRow(headers, columnWidths, cellPadding, false);
+    const rowHeight = Math.max(1, ...wrappedHeader.map((c) => c.length));
+    for (let line = 0; line < rowHeight; line++) {
+      const cellTexts: string[] = [];
+      for (let c = 0; c < columnWidths.length; c++) {
+        const cellLines = wrappedHeader[c] ?? [""];
+        const text = cellLines[line] ?? "";
+        const align = alignments[c] ?? "left";
+        const colW = columnWidths[c] ?? 3;
+        cellTexts.push(padCell(text, colW, align, cellPadding));
+      }
+      lines.push(
+        `${border.vertical}${cellTexts.join(border.vertical)}${border.vertical}`
+      );
+    }
+
+    // Header separator
+    lines.push(
+      horizontalLine(columnWidths, {
+        left: border.leftT,
+        junction: border.cross,
+        right: border.rightT,
+        horizontal: hz,
+      })
+    );
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  /**
+   * Render a single data row with side borders.
+   * Call once per data item as it arrives.
+   */
+  row(cells: string[]): string {
+    const { border, columnWidths, cellPadding, alignments, truncate } = this;
+    const wrappedCells = wrapRow(cells, columnWidths, cellPadding, truncate);
+    const rowHeight = Math.max(1, ...wrappedCells.map((c) => c.length));
+    const lines: string[] = [];
+
+    for (let line = 0; line < rowHeight; line++) {
+      const cellTexts: string[] = [];
+      for (let c = 0; c < columnWidths.length; c++) {
+        const cellLines = wrappedCells[c] ?? [""];
+        const text = cellLines[line] ?? "";
+        const align = alignments[c] ?? "left";
+        const colW = columnWidths[c] ?? 3;
+        cellTexts.push(padCell(text, colW, align, cellPadding));
+      }
+      lines.push(
+        `${border.vertical}${cellTexts.join(border.vertical)}${border.vertical}`
+      );
+    }
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  /**
+   * Render the bottom border.
+   * Call once when the stream ends.
+   */
+  footer(): string {
+    const { border, columnWidths } = this;
+    return `${horizontalLine(columnWidths, {
+      left: border.bottomLeft,
+      junction: border.bottomT,
+      right: border.bottomRight,
+      horizontal: border.horizontal,
+    })}\n`;
+  }
+}

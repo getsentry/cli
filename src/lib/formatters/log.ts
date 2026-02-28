@@ -8,15 +8,14 @@ import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import {
   colorTag,
-  divider,
   escapeMarkdownCell,
   escapeMarkdownInline,
-  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
   renderMarkdown,
 } from "./markdown.js";
+import { StreamingTable, type StreamingTableOptions } from "./text-table.js";
 
 /** Markdown color tag names for log severity levels */
 const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
@@ -66,39 +65,70 @@ function formatTimestamp(timestamp: string): string {
 }
 
 /**
- * Format a single log entry for human-readable output.
+ * Extract cell values for a log row (shared by streaming and batch paths).
  *
- * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
- * row so streamed output composes into a valid CommonMark document.
- * In rendered mode (TTY): emits padded ANSI-colored text for live display.
+ * @param log - The log entry
+ * @param padSeverity - Whether to pad severity to 7 chars for alignment
+ * @returns `[timestamp, severity, message]` strings
+ */
+export function buildLogRowCells(
+  log: SentryLog,
+  padSeverity = true
+): [string, string, string] {
+  const timestamp = formatTimestamp(log.timestamp);
+  const level = padSeverity
+    ? formatSeverity(log.severity)
+    : formatSeverityLabel(log.severity);
+  const message = escapeMarkdownCell(log.message ?? "");
+  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+  return [timestamp, level, `${message}${trace}`];
+}
+
+/**
+ * Format a single log entry as a plain markdown table row.
+ * Used for non-TTY / piped output where StreamingTable isn't appropriate.
  *
  * @param log - The log entry to format
  * @returns Formatted log line with newline
  */
 export function formatLogRow(log: SentryLog): string {
-  const timestamp = formatTimestamp(log.timestamp);
-  // Use formatSeverity() for per-level ANSI color (red/yellow/cyan/muted),
-  // matching the batch-mode formatLogTable path.
-  const level = formatSeverity(log.severity);
-  const message = escapeMarkdownCell(log.message ?? "");
-  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
-  return mdRow([timestamp, level, `${message}${trace}`]);
+  return mdRow(buildLogRowCells(log));
+}
+
+/** Hint rows for column width estimation in streaming mode. */
+const LOG_HINT_ROWS: string[][] = [
+  ["2026-01-15 23:59:59", "WARNING", "A typical log message with some detail"],
+];
+
+/**
+ * Create a StreamingTable configured for log output.
+ *
+ * @param options - Override default table options
+ * @returns A StreamingTable with log-specific column configuration
+ */
+export function createLogStreamingTable(
+  options: Partial<StreamingTableOptions> = {}
+): StreamingTable {
+  return new StreamingTable([...LOG_TABLE_COLS], {
+    hintRows: LOG_HINT_ROWS,
+    // Timestamp and Level are fixed-width; Message gets the rest
+    shrinkable: [false, false, true],
+    truncate: false,
+    ...options,
+  });
 }
 
 /**
- * Format column header for logs list (used in streaming/follow mode).
+ * Format column header for logs list in plain (non-TTY) mode.
  *
- * In plain mode: emits a proper markdown table header + separator row so that
+ * Emits a proper markdown table header + separator row so that
  * the streamed rows compose into a valid CommonMark document when redirected.
- * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ * In TTY mode, use {@link createLogStreamingTable} instead.
  *
  * @returns Header string (includes trailing newline)
  */
 export function formatLogsHeader(): string {
-  if (isPlainOutput()) {
-    return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
-  }
-  return `${mdRow(LOG_TABLE_COLS.map((c) => `**${c}**`))}${divider(80)}\n`;
+  return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
 }
 
 /**
@@ -111,16 +141,7 @@ export function formatLogsHeader(): string {
  */
 export function formatLogTable(logs: SentryLog[]): string {
   const rows = logs
-    .map((log) => {
-      const timestamp = formatTimestamp(log.timestamp);
-      // formatSeverity wraps the padEnd label inside a color tag, so .trim()
-      // on the result would be a no-op. Use formatSeverityLabel (no padding)
-      // for the batch table which handles its own column sizing.
-      const severity = formatSeverityLabel(log.severity);
-      const message = escapeMarkdownCell(log.message ?? "");
-      const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
-      return mdRow([timestamp, severity, `${message}${trace}`]).trimEnd();
-    })
+    .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
     .join("\n");
 
   return renderMarkdown(`${mdTableHeader(LOG_TABLE_COLS)}\n${rows}`);

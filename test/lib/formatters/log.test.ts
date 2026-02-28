@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  createLogStreamingTable,
   formatLogDetails,
   formatLogRow,
   formatLogsHeader,
@@ -151,27 +152,43 @@ describe("formatLogRow (rendered mode)", () => {
   });
 });
 
-describe("formatLogsHeader (rendered mode)", () => {
-  useRenderedMode();
-
-  test("contains column titles", () => {
-    const result = stripAnsi(formatLogsHeader());
+describe("createLogStreamingTable", () => {
+  test("header() contains column titles and box-drawing borders", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.header();
 
     expect(result).toContain("Timestamp");
     expect(result).toContain("Level");
     expect(result).toContain("Message");
+    // Box-drawing border characters
+    expect(result).toContain("─");
+    expect(result).toContain("╭");
   });
 
-  test("contains divider line", () => {
-    const result = formatLogsHeader();
+  test("row() renders cells with side borders", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.row(["2026-01-15 10:00:00", "ERROR", "something"]);
 
-    // Should have divider characters
+    expect(result).toContain("2026-01-15 10:00:00");
+    expect(result).toContain("ERROR");
+    expect(result).toContain("something");
+    // Side borders
+    expect(result).toContain("│");
+  });
+
+  test("footer() renders bottom border", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.footer();
+
     expect(result).toContain("─");
+    expect(result).toContain("╯");
   });
 
   test("ends with newline", () => {
-    const result = formatLogsHeader();
-    expect(result).toEndWith("\n");
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    expect(table.header()).toEndWith("\n");
+    expect(table.row(["a", "b", "c"])).toEndWith("\n");
+    expect(table.footer()).toEndWith("\n");
   });
 });
 

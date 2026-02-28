@@ -7,14 +7,13 @@
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
 import { formatRelativeTime } from "./human.js";
 import {
-  divider,
   escapeMarkdownCell,
-  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
   renderMarkdown,
 } from "./markdown.js";
+import { StreamingTable, type StreamingTableOptions } from "./text-table.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -60,7 +59,7 @@ const TRACE_TABLE_COLS = ["Trace ID", "Transaction", "Duration:", "When"];
  * @param item - Transaction list item from the API
  * @returns `[traceId, transaction, duration, when]` markdown-safe strings
  */
-function buildTraceRowCells(
+export function buildTraceRowCells(
   item: TransactionListItem
 ): [string, string, string, string] {
   return [
@@ -86,22 +85,51 @@ export function formatTraceRow(item: TransactionListItem): string {
 }
 
 /**
- * Format column header for traces list (streaming mode).
+ * Format column header for traces list in plain (non-TTY) mode.
  *
- * In plain mode: emits a proper markdown table header + separator row so
- * that streamed rows compose into a valid CommonMark document when redirected.
- * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ * Emits a proper markdown table header + separator row so that
+ * the streamed rows compose into a valid CommonMark document when redirected.
+ * In TTY mode, use {@link createTraceStreamingTable} instead.
  *
  * @returns Header string (includes trailing newline)
  */
 export function formatTracesHeader(): string {
-  if (isPlainOutput()) {
-    return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
-  }
+  return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
+}
+
+/** Hint rows for column width estimation in streaming mode. */
+const TRACE_HINT_ROWS: string[][] = [
+  [
+    "`abcdef1234567890abcdef1234567890`",
+    "GET /api/v1/some-endpoint",
+    "1.23s",
+    "2 hours ago",
+  ],
+];
+
+/**
+ * Create a StreamingTable configured for trace output.
+ *
+ * @param options - Override default table options
+ * @returns A StreamingTable with trace-specific column configuration
+ */
+export function createTraceStreamingTable(
+  options: Partial<StreamingTableOptions> = {}
+): StreamingTable {
+  const alignments = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? ("right" as const) : null
+  );
   const names = TRACE_TABLE_COLS.map((c) =>
     c.endsWith(":") ? c.slice(0, -1) : c
   );
-  return `${mdRow(names.map((n) => `**${n}**`))}${divider(96)}\n`;
+  return new StreamingTable(names, {
+    hintRows: TRACE_HINT_ROWS,
+    alignments,
+    // Trace ID and Duration/When are fixed; Transaction gets the rest
+    shrinkable: [false, true, false, false],
+    truncate: true,
+    ...options,
+  });
 }
 
 /**
