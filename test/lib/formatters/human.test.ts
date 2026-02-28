@@ -7,7 +7,6 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import chalk from "chalk";
 import {
   formatShortId,
   formatUserIdentity,
@@ -22,10 +21,14 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-/** Strip ANSI escape codes for content testing. */
+/** Strip ANSI escape codes and color tags for content testing. */
 function stripFormatting(s: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return (
+    s
+      .replace(/<\/?[a-z]+>/g, "")
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
+      .replace(/\x1b\[[0-9;]*m/g, "")
+  );
 }
 
 describe("formatShortId edge cases", () => {
@@ -54,10 +57,8 @@ describe("formatShortId formatting", () => {
   test("single project mode applies formatting to suffix", () => {
     const result = formatShortId("CRAFT-G", { projectSlug: "craft" });
     expect(stripFormatting(result)).toBe("CRAFT-G");
-    // Suffix should be bold+underlined when color is active
-    if (chalk.level > 0) {
-      expect(result).not.toBe(stripFormatting(result));
-    }
+    // Suffix should be wrapped in bold+underline tag
+    expect(result).toContain("<bu>G</bu>");
   });
 
   test("multi-project mode applies formatting to suffix", () => {
@@ -67,10 +68,9 @@ describe("formatShortId formatting", () => {
       isMultiProject: true,
     });
     expect(stripFormatting(result)).toBe("SPOTLIGHT-ELECTRON-4Y");
-    // Alias char and suffix should be bold+underlined when color is active
-    if (chalk.level > 0) {
-      expect(result).not.toBe(stripFormatting(result));
-    }
+    // Alias char and suffix should be bold+underlined
+    expect(result).toContain("<bu>E</bu>");
+    expect(result).toContain("<bu>4Y</bu>");
   });
 
   test("no formatting when no options provided", () => {

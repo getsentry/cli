@@ -195,7 +195,7 @@ export function divider(width = 80): string {
  * ANSI color. In plain (non-TTY) mode the tags are stripped, leaving only
  * the inner text.
  *
- * Supported tags: red, green, yellow, blue, magenta, cyan, muted
+ * Supported tags: red, green, yellow, blue, magenta, cyan, muted, bu (bold+underline)
  */
 const COLOR_TAGS: Record<string, (text: string) => string> = {
   red: (t) => chalk.hex(COLORS.red)(t),
@@ -205,6 +205,7 @@ const COLOR_TAGS: Record<string, (text: string) => string> = {
   magenta: (t) => chalk.hex(COLORS.magenta)(t),
   cyan: (t) => chalk.hex(COLORS.cyan)(t),
   muted: (t) => chalk.hex(COLORS.muted)(t),
+  bu: (t) => chalk.bold.underline(t),
 };
 
 /**
