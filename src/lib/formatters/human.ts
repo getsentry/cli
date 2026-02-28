@@ -527,20 +527,23 @@ export function formatIssueDetails(issue: SentryIssue): string {
   kvRows.push(["Level", levelLine]);
   kvRows.push(["Platform", issue.platform ?? "unknown"]);
   kvRows.push(["Type", issue.type ?? "unknown"]);
-  kvRows.push(["Assignee", String(issue.assignedTo?.name ?? "Unassigned")]);
+  kvRows.push([
+    "Assignee",
+    escapeMarkdownInline(String(issue.assignedTo?.name ?? "Unassigned")),
+  ]);
 
   if (issue.project) {
     kvRows.push([
       "Project",
-      `${issue.project.name ?? "(unknown)"} (${safeCodeSpan(issue.project.slug ?? "")})`,
+      `${escapeMarkdownInline(issue.project.name ?? "(unknown)")} (${safeCodeSpan(issue.project.slug ?? "")})`,
     ]);
   }
 
   const firstReleaseVersion = issue.firstRelease?.shortVersion;
   const lastReleaseVersion = issue.lastRelease?.shortVersion;
   if (firstReleaseVersion || lastReleaseVersion) {
-    const first = String(firstReleaseVersion ?? "");
-    const last = String(lastReleaseVersion ?? "");
+    const first = escapeMarkdownInline(String(firstReleaseVersion ?? ""));
+    const last = escapeMarkdownInline(String(lastReleaseVersion ?? ""));
     if (firstReleaseVersion && lastReleaseVersion) {
       if (firstReleaseVersion === lastReleaseVersion) {
         kvRows.push(["Release", first]);
@@ -1160,7 +1163,7 @@ export function formatOrgDetails(org: SentryOrganization): string {
 
   const kvRows: [string, string][] = [];
   kvRows.push(["Slug", `\`${org.slug || "(none)"}\``]);
-  kvRows.push(["Name", org.name || "(unnamed)"]);
+  kvRows.push(["Name", escapeMarkdownInline(org.name || "(unnamed)")]);
   kvRows.push(["ID", String(org.id)]);
   if (org.dateCreated) {
     kvRows.push(["Created", new Date(org.dateCreated).toLocaleString()]);
@@ -1198,7 +1201,7 @@ export function formatProjectDetails(
 
   const kvRows: [string, string][] = [];
   kvRows.push(["Slug", `\`${project.slug || "(none)"}\``]);
-  kvRows.push(["Name", project.name || "(unnamed)"]);
+  kvRows.push(["Name", escapeMarkdownInline(project.name || "(unnamed)")]);
   kvRows.push(["ID", String(project.id)]);
   kvRows.push(["Platform", project.platform || "Not set"]);
   kvRows.push(["DSN", `\`${dsn || "No DSN available"}\``]);
@@ -1209,7 +1212,7 @@ export function formatProjectDetails(
   if (project.organization) {
     kvRows.push([
       "Organization",
-      `${project.organization.name} (${safeCodeSpan(project.organization.slug)})`,
+      `${escapeMarkdownInline(project.organization.name)} (${safeCodeSpan(project.organization.slug)})`,
     ]);
   }
   if (project.firstEvent) {
