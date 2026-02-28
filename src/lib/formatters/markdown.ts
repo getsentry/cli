@@ -208,6 +208,12 @@ const COLOR_TAGS: Record<string, (text: string) => string> = {
   bu: (t) => chalk.bold.underline(t),
 };
 
+/** Regex matching all supported color tag pairs — compiled once at module scope. */
+const COLOR_TAG_RE = new RegExp(
+  `<(${Object.keys(COLOR_TAGS).join("|")})>([\\s\\S]*?)<\\/\\1>`,
+  "gi"
+);
+
 /**
  * Wrap text in a semantic color tag for use in markdown strings.
  *
@@ -237,13 +243,12 @@ const RE_SELF_TAG = /^<([a-z]+)>([\s\S]*?)<\/\1>$/i;
 export function stripColorTags(text: string): string {
   // Repeatedly replace all supported color tag pairs until none remain.
   // The loop handles nested tags (uncommon but possible).
-  const tagPattern = Object.keys(COLOR_TAGS).join("|");
-  const re = new RegExp(`<(${tagPattern})>([\\s\\S]*?)<\\/\\1>`, "gi");
   let result = text;
   let prev: string;
   do {
     prev = result;
-    result = result.replace(re, "$2");
+    COLOR_TAG_RE.lastIndex = 0;
+    result = result.replace(COLOR_TAG_RE, "$2");
   } while (result !== prev);
   return result;
 }

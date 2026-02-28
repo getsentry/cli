@@ -21,6 +21,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
   buildListCommand,
   TARGET_PATTERN_NOTE,
@@ -93,7 +94,7 @@ function writeLogs(
     }
   } else if (table) {
     for (const log of logs) {
-      stdout.write(table.row(buildLogRowCells(log)));
+      stdout.write(table.row(buildLogRowCells(log).map(renderInlineMarkdown)));
     }
   } else {
     for (const log of logs) {
