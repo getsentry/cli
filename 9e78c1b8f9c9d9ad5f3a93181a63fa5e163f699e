@@ -1,0 +1,26 @@
+## Investigation
+
+Reported: pagination hints ('more available', '-c last') never appearing after PR #306 merged.
+
+## Root Cause
+
+The Sentry `/organizations/{org}/issues/` API endpoint uses `limit` as its
+page-size query parameter. The `/teams/` and `/repos/` endpoints use `per_page`.
+This inconsistency is in Sentry's API itself.
+
+`listIssuesPaginated` was sending `per_page=25`, which the issues API silently
+ignores — returning 100 items (its server-side default). The call chain:
+
+1. `listIssuesPaginated` sends `per_page=25`
+2. API ignores it, returns 100 items
+3. `listIssuesAllPages` sees `100 > 25`, slices to 25, returns WITHOUT nextCursor
+4. `hasMore = !!nextCursor` → false → no pagination hint shown
+
+Confirmed by direct API calls:
+- `?per_page=5` → 100 items returned
+- `?limit=5` → exactly 5 items returned with valid Link header
+
+## Fix
+
+Change `per_page` to `limit` in `listIssuesPaginated` params (api-client.ts).
+Update the corresponding test assertion. One-line fix + comment.
