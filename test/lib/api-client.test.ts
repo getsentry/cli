@@ -1262,7 +1262,7 @@ describe("listIssuesPaginated", () => {
 
     const url = new URL(capturedUrl);
     expect(url.searchParams.get("cursor")).toBe("0:3:0");
-    expect(url.searchParams.get("per_page")).toBe("20");
+    expect(url.searchParams.get("limit")).toBe("20");
     expect(url.searchParams.get("sort")).toBe("freq");
   });
 });
