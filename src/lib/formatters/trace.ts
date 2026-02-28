@@ -8,12 +8,19 @@ import type { TraceSpan, TransactionListItem } from "../../types/index.js";
 import { formatRelativeTime } from "./human.js";
 import {
   escapeMarkdownCell,
+  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
+  renderInlineMarkdown,
   renderMarkdown,
+  stripColorTags,
 } from "./markdown.js";
-import { StreamingTable, type StreamingTableOptions } from "./text-table.js";
+import {
+  renderTextTable,
+  StreamingTable,
+  type StreamingTableOptions,
+} from "./text-table.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -143,10 +150,22 @@ export function createTraceStreamingTable(
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatTraceTable(items: TransactionListItem[]): string {
-  const rows = items
-    .map((item) => mdRow(buildTraceRowCells(item)).trimEnd())
-    .join("\n");
-  return renderMarkdown(`${mdTableHeader(TRACE_TABLE_COLS)}\n${rows}`);
+  if (isPlainOutput()) {
+    const rows = items
+      .map((item) => mdRow(buildTraceRowCells(item)).trimEnd())
+      .join("\n");
+    return `${stripColorTags(mdTableHeader(TRACE_TABLE_COLS))}\n${rows}\n`;
+  }
+  const headers = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? c.slice(0, -1) : c
+  );
+  const rows = items.map((item) =>
+    buildTraceRowCells(item).map((c) => renderInlineMarkdown(c))
+  );
+  const alignments = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? ("right" as const) : ("left" as const)
+  );
+  return renderTextTable(headers, rows, { alignments });
 }
 
 /** Trace summary computed from a span tree */
@@ -281,7 +300,10 @@ export function formatTraceSummary(summary: TraceSummary): string {
 
   if (summary.rootTransaction) {
     const opPrefix = summary.rootOp ? `[\`${summary.rootOp}\`] ` : "";
-    kvRows.push(["Root", `${opPrefix}${summary.rootTransaction}`]);
+    kvRows.push([
+      "Root",
+      `${opPrefix}${escapeMarkdownCell(summary.rootTransaction)}`,
+    ]);
   }
   kvRows.push(["Duration", formatTraceDuration(summary.duration)]);
   kvRows.push(["Spans", String(summary.spanCount)]);

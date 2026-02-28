@@ -10,12 +10,19 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
+  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
+  renderInlineMarkdown,
   renderMarkdown,
+  stripColorTags,
 } from "./markdown.js";
-import { StreamingTable, type StreamingTableOptions } from "./text-table.js";
+import {
+  renderTextTable,
+  StreamingTable,
+  type StreamingTableOptions,
+} from "./text-table.js";
 
 /** Markdown color tag names for log severity levels */
 const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
@@ -140,11 +147,17 @@ export function formatLogsHeader(): string {
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatLogTable(logs: SentryLog[]): string {
-  const rows = logs
-    .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
-    .join("\n");
-
-  return renderMarkdown(`${mdTableHeader(LOG_TABLE_COLS)}\n${rows}`);
+  if (isPlainOutput()) {
+    const rows = logs
+      .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
+      .join("\n");
+    return `${stripColorTags(mdTableHeader(LOG_TABLE_COLS))}\n${rows}\n`;
+  }
+  const headers = [...LOG_TABLE_COLS];
+  const rows = logs.map((log) =>
+    buildLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
+  );
+  return renderTextTable(headers, rows);
 }
 
 /**

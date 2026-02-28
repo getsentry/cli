@@ -560,14 +560,14 @@ export function formatIssueDetails(issue: SentryIssue): string {
   if (issue.firstSeen) {
     let firstSeenLine = new Date(issue.firstSeen).toLocaleString();
     if (firstReleaseVersion) {
-      firstSeenLine += ` (in ${firstReleaseVersion})`;
+      firstSeenLine += ` (in ${escapeMarkdownCell(String(firstReleaseVersion))})`;
     }
     kvRows.push(["First seen", firstSeenLine]);
   }
   if (issue.lastSeen) {
     let lastSeenLine = new Date(issue.lastSeen).toLocaleString();
     if (lastReleaseVersion && lastReleaseVersion !== firstReleaseVersion) {
-      lastSeenLine += ` (in ${lastReleaseVersion})`;
+      lastSeenLine += ` (in ${escapeMarkdownCell(String(lastReleaseVersion))})`;
     }
     kvRows.push(["Last seen", lastSeenLine]);
   }

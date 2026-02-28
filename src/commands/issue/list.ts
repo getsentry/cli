@@ -107,7 +107,6 @@ function parseSort(value: string): SortValue {
  *
  * @param stdout - Output writer
  * @param title - Section title
- * @param isMultiProject - Whether to show ALIAS column for multi-project mode
  */
 function writeListHeader(stdout: Writer, title: string): void {
   stdout.write(`${title}:\n\n`);
