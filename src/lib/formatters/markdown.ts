@@ -138,7 +138,7 @@ export function mdTableHeader(cols: readonly string[]): string {
  */
 export function mdRow(cells: readonly string[]): string {
   if (isPlainOutput()) {
-    return `| ${cells.join(" | ")} |\n`;
+    return `| ${cells.map(stripColorTags).join(" | ")} |\n`;
   }
   const out = cells.map((c) =>
     renderInline(marked.lexer(c).flatMap(flattenInline)).replace(
@@ -170,7 +170,7 @@ export function mdKvTable(
     // so that backslash-pipe sequences in values don't produce escaped pipes in
     // the rendered output. Newlines are collapsed to spaces.
     lines.push(
-      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\u2502")} |`
+      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\|/g, "\u2502")} |`
     );
   }
   return lines.join("\n");
@@ -231,7 +231,7 @@ const RE_SELF_TAG = /^<([a-z]+)>([\s\S]*?)<\/\1>$/i;
  * Used in plain output mode so that `colorTag()` values don't leak as literal
  * HTML-like tags into piped / CI / redirected output.
  */
-function stripColorTags(text: string): string {
+export function stripColorTags(text: string): string {
   // Repeatedly replace all supported color tag pairs until none remain.
   // The loop handles nested tags (uncommon but possible).
   const tagPattern = Object.keys(COLOR_TAGS).join("|");

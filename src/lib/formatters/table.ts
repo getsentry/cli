@@ -14,6 +14,7 @@ import {
   escapeMarkdownCell,
   isPlainOutput,
   renderInlineMarkdown,
+  stripColorTags,
 } from "./markdown.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
@@ -54,7 +55,7 @@ export function buildMarkdownTable<T>(
   const rows = items
     .map(
       (item) =>
-        `| ${columns.map((c) => escapeMarkdownCell(c.value(item))).join(" | ")} |`
+        `| ${columns.map((c) => escapeMarkdownCell(stripColorTags(c.value(item)))).join(" | ")} |`
     )
     .join("\n");
   return `${header}\n${separator}\n${rows}`;
