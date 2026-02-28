@@ -225,7 +225,9 @@ describe("formatLogsHeader (plain mode)", () => {
 
   test("emits markdown table header and separator", () => {
     const result = formatLogsHeader();
-    expect(result).toContain("| **Timestamp** | **Level** | **Message** |");
+    // Plain mode produces mdTableHeader output (no bold markup), followed by separator
+    expect(result).toContain("| Timestamp | Level | Message |");
+    expect(result).toContain("| --- | --- | --- |");
   });
 
   test("ends with newline", () => {

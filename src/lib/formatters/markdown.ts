@@ -77,16 +77,27 @@ export function isPlainOutput(): boolean {
 /**
  * Escape a string for safe use inside a markdown table cell.
  *
- * Collapses newlines, escapes backslashes, then pipes.
+ * Collapses newlines, escapes backslashes, pipes, and angle brackets.
+ * Angle brackets must be escaped to `&lt;`/`&gt;` so that user-supplied
+ * content (e.g. `Expected <string>`) is not parsed as an HTML tag by
+ * `marked`, which would silently drop the content via `renderHtmlToken`.
  */
 export function escapeMarkdownCell(value: string): string {
-  return value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+  return value
+    .replace(/\n/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /**
  * Escape CommonMark inline emphasis characters.
  *
- * Prevents `_`, `*`, `` ` ``, `[`, `]` from being consumed by the parser.
+ * Prevents `_`, `*`, `` ` ``, `[`, `]`, `<`, and `>` from being consumed
+ * by the parser. Angle brackets are HTML-escaped so that user-supplied
+ * content (e.g. `Expected <string> got <number>`) is not silently dropped
+ * when `marked` parses the text as HTML tokens.
  */
 export function escapeMarkdownInline(value: string): string {
   return value
@@ -95,7 +106,9 @@ export function escapeMarkdownInline(value: string): string {
     .replace(/_/g, "\\_")
     .replace(/`/g, "\\`")
     .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
+    .replace(/\]/g, "\\]")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /**
@@ -153,8 +166,11 @@ export function mdKvTable(
   lines.push("| | |");
   lines.push("|---|---|");
   for (const [label, value] of rows) {
+    // Escape backslashes first, then replace pipes with a Unicode box character
+    // so that backslash-pipe sequences in values don't produce escaped pipes in
+    // the rendered output. Newlines are collapsed to spaces.
     lines.push(
-      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\|/g, "\u2502")} |`
+      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\u2502")} |`
     );
   }
   return lines.join("\n");
@@ -218,6 +234,27 @@ export function colorTag(tag: keyof typeof COLOR_TAGS, text: string): string {
 const RE_OPEN_TAG = /^<([a-z]+)>$/i;
 const RE_CLOSE_TAG = /^<\/([a-z]+)>$/i;
 const RE_SELF_TAG = /^<([a-z]+)>([\s\S]*?)<\/\1>$/i;
+
+/**
+ * Strip color tags (`<red>…</red>`, `<green>…</green>`, etc.) from a string,
+ * leaving only the inner text.
+ *
+ * Used in plain output mode so that `colorTag()` values don't leak as literal
+ * HTML-like tags into piped / CI / redirected output.
+ */
+function stripColorTags(text: string): string {
+  // Repeatedly replace all supported color tag pairs until none remain.
+  // The loop handles nested tags (uncommon but possible).
+  const tagPattern = Object.keys(COLOR_TAGS).join("|");
+  const re = new RegExp(`<(${tagPattern})>([\\s\\S]*?)<\\/\\1>`, "gi");
+  let result = text;
+  let prev: string;
+  do {
+    prev = result;
+    result = result.replace(re, "$2");
+  } while (result !== prev);
+  return result;
+}
 
 /**
  * Render an inline HTML token as a color-tagged string.
@@ -385,11 +422,12 @@ function renderBlocks(tokens: Token[]): string {
       case "heading": {
         const t = token as Tokens.Heading;
         const text = renderInline(t.tokens);
-        if (t.depth <= 2) {
-          parts.push(chalk.hex(COLORS.cyan).bold(text));
-        } else {
-          parts.push(chalk.hex(COLORS.cyan).bold(text));
-        }
+        // h1/h2 → bold cyan; h3+ → plain cyan (less prominent)
+        const styled =
+          t.depth <= 2
+            ? chalk.hex(COLORS.cyan).bold(text)
+            : chalk.hex(COLORS.cyan)(text);
+        parts.push(styled);
         parts.push("");
         break;
       }
@@ -524,7 +562,9 @@ function renderTableToken(table: Tokens.Table): string {
  */
 export function renderMarkdown(md: string): string {
   if (isPlainOutput()) {
-    return md.trimEnd();
+    // Strip color tags so <red>text</red> doesn't leak as literal markup in
+    // piped / CI / redirected output (documented "plain mode" contract).
+    return stripColorTags(md).trimEnd();
   }
   const tokens = marked.lexer(md);
   return renderBlocks(tokens).trimEnd();
@@ -539,7 +579,8 @@ export function renderMarkdown(md: string): string {
  */
 export function renderInlineMarkdown(md: string): string {
   if (isPlainOutput()) {
-    return md;
+    // Strip color tags for the same reason as renderMarkdown.
+    return stripColorTags(md);
   }
   const tokens = marked.lexer(md);
   return renderInline(tokens.flatMap(flattenInline));

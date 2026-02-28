@@ -52,9 +52,10 @@ export const boldUnderline = (text: string): string =>
  * @returns Text wrapped in OSC 8 hyperlink escape sequences
  */
 export function terminalLink(text: string, url: string): string {
-  // OSC 8 ; params ; URI ST  text  OSC 8 ; ; ST
-  // Using BEL () as string terminator for broad compatibility
-  return `]8;;${url}${text}]8;;`;
+  // OSC 8 ; params ; URI BEL  text  OSC 8 ; ; BEL
+  // \x1b] opens the OSC sequence; \x07 (BEL) terminates it.
+  // Using BEL instead of ST (\x1b\\) for broad terminal compatibility.
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
 }
 
 // Semantic Helpers

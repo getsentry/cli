@@ -9,6 +9,7 @@ import { formatRelativeTime } from "./human.js";
 import {
   divider,
   escapeMarkdownCell,
+  isPlainOutput,
   mdRow,
   mdTableHeader,
   renderMarkdown,
@@ -86,9 +87,16 @@ export function formatTraceRow(item: TransactionListItem): string {
 /**
  * Format column header for traces list (streaming mode).
  *
+ * In plain mode: emits a proper markdown table header + separator row so
+ * that streamed rows compose into a valid CommonMark document when redirected.
+ * In rendered mode: emits an ANSI-muted text header with a rule separator.
+ *
  * @returns Header string (includes trailing newline)
  */
 export function formatTracesHeader(): string {
+  if (isPlainOutput()) {
+    return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
+  }
   const names = TRACE_TABLE_COLS.map((c) =>
     c.endsWith(":") ? c.slice(0, -1) : c
   );

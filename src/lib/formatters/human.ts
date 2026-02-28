@@ -396,6 +396,8 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
 /** Row data prepared for the issue table */
 export type IssueTableRow = {
   issue: SentryIssue;
+  /** Org slug — used as project key in trimWithProjectGuarantee and similar utilities. */
+  orgSlug: string;
   formatOptions: FormatShortIdOptions;
 };
 
@@ -472,7 +474,9 @@ export function writeIssueTable(
     },
     {
       header: "TITLE",
-      value: ({ issue }) => issue.title,
+      // Escape markdown emphasis chars so underscores/asterisks in issue titles
+      // (e.g. "Expected <string> got <number>") don't render as italic/bold text.
+      value: ({ issue }) => escapeMarkdownInline(issue.title),
     }
   );
 

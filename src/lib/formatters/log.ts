@@ -11,6 +11,7 @@ import {
   divider,
   escapeMarkdownCell,
   escapeMarkdownInline,
+  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
@@ -18,7 +19,7 @@ import {
 } from "./markdown.js";
 
 /** Markdown color tag names for log severity levels */
-const SEVERITY_TAGS: Record<string, string> = {
+const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
   fatal: "red",
   error: "red",
   warning: "yellow",
@@ -42,7 +43,7 @@ function formatSeverity(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
   const tag = SEVERITY_TAGS[level];
   const label = level.toUpperCase().padEnd(7);
-  return tag ? colorTag(tag as Parameters<typeof colorTag>[0], label) : label;
+  return tag ? colorTag(tag, label) : label;
 }
 
 /**
@@ -87,12 +88,16 @@ export function formatLogRow(log: SentryLog): string {
 /**
  * Format column header for logs list (used in streaming/follow mode).
  *
- * In plain mode: emits a markdown table header + separator row.
+ * In plain mode: emits a proper markdown table header + separator row so that
+ * the streamed rows compose into a valid CommonMark document when redirected.
  * In rendered mode: emits an ANSI-muted text header with a rule separator.
  *
  * @returns Header string (includes trailing newline)
  */
 export function formatLogsHeader(): string {
+  if (isPlainOutput()) {
+    return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
+  }
   return `${mdRow(LOG_TABLE_COLS.map((c) => `**${c}**`))}${divider(80)}\n`;
 }
 
@@ -108,7 +113,10 @@ export function formatLogTable(logs: SentryLog[]): string {
   const rows = logs
     .map((log) => {
       const timestamp = formatTimestamp(log.timestamp);
-      const severity = formatSeverity(log.severity).trim();
+      // formatSeverity wraps the padEnd label inside a color tag, so .trim()
+      // on the result would be a no-op. Use formatSeverityLabel (no padding)
+      // for the batch table which handles its own column sizing.
+      const severity = formatSeverityLabel(log.severity);
       const message = escapeMarkdownCell(log.message ?? "");
       const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
       return `| ${timestamp} | ${severity} | ${message}${trace} |`;
@@ -128,7 +136,7 @@ function formatSeverityLabel(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
   const tag = SEVERITY_TAGS[level];
   const label = level.toUpperCase();
-  return tag ? colorTag(tag as Parameters<typeof colorTag>[0], label) : label;
+  return tag ? colorTag(tag, label) : label;
 }
 
 /**

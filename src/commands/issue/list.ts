@@ -113,14 +113,6 @@ function writeListHeader(stdout: Writer, title: string): void {
   stdout.write(`${title}:\n\n`);
 }
 
-/** Issue with formatting options attached */
-/** @internal */ export type IssueWithOptions = {
-  issue: SentryIssue;
-  /** Org slug — used as part of the per-project key in trimWithProjectGuarantee. */
-  orgSlug: string;
-  formatOptions: FormatShortIdOptions;
-};
-
 /**
  * Write footer with usage tip.
  *
@@ -570,9 +562,9 @@ async function fetchWithBudget(
  * @returns Trimmed array in the same sorted order
  */
 function trimWithProjectGuarantee(
-  issues: IssueWithOptions[],
+  issues: IssueTableRow[],
   limit: number
-): IssueWithOptions[] {
+): IssueTableRow[] {
   if (issues.length <= limit) {
     return issues;
   }

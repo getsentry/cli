@@ -443,7 +443,10 @@ describe("colorTag", () => {
   test("plain mode: tags are stripped leaving bare text", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "1", NO_COLOR: undefined }, true, () => {
       const result = renderInlineMarkdown(colorTag("red", "ERROR"));
-      expect(result).toContain("<red>ERROR</red>");
+      // Color tags must be stripped in plain mode — they must not leak as literal markup
+      expect(result).not.toContain("<red>");
+      expect(result).not.toContain("</red>");
+      expect(result).toContain("ERROR");
     });
   });
 });

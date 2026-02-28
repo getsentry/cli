@@ -189,9 +189,10 @@ describe("formatTracesHeader (plain mode)", () => {
 
   test("emits markdown table header and separator", () => {
     const result = formatTracesHeader();
-    expect(result).toContain(
-      "| **Trace ID** | **Transaction** | **Duration** | **When** |"
-    );
+    // Plain mode produces mdTableHeader output (no bold markup), with separator
+    expect(result).toContain("| Trace ID | Transaction | Duration | When |");
+    // Duration column is right-aligned (`:` suffix in TRACE_TABLE_COLS)
+    expect(result).toContain("| --- | --- | ---: | --- |");
   });
 
   test("ends with newline", () => {
