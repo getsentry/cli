@@ -305,7 +305,9 @@ describe("property: getComparator", () => {
         const cmp = getComparator(sort);
         const ab = cmp(a, b);
         const ba = cmp(b, a);
-        expect(Math.sign(ab)).toBe(-Math.sign(ba));
+        // ab + ba === 0 is the anti-symmetry check that handles 0/-0 correctly
+        // (Object.is(0, -0) is false, but 0 + -0 === 0)
+        expect(ab + ba).toBe(0);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
