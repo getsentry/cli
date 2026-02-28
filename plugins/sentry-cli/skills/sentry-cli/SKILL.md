@@ -405,6 +405,14 @@ sentry api /organizations/ --include
 sentry api /projects/my-org/my-project/issues/ --paginate
 ```
 
+### Setup
+
+Set up Sentry in your project
+
+#### `sentry setup`
+
+Set up Sentry in your project
+
 ### Cli
 
 CLI-related commands

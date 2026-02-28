@@ -23,6 +23,7 @@ import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
+import { setupCommand } from "./commands/setup.js";
 import { teamRoute } from "./commands/team/index.js";
 import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
@@ -54,6 +55,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
 export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
+    setup: setupCommand,
     auth: authRoute,
     cli: cliRoute,
     org: orgRoute,
