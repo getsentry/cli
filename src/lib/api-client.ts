@@ -1031,7 +1031,8 @@ export function listIssuesPaginated(
         // omitting the parameter.
         query: fullQuery || undefined,
         cursor: options.cursor,
-        per_page: options.perPage ?? 25,
+        // The issues endpoint uses `limit` (not `per_page`) to control page size.
+        limit: options.perPage ?? 25,
         sort: options.sort,
         statsPeriod: options.statsPeriod,
       },
