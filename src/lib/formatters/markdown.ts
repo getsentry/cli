@@ -88,7 +88,12 @@ export function escapeMarkdownCell(value: string): string {
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/`/g, "\\`")
+    .replace(/\[/g, "\\[")
+    .replace(/]/g, "\\]");
 }
 
 /**

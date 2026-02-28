@@ -477,9 +477,7 @@ export function writeIssueTable(
     },
     {
       header: "TITLE",
-      // Escape markdown emphasis chars so underscores/asterisks in issue titles
-      // (e.g. "Expected <string> got <number>") don't render as italic/bold text.
-      value: ({ issue }) => escapeMarkdownInline(issue.title),
+      value: ({ issue }) => issue.title,
     }
   );
 
