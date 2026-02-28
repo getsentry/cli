@@ -24,10 +24,14 @@ import {
 } from "../../../src/lib/formatters/human.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
-// Helper to strip ANSI codes and markdown color tags for content testing
+// Helper to strip ANSI codes and markdown color tags for content testing.
+// Strips color tags first to avoid incomplete multi-character sanitization
+// (ANSI removal could otherwise join fragments into tag-like sequences).
 function stripAnsi(str: string): string {
+  let result = str.replace(/<\/?[a-z]+>/g, "");
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
-  return str.replace(/\x1b\[[0-9;]*m/g, "").replace(/<\/?[a-z]+>/g, "");
+  result = result.replace(/\x1b\[[0-9;]*m/g, "");
+  return result;
 }
 
 // Status Formatting
