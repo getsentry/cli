@@ -8,7 +8,9 @@
  * Falls back to raw requests for internal/undocumented endpoints.
  */
 
+import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
+  listAnOrganization_sIssues,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   listAProject_sTeams,
@@ -127,6 +129,26 @@ function unwrapResult<T>(
   }
 
   return data as T;
+}
+
+/**
+ * Unwrap an @sentry/api SDK result AND extract pagination from the Link header.
+ *
+ * Unlike {@link unwrapResult} which discards the Response, this preserves the
+ * Link header for cursor-based pagination. Use for SDK-backed paginated endpoints.
+ *
+ * @param result - The result from an SDK function call (includes `response`)
+ * @param context - Human-readable context for error messages
+ * @returns Data and optional next-page cursor
+ */
+function unwrapPaginatedResult<T>(
+  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  context: string
+): PaginatedResponse<T> {
+  const response = (result as { response?: Response }).response;
+  const data = unwrapResult(result, context);
+  const { nextCursor } = parseLinkHeader(response?.headers.get("link") ?? null);
+  return { data, nextCursor };
 }
 
 /**
@@ -996,23 +1018,32 @@ export async function getProjectKeys(
 // Issue functions
 
 /**
+ * Sort options for issue listing, derived from the @sentry/api SDK types.
+ * Uses the SDK type directly for compile-time safety against parameter drift.
+ */
+export type IssueSort = NonNullable<
+  NonNullable<ListAnOrganizationSissuesData["query"]>["sort"]
+>;
+
+/**
  * List issues for a project with pagination control.
- * Returns a single page of results with cursor metadata for manual pagination.
- * Uses the org-scoped endpoint with a `project:{slug}` filter.
+ *
+ * Uses the @sentry/api SDK's `listAnOrganization_sIssues` for type-safe
+ * query parameters, and extracts pagination from the response Link header.
  *
  * @param orgSlug - Organization slug
- * @param projectSlug - Project slug
+ * @param projectSlug - Project slug (empty string for org-wide listing)
  * @param options - Query and pagination options
  * @returns Single page of issues with cursor metadata
  */
-export function listIssuesPaginated(
+export async function listIssuesPaginated(
   orgSlug: string,
   projectSlug: string,
   options: {
     query?: string;
     cursor?: string;
     perPage?: number;
-    sort?: "date" | "new" | "freq" | "user";
+    sort?: IssueSort;
     statsPeriod?: string;
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
@@ -1022,21 +1053,28 @@ export function listIssuesPaginated(
   const projectFilter = projectSlug ? `project:${projectSlug}` : "";
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  return orgScopedRequestPaginated<SentryIssue[]>(
-    `/organizations/${orgSlug}/issues/`,
-    {
-      params: {
-        // Convert empty string to undefined so ky omits the param entirely;
-        // sending `query=` causes the Sentry API to behave differently than
-        // omitting the parameter.
-        query: fullQuery || undefined,
-        cursor: options.cursor,
-        // The issues endpoint uses `limit` (not `per_page`) to control page size.
-        limit: options.perPage ?? 25,
-        sort: options.sort,
-        statsPeriod: options.statsPeriod,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sIssues({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      // Convert empty string to undefined so the SDK omits the param entirely;
+      // sending `query=` causes the Sentry API to behave differently than
+      // omitting the parameter.
+      query: fullQuery || undefined,
+      cursor: options.cursor,
+      limit: options.perPage ?? 25,
+      sort: options.sort,
+      statsPeriod: options.statsPeriod,
+    },
+  });
+
+  return unwrapPaginatedResult<SentryIssue[]>(
+    result as
+      | { data: SentryIssue[]; error: undefined }
+      | { data: undefined; error: unknown },
+    "Failed to list issues"
   );
 }
 
@@ -1071,7 +1109,7 @@ export async function listIssuesAllPages(
   options: {
     query?: string;
     limit: number;
-    sort?: "date" | "new" | "freq" | "user";
+    sort?: IssueSort;
     statsPeriod?: string;
     /** Resume pagination from this cursor instead of starting from the beginning. */
     startCursor?: string;
