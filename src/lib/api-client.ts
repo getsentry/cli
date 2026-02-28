@@ -124,6 +124,11 @@ function unwrapResult<T>(
     if (error instanceof AuthError || error instanceof ApiError) {
       throw error;
     }
+    // The @sentry/api SDK always includes `response` on the returned object in
+    // the default "fields" responseStyle (see createClient request() in the SDK
+    // source — it spreads `{ request, response }` into every return value).
+    // The cast is typed as optional only because the SDK's TypeScript types omit
+    // `response` from the return type, not because it can be absent at runtime.
     const response = (result as { response?: Response }).response;
     throwApiError(error, response, context);
   }
