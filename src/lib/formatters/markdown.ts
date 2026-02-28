@@ -169,8 +169,10 @@ export function mdKvTable(
     // Escape backslashes first, then replace pipes with a Unicode box character
     // so that backslash-pipe sequences in values don't produce escaped pipes in
     // the rendered output. Newlines are collapsed to spaces.
+    // Only replace structural characters that break table syntax.
+    // Content escaping (<>, \, _*`) is the caller's responsibility.
     lines.push(
-      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\\/g, "\\\\").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\|/g, "\u2502")} |`
+      `| **${label}** | ${value.replace(/\n/g, " ").replace(/\|/g, "\u2502")} |`
     );
   }
   return lines.join("\n");

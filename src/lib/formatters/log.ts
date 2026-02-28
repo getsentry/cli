@@ -119,7 +119,7 @@ export function formatLogTable(logs: SentryLog[]): string {
       const severity = formatSeverityLabel(log.severity);
       const message = escapeMarkdownCell(log.message ?? "");
       const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
-      return `| ${timestamp} | ${severity} | ${message}${trace} |`;
+      return mdRow([timestamp, severity, `${message}${trace}`]).trimEnd();
     })
     .join("\n");
 

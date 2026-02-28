@@ -10,6 +10,7 @@ import {
   divider,
   escapeMarkdownCell,
   isPlainOutput,
+  mdKvTable,
   mdRow,
   mdTableHeader,
   renderMarkdown,
@@ -115,10 +116,7 @@ export function formatTracesHeader(): string {
  */
 export function formatTraceTable(items: TransactionListItem[]): string {
   const rows = items
-    .map((item) => {
-      const [traceId, transaction, duration, when] = buildTraceRowCells(item);
-      return `| ${traceId} | ${transaction} | ${duration} | ${when} |`;
-    })
+    .map((item) => mdRow(buildTraceRowCells(item)).trimEnd())
     .join("\n");
   return renderMarkdown(`${mdTableHeader(TRACE_TABLE_COLS)}\n${rows}`);
 }
@@ -251,25 +249,22 @@ export function computeTraceSummary(
  * @returns Rendered terminal string
  */
 export function formatTraceSummary(summary: TraceSummary): string {
-  const rows: string[] = [];
+  const kvRows: [string, string][] = [];
 
   if (summary.rootTransaction) {
     const opPrefix = summary.rootOp ? `[\`${summary.rootOp}\`] ` : "";
-    rows.push(
-      `| **Root** | ${opPrefix}${escapeMarkdownCell(summary.rootTransaction)} |`
-    );
+    kvRows.push(["Root", `${opPrefix}${summary.rootTransaction}`]);
   }
-  rows.push(`| **Duration** | ${formatTraceDuration(summary.duration)} |`);
-  rows.push(`| **Spans** | ${summary.spanCount} |`);
+  kvRows.push(["Duration", formatTraceDuration(summary.duration)]);
+  kvRows.push(["Spans", String(summary.spanCount)]);
   if (summary.projects.length > 0) {
-    rows.push(`| **Projects** | ${summary.projects.join(", ")} |`);
+    kvRows.push(["Projects", summary.projects.join(", ")]);
   }
   if (Number.isFinite(summary.startTimestamp) && summary.startTimestamp > 0) {
     const date = new Date(summary.startTimestamp * 1000);
-    rows.push(`| **Started** | ${date.toLocaleString("sv-SE")} |`);
+    kvRows.push(["Started", date.toLocaleString("sv-SE")]);
   }
 
-  const table = `| | |\n|---|---|\n${rows.join("\n")}`;
-  const md = `## Trace \`${summary.traceId}\`\n\n${table}\n`;
+  const md = `## Trace \`${summary.traceId}\`\n\n${mdKvTable(kvRows)}\n`;
   return renderMarkdown(md);
 }

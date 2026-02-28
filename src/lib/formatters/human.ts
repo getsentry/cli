@@ -30,6 +30,9 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
+  mdKvTable,
+  mdRow,
+  mdTableHeader,
   renderMarkdown,
   safeCodeSpan,
 } from "./markdown.js";
@@ -497,14 +500,15 @@ export function formatIssueDetails(issue: SentryIssue): string {
   lines.push("");
 
   // Key-value details as a table
-  const rows: string[] = [];
+  const kvRows: [string, string][] = [];
 
-  rows.push(
-    `| **Status** | ${formatStatusLabel(issue.status)}${issue.substatus ? ` (${capitalize(issue.substatus)})` : ""} |`
-  );
+  kvRows.push([
+    "Status",
+    `${formatStatusLabel(issue.status)}${issue.substatus ? ` (${capitalize(issue.substatus)})` : ""}`,
+  ]);
 
   if (issue.priority) {
-    rows.push(`| **Priority** | ${capitalize(issue.priority)} |`);
+    kvRows.push(["Priority", capitalize(issue.priority)]);
   }
 
   if (
@@ -513,75 +517,68 @@ export function formatIssueDetails(issue: SentryIssue): string {
   ) {
     const tier = getSeerFixabilityLabel(issue.seerFixabilityScore);
     const fixDetail = formatFixabilityDetail(issue.seerFixabilityScore);
-    rows.push(
-      `| **Fixability** | ${colorTag(FIXABILITY_TAGS[tier], fixDetail)} |`
-    );
+    kvRows.push(["Fixability", colorTag(FIXABILITY_TAGS[tier], fixDetail)]);
   }
 
   let levelLine = issue.level ?? "unknown";
   if (issue.isUnhandled) {
     levelLine += " (unhandled)";
   }
-  rows.push(`| **Level** | ${levelLine} |`);
-  rows.push(
-    `| **Platform** | ${escapeMarkdownCell(issue.platform ?? "unknown")} |`
-  );
-  rows.push(`| **Type** | ${escapeMarkdownCell(issue.type ?? "unknown")} |`);
-  rows.push(
-    `| **Assignee** | ${escapeMarkdownCell(String(issue.assignedTo?.name ?? "Unassigned"))} |`
-  );
+  kvRows.push(["Level", levelLine]);
+  kvRows.push(["Platform", issue.platform ?? "unknown"]);
+  kvRows.push(["Type", issue.type ?? "unknown"]);
+  kvRows.push(["Assignee", String(issue.assignedTo?.name ?? "Unassigned")]);
 
   if (issue.project) {
-    rows.push(
-      `| **Project** | ${escapeMarkdownCell(issue.project.name ?? "(unknown)")} (${safeCodeSpan(issue.project.slug ?? "")}) |`
-    );
+    kvRows.push([
+      "Project",
+      `${issue.project.name ?? "(unknown)"} (${safeCodeSpan(issue.project.slug ?? "")})`,
+    ]);
   }
 
   const firstReleaseVersion = issue.firstRelease?.shortVersion;
   const lastReleaseVersion = issue.lastRelease?.shortVersion;
   if (firstReleaseVersion || lastReleaseVersion) {
-    const first = escapeMarkdownCell(String(firstReleaseVersion ?? ""));
-    const last = escapeMarkdownCell(String(lastReleaseVersion ?? ""));
+    const first = String(firstReleaseVersion ?? "");
+    const last = String(lastReleaseVersion ?? "");
     if (firstReleaseVersion && lastReleaseVersion) {
       if (firstReleaseVersion === lastReleaseVersion) {
-        rows.push(`| **Release** | ${first} |`);
+        kvRows.push(["Release", first]);
       } else {
-        rows.push(`| **Releases** | ${first} → ${last} |`);
+        kvRows.push(["Releases", `${first} → ${last}`]);
       }
     } else if (lastReleaseVersion) {
-      rows.push(`| **Release** | ${last} |`);
+      kvRows.push(["Release", last]);
     } else if (firstReleaseVersion) {
-      rows.push(`| **Release** | ${first} |`);
+      kvRows.push(["Release", first]);
     }
   }
 
-  rows.push(`| **Events** | ${issue.count ?? 0} |`);
-  rows.push(`| **Users** | ${issue.userCount ?? 0} |`);
+  kvRows.push(["Events", String(issue.count ?? 0)]);
+  kvRows.push(["Users", String(issue.userCount ?? 0)]);
 
   if (issue.firstSeen) {
     let firstSeenLine = new Date(issue.firstSeen).toLocaleString();
     if (firstReleaseVersion) {
       firstSeenLine += ` (in ${firstReleaseVersion})`;
     }
-    rows.push(`| **First seen** | ${firstSeenLine} |`);
+    kvRows.push(["First seen", firstSeenLine]);
   }
   if (issue.lastSeen) {
     let lastSeenLine = new Date(issue.lastSeen).toLocaleString();
     if (lastReleaseVersion && lastReleaseVersion !== firstReleaseVersion) {
       lastSeenLine += ` (in ${lastReleaseVersion})`;
     }
-    rows.push(`| **Last seen** | ${lastSeenLine} |`);
+    kvRows.push(["Last seen", lastSeenLine]);
   }
 
   if (issue.culprit) {
-    rows.push(`| **Culprit** | ${safeCodeSpan(issue.culprit)} |`);
+    kvRows.push(["Culprit", safeCodeSpan(issue.culprit)]);
   }
 
-  rows.push(`| **Link** | ${escapeMarkdownCell(issue.permalink ?? "")} |`);
+  kvRows.push(["Link", issue.permalink ?? ""]);
 
-  lines.push("| | |");
-  lines.push("|---|---|");
-  lines.push(...rows);
+  lines.push(mdKvTable(kvRows));
 
   if (issue.metadata?.value) {
     lines.push("");
@@ -690,8 +687,7 @@ function buildBreadcrumbsMarkdown(breadcrumbsEntry: BreadcrumbsEntry): string {
   const lines: string[] = [];
   lines.push("### Breadcrumbs");
   lines.push("");
-  lines.push("| Time | Level | Category | Message |");
-  lines.push("|---|---|---|---|");
+  lines.push(mdTableHeader(["Time", "Level", "Category", "Message"]).trimEnd());
 
   for (const breadcrumb of breadcrumbs) {
     const timestamp = breadcrumb.timestamp
@@ -721,9 +717,7 @@ function buildBreadcrumbsMarkdown(breadcrumbsEntry: BreadcrumbsEntry): string {
     const safeMessage = escapeMarkdownCell(message);
     const safeCategory = escapeMarkdownCell(breadcrumb.category ?? "default");
 
-    lines.push(
-      `| ${timestamp} | ${level} | ${safeCategory} | ${safeMessage} |`
-    );
+    lines.push(mdRow([timestamp, level, safeCategory, safeMessage]).trimEnd());
   }
 
   return lines.join("\n");
@@ -904,22 +898,18 @@ function buildEnvironmentMarkdown(event: SentryEvent): string {
     return "";
   }
 
-  const rows: string[] = [];
+  const kvRows: [string, string][] = [];
 
   if (contexts.browser) {
     const name = contexts.browser.name || "Unknown Browser";
     const version = contexts.browser.version || "";
-    rows.push(
-      `| **Browser** | ${escapeMarkdownCell(`${name}${version ? ` ${version}` : ""}`)} |`
-    );
+    kvRows.push(["Browser", `${name}${version ? ` ${version}` : ""}`]);
   }
 
   if (contexts.os) {
     const name = contexts.os.name || "Unknown OS";
     const version = contexts.os.version || "";
-    rows.push(
-      `| **OS** | ${escapeMarkdownCell(`${name}${version ? ` ${version}` : ""}`)} |`
-    );
+    kvRows.push(["OS", `${name}${version ? ` ${version}` : ""}`]);
   }
 
   if (contexts.device) {
@@ -927,15 +917,15 @@ function buildEnvironmentMarkdown(event: SentryEvent): string {
     const brand = contexts.device.brand || "";
     if (family || brand) {
       const device = brand ? `${family} (${brand})` : family;
-      rows.push(`| **Device** | ${escapeMarkdownCell(device)} |`);
+      kvRows.push(["Device", device]);
     }
   }
 
-  if (rows.length === 0) {
+  if (kvRows.length === 0) {
     return "";
   }
 
-  return `### Environment\n\n| | |\n|---|---|\n${rows.join("\n")}`;
+  return mdKvTable(kvRows, "Environment");
 }
 
 /**
@@ -960,22 +950,22 @@ function buildUserMarkdown(event: SentryEvent): string {
     return "";
   }
 
-  const rows: string[] = [];
+  const kvRows: [string, string][] = [];
 
   if (user.name) {
-    rows.push(`| **Name** | ${escapeMarkdownCell(user.name)} |`);
+    kvRows.push(["Name", user.name]);
   }
   if (user.email) {
-    rows.push(`| **Email** | ${escapeMarkdownCell(user.email)} |`);
+    kvRows.push(["Email", user.email]);
   }
   if (user.username) {
-    rows.push(`| **Username** | ${escapeMarkdownCell(user.username)} |`);
+    kvRows.push(["Username", user.username]);
   }
   if (user.id) {
-    rows.push(`| **ID** | ${escapeMarkdownCell(user.id)} |`);
+    kvRows.push(["ID", user.id]);
   }
   if (user.ip_address) {
-    rows.push(`| **IP** | ${escapeMarkdownCell(user.ip_address)} |`);
+    kvRows.push(["IP", user.ip_address]);
   }
 
   if (user.geo) {
@@ -991,11 +981,11 @@ function buildUserMarkdown(event: SentryEvent): string {
       parts.push(`(${geo.country_code})`);
     }
     if (parts.length > 0) {
-      rows.push(`| **Location** | ${escapeMarkdownCell(parts.join(", "))} |`);
+      kvRows.push(["Location", parts.join(", ")]);
     }
   }
 
-  return `### User\n\n| | |\n|---|---|\n${rows.join("\n")}`;
+  return mdKvTable(kvRows, "User");
 }
 
 /**
@@ -1050,20 +1040,21 @@ export function formatEventDetails(
     sections.push("");
 
     // Basic info table
-    const infoRows: string[] = [];
-    infoRows.push(`| **Event ID** | \`${event.eventID}\` |`);
+    const infoKvRows: [string, string][] = [];
+    infoKvRows.push(["Event ID", `\`${event.eventID}\``]);
     if (event.dateReceived) {
-      infoRows.push(
-        `| **Received** | ${new Date(event.dateReceived).toLocaleString()} |`
-      );
+      infoKvRows.push([
+        "Received",
+        new Date(event.dateReceived).toLocaleString(),
+      ]);
     }
     if (event.location) {
-      infoRows.push(`| **Location** | ${safeCodeSpan(event.location)} |`);
+      infoKvRows.push(["Location", safeCodeSpan(event.location)]);
     }
 
     const traceCtx = event.contexts?.trace;
     if (traceCtx?.trace_id) {
-      infoRows.push(`| **Trace** | ${safeCodeSpan(traceCtx.trace_id)} |`);
+      infoKvRows.push(["Trace", safeCodeSpan(traceCtx.trace_id)]);
     }
 
     if (event.sdk?.name || event.sdk?.version) {
@@ -1072,19 +1063,15 @@ export function formatEventDetails(
       const sdkName = event.sdk.name ?? "unknown";
       const sdkVersion = event.sdk.version ?? "";
       const sdkInfo = `${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""}`;
-      infoRows.push(`| **SDK** | \`${sdkInfo}\` |`);
+      infoKvRows.push(["SDK", `\`${sdkInfo}\``]);
     }
 
     if (event.release?.shortVersion) {
-      infoRows.push(
-        `| **Release** | ${escapeMarkdownCell(event.release.shortVersion)} |`
-      );
+      infoKvRows.push(["Release", String(event.release.shortVersion)]);
     }
 
-    if (infoRows.length > 0) {
-      sections.push("| | |");
-      sections.push("|---|---|");
-      sections.push(...infoRows);
+    if (infoKvRows.length > 0) {
+      sections.push(mdKvTable(infoKvRows));
     }
 
     // User section
@@ -1140,11 +1127,14 @@ export function formatEventDetails(
       sections.push("");
       sections.push("### Tags");
       sections.push("");
-      sections.push("| Key | Value |");
-      sections.push("|---|---|");
+      sections.push(mdTableHeader(["Key", "Value"]).trimEnd());
       for (const tag of event.tags) {
-        const safeVal = escapeMarkdownCell(String(tag.value));
-        sections.push(`| \`${tag.key}\` | ${safeVal} |`);
+        sections.push(
+          mdRow([
+            `\`${tag.key}\``,
+            escapeMarkdownCell(String(tag.value)),
+          ]).trimEnd()
+        );
       }
     }
 
@@ -1168,21 +1158,17 @@ export function formatOrgDetails(org: SentryOrganization): string {
   );
   lines.push("");
 
-  const rows: string[] = [];
-  rows.push(`| **Slug** | \`${org.slug || "(none)"}\` |`);
-  rows.push(`| **Name** | ${escapeMarkdownCell(org.name || "(unnamed)")} |`);
-  rows.push(`| **ID** | ${org.id} |`);
+  const kvRows: [string, string][] = [];
+  kvRows.push(["Slug", `\`${org.slug || "(none)"}\``]);
+  kvRows.push(["Name", org.name || "(unnamed)"]);
+  kvRows.push(["ID", String(org.id)]);
   if (org.dateCreated) {
-    rows.push(
-      `| **Created** | ${new Date(org.dateCreated).toLocaleString()} |`
-    );
+    kvRows.push(["Created", new Date(org.dateCreated).toLocaleString()]);
   }
-  rows.push(`| **2FA** | ${org.require2FA ? "Required" : "Not required"} |`);
-  rows.push(`| **Early Adopter** | ${org.isEarlyAdopter ? "Yes" : "No"} |`);
+  kvRows.push(["2FA", org.require2FA ? "Required" : "Not required"]);
+  kvRows.push(["Early Adopter", org.isEarlyAdopter ? "Yes" : "No"]);
 
-  lines.push("| | |");
-  lines.push("|---|---|");
-  lines.push(...rows);
+  lines.push(mdKvTable(kvRows));
 
   const featuresSection = formatFeaturesMarkdown(org.features);
   if (featuresSection) {
@@ -1210,43 +1196,34 @@ export function formatProjectDetails(
   );
   lines.push("");
 
-  const rows: string[] = [];
-  rows.push(`| **Slug** | \`${project.slug || "(none)"}\` |`);
-  rows.push(
-    `| **Name** | ${escapeMarkdownCell(project.name || "(unnamed)")} |`
-  );
-  rows.push(`| **ID** | ${project.id} |`);
-  rows.push(
-    `| **Platform** | ${escapeMarkdownCell(project.platform || "Not set")} |`
-  );
-  rows.push(`| **DSN** | \`${dsn || "No DSN available"}\` |`);
-  rows.push(`| **Status** | ${project.status} |`);
+  const kvRows: [string, string][] = [];
+  kvRows.push(["Slug", `\`${project.slug || "(none)"}\``]);
+  kvRows.push(["Name", project.name || "(unnamed)"]);
+  kvRows.push(["ID", String(project.id)]);
+  kvRows.push(["Platform", project.platform || "Not set"]);
+  kvRows.push(["DSN", `\`${dsn || "No DSN available"}\``]);
+  kvRows.push(["Status", project.status ?? "unknown"]);
   if (project.dateCreated) {
-    rows.push(
-      `| **Created** | ${new Date(project.dateCreated).toLocaleString()} |`
-    );
+    kvRows.push(["Created", new Date(project.dateCreated).toLocaleString()]);
   }
   if (project.organization) {
-    rows.push(
-      `| **Organization** | ${escapeMarkdownCell(project.organization.name)} (${safeCodeSpan(project.organization.slug)}) |`
-    );
+    kvRows.push([
+      "Organization",
+      `${project.organization.name} (${safeCodeSpan(project.organization.slug)})`,
+    ]);
   }
   if (project.firstEvent) {
-    rows.push(
-      `| **First Event** | ${new Date(project.firstEvent).toLocaleString()} |`
-    );
+    kvRows.push(["First Event", new Date(project.firstEvent).toLocaleString()]);
   } else {
-    rows.push("| **First Event** | No events yet |");
+    kvRows.push(["First Event", "No events yet"]);
   }
 
-  rows.push(`| **Sessions** | ${project.hasSessions ? "Yes" : "No"} |`);
-  rows.push(`| **Replays** | ${project.hasReplays ? "Yes" : "No"} |`);
-  rows.push(`| **Profiles** | ${project.hasProfiles ? "Yes" : "No"} |`);
-  rows.push(`| **Monitors** | ${project.hasMonitors ? "Yes" : "No"} |`);
+  kvRows.push(["Sessions", project.hasSessions ? "Yes" : "No"]);
+  kvRows.push(["Replays", project.hasReplays ? "Yes" : "No"]);
+  kvRows.push(["Profiles", project.hasProfiles ? "Yes" : "No"]);
+  kvRows.push(["Monitors", project.hasMonitors ? "Yes" : "No"]);
 
-  lines.push("| | |");
-  lines.push("|---|---|");
-  lines.push(...rows);
+  lines.push(mdKvTable(kvRows));
 
   const featuresSection = formatFeaturesMarkdown(project.features);
   if (featuresSection) {
