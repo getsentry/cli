@@ -4,7 +4,11 @@
  * Provides formatting utilities for displaying Sentry logs in the CLI.
  */
 
-import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
+import type {
+  DetailedSentryLog,
+  SentryLog,
+  TraceLog,
+} from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import {
   colorTag,
@@ -287,4 +291,81 @@ export function formatLogDetails(
   }
 
   return renderMarkdown(lines.join("\n"));
+}
+
+// Trace-log formatters (for /organizations/{org}/trace-logs/ endpoint)
+
+/** Column headers for the trace-log table — same layout as the regular log table */
+const TRACE_LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
+
+/**
+ * Extract cell values for a trace-log row.
+ *
+ * Identical layout to {@link buildLogRowCells} but operates on {@link TraceLog}
+ * (from the trace-logs endpoint) rather than {@link SentryLog} (Explore/Events).
+ * The trace ID column is omitted — all rows share the same trace, so it adds
+ * no information in this context.
+ *
+ * @param log - The trace log entry
+ * @param padSeverity - Whether to pad severity to 7 chars for column alignment
+ * @returns `[timestamp, severity, message]` markdown-safe cell strings
+ */
+export function buildTraceLogRowCells(
+  log: TraceLog,
+  padSeverity = true
+): [string, string, string] {
+  const timestamp = formatTimestamp(log.timestamp);
+  const level = padSeverity
+    ? formatSeverity(log.severity)
+    : formatSeverityLabel(log.severity);
+  const message = escapeMarkdownCell(log.message ?? "");
+  return [timestamp, level, message];
+}
+
+/**
+ * Format a single trace-log entry as a plain markdown table row.
+ * Used for non-TTY / piped output where a batch table isn't appropriate.
+ *
+ * @param log - The trace log entry to format
+ * @returns Formatted markdown row string with newline
+ */
+export function formatTraceLogRow(log: TraceLog): string {
+  return mdRow(buildTraceLogRowCells(log));
+}
+
+/**
+ * Format column header for trace-logs list in plain (non-TTY) mode.
+ *
+ * Emits a proper markdown table header + separator row so streamed rows
+ * compose into a valid CommonMark document when redirected. In TTY mode,
+ * use {@link formatTraceLogTable} instead.
+ *
+ * @returns Header string (includes trailing newline)
+ */
+export function formatTraceLogsHeader(): string {
+  return `${mdTableHeader(TRACE_LOG_TABLE_COLS)}\n`;
+}
+
+/**
+ * Build a rendered markdown table for a batch list of trace log entries.
+ *
+ * Uses {@link buildTraceLogRowCells} so cell formatting stays consistent with
+ * the streaming path. In TTY mode renders a Unicode-bordered table; in plain
+ * mode emits raw CommonMark rows.
+ *
+ * @param logs - Trace log entries to display
+ * @returns Rendered terminal string with Unicode-bordered table
+ */
+export function formatTraceLogTable(logs: TraceLog[]): string {
+  if (isPlainOutput()) {
+    const rows = logs
+      .map((log) => mdRow(buildTraceLogRowCells(log, false)).trimEnd())
+      .join("\n");
+    return `${stripColorTags(mdTableHeader(TRACE_LOG_TABLE_COLS))}\n${rows}\n`;
+  }
+  const headers = [...TRACE_LOG_TABLE_COLS];
+  const rows = logs.map((log) =>
+    buildTraceLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
+  );
+  return renderTextTable(headers, rows);
 }

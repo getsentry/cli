@@ -6,12 +6,14 @@
 
 import { buildRouteMap } from "@stricli/core";
 import { listCommand } from "./list.js";
+import { logsCommand } from "./logs.js";
 import { viewCommand } from "./view.js";
 
 export const traceRoute = buildRouteMap({
   routes: {
     list: listCommand,
     view: viewCommand,
+    logs: logsCommand,
   },
   docs: {
     brief: "View distributed traces",
@@ -19,7 +21,8 @@ export const traceRoute = buildRouteMap({
       "View and explore distributed traces from your Sentry projects.\n\n" +
       "Commands:\n" +
       "  list     List recent traces in a project\n" +
-      "  view     View details of a specific trace",
+      "  view     View details of a specific trace\n" +
+      "  logs     View logs associated with a trace",
     hideRoute: {},
   },
 });

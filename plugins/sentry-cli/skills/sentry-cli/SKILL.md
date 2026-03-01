@@ -586,6 +586,17 @@ View details of a specific trace
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
+#### `sentry trace logs <args...>`
+
+View logs associated with a trace
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open trace in browser`
+- `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Additional filter query (Sentry search syntax)`
+
 ### Issues
 
 List issues in a project
