@@ -218,7 +218,7 @@ export function formatStatusLabel(status: string | undefined): string {
  */
 export function formatRelativeTime(dateString: string | undefined): string {
   if (!dateString) {
-    return muted("—");
+    return colorTag("muted", "—");
   }
 
   const date = new Date(dateString);
@@ -477,7 +477,7 @@ export function writeIssueTable(
     },
     {
       header: "TITLE",
-      value: ({ issue }) => escapeMarkdownCell(issue.title),
+      value: ({ issue }) => escapeMarkdownInline(issue.title),
     }
   );
 
