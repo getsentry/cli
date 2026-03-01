@@ -151,7 +151,7 @@ export const listCommand = buildListCommand("trace", {
     }
 
     stdout.write(`Recent traces in ${org}/${project}:\n\n`);
-    stdout.write(`${formatTraceTable(traces)}\n`);
+    stdout.write(formatTraceTable(traces));
 
     // Show footer with tip
     const hasMore = traces.length >= flags.limit;

@@ -132,7 +132,7 @@ async function executeSingleFetch(
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
   const chronological = [...logs].reverse();
 
-  stdout.write(`${formatLogTable(chronological)}\n`);
+  stdout.write(formatLogTable(chronological));
 
   // Show footer with tip if we hit the limit
   const hasMore = logs.length >= flags.limit;
