@@ -477,7 +477,7 @@ export function writeIssueTable(
     },
     {
       header: "TITLE",
-      value: ({ issue }) => issue.title,
+      value: ({ issue }) => escapeMarkdownCell(issue.title),
     }
   );
 

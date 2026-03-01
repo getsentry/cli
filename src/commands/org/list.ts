@@ -10,6 +10,7 @@ import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { buildListLimitFlag, LIST_JSON_FLAG } from "../../lib/list-command.js";
 
@@ -108,7 +109,7 @@ export const listCommand = buildCommand({
       ...(showRegion
         ? [{ header: "REGION", value: (r: OrgRow) => r.region ?? "" }]
         : []),
-      { header: "NAME", value: (r) => r.name },
+      { header: "NAME", value: (r) => escapeMarkdownCell(r.name) },
     ];
 
     writeTable(stdout, rows, columns);

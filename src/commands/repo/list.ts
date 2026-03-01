@@ -14,6 +14,7 @@ import {
   listRepositories,
   listRepositoriesPaginated,
 } from "../../lib/api-client.js";
+import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   buildOrgListCommand,
@@ -31,10 +32,10 @@ type RepositoryWithOrg = SentryRepository & { orgSlug?: string };
 /** Column definitions for the repository table. */
 const REPO_COLUMNS: Column<RepositoryWithOrg>[] = [
   { header: "ORG", value: (r) => r.orgSlug || "" },
-  { header: "NAME", value: (r) => r.name },
+  { header: "NAME", value: (r) => escapeMarkdownCell(r.name) },
   { header: "PROVIDER", value: (r) => r.provider.name },
   { header: "STATUS", value: (r) => r.status },
-  { header: "URL", value: (r) => r.url || "" },
+  { header: "URL", value: (r) => escapeMarkdownCell(r.url || "") },
 ];
 
 /** Shared config that plugs into the org-list framework. */

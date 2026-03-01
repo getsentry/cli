@@ -41,7 +41,7 @@ export type Column<T> = {
 /**
  * Build a raw CommonMark table string from items and column definitions.
  *
- * Cell values are escaped via {@link escapeMarkdownCell} so pipe and
+ * Column value functions should call {@link escapeMarkdownCell} on user data so pipe and
  * backslash characters in API-supplied strings don't break the table.
  *
  * Used for plain/non-TTY output mode.
@@ -55,7 +55,7 @@ export function buildMarkdownTable<T>(
   const rows = items
     .map(
       (item) =>
-        `| ${columns.map((c) => escapeMarkdownCell(stripColorTags(c.value(item)))).join(" | ")} |`
+        `| ${columns.map((c) => stripColorTags(c.value(item))).join(" | ")} |`
     )
     .join("\n");
   return `${header}\n${separator}\n${rows}`;

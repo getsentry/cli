@@ -32,6 +32,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { AuthError, ContextError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   buildListCommand,
@@ -229,7 +230,7 @@ async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
 const PROJECT_COLUMNS: Column<ProjectWithOrg>[] = [
   { header: "ORG", value: (p) => p.orgSlug || "" },
   { header: "PROJECT", value: (p) => p.slug },
-  { header: "NAME", value: (p) => p.name },
+  { header: "NAME", value: (p) => escapeMarkdownCell(p.name) },
   { header: "PLATFORM", value: (p) => p.platform || "" },
 ];
 

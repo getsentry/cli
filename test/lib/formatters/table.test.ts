@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, mock, test } from "bun:test";
+import { escapeMarkdownCell } from "../../../src/lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../../src/lib/formatters/table.js";
 
 type Row = { name: string; count: number; status: string };
@@ -137,15 +138,15 @@ describe("writeTable (plain mode)", () => {
     });
   });
 
-  test("escapes pipe characters in cell values", () => {
+  test("escapes pipe characters when column uses escapeMarkdownCell", () => {
     withPlain(() => {
       const cols: Column<{ v: string }>[] = [
-        { header: "VAL", value: (r) => r.v },
+        { header: "VAL", value: (r) => escapeMarkdownCell(r.v) },
       ];
       const write = mock(() => true);
       writeTable({ write }, [{ v: "a|b" }], cols);
       const output = write.mock.calls.map((c) => c[0]).join("");
-      // Pipe should be escaped
+      // Pipe should be escaped by the column value function
       expect(output).toContain("a\\|b");
     });
   });
