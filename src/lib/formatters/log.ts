@@ -6,31 +6,50 @@
 
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
-import { cyan, muted, red, yellow } from "./colors.js";
-import { divider } from "./human.js";
+import {
+  colorTag,
+  escapeMarkdownCell,
+  escapeMarkdownInline,
+  isPlainOutput,
+  mdKvTable,
+  mdRow,
+  mdTableHeader,
+  renderInlineMarkdown,
+  renderMarkdown,
+  stripColorTags,
+} from "./markdown.js";
+import {
+  renderTextTable,
+  StreamingTable,
+  type StreamingTableOptions,
+} from "./text-table.js";
 
-/** Color functions for log severity levels */
-const SEVERITY_COLORS: Record<string, (text: string) => string> = {
-  fatal: red,
-  error: red,
-  warning: yellow,
-  warn: yellow,
-  info: cyan,
-  debug: muted,
-  trace: muted,
+/** Markdown color tag names for log severity levels */
+const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
+  fatal: "red",
+  error: "red",
+  warning: "yellow",
+  warn: "yellow",
+  info: "cyan",
+  debug: "muted",
+  trace: "muted",
 };
 
+/** Column headers for the streaming log table */
+const LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
+
 /**
- * Format severity level with appropriate color.
+ * Format severity level with appropriate color tag.
  * Pads to 7 characters for alignment (longest: "warning").
  *
  * @param severity - The log severity level
- * @returns Colored and padded severity string
+ * @returns Markdown color-tagged and padded severity string
  */
 function formatSeverity(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
-  const colorFn = SEVERITY_COLORS[level] ?? ((s: string) => s);
-  return colorFn(level.toUpperCase().padEnd(7));
+  const tag = SEVERITY_TAGS[level];
+  const label = level.toUpperCase().padEnd(7);
+  return tag ? colorTag(tag, label) : label;
 }
 
 /**
@@ -53,127 +72,180 @@ function formatTimestamp(timestamp: string): string {
 }
 
 /**
- * Format a single log entry for human-readable output.
+ * Extract cell values for a log row (shared by streaming and batch paths).
  *
- * Format: "TIMESTAMP  SEVERITY  MESSAGE [trace_id]"
- * Example: "2024-01-30 14:32:15  ERROR    Failed to connect [abc12345]"
+ * @param log - The log entry
+ * @param padSeverity - Whether to pad severity to 7 chars for alignment
+ * @returns `[timestamp, severity, message]` strings
+ */
+export function buildLogRowCells(
+  log: SentryLog,
+  padSeverity = true
+): [string, string, string] {
+  const timestamp = formatTimestamp(log.timestamp);
+  const level = padSeverity
+    ? formatSeverity(log.severity)
+    : formatSeverityLabel(log.severity);
+  const message = escapeMarkdownCell(log.message ?? "");
+  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+  return [timestamp, level, `${message}${trace}`];
+}
+
+/**
+ * Format a single log entry as a plain markdown table row.
+ * Used for non-TTY / piped output where StreamingTable isn't appropriate.
  *
  * @param log - The log entry to format
  * @returns Formatted log line with newline
  */
 export function formatLogRow(log: SentryLog): string {
-  const timestamp = formatTimestamp(log.timestamp);
-  const severity = formatSeverity(log.severity);
-  const message = log.message ?? "";
-  const trace = log.trace ? muted(` [${log.trace.slice(0, 8)}]`) : "";
+  return mdRow(buildLogRowCells(log));
+}
 
-  return `${timestamp}  ${severity}  ${message}${trace}\n`;
+/** Hint rows for column width estimation in streaming mode. */
+const LOG_HINT_ROWS: string[][] = [
+  ["2026-01-15 23:59:59", "WARNING", "A typical log message with some detail"],
+];
+
+/**
+ * Create a StreamingTable configured for log output.
+ *
+ * @param options - Override default table options
+ * @returns A StreamingTable with log-specific column configuration
+ */
+export function createLogStreamingTable(
+  options: Partial<StreamingTableOptions> = {}
+): StreamingTable {
+  return new StreamingTable([...LOG_TABLE_COLS], {
+    hintRows: LOG_HINT_ROWS,
+    // Timestamp and Level are fixed-width; Message gets the rest
+    shrinkable: [false, false, true],
+    truncate: false,
+    ...options,
+  });
 }
 
 /**
- * Format column header for logs list.
+ * Format column header for logs list in plain (non-TTY) mode.
  *
- * @returns Header line with column titles and divider
+ * Emits a proper markdown table header + separator row so that
+ * the streamed rows compose into a valid CommonMark document when redirected.
+ * In TTY mode, use {@link createLogStreamingTable} instead.
+ *
+ * @returns Header string (includes trailing newline)
  */
 export function formatLogsHeader(): string {
-  const header = muted("TIMESTAMP            LEVEL    MESSAGE");
-  return `${header}\n${divider(80)}\n`;
+  return `${mdTableHeader(LOG_TABLE_COLS)}\n`;
 }
 
 /**
- * Format severity level with color for detailed view (not padded).
+ * Build a markdown table for a list of log entries.
+ *
+ * Pre-rendered ANSI codes in cell values (e.g. colored severity) are preserved.
+ *
+ * @param logs - Log entries to display
+ * @returns Rendered terminal string with Unicode-bordered table
+ */
+export function formatLogTable(logs: SentryLog[]): string {
+  if (isPlainOutput()) {
+    const rows = logs
+      .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
+      .join("\n");
+    return `${stripColorTags(mdTableHeader(LOG_TABLE_COLS))}\n${rows}\n`;
+  }
+  const headers = [...LOG_TABLE_COLS];
+  const rows = logs.map((log) =>
+    buildLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
+  );
+  return renderTextTable(headers, rows);
+}
+
+/**
+ * Format severity level with color tag for detailed view (not padded).
  *
  * @param severity - The log severity level
- * @returns Colored severity string
+ * @returns Markdown color-tagged severity string
  */
 function formatSeverityLabel(severity: string | null | undefined): string {
   const level = (severity ?? "info").toLowerCase();
-  const colorFn = SEVERITY_COLORS[level] ?? ((s: string) => s);
-  return colorFn(level.toUpperCase());
+  const tag = SEVERITY_TAGS[level];
+  const label = level.toUpperCase();
+  return tag ? colorTag(tag, label) : label;
 }
 
-/** Minimum width for header separator line */
-const MIN_HEADER_WIDTH = 20;
-
 /**
- * Format detailed log entry for display.
+ * Format detailed log entry for display as rendered markdown.
  * Shows all available fields in a structured format.
  *
  * @param log - The detailed log entry to format
  * @param orgSlug - Organization slug for building trace URLs
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: log detail formatting requires multiple conditional sections
 export function formatLogDetails(
   log: DetailedSentryLog,
   orgSlug: string
-): string[] {
-  const lines: string[] = [];
+): string {
   const logId = log["sentry.item_id"];
+  const lines: string[] = [];
 
-  // Header
-  const headerText = `Log ${logId.slice(0, 12)}...`;
-  const separatorWidth = Math.max(
-    MIN_HEADER_WIDTH,
-    Math.min(80, headerText.length)
-  );
-  lines.push(headerText);
-  lines.push(muted("═".repeat(separatorWidth)));
+  lines.push(`## Log \`${logId.slice(0, 6)}...${logId.slice(-6)}\``);
   lines.push("");
 
-  // Core fields
-  lines.push(`ID:         ${logId}`);
-  lines.push(`Timestamp:  ${formatTimestamp(log.timestamp)}`);
-  lines.push(`Severity:   ${formatSeverityLabel(log.severity)}`);
+  // Core fields table
+  lines.push(
+    mdKvTable([
+      ["ID", `\`${logId}\``],
+      ["Timestamp", formatTimestamp(log.timestamp)],
+      ["Severity", formatSeverityLabel(log.severity)],
+    ])
+  );
 
-  // Message (may be multi-line or long)
   if (log.message) {
     lines.push("");
-    lines.push("Message:");
-    lines.push(`  ${log.message}`);
+    lines.push("**Message:**");
+    lines.push("");
+    lines.push(`> ${escapeMarkdownInline(log.message).replace(/\n/g, "\n> ")}`);
   }
-  lines.push("");
 
   // Context section
   if (log.project || log.environment || log.release) {
-    lines.push(muted("─── Context ───"));
-    lines.push("");
+    const ctxRows: [string, string][] = [];
     if (log.project) {
-      lines.push(`Project:      ${log.project}`);
+      ctxRows.push(["Project", log.project]);
     }
     if (log.environment) {
-      lines.push(`Environment:  ${log.environment}`);
+      ctxRows.push(["Environment", log.environment]);
     }
     if (log.release) {
-      lines.push(`Release:      ${log.release}`);
+      ctxRows.push(["Release", log.release]);
     }
     lines.push("");
+    lines.push(mdKvTable(ctxRows, "Context"));
   }
 
   // SDK section
   const sdkName = log["sdk.name"];
   const sdkVersion = log["sdk.version"];
   if (sdkName || sdkVersion) {
-    lines.push(muted("─── SDK ───"));
-    lines.push("");
+    // Wrap in backticks to prevent markdown from interpreting underscores/dashes
     const sdkInfo =
       sdkName && sdkVersion
-        ? `${sdkName} ${sdkVersion}`
-        : sdkName || sdkVersion;
-    lines.push(`SDK:          ${sdkInfo}`);
+        ? `\`${sdkName} ${sdkVersion}\``
+        : `\`${sdkName ?? sdkVersion}\``;
     lines.push("");
+    lines.push(mdKvTable([["SDK", sdkInfo]], "SDK"));
   }
 
   // Trace section
   if (log.trace) {
-    lines.push(muted("─── Trace ───"));
-    lines.push("");
-    lines.push(`Trace ID:     ${log.trace}`);
+    const traceRows: [string, string][] = [["Trace ID", `\`${log.trace}\``]];
     if (log.span_id) {
-      lines.push(`Span ID:      ${log.span_id}`);
+      traceRows.push(["Span ID", `\`${log.span_id}\``]);
     }
-    lines.push(`Link:         ${buildTraceUrl(orgSlug, log.trace)}`);
+    traceRows.push(["Link", buildTraceUrl(orgSlug, log.trace)]);
     lines.push("");
+    lines.push(mdKvTable(traceRows, "Trace"));
   }
 
   // Source location section (OTel code attributes)
@@ -181,38 +253,38 @@ export function formatLogDetails(
   const codeFilePath = log["code.file.path"];
   const codeLineNumber = log["code.line.number"];
   if (codeFunction || codeFilePath) {
-    lines.push(muted("─── Source Location ───"));
-    lines.push("");
+    const srcRows: [string, string][] = [];
     if (codeFunction) {
-      lines.push(`Function:     ${codeFunction}`);
+      srcRows.push(["Function", `\`${codeFunction}\``]);
     }
     if (codeFilePath) {
       const location = codeLineNumber
         ? `${codeFilePath}:${codeLineNumber}`
         : codeFilePath;
-      lines.push(`File:         ${location}`);
+      srcRows.push(["File", `\`${location}\``]);
     }
     lines.push("");
+    lines.push(mdKvTable(srcRows, "Source Location"));
   }
 
-  // OpenTelemetry section (if any OTel fields are present)
+  // OpenTelemetry section
   const otelKind = log["sentry.otel.kind"];
   const otelStatus = log["sentry.otel.status_code"];
   const otelScope = log["sentry.otel.instrumentation_scope.name"];
   if (otelKind || otelStatus || otelScope) {
-    lines.push(muted("─── OpenTelemetry ───"));
-    lines.push("");
+    const otelRows: [string, string][] = [];
     if (otelKind) {
-      lines.push(`Kind:         ${otelKind}`);
+      otelRows.push(["Kind", otelKind]);
     }
     if (otelStatus) {
-      lines.push(`Status:       ${otelStatus}`);
+      otelRows.push(["Status", otelStatus]);
     }
     if (otelScope) {
-      lines.push(`Scope:        ${otelScope}`);
+      otelRows.push(["Scope", otelScope]);
     }
     lines.push("");
+    lines.push(mdKvTable(otelRows, "OpenTelemetry"));
   }
 
-  return lines;
+  return renderMarkdown(lines.join("\n"));
 }

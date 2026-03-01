@@ -239,8 +239,10 @@ describe("multi-region", () => {
         ]);
 
         expect(result.exitCode).toBe(0);
-        // Should contain the US issue
-        expect(result.stdout).toContain("ACME-FRONTEND-1A");
+        // Should contain the US issue (strip markdown bold markers from short ID)
+        expect(result.stdout.replace(/\*\*/g, "")).toContain(
+          "ACME-FRONTEND-1A"
+        );
       },
       { timeout: TEST_TIMEOUT }
     );
@@ -260,8 +262,8 @@ describe("multi-region", () => {
         ]);
 
         expect(result.exitCode).toBe(0);
-        // Should contain the EU issue
-        expect(result.stdout).toContain("EURO-PORTAL-1A");
+        // Should contain the EU issue (strip markdown bold markers from short ID)
+        expect(result.stdout.replace(/\*\*/g, "")).toContain("EURO-PORTAL-1A");
       },
       { timeout: TEST_TIMEOUT }
     );

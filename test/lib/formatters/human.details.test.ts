@@ -7,18 +7,16 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  calculateOrgSlugWidth,
-  calculateProjectColumnWidths,
+  formatEventDetails,
   formatFixability,
   formatFixabilityDetail,
   formatIssueDetails,
   formatOrgDetails,
-  formatOrgRow,
   formatProjectDetails,
-  formatProjectRow,
   getSeerFixabilityLabel,
 } from "../../../src/lib/formatters/human.js";
 import type {
+  SentryEvent,
   SentryIssue,
   SentryOrganization,
   SentryProject,
@@ -84,40 +82,6 @@ function createMockIssue(overrides: Partial<SentryIssue> = {}): SentryIssue {
 
 // Organization Formatting Tests
 
-describe("calculateOrgSlugWidth", () => {
-  test("returns minimum width of 4 for empty array", () => {
-    expect(calculateOrgSlugWidth([])).toBe(4);
-  });
-
-  test("returns max slug length when longer than minimum", () => {
-    const orgs = [
-      createMockOrg({ slug: "ab" }),
-      createMockOrg({ slug: "longer-org-slug" }),
-      createMockOrg({ slug: "medium" }),
-    ];
-    expect(calculateOrgSlugWidth(orgs)).toBe(15); // "longer-org-slug".length
-  });
-
-  test("returns minimum when all slugs are shorter", () => {
-    const orgs = [createMockOrg({ slug: "ab" }), createMockOrg({ slug: "xy" })];
-    expect(calculateOrgSlugWidth(orgs)).toBe(4); // minimum is 4
-  });
-});
-
-describe("formatOrgRow", () => {
-  test("formats organization row with padding", () => {
-    const org = createMockOrg({ slug: "acme", name: "Acme Inc" });
-    const result = formatOrgRow(org, 10);
-    expect(result).toBe("acme        Acme Inc");
-  });
-
-  test("handles long slug correctly", () => {
-    const org = createMockOrg({ slug: "very-long-org", name: "Test" });
-    const result = formatOrgRow(org, 15);
-    expect(result).toBe("very-long-org    Test");
-  });
-});
-
 describe("formatOrgDetails", () => {
   test("formats basic organization details", () => {
     const org = createMockOrg({
@@ -128,134 +92,48 @@ describe("formatOrgDetails", () => {
       isEarlyAdopter: true,
     });
 
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("acme: Acme Corp");
-    expect(lines.some((l) => l.includes("Slug:       acme"))).toBe(true);
-    expect(lines.some((l) => l.includes("Name:       Acme Corp"))).toBe(true);
-    expect(lines.some((l) => l.includes("ID:         123"))).toBe(true);
-    expect(lines.some((l) => l.includes("2FA:        Required"))).toBe(true);
-    expect(lines.some((l) => l.includes("Early Adopter: Yes"))).toBe(true);
+    // Header contains slug and name
+    expect(lines[0]).toContain("acme");
+    expect(lines[0]).toContain("Acme Corp");
+
+    // Table rows contain the right values
+    expect(result).toContain("acme");
+    expect(result).toContain("Acme Corp");
+    expect(result).toContain("123");
+    expect(result).toContain("Required");
+    expect(result).toContain("Yes");
   });
 
   test("formats organization without 2FA", () => {
     const org = createMockOrg({ require2FA: false, isEarlyAdopter: false });
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
 
-    expect(lines.some((l) => l.includes("2FA:        Not required"))).toBe(
-      true
-    );
-    expect(lines.some((l) => l.includes("Early Adopter: No"))).toBe(true);
+    expect(result).toContain("Not required");
+    expect(result).toContain("No");
   });
 
   test("includes features when present", () => {
     const org = createMockOrg({
       features: ["feature-a", "feature-b", "feature-c"],
     });
-    const lines = formatOrgDetails(org).map(stripAnsi);
+    const result = stripAnsi(formatOrgDetails(org));
 
-    expect(lines.some((l) => l.includes("Features (3)"))).toBe(true);
-    expect(lines.some((l) => l.includes("feature-a"))).toBe(true);
+    expect(result).toContain("Features");
+    expect(result).toContain("feature-a");
   });
 
   test("handles missing dateCreated", () => {
     const org = createMockOrg({ dateCreated: undefined });
-    const lines = formatOrgDetails(org).map(stripAnsi);
-
-    // Should not throw and should not include Created line
-    expect(lines.some((l) => l.startsWith("Created:"))).toBe(false);
+    // Should not throw
+    const result = stripAnsi(formatOrgDetails(org));
+    expect(result).not.toContain("Created");
   });
 });
 
 // Project Formatting Tests
-
-describe("calculateProjectColumnWidths", () => {
-  test("returns minimum widths for empty array", () => {
-    const result = calculateProjectColumnWidths([]);
-    expect(result.orgWidth).toBe(3);
-    expect(result.slugWidth).toBe(7);
-    expect(result.nameWidth).toBe(4);
-  });
-
-  test("calculates widths based on content", () => {
-    const projects = [
-      createMockProject({
-        orgSlug: "acme-corp",
-        slug: "frontend-app",
-        name: "Frontend Application",
-      }),
-      createMockProject({ orgSlug: "beta", slug: "api", name: "API" }),
-    ];
-
-    const result = calculateProjectColumnWidths(projects);
-
-    expect(result.orgWidth).toBe(9); // "acme-corp".length
-    expect(result.slugWidth).toBe(12); // "frontend-app".length
-    expect(result.nameWidth).toBe(20); // "Frontend Application".length
-  });
-
-  test("handles missing orgSlug", () => {
-    const projects = [
-      createMockProject({ orgSlug: undefined, slug: "test", name: "Test" }),
-    ];
-
-    const result = calculateProjectColumnWidths(projects);
-    expect(result.orgWidth).toBe(3); // minimum
-  });
-});
-
-describe("formatProjectRow", () => {
-  test("formats project row with all columns", () => {
-    const project = createMockProject({
-      orgSlug: "acme",
-      slug: "frontend",
-      name: "Frontend",
-      platform: "javascript",
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 8,
-      slugWidth: 10,
-      nameWidth: 10,
-    });
-
-    expect(result).toBe("acme      frontend    Frontend    javascript");
-  });
-
-  test("handles missing platform", () => {
-    const project = createMockProject({
-      orgSlug: "acme",
-      slug: "api",
-      name: "API",
-      platform: undefined,
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 5,
-      slugWidth: 5,
-      nameWidth: 5,
-    });
-
-    expect(result).toBe("acme   api    API    ");
-  });
-
-  test("handles missing orgSlug", () => {
-    const project = createMockProject({
-      orgSlug: undefined,
-      slug: "test",
-      name: "Test",
-      platform: "python",
-    });
-
-    const result = formatProjectRow(project, {
-      orgWidth: 5,
-      slugWidth: 5,
-      nameWidth: 5,
-    });
-
-    expect(result).toBe("       test   Test   python");
-  });
-});
 
 describe("formatProjectDetails", () => {
   test("formats basic project details", () => {
@@ -267,35 +145,34 @@ describe("formatProjectDetails", () => {
       status: "active",
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
+    const result = stripAnsi(formatProjectDetails(project));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("frontend: Frontend App");
-    expect(lines.some((l) => l.includes("Slug:       frontend"))).toBe(true);
-    expect(lines.some((l) => l.includes("Name:       Frontend App"))).toBe(
-      true
-    );
-    expect(lines.some((l) => l.includes("ID:         456"))).toBe(true);
-    expect(lines.some((l) => l.includes("Platform:   javascript"))).toBe(true);
-    expect(lines.some((l) => l.includes("Status:     active"))).toBe(true);
+    // Header contains slug and name
+    expect(lines[0]).toContain("frontend");
+    expect(lines[0]).toContain("Frontend App");
+
+    // Table rows contain the right values
+    expect(result).toContain("frontend");
+    expect(result).toContain("Frontend App");
+    expect(result).toContain("456");
+    expect(result).toContain("javascript");
+    expect(result).toContain("active");
   });
 
   test("includes DSN when provided", () => {
     const project = createMockProject();
     const dsn = "https://abc123@sentry.io/456";
 
-    const lines = formatProjectDetails(project, dsn).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes(`DSN:        ${dsn}`))).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project, dsn));
+    expect(result).toContain(dsn);
   });
 
   test("shows 'No DSN available' when DSN is null", () => {
     const project = createMockProject();
 
-    const lines = formatProjectDetails(project, null).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("DSN:        No DSN available"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project, null));
+    expect(result).toContain("No DSN available");
   });
 
   test("includes organization context when present", () => {
@@ -303,11 +180,9 @@ describe("formatProjectDetails", () => {
       organization: { slug: "acme", name: "Acme Corp" },
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Organization: Acme Corp (acme)"))
-    ).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("Acme Corp");
+    expect(result).toContain("acme");
   });
 
   test("includes capability flags", () => {
@@ -318,34 +193,26 @@ describe("formatProjectDetails", () => {
       hasMonitors: true,
     });
 
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Sessions:  Yes"))).toBe(true);
-    expect(lines.some((l) => l.includes("Replays:   Yes"))).toBe(true);
-    expect(lines.some((l) => l.includes("Profiles:  No"))).toBe(true);
-    expect(lines.some((l) => l.includes("Monitors:  Yes"))).toBe(true);
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("Sessions");
+    expect(result).toContain("Replays");
+    expect(result).toContain("Profiles");
+    expect(result).toContain("Monitors");
   });
 
   test("handles missing firstEvent", () => {
     const project = createMockProject({ firstEvent: undefined });
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("First Event: No events yet"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project));
+    expect(result).toContain("No events yet");
   });
 
   test("formats firstEvent date when present", () => {
     const project = createMockProject({
       firstEvent: "2024-06-15T10:30:00Z",
     });
-    const lines = formatProjectDetails(project).map(stripAnsi);
-
-    expect(lines.some((l) => l.startsWith("First Event:"))).toBe(true);
-    // Should contain a formatted date (locale-dependent)
-    expect(lines.some((l) => l.includes("2024") || l.includes("15"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatProjectDetails(project));
+    // Should contain year (locale-dependent format)
+    expect(result).toContain("2024");
   });
 });
 
@@ -362,13 +229,19 @@ describe("formatIssueDetails", () => {
       userCount: 25,
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
+    const result = stripAnsi(formatIssueDetails(issue));
+    const lines = result.split("\n");
 
-    expect(lines[0]).toBe("PROJ-ABC: Test Error");
-    expect(lines.some((l) => l.includes("Status:"))).toBe(true);
-    expect(lines.some((l) => l.includes("Level:      error"))).toBe(true);
-    expect(lines.some((l) => l.includes("Events:     100"))).toBe(true);
-    expect(lines.some((l) => l.includes("Users:      25"))).toBe(true);
+    // Header contains shortId and title
+    expect(lines[0]).toContain("PROJ-ABC");
+    expect(lines[0]).toContain("Test Error");
+
+    // Table contains key fields
+    expect(result).toContain("Status");
+    expect(result).toContain("Level");
+    expect(result).toContain("error");
+    expect(result).toContain("100");
+    expect(result).toContain("25");
   });
 
   test("includes substatus when present", () => {
@@ -377,23 +250,21 @@ describe("formatIssueDetails", () => {
       substatus: "ongoing",
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("(Ongoing)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Ongoing");
   });
 
   test("includes priority when present", () => {
     const issue = createMockIssue({ priority: "high" });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Priority:   High"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Priority");
+    expect(result).toContain("High");
   });
 
   test("shows unhandled indicator", () => {
     const issue = createMockIssue({ isUnhandled: true });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("(unhandled)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("unhandled");
   });
 
   test("includes project info when present", () => {
@@ -401,11 +272,9 @@ describe("formatIssueDetails", () => {
       project: { slug: "frontend", name: "Frontend App" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Project:    Frontend App (frontend)"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Frontend App");
+    expect(result).toContain("frontend");
   });
 
   test("formats single release correctly", () => {
@@ -414,9 +283,9 @@ describe("formatIssueDetails", () => {
       lastRelease: { shortVersion: "1.0.0" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l === "Release:    1.0.0")).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("1.0.0");
+    expect(result).toContain("Release");
   });
 
   test("formats release range when different", () => {
@@ -425,11 +294,10 @@ describe("formatIssueDetails", () => {
       lastRelease: { shortVersion: "2.0.0" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Releases:   1.0.0 -> 2.0.0"))).toBe(
-      true
-    );
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("1.0.0");
+    expect(result).toContain("2.0.0");
+    expect(result).toContain("→");
   });
 
   test("includes assignee name", () => {
@@ -437,25 +305,20 @@ describe("formatIssueDetails", () => {
       assignedTo: { name: "John Doe" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Assignee:   John Doe"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("John Doe");
   });
 
   test("shows Unassigned when no assignee", () => {
     const issue = createMockIssue({ assignedTo: undefined });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Assignee:   Unassigned"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Unassigned");
   });
 
   test("includes culprit when present", () => {
     const issue = createMockIssue({ culprit: "app.js in handleClick" });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Culprit:    app.js in handleClick"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("app.js in handleClick");
   });
 
   test("includes metadata message when present", () => {
@@ -463,12 +326,9 @@ describe("formatIssueDetails", () => {
       metadata: { value: "Cannot read property 'x' of null" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l === "Message:")).toBe(true);
-    expect(
-      lines.some((l) => l.includes("Cannot read property 'x' of null"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Message");
+    expect(result).toContain("Cannot read property");
   });
 
   test("includes metadata filename and function", () => {
@@ -476,10 +336,9 @@ describe("formatIssueDetails", () => {
       metadata: { filename: "src/app.js", function: "handleClick" },
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("File:       src/app.js"))).toBe(true);
-    expect(lines.some((l) => l.includes("Function:   handleClick"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("src/app.js");
+    expect(result).toContain("handleClick");
   });
 
   test("includes permalink", () => {
@@ -487,11 +346,8 @@ describe("formatIssueDetails", () => {
       permalink: "https://sentry.io/issues/123",
     });
 
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(
-      lines.some((l) => l.includes("Link:       https://sentry.io/issues/123"))
-    ).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("https://sentry.io/issues/123");
   });
 
   test("handles missing optional fields gracefully", () => {
@@ -509,46 +365,47 @@ describe("formatIssueDetails", () => {
     });
 
     // Should not throw
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.length).toBeGreaterThan(5);
-    expect(lines.some((l) => l.includes("Platform:   unknown"))).toBe(true);
-    expect(lines.some((l) => l.includes("Type:       unknown"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result.length).toBeGreaterThan(50);
+    expect(result).toContain("Platform");
+    expect(result).toContain("unknown");
+    expect(result).toContain("Type");
   });
 
   test("includes fixability with percentage when seerFixabilityScore is present", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.7 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: High (70%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("High");
+    expect(result).toContain("70%");
   });
 
   test("omits fixability when seerFixabilityScore is null", () => {
     const issue = createMockIssue({ seerFixabilityScore: null });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).not.toContain("Fixability");
   });
 
   test("omits fixability when seerFixabilityScore is undefined", () => {
     const issue = createMockIssue({ seerFixabilityScore: undefined });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability:"))).toBe(false);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).not.toContain("Fixability");
   });
 
   test("shows med label for medium score", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.5 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: Med (50%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("Med");
+    expect(result).toContain("50%");
   });
 
   test("shows low label for low score", () => {
     const issue = createMockIssue({ seerFixabilityScore: 0.1 });
-    const lines = formatIssueDetails(issue).map(stripAnsi);
-
-    expect(lines.some((l) => l.includes("Fixability: Low (10%)"))).toBe(true);
+    const result = stripAnsi(formatIssueDetails(issue));
+    expect(result).toContain("Fixability");
+    expect(result).toContain("Low");
+    expect(result).toContain("10%");
   });
 });
 
@@ -622,5 +479,410 @@ describe("formatFixabilityDetail", () => {
   test("returns empty string for null or undefined", () => {
     expect(formatFixabilityDetail(null)).toBe("");
     expect(formatFixabilityDetail(undefined)).toBe("");
+  });
+});
+
+// Event Formatting Tests
+
+function createMockEvent(overrides: Partial<SentryEvent> = {}): SentryEvent {
+  return {
+    eventID: "abc123def456abc7890",
+    dateReceived: "2024-01-15T12:30:00Z",
+    ...overrides,
+  };
+}
+
+describe("formatEventDetails", () => {
+  test("returns a string", () => {
+    const result = formatEventDetails(createMockEvent());
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes event ID in header", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent()));
+    expect(result).toContain("abc123de");
+  });
+
+  test("includes custom header text", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent(), "My Custom Header")
+    );
+    expect(result).toContain("My Custom Header");
+  });
+
+  test("includes event ID and received date", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent()));
+    expect(result).toContain("abc123def456abc7890");
+    expect(result).toContain("Event ID");
+    expect(result).toContain("Received");
+  });
+
+  test("includes location when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent({ location: "app/main.py" }))
+    );
+    expect(result).toContain("Location");
+    expect(result).toContain("app/main.py");
+  });
+
+  test("includes trace context when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          contexts: { trace: { trace_id: "aabbccdd11223344" } },
+        })
+      )
+    );
+    expect(result).toContain("Trace");
+    expect(result).toContain("aabbccdd11223344");
+  });
+
+  test("includes SDK info when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          sdk: { name: "sentry.javascript.browser", version: "7.0.0" },
+        })
+      )
+    );
+    expect(result).toContain("SDK");
+    expect(result).toContain("sentry.javascript.browser");
+    expect(result).toContain("7.0.0");
+  });
+
+  test("includes release when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          release: { version: "1.0.0", shortVersion: "1.0.0" },
+        })
+      )
+    );
+    expect(result).toContain("Release");
+    expect(result).toContain("1.0.0");
+  });
+
+  test("includes user section when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: {
+            email: "test@example.com",
+            username: "testuser",
+            id: "42",
+            ip_address: "192.168.1.1",
+          },
+        })
+      )
+    );
+    expect(result).toContain("User");
+    expect(result).toContain("test@example.com");
+    expect(result).toContain("testuser");
+    expect(result).toContain("192.168.1.1");
+  });
+
+  test("includes user geo when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: {
+            email: "test@example.com",
+            geo: { city: "Berlin", region: "Berlin", country_code: "DE" },
+          },
+        })
+      )
+    );
+    expect(result).toContain("Location");
+    expect(result).toContain("Berlin");
+    expect(result).toContain("DE");
+  });
+
+  test("includes environment contexts when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          contexts: {
+            browser: { name: "Chrome", version: "120.0" },
+            os: { name: "Windows", version: "11" },
+            device: { family: "Desktop", brand: "Apple" },
+          },
+        })
+      )
+    );
+    expect(result).toContain("Environment");
+    expect(result).toContain("Chrome");
+    expect(result).toContain("Windows");
+    expect(result).toContain("Desktop");
+  });
+
+  test("includes request section when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "request",
+              data: {
+                url: "https://api.example.com/users",
+                method: "POST",
+                headers: [["User-Agent", "Mozilla/5.0"]],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Request");
+    expect(result).toContain("POST https://api.example.com/users");
+    expect(result).toContain("Mozilla/5.0");
+  });
+
+  test("includes stack trace when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "exception",
+              data: {
+                values: [
+                  {
+                    type: "TypeError",
+                    value: "Cannot read property",
+                    mechanism: { type: "generic", handled: false },
+                    stacktrace: {
+                      frames: [
+                        {
+                          function: "handleClick",
+                          filename: "app.js",
+                          lineNo: 42,
+                          colNo: 10,
+                          inApp: true,
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Stack Trace");
+    expect(result).toContain("TypeError: Cannot read property");
+    expect(result).toContain("handleClick");
+    expect(result).toContain("app.js");
+    expect(result).toContain("[in-app]");
+    expect(result).toContain("unhandled");
+  });
+
+  test("includes stack frame code context when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "exception",
+              data: {
+                values: [
+                  {
+                    type: "Error",
+                    value: "fail",
+                    stacktrace: {
+                      frames: [
+                        {
+                          function: "foo",
+                          filename: "bar.js",
+                          lineNo: 10,
+                          colNo: 1,
+                          context: [
+                            [9, "  const x = 1;"],
+                            [10, '  throw new Error("fail");'],
+                            [11, "}"],
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("const x = 1");
+    expect(result).toContain("throw new Error");
+  });
+
+  test("includes breadcrumbs when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  {
+                    timestamp: "2024-01-15T12:29:55Z",
+                    level: "info",
+                    category: "navigation",
+                    message: "User clicked button",
+                  },
+                  {
+                    timestamp: "2024-01-15T12:30:00Z",
+                    level: "error",
+                    category: "http",
+                    data: {
+                      url: "https://api.example.com/data",
+                      method: "GET",
+                      status_code: 500,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Breadcrumbs");
+    expect(result).toContain("navigation");
+    expect(result).toContain("User clicked button");
+    expect(result).toContain("GET");
+    expect(result).toContain("500");
+  });
+
+  test("includes replay link when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          tags: [{ key: "replayId", value: "replay-uuid-123" }],
+        }),
+        "Latest Event",
+        "https://acme.sentry.io/issues/789/"
+      )
+    );
+    expect(result).toContain("Replay");
+    expect(result).toContain("replay-uuid-123");
+    expect(result).toContain("https://acme.sentry.io/replays/replay-uuid-123/");
+  });
+
+  test("includes tags when present", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          tags: [
+            { key: "browser", value: "Chrome 120" },
+            { key: "os", value: "Windows 11" },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Tags");
+    expect(result).toContain("browser");
+    expect(result).toContain("Chrome 120");
+  });
+
+  test("handles minimal event", () => {
+    const result = formatEventDetails(
+      createMockEvent({ dateReceived: undefined })
+    );
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  test("handles breadcrumb navigation data", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  {
+                    category: "navigation",
+                    data: { from: "/home", to: "/profile" },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("/home");
+    expect(result).toContain("/profile");
+  });
+
+  test("truncates long breadcrumb messages", () => {
+    const longMsg = "X".repeat(100);
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [
+            {
+              type: "breadcrumbs",
+              data: {
+                values: [
+                  { category: "console", message: longMsg, level: "info" },
+                ],
+              },
+            },
+          ],
+        })
+      )
+    );
+    expect(result).not.toContain(longMsg);
+    expect(result).toContain("...");
+  });
+
+  test("skips empty breadcrumbs array", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [{ type: "breadcrumbs", data: { values: [] } }],
+        })
+      )
+    );
+    expect(result).not.toContain("Breadcrumbs");
+  });
+
+  test("shows user name when available", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          user: { name: "John Doe" },
+        })
+      )
+    );
+    expect(result).toContain("Name");
+    expect(result).toContain("John Doe");
+  });
+
+  test("skips user section when user has no data", () => {
+    const result = stripAnsi(formatEventDetails(createMockEvent({ user: {} })));
+    expect(result).not.toContain("User");
+  });
+
+  test("skips environment section when no contexts", () => {
+    const result = stripAnsi(
+      formatEventDetails(createMockEvent({ contexts: null }))
+    );
+    expect(result).not.toContain("Environment");
+  });
+
+  test("skips request section when no URL", () => {
+    const result = stripAnsi(
+      formatEventDetails(
+        createMockEvent({
+          entries: [{ type: "request", data: {} }],
+        })
+      )
+    );
+    expect(result).not.toContain("Request");
   });
 });

@@ -10,14 +10,24 @@ import {
   createSeerError,
   formatAutofixError,
   formatProgressLine,
-  formatRootCause,
   formatRootCauseList,
+  formatSolution,
   getProgressMessage,
   getSpinnerFrame,
   handleSeerApiError,
   truncateProgressMessage,
 } from "../../../src/lib/formatters/seer.js";
-import type { AutofixState, RootCause } from "../../../src/types/seer.js";
+import type {
+  AutofixState,
+  RootCause,
+  SolutionArtifact,
+} from "../../../src/types/seer.js";
+
+/** Strip ANSI escape codes */
+function stripAnsi(str: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI control chars
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 describe("getSpinnerFrame", () => {
   test("returns a spinner character", () => {
@@ -131,61 +141,61 @@ describe("getProgressMessage", () => {
   });
 });
 
-describe("formatRootCause", () => {
+describe("formatRootCauseList", () => {
   test("formats a basic root cause", () => {
-    const cause: RootCause = {
-      id: 0,
-      description:
-        "Database connection timeout due to missing pool configuration",
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description:
+          "Database connection timeout due to missing pool configuration",
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.join("\n")).toContain("Database connection timeout");
-    expect(lines.join("\n")).toContain("Cause #0");
+    const output = stripAnsi(formatRootCauseList(causes));
+    expect(output.length).toBeGreaterThan(0);
+    expect(output).toContain("Database connection timeout");
   });
 
   test("includes relevant repos when present", () => {
-    const cause: RootCause = {
-      id: 0,
-      description: "Test cause",
-      relevant_repos: ["org/repo1", "org/repo2"],
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description: "Test cause",
+        relevant_repos: ["org/repo1", "org/repo2"],
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("org/repo1");
   });
 
   test("includes reproduction steps when present", () => {
-    const cause: RootCause = {
-      id: 0,
-      description: "Test cause",
-      root_cause_reproduction: [
-        {
-          title: "Step 1",
-          code_snippet_and_analysis: "User makes API request",
-        },
-        {
-          title: "Step 2",
-          code_snippet_and_analysis: "Database query times out",
-        },
-      ],
-    };
+    const causes: RootCause[] = [
+      {
+        id: 0,
+        description: "Test cause",
+        root_cause_reproduction: [
+          {
+            title: "Step 1",
+            code_snippet_and_analysis: "User makes API request",
+          },
+          {
+            title: "Step 2",
+            code_snippet_and_analysis: "Database query times out",
+          },
+        ],
+      },
+    ];
 
-    const lines = formatRootCause(cause, 0);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("Step 1");
     expect(output).toContain("User makes API request");
   });
-});
 
-describe("formatRootCauseList", () => {
   test("formats single cause", () => {
     const causes: RootCause[] = [{ id: 0, description: "Single root cause" }];
 
-    const lines = formatRootCauseList(causes);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("Single root cause");
   });
 
@@ -195,15 +205,13 @@ describe("formatRootCauseList", () => {
       { id: 1, description: "Second cause" },
     ];
 
-    const lines = formatRootCauseList(causes);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList(causes));
     expect(output).toContain("First cause");
     expect(output).toContain("Second cause");
   });
 
   test("handles empty causes array", () => {
-    const lines = formatRootCauseList([]);
-    const output = lines.join("\n");
+    const output = stripAnsi(formatRootCauseList([]));
     expect(output).toContain("No root causes");
   });
 });
@@ -314,5 +322,81 @@ describe("SeerError formatting", () => {
     // Should NOT contain broken URL patterns
     expect(formatted).not.toContain("undefined");
     expect(formatted).not.toContain("/seer/");
+  });
+});
+
+describe("formatSolution", () => {
+  function makeSolution(
+    overrides: Partial<SolutionArtifact["data"]> = {}
+  ): SolutionArtifact {
+    return {
+      key: "solution",
+      data: {
+        one_line_summary: "Add null check before accessing user.name",
+        steps: [
+          {
+            title: "Update the handler function",
+            description: "Check for null before accessing the property.",
+          },
+        ],
+        ...overrides,
+      },
+    };
+  }
+
+  test("returns a string", () => {
+    const result = formatSolution(makeSolution());
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes summary text", () => {
+    const result = stripAnsi(formatSolution(makeSolution()));
+    expect(result).toContain("Add null check before accessing user.name");
+  });
+
+  test("includes Solution heading", () => {
+    const result = stripAnsi(formatSolution(makeSolution()));
+    expect(result).toContain("Solution");
+  });
+
+  test("includes step titles", () => {
+    const result = stripAnsi(
+      formatSolution(
+        makeSolution({
+          steps: [
+            { title: "Step One", description: "Do the first thing." },
+            { title: "Step Two", description: "Do the second thing." },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Step One");
+    expect(result).toContain("Step Two");
+    expect(result).toContain("Do the first thing");
+    expect(result).toContain("Do the second thing");
+  });
+
+  test("handles empty steps array", () => {
+    const result = stripAnsi(formatSolution(makeSolution({ steps: [] })));
+    expect(result).toContain("Solution");
+    expect(result).toContain("Add null check");
+    expect(result).not.toContain("Steps to implement");
+  });
+
+  test("preserves markdown in step descriptions", () => {
+    const result = stripAnsi(
+      formatSolution(
+        makeSolution({
+          steps: [
+            {
+              title: "Fix code",
+              description: "Change `foo()` to `bar()`\nThen redeploy.",
+            },
+          ],
+        })
+      )
+    );
+    expect(result).toContain("Fix code");
+    expect(result).toContain("foo()");
   });
 });

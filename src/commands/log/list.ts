@@ -12,11 +12,16 @@ import { listLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
+  buildLogRowCells,
+  createLogStreamingTable,
   formatLogRow,
   formatLogsHeader,
+  formatLogTable,
+  isPlainOutput,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
   buildListCommand,
   TARGET_PATTERN_NOTE,
@@ -73,11 +78,23 @@ function parseFollow(value: string): number {
 
 /**
  * Write logs to output in the appropriate format.
+ *
+ * When a StreamingTable is provided (TTY mode), renders rows through the
+ * bordered table. Otherwise falls back to plain markdown rows.
  */
-function writeLogs(stdout: Writer, logs: SentryLog[], asJson: boolean): void {
+function writeLogs(
+  stdout: Writer,
+  logs: SentryLog[],
+  asJson: boolean,
+  table?: import("../../lib/formatters/text-table.js").StreamingTable
+): void {
   if (asJson) {
     for (const log of logs) {
       writeJson(stdout, log);
+    }
+  } else if (table) {
+    for (const log of logs) {
+      stdout.write(table.row(buildLogRowCells(log).map(renderInlineMarkdown)));
     }
   } else {
     for (const log of logs) {
@@ -115,10 +132,7 @@ async function executeSingleFetch(
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
   const chronological = [...logs].reverse();
 
-  stdout.write(formatLogsHeader());
-  for (const log of chronological) {
-    stdout.write(formatLogRow(log));
-  }
+  stdout.write(formatLogTable(chronological));
 
   // Show footer with tip if we hit the limit
   const hasMore = logs.length >= flags.limit;
@@ -160,7 +174,12 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stderr.write("\n");
   }
 
-  // Track if header has been printed (for human mode)
+  // In TTY mode, use a bordered StreamingTable for aligned columns.
+  // In plain mode, use raw markdown rows for pipe-friendly output.
+  const plain = flags.json || isPlainOutput();
+  const table = plain ? undefined : createLogStreamingTable();
+
+  // Track if header has been printed (for human/plain mode)
   let headerPrinted = false;
 
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
@@ -172,13 +191,21 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
   // Print header before initial logs (human mode only)
   if (!flags.json && initialLogs.length > 0) {
-    stdout.write(formatLogsHeader());
+    stdout.write(table ? table.header() : formatLogsHeader());
     headerPrinted = true;
   }
 
   // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
   const chronologicalInitial = [...initialLogs].reverse();
-  writeLogs(stdout, chronologicalInitial, flags.json);
+  writeLogs(stdout, chronologicalInitial, flags.json, table);
+
+  // Print bottom border on Ctrl+C so the table closes cleanly
+  if (table) {
+    process.once("SIGINT", () => {
+      stdout.write(table.footer());
+      process.exit(0);
+    });
+  }
 
   // Track newest timestamp (logs are sorted -timestamp, so first is newest)
   // Use current time as fallback to avoid fetching old logs when initial fetch is empty
@@ -202,13 +229,13 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
       if (newestLog) {
         // Print header before first logs if not already printed
         if (!(flags.json || headerPrinted)) {
-          stdout.write(formatLogsHeader());
+          stdout.write(table ? table.header() : formatLogsHeader());
           headerPrinted = true;
         }
 
         // Reverse for chronological order (oldest first for tail -f style)
         const chronologicalNew = [...newLogs].reverse();
-        writeLogs(stdout, chronologicalNew, flags.json);
+        writeLogs(stdout, chronologicalNew, flags.json, table);
 
         // Update timestamp AFTER successful write to avoid losing logs on write failure
         lastTimestamp = newestLog.timestamp_precise;

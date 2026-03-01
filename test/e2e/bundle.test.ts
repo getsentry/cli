@@ -85,7 +85,7 @@ describe("npm bundle", () => {
     // Even if it exits non-zero due to missing config, it should run as JS not shell
     const output = stdout + stderr;
     expect(output.length).toBeGreaterThan(0);
-  });
+  }, 15_000); // Allow up to 15s for cold Node.js JIT startup on slow CI runners
 
   test("bundle does not emit Node.js warnings", async () => {
     // Run the bundle and capture stderr to check for warnings
@@ -103,7 +103,7 @@ describe("npm bundle", () => {
     expect(stderr).not.toContain("ExperimentalWarning");
     expect(stderr).not.toContain("DeprecationWarning");
     expect(stderr).not.toContain("Warning:");
-  });
+  }, 15_000); // Allow up to 15s for cold Node.js JIT startup on slow CI runners
 
   test("bundle can be executed directly on Unix", async () => {
     // Skip on Windows where shebang doesn't apply
@@ -134,5 +134,5 @@ describe("npm bundle", () => {
     // The CLI should start and produce some output
     const output = stdout + stderr;
     expect(output.length).toBeGreaterThan(0);
-  });
+  }, 15_000); // Allow up to 15s for cold Node.js JIT startup on slow CI runners
 });

@@ -9,12 +9,9 @@ import { listOrganizations } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
-import {
-  calculateOrgSlugWidth,
-  formatOrgRow,
-  writeFooter,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { buildListLimitFlag, LIST_JSON_FLAG } from "../../lib/list-command.js";
 
 type ListFlags = {
@@ -97,29 +94,25 @@ export const listCommand = buildCommand({
     const uniqueRegions = new Set(orgRegions.values());
     const showRegion = uniqueRegions.size > 1;
 
-    const slugWidth = calculateOrgSlugWidth(limitedOrgs);
+    // Build columns — include REGION when orgs span multiple regions
+    type OrgRow = { slug: string; name: string; region?: string };
+    const rows: OrgRow[] = limitedOrgs.map((org) => ({
+      slug: org.slug,
+      name: org.name,
+      region: showRegion
+        ? getRegionDisplayName(orgRegions.get(org.slug) ?? "")
+        : undefined,
+    }));
 
-    // Header
-    if (showRegion) {
-      stdout.write(
-        `${"SLUG".padEnd(slugWidth)}  ${"REGION".padEnd(6)}  NAME\n`
-      );
-    } else {
-      stdout.write(`${"SLUG".padEnd(slugWidth)}  NAME\n`);
-    }
+    const columns: Column<OrgRow>[] = [
+      { header: "SLUG", value: (r) => r.slug },
+      ...(showRegion
+        ? [{ header: "REGION", value: (r: OrgRow) => r.region ?? "" }]
+        : []),
+      { header: "NAME", value: (r) => escapeMarkdownCell(r.name) },
+    ];
 
-    // Rows
-    for (const org of limitedOrgs) {
-      if (showRegion) {
-        const regionUrl = orgRegions.get(org.slug) ?? "";
-        const regionName = getRegionDisplayName(regionUrl);
-        stdout.write(
-          `${org.slug.padEnd(slugWidth)}  ${regionName.padEnd(6)}  ${org.name}\n`
-        );
-      } else {
-        stdout.write(`${formatOrgRow(org, slugWidth)}\n`);
-      }
-    }
+    writeTable(stdout, rows, columns);
 
     if (orgs.length > flags.limit) {
       stdout.write(

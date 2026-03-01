@@ -8,8 +8,7 @@ import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
-  formatTraceRow,
-  formatTracesHeader,
+  formatTraceTable,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -152,10 +151,7 @@ export const listCommand = buildListCommand("trace", {
     }
 
     stdout.write(`Recent traces in ${org}/${project}:\n\n`);
-    stdout.write(formatTracesHeader());
-    for (const trace of traces) {
-      stdout.write(formatTraceRow(trace));
-    }
+    stdout.write(formatTraceTable(traces));
 
     // Show footer with tip
     const hasMore = traces.length >= flags.limit;

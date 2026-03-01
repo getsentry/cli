@@ -2,14 +2,15 @@
  * Human-readable output formatters
  *
  * Centralized formatting utilities for consistent CLI output.
- * Follows gh cli patterns for alignment and presentation.
+ * Detail views (issue, event, org, project) are built as markdown and rendered
+ * via renderMarkdown(). List rows still use lightweight inline formatting for
+ * performance, while list tables are rendered via writeTable() → renderMarkdown().
  */
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import prettyMs from "pretty-ms";
 import type {
-  Breadcrumb,
   BreadcrumbsEntry,
   ExceptionEntry,
   ExceptionValue,
@@ -21,32 +22,53 @@ import type {
   SentryProject,
   StackFrame,
   TraceSpan,
+  Writer,
 } from "../../types/index.js";
 import { withSerializeSpan } from "../telemetry.js";
+import { type FixabilityTier, muted } from "./colors.js";
 import {
-  boldUnderline,
-  type FixabilityTier,
-  fixabilityColor,
-  green,
-  levelColor,
-  muted,
-  red,
-  statusColor,
-  yellow,
-} from "./colors.js";
+  colorTag,
+  escapeMarkdownCell,
+  escapeMarkdownInline,
+  mdKvTable,
+  mdRow,
+  mdTableHeader,
+  renderMarkdown,
+  safeCodeSpan,
+} from "./markdown.js";
+import { type Column, writeTable } from "./table.js";
+
+// Color tag maps
+
+/** Markdown color tags for issue level values */
+const LEVEL_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
+  fatal: "red",
+  error: "red",
+  warning: "yellow",
+  info: "cyan",
+  debug: "muted",
+};
+
+/** Markdown color tags for Seer fixability tiers */
+const FIXABILITY_TAGS: Record<FixabilityTier, Parameters<typeof colorTag>[0]> =
+  {
+    high: "green",
+    med: "yellow",
+    low: "red",
+  };
 
 // Status Formatting
 
 const STATUS_ICONS: Record<IssueStatus, string> = {
-  resolved: green("✓"),
-  unresolved: yellow("●"),
-  ignored: muted("−"),
+  resolved: colorTag("green", "✓"),
+  unresolved: colorTag("yellow", "●"),
+  ignored: colorTag("muted", "−"),
 };
 
 const STATUS_LABELS: Record<IssueStatus, string> = {
-  resolved: `${green("✓")} Resolved`,
-  unresolved: `${yellow("●")} Unresolved`,
-  ignored: `${muted("−")} Ignored`,
+  resolved: `${colorTag("green", "✓")} Resolved`,
+  unresolved: `${colorTag("yellow", "●")} Unresolved`,
+  ignored: `${colorTag("muted", "−")} Ignored`,
 };
 
 /** Maximum features to display before truncating with "... and N more" */
@@ -148,123 +170,40 @@ function extractEntry<T extends keyof EntryTypeMap>(
 const BASE_URL_REGEX = /^(https?:\/\/[^/]+)/;
 
 /**
- * Format a features array for display, truncating if necessary.
+ * Format a features list as a markdown bullet list.
  *
  * @param features - Array of feature names (may be undefined)
- * @returns Formatted lines to append to output, or empty array if no features
+ * @returns Markdown string, or empty string if no features
  */
-function formatFeaturesList(features: string[] | undefined): string[] {
+function formatFeaturesMarkdown(features: string[] | undefined): string {
   if (!features || features.length === 0) {
-    return [];
+    return "";
   }
 
-  const lines: string[] = ["", `Features (${features.length}):`];
   const displayFeatures = features.slice(0, MAX_DISPLAY_FEATURES);
-  lines.push(`  ${displayFeatures.join(", ")}`);
+  const items = displayFeatures.map((f) => `- ${f}`).join("\n");
+  const more =
+    features.length > MAX_DISPLAY_FEATURES
+      ? `\n*... and ${features.length - MAX_DISPLAY_FEATURES} more*`
+      : "";
 
-  if (features.length > MAX_DISPLAY_FEATURES) {
-    lines.push(`  ... and ${features.length - MAX_DISPLAY_FEATURES} more`);
-  }
-
-  return lines;
-}
-
-/** Minimum width for header separator line */
-const MIN_HEADER_WIDTH = 20;
-
-/**
- * Format a details header with slug and name.
- * Handles empty values gracefully.
- *
- * @param slug - Resource slug (e.g., org or project slug)
- * @param name - Resource display name
- * @returns Array with header line and separator
- */
-function formatDetailsHeader(slug: string, name: string): [string, string] {
-  const displaySlug = slug || "(no slug)";
-  const displayName = name || "(unnamed)";
-  const header = `${displaySlug}: ${displayName}`;
-  const separatorWidth = Math.max(
-    MIN_HEADER_WIDTH,
-    Math.min(80, header.length)
-  );
-  return [header, muted("═".repeat(separatorWidth))];
+  return `\n**Features** (${features.length}):\n\n${items}${more}`;
 }
 
 /**
  * Get status icon for an issue status
  */
 export function formatStatusIcon(status: string | undefined): string {
-  if (!status) {
-    return statusColor("●", status);
-  }
-  return STATUS_ICONS[status as IssueStatus] ?? statusColor("●", status);
+  return STATUS_ICONS[status as IssueStatus] ?? colorTag("yellow", "●");
 }
 
 /**
  * Get full status label for an issue status
  */
 export function formatStatusLabel(status: string | undefined): string {
-  if (!status) {
-    return `${statusColor("●", status)} Unknown`;
-  }
   return (
-    STATUS_LABELS[status as IssueStatus] ??
-    `${statusColor("●", status)} Unknown`
+    STATUS_LABELS[status as IssueStatus] ?? `${colorTag("yellow", "●")} Unknown`
   );
-}
-
-// Table Formatting
-
-type TableColumn = {
-  header: string;
-  width: number;
-  align?: "left" | "right";
-};
-
-/**
- * Format a table with aligned columns
- */
-export function formatTable(
-  columns: TableColumn[],
-  rows: string[][]
-): string[] {
-  const lines: string[] = [];
-
-  // Header
-  const header = columns
-    .map((col) =>
-      col.align === "right"
-        ? col.header.padStart(col.width)
-        : col.header.padEnd(col.width)
-    )
-    .join("  ");
-  lines.push(header);
-
-  // Rows
-  for (const row of rows) {
-    const formatted = row
-      .map((cell, i) => {
-        const col = columns[i];
-        if (!col) {
-          return cell;
-        }
-        return col.align === "right"
-          ? cell.padStart(col.width)
-          : cell.padEnd(col.width);
-      })
-      .join("  ");
-    lines.push(formatted);
-  }
-
-  return lines;
-}
-
-/**
- * Create a horizontal divider
- */
-export function divider(length = 80, char = "─"): string {
-  return muted(char.repeat(length));
 }
 
 // Date Formatting
@@ -279,7 +218,7 @@ export function divider(length = 80, char = "─"): string {
  */
 export function formatRelativeTime(dateString: string | undefined): string {
   if (!dateString) {
-    return muted("—").padEnd(10);
+    return colorTag("muted", "—");
   }
 
   const date = new Date(dateString);
@@ -301,163 +240,45 @@ export function formatRelativeTime(dateString: string | undefined): string {
     text = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
-  return text.padEnd(10);
+  return text;
 }
 
 // Issue Formatting
-
-/** Column widths for issue list table */
-const COL_LEVEL = 7;
-const COL_ALIAS = 15;
-const COL_SHORT_ID = 22;
-const COL_COUNT = 5;
-const COL_SEEN = 10;
-/** Width for the FIXABILITY column (longest value "high(100%)" = 10) */
-const COL_FIX = 10;
 
 /** Quantifier suffixes indexed by groups of 3 digits (K=10^3, M=10^6, …, E=10^18) */
 const QUANTIFIERS = ["", "K", "M", "B", "T", "P", "E"];
 
 /**
- * Abbreviate large numbers to fit within {@link COL_COUNT} characters.
- * Uses K/M/B/T/P/E suffixes up to 10^18 (exa).
+ * Abbreviate large numbers with K/M/B/T/P/E suffixes (up to 10^18).
  *
  * The decimal is only shown when the rounded value is < 100 (e.g. "12.3K",
- * "1.5M" but not "100M"). The result is always exactly COL_COUNT chars wide.
+ * "1.5M" but not "100M").
  *
- * Note: `Number(raw)` loses precision above `Number.MAX_SAFE_INTEGER`
- * (~9P / 9×10^15), which is far beyond any realistic Sentry event count.
- *
- * Examples: 999 → "  999", 12345 → "12.3K", 150000 → " 150K", 1500000 → "1.5M"
+ * @param raw - Stringified count
+ * @returns Abbreviated string without padding
  */
 function abbreviateCount(raw: string): string {
   const n = Number(raw);
   if (Number.isNaN(n)) {
-    // Non-numeric input: use a placeholder rather than passing through an
-    // arbitrarily wide string that would break column alignment
     Sentry.logger.warn(`Unexpected non-numeric issue count: ${raw}`);
-    return "?".padStart(COL_COUNT);
+    return "?";
   }
-  if (raw.length <= COL_COUNT) {
-    return raw.padStart(COL_COUNT);
+  if (n < 1000) {
+    return raw;
   }
   const tier = Math.min(Math.floor(Math.log10(n) / 3), QUANTIFIERS.length - 1);
   const suffix = QUANTIFIERS[tier] ?? "";
   const scaled = n / 10 ** (tier * 3);
-  // Only show decimal when it adds information — compare the rounded value to avoid
-  // "100.0K" when scaled is e.g. 99.95 (toFixed(1) rounds up to "100.0")
   const rounded1dp = Number(scaled.toFixed(1));
   if (rounded1dp < 100) {
-    return `${rounded1dp.toFixed(1)}${suffix}`.padStart(COL_COUNT);
+    return `${rounded1dp.toFixed(1)}${suffix}`;
   }
   const rounded = Math.round(scaled);
-  // Promote to next tier if rounding produces >= 1000 (e.g. 999.95K → "1.0M")
   if (rounded >= 1000 && tier < QUANTIFIERS.length - 1) {
     const nextSuffix = QUANTIFIERS[tier + 1] ?? "";
-    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`.padStart(COL_COUNT);
+    return `${(rounded / 1000).toFixed(1)}${nextSuffix}`;
   }
-  // At max tier with no promotion available: cap at 999 to guarantee COL_COUNT width
-  // (numbers > 10^21 are unreachable in practice for Sentry event counts)
-  return `${Math.min(rounded, 999)}${suffix}`.padStart(COL_COUNT);
-}
-
-/** Column where title starts in single-project mode (no ALIAS column) */
-const TITLE_START_COL =
-  COL_LEVEL + 1 + COL_SHORT_ID + 1 + COL_COUNT + 2 + COL_SEEN + 2 + COL_FIX + 2;
-
-/** Column where title starts in multi-project mode (with ALIAS column) */
-const TITLE_START_COL_MULTI =
-  COL_LEVEL +
-  1 +
-  COL_ALIAS +
-  1 +
-  COL_SHORT_ID +
-  1 +
-  COL_COUNT +
-  2 +
-  COL_SEEN +
-  2 +
-  COL_FIX +
-  2;
-
-/**
- * Format the header row for issue list table.
- * Uses same column widths as data rows to ensure alignment.
- *
- * @param isMultiProject - Whether to include ALIAS column for multi-project mode
- */
-export function formatIssueListHeader(isMultiProject = false): string {
-  if (isMultiProject) {
-    return (
-      "LEVEL".padEnd(COL_LEVEL) +
-      " " +
-      "ALIAS".padEnd(COL_ALIAS) +
-      " " +
-      "SHORT ID".padEnd(COL_SHORT_ID) +
-      " " +
-      "COUNT".padStart(COL_COUNT) +
-      "  " +
-      "SEEN".padEnd(COL_SEEN) +
-      "  " +
-      "FIXABILITY".padEnd(COL_FIX) +
-      "  " +
-      "TITLE"
-    );
-  }
-  return (
-    "LEVEL".padEnd(COL_LEVEL) +
-    " " +
-    "SHORT ID".padEnd(COL_SHORT_ID) +
-    " " +
-    "COUNT".padStart(COL_COUNT) +
-    "  " +
-    "SEEN".padEnd(COL_SEEN) +
-    "  " +
-    "FIXABILITY".padEnd(COL_FIX) +
-    "  " +
-    "TITLE"
-  );
-}
-
-/**
- * Wrap long text with indentation for continuation lines.
- * Breaks at word boundaries when possible.
- *
- * @param text - Text to wrap
- * @param startCol - Column where text starts (for indenting continuation lines)
- * @param termWidth - Terminal width
- */
-function wrapTitle(text: string, startCol: number, termWidth: number): string {
-  const availableWidth = termWidth - startCol;
-
-  // No wrapping needed or terminal too narrow
-  if (text.length <= availableWidth || availableWidth < 20) {
-    return text;
-  }
-
-  const indent = " ".repeat(startCol);
-  const lines: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= availableWidth) {
-      lines.push(remaining);
-      break;
-    }
-
-    // Find break point (prefer word boundary)
-    let breakAt = availableWidth;
-    const lastSpace = remaining.lastIndexOf(" ", availableWidth);
-    if (lastSpace > availableWidth * 0.5) {
-      breakAt = lastSpace;
-    }
-
-    lines.push(remaining.slice(0, breakAt).trimEnd());
-    remaining = remaining.slice(breakAt).trimStart();
-  }
-
-  // First line has no indent, continuation lines do
-  return lines.join(`\n${indent}`);
+  return `${Math.min(rounded, 999)}${suffix}`;
 }
 
 /**
@@ -476,61 +297,46 @@ export type FormatShortIdOptions = {
  * Format short ID for multi-project mode by highlighting the alias characters.
  * Only highlights the specific characters that form the alias:
  * - CLI-25 with alias "c" → **C**LI-**25**
- * - CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4**
- * - API-APP-5 with alias "ap" → API-**AP**P-**5** (searches backwards to find correct part)
- * - X-AB-5 with alias "x-a" → **X-A**B-**5** (handles aliases with embedded dashes)
  *
- * @returns Formatted string if alias matches, null otherwise (to fall back to default)
+ * @returns Formatted string with ANSI highlights, or null if no match found
  */
 function formatShortIdWithAlias(
-  upperShortId: string,
+  shortId: string,
   projectAlias: string
 ): string | null {
-  // Extract project part of alias (handle "o1/d" format for collision cases)
-  const aliasProjectPart = projectAlias.includes("/")
-    ? projectAlias.split("/").pop()
+  // Extract the project part of the alias — cross-org collision aliases use
+  // the format "o1/d" where only "d" should match against the short ID parts.
+  const aliasPart = projectAlias.includes("/")
+    ? (projectAlias.split("/").pop() ?? projectAlias)
     : projectAlias;
 
-  if (!aliasProjectPart) {
-    return null;
-  }
-
-  const parts = upperShortId.split("-");
-  if (parts.length < 2) {
-    return null;
-  }
-
-  const aliasUpper = aliasProjectPart.toUpperCase();
+  const aliasUpper = aliasPart.toUpperCase();
   const aliasLen = aliasUpper.length;
-  const projectParts = parts.slice(0, -1);
-  const issueSuffix = parts.at(-1) ?? "";
 
-  // Method 1: For aliases without dashes, search backwards through project parts
-  // This handles cases like "api-app" where alias "ap" should match "APP" not "API"
+  const parts = shortId.split("-");
+  const issueSuffix = parts.pop() ?? "";
+  const projectParts = parts;
+
   if (!aliasUpper.includes("-")) {
     for (let i = projectParts.length - 1; i >= 0; i--) {
       const part = projectParts[i];
       if (part?.startsWith(aliasUpper)) {
-        // Found match - highlight alias prefix in this part and the issue suffix
         const result = projectParts.map((p, idx) => {
           if (idx === i) {
-            return boldUnderline(p.slice(0, aliasLen)) + p.slice(aliasLen);
+            return `${colorTag("bu", p.slice(0, aliasLen))}${p.slice(aliasLen)}`;
           }
           return p;
         });
-        return `${result.join("-")}-${boldUnderline(issueSuffix)}`;
+        return `${result.join("-")}-${colorTag("bu", issueSuffix)}`;
       }
     }
   }
 
-  // Method 2: For aliases with dashes (or if Method 1 found no match),
-  // match against the joined project portion
   const projectPortion = projectParts.join("-");
   if (projectPortion.startsWith(aliasUpper)) {
-    // Highlight first aliasLen chars of project portion, plus issue suffix
-    const highlighted = boldUnderline(projectPortion.slice(0, aliasLen));
+    const highlighted = colorTag("bu", projectPortion.slice(0, aliasLen));
     const rest = projectPortion.slice(aliasLen);
-    return `${highlighted}${rest}-${boldUnderline(issueSuffix)}`;
+    return `${highlighted}${rest}-${colorTag("bu", issueSuffix)}`;
   }
 
   return null;
@@ -543,21 +349,19 @@ function formatShortIdWithAlias(
  * - Multi-project: CLI-WEBSITE-4 with alias "w" → CLI-**W**EBSITE-**4** (alias chars highlighted)
  *
  * @param shortId - Full short ID (e.g., "CLI-25", "CLI-WEBSITE-4")
- * @param options - Formatting options (projectSlug, projectAlias, isMultiProject)
+ * @param options - Formatting options (projectSlug and/or projectAlias)
  * @returns Formatted short ID with highlights
  */
 export function formatShortId(
   shortId: string,
   options?: FormatShortIdOptions | string
 ): string {
-  // Handle legacy string parameter (projectSlug only)
   const opts: FormatShortIdOptions =
     typeof options === "string" ? { projectSlug: options } : (options ?? {});
 
   const { projectSlug, projectAlias, isMultiProject } = opts;
   const upperShortId = shortId.toUpperCase();
 
-  // In multi-project mode with an alias, highlight the part that the alias represents
   if (isMultiProject && projectAlias) {
     const formatted = formatShortIdWithAlias(upperShortId, projectAlias);
     if (formatted) {
@@ -565,24 +369,15 @@ export function formatShortId(
     }
   }
 
-  // Single-project mode or fallback: highlight just the issue suffix
   if (projectSlug) {
     const prefix = `${projectSlug.toUpperCase()}-`;
     if (upperShortId.startsWith(prefix)) {
       const suffix = shortId.slice(prefix.length);
-      return `${prefix}${boldUnderline(suffix.toUpperCase())}`;
+      return `${prefix}${colorTag("bu", suffix.toUpperCase())}`;
     }
   }
 
   return upperShortId;
-}
-
-/**
- * Calculate the raw display length of a formatted short ID (without ANSI codes).
- * In all modes, we display the full shortId (just with different styling).
- */
-function getShortIdDisplayLength(shortId: string): number {
-  return shortId.length;
 }
 
 /**
@@ -601,376 +396,363 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
   return `${projectAlias}-${suffix}`;
 }
 
+/** Row data prepared for the issue table */
+export type IssueTableRow = {
+  issue: SentryIssue;
+  /** Org slug — used as project key in trimWithProjectGuarantee and similar utilities. */
+  orgSlug: string;
+  formatOptions: FormatShortIdOptions;
+};
+
 /**
- * Format a single issue for list display.
- * Wraps long titles with proper indentation.
+ * Write an issue list as a Unicode-bordered markdown table.
  *
- * @param issue - Issue to format
- * @param termWidth - Terminal width for wrapping (default 80)
- * @param shortIdOptions - Options for formatting the short ID (projectSlug and/or projectAlias)
+ * Columns are conditionally included based on `isMultiProject` mode.
+ * Cell values are pre-colored with ANSI codes which survive the
+ * cli-table3 rendering pipeline.
+ *
+ * @param stdout - Output writer
+ * @param rows - Issues with formatting options
+ * @param isMultiProject - Whether to include the ALIAS column
  */
-export function formatIssueRow(
-  issue: SentryIssue,
-  termWidth = 80,
-  shortIdOptions?: FormatShortIdOptions | string
-): string {
-  // Handle legacy string parameter (projectSlug only)
-  const opts: FormatShortIdOptions =
-    typeof shortIdOptions === "string"
-      ? { projectSlug: shortIdOptions }
-      : (shortIdOptions ?? {});
+export function writeIssueTable(
+  stdout: Writer,
+  rows: IssueTableRow[],
+  isMultiProject: boolean
+): void {
+  const columns: Column<IssueTableRow>[] = [
+    {
+      header: "LEVEL",
+      value: ({ issue }) => {
+        const level = (issue.level ?? "unknown").toLowerCase();
+        const tag = LEVEL_TAGS[level];
+        const label = level.toUpperCase();
+        return tag ? colorTag(tag, label) : label;
+      },
+    },
+  ];
 
-  const { isMultiProject, projectAlias } = opts;
-
-  const levelText = (issue.level ?? "unknown").toUpperCase().padEnd(COL_LEVEL);
-  const level = levelColor(levelText, issue.level);
-  const formattedShortId = formatShortId(issue.shortId, opts);
-
-  // Calculate raw display length (without ANSI codes) for padding
-  const rawLen = getShortIdDisplayLength(issue.shortId);
-  const shortIdPadding = " ".repeat(Math.max(0, COL_SHORT_ID - rawLen));
-  const shortId = `${formattedShortId}${shortIdPadding}`;
-  const count = abbreviateCount(`${issue.count}`);
-  const seen = formatRelativeTime(issue.lastSeen);
-
-  // Fixability column (color applied after padding to preserve alignment)
-  const fixText = formatFixability(issue.seerFixabilityScore);
-  const fixPadding = " ".repeat(Math.max(0, COL_FIX - fixText.length));
-  const score = issue.seerFixabilityScore;
-  const fix =
-    fixText && score !== null && score !== undefined
-      ? fixabilityColor(fixText, getSeerFixabilityLabel(score)) + fixPadding
-      : fixPadding;
-
-  // Multi-project mode: include ALIAS column
   if (isMultiProject) {
-    const aliasShorthand = computeAliasShorthand(issue.shortId, projectAlias);
-    const aliasPadding = " ".repeat(
-      Math.max(0, COL_ALIAS - aliasShorthand.length)
-    );
-    const alias = `${aliasShorthand}${aliasPadding}`;
-    const title = wrapTitle(issue.title, TITLE_START_COL_MULTI, termWidth);
-    return `${level} ${alias} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
+    columns.push({
+      header: "ALIAS",
+      value: ({ issue, formatOptions }) =>
+        computeAliasShorthand(issue.shortId, formatOptions.projectAlias),
+    });
   }
 
-  const title = wrapTitle(issue.title, TITLE_START_COL, termWidth);
-  return `${level} ${shortId} ${count}  ${seen}  ${fix}  ${title}`;
+  columns.push(
+    {
+      header: "SHORT ID",
+      // Short IDs are the primary identifier users copy for
+      // `sentry issue view <ID>` — never shrink or truncate them.
+      shrinkable: false,
+      value: ({ issue, formatOptions }) => {
+        const formatted = formatShortId(issue.shortId, formatOptions);
+        if (issue.permalink) {
+          return `[${formatted}](${issue.permalink})`;
+        }
+        return formatted;
+      },
+    },
+    {
+      header: "COUNT",
+      value: ({ issue }) => abbreviateCount(`${issue.count}`),
+      align: "right",
+    },
+    {
+      header: "SEEN",
+      value: ({ issue }) => formatRelativeTime(issue.lastSeen),
+    },
+    {
+      header: "FIXABILITY",
+      value: ({ issue }) => {
+        const text = formatFixability(issue.seerFixabilityScore);
+        const score = issue.seerFixabilityScore;
+        if (text && score !== null && score !== undefined) {
+          const tier = getSeerFixabilityLabel(score);
+          return colorTag(FIXABILITY_TAGS[tier], text);
+        }
+        return "";
+      },
+    },
+    {
+      header: "TITLE",
+      value: ({ issue }) => escapeMarkdownInline(issue.title),
+    }
+  );
+
+  writeTable(stdout, rows, columns);
 }
 
 /**
- * Format detailed issue information
+ * Format detailed issue information as rendered markdown.
+ *
+ * @param issue - The Sentry issue to format
+ * @returns Rendered terminal string
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: issue formatting logic
-export function formatIssueDetails(issue: SentryIssue): string[] {
+export function formatIssueDetails(issue: SentryIssue): string {
   const lines: string[] = [];
 
-  // Header
-  lines.push(`${issue.shortId}: ${issue.title}`);
-  lines.push(
-    muted(
-      "═".repeat(Math.min(80, issue.title.length + issue.shortId.length + 2))
-    )
-  );
+  lines.push(`## ${issue.shortId}: ${escapeMarkdownInline(issue.title ?? "")}`);
   lines.push("");
 
-  // Status with substatus
-  let statusLine = formatStatusLabel(issue.status);
-  if (issue.substatus) {
-    statusLine += ` (${capitalize(issue.substatus)})`;
-  }
-  lines.push(`Status:     ${statusLine}`);
+  // Key-value details as a table
+  const kvRows: [string, string][] = [];
 
-  // Priority
+  kvRows.push([
+    "Status",
+    `${formatStatusLabel(issue.status)}${issue.substatus ? ` (${capitalize(issue.substatus)})` : ""}`,
+  ]);
+
   if (issue.priority) {
-    lines.push(`Priority:   ${capitalize(issue.priority)}`);
+    kvRows.push(["Priority", capitalize(issue.priority)]);
   }
 
-  // Seer fixability
   if (
     issue.seerFixabilityScore !== null &&
     issue.seerFixabilityScore !== undefined
   ) {
-    const fixDetail = formatFixabilityDetail(issue.seerFixabilityScore);
     const tier = getSeerFixabilityLabel(issue.seerFixabilityScore);
-    lines.push(`Fixability: ${fixabilityColor(fixDetail, tier)}`);
+    const fixDetail = formatFixabilityDetail(issue.seerFixabilityScore);
+    kvRows.push(["Fixability", colorTag(FIXABILITY_TAGS[tier], fixDetail)]);
   }
 
-  // Level with unhandled indicator
   let levelLine = issue.level ?? "unknown";
   if (issue.isUnhandled) {
     levelLine += " (unhandled)";
   }
-  lines.push(`Level:      ${levelLine}`);
+  kvRows.push(["Level", levelLine]);
+  kvRows.push(["Platform", issue.platform ?? "unknown"]);
+  kvRows.push(["Type", issue.type ?? "unknown"]);
+  kvRows.push([
+    "Assignee",
+    escapeMarkdownInline(String(issue.assignedTo?.name ?? "Unassigned")),
+  ]);
 
-  lines.push(`Platform:   ${issue.platform ?? "unknown"}`);
-  lines.push(`Type:       ${issue.type ?? "unknown"}`);
-
-  // Assignee (show early, it's important)
-  const assigneeName = issue.assignedTo?.name ?? "Unassigned";
-  lines.push(`Assignee:   ${assigneeName}`);
-  lines.push("");
-
-  // Project
   if (issue.project) {
-    lines.push(`Project:    ${issue.project.name} (${issue.project.slug})`);
+    kvRows.push([
+      "Project",
+      `${escapeMarkdownInline(issue.project.name ?? "(unknown)")} (${safeCodeSpan(issue.project.slug ?? "")})`,
+    ]);
   }
 
-  // Releases
   const firstReleaseVersion = issue.firstRelease?.shortVersion;
   const lastReleaseVersion = issue.lastRelease?.shortVersion;
   if (firstReleaseVersion || lastReleaseVersion) {
+    const first = escapeMarkdownInline(String(firstReleaseVersion ?? ""));
+    const last = escapeMarkdownInline(String(lastReleaseVersion ?? ""));
     if (firstReleaseVersion && lastReleaseVersion) {
       if (firstReleaseVersion === lastReleaseVersion) {
-        lines.push(`Release:    ${firstReleaseVersion}`);
+        kvRows.push(["Release", first]);
       } else {
-        lines.push(
-          `Releases:   ${firstReleaseVersion} -> ${lastReleaseVersion}`
-        );
+        kvRows.push(["Releases", `${first} → ${last}`]);
       }
     } else if (lastReleaseVersion) {
-      lines.push(`Release:    ${lastReleaseVersion}`);
+      kvRows.push(["Release", last]);
     } else if (firstReleaseVersion) {
-      lines.push(`Release:    ${firstReleaseVersion}`);
+      kvRows.push(["Release", first]);
     }
   }
-  lines.push("");
 
-  // Stats
-  lines.push(`Events:     ${issue.count ?? 0}`);
-  lines.push(`Users:      ${issue.userCount ?? 0}`);
+  kvRows.push(["Events", String(issue.count ?? 0)]);
+  kvRows.push(["Users", String(issue.userCount ?? 0)]);
 
-  // First/Last seen with release info
   if (issue.firstSeen) {
-    let firstSeenLine = `First seen: ${new Date(issue.firstSeen).toLocaleString()}`;
+    let firstSeenLine = new Date(issue.firstSeen).toLocaleString();
     if (firstReleaseVersion) {
-      firstSeenLine += ` (in ${firstReleaseVersion})`;
+      firstSeenLine += ` (in ${escapeMarkdownCell(String(firstReleaseVersion))})`;
     }
-    lines.push(firstSeenLine);
+    kvRows.push(["First seen", firstSeenLine]);
   }
   if (issue.lastSeen) {
-    let lastSeenLine = `Last seen:  ${new Date(issue.lastSeen).toLocaleString()}`;
+    let lastSeenLine = new Date(issue.lastSeen).toLocaleString();
     if (lastReleaseVersion && lastReleaseVersion !== firstReleaseVersion) {
-      lastSeenLine += ` (in ${lastReleaseVersion})`;
+      lastSeenLine += ` (in ${escapeMarkdownCell(String(lastReleaseVersion))})`;
     }
-    lines.push(lastSeenLine);
+    kvRows.push(["Last seen", lastSeenLine]);
   }
-  lines.push("");
 
-  // Culprit
   if (issue.culprit) {
-    lines.push(`Culprit:    ${issue.culprit}`);
-    lines.push("");
+    kvRows.push(["Culprit", safeCodeSpan(issue.culprit)]);
   }
 
-  // Metadata
+  kvRows.push(["Link", issue.permalink ?? ""]);
+
+  lines.push(mdKvTable(kvRows));
+
   if (issue.metadata?.value) {
-    lines.push("Message:");
-    lines.push(`  ${issue.metadata.value}`);
     lines.push("");
+    lines.push("**Message:**");
+    lines.push("");
+    lines.push(
+      `> ${escapeMarkdownInline(issue.metadata.value).replace(/\n/g, "\n> ")}`
+    );
   }
 
   if (issue.metadata?.filename) {
-    lines.push(`File:       ${issue.metadata.filename}`);
+    lines.push("");
+    lines.push(`**File:** \`${issue.metadata.filename}\``);
   }
   if (issue.metadata?.function) {
-    lines.push(`Function:   ${issue.metadata.function}`);
+    lines.push(`**Function:** \`${issue.metadata.function}\``);
   }
 
-  // Link
-  lines.push("");
-  lines.push(`Link:       ${issue.permalink}`);
-
-  return lines;
+  return renderMarkdown(lines.join("\n"));
 }
 
 // Stack Trace Formatting
 
 /**
- * Format a single stack frame
+ * Format a single stack frame as markdown.
  */
-function formatStackFrame(frame: StackFrame): string[] {
+function formatStackFrameMarkdown(frame: StackFrame): string {
   const lines: string[] = [];
   const fn = frame.function || "<anonymous>";
   const file = frame.filename || frame.absPath || "<unknown>";
   const line = frame.lineNo ?? "?";
   const col = frame.colNo ?? "?";
-  const inAppTag = frame.inApp ? " [in-app]" : "";
+  const inAppTag = frame.inApp ? " `[in-app]`" : "";
 
-  lines.push(`  at ${fn} (${file}:${line}:${col})${inAppTag}`);
+  lines.push(`${safeCodeSpan(`at ${fn} (${file}:${line}:${col})`)}${inAppTag}`);
 
-  // Show code context if available
   if (frame.context && frame.context.length > 0) {
+    lines.push("");
+    lines.push("```");
     for (const [lineNo, code] of frame.context) {
       const isCurrentLine = lineNo === frame.lineNo;
       const prefix = isCurrentLine ? ">" : " ";
-      const lineNumStr = String(lineNo).padStart(6);
-      const codeLine = `     ${prefix} ${lineNumStr} | ${code}`;
-      lines.push(isCurrentLine ? yellow(codeLine) : muted(codeLine));
+      lines.push(`${prefix} ${String(lineNo).padStart(6)} | ${code}`);
     }
-    lines.push(""); // blank line after context
+    lines.push("```");
+    lines.push("");
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 /**
- * Format an exception value (type, message, stack trace)
+ * Format an exception value (type, message, stack trace) as markdown.
  */
-function formatExceptionValue(exception: ExceptionValue): string[] {
+function formatExceptionValueMarkdown(exception: ExceptionValue): string {
   const lines: string[] = [];
 
-  // Exception type and message
   const type = exception.type || "Error";
   const value = exception.value || "";
-  lines.push(red(`${type}: ${value}`));
+  lines.push(`**${safeCodeSpan(`${type}: ${value}`)}**`);
 
-  // Mechanism info
   if (exception.mechanism) {
     const handled = exception.mechanism.handled ? "handled" : "unhandled";
     const mechType = exception.mechanism.type || "unknown";
-    lines.push(muted(`  mechanism: ${mechType} (${handled})`));
+    lines.push(`*mechanism: ${mechType} (${handled})*`);
   }
   lines.push("");
 
-  // Stack trace frames (reversed - most recent first, which is last in array)
   const frames = exception.stacktrace?.frames ?? [];
-  // Reverse frames so most recent is first (stack traces are usually bottom-up)
   const reversedFrames = [...frames].reverse();
   for (const frame of reversedFrames) {
-    lines.push(...formatStackFrame(frame));
+    lines.push(formatStackFrameMarkdown(frame));
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 /**
- * Format the full stack trace section
+ * Build the stack trace section as markdown.
  */
-function formatStackTrace(exceptionEntry: ExceptionEntry): string[] {
+function buildStackTraceMarkdown(exceptionEntry: ExceptionEntry): string {
   const lines: string[] = [];
-  lines.push("");
-  lines.push(muted("─── Stack Trace ───"));
+  lines.push("### Stack Trace");
   lines.push("");
 
   const values = exceptionEntry.data.values ?? [];
-  // Usually there's one exception, but there can be chained exceptions
   for (const exception of values) {
-    lines.push(...formatExceptionValue(exception));
+    lines.push(formatExceptionValueMarkdown(exception));
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 // Breadcrumbs Formatting
 
 /**
- * Format breadcrumb level with color
- */
-function formatBreadcrumbLevel(level: string | undefined): string {
-  const lvl = (level || "info").padEnd(7);
-  switch (level) {
-    case "error":
-      return red(lvl);
-    case "warning":
-      return yellow(lvl);
-    case "debug":
-      return muted(lvl);
-    default:
-      return muted(lvl);
-  }
-}
-
-/**
- * Format a single breadcrumb
+ * Build the breadcrumbs section as a markdown table.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: breadcrumb formatting logic
-function formatBreadcrumb(breadcrumb: Breadcrumb): string {
-  const timestamp = breadcrumb.timestamp
-    ? new Date(breadcrumb.timestamp).toLocaleTimeString()
-    : "??:??:??";
-  const level = formatBreadcrumbLevel(breadcrumb.level);
-  const category = (breadcrumb.category || "default").padEnd(18);
-
-  // Build message from breadcrumb data
-  let message = breadcrumb.message || "";
-  if (!message && breadcrumb.data) {
-    // Format common breadcrumb types
-    const data = breadcrumb.data as Record<string, unknown>;
-    if (data.url && data.method) {
-      // HTTP request breadcrumb
-      const status = data.status_code ? ` -> ${data.status_code}` : "";
-      message = `${data.method} ${data.url}${status}`;
-    } else if (data.from && data.to) {
-      // Navigation breadcrumb
-      message = `${data.from} -> ${data.to}`;
-    } else if (data.arguments && Array.isArray(data.arguments)) {
-      // Console breadcrumb
-      message = String(data.arguments[0] || "").slice(0, 60);
-    }
-  }
-
-  // Truncate long messages
-  if (message.length > 60) {
-    message = `${message.slice(0, 57)}...`;
-  }
-
-  return `  ${timestamp}  ${level}  ${category}  ${message}`;
-}
-
-/**
- * Format the breadcrumbs section
- */
-function formatBreadcrumbs(breadcrumbsEntry: BreadcrumbsEntry): string[] {
-  const lines: string[] = [];
+function buildBreadcrumbsMarkdown(breadcrumbsEntry: BreadcrumbsEntry): string {
   const breadcrumbs = breadcrumbsEntry.data.values ?? [];
-
   if (breadcrumbs.length === 0) {
-    return lines;
+    return "";
   }
 
+  const lines: string[] = [];
+  lines.push("### Breadcrumbs");
   lines.push("");
-  lines.push(muted("─── Breadcrumbs ───"));
-  lines.push("");
+  lines.push(mdTableHeader(["Time", "Level", "Category", "Message"]).trimEnd());
 
-  // Show all breadcrumbs, oldest first (they're usually already in order)
   for (const breadcrumb of breadcrumbs) {
-    lines.push(formatBreadcrumb(breadcrumb));
+    const timestamp = breadcrumb.timestamp
+      ? new Date(breadcrumb.timestamp).toLocaleTimeString()
+      : "??:??:??";
+
+    const level = breadcrumb.level ?? "info";
+
+    let message = breadcrumb.message ?? "";
+    if (!message && breadcrumb.data) {
+      const data = breadcrumb.data as Record<string, unknown>;
+      if (data.url && data.method) {
+        const status = data.status_code ? ` → ${data.status_code}` : "";
+        message = `${data.method} ${data.url}${status}`;
+      } else if (data.from && data.to) {
+        message = `${data.from} → ${data.to}`;
+      } else if (data.arguments && Array.isArray(data.arguments)) {
+        message = String(data.arguments[0] || "").slice(0, 60);
+      }
+    }
+
+    if (message.length > 80) {
+      message = `${message.slice(0, 77)}...`;
+    }
+
+    // Escape special markdown characters that would break the table cell
+    const safeMessage = escapeMarkdownCell(message);
+    const safeCategory = escapeMarkdownCell(breadcrumb.category ?? "default");
+
+    lines.push(mdRow([timestamp, level, safeCategory, safeMessage]).trimEnd());
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 // Request Formatting
 
 /**
- * Format the HTTP request section
+ * Build the HTTP request section as markdown.
  */
-function formatRequest(requestEntry: RequestEntry): string[] {
-  const lines: string[] = [];
+function buildRequestMarkdown(requestEntry: RequestEntry): string {
   const data = requestEntry.data;
-
   if (!data.url) {
-    return lines;
+    return "";
   }
 
+  const lines: string[] = [];
+  lines.push("### Request");
   lines.push("");
-  lines.push("Request:");
   const method = data.method || "GET";
-  lines.push(`  ${method} ${data.url}`);
+  lines.push(`\`${method} ${data.url}\``);
 
-  // Show User-Agent if available
   if (data.headers) {
     for (const [key, value] of data.headers) {
       if (key.toLowerCase() === "user-agent") {
         const truncatedUA =
-          value.length > 70 ? `${value.slice(0, 67)}...` : value;
-        lines.push(`  User-Agent: ${truncatedUA}`);
+          value.length > 100 ? `${value.slice(0, 97)}...` : value;
+        lines.push(`**User-Agent:** ${truncatedUA}`);
         break;
       }
     }
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 // Span Tree Formatting
@@ -1108,64 +890,53 @@ export function formatSimpleSpanTree(
 // Environment Context Formatting
 
 /**
- * Format the environment contexts (browser, OS, device)
+ * Build environment context section (browser, OS, device) as markdown.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: context formatting logic
-function formatEnvironmentContexts(event: SentryEvent): string[] {
-  const lines: string[] = [];
+function buildEnvironmentMarkdown(event: SentryEvent): string {
   const contexts = event.contexts;
-
   if (!contexts) {
-    return lines;
+    return "";
   }
 
-  const parts: string[] = [];
+  const kvRows: [string, string][] = [];
 
-  // Browser
   if (contexts.browser) {
     const name = contexts.browser.name || "Unknown Browser";
     const version = contexts.browser.version || "";
-    parts.push(`Browser: ${name}${version ? ` ${version}` : ""}`);
+    kvRows.push(["Browser", `${name}${version ? ` ${version}` : ""}`]);
   }
 
-  // OS
   if (contexts.os) {
     const name = contexts.os.name || "Unknown OS";
     const version = contexts.os.version || "";
-    parts.push(`OS: ${name}${version ? ` ${version}` : ""}`);
+    kvRows.push(["OS", `${name}${version ? ` ${version}` : ""}`]);
   }
 
-  // Device
   if (contexts.device) {
     const family = contexts.device.family || contexts.device.model || "";
     const brand = contexts.device.brand || "";
     if (family || brand) {
       const device = brand ? `${family} (${brand})` : family;
-      parts.push(`Device: ${device}`);
+      kvRows.push(["Device", device]);
     }
   }
 
-  if (parts.length > 0) {
-    lines.push("");
-    lines.push("Environment:");
-    for (const part of parts) {
-      lines.push(`  ${part}`);
-    }
+  if (kvRows.length === 0) {
+    return "";
   }
 
-  return lines;
+  return mdKvTable(kvRows, "Environment");
 }
 
 /**
- * Format user information including geo data
+ * Build user information section as markdown.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: user formatting logic
-function formatUserInfo(event: SentryEvent): string[] {
-  const lines: string[] = [];
+function buildUserMarkdown(event: SentryEvent): string {
   const user = event.user;
-
   if (!user) {
-    return lines;
+    return "";
   }
 
   const hasUserData =
@@ -1177,29 +948,27 @@ function formatUserInfo(event: SentryEvent): string[] {
     user.geo;
 
   if (!hasUserData) {
-    return lines;
+    return "";
   }
 
-  lines.push("");
-  lines.push("User:");
+  const kvRows: [string, string][] = [];
 
   if (user.name) {
-    lines.push(`  Name:     ${user.name}`);
+    kvRows.push(["Name", user.name]);
   }
   if (user.email) {
-    lines.push(`  Email:    ${user.email}`);
+    kvRows.push(["Email", user.email]);
   }
   if (user.username) {
-    lines.push(`  Username: ${user.username}`);
+    kvRows.push(["Username", user.username]);
   }
   if (user.id) {
-    lines.push(`  ID:       ${user.id}`);
+    kvRows.push(["ID", user.id]);
   }
   if (user.ip_address) {
-    lines.push(`  IP:       ${user.ip_address}`);
+    kvRows.push(["IP", user.ip_address]);
   }
 
-  // Geo information
   if (user.geo) {
     const geo = user.geo;
     const parts: string[] = [];
@@ -1213,285 +982,256 @@ function formatUserInfo(event: SentryEvent): string[] {
       parts.push(`(${geo.country_code})`);
     }
     if (parts.length > 0) {
-      lines.push(`  Location: ${parts.join(", ")}`);
+      kvRows.push(["Location", parts.join(", ")]);
     }
   }
 
-  return lines;
+  return mdKvTable(kvRows, "User");
 }
 
 /**
- * Format replay link if available
+ * Build replay link section as markdown.
  */
-function formatReplayLink(
+function buildReplayMarkdown(
   event: SentryEvent,
   issuePermalink?: string
-): string[] {
-  const lines: string[] = [];
-
-  // Find replayId in tags
+): string {
   const replayTag = event.tags?.find((t) => t.key === "replayId");
   if (!replayTag?.value) {
-    return lines;
+    return "";
   }
 
+  const lines: string[] = [];
+  lines.push("### Replay");
   lines.push("");
-  lines.push(muted("─── Replay ───"));
-  lines.push("");
-  lines.push(`  ID: ${replayTag.value}`);
+  lines.push(`**ID:** \`${replayTag.value}\``);
 
-  // Try to construct replay URL from issue permalink
   if (issuePermalink) {
-    // Extract base URL from permalink (e.g., https://org.sentry.io/issues/123/)
     const match = BASE_URL_REGEX.exec(issuePermalink);
     if (match?.[1]) {
-      lines.push(`  Link: ${match[1]}/replays/${replayTag.value}/`);
+      lines.push(`**Link:** ${match[1]}/replays/${replayTag.value}/`);
     }
   }
 
-  return lines;
+  return lines.join("\n");
 }
 
 // Event Formatting
 
 /**
- * Format event details for display.
+ * Format event details for display as rendered markdown.
  *
  * @param event - The Sentry event to format
  * @param header - Optional header text (defaults to "Latest Event")
  * @param issuePermalink - Optional issue permalink for constructing replay links
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
 export function formatEventDetails(
   event: SentryEvent,
   header = "Latest Event",
   issuePermalink?: string
-): string[] {
+): string {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Event formatting requires multiple conditional sections
   return withSerializeSpan("formatEventDetails", () => {
-    const lines: string[] = [];
+    const sections: string[] = [];
 
-    // Header
-    lines.push("");
-    lines.push(muted(`─── ${header} (${event.eventID.slice(0, 8)}) ───`));
-    lines.push("");
+    sections.push(
+      `## ${escapeMarkdownInline(header)} (\`${event.eventID.slice(0, 8)}\`)`
+    );
+    sections.push("");
 
-    // Basic info
-    lines.push(`Event ID:   ${event.eventID}`);
+    // Basic info table
+    const infoKvRows: [string, string][] = [];
+    infoKvRows.push(["Event ID", `\`${event.eventID}\``]);
     if (event.dateReceived) {
-      lines.push(
-        `Received:   ${new Date(event.dateReceived).toLocaleString()}`
-      );
+      infoKvRows.push([
+        "Received",
+        new Date(event.dateReceived).toLocaleString(),
+      ]);
     }
     if (event.location) {
-      lines.push(`Location:   ${event.location}`);
+      infoKvRows.push(["Location", safeCodeSpan(event.location)]);
     }
 
-    // Trace context
     const traceCtx = event.contexts?.trace;
     if (traceCtx?.trace_id) {
-      lines.push(`Trace:      ${traceCtx.trace_id}`);
+      infoKvRows.push(["Trace", safeCodeSpan(traceCtx.trace_id)]);
     }
 
-    // User info (including geo)
-    lines.push(...formatUserInfo(event));
-
-    // Environment contexts (browser, OS, device)
-    lines.push(...formatEnvironmentContexts(event));
-
-    // HTTP Request
-    const requestEntry = extractEntry(event, "request");
-    if (requestEntry) {
-      lines.push(...formatRequest(requestEntry));
-    }
-
-    // SDK info
     if (event.sdk?.name || event.sdk?.version) {
-      lines.push("");
+      // Wrap in backtick code span — SDK names like sentry.python.aws_lambda
+      // contain underscores that markdown would otherwise render as emphasis.
       const sdkName = event.sdk.name ?? "unknown";
       const sdkVersion = event.sdk.version ?? "";
-      lines.push(`SDK:        ${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""}`);
+      const sdkInfo = `${sdkName}${sdkVersion ? ` ${sdkVersion}` : ""}`;
+      infoKvRows.push(["SDK", `\`${sdkInfo}\``]);
     }
 
-    // Release info
     if (event.release?.shortVersion) {
-      lines.push(`Release:    ${event.release.shortVersion}`);
+      infoKvRows.push(["Release", String(event.release.shortVersion)]);
+    }
+
+    if (infoKvRows.length > 0) {
+      sections.push(mdKvTable(infoKvRows));
+    }
+
+    // User section
+    const userSection = buildUserMarkdown(event);
+    if (userSection) {
+      sections.push("");
+      sections.push(userSection);
+    }
+
+    // Environment section
+    const envSection = buildEnvironmentMarkdown(event);
+    if (envSection) {
+      sections.push("");
+      sections.push(envSection);
+    }
+
+    // HTTP Request section
+    const requestEntry = extractEntry(event, "request");
+    if (requestEntry) {
+      const requestSection = buildRequestMarkdown(requestEntry);
+      if (requestSection) {
+        sections.push("");
+        sections.push(requestSection);
+      }
     }
 
     // Stack Trace
     const exceptionEntry = extractEntry(event, "exception");
     if (exceptionEntry) {
-      lines.push(...formatStackTrace(exceptionEntry));
+      sections.push("");
+      sections.push(buildStackTraceMarkdown(exceptionEntry));
     }
 
     // Breadcrumbs
     const breadcrumbsEntry = extractEntry(event, "breadcrumbs");
     if (breadcrumbsEntry) {
-      lines.push(...formatBreadcrumbs(breadcrumbsEntry));
-    }
-
-    // Replay link
-    lines.push(...formatReplayLink(event, issuePermalink));
-
-    // Tags
-    if (event.tags?.length) {
-      lines.push("");
-      lines.push(muted("─── Tags ───"));
-      lines.push("");
-      for (const tag of event.tags) {
-        lines.push(`  ${tag.key}: ${tag.value}`);
+      const breadcrumbSection = buildBreadcrumbsMarkdown(breadcrumbsEntry);
+      if (breadcrumbSection) {
+        sections.push("");
+        sections.push(breadcrumbSection);
       }
     }
 
-    return lines;
+    // Replay link
+    const replaySection = buildReplayMarkdown(event, issuePermalink);
+    if (replaySection) {
+      sections.push("");
+      sections.push(replaySection);
+    }
+
+    // Tags
+    if (event.tags?.length) {
+      sections.push("");
+      sections.push("### Tags");
+      sections.push("");
+      sections.push(mdTableHeader(["Key", "Value"]).trimEnd());
+      for (const tag of event.tags) {
+        sections.push(
+          mdRow([
+            `\`${tag.key}\``,
+            escapeMarkdownCell(String(tag.value)),
+          ]).trimEnd()
+        );
+      }
+    }
+
+    return renderMarkdown(sections.join("\n"));
   });
 }
 
 // Organization Formatting
 
 /**
- * Format organization for list display
- */
-export function formatOrgRow(
-  org: SentryOrganization,
-  slugWidth: number
-): string {
-  return `${org.slug.padEnd(slugWidth)}  ${org.name}`;
-}
-
-/**
- * Calculate max slug width from organizations
- */
-export function calculateOrgSlugWidth(orgs: SentryOrganization[]): number {
-  return Math.max(...orgs.map((o) => o.slug.length), 4);
-}
-
-/**
- * Format detailed organization information.
+ * Format detailed organization information as rendered markdown.
  *
  * @param org - The Sentry organization to format
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
-export function formatOrgDetails(org: SentryOrganization): string[] {
+export function formatOrgDetails(org: SentryOrganization): string {
   const lines: string[] = [];
 
-  // Header
-  const [header, separator] = formatDetailsHeader(org.slug, org.name);
-  lines.push(header, separator, "");
-
-  // Basic info
-  lines.push(`Slug:       ${org.slug || "(none)"}`);
-  lines.push(`Name:       ${org.name || "(unnamed)"}`);
-  lines.push(`ID:         ${org.id}`);
-  if (org.dateCreated) {
-    lines.push(`Created:    ${new Date(org.dateCreated).toLocaleString()}`);
-  }
+  lines.push(
+    `## ${escapeMarkdownInline(org.slug)}: ${escapeMarkdownInline(org.name || "(unnamed)")}`
+  );
   lines.push("");
 
-  // Settings
-  lines.push(`2FA:        ${org.require2FA ? "Required" : "Not required"}`);
-  lines.push(`Early Adopter: ${org.isEarlyAdopter ? "Yes" : "No"}`);
+  const kvRows: [string, string][] = [];
+  kvRows.push(["Slug", `\`${org.slug || "(none)"}\``]);
+  kvRows.push(["Name", escapeMarkdownInline(org.name || "(unnamed)")]);
+  kvRows.push(["ID", String(org.id)]);
+  if (org.dateCreated) {
+    kvRows.push(["Created", new Date(org.dateCreated).toLocaleString()]);
+  }
+  kvRows.push(["2FA", org.require2FA ? "Required" : "Not required"]);
+  kvRows.push(["Early Adopter", org.isEarlyAdopter ? "Yes" : "No"]);
 
-  // Features
-  lines.push(...formatFeaturesList(org.features));
+  lines.push(mdKvTable(kvRows));
 
-  return lines;
-}
+  const featuresSection = formatFeaturesMarkdown(org.features);
+  if (featuresSection) {
+    lines.push(featuresSection);
+  }
 
-// Project Formatting
-
-type ProjectRowOptions = {
-  orgWidth: number;
-  slugWidth: number;
-  nameWidth: number;
-};
-
-/**
- * Format project for list display
- */
-export function formatProjectRow(
-  project: SentryProject & { orgSlug?: string },
-  options: ProjectRowOptions
-): string {
-  const { orgWidth, slugWidth, nameWidth } = options;
-  const org = (project.orgSlug || "").padEnd(orgWidth);
-  const slug = project.slug.padEnd(slugWidth);
-  const name = project.name.padEnd(nameWidth);
-  const platform = project.platform || "";
-  return `${org}  ${slug}  ${name}  ${platform}`;
+  return renderMarkdown(lines.join("\n"));
 }
 
 /**
- * Calculate column widths for project list display
- */
-export function calculateProjectColumnWidths(
-  projects: Array<SentryProject & { orgSlug?: string }>
-): { orgWidth: number; slugWidth: number; nameWidth: number } {
-  const orgWidth = Math.max(
-    ...projects.map((p) => (p.orgSlug || "").length),
-    3
-  );
-  const slugWidth = Math.max(...projects.map((p) => p.slug.length), 7);
-  const nameWidth = Math.max(...projects.map((p) => p.name.length), 4);
-  return { orgWidth, slugWidth, nameWidth };
-}
-
-/**
- * Format detailed project information.
+ * Format detailed project information as rendered markdown.
  *
  * @param project - The Sentry project to format
  * @param dsn - Optional DSN string to display
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
 export function formatProjectDetails(
   project: SentryProject,
   dsn?: string | null
-): string[] {
+): string {
   const lines: string[] = [];
 
-  // Header
-  const [header, separator] = formatDetailsHeader(project.slug, project.name);
-  lines.push(header, separator, "");
+  lines.push(
+    `## ${escapeMarkdownInline(project.slug)}: ${escapeMarkdownInline(project.name || "(unnamed)")}`
+  );
+  lines.push("");
 
-  // Basic info
-  lines.push(`Slug:       ${project.slug || "(none)"}`);
-  lines.push(`Name:       ${project.name || "(unnamed)"}`);
-  lines.push(`ID:         ${project.id}`);
-  lines.push(`Platform:   ${project.platform || "Not set"}`);
-  lines.push(`DSN:        ${dsn || "No DSN available"}`);
-  lines.push(`Status:     ${project.status}`);
+  const kvRows: [string, string][] = [];
+  kvRows.push(["Slug", `\`${project.slug || "(none)"}\``]);
+  kvRows.push(["Name", escapeMarkdownInline(project.name || "(unnamed)")]);
+  kvRows.push(["ID", String(project.id)]);
+  kvRows.push(["Platform", project.platform || "Not set"]);
+  kvRows.push(["DSN", `\`${dsn || "No DSN available"}\``]);
+  kvRows.push(["Status", project.status ?? "unknown"]);
   if (project.dateCreated) {
-    lines.push(`Created:    ${new Date(project.dateCreated).toLocaleString()}`);
+    kvRows.push(["Created", new Date(project.dateCreated).toLocaleString()]);
   }
-
-  // Organization context
   if (project.organization) {
-    lines.push("");
-    lines.push(
-      `Organization: ${project.organization.name} (${project.organization.slug})`
-    );
+    kvRows.push([
+      "Organization",
+      `${escapeMarkdownInline(project.organization.name)} (${safeCodeSpan(project.organization.slug)})`,
+    ]);
   }
-
-  // Activity info
-  lines.push("");
   if (project.firstEvent) {
-    lines.push(`First Event: ${new Date(project.firstEvent).toLocaleString()}`);
+    kvRows.push(["First Event", new Date(project.firstEvent).toLocaleString()]);
   } else {
-    lines.push("First Event: No events yet");
+    kvRows.push(["First Event", "No events yet"]);
   }
 
-  // Capabilities
-  lines.push("");
-  lines.push("Capabilities:");
-  lines.push(`  Sessions:  ${project.hasSessions ? "Yes" : "No"}`);
-  lines.push(`  Replays:   ${project.hasReplays ? "Yes" : "No"}`);
-  lines.push(`  Profiles:  ${project.hasProfiles ? "Yes" : "No"}`);
-  lines.push(`  Monitors:  ${project.hasMonitors ? "Yes" : "No"}`);
+  kvRows.push(["Sessions", project.hasSessions ? "Yes" : "No"]);
+  kvRows.push(["Replays", project.hasReplays ? "Yes" : "No"]);
+  kvRows.push(["Profiles", project.hasProfiles ? "Yes" : "No"]);
+  kvRows.push(["Monitors", project.hasMonitors ? "Yes" : "No"]);
 
-  // Features
-  lines.push(...formatFeaturesList(project.features));
+  lines.push(mdKvTable(kvRows));
 
-  return lines;
+  const featuresSection = formatFeaturesMarkdown(project.features);
+  if (featuresSection) {
+    lines.push(featuresSection);
+  }
+
+  return renderMarkdown(lines.join("\n"));
 }
 
 // User Identity Formatting

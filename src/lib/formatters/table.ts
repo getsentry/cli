@@ -1,11 +1,22 @@
 /**
  * Generic column-based table renderer.
  *
- * Replaces the duplicated calculateColumnWidths / writeHeader / writeRows
- * pattern used across team, repo, and project list commands.
+ * Provides `writeTable()` for rendering structured data as Unicode-bordered
+ * tables directly via the text-table renderer, and `buildMarkdownTable()`
+ * for producing raw CommonMark table syntax (used in plain/non-TTY mode).
+ *
+ * ANSI escape codes in cell values are preserved — `string-width` correctly
+ * treats them as zero-width for column sizing.
  */
 
 import type { Writer } from "../../types/index.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  renderInlineMarkdown,
+  stripColorTags,
+} from "./markdown.js";
+import { type Alignment, renderTextTable } from "./text-table.js";
 
 /**
  * Describes a single column in a table.
@@ -19,56 +30,84 @@ export type Column<T> = {
   value: (item: T) => string;
   /** Column alignment. Defaults to "left". */
   align?: "left" | "right";
-  /** Minimum column width (header width is always respected) */
+  /** Minimum content width. Column will not shrink below this. */
   minWidth?: number;
+  /** Whether this column can be shrunk when the table exceeds terminal width. @default true */
+  shrinkable?: boolean;
+  /** Truncate long values with "\u2026" instead of wrapping. @default false */
+  truncate?: boolean;
 };
 
 /**
- * Render items as a formatted table with auto-sized columns.
+ * Build a raw CommonMark table string from items and column definitions.
  *
- * Column widths are computed as `max(header.length, minWidth, longestValue)`.
- * Columns are separated by two spaces. No trailing separator after the last column.
+ * Column value functions should call {@link escapeMarkdownCell} on user data so pipe and
+ * backslash characters in API-supplied strings don't break the table.
+ *
+ * Used for plain/non-TTY output mode.
+ */
+export function buildMarkdownTable<T>(
+  items: T[],
+  columns: Column<T>[]
+): string {
+  const header = `| ${columns.map((c) => c.header).join(" | ")} |`;
+  const separator = `| ${columns.map((c) => (c.align === "right" ? "---:" : "---")).join(" | ")} |`;
+  const rows = items
+    .map(
+      (item) =>
+        `| ${columns.map((c) => stripColorTags(c.value(item))).join(" | ")} |`
+    )
+    .join("\n");
+  return `${header}\n${separator}\n${rows}`;
+}
+
+/**
+ * Render items as a formatted table.
+ *
+ * Cell values are markdown strings — in TTY mode they are rendered through
+ * \ before column sizing, so \,
+ * \code\, and \ in cell values render as styled/clickable text.
+ * Pre-existing ANSI codes (e.g. chalk colors) pass through the markdown
+ * parser untouched.
+ *
+ * In plain mode: emits raw CommonMark table syntax.
  *
  * @param stdout - Output writer
  * @param items - Row data
  * @param columns - Column definitions (ordering determines display order)
  */
+/** Options for writeTable. */
+export type WriteTableOptions = {
+  /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
+  truncate?: boolean;
+};
+
 export function writeTable<T>(
   stdout: Writer,
   items: T[],
-  columns: Column<T>[]
+  columns: Column<T>[],
+  options?: WriteTableOptions
 ): void {
-  // Pre-compute widths
-  const widths = columns.map((col) => {
-    const headerLen = col.header.length;
-    const minLen = col.minWidth ?? 0;
-    const maxValue = items.reduce(
-      (max, item) => Math.max(max, col.value(item).length),
-      0
-    );
-    return Math.max(headerLen, minLen, maxValue);
-  });
-
-  // Header row
-  const headerCells = columns.map((col, i) =>
-    pad(col.header, widths[i] as number, col.align)
-  );
-  stdout.write(`${headerCells.join("  ")}\n`);
-
-  // Data rows
-  for (const item of items) {
-    const cells = columns.map((col, i) =>
-      pad(col.value(item), widths[i] as number, col.align)
-    );
-    stdout.write(`${cells.join("  ")}\n`);
+  if (isPlainOutput()) {
+    stdout.write(`${buildMarkdownTable(items, columns)}\n`);
+    return;
   }
-}
 
-/** Pad a string to width with the given alignment. */
-function pad(
-  value: string,
-  width: number,
-  align: "left" | "right" = "left"
-): string {
-  return align === "right" ? value.padStart(width) : value.padEnd(width);
+  const headers = columns.map((c) => c.header);
+  const rows = items.map((item) =>
+    columns.map((c) => renderInlineMarkdown(c.value(item)))
+  );
+  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
+
+  const minWidths = columns.map((c) => c.minWidth ?? 0);
+  const shrinkable = columns.map((c) => c.shrinkable ?? true);
+
+  stdout.write(
+    renderTextTable(headers, rows, {
+      alignments,
+      minWidths,
+      shrinkable,
+      truncate: options?.truncate,
+    })
+  );
 }

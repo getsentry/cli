@@ -18,7 +18,6 @@ import {
 import {
   formatFixability,
   formatFixabilityDetail,
-  formatIssueListHeader,
   formatShortId,
   formatUserIdentity,
   getSeerFixabilityLabel,
@@ -29,6 +28,11 @@ import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 function stripAnsi(str: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
   return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Strip ANSI escape codes and color tags for content testing. */
+function stripFormatting(s: string): string {
+  return stripAnsi(s).replace(/<\/?[a-z]+>/g, "");
 }
 
 // Arbitraries
@@ -61,7 +65,7 @@ describe("formatShortId properties", () => {
     await fcAssert(
       property(shortIdArb, (shortId) => {
         const result = formatShortId(shortId);
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -71,7 +75,7 @@ describe("formatShortId properties", () => {
     await fcAssert(
       property(shortIdArb, (shortId) => {
         const result = formatShortId(shortId);
-        expect(stripAnsi(result).length).toBe(shortId.length);
+        expect(stripFormatting(result).length).toBe(shortId.length);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -82,7 +86,7 @@ describe("formatShortId properties", () => {
       property(tuple(projectSlugArb, suffixArb), ([project, suffix]) => {
         const shortId = `${project}-${suffix}`;
         const result = formatShortId(shortId, { projectSlug: project });
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -97,7 +101,7 @@ describe("formatShortId properties", () => {
           projectSlug: project,
           projectAlias: alias,
         });
-        expect(stripAnsi(result)).toBe(shortId.toUpperCase());
+        expect(stripFormatting(result)).toBe(shortId.toUpperCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -237,36 +241,6 @@ describe("formatUserIdentity properties", () => {
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
-  });
-});
-
-describe("formatIssueListHeader properties", () => {
-  test("multi-project mode always includes ALIAS column", () => {
-    const header = formatIssueListHeader(true);
-    expect(header).toContain("ALIAS");
-  });
-
-  test("single-project mode never includes ALIAS column", () => {
-    const header = formatIssueListHeader(false);
-    expect(header).not.toContain("ALIAS");
-  });
-
-  test("both modes include essential columns", async () => {
-    const essentialColumns = [
-      "LEVEL",
-      "SHORT ID",
-      "COUNT",
-      "SEEN",
-      "FIXABILITY",
-      "TITLE",
-    ];
-
-    for (const isMultiProject of [true, false]) {
-      const header = formatIssueListHeader(isMultiProject);
-      for (const col of essentialColumns) {
-        expect(header).toContain(col);
-      }
-    }
   });
 });
 

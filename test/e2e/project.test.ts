@@ -153,7 +153,7 @@ describe("sentry org view", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(TEST_ORG);
-      expect(result.stdout).toContain("Slug:");
+      expect(result.stdout).toContain("Slug");
     },
     { timeout: 15_000 }
   );
@@ -232,7 +232,7 @@ describe("sentry project view", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(TEST_PROJECT);
-      expect(result.stdout).toContain("Slug:");
+      expect(result.stdout).toContain("Slug");
     },
     { timeout: 15_000 }
   );
@@ -249,7 +249,7 @@ describe("sentry project view", () => {
       ]);
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("DSN:");
+      expect(result.stdout).toContain("DSN");
       expect(result.stdout).toContain(TEST_DSN);
     },
     { timeout: 15_000 }
