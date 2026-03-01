@@ -1,0 +1,45 @@
+## Implementation Plan: `sentry trace logs`
+
+### Problem
+Issue #247: No CLI support for fetching logs associated with a trace.
+The Explore/Events logs API (/events/?dataset=logs) doesn't support trace filtering.
+A dedicated `/organizations/{org}/trace-logs/` endpoint exists for this purpose.
+
+### Approach
+Option C from the issue: dedicated `sentry trace logs` subcommand.
+
+### Key design decisions
+
+1. **Org-only resolution** — The trace-logs endpoint is org-scoped and always
+   queries all projects in the org. Unlike `trace view` (which uses resolveOrgAndProject),
+   this command uses `resolveOrg()` only. No `--project` flag needed or desired.
+
+2. **Dedicated endpoint** — Uses `/organizations/{org}/trace-logs/` (not the
+   Explore/Events logs API). Returns a fixed 8-column schema:
+   id, project.id, trace, severity_number, severity, timestamp, timestamp_precise, message.
+   Key differences vs SentryLog: id instead of sentry.item_id; timestamp_precise is
+   ISO string (not nanosecond integer); always includes severity_number.
+
+3. **statsPeriod required** — The API returns empty results without a stats period.
+   Default: 14d (matches the Sentry web UI default for trace views).
+
+4. **Chronological display** — API returns newest-first; command reverses for
+   display (oldest → newest), which reads more naturally for log sequences.
+
+5. **Markdown-first formatting** — Uses the formatTraceLogTable() / buildTraceLogRowCells()
+   pattern from PR #297: renderTextTable for TTY, raw markdown for plain/piped output.
+   Columns: Timestamp | Level | Message (trace ID column omitted — all rows share the same trace).
+
+### Files changed
+- src/types/sentry.ts — TraceLogSchema + TraceLogsResponseSchema
+- src/types/index.ts — barrel exports
+- src/lib/api-client.ts — listTraceLogs()
+- src/lib/formatters/log.ts — buildTraceLogRowCells, formatTraceLogRow, formatTraceLogsHeader, formatTraceLogTable
+- src/commands/trace/logs.ts — new command
+- src/commands/trace/index.ts — registers logs subcommand
+- test/commands/trace/logs.test.ts — 33 tests
+
+### Out of scope
+- --follow mode (trace logs are bounded, not a stream)
+- Multiple trace IDs per command
+- --trace-id flag on sentry log list (Option A)
