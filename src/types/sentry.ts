@@ -566,6 +566,59 @@ export const DetailedLogsResponseSchema = z.object({
 
 export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
 
+// Trace-log types (from /organizations/{org}/trace-logs/ endpoint)
+
+/**
+ * Individual log entry from the trace-logs endpoint.
+ *
+ * Fields returned by `GET /api/0/organizations/{org}/trace-logs/`. This endpoint
+ * is org-scoped and always queries all projects — it returns a fixed set of 8
+ * columns, unlike the flexible Explore/Events logs endpoint.
+ *
+ * Key differences from {@link SentryLog} (Explore/Events):
+ * - `id` instead of `sentry.item_id`
+ * - Includes `project.id` (integer) and `severity_number`
+ * - `timestamp_precise` is an ISO string (not a nanosecond integer)
+ */
+export const TraceLogSchema = z
+  .object({
+    /** Unique identifier for this log entry */
+    id: z.string(),
+    /** Numeric ID of the project this log belongs to */
+    "project.id": z.number(),
+    /** The 32-character hex trace ID this log is associated with */
+    trace: z.string(),
+    /** Numeric OTel severity level (e.g., 9 = INFO, 13 = WARN, 17 = ERROR) */
+    severity_number: z.number(),
+    /** Severity label (e.g., "info", "warn", "error") */
+    severity: z.string(),
+    /** ISO 8601 timestamp */
+    timestamp: z.string(),
+    /** High-precision ISO 8601 timestamp */
+    timestamp_precise: z.string(),
+    /** Log message content */
+    message: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type TraceLog = z.infer<typeof TraceLogSchema>;
+
+/** Response from the trace-logs endpoint */
+export const TraceLogsResponseSchema = z
+  .object({
+    data: z.array(TraceLogSchema),
+    meta: z
+      .object({
+        fields: z.record(z.string()).optional(),
+        units: z.record(z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type TraceLogsResponse = z.infer<typeof TraceLogsResponseSchema>;
+
 // Transaction (for trace listing)
 
 /**
