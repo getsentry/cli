@@ -313,6 +313,10 @@ describe("escapeMarkdownCell", () => {
     const result = escapeMarkdownCell("a|b|c");
     expect(result).toBe("a\\|b\\|c");
   });
+
+  test("escapes angle brackets with backslash", () => {
+    expect(escapeMarkdownCell("<html>")).toBe("\\<html\\>");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -478,6 +482,29 @@ describe("escapeMarkdownInline", () => {
 
   test("returns unchanged string with no special chars", () => {
     expect(escapeMarkdownInline("hello world")).toBe("hello world");
+  });
+
+  test("escapes angle brackets with backslash", () => {
+    expect(escapeMarkdownInline("<unknown>")).toBe("\\<unknown\\>");
+  });
+
+  test("angle brackets survive round-trip through renderInlineMarkdown", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      const escaped = escapeMarkdownInline("<unknown>");
+      const result = stripAnsi(renderInlineMarkdown(escaped));
+      expect(result).toBe("<unknown>");
+    });
+  });
+
+  test("URLs with underscores render without backslashes", () => {
+    withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
+      const escaped = escapeMarkdownInline(
+        "https://spotlightjs.com/_astro/ui-core.js"
+      );
+      const result = stripAnsi(renderInlineMarkdown(escaped));
+      expect(result).not.toContain("\\_");
+      expect(result).toContain("_astro");
+    });
   });
 });
 

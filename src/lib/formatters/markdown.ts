@@ -78,7 +78,7 @@ export function isPlainOutput(): boolean {
  * Escape a string for safe use inside a markdown table cell.
  *
  * Collapses newlines, escapes backslashes, pipes, and angle brackets.
- * Angle brackets must be escaped to `&lt;`/`&gt;` so that user-supplied
+ * Angle brackets are backslash-escaped (`\<`/`\>`) so that user-supplied
  * content (e.g. `Expected <string>`) is not parsed as an HTML tag by
  * `marked`, which would silently drop the content via `renderHtmlToken`.
  */
@@ -87,17 +87,17 @@ export function escapeMarkdownCell(value: string): string {
     .replace(/\n/g, " ")
     .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/</g, "\\<")
+    .replace(/>/g, "\\>");
 }
 
 /**
  * Escape CommonMark inline emphasis characters.
  *
  * Prevents `_`, `*`, `` ` ``, `[`, `]`, `<`, and `>` from being consumed
- * by the parser. Angle brackets are HTML-escaped so that user-supplied
- * content (e.g. `Expected <string> got <number>`) is not silently dropped
- * when `marked` parses the text as HTML tokens.
+ * by the parser. Angle brackets are backslash-escaped (`\<`/`\>`) so that
+ * user-supplied content (e.g. `Expected <string> got <number>`) is not
+ * silently dropped when `marked` parses the text as HTML tokens.
  */
 export function escapeMarkdownInline(value: string): string {
   return value
@@ -107,8 +107,8 @@ export function escapeMarkdownInline(value: string): string {
     .replace(/`/g, "\\`")
     .replace(/\[/g, "\\[")
     .replace(/\]/g, "\\]")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/</g, "\\<")
+    .replace(/>/g, "\\>");
 }
 
 /**
@@ -320,9 +320,19 @@ function renderOneInline(token: Token): string {
       return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
     case "link": {
       const link = token as Tokens.Link;
-      const linkText = renderInline(link.tokens);
+      let linkText = renderInline(link.tokens);
+      let href = link.href ?? "";
+      // GFM autolinks absorb backslash-escapes literally (\_astro → \_astro).
+      // Detect autolinks via link.raw (starts with URL, not "[") and strip artifacts.
+      const raw = link.raw ?? "";
+      if (raw.startsWith("http://") || raw.startsWith("https://")) {
+        const unescape = (s: string) =>
+          s.replace(/\\([_*`\[\]<>\\])/g, "$1");
+        linkText = unescape(linkText);
+        href = unescape(href);
+      }
       const styled = chalk.hex(COLORS.blue)(linkText);
-      return link.href ? terminalLink(styled, link.href) : styled;
+      return href ? terminalLink(styled, href) : styled;
     }
     case "del":
       return chalk.dim.gray.strikethrough(
