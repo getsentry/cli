@@ -322,6 +322,96 @@ describe("runWizard", () => {
       expect(errorMsg).toContain("alien");
     });
 
+    test("handles multiple suspend/resume iterations", async () => {
+      // First iteration: local-op, second: interactive, third: success
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["detect-platform"]],
+        steps: {
+          "detect-platform": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "list-dir",
+              cwd: "/app",
+              params: { path: "." },
+            },
+          },
+        },
+      };
+      mockResumeResults = [
+        {
+          status: "suspended",
+          suspended: [["select-features"]],
+          steps: {
+            "select-features": {
+              suspendPayload: {
+                type: "interactive",
+                kind: "multi-select",
+                prompt: "Select features",
+                availableFeatures: ["errorMonitoring"],
+              },
+            },
+          },
+        },
+        { status: "success" },
+      ];
+
+      await runWizard(makeOptions());
+
+      expect(mockHandleLocalOp).toHaveBeenCalledTimes(1);
+      expect(mockHandleInteractive).toHaveBeenCalledTimes(1);
+      expect(mockFormatResult).toHaveBeenCalled();
+    });
+
+    test("handles non-Error exception in catch block", async () => {
+      mockHandleLocalOp.mockImplementationOnce(() =>
+        Promise.reject("string error")
+      );
+
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["detect-platform"]],
+        steps: {
+          "detect-platform": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "list-dir",
+              cwd: "/app",
+              params: { path: "." },
+            },
+          },
+        },
+      };
+
+      await runWizard(makeOptions());
+
+      expect(logMock.error).toHaveBeenCalledWith("string error");
+      expect(cancelMock).toHaveBeenCalledWith("Setup failed");
+    });
+
+    test("falls back to iterating steps when stepId key not found", async () => {
+      // The suspend path references "step-a" but the payload is under "step-b"
+      mockStartResult = {
+        status: "suspended",
+        suspended: [["step-a"]],
+        steps: {
+          "step-b": {
+            suspendPayload: {
+              type: "local-op",
+              operation: "read-files",
+              cwd: "/app",
+              params: { paths: ["index.ts"] },
+            },
+          },
+        },
+      };
+      mockResumeResults = [{ status: "success" }];
+
+      await runWizard(makeOptions());
+
+      expect(mockHandleLocalOp).toHaveBeenCalled();
+    });
+
     test("handles missing suspend payload", async () => {
       mockStartResult = {
         status: "suspended",

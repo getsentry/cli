@@ -79,7 +79,10 @@ describe("printCustomHelp", () => {
 
     // Should include at least some core commands from routes
     expect(output).toContain("sentry");
+    // Route map command (exercises isRouteMap branch)
     expect(output).toContain("auth");
+    // Direct command with tuple positional (exercises isCommand + getPositionalPlaceholder)
+    expect(output).toContain("init");
   });
 
   test("output contains docs URL", async () => {

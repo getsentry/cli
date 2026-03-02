@@ -216,6 +216,22 @@ describe("handleMultiSelect", () => {
     expect(features).toContain("sessionReplay");
   });
 
+  test("throws WizardCancelledError when user cancels multi-select", async () => {
+    multiselectImpl = mock(() => Promise.resolve(Symbol.for("cancel")));
+
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Select features",
+          kind: "multi-select",
+          availableFeatures: ["errorMonitoring", "performanceMonitoring"],
+        },
+        makeOptions({ yes: false })
+      )
+    ).rejects.toThrow("Setup cancelled");
+  });
+
   test("excludes errorMonitoring from multiselect options (always included)", async () => {
     multiselectImpl = mock(() => Promise.resolve(["performanceMonitoring"]));
 
@@ -279,6 +295,21 @@ describe("handleConfirm", () => {
     );
 
     expect(result).toEqual({ addExample: false });
+  });
+
+  test("throws WizardCancelledError when user cancels confirm", async () => {
+    confirmImpl = mock(() => Promise.resolve(Symbol.for("cancel")));
+
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Continue with setup?",
+          kind: "confirm",
+        },
+        makeOptions({ yes: false })
+      )
+    ).rejects.toThrow("Setup cancelled");
   });
 
   test("returns action: stop when user declines non-example prompt", async () => {
