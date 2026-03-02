@@ -18,7 +18,7 @@ import {
 import { createCommand } from "../../../src/commands/project/create.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ApiError, CliError, ContextError } from "../../../src/lib/errors.js";
+import { ApiError, CliError, ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
@@ -505,9 +505,9 @@ describe("project create", () => {
     const err = await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ContextError);
+    expect(err).toBeInstanceOf(ResolutionError);
     expect(err.message).toContain("acme-corp");
-    expect(err.message).toContain("404");
+    expect(err.message).toContain("not found");
     // Should show the user's actual orgs to help them pick the right one
     expect(err.message).toContain("Your organizations");
     expect(err.message).toContain("other-org");
@@ -528,7 +528,7 @@ describe("project create", () => {
     const err = await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ContextError);
+    expect(err).toBeInstanceOf(ResolutionError);
     expect(err.message).toContain("auto-detected from test/mocks/routes.ts");
     expect(err.message).toContain("123");
     expect(err.message).toContain("Your organizations");

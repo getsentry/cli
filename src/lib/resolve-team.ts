@@ -7,7 +7,7 @@
 
 import type { SentryTeam } from "../types/index.js";
 import { listOrganizations, listTeams } from "./api-client.js";
-import { ApiError, CliError, ContextError } from "./errors.js";
+import { ApiError, CliError, ContextError, ResolutionError } from "./errors.js";
 import { getSentryBaseUrl } from "./sentry-urls.js";
 
 /**
@@ -55,6 +55,7 @@ export type ResolveTeamOptions = {
  * @param options - Resolution options (team flag, usage hint, detection source)
  * @returns Team slug to use
  * @throws {ContextError} When team cannot be resolved
+ * @throws {ResolutionError} When org slug returns 404
  */
 export async function resolveTeam(
   orgSlug: string,
@@ -117,26 +118,25 @@ export async function resolveTeam(
  */
 async function buildOrgFailureError(
   orgSlug: string,
-  error: ApiError,
+  _error: ApiError,
   options: ResolveTeamOptions
 ): Promise<never> {
   const orgHint = await fetchOrgListHint(
     `Specify org explicitly: ${options.usageHint}`
   );
 
-  const alternatives = [
-    `Could not list teams for org '${orgSlug}' (${error.status})`,
-  ];
+  const suggestions: string[] = [];
   if (options.detectedFrom) {
-    alternatives.push(
+    suggestions.push(
       `Org '${orgSlug}' was auto-detected from ${options.detectedFrom}`
     );
   }
-  alternatives.push(orgHint);
+  suggestions.push(orgHint);
 
-  throw new ContextError(
-    "Organization",
+  throw new ResolutionError(
+    `Organization '${orgSlug}'`,
+    "not found",
     `${options.usageHint} --team <team-slug>`,
-    alternatives
+    suggestions
   );
 }
