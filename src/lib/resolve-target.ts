@@ -38,6 +38,7 @@ import {
   getDsnSourceDescription,
 } from "./dsn/index.js";
 import {
+  ApiError,
   AuthError,
   ContextError,
   ResolutionError,
@@ -537,16 +538,32 @@ function resolveFromEnvVars(): {
 
 /**
  * Fetch the numeric project ID for an explicit org/project pair.
- * Returns undefined on any failure (network, permissions, 404).
+ *
+ * Throws on auth errors and 404s (user-actionable). Returns undefined
+ * for transient failures (network, 500s) so the command can still
+ * attempt slug-based querying as a fallback.
  */
-async function fetchProjectId(
+export async function fetchProjectId(
   org: string,
-  project: string
+  project: string,
 ): Promise<number | undefined> {
   try {
     const projectInfo = await getProject(org, project);
     return Number(projectInfo.id) || undefined;
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ResolutionError(
+        `Project '${project}'`,
+        `not found in organization '${org}'`,
+        `sentry issue list ${org}/<project>`,
+        [
+          `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
+        ],
+      );
+    }
     return;
   }
 }

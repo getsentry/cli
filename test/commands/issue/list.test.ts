@@ -363,7 +363,7 @@ describe("issue list: partial failure handling", () => {
       "myproj"
     );
 
-    expect(stderr.output).toContain("Failed to fetch issues from 1 project(s)");
+    expect(stderr.output).toContain("Failed to fetch issues from org-two/myproj");
     expect(stderr.output).toContain("Showing results from 1 project(s)");
   });
 
