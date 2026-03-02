@@ -1,70 +1,105 @@
 /**
- * Wizard Runner Tests
+ * Isolated tests for the init wizard runner.
  *
- * Tests for the init wizard runner. Uses spyOn on namespace imports
- * to stub heavy dependencies (MastraClient, clack, handlers, auth, help).
+ * Uses mock.module() to stub heavy dependencies (MastraClient, clack, handlers,
+ * auth, help). Kept isolated to avoid module-level mock leakage.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as mastraModule from "@mastra/client-js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as authModule from "../../../src/lib/db/auth.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as helpModule from "../../../src/lib/help.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as formattersModule from "../../../src/lib/init/formatters.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as interactiveModule from "../../../src/lib/init/interactive.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as localOpsModule from "../../../src/lib/init/local-ops.js";
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type {
   WizardOptions,
   WorkflowRunResult,
-} from "../../../src/lib/init/types.js";
-import { runWizard } from "../../../src/lib/init/wizard-runner.js";
+} from "../../src/lib/init/types.js";
 
-const noop = () => {
-  /* suppress output */
-};
-
-// ── Clack spinner mock ──────────────────────────────────────────────────────
+// ── Clack mocks ────────────────────────────────────────────────────────────
 const spinnerMock = {
   start: mock(),
   stop: mock(),
   message: mock(),
 };
+const introMock = mock();
+const logMock = { info: mock(), warn: mock(), error: mock() };
+const cancelMock = mock();
 
-// ── Spy references ──────────────────────────────────────────────────────────
-let spinnerSpy: ReturnType<typeof spyOn>;
-let introSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let handleLocalOpSpy: ReturnType<typeof spyOn>;
-let handleInteractiveSpy: ReturnType<typeof spyOn>;
-let formatResultSpy: ReturnType<typeof spyOn>;
-let formatErrorSpy: ReturnType<typeof spyOn>;
-let getAuthTokenSpy: ReturnType<typeof spyOn>;
-let formatBannerSpy: ReturnType<typeof spyOn>;
-let mastraClientSpy: ReturnType<typeof spyOn>;
+mock.module("@clack/prompts", () => ({
+  spinner: () => spinnerMock,
+  intro: introMock,
+  log: logMock,
+  cancel: cancelMock,
+  note: mock(),
+  outro: mock(),
+  select: mock(),
+  multiselect: mock(),
+  confirm: mock(),
+  isCancel: (v: unknown) => v === Symbol.for("cancel"),
+}));
 
-// ── Workflow state ──────────────────────────────────────────────────────────
-let mockStartResult: WorkflowRunResult;
-let mockResumeResults: WorkflowRunResult[];
-let resumeCallCount: number;
-let startShouldThrow: boolean;
+// ── Handler mocks ──────────────────────────────────────────────────────────
+const mockHandleLocalOp = mock(() =>
+  Promise.resolve({ ok: true, data: { results: [] } })
+);
+mock.module("../../src/lib/init/local-ops.js", () => ({
+  handleLocalOp: mockHandleLocalOp,
+  validateCommand: () => {
+    /* noop mock */
+  },
+}));
+
+const mockHandleInteractive = mock(() =>
+  Promise.resolve({ action: "continue" })
+);
+mock.module("../../src/lib/init/interactive.js", () => ({
+  handleInteractive: mockHandleInteractive,
+}));
+
+const mockFormatResult = mock();
+const mockFormatError = mock();
+mock.module("../../src/lib/init/formatters.js", () => ({
+  formatResult: mockFormatResult,
+  formatError: mockFormatError,
+}));
+
+mock.module("../../src/lib/db/auth.js", () => ({
+  getAuthToken: () => "fake-token",
+  isAuthenticated: () => Promise.resolve(false),
+}));
+
+mock.module("../../src/lib/help.js", () => ({
+  formatBanner: () => "BANNER",
+}));
+
+// ── MastraClient mock ──────────────────────────────────────────────────────
+let mockStartResult: WorkflowRunResult = { status: "success" };
+let mockResumeResults: WorkflowRunResult[] = [];
+let resumeCallCount = 0;
+let startShouldThrow = false;
+
+mock.module("@mastra/client-js", () => ({
+  MastraClient: class {
+    getWorkflow() {
+      return {
+        createRun: () =>
+          Promise.resolve({
+            startAsync: () => {
+              if (startShouldThrow) {
+                return Promise.reject(new Error("Connection refused"));
+              }
+              return Promise.resolve(mockStartResult);
+            },
+            resumeAsync: () => {
+              const result = mockResumeResults[resumeCallCount] ?? {
+                status: "success",
+              };
+              resumeCallCount += 1;
+              return Promise.resolve(result);
+            },
+          }),
+      };
+    }
+  },
+}));
+
+const { runWizard } = await import("../../src/lib/init/wizard-runner.js");
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -79,93 +114,29 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   };
 }
 
-beforeEach(() => {
-  // Reset workflow state
+function resetAllMocks() {
+  spinnerMock.start.mockClear();
+  spinnerMock.stop.mockClear();
+  spinnerMock.message.mockClear();
+  introMock.mockClear();
+  logMock.info.mockClear();
+  logMock.warn.mockClear();
+  logMock.error.mockClear();
+  cancelMock.mockClear();
+  mockHandleLocalOp.mockClear();
+  mockHandleInteractive.mockClear();
+  mockFormatResult.mockClear();
+  mockFormatError.mockClear();
+
   mockStartResult = { status: "success" };
   mockResumeResults = [];
   resumeCallCount = 0;
   startShouldThrow = false;
-
-  // Clack spies
-  spinnerMock.start.mockClear();
-  spinnerMock.stop.mockClear();
-  spinnerMock.message.mockClear();
-
-  spinnerSpy = spyOn(clack, "spinner").mockReturnValue(spinnerMock as any);
-  introSpy = spyOn(clack, "intro").mockImplementation(noop);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-
-  // Handler spies
-  handleLocalOpSpy = spyOn(localOpsModule, "handleLocalOp").mockImplementation(
-    () => Promise.resolve({ ok: true, data: { results: [] } }) as any
-  );
-  handleInteractiveSpy = spyOn(
-    interactiveModule,
-    "handleInteractive"
-  ).mockImplementation(() => Promise.resolve({ action: "continue" }) as any);
-
-  // Formatter spies
-  formatResultSpy = spyOn(formattersModule, "formatResult").mockImplementation(
-    noop
-  );
-  formatErrorSpy = spyOn(formattersModule, "formatError").mockImplementation(
-    noop
-  );
-
-  // Auth & help spies
-  getAuthTokenSpy = spyOn(authModule, "getAuthToken").mockReturnValue(
-    "fake-token" as any
-  );
-  formatBannerSpy = spyOn(helpModule, "formatBanner").mockReturnValue(
-    "BANNER" as any
-  );
-
-  // MastraClient spy — mockImplementation returns an object, so `new` uses it
-  mastraClientSpy = spyOn(mastraModule, "MastraClient").mockImplementation(
-    () =>
-      ({
-        getWorkflow: () => ({
-          createRun: () =>
-            Promise.resolve({
-              startAsync: () => {
-                if (startShouldThrow) {
-                  return Promise.reject(new Error("Connection refused"));
-                }
-                return Promise.resolve(mockStartResult);
-              },
-              resumeAsync: () => {
-                const result = mockResumeResults[resumeCallCount] ?? {
-                  status: "success",
-                };
-                resumeCallCount += 1;
-                return Promise.resolve(result);
-              },
-            }),
-        }),
-      }) as any
-  );
-});
-
-afterEach(() => {
-  spinnerSpy.mockRestore();
-  introSpy.mockRestore();
-  logInfoSpy.mockRestore();
-  logWarnSpy.mockRestore();
-  logErrorSpy.mockRestore();
-  cancelSpy.mockRestore();
-  handleLocalOpSpy.mockRestore();
-  handleInteractiveSpy.mockRestore();
-  formatResultSpy.mockRestore();
-  formatErrorSpy.mockRestore();
-  getAuthTokenSpy.mockRestore();
-  formatBannerSpy.mockRestore();
-  mastraClientSpy.mockRestore();
-});
+}
 
 describe("runWizard", () => {
+  beforeEach(resetAllMocks);
+
   describe("TTY check", () => {
     test("writes error to stderr when not TTY and not --yes", async () => {
       const origIsTTY = process.stdin.isTTY;
@@ -199,8 +170,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(formatResultSpy).toHaveBeenCalled();
-      expect(formatErrorSpy).not.toHaveBeenCalled();
+      expect(mockFormatResult).toHaveBeenCalled();
+      expect(mockFormatError).not.toHaveBeenCalled();
     });
   });
 
@@ -210,8 +181,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(formatErrorSpy).toHaveBeenCalled();
-      expect(formatResultSpy).not.toHaveBeenCalled();
+      expect(mockFormatError).toHaveBeenCalled();
+      expect(mockFormatResult).not.toHaveBeenCalled();
     });
 
     test("treats success with exitCode as error", async () => {
@@ -222,7 +193,7 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(formatErrorSpy).toHaveBeenCalled();
+      expect(mockFormatError).toHaveBeenCalled();
     });
 
     test("handles connection error gracefully", async () => {
@@ -230,8 +201,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(logErrorSpy).toHaveBeenCalledWith("Connection refused");
-      expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+      expect(logMock.error).toHaveBeenCalledWith("Connection refused");
+      expect(cancelMock).toHaveBeenCalledWith("Setup failed");
     });
   });
 
@@ -255,8 +226,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(handleLocalOpSpy).toHaveBeenCalled();
-      const payload = handleLocalOpSpy.mock.calls[0][0] as {
+      expect(mockHandleLocalOp).toHaveBeenCalled();
+      const payload = mockHandleLocalOp.mock.calls[0][0] as {
         type: string;
         operation: string;
       };
@@ -283,8 +254,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(handleInteractiveSpy).toHaveBeenCalled();
-      const payload = handleInteractiveSpy.mock.calls[0][0] as {
+      expect(mockHandleInteractive).toHaveBeenCalled();
+      const payload = mockHandleInteractive.mock.calls[0][0] as {
         type: string;
         kind: string;
       };
@@ -308,7 +279,7 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(handleLocalOpSpy).toHaveBeenCalled();
+      expect(mockHandleLocalOp).toHaveBeenCalled();
     });
 
     test("auto-continues verify-changes in dry-run mode", async () => {
@@ -330,7 +301,7 @@ describe("runWizard", () => {
       await runWizard(makeOptions({ dryRun: true }));
 
       // handleInteractive should NOT be called — dry-run auto-continues
-      expect(handleInteractiveSpy).not.toHaveBeenCalled();
+      expect(mockHandleInteractive).not.toHaveBeenCalled();
     });
 
     test("handles unknown suspend payload type", async () => {
@@ -346,8 +317,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(logErrorSpy).toHaveBeenCalled();
-      const errorMsg: string = logErrorSpy.mock.calls[0][0];
+      expect(logMock.error).toHaveBeenCalled();
+      const errorMsg: string = logMock.error.mock.calls[0][0];
       expect(errorMsg).toContain("alien");
     });
 
@@ -387,13 +358,13 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(handleLocalOpSpy).toHaveBeenCalledTimes(1);
-      expect(handleInteractiveSpy).toHaveBeenCalledTimes(1);
-      expect(formatResultSpy).toHaveBeenCalled();
+      expect(mockHandleLocalOp).toHaveBeenCalledTimes(1);
+      expect(mockHandleInteractive).toHaveBeenCalledTimes(1);
+      expect(mockFormatResult).toHaveBeenCalled();
     });
 
     test("handles non-Error exception in catch block", async () => {
-      handleLocalOpSpy.mockImplementationOnce(() =>
+      mockHandleLocalOp.mockImplementationOnce(() =>
         Promise.reject("string error")
       );
 
@@ -414,8 +385,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(logErrorSpy).toHaveBeenCalledWith("string error");
-      expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+      expect(logMock.error).toHaveBeenCalledWith("string error");
+      expect(cancelMock).toHaveBeenCalledWith("Setup failed");
     });
 
     test("falls back to iterating steps when stepId key not found", async () => {
@@ -438,7 +409,7 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(handleLocalOpSpy).toHaveBeenCalled();
+      expect(mockHandleLocalOp).toHaveBeenCalled();
     });
 
     test("handles missing suspend payload", async () => {
@@ -450,8 +421,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions());
 
-      expect(logErrorSpy).toHaveBeenCalled();
-      const errorMsg: string = logErrorSpy.mock.calls[0][0];
+      expect(logMock.error).toHaveBeenCalled();
+      const errorMsg: string = logMock.error.mock.calls[0][0];
       expect(errorMsg).toContain("No suspend payload");
     });
   });
@@ -462,8 +433,8 @@ describe("runWizard", () => {
 
       await runWizard(makeOptions({ dryRun: true }));
 
-      expect(logWarnSpy).toHaveBeenCalled();
-      const warnMsg: string = logWarnSpy.mock.calls[0][0];
+      expect(logMock.warn).toHaveBeenCalled();
+      const warnMsg: string = logMock.warn.mock.calls[0][0];
       expect(warnMsg).toContain("Dry-run");
     });
   });
