@@ -237,8 +237,11 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
         // Read only up to maxBytes
         const buffer = Buffer.alloc(maxBytes);
         const fd = fs.openSync(absPath, "r");
-        fs.readSync(fd, buffer, 0, maxBytes, 0);
-        fs.closeSync(fd);
+        try {
+          fs.readSync(fd, buffer, 0, maxBytes, 0);
+        } finally {
+          fs.closeSync(fd);
+        }
         files[filePath] = buffer.toString("utf-8");
       } else {
         files[filePath] = fs.readFileSync(absPath, "utf-8");
