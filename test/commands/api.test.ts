@@ -1304,6 +1304,17 @@ describe("extractJsonBody", () => {
     expect(result.remaining).toEqual(["extra=field", "other=value"]);
   });
 
+  test("does NOT extract JSON primitives — they stay in remaining (no TypeError risk)", () => {
+    const stderr = createMockWriter();
+    // Primitives like numbers, booleans, strings are valid JSON but cannot be
+    // used with the 'in' operator, which would throw a TypeError downstream.
+    expect(extractJsonBody(["42"], stderr).body).toBeUndefined();
+    expect(extractJsonBody(["true"], stderr).body).toBeUndefined();
+    expect(extractJsonBody(['"hello"'], stderr).body).toBeUndefined();
+    expect(extractJsonBody(["null"], stderr).body).toBeUndefined();
+    expect(stderr.output).toBe("");
+  });
+
   test("leaves invalid JSON-looking fields in remaining", () => {
     const stderr = createMockWriter();
     const result = extractJsonBody(["{not-valid-json}"], stderr);

@@ -627,30 +627,42 @@ export function parseDataBody(
 }
 
 /**
- * Try to parse a single field as a bare JSON body.  Returns the parsed value
- * if the field has no `=` and is valid JSON starting with `{` or `[`;
- * otherwise returns `undefined`.
+ * Try to parse a single field as a bare JSON **object or array** body.
+ *
+ * The `startsWith` guard is intentional — not just an optimisation.  It
+ * restricts detection to objects (`{`) and arrays (`[`), excluding JSON
+ * primitives like `42`, `true`, `"string"`.  Without this guard those
+ * primitives would be extracted as the body, and downstream code (e.g. the
+ * `k in body` key-conflict check) would throw a `TypeError` because the `in`
+ * operator requires an object on the right-hand side.
+ *
  * @internal
  */
-function tryParseJsonField(field: string): unknown | undefined {
+function tryParseJsonField(
+  field: string
+): Record<string, unknown> | unknown[] | undefined {
   if (field.includes("=")) {
+    return;
+  }
+  if (!(field.startsWith("{") || field.startsWith("["))) {
     return;
   }
 
   try {
-    return JSON.parse(field);
+    return JSON.parse(field) as Record<string, unknown> | unknown[];
   } catch {
     return;
   }
 }
 
 /**
- * Scan a field list for bare JSON values (no `=`) and extract the first one
- * as the intended request body.  This handles the common mistake of passing
- * `-f '{"status":"ignored"}'` instead of `-d '{"status":"ignored"}'`.
+ * Scan a field list for bare JSON **object or array** values (no `=`) and
+ * extract the first one as the intended request body.  This handles the
+ * common mistake of passing `-f '{"status":"ignored"}'` instead of
+ * `-d '{"status":"ignored"}'`.
  *
- * Detection is conservative: the field must have no `=` and parse as valid
- * JSON.  Only one JSON body is allowed — multiple
+ * Detection is conservative: the field must have no `=`, start with `{` or
+ * `[`, and parse as valid JSON.  Only one JSON body is allowed — multiple
  * JSON fields are ambiguous and produce a {@link ValidationError}.
  *
  * @returns An object with the extracted `body` (if any) and the `remaining`
@@ -685,7 +697,7 @@ export function extractJsonBody(
       );
     }
 
-    jsonBody = parsed as Record<string, unknown> | unknown[];
+    jsonBody = parsed;
     const preview = field.length > 60 ? `${field.substring(0, 57)}...` : field;
     stderr.write(
       `hint: '${preview}' was used as the request body. ` +
