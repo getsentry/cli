@@ -18,7 +18,12 @@ import {
 import { createCommand } from "../../../src/commands/project/create.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ApiError, CliError, ContextError, ResolutionError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  CliError,
+  ContextError,
+  ResolutionError,
+} from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
