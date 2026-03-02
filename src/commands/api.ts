@@ -636,9 +636,6 @@ function tryParseJsonField(field: string): unknown | undefined {
   if (field.includes("=")) {
     return;
   }
-  if (!(field.startsWith("{") || field.startsWith("["))) {
-    return;
-  }
 
   try {
     return JSON.parse(field);
@@ -652,8 +649,8 @@ function tryParseJsonField(field: string): unknown | undefined {
  * as the intended request body.  This handles the common mistake of passing
  * `-f '{"status":"ignored"}'` instead of `-d '{"status":"ignored"}'`.
  *
- * Detection is conservative: the field must have no `=`, start with `{` or
- * `[`, *and* parse as valid JSON.  Only one JSON body is allowed — multiple
+ * Detection is conservative: the field must have no `=` and parse as valid
+ * JSON.  Only one JSON body is allowed — multiple
  * JSON fields are ambiguous and produce a {@link ValidationError}.
  *
  * @returns An object with the extracted `body` (if any) and the `remaining`
@@ -889,10 +886,14 @@ export function buildFromFields(
   let rawField = normalizeFields(flags["raw-field"], stderr);
 
   // Auto-detect bare JSON passed as a field value (common mistake).
-  // Extract it as the body and hint about --data/-d for next time.
-  const extracted = extractJsonBody(rawField, stderr);
-  let body: Record<string, unknown> | unknown[] | undefined = extracted.body;
-  rawField = extracted.remaining;
+  // GET requests don't have a body — skip detection so JSON-shaped values
+  // fall through to query-param routing (which will throw a clear error).
+  let body: Record<string, unknown> | unknown[] | undefined;
+  if (method !== "GET") {
+    const extracted = extractJsonBody(rawField, stderr);
+    body = extracted.body;
+    rawField = extracted.remaining;
+  }
 
   // Route remaining fields to body (merge) or params based on HTTP method
   const options = prepareRequestOptions(method, field, rawField);
@@ -905,10 +906,25 @@ export function buildFromFields(
         "field"
       );
     }
+    if (body) {
+      // Detect top-level key conflicts before merging — a shallow spread would
+      // silently drop nested fields from the JSON body (e.g. statusDetails.ignoreCount
+      // overwritten by statusDetails[minCount]=5).
+      const conflicts = Object.keys(options.body).filter(
+        (k) => k in (body as Record<string, unknown>)
+      );
+      if (conflicts.length > 0) {
+        throw new ValidationError(
+          `Field flag(s) conflict with detected JSON body at key(s): ${conflicts.join(", ")}. ` +
+            "Use --data/-d to pass the full JSON body, or use only field flags (-F/-f).",
+          "field"
+        );
+      }
+    }
     // Merge field-built key=value entries into the auto-detected JSON object body
     body =
       body && typeof body === "object"
-        ? { ...body, ...options.body }
+        ? { ...(body as Record<string, unknown>), ...options.body }
         : options.body;
   }
 

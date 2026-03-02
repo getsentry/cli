@@ -1416,4 +1416,53 @@ describe("buildFromFields", () => {
       )
     ).toThrow(/Cannot combine a JSON array/);
   });
+
+  test("does NOT extract JSON body for GET — falls through to query-param routing (which throws)", () => {
+    const stderr = createMockWriter();
+    // GET with a bare JSON field: no body extracted, falls to buildRawQueryParams
+    // which throws "Invalid field format" since there is no '='
+    expect(() =>
+      buildFromFields("GET", { "raw-field": ['{"status":"ignored"}'] }, stderr)
+    ).toThrow(ValidationError);
+    // No hint should have been emitted (JSON extraction was skipped for GET)
+    expect(stderr.output).toBe("");
+  });
+
+  test("throws ValidationError when field flags conflict with JSON body at same top-level key", () => {
+    const stderr = createMockWriter();
+    expect(() =>
+      buildFromFields(
+        "PUT",
+        {
+          "raw-field": [
+            '{"status":"ignored","statusDetails":{"ignoreCount":1}}',
+          ],
+          field: ["statusDetails[minCount]=5"],
+        },
+        stderr
+      )
+    ).toThrow(ValidationError);
+    expect(() =>
+      buildFromFields(
+        "PUT",
+        {
+          "raw-field": [
+            '{"status":"ignored","statusDetails":{"ignoreCount":1}}',
+          ],
+          field: ["statusDetails[minCount]=5"],
+        },
+        stderr
+      )
+    ).toThrow(/conflict/i);
+  });
+
+  test("non-conflicting keys from JSON body and field flags merge cleanly", () => {
+    const stderr = createMockWriter();
+    const result = buildFromFields(
+      "PUT",
+      { "raw-field": ['{"status":"ignored"}'], field: ["assignee=me"] },
+      stderr
+    );
+    expect(result.body).toEqual({ status: "ignored", assignee: "me" });
+  });
 });
