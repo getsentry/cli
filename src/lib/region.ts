@@ -6,7 +6,7 @@
  */
 
 import { retrieveAnOrganization } from "@sentry/api";
-import { getOrgRegion, setOrgRegion } from "./db/regions.js";
+import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { AuthError } from "./errors.js";
 import { getSdkConfig } from "./sentry-client.js";
@@ -81,37 +81,59 @@ export function isMultiRegionEnabled(): boolean {
 }
 
 /**
- * Resolve the effective org slug for API calls, with DSN prefix fallback.
+ * Try to resolve a DSN-style org identifier using the local org cache.
+ *
+ * Strips the DSN `o` prefix and looks up the numeric ID in the org_regions
+ * table. Returns the cached slug if found, or `undefined` to signal that
+ * the input isn't a DSN-style identifier or isn't in the cache.
+ */
+async function lookupDsnOrgInCache(
+  orgSlug: string
+): Promise<string | undefined> {
+  const numericId = stripDsnOrgPrefix(orgSlug);
+  if (numericId === orgSlug) {
+    return;
+  }
+  const match = await getOrgByNumericId(numericId);
+  return match?.slug;
+}
+
+/**
+ * Resolve the effective org slug for API calls, with offline cache fallback.
  *
  * When users or AI agents extract org identifiers from DSN hosts
  * (e.g., `o1081365` from `o1081365.ingest.us.sentry.io`), the `o`-prefixed
- * form isn't recognized by the Sentry API. This function validates the org
- * via region resolution and falls back to stripping the DSN prefix only
- * when the original identifier fails.
+ * form isn't recognized by the Sentry API. This function resolves the
+ * identifier using the locally cached org list:
  *
- * The fallback triggers only when:
- * 1. The org wasn't previously cached (first-time resolution)
- * 2. Region resolution didn't cache a result (API didn't recognize the org)
- * 3. The org matches the DSN `oNNNNN` pattern
- *
- * `resolveOrgRegion` caches on success but not on failure — this is the
- * signal used to detect that an org wasn't found.
+ * 1. Check if the slug is already cached → return as-is
+ * 2. If it looks like a DSN identifier (`oNNNNN`), look up the numeric ID
+ *    in the org cache → return the matching slug
+ * 3. If cache miss, refresh the org list from the API (one fan-out call)
+ *    and retry both lookups
+ * 4. Fall back to returning the original slug for downstream error handling
  *
  * @param orgSlug - Raw org identifier from user input
  * @returns The org slug to use for API calls (may be normalized)
  */
 export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
-  // Fast path: already cached from a previous successful resolution
+  // Fast path: slug is already known
   const cached = await getOrgRegion(orgSlug);
   if (cached) {
     return orgSlug;
   }
 
-  // Attempt to resolve — resolveOrgRegion caches on success, not on failure.
-  // Auth errors mean we can't validate — return as-is and let downstream
-  // API calls produce the proper auth error with context.
+  // Offline lookup: try as a DSN-style numeric ID
+  const cachedSlug = await lookupDsnOrgInCache(orgSlug);
+  if (cachedSlug) {
+    return cachedSlug;
+  }
+
+  // Cache is cold or identifier is unknown — refresh the org list.
+  // listOrganizations() populates org_regions with slug, region, and org_id.
   try {
-    await resolveOrgRegion(orgSlug);
+    const { listOrganizations } = await import("./api-client.js");
+    await listOrganizations();
   } catch (error) {
     if (error instanceof AuthError) {
       return orgSlug;
@@ -119,34 +141,16 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
     throw error;
   }
 
-  // Check if the resolution succeeded (was it cached?)
-  const afterResolve = await getOrgRegion(orgSlug);
-  if (afterResolve) {
+  // Retry: check if slug is now cached
+  const afterRefresh = await getOrgRegion(orgSlug);
+  if (afterRefresh) {
     return orgSlug;
   }
 
-  // Resolution failed — try DSN prefix stripping as fallback
-  const stripped = stripDsnOrgPrefix(orgSlug);
-  if (stripped === orgSlug) {
-    // Not a DSN-style identifier — return as-is, let downstream fail naturally
-    return orgSlug;
-  }
-
-  // Try the stripped version
-  try {
-    await resolveOrgRegion(stripped);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      return orgSlug;
-    }
-    throw error;
-  }
-
-  const strippedCached = await getOrgRegion(stripped);
-  if (strippedCached) {
-    // Cache under original key too so future calls are instant
-    await setOrgRegion(orgSlug, strippedCached);
-    return stripped;
+  // Retry: check numeric ID after refresh
+  const refreshedSlug = await lookupDsnOrgInCache(orgSlug);
+  if (refreshedSlug) {
+    return refreshedSlug;
   }
 
   // Neither worked — return original, let downstream produce the error

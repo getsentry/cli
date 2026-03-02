@@ -628,10 +628,11 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   const flatResults = results.flat();
   const orgs = flatResults.map((r) => r.org);
 
-  const regionEntries: [string, string][] = flatResults.map((r) => [
-    r.org.slug,
-    r.regionUrl,
-  ]);
+  const regionEntries = flatResults.map((r) => ({
+    slug: r.org.slug,
+    regionUrl: r.regionUrl,
+    orgId: r.org.id,
+  }));
   await setOrgRegions(regionEntries);
 
   return orgs;
