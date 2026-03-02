@@ -47,14 +47,15 @@ import {
 import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
-/** Convert a string or numeric ID to a number, or `undefined` if falsy/NaN. */
+/** Convert a string or numeric ID to a positive number, or `undefined` if invalid. */
 export function toNumericId(
   id: string | number | undefined
 ): number | undefined {
-  if (id === null) {
+  if (id === undefined || id === null) {
     return;
   }
-  return Number(id) || undefined;
+  const n = Number(id);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /**
@@ -600,13 +601,11 @@ export async function resolveAllTargets(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    const projectId = await fetchProjectId(org, project);
     return {
       targets: [
         {
           org,
           project,
-          projectId,
           orgDisplay: org,
           projectDisplay: project,
         },
@@ -726,11 +725,9 @@ export async function resolveOrgAndProject(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    const projectId = await fetchProjectId(org, project);
     return {
       org,
       project,
-      projectId,
       orgDisplay: org,
       projectDisplay: project,
     };

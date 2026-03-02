@@ -143,6 +143,17 @@ describe("toNumericId", () => {
   test("returns undefined for non-numeric string", () => {
     expect(toNumericId("abc")).toBeUndefined();
   });
+
+  test("returns undefined for negative numbers", () => {
+    expect(toNumericId(-1)).toBeUndefined();
+    expect(toNumericId("-5")).toBeUndefined();
+  });
+
+  test("returns undefined for Infinity", () => {
+    expect(toNumericId(Number.POSITIVE_INFINITY)).toBeUndefined();
+    expect(toNumericId(Number.NEGATIVE_INFINITY)).toBeUndefined();
+    expect(toNumericId("Infinity")).toBeUndefined();
+  });
 });
 
 // ============================================================================
@@ -222,22 +233,6 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
 
-    await setAuthToken("test-token");
-    await setOrgRegion("flag-org", DEFAULT_SENTRY_URL);
-    globalThis.fetch = mockFetch(async (input, init) => {
-      const req = new Request(input, init);
-      if (req.url.includes("/api/0/projects/flag-org/flag-project/")) {
-        return Response.json({
-          id: "123",
-          slug: "flag-project",
-          name: "Flag Project",
-        });
-      }
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    });
-
     const result = await resolveOrgAndProject({
       org: "flag-org",
       project: "flag-project",
@@ -245,6 +240,8 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
     });
     expect(result?.org).toBe("flag-org");
     expect(result?.project).toBe("flag-project");
+    // Explicit path no longer fetches projectId
+    expect(result?.projectId).toBeUndefined();
   });
 
   test("resolveOrgAndProject: ignores empty/whitespace-only values", async () => {
@@ -304,28 +301,15 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
 
-    await setAuthToken("test-token");
-    await setOrgRegion("flag-org", DEFAULT_SENTRY_URL);
-    globalThis.fetch = mockFetch(async (input, init) => {
-      const req = new Request(input, init);
-      if (req.url.includes("/api/0/projects/flag-org/flag-project/")) {
-        return Response.json({
-          id: "123",
-          slug: "flag-project",
-          name: "Flag Project",
-        });
-      }
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
-      });
-    });
-
     const result = await resolveAllTargets({
       org: "flag-org",
       project: "flag-project",
       cwd: "/tmp",
     });
     expect(result.targets[0]?.org).toBe("flag-org");
+    expect(result.targets[0]?.project).toBe("flag-project");
+    // Explicit path no longer fetches projectId
+    expect(result.targets[0]?.projectId).toBeUndefined();
   });
 
   // --- resolveOrgsForListing ---

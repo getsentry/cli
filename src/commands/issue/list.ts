@@ -284,9 +284,19 @@ async function resolveTargetsFromParsedArg(
   cwd: string
 ): Promise<TargetResolutionResult> {
   switch (parsed.type) {
-    case "auto-detect":
+    case "auto-detect": {
       // Use existing resolution logic (DSN detection, config defaults)
-      return resolveAllTargets({ cwd, usageHint: USAGE_HINT });
+      const result = await resolveAllTargets({ cwd, usageHint: USAGE_HINT });
+      // Enrich targets missing projectId (env var / config default paths)
+      await Promise.all(
+        result.targets.map(async (target) => {
+          if (!target.projectId) {
+            target.projectId = await fetchProjectId(target.org, target.project);
+          }
+        })
+      );
+      return result;
+    }
 
     case "explicit": {
       // Single explicit target — fetch project ID for API query param
