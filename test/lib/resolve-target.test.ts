@@ -11,12 +11,15 @@ import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
+import { AuthError, ResolutionError } from "../../src/lib/errors.js";
 import {
+  fetchProjectId,
   isValidDirNameForInference,
   resolveAllTargets,
   resolveOrg,
   resolveOrgAndProject,
   resolveOrgsForListing,
+  toNumericId,
 } from "../../src/lib/resolve-target.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
 
@@ -101,6 +104,44 @@ describe("isValidDirNameForInference edge cases", () => {
     expect(isValidDirNameForInference("ab")).toBe(true);
     expect(isValidDirNameForInference("a1")).toBe(true);
     expect(isValidDirNameForInference("--")).toBe(true);
+  });
+});
+
+// ============================================================================
+// toNumericId — pure function for ID coercion
+// ============================================================================
+
+describe("toNumericId", () => {
+  test("returns undefined for undefined", () => {
+    expect(toNumericId(undefined)).toBeUndefined();
+  });
+
+  test("returns undefined for null (cast)", () => {
+    expect(toNumericId(null as unknown as undefined)).toBeUndefined();
+  });
+
+  test("converts string number to number", () => {
+    expect(toNumericId("123")).toBe(123);
+  });
+
+  test("returns number as-is", () => {
+    expect(toNumericId(123)).toBe(123);
+  });
+
+  test("returns undefined for string '0' (falsy)", () => {
+    expect(toNumericId("0")).toBeUndefined();
+  });
+
+  test("returns undefined for numeric 0 (falsy)", () => {
+    expect(toNumericId(0)).toBeUndefined();
+  });
+
+  test("returns undefined for empty string", () => {
+    expect(toNumericId("")).toBeUndefined();
+  });
+
+  test("returns undefined for non-numeric string", () => {
+    expect(toNumericId("abc")).toBeUndefined();
   });
 });
 
@@ -293,5 +334,76 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
     process.env.SENTRY_ORG = "env-org";
     const result = await resolveOrgsForListing(undefined, "/tmp");
     expect(result.orgs).toContain("env-org");
+  });
+});
+
+// ============================================================================
+// fetchProjectId — async project ID lookup with error handling
+// ============================================================================
+
+describe("fetchProjectId", () => {
+  useTestConfigDir("test-fetchProjectId-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns numeric project ID on success", async () => {
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
+        return Response.json({ id: "456", slug: "test-project" });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const result = await fetchProjectId("test-org", "test-project");
+    expect(result).toBe(456);
+  });
+
+  test("throws ResolutionError on 404", async () => {
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        })
+    );
+
+    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+      ResolutionError
+    );
+  });
+
+  test("rethrows AuthError when not authenticated", async () => {
+    // No auth token set — refreshToken() will throw AuthError
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+      AuthError
+    );
+  });
+
+  test("returns undefined on transient server error", async () => {
+    await setAuthToken("test-token");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Internal error" }), {
+          status: 500,
+        })
+    );
+
+    const result = await fetchProjectId("test-org", "test-project");
+    expect(result).toBeUndefined();
   });
 });

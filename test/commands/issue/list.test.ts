@@ -297,6 +297,7 @@ describe("issue list: partial failure handling", () => {
     expect(output.data.length).toBe(1);
     expect(output.errors.length).toBe(1);
     expect(output.errors[0].status).toBe(400);
+    expect(output.errors[0].project).toBe("org-two/myproj");
   });
 
   test("stderr warning on partial failures in human output", async () => {
