@@ -326,7 +326,7 @@ function renderOneInline(token: Token): string {
       // Detect autolinks via link.raw (starts with URL, not "[") and strip artifacts.
       const raw = link.raw ?? "";
       if (raw.startsWith("http://") || raw.startsWith("https://")) {
-        const stripEscapes = (s: string) => s.replace(/\\([_*`[<>\\])/g, "$1");
+        const stripEscapes = (s: string) => s.replace(/\\([_*`[\]<>\\])/g, "$1");
         linkText = stripEscapes(linkText);
         href = stripEscapes(href);
       }
