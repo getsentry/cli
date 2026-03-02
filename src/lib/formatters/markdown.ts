@@ -326,10 +326,9 @@ function renderOneInline(token: Token): string {
       // Detect autolinks via link.raw (starts with URL, not "[") and strip artifacts.
       const raw = link.raw ?? "";
       if (raw.startsWith("http://") || raw.startsWith("https://")) {
-        const unescape = (s: string) =>
-          s.replace(/\\([_*`\[\]<>\\])/g, "$1");
-        linkText = unescape(linkText);
-        href = unescape(href);
+        const stripEscapes = (s: string) => s.replace(/\\([_*`[<>\\])/g, "$1");
+        linkText = stripEscapes(linkText);
+        href = stripEscapes(href);
       }
       const styled = chalk.hex(COLORS.blue)(linkText);
       return href ? terminalLink(styled, href) : styled;
