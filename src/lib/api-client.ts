@@ -1050,12 +1050,17 @@ export async function listIssuesPaginated(
     perPage?: number;
     sort?: IssueSort;
     statsPeriod?: string;
+    /** Numeric project ID. When provided, uses the `project` query param
+     *  instead of `project:<slug>` search syntax, avoiding "not actively
+     *  selected" errors. */
+    projectId?: number;
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
-  // Only add project filter when projectSlug is non-empty; an empty slug would
-  // produce "project:" (a truthy string that .filter(Boolean) won't remove),
-  // sending a malformed query to the API for org-wide listing.
-  const projectFilter = projectSlug ? `project:${projectSlug}` : "";
+  // When we have a numeric project ID, use the `project` query param (Array<number>)
+  // instead of `project:<slug>` in the search query. The API's `project` param
+  // selects the project directly, bypassing the "actively selected" requirement.
+  const projectFilter =
+    options.projectId ? "" : projectSlug ? `project:${projectSlug}` : "";
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   const config = await getOrgSdkConfig(orgSlug);
@@ -1064,6 +1069,7 @@ export async function listIssuesPaginated(
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
+      project: options.projectId ? [options.projectId] : undefined,
       // Convert empty string to undefined so the SDK omits the param entirely;
       // sending `query=` causes the Sentry API to behave differently than
       // omitting the parameter.
@@ -1116,6 +1122,8 @@ export async function listIssuesAllPages(
     limit: number;
     sort?: IssueSort;
     statsPeriod?: string;
+    /** Numeric project ID for direct project selection via query param. */
+    projectId?: number;
     /** Resume pagination from this cursor instead of starting from the beginning. */
     startCursor?: string;
     /** Called after each page is fetched. Useful for progress indicators. */
@@ -1141,6 +1149,7 @@ export async function listIssuesAllPages(
       perPage,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
+      projectId: options.projectId,
     });
 
     allResults.push(...response.data);

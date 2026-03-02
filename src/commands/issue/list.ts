@@ -10,6 +10,7 @@ import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
   findProjectsBySlug,
+  getProject,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
@@ -286,18 +287,27 @@ async function resolveTargetsFromParsedArg(
       // Use existing resolution logic (DSN detection, config defaults)
       return resolveAllTargets({ cwd, usageHint: USAGE_HINT });
 
-    case "explicit":
-      // Single explicit target
+    case "explicit": {
+      // Single explicit target — fetch project ID for API query param
+      let projectId: number | undefined;
+      try {
+        const projectInfo = await getProject(parsed.org, parsed.project);
+        projectId = Number(projectInfo.id) || undefined;
+      } catch {
+        // Proceed without numeric ID on failure
+      }
       return {
         targets: [
           {
             org: parsed.org,
             project: parsed.project,
+            projectId,
             orgDisplay: parsed.org,
             projectDisplay: parsed.project,
           },
         ],
       };
+    }
 
     case "org-all": {
       // List all projects in the specified org
@@ -305,6 +315,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = projects.map((p) => ({
         org: parsed.org,
         project: p.slug,
+        projectId: Number(p.id) || undefined,
         orgDisplay: parsed.org,
         projectDisplay: p.name,
       }));
@@ -341,6 +352,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = matches.map((m) => ({
         org: m.orgSlug,
         project: m.slug,
+        projectId: Number(m.id) || undefined,
         orgDisplay: m.orgSlug,
         projectDisplay: m.name,
       }));
@@ -386,7 +398,7 @@ async function fetchIssuesForTarget(
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
-      options
+      { ...options, projectId: target.projectId }
     );
     return {
       success: true,

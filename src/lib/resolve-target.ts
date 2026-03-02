@@ -54,6 +54,8 @@ export type ResolvedTarget = {
   org: string;
   /** Project slug for API calls */
   project: string;
+  /** Numeric project ID for API query params (avoids "not actively selected" errors) */
+  projectId?: number;
   /** Human-readable org name (falls back to slug) */
   orgDisplay: string;
   /** Human-readable project name (falls back to slug) */
@@ -135,6 +137,7 @@ export async function resolveFromDsn(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: cached.projectId ? Number(cached.projectId) : undefined,
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -143,6 +146,7 @@ export async function resolveFromDsn(
 
   // Cache miss — fetch project details and cache them
   const projectInfo = await getProject(dsn.orgId, dsn.projectId);
+  const numericProjectId = Number(projectInfo.id) || undefined;
 
   if (projectInfo.organization) {
     await setCachedProject(dsn.orgId, dsn.projectId, {
@@ -150,11 +154,13 @@ export async function resolveFromDsn(
       orgName: projectInfo.organization.name,
       projectSlug: projectInfo.slug,
       projectName: projectInfo.name,
+      projectId: projectInfo.id,
     });
 
     return {
       org: projectInfo.organization.slug,
       project: projectInfo.slug,
+      projectId: numericProjectId,
       orgDisplay: projectInfo.organization.name,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -165,6 +171,7 @@ export async function resolveFromDsn(
   return {
     org: dsn.orgId,
     project: dsn.projectId,
+    projectId: numericProjectId,
     orgDisplay: dsn.orgId,
     projectDisplay: projectInfo.name,
     detectedFrom,
@@ -223,6 +230,7 @@ async function resolveDsnByPublicKey(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: cached.projectId ? Number(cached.projectId) : undefined,
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -244,11 +252,13 @@ async function resolveDsnByPublicKey(
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
+        projectId: projectInfo.id,
       });
 
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
+        projectId: Number(projectInfo.id) || undefined,
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -294,6 +304,7 @@ async function resolveDsnToTarget(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: cached.projectId ? Number(cached.projectId) : undefined,
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -304,6 +315,7 @@ async function resolveDsnToTarget(
   // Cache miss — fetch project details and cache them
   try {
     const projectInfo = await getProject(dsn.orgId, dsn.projectId);
+    const numericProjectId = Number(projectInfo.id) || undefined;
 
     if (projectInfo.organization) {
       await setCachedProject(dsn.orgId, dsn.projectId, {
@@ -311,11 +323,13 @@ async function resolveDsnToTarget(
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
+        projectId: projectInfo.id,
       });
 
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
+        projectId: numericProjectId,
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -327,6 +341,7 @@ async function resolveDsnToTarget(
     return {
       org: dsn.orgId,
       project: dsn.projectId,
+      projectId: numericProjectId,
       orgDisplay: dsn.orgId,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -456,6 +471,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
   const targets: ResolvedTarget[] = matches.map((m) => ({
     org: m.orgSlug,
     project: m.slug,
+    projectId: Number(m.id) || undefined,
     orgDisplay: m.organization?.name ?? m.orgSlug,
     projectDisplay: m.name,
     detectedFrom,
@@ -543,11 +559,23 @@ export async function resolveAllTargets(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
+    // Fetch project to validate it exists and get the numeric ID.
+    // This is one API call but also catches typos early with a clear error
+    // instead of a confusing "not actively selected" API error later.
+    let projectId: number | undefined;
+    try {
+      const projectInfo = await getProject(org, project);
+      projectId = Number(projectInfo.id) || undefined;
+    } catch {
+      // If the validation call fails (network, permissions), proceed without
+      // the numeric ID — the API will fall back to project:slug behavior.
+    }
     return {
       targets: [
         {
           org,
           project,
+          projectId,
           orgDisplay: org,
           projectDisplay: project,
         },
@@ -667,9 +695,17 @@ export async function resolveOrgAndProject(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
+    let projectId: number | undefined;
+    try {
+      const projectInfo = await getProject(org, project);
+      projectId = Number(projectInfo.id) || undefined;
+    } catch {
+      // Proceed without numeric ID on failure
+    }
     return {
       org,
       project,
+      projectId,
       orgDisplay: org,
       projectDisplay: project,
     };
