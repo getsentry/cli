@@ -1281,7 +1281,7 @@ describe("listIssuesPaginated", () => {
       return new Response(JSON.stringify([]), { status: 200 });
     };
 
-    await listIssuesPaginated("my-org", "my-proj", { projectId: 12345 });
+    await listIssuesPaginated("my-org", "my-proj", { projectId: 12_345 });
 
     const url = new URL(capturedUrl);
     // Should use project=12345 query param
@@ -1331,7 +1331,7 @@ describe("listIssuesPaginated", () => {
     };
 
     await listIssuesPaginated("my-org", "my-proj", {
-      projectId: 12345,
+      projectId: 12_345,
       query: "is:unresolved",
     });
 

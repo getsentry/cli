@@ -536,6 +536,22 @@ function resolveFromEnvVars(): {
 }
 
 /**
+ * Fetch the numeric project ID for an explicit org/project pair.
+ * Returns undefined on any failure (network, permissions, 404).
+ */
+async function fetchProjectId(
+  org: string,
+  project: string
+): Promise<number | undefined> {
+  try {
+    const projectInfo = await getProject(org, project);
+    return Number(projectInfo.id) || undefined;
+  } catch {
+    return;
+  }
+}
+
+/**
  * Resolve all targets for monorepo-aware commands.
  *
  * When multiple DSNs are detected, resolves all of them in parallel
@@ -559,17 +575,7 @@ export async function resolveAllTargets(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    // Fetch project to validate it exists and get the numeric ID.
-    // This is one API call but also catches typos early with a clear error
-    // instead of a confusing "not actively selected" API error later.
-    let projectId: number | undefined;
-    try {
-      const projectInfo = await getProject(org, project);
-      projectId = Number(projectInfo.id) || undefined;
-    } catch {
-      // If the validation call fails (network, permissions), proceed without
-      // the numeric ID — the API will fall back to project:slug behavior.
-    }
+    const projectId = await fetchProjectId(org, project);
     return {
       targets: [
         {
@@ -695,13 +701,7 @@ export async function resolveOrgAndProject(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    let projectId: number | undefined;
-    try {
-      const projectInfo = await getProject(org, project);
-      projectId = Number(projectInfo.id) || undefined;
-    } catch {
-      // Proceed without numeric ID on failure
-    }
+    const projectId = await fetchProjectId(org, project);
     return {
       org,
       project,

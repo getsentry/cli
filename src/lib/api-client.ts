@@ -1059,8 +1059,10 @@ export async function listIssuesPaginated(
   // When we have a numeric project ID, use the `project` query param (Array<number>)
   // instead of `project:<slug>` in the search query. The API's `project` param
   // selects the project directly, bypassing the "actively selected" requirement.
-  const projectFilter =
-    options.projectId ? "" : projectSlug ? `project:${projectSlug}` : "";
+  let projectFilter = "";
+  if (!options.projectId && projectSlug) {
+    projectFilter = `project:${projectSlug}`;
+  }
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   const config = await getOrgSdkConfig(orgSlug);
