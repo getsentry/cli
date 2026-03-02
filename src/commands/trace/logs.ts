@@ -11,7 +11,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
-  formatTraceLogTable,
+  formatLogTable,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -237,7 +237,7 @@ export const logsCommand = buildCommand({
     // API returns newest-first; reverse for chronological display
     const chronological = [...logs].reverse();
 
-    stdout.write(formatTraceLogTable(chronological));
+    stdout.write(formatLogTable(chronological, false));
 
     const hasMore = logs.length >= flags.limit;
     const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;

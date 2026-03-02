@@ -4,11 +4,7 @@
  * Provides formatting utilities for displaying Sentry logs in the CLI.
  */
 
-import type {
-  DetailedSentryLog,
-  SentryLog,
-  TraceLog,
-} from "../../types/index.js";
+import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
 import {
   colorTag,
@@ -41,6 +37,19 @@ const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
 
 /** Column headers for the streaming log table */
 const LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
+
+/**
+ * Minimal log-row shape shared by {@link SentryLog} (Explore/Events) and
+ * trace-log entries (`TraceLog` from the trace-logs endpoint).
+ * Both types carry these three fields with the same semantics.
+ */
+type LogLike = {
+  timestamp: string;
+  severity?: string | null;
+  message?: string | null;
+  /** Present on Explore/Events logs; absent on trace-logs (all rows share one trace). */
+  trace?: string | null;
+};
 
 /**
  * Format severity level with appropriate color tag.
@@ -78,20 +87,28 @@ function formatTimestamp(timestamp: string): string {
 /**
  * Extract cell values for a log row (shared by streaming and batch paths).
  *
- * @param log - The log entry
+ * When `includeTrace` is true (the default), a short trace-ID suffix is
+ * appended to the message cell — useful in Explore/Events lists where rows
+ * may span many traces. Pass `false` when all rows already share the same
+ * trace (e.g., `sentry trace logs`) so the redundant suffix is omitted.
+ *
+ * @param log - The log entry (any {@link LogLike} shape)
  * @param padSeverity - Whether to pad severity to 7 chars for alignment
- * @returns `[timestamp, severity, message]` strings
+ * @param includeTrace - Whether to append a short trace-ID suffix to the message
+ * @returns `[timestamp, severity, message]` markdown-safe cell strings
  */
 export function buildLogRowCells(
-  log: SentryLog,
-  padSeverity = true
+  log: LogLike,
+  padSeverity = true,
+  includeTrace = true
 ): [string, string, string] {
   const timestamp = formatTimestamp(log.timestamp);
   const level = padSeverity
     ? formatSeverity(log.severity)
     : formatSeverityLabel(log.severity);
   const message = escapeMarkdownCell(log.message ?? "");
-  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+  const trace =
+    includeTrace && log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
   return [timestamp, level, `${message}${trace}`];
 }
 
@@ -99,11 +116,12 @@ export function buildLogRowCells(
  * Format a single log entry as a plain markdown table row.
  * Used for non-TTY / piped output where StreamingTable isn't appropriate.
  *
- * @param log - The log entry to format
+ * @param log - The log entry (any {@link LogLike} shape)
+ * @param includeTrace - Whether to append a short trace-ID suffix (default: true)
  * @returns Formatted log line with newline
  */
-export function formatLogRow(log: SentryLog): string {
-  return mdRow(buildLogRowCells(log));
+export function formatLogRow(log: LogLike, includeTrace = true): string {
+  return mdRow(buildLogRowCells(log, true, includeTrace));
 }
 
 /** Hint rows for column width estimation in streaming mode. */
@@ -145,21 +163,28 @@ export function formatLogsHeader(): string {
 /**
  * Build a markdown table for a list of log entries.
  *
+ * Accepts any {@link LogLike} shape — both {@link SentryLog} (Explore/Events)
+ * and trace-log entries. Pass `includeTrace: false` when all rows already share
+ * the same trace (e.g., `sentry trace logs`) to omit the redundant trace suffix.
+ *
  * Pre-rendered ANSI codes in cell values (e.g. colored severity) are preserved.
  *
  * @param logs - Log entries to display
+ * @param includeTrace - Whether to append a short trace-ID suffix (default: true)
  * @returns Rendered terminal string with Unicode-bordered table
  */
-export function formatLogTable(logs: SentryLog[]): string {
+export function formatLogTable(logs: LogLike[], includeTrace = true): string {
   if (isPlainOutput()) {
     const rows = logs
-      .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
+      .map((log) => mdRow(buildLogRowCells(log, false, includeTrace)).trimEnd())
       .join("\n");
     return `${stripColorTags(mdTableHeader(LOG_TABLE_COLS))}\n${rows}\n`;
   }
   const headers = [...LOG_TABLE_COLS];
   const rows = logs.map((log) =>
-    buildLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
+    buildLogRowCells(log, false, includeTrace).map((c) =>
+      renderInlineMarkdown(c)
+    )
   );
   return renderTextTable(headers, rows);
 }
@@ -291,81 +316,4 @@ export function formatLogDetails(
   }
 
   return renderMarkdown(lines.join("\n"));
-}
-
-// Trace-log formatters (for /organizations/{org}/trace-logs/ endpoint)
-
-/** Column headers for the trace-log table — same layout as the regular log table */
-const TRACE_LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
-
-/**
- * Extract cell values for a trace-log row.
- *
- * Identical layout to {@link buildLogRowCells} but operates on {@link TraceLog}
- * (from the trace-logs endpoint) rather than {@link SentryLog} (Explore/Events).
- * The trace ID column is omitted — all rows share the same trace, so it adds
- * no information in this context.
- *
- * @param log - The trace log entry
- * @param padSeverity - Whether to pad severity to 7 chars for column alignment
- * @returns `[timestamp, severity, message]` markdown-safe cell strings
- */
-export function buildTraceLogRowCells(
-  log: TraceLog,
-  padSeverity = true
-): [string, string, string] {
-  const timestamp = formatTimestamp(log.timestamp);
-  const level = padSeverity
-    ? formatSeverity(log.severity)
-    : formatSeverityLabel(log.severity);
-  const message = escapeMarkdownCell(log.message ?? "");
-  return [timestamp, level, message];
-}
-
-/**
- * Format a single trace-log entry as a plain markdown table row.
- * Used for non-TTY / piped output where a batch table isn't appropriate.
- *
- * @param log - The trace log entry to format
- * @returns Formatted markdown row string with newline
- */
-export function formatTraceLogRow(log: TraceLog): string {
-  return mdRow(buildTraceLogRowCells(log));
-}
-
-/**
- * Format column header for trace-logs list in plain (non-TTY) mode.
- *
- * Emits a proper markdown table header + separator row so streamed rows
- * compose into a valid CommonMark document when redirected. In TTY mode,
- * use {@link formatTraceLogTable} instead.
- *
- * @returns Header string (includes trailing newline)
- */
-export function formatTraceLogsHeader(): string {
-  return `${mdTableHeader(TRACE_LOG_TABLE_COLS)}\n`;
-}
-
-/**
- * Build a rendered markdown table for a batch list of trace log entries.
- *
- * Uses {@link buildTraceLogRowCells} so cell formatting stays consistent with
- * the streaming path. In TTY mode renders a Unicode-bordered table; in plain
- * mode emits raw CommonMark rows.
- *
- * @param logs - Trace log entries to display
- * @returns Rendered terminal string with Unicode-bordered table
- */
-export function formatTraceLogTable(logs: TraceLog[]): string {
-  if (isPlainOutput()) {
-    const rows = logs
-      .map((log) => mdRow(buildTraceLogRowCells(log, false)).trimEnd())
-      .join("\n");
-    return `${stripColorTags(mdTableHeader(TRACE_LOG_TABLE_COLS))}\n${rows}\n`;
-  }
-  const headers = [...TRACE_LOG_TABLE_COLS];
-  const rows = logs.map((log) =>
-    buildTraceLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
-  );
-  return renderTextTable(headers, rows);
 }
