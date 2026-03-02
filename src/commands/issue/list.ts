@@ -10,6 +10,7 @@ import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
   findProjectsBySlug,
+  getProject,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
@@ -287,11 +288,22 @@ async function resolveTargetsFromParsedArg(
     case "auto-detect": {
       // Use existing resolution logic (DSN detection, config defaults)
       const result = await resolveAllTargets({ cwd, usageHint: USAGE_HINT });
-      // Enrich targets missing projectId (env var / config default paths)
-      await Promise.all(
-        result.targets.map(async (target) => {
-          if (!target.projectId) {
-            target.projectId = await fetchProjectId(target.org, target.project);
+      // DSN-detected and directory-inferred targets already carry a projectId.
+      // Env var / config-default paths return targets without one, so enrich
+      // them now using the project API. Any failure silently falls back to
+      // slug-based querying — the target was already resolved, so we never
+      // surface a ResolutionError here (that's only for the explicit case).
+      result.targets = await Promise.all(
+        result.targets.map(async (t) => {
+          if (t.projectId !== undefined) {
+            return t;
+          }
+          try {
+            const info = await getProject(t.org, t.project);
+            const id = toNumericId(info.id);
+            return id !== undefined ? { ...t, projectId: id } : t;
+          } catch {
+            return t;
           }
         })
       );

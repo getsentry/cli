@@ -116,8 +116,8 @@ describe("toNumericId", () => {
     expect(toNumericId(undefined)).toBeUndefined();
   });
 
-  test("returns undefined for null (cast)", () => {
-    expect(toNumericId(null as unknown as undefined)).toBeUndefined();
+  test("returns undefined for null", () => {
+    expect(toNumericId(null)).toBeUndefined();
   });
 
   test("converts string number to number", () => {
@@ -128,12 +128,20 @@ describe("toNumericId", () => {
     expect(toNumericId(123)).toBe(123);
   });
 
-  test("returns undefined for string '0' (falsy)", () => {
+  test("returns undefined for string '0' (not a valid Sentry ID)", () => {
     expect(toNumericId("0")).toBeUndefined();
   });
 
-  test("returns undefined for numeric 0 (falsy)", () => {
+  test("returns undefined for numeric 0 (not a valid Sentry ID)", () => {
     expect(toNumericId(0)).toBeUndefined();
+  });
+
+  test("returns undefined for negative numbers (not valid Sentry IDs)", () => {
+    expect(toNumericId(-1)).toBeUndefined();
+  });
+
+  test("returns undefined for non-integer floats", () => {
+    expect(toNumericId(1.5)).toBeUndefined();
   });
 
   test("returns undefined for empty string", () => {
@@ -168,16 +176,12 @@ describe("toNumericId", () => {
 describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => {
   useTestConfigDir("test-resolve-target-");
 
-  let originalFetch: typeof globalThis.fetch;
-
   beforeEach(() => {
-    originalFetch = globalThis.fetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
@@ -232,7 +236,6 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
   test("resolveOrgAndProject: CLI flags override env vars", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
-
     const result = await resolveOrgAndProject({
       org: "flag-org",
       project: "flag-project",
@@ -300,7 +303,6 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
   test("resolveAllTargets: CLI flags override env vars", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
-
     const result = await resolveAllTargets({
       org: "flag-org",
       project: "flag-project",

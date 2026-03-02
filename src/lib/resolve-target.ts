@@ -47,15 +47,21 @@ import {
 import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
-/** Convert a string or numeric ID to a positive number, or `undefined` if invalid. */
+/**
+ * Convert a string or numeric ID to a positive integer, or `undefined` if the
+ * value is absent, non-numeric, or not a positive integer.
+ *
+ * Sentry project/org IDs are always positive integers, so `0` and negative
+ * values are treated as absent rather than valid IDs.
+ */
 export function toNumericId(
-  id: string | number | undefined
+  id: string | number | null | undefined
 ): number | undefined {
-  if (id === undefined || id === null) {
+  if (id === null || id === undefined) {
     return;
   }
   const n = Number(id);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 /**
