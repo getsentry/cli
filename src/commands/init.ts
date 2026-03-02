@@ -79,9 +79,6 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       yes: flags.yes,
       dryRun: flags["dry-run"],
       features: featuresList,
-      stdout: this.stdout,
-      stderr: this.stderr,
-      stdin: this.stdin,
     });
   },
 });

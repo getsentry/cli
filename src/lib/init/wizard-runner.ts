@@ -147,13 +147,14 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
-  const run = await workflow.createRun();
 
   const spin = spinner();
 
+  let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
     spin.start("Connecting to wizard...");
+    run = await workflow.createRun();
     result = (await run.startAsync({
       inputData: { directory, force, yes, dryRun, features },
       tracingOptions,

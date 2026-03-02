@@ -107,9 +107,6 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
     force: false,
     yes: true, // default to --yes to avoid TTY check
     dryRun: false,
-    stdout: { write: () => true },
-    stderr: { write: () => true },
-    stdin: process.stdin,
     ...overrides,
   };
 }
