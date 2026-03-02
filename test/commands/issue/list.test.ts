@@ -90,6 +90,18 @@ function createContext() {
   return { context, stdout, stderr };
 }
 
+/** Return a mock project response if the URL matches the default test project endpoint, or null. */
+function mockDefaultProject(url: string): Response | null {
+  if (url.includes("/api/0/projects/test-org/test-project/")) {
+    return Response.json({
+      id: "789",
+      slug: "test-project",
+      name: "Test Project",
+    });
+  }
+  return null;
+}
+
 /** Build a mock issue response */
 function mockIssue(overrides?: Record<string, unknown>) {
   return {
@@ -114,14 +126,8 @@ describe("issue list: error propagation", () => {
     // listIssues hits: /api/0/organizations/test-org/issues/?query=project:test-project
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      // fetchProjectId enrichment for config-defaults path
-      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
-        return Response.json({
-          id: "789",
-          slug: "test-project",
-          name: "Test Project",
-        });
-      }
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(
           JSON.stringify({ detail: "Invalid query: unknown field" }),
@@ -148,14 +154,8 @@ describe("issue list: error propagation", () => {
   test("throws ApiError with 404 status when project not found", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      // fetchProjectId enrichment for config-defaults path
-      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
-        return Response.json({
-          id: "789",
-          slug: "test-project",
-          name: "Test Project",
-        });
-      }
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify({ detail: "Project not found" }), {
           status: 404,
@@ -181,14 +181,8 @@ describe("issue list: error propagation", () => {
   test("throws ApiError with 429 status on rate limiting", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      // fetchProjectId enrichment for config-defaults path
-      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
-        return Response.json({
-          id: "789",
-          slug: "test-project",
-          name: "Test Project",
-        });
-      }
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify({ detail: "Too many requests" }), {
           status: 429,
@@ -214,14 +208,8 @@ describe("issue list: error propagation", () => {
   test("preserves ApiError detail from original error", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      // fetchProjectId enrichment for config-defaults path
-      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
-        return Response.json({
-          id: "789",
-          slug: "test-project",
-          name: "Test Project",
-        });
-      }
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(
           JSON.stringify({ detail: "Invalid search query: bad syntax" }),
@@ -405,14 +393,8 @@ describe("issue list: partial failure handling", () => {
   test("JSON output wraps in {data, hasMore} object", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      // fetchProjectId enrichment for config-defaults path
-      if (req.url.includes("/api/0/projects/test-org/test-project/")) {
-        return Response.json({
-          id: "789",
-          slug: "test-project",
-          name: "Test Project",
-        });
-      }
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify([mockIssue()]), {
           status: 200,
