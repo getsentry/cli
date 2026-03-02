@@ -111,10 +111,11 @@ describe("validateCommand", () => {
 
 describe("handleLocalOp", () => {
   let testDir: string;
-  const options = makeOptions();
+  let options: WizardOptions;
 
   beforeEach(() => {
     testDir = mkdtempSync(join("/tmp", "local-ops-test-"));
+    options = makeOptions({ directory: testDir });
   });
 
   afterEach(() => {
@@ -175,6 +176,50 @@ describe("handleLocalOp", () => {
         operation: "list-dir",
         cwd: testDir,
         params: { path: "subdir" },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("cwd sandboxing", () => {
+    test("rejects cwd outside project directory", async () => {
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: "/",
+        params: { path: "." },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("outside project directory");
+    });
+
+    test("allows cwd equal to project directory", async () => {
+      writeFileSync(join(testDir, "file.txt"), "x");
+
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: testDir,
+        params: { path: "." },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+    });
+
+    test("allows cwd that is a subdirectory of project directory", async () => {
+      mkdirSync(join(testDir, "sub"));
+      writeFileSync(join(testDir, "sub", "file.txt"), "x");
+
+      const payload: ListDirPayload = {
+        type: "local-op",
+        operation: "list-dir",
+        cwd: join(testDir, "sub"),
+        params: { path: "." },
       };
 
       const result = await handleLocalOp(payload, options);
@@ -489,7 +534,7 @@ describe("handleLocalOp", () => {
         params: { commands: ["rm -rf /", "echo hello"] },
       };
 
-      const dryRunOptions = makeOptions({ dryRun: true });
+      const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
       const result = await handleLocalOp(payload, dryRunOptions);
       expect(result.ok).toBe(true);
       const results = (
@@ -657,7 +702,7 @@ describe("handleLocalOp", () => {
         },
       };
 
-      const dryRunOptions = makeOptions({ dryRun: true });
+      const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
       const result = await handleLocalOp(payload, dryRunOptions);
       expect(result.ok).toBe(true);
 
@@ -681,7 +726,7 @@ describe("handleLocalOp", () => {
         },
       };
 
-      const dryRunOptions = makeOptions({ dryRun: true });
+      const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
       const result = await handleLocalOp(payload, dryRunOptions);
       expect(result.ok).toBe(false);
       expect(result.error).toContain("outside project directory");

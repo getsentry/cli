@@ -149,6 +149,19 @@ export async function handleLocalOp(
   options: WizardOptions
 ): Promise<LocalOpResult> {
   try {
+    // Validate that the remote-supplied cwd is within the user's project directory
+    const normalizedCwd = path.resolve(payload.cwd);
+    const normalizedDir = path.resolve(options.directory);
+    if (
+      normalizedCwd !== normalizedDir &&
+      !normalizedCwd.startsWith(normalizedDir + path.sep)
+    ) {
+      return {
+        ok: false,
+        error: `Blocked: cwd "${payload.cwd}" is outside project directory "${options.directory}"`,
+      };
+    }
+
     switch (payload.operation) {
       case "list-dir":
         return await listDir(payload);
