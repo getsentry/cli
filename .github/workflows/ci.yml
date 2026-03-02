@@ -10,6 +10,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# packages:write is needed for publish-nightly to push to GHCR
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Commit timestamp used for deterministic nightly version strings.
+  # Defined at workflow level so build-binary and publish-nightly always agree.
+  COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+
 jobs:
   changes:
     name: Detect Changes
@@ -19,6 +29,8 @@ jobs:
     outputs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      build-targets: ${{ steps.targets.outputs.matrix }}
+      nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
@@ -40,6 +52,37 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - '.github/workflows/ci.yml'
+      - name: Compute build matrix
+        id: targets
+        run: |
+          {
+            echo 'matrix<<MATRIX_EOF'
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              # PRs only need linux-x64 for smoke test and e2e — skip macOS/Windows
+              echo '{"include":[
+                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+              ]}'
+            else
+              # main, release/**, workflow_call: full cross-platform matrix
+              echo '{"include":[
+                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
+                {"target":"windows-x64",   "os":"windows-latest","can-test":true},
+                {"target":"darwin-x64",    "os":"macos-latest",  "can-test":false},
+                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+              ]}'
+            fi
+            echo 'MATRIX_EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Compute nightly version
+        id: nightly
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
+          CURRENT=$(jq -r .version package.json)
+          VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: ${VERSION}"
 
   check-skill:
     name: Check SKILL.md
@@ -130,33 +173,14 @@ jobs:
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          post-pr-comment: true
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
-    needs: [lint, test-unit]
+    needs: [changes, lint, test-unit]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Native builds (can run smoke test)
-          - target: darwin-arm64
-            os: macos-latest
-            can-test: true
-          - target: linux-x64
-            os: ubuntu-latest
-            can-test: true
-          - target: windows-x64
-            os: windows-latest
-            can-test: true
-          # Cross-compiled builds (cannot run smoke test)
-          - target: darwin-x64
-            os: macos-latest
-            can-test: false
-          - target: linux-arm64
-            os: ubuntu-latest
-            can-test: false
+      matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -179,9 +203,19 @@ jobs:
           done
           echo "All install attempts failed"
           exit 1
+      - name: Set nightly version
+        # Inject the nightly version (computed once in the changes job) into
+        # package.json before the build so it gets baked into the binary.
+        if: needs.changes.outputs.nightly-version != ''
+        shell: bash
+        run: |
+          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
       - name: Build
         env:
           SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+          # Set on main/release branches so build.ts runs binpunch + creates .gz
+          RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
         run: bun run build --target ${{ matrix.target }}
       - name: Smoke test
         if: matrix.can-test
@@ -192,11 +226,61 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
-      - name: Upload artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: sentry-${{ matrix.target }}
-          path: dist-bin/sentry-*
+          path: |
+            dist-bin/sentry-*
+            !dist-bin/*.gz
+
+      - name: Upload compressed artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentry-${{ matrix.target }}-gz
+          path: dist-bin/*.gz
+
+  publish-nightly:
+    name: Publish Nightly to GHCR
+    # Only run on pushes to main, not on PRs or release branches
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download compressed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sentry-*-gz
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.2.3
+          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin oras < "$TARBALL"
+          rm "$TARBALL"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push to GHCR
+        # Push from inside the artifacts directory so ORAS records bare
+        # filenames (e.g. "sentry-linux-x64.gz") as layer titles, not
+        # "artifacts/sentry-linux-x64.gz". The CLI matches layers by
+        # filename in findLayerByFilename().
+        working-directory: artifacts
+        run: |
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
+          oras push ghcr.io/getsentry/cli:nightly \
+            --artifact-type application/vnd.sentry.cli.nightly \
+            --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
+            --annotation "version=${VERSION}" \
+            *.gz
 
   test-e2e:
     name: E2E Tests
@@ -286,14 +370,15 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e]
+    needs: [changes, check-skill, build-binary, build-npm, build-docs, test-e2e, publish-nightly]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
         run: |
           # Check for explicit failures or cancellations in all jobs
-          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }}"
+          # publish-nightly is skipped on PRs (if: github.ref == 'refs/heads/main') — that's expected
+          results="${{ needs.check-skill.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.publish-nightly.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"

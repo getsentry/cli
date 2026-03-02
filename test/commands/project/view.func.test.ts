@@ -109,7 +109,7 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("test-project");
-    expect(output).toContain("Slug:");
+    expect(output).toContain("Slug");
   });
 
   test("explicit org/project with --web opens browser", async () => {
@@ -170,7 +170,8 @@ describe("viewCommand.func", () => {
     expect(resolveProjectBySlugSpy).toHaveBeenCalledWith(
       "frontend",
       "sentry project view <org>/<project>",
-      "sentry project view <org>/frontend"
+      "sentry project view <org>/frontend",
+      context.stderr
     );
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);

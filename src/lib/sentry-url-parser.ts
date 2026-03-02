@@ -8,6 +8,7 @@
  * so that subsequent API calls reach the correct instance.
  */
 
+import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
@@ -19,7 +20,7 @@ import { isSentrySaasUrl } from "./sentry-urls.js";
 export type ParsedSentryUrl = {
   /** Scheme + host of the Sentry instance (e.g., "https://sentry.io" or "https://sentry.example.com") */
   baseUrl: string;
-  /** Organization slug from the URL path */
+  /** Organization slug from the URL path or subdomain */
   org: string;
   /** Issue identifier — numeric group ID (e.g., "32886") or short ID (e.g., "CLI-G") */
   issueId?: string;
@@ -84,6 +85,53 @@ function matchSettingsPath(
 }
 
 /**
+ * Try to extract org from a SaaS subdomain-style URL.
+ *
+ * Matches `https://{org}.sentry.io/issues/{id}/` and similar paths
+ * where the org is in the hostname rather than the URL path.
+ * Only applies to SaaS URLs — self-hosted instances don't use this pattern.
+ *
+ * @returns Parsed result or null if not a subdomain-style SaaS URL with a known path
+ */
+function matchSubdomainOrg(
+  baseUrl: string,
+  hostname: string,
+  segments: string[]
+): ParsedSentryUrl | null {
+  // Must be a subdomain of sentry.io (e.g., "my-org.sentry.io")
+  if (!hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)) {
+    return null;
+  }
+
+  const org = hostname.slice(0, -`.${DEFAULT_SENTRY_HOST}`.length);
+
+  // Skip region subdomains (us.sentry.io, de.sentry.io, etc.) —
+  // these are API hosts, not org subdomains.
+  if (org.length <= 2) {
+    return null;
+  }
+
+  // /issues/{id}/ (optionally with /events/{eventId}/)
+  if (segments[0] === "issues" && segments[1]) {
+    const eventId =
+      segments[2] === "events" && segments[3] ? segments[3] : undefined;
+    return { baseUrl, org, issueId: segments[1], eventId };
+  }
+
+  // /traces/{traceId}/
+  if (segments[0] === "traces" && segments[1]) {
+    return { baseUrl, org, traceId: segments[1] };
+  }
+
+  // Bare org subdomain URL
+  if (segments.length === 0) {
+    return { baseUrl, org };
+  }
+
+  return null;
+}
+
+/**
  * Parse a Sentry web URL and extract its components.
  *
  * Recognizes these path patterns (both SaaS and self-hosted):
@@ -92,6 +140,11 @@ function matchSettingsPath(
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/traces/{traceId}/`
  * - `/organizations/{org}/`
+ *
+ * Also recognizes SaaS subdomain-style URLs:
+ * - `https://{org}.sentry.io/issues/{id}/`
+ * - `https://{org}.sentry.io/traces/{traceId}/`
+ * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
  *
  * @param input - Raw string that may or may not be a URL
  * @returns Parsed components, or null if input is not a recognized Sentry URL
@@ -114,7 +167,8 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 
   return (
     matchOrganizationsPath(baseUrl, segments) ??
-    matchSettingsPath(baseUrl, segments)
+    matchSettingsPath(baseUrl, segments) ??
+    matchSubdomainOrg(baseUrl, url.hostname, segments)
   );
 }
 

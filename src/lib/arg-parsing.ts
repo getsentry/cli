@@ -6,10 +6,35 @@
  * project list) and single-item commands (issue view, explain, plan).
  */
 
-import { ValidationError } from "./errors.js";
+import { ContextError, ValidationError } from "./errors.js";
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
+
+/**
+ * Validate that a CLI --limit flag value is within an allowed range.
+ *
+ * Used by commands that need API-side limiting (trace list, log list) where
+ * the value is passed directly to the API as `per_page`.
+ *
+ * @param value - Raw string input from CLI flag
+ * @param min - Minimum allowed value (inclusive)
+ * @param max - Maximum allowed value (inclusive)
+ * @returns Parsed integer
+ * @throws {Error} If value is NaN or outside [min, max]
+ *
+ * @example
+ * validateLimit("50", 1, 1000)  // 50
+ * validateLimit("0", 1, 1000)   // throws
+ * validateLimit("abc", 1, 1000) // throws
+ */
+export function validateLimit(value: string, min: number, max: number): number {
+  const num = Number.parseInt(value, 10);
+  if (Number.isNaN(num) || num < min || num > max) {
+    throw new Error(`--limit must be between ${min} and ${max}`);
+  }
+  return num;
+}
 
 /** Default span depth when no value is provided */
 const DEFAULT_SPAN_DEPTH = 3;
@@ -343,6 +368,55 @@ function parseWithDash(arg: string): ParsedIssueArg {
 
   // "cli-G" or "spotlight-electron-4Y"
   return { type: "project-search", projectSlug, suffix };
+}
+
+/**
+ * Parse a single positional arg that may be a plain hex ID or a slash-separated
+ * `org/project/id` pattern.
+ *
+ * Used by commands whose IDs are hex strings that never contain `/`
+ * (event, trace, log), making the pattern unambiguous:
+ * - No slashes → plain ID, no target
+ * - Exactly one slash → `org/project` without ID → throws {@link ContextError}
+ * - Two or more slashes → splits on last `/` → `targetArg` + `id`
+ *
+ * @param arg - The raw single positional argument
+ * @param idLabel - Human-readable ID label for error messages (e.g. `"Event ID"`)
+ * @param usageHint - Usage example shown in error messages
+ * @returns Parsed `{ id, targetArg }` — `targetArg` is `undefined` for plain IDs
+ * @throws {ContextError} When the arg contains exactly one slash (missing ID)
+ *   or ends with a trailing slash (empty ID segment)
+ */
+export function parseSlashSeparatedArg(
+  arg: string,
+  idLabel: string,
+  usageHint: string
+): { id: string; targetArg: string | undefined } {
+  const slashIdx = arg.indexOf("/");
+
+  if (slashIdx === -1) {
+    // No slashes — plain ID
+    return { id: arg, targetArg: undefined };
+  }
+
+  // IDs are hex and never contain "/" — this must be a structured
+  // "org/project/id" or "org/project" (missing ID)
+  const lastSlashIdx = arg.lastIndexOf("/");
+
+  if (slashIdx === lastSlashIdx) {
+    // Exactly one slash: "org/project" without ID
+    throw new ContextError(idLabel, usageHint);
+  }
+
+  // Two+ slashes: split on last "/" → target + id
+  const targetArg = arg.slice(0, lastSlashIdx);
+  const id = arg.slice(lastSlashIdx + 1);
+
+  if (!id) {
+    throw new ContextError(idLabel, usageHint);
+  }
+
+  return { id, targetArg };
 }
 
 export function parseIssueArg(arg: string): ParsedIssueArg {

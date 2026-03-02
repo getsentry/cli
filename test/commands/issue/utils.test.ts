@@ -9,11 +9,13 @@ import {
   buildCommandHint,
   ensureRootCauseAnalysis,
   pollAutofixState,
+  resolveIssue,
   resolveOrgAndIssueId,
 } from "../../../src/commands/issue/utils.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
+import { ResolutionError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 describe("buildCommandHint", () => {
@@ -106,6 +108,90 @@ describe("resolveOrgAndIssueId", () => {
         command: "explain",
       })
     ).rejects.toThrow("Organization");
+  });
+
+  test("resolves numeric ID when API response includes subdomain-style permalink", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/issues/123456789/")) {
+        return new Response(
+          JSON.stringify({
+            id: "123456789",
+            shortId: "PROJECT-ABC",
+            title: "Test Issue",
+            status: "unresolved",
+            platform: "javascript",
+            type: "error",
+            count: "10",
+            userCount: 5,
+            // Org slug embedded in subdomain-style permalink
+            permalink: "https://my-org.sentry.io/issues/123456789/",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    // Org should be extracted from permalink — no longer throws
+    const result = await resolveOrgAndIssueId({
+      issueArg: "123456789",
+      cwd: getConfigDir(),
+      command: "explain",
+    });
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("123456789");
+  });
+
+  test("resolves numeric ID when API response includes path-style permalink", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (url.includes("/issues/55555555/")) {
+        return new Response(
+          JSON.stringify({
+            id: "55555555",
+            shortId: "BACKEND-XY",
+            title: "Another Issue",
+            status: "unresolved",
+            platform: "python",
+            type: "error",
+            count: "1",
+            userCount: 1,
+            // Path-style permalink (sentry.io/organizations/{org}/issues/{id}/)
+            permalink:
+              "https://sentry.io/organizations/acme-corp/issues/55555555/",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "55555555",
+      cwd: getConfigDir(),
+      command: "explain",
+    });
+    expect(result.org).toBe("acme-corp");
+    expect(result.issueId).toBe("55555555");
   });
 
   test("resolves explicit org prefix (org/ISSUE-ID)", async () => {
@@ -304,7 +390,7 @@ describe("resolveOrgAndIssueId", () => {
     expect(result.issueId).toBe("444555666");
   });
 
-  test("throws ContextError for short suffix without project context", async () => {
+  test("throws ResolutionError for short suffix without project context", async () => {
     // Clear any defaults to ensure no project context
     const { clearAuth } = await import("../../../src/lib/db/auth.js");
     const { setDefaults } = await import("../../../src/lib/db/defaults.js");
@@ -317,7 +403,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("Cannot resolve issue suffix");
+    ).rejects.toThrow("could not be resolved");
   });
 
   test("searches projects across orgs for project-suffix format", async () => {
@@ -569,7 +655,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("multiple organizations");
+    ).rejects.toThrow("is ambiguous");
   });
 
   test("short suffix auth error (401) propagates", async () => {
@@ -1265,5 +1351,105 @@ describe("ensureRootCauseAnalysis", () => {
     });
 
     expect(stderrOutput).toContain("root cause analysis");
+  });
+});
+
+describe("resolveIssue: numeric 404 error handling", () => {
+  const getResolveIssueConfigDir = useTestConfigDir("test-resolve-issue-", {
+    isolateProjectRoot: true,
+  });
+
+  let savedFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    savedFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = savedFetch;
+  });
+
+  test("numeric 404 throws ResolutionError with ID and short-ID hint", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Issue not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const err = await resolveIssue({
+      issueArg: "123456789",
+      cwd: getResolveIssueConfigDir(),
+      command: "view",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ResolutionError);
+    // Message includes the numeric ID
+    expect(String(err)).toContain("123456789");
+    // Message says "not found", not "is required"
+    expect(String(err)).toContain("not found");
+    // Suggests the short-ID format
+    expect(String(err)).toContain("project>-123456789");
+  });
+
+  test("numeric non-404 error propagates unchanged", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    await expect(
+      resolveIssue({
+        issueArg: "123456789",
+        cwd: getResolveIssueConfigDir(),
+        command: "view",
+      })
+    ).rejects.not.toBeInstanceOf(ResolutionError);
+  });
+
+  test("explicit-org-numeric 404 throws ResolutionError with org and ID", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Issue not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const err = await resolveIssue({
+      issueArg: "my-org/999999999",
+      cwd: getResolveIssueConfigDir(),
+      command: "view",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ResolutionError);
+    // Message includes the numeric ID
+    expect(String(err)).toContain("999999999");
+    // Message mentions the org
+    expect(String(err)).toContain("my-org");
+    // Message says "not found", not "is required"
+    expect(String(err)).toContain("not found");
+    // Suggests the short-ID format
+    expect(String(err)).toContain("project>-999999999");
+  });
+
+  test("explicit-org-numeric non-404 error propagates unchanged", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    await expect(
+      resolveIssue({
+        issueArg: "my-org/999999999",
+        cwd: getResolveIssueConfigDir(),
+        command: "view",
+      })
+    ).rejects.not.toBeInstanceOf(ResolutionError);
   });
 });

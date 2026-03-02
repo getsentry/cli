@@ -1,4 +1,7 @@
 ---
+import { getImage } from 'astro:assets';
+import bgImage from '../assets/bg.png';
+
 interface Props {
   title?: string;
   background?: 'custom';
@@ -6,11 +9,15 @@ interface Props {
 
 const { title = "Terminal", background } = Astro.props;
 const bgClass = background ? `bg-${background}` : '';
-const baseUrl = import.meta.env.BASE_URL;
-const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
+
+let bgStyle = '';
+if (background) {
+  const optimized = await getImage({ src: bgImage, format: 'webp', quality: 80 });
+  bgStyle = `--bg-image: url('${optimized.src}');`;
+}
 ---
 
-<div class={`terminal-wrapper ${bgClass}`} style={background ? `--bg-image: url('${base}bg.png');` : ''}>
+<div class={`terminal-wrapper ${bgClass}`} style={bgStyle}>
   <div class="terminal">
     <div class="terminal-header">
       <div class="terminal-dots">

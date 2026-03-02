@@ -8,17 +8,25 @@
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
-import { findProjectsBySlug, listLogs } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
-import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { listLogs } from "../../lib/api-client.js";
+import { validateLimit } from "../../lib/arg-parsing.js";
+import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import {
+  buildLogRowCells,
+  createLogStreamingTable,
   formatLogRow,
   formatLogsHeader,
+  formatLogTable,
+  isPlainOutput,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
+import {
+  buildListCommand,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
+import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { SentryLog, Writer } from "../../types/index.js";
 
@@ -28,9 +36,6 @@ type ListFlags = {
   readonly follow?: number;
   readonly json: boolean;
 };
-
-/** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry log list <org>/<project>";
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -44,17 +49,14 @@ const DEFAULT_LIMIT = 100;
 /** Default poll interval in seconds for --follow mode */
 const DEFAULT_POLL_INTERVAL = 2;
 
+/** Command name used in resolver error messages */
+const COMMAND_NAME = "log list";
+
 /**
- * Validate that --limit value is within allowed range.
- *
- * @throws Error if value is outside MIN_LIMIT..MAX_LIMIT range
+ * Parse --limit flag, delegating range validation to shared utility.
  */
-function validateLimit(value: string): number {
-  const num = Number.parseInt(value, 10);
-  if (Number.isNaN(num) || num < MIN_LIMIT || num > MAX_LIMIT) {
-    throw new Error(`--limit must be between ${MIN_LIMIT} and ${MAX_LIMIT}`);
-  }
-  return num;
+function parseLimit(value: string): number {
+  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
 }
 
 /**
@@ -76,11 +78,23 @@ function parseFollow(value: string): number {
 
 /**
  * Write logs to output in the appropriate format.
+ *
+ * When a StreamingTable is provided (TTY mode), renders rows through the
+ * bordered table. Otherwise falls back to plain markdown rows.
  */
-function writeLogs(stdout: Writer, logs: SentryLog[], asJson: boolean): void {
+function writeLogs(
+  stdout: Writer,
+  logs: SentryLog[],
+  asJson: boolean,
+  table?: import("../../lib/formatters/text-table.js").StreamingTable
+): void {
   if (asJson) {
     for (const log of logs) {
       writeJson(stdout, log);
+    }
+  } else if (table) {
+    for (const log of logs) {
+      stdout.write(table.row(buildLogRowCells(log).map(renderInlineMarkdown)));
     }
   } else {
     for (const log of logs) {
@@ -118,10 +132,7 @@ async function executeSingleFetch(
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
   const chronological = [...logs].reverse();
 
-  stdout.write(formatLogsHeader());
-  for (const log of chronological) {
-    stdout.write(formatLogRow(log));
-  }
+  stdout.write(formatLogTable(chronological));
 
   // Show footer with tip if we hit the limit
   const hasMore = logs.length >= flags.limit;
@@ -163,7 +174,12 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stderr.write("\n");
   }
 
-  // Track if header has been printed (for human mode)
+  // In TTY mode, use a bordered StreamingTable for aligned columns.
+  // In plain mode, use raw markdown rows for pipe-friendly output.
+  const plain = flags.json || isPlainOutput();
+  const table = plain ? undefined : createLogStreamingTable();
+
+  // Track if header has been printed (for human/plain mode)
   let headerPrinted = false;
 
   // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
@@ -175,13 +191,21 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
 
   // Print header before initial logs (human mode only)
   if (!flags.json && initialLogs.length > 0) {
-    stdout.write(formatLogsHeader());
+    stdout.write(table ? table.header() : formatLogsHeader());
     headerPrinted = true;
   }
 
   // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
   const chronologicalInitial = [...initialLogs].reverse();
-  writeLogs(stdout, chronologicalInitial, flags.json);
+  writeLogs(stdout, chronologicalInitial, flags.json, table);
+
+  // Print bottom border on Ctrl+C so the table closes cleanly
+  if (table) {
+    process.once("SIGINT", () => {
+      stdout.write(table.footer());
+      process.exit(0);
+    });
+  }
 
   // Track newest timestamp (logs are sorted -timestamp, so first is newest)
   // Use current time as fallback to avoid fetching old logs when initial fetch is empty
@@ -205,13 +229,13 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
       if (newestLog) {
         // Print header before first logs if not already printed
         if (!(flags.json || headerPrinted)) {
-          stdout.write(formatLogsHeader());
+          stdout.write(table ? table.header() : formatLogsHeader());
           headerPrinted = true;
         }
 
         // Reverse for chronological order (oldest first for tail -f style)
         const chronologicalNew = [...newLogs].reverse();
-        writeLogs(stdout, chronologicalNew, flags.json);
+        writeLogs(stdout, chronologicalNew, flags.json, table);
 
         // Update timestamp AFTER successful write to avoid losing logs on write failure
         lastTimestamp = newestLog.timestamp_precise;
@@ -226,99 +250,23 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
       Sentry.captureException(error);
 
       // Always write to stderr (doesn't interfere with JSON on stdout)
-      const message = error instanceof Error ? error.message : String(error);
+      const message = stringifyUnknown(error);
       stderr.write(`Error fetching logs: ${message}\n`);
       // Continue polling on transient errors (network, etc.)
     }
   }
 }
 
-/** Resolved org and project for log commands */
-type ResolvedLogTarget = {
-  org: string;
-  project: string;
-};
-
-/**
- * Resolve org/project from parsed argument or auto-detection.
- *
- * Handles:
- * - explicit: "org/project" → use directly
- * - project-search: "project" → find project across all orgs
- * - auto-detect: no input → use DSN detection or config defaults
- *
- * @throws {ContextError} When target cannot be resolved
- */
-async function resolveLogTarget(
-  target: string | undefined,
-  cwd: string
-): Promise<ResolvedLogTarget> {
-  const parsed = parseOrgProjectArg(target);
-
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-
-    case "org-all":
-      throw new ContextError(
-        "Project",
-        `Please specify a project: sentry log list ${parsed.org}/<project>`
-      );
-
-    case "project-search": {
-      // Find project across all orgs
-      const matches = await findProjectsBySlug(parsed.projectSlug);
-
-      if (matches.length === 0) {
-        throw new ContextError(
-          "Project",
-          `No project '${parsed.projectSlug}' found in any accessible organization.\n\n` +
-            `Try: sentry log list <org>/${parsed.projectSlug}`
-        );
-      }
-
-      if (matches.length > 1) {
-        const options = matches
-          .map((m) => `  sentry log list ${m.orgSlug}/${m.slug}`)
-          .join("\n");
-        throw new ContextError(
-          "Project",
-          `Found '${parsed.projectSlug}' in ${matches.length} organizations. Please specify:\n${options}`
-        );
-      }
-
-      // Safe: we checked matches.length === 1 above, so first element exists
-      const match = matches[0] as (typeof matches)[number];
-      return { org: match.orgSlug, project: match.slug };
-    }
-
-    case "auto-detect": {
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint: USAGE_HINT,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", USAGE_HINT);
-      }
-      return { org: resolved.org, project: resolved.project };
-    }
-
-    default: {
-      const _exhaustiveCheck: never = parsed;
-      throw new Error(`Unexpected parsed type: ${_exhaustiveCheck}`);
-    }
-  }
-}
-
-export const listCommand = buildCommand({
+export const listCommand = buildListCommand("log", {
   docs: {
     brief: "List logs from a project",
     fullDescription:
       "List and stream logs from Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry log list               # auto-detect from DSN or config\n" +
       "  sentry log list <org>/<proj>  # explicit org and project\n" +
       "  sentry log list <project>     # find project across all orgs\n\n" +
+      `${TARGET_PATTERN_NOTE}\n\n` +
       "Examples:\n" +
       "  sentry log list                    # List last 100 logs\n" +
       "  sentry log list -f                 # Stream logs (2s poll interval)\n" +
@@ -331,8 +279,8 @@ export const listCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project> or <project>",
+          placeholder: "org/project",
+          brief: "<org>/<project> or <project> (search)",
           parse: String,
           optional: true,
         },
@@ -341,7 +289,7 @@ export const listCommand = buildCommand({
     flags: {
       limit: {
         kind: "parsed",
-        parse: validateLimit,
+        parse: parseLimit,
         brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
@@ -378,7 +326,11 @@ export const listCommand = buildCommand({
     const { stdout, stderr, cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
-    const { org, project } = await resolveLogTarget(target, cwd);
+    const { org, project } = await resolveOrgProjectFromArg(
+      target,
+      cwd,
+      COMMAND_NAME
+    );
     setContext([org], [project]);
 
     if (flags.follow) {

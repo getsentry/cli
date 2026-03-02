@@ -1,17 +1,19 @@
 /**
  * Unit Tests for Trace Formatters
  *
- * Tests for formatTraceDuration, formatTracesHeader, formatTraceRow,
+ * Tests for formatTraceDuration, formatTraceTable,
+  formatTracesHeader, formatTraceRow,
  * computeTraceSummary, and formatTraceSummary.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   computeTraceSummary,
   formatTraceDuration,
   formatTraceRow,
   formatTraceSummary,
   formatTracesHeader,
+  formatTraceTable,
 } from "../../../src/lib/formatters/trace.js";
 import type {
   TraceSpan,
@@ -24,6 +26,38 @@ import type {
 function stripAnsi(str: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI codes use control chars
   return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Force rendered (TTY) mode for a describe block */
+function useRenderedMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
+
+/** Force plain mode for a describe block */
+function usePlainMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
 }
 
 /**
@@ -92,13 +126,15 @@ describe("formatTraceDuration", () => {
   });
 });
 
-describe("formatTracesHeader", () => {
+describe("formatTracesHeader (rendered mode)", () => {
+  useRenderedMode();
+
   test("contains column titles", () => {
     const header = stripAnsi(formatTracesHeader());
-    expect(header).toContain("TRACE ID");
-    expect(header).toContain("TRANSACTION");
-    expect(header).toContain("DURATION");
-    expect(header).toContain("WHEN");
+    expect(header).toContain("Trace ID");
+    expect(header).toContain("Transaction");
+    expect(header).toContain("Duration");
+    expect(header).toContain("When");
   });
 
   test("ends with newline", () => {
@@ -107,7 +143,9 @@ describe("formatTracesHeader", () => {
   });
 });
 
-describe("formatTraceRow", () => {
+describe("formatTraceRow (rendered mode)", () => {
+  useRenderedMode();
+
   test("includes trace ID", () => {
     const traceId = "a".repeat(32);
     const row = formatTraceRow(makeTransaction({ trace: traceId }));
@@ -128,12 +166,11 @@ describe("formatTraceRow", () => {
     expect(row).toContain("245ms");
   });
 
-  test("truncates long transaction names", () => {
+  test("includes full transaction name in markdown row", () => {
     const longName = "A".repeat(50);
     const row = formatTraceRow(makeTransaction({ transaction: longName }));
-    // Should be truncated to 30 chars
-    expect(row).not.toContain(longName);
-    expect(row).toContain("A".repeat(30));
+    // Full name preserved in markdown table cell
+    expect(row).toContain(longName);
   });
 
   test("shows 'unknown' for empty transaction", () => {
@@ -144,6 +181,72 @@ describe("formatTraceRow", () => {
   test("ends with newline", () => {
     const row = formatTraceRow(makeTransaction());
     expect(row.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("formatTracesHeader (plain mode)", () => {
+  usePlainMode();
+
+  test("emits markdown table header and separator", () => {
+    const result = formatTracesHeader();
+    // Plain mode produces mdTableHeader output (no bold markup), with separator
+    expect(result).toContain("| Trace ID | Transaction | Duration | When |");
+    // Duration column is right-aligned (`:` suffix in TRACE_TABLE_COLS)
+    expect(result).toContain("| --- | --- | ---: | --- |");
+  });
+
+  test("ends with newline", () => {
+    expect(formatTracesHeader()).toEndWith("\n");
+  });
+});
+
+describe("formatTraceRow (plain mode)", () => {
+  usePlainMode();
+
+  test("emits a markdown table row", () => {
+    const row = formatTraceRow(makeTransaction());
+    expect(row).toMatch(/^\|.+\|.+\|.+\|.+\|\n$/);
+  });
+
+  test("includes trace ID", () => {
+    const traceId = "a".repeat(32);
+    const row = formatTraceRow(makeTransaction({ trace: traceId }));
+    expect(row).toContain(traceId);
+  });
+
+  test("includes transaction name", () => {
+    const row = formatTraceRow(
+      makeTransaction({ transaction: "POST /api/data" })
+    );
+    expect(row).toContain("POST /api/data");
+  });
+
+  test("includes formatted duration", () => {
+    const row = formatTraceRow(
+      makeTransaction({ "transaction.duration": 245 })
+    );
+    expect(row).toContain("245ms");
+  });
+
+  test("does not truncate long transaction names (no column padding in plain mode)", () => {
+    const longName = "A".repeat(50);
+    const row = formatTraceRow(makeTransaction({ transaction: longName }));
+    expect(row).toContain(longName);
+  });
+
+  test("escapes pipe characters in transaction name", () => {
+    const row = formatTraceRow(makeTransaction({ transaction: "GET /a|b" }));
+    expect(row).toContain("GET /a\\|b");
+  });
+
+  test("shows 'unknown' for empty transaction", () => {
+    const row = formatTraceRow(makeTransaction({ transaction: "" }));
+    expect(row).toContain("unknown");
+  });
+
+  test("ends with newline", () => {
+    const row = formatTraceRow(makeTransaction());
+    expect(row).toEndWith("\n");
   });
 });
 
@@ -250,7 +353,7 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("abc123def456", [
       makeSpan({ start_timestamp: 1000.0, timestamp: 1001.0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
+    const output = stripAnsi(formatTraceSummary(summary));
     expect(output).toContain("abc123def456");
   });
 
@@ -261,16 +364,17 @@ describe("formatTraceSummary", () => {
         "transaction.op": "http.server",
       }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("[http.server] GET /api/users");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("http.server");
+    expect(output).toContain("GET /api/users");
   });
 
   test("shows duration", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 1000.0, timestamp: 1001.24 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Duration:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Duration");
     expect(output).toContain("1.24s");
   });
 
@@ -278,8 +382,8 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 0, timestamp: 0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Duration:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Duration");
     expect(output).toContain("—");
   });
 
@@ -287,16 +391,17 @@ describe("formatTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ children: [makeSpan(), makeSpan()] }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Span Count:  3");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Spans");
+    expect(output).toContain("3");
   });
 
   test("shows projects when present", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ project_slug: "my-app" }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Projects:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Projects");
     expect(output).toContain("my-app");
   });
 
@@ -307,15 +412,54 @@ describe("formatTraceSummary", () => {
         timestamp: 1_700_000_001.0,
       }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).toContain("Started:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).toContain("Started");
   });
 
   test("omits start time when no valid timestamps", () => {
     const summary = computeTraceSummary("trace-id", [
       makeSpan({ start_timestamp: 0, timestamp: 0 }),
     ]);
-    const output = stripAnsi(formatTraceSummary(summary).join("\n"));
-    expect(output).not.toContain("Started:");
+    const output = stripAnsi(formatTraceSummary(summary));
+    expect(output).not.toContain("Started");
+  });
+});
+
+describe("formatTraceTable", () => {
+  test("returns a string", () => {
+    const result = formatTraceTable([makeTransaction()]);
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes all transaction names", () => {
+    const items = [
+      makeTransaction({ transaction: "GET /api/users" }),
+      makeTransaction({ transaction: "POST /api/data" }),
+    ];
+    const result = stripAnsi(formatTraceTable(items));
+    expect(result).toContain("GET /api/users");
+    expect(result).toContain("POST /api/data");
+  });
+
+  test("includes trace IDs", () => {
+    const traceId = "a".repeat(32);
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ trace: traceId })])
+    );
+    expect(result).toContain(traceId);
+  });
+
+  test("includes formatted durations", () => {
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ "transaction.duration": 1500 })])
+    );
+    expect(result).toContain("1.50s");
+  });
+
+  test("shows 'unknown' for empty transaction", () => {
+    const result = stripAnsi(
+      formatTraceTable([makeTransaction({ transaction: "" })])
+    );
+    expect(result).toContain("unknown");
   });
 });

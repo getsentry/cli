@@ -12,6 +12,7 @@ type ProjectCacheRow = {
   org_name: string;
   project_slug: string;
   project_name: string;
+  project_id?: string;
   cached_at: number;
   last_accessed: number;
 };
@@ -30,6 +31,7 @@ function rowToCachedProject(row: ProjectCacheRow): CachedProject {
     orgName: row.org_name,
     projectSlug: row.project_slug,
     projectName: row.project_name,
+    projectId: row.project_id,
     cachedAt: row.cached_at,
   };
 }
@@ -78,6 +80,7 @@ export async function setCachedProject(
       org_name: info.orgName,
       project_slug: info.projectSlug,
       project_name: info.projectName,
+      project_id: info.projectId ?? null,
       cached_at: now,
       last_accessed: now,
     },
@@ -124,6 +127,7 @@ export async function setCachedProjectByDsnKey(
       org_name: info.orgName,
       project_slug: info.projectSlug,
       project_name: info.projectName,
+      project_id: info.projectId ?? null,
       cached_at: now,
       last_accessed: now,
     },

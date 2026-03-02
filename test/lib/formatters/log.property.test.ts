@@ -74,15 +74,21 @@ function createDetailedLogArb() {
 
 const detailedLogArb = createDetailedLogArb();
 
+/** Strip ANSI escape codes */
+function stripAnsi(str: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI control chars
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 describe("formatLogDetails properties", () => {
-  test("always returns non-empty array", async () => {
+  test("always returns a non-empty string", async () => {
     await fcAssert(
       property(
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
           const result = formatLogDetails(log, orgSlug);
-          expect(Array.isArray(result)).toBe(true);
+          expect(typeof result).toBe("string");
           expect(result.length).toBeGreaterThan(0);
         }
       ),
@@ -96,7 +102,7 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
           expect(result).toContain(log["sentry.item_id"]);
         }
       ),
@@ -110,8 +116,8 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
-          expect(result).toContain("Timestamp:");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
+          expect(result).toContain("Timestamp");
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -124,8 +130,8 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
-          expect(result).toContain("Severity:");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
+          expect(result).toContain("Severity");
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -138,7 +144,7 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
           if (log.trace) {
             expect(result).toContain("/traces/");
             expect(result).toContain(log.trace);
@@ -157,7 +163,7 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
           if (log["sdk.name"]) {
             expect(result).toContain("SDK");
             expect(result).toContain(log["sdk.name"]);
@@ -174,7 +180,7 @@ describe("formatLogDetails properties", () => {
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
-          const result = formatLogDetails(log, orgSlug).join("\n");
+          const result = stripAnsi(formatLogDetails(log, orgSlug));
           const hasCodeFields = log["code.function"] || log["code.file.path"];
           if (hasCodeFields) {
             expect(result).toContain("Source Location");
@@ -202,16 +208,15 @@ describe("formatLogDetails properties", () => {
     );
   });
 
-  test("output lines are all strings", async () => {
+  test("output is a string (not array)", async () => {
     await fcAssert(
       property(
         detailedLogArb,
         orgSlugArb,
         (log: DetailedSentryLog, orgSlug: string) => {
           const result = formatLogDetails(log, orgSlug);
-          for (const line of result) {
-            expect(typeof line).toBe("string");
-          }
+          expect(typeof result).toBe("string");
+          expect(Array.isArray(result)).toBe(false);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }

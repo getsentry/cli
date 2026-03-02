@@ -9,10 +9,25 @@ import PackageManagerCode from "../../components/PackageManagerCode.astro";
 
 ### Install Script
 
-Install the Sentry CLI using the install script:
+Install the latest stable release:
 
 ```bash
 curl https://cli.sentry.dev/install -fsS | bash
+```
+
+Install the nightly build (built from `main`, updated on every commit):
+
+```bash
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
+```
+
+The chosen channel is persisted so that `sentry cli upgrade` automatically
+tracks the same channel on future updates.
+
+### Homebrew
+
+```bash
+brew install getsentry/tools/sentry
 ```
 
 ### Package Managers

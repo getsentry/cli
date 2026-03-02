@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
+import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
+import { useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -297,13 +299,22 @@ describe("sentry cli setup", () => {
     expect(combined).toContain("GITHUB_PATH");
   });
 
-  test("shows unsupported message for sh shell completions", async () => {
+  test("falls back to bash completions for unsupported shell when bash is available", async () => {
+    // Create a fake bash executable in testDir/bin so isBashAvailable() returns
+    // true with PATH pointing there — no dependency on the host system.
+    const binDir = join(testDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+    const { chmodSync, writeFileSync: wf } = await import("node:fs");
+    const fakeBash = join(binDir, "bash");
+    wf(fakeBash, "#!/bin/sh\necho fake-bash");
+    chmodSync(fakeBash, 0o755);
+
     const { context, output } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
-        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
-        SHELL: "/bin/tcsh",
+        PATH: binDir,
+        SHELL: "/bin/xonsh",
       },
     });
 
@@ -314,7 +325,51 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("Not supported for");
+    expect(combined).toContain("Your shell (xonsh) is not directly supported");
+    expect(combined).toContain("bash completions as a fallback");
+    expect(combined).toContain("bash-completion");
+  });
+
+  test("shows unsupported message for unknown shell when bash is not in PATH", async () => {
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        // Empty PATH so isBashAvailable() returns false
+        PATH: "",
+        SHELL: "/bin/xonsh",
+      },
+    });
+
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).toContain("Not supported for xonsh shell");
+  });
+
+  test("silently skips completions for sh shell", async () => {
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+        SHELL: "/bin/sh",
+      },
+    });
+
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const combined = output.join("");
+    // sh/ash shells silently skip completions — no message at all
+    expect(combined).not.toContain("Completions:");
   });
 
   test("supports kebab-case flags", async () => {
@@ -586,5 +641,147 @@ describe("sentry cli setup", () => {
       expect(combined).toContain("Setup complete!");
       expect(combined).not.toContain("Agent skills:");
     });
+
+    test("bestEffort catches errors from steps and setup still completes", async () => {
+      // Make the completions dir unwritable so installCompletions() fails.
+      // bestEffort() must catch the error and continue — setup still completes.
+      const { chmodSync: chmod } = await import("node:fs");
+      const homeDir = join(testDir, "home");
+      const xdgData = join(homeDir, ".local", "share");
+      mkdirSync(xdgData, { recursive: true });
+      // Create the zsh site-functions dir as unwritable so Bun.write() fails
+      const zshDir = join(xdgData, "zsh", "site-functions");
+      mkdirSync(zshDir, { recursive: true });
+      chmod(zshDir, 0o444); // read-only → completion write will throw
+
+      const { context, output } = createMockContext({
+        homeDir,
+        env: {
+          XDG_DATA_HOME: xdgData,
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/zsh",
+        },
+      });
+
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+        context
+      );
+
+      const combined = output.join("");
+      // Setup must complete even though the completions step threw
+      expect(combined).toContain("Setup complete!");
+
+      chmod(zshDir, 0o755);
+    });
+  });
+});
+
+describe("sentry cli setup — --channel flag", () => {
+  useTestConfigDir("test-setup-channel-");
+
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(
+      "/tmp",
+      `setup-channel-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("persists 'nightly' channel when --channel nightly is passed", async () => {
+    const { context } = createMockContext({ homeDir: testDir });
+
+    expect(getReleaseChannel()).toBe("stable");
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    expect(getReleaseChannel()).toBe("nightly");
+  });
+
+  test("persists 'stable' channel when --channel stable is passed", async () => {
+    const { context } = createMockContext({ homeDir: testDir });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "stable",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    expect(getReleaseChannel()).toBe("stable");
+  });
+
+  test("logs channel when not in --install mode", async () => {
+    const { context, output } = createMockContext({ homeDir: testDir });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).toContain("Recorded release channel: nightly");
+  });
+
+  test("does not log channel in --install mode", async () => {
+    // In --install mode, the setup is silent about the channel
+    // (it's set during binary placement, before user sees output)
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "sentry.download"),
+    });
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--install",
+        "--channel",
+        "nightly",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    const combined = output.join("");
+    expect(combined).not.toContain("Recorded release channel: nightly");
   });
 });

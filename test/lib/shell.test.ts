@@ -7,13 +7,14 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   addToGitHubPath,
   addToPath,
   detectShell,
   findExistingConfigFile,
   getConfigCandidates,
+  isBashAvailable,
 } from "../../src/lib/shell.js";
 
 describe("shell utilities", () => {
@@ -255,5 +256,25 @@ describe("shell utilities", () => {
 
       expect(result).toBe(false);
     });
+  });
+});
+
+describe("isBashAvailable", () => {
+  test("returns true when bash is in PATH", () => {
+    // Point PATH at the directory containing bash
+    const bashPath = Bun.which("bash");
+    if (!bashPath) {
+      // Skip if bash truly isn't on this system
+      return;
+    }
+    expect(isBashAvailable(dirname(bashPath))).toBe(true);
+  });
+
+  test("returns false when PATH has no bash", () => {
+    expect(isBashAvailable("/nonexistent")).toBe(false);
+  });
+
+  test("returns false when PATH is empty", () => {
+    expect(isBashAvailable("")).toBe(false);
   });
 });

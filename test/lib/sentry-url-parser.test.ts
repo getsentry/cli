@@ -209,6 +209,85 @@ describe("parseSentryUrl", () => {
     });
   });
 
+  describe("SaaS subdomain-style URLs (org in hostname)", () => {
+    test("issue URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/issues/99124558/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        issueId: "99124558",
+      });
+    });
+
+    test("issue URL with event ID", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/issues/99124558/events/abc123/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        issueId: "99124558",
+        eventId: "abc123",
+      });
+    });
+
+    test("trace URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/traces/a4d1aae7216b47ff8117cf4e09ce9d0a/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
+    test("bare org subdomain returns org only", () => {
+      const result = parseSentryUrl("https://my-org.sentry.io/");
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("hyphenated org slug", () => {
+      const result = parseSentryUrl(
+        "https://acme-corp.sentry.io/issues/12345/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://acme-corp.sentry.io",
+        org: "acme-corp",
+        issueId: "12345",
+      });
+    });
+
+    test("region subdomains are ignored (us.sentry.io)", () => {
+      // Region hosts don't have org in subdomain — return null for unknown paths
+      expect(parseSentryUrl("https://us.sentry.io/issues/123/")).toBeNull();
+    });
+
+    test("region subdomains are ignored (de.sentry.io)", () => {
+      expect(parseSentryUrl("https://de.sentry.io/issues/123/")).toBeNull();
+    });
+
+    test("unknown subdomain path returns null", () => {
+      expect(parseSentryUrl("https://my-org.sentry.io/auth/login/")).toBeNull();
+    });
+
+    test("self-hosted URLs are not matched as subdomain orgs", () => {
+      // Self-hosted hostname doesn't end with .sentry.io — subdomain extraction must not apply.
+      // The path /issues/123/ has no /organizations/ prefix, so no matcher handles it.
+      expect(
+        parseSentryUrl("https://sentry.example.com/issues/123/")
+      ).toBeNull();
+      expect(
+        parseSentryUrl("https://sentry.acme.internal:9000/issues/456/")
+      ).toBeNull();
+    });
+  });
+
   describe("unrecognized paths return null", () => {
     test("root URL", () => {
       expect(parseSentryUrl("https://sentry.io/")).toBeNull();

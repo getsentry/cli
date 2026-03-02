@@ -227,7 +227,7 @@ describe("fetchWithUpgradeError", () => {
   test("wraps non-Error thrown values as UpgradeError", async () => {
     globalThis.fetch = (async () => {
       // biome-ignore lint/style/useThrowOnlyError: intentionally testing non-Error throw
-      throw { toString: () => "custom thrown value" };
+      throw { code: "ECONNRESET", reason: "connection reset" };
     }) as typeof globalThis.fetch;
 
     try {
@@ -235,7 +235,7 @@ describe("fetchWithUpgradeError", () => {
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(UpgradeError);
-      expect((error as UpgradeError).message).toContain("custom thrown value");
+      expect((error as UpgradeError).message).toContain("ECONNRESET");
     }
   });
 });

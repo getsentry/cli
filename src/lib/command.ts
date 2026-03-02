@@ -2,7 +2,15 @@
  * Command Builder with Telemetry
  *
  * Wraps Stricli's buildCommand to automatically capture flag usage for telemetry.
- * Commands should import buildCommand from this module instead of @stricli/core.
+ *
+ * ALL commands MUST import `buildCommand` from this module, NOT from `@stricli/core`.
+ * Importing directly from `@stricli/core` silently bypasses flag/arg telemetry capture.
+ *
+ * Correct:   import { buildCommand } from "../../lib/command.js";
+ * Incorrect: import { buildCommand } from "@stricli/core";  // skips telemetry!
+ *
+ * Exception: `help.ts` may import from `@stricli/core` because it also needs `run`,
+ * and the help command has no meaningful flags to capture.
  */
 
 import {

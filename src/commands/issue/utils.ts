@@ -9,16 +9,18 @@ import {
   getAutofixState,
   getIssue,
   getIssueByShortId,
+  getIssueInOrg,
   triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
 import { parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
-import { ContextError } from "../../lib/errors.js";
+import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
-import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
+import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue, Writer } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
@@ -140,15 +142,19 @@ async function resolveProjectSearch(
   const projects = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
-    throw new ContextError(`Project '${projectSlug}' not found`, commandHint, [
-      "No project with this slug found in any accessible organization",
-    ]);
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint,
+      ["No project with this slug found in any accessible organization"]
+    );
   }
 
   if (projects.length > 1) {
     const orgList = projects.map((p) => p.orgSlug).join(", ");
-    throw new ContextError(
-      `Project '${projectSlug}' found in multiple organizations`,
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "is ambiguous",
       commandHint,
       [
         `Found in: ${orgList}`,
@@ -159,7 +165,11 @@ async function resolveProjectSearch(
 
   const project = projects[0];
   if (!project) {
-    throw new ContextError(`Project '${projectSlug}' not found`, commandHint);
+    throw new ResolutionError(
+      `Project '${projectSlug}'`,
+      "not found",
+      commandHint
+    );
   }
 
   const fullShortId = expandToFullShortId(suffix, project.slug);
@@ -181,8 +191,9 @@ async function resolveSuffixOnly(
 ): Promise<StrictResolvedIssue> {
   const target = await resolveOrgAndProject({ cwd });
   if (!target) {
-    throw new ContextError(
-      `Cannot resolve issue suffix '${suffix}' without project context`,
+    throw new ResolutionError(
+      `Issue suffix '${suffix}'`,
+      "could not be resolved without project context",
       commandHint
     );
   }
@@ -208,8 +219,9 @@ function resolveExplicitOrgSuffix(
   suffix: string,
   commandHint: string
 ): never {
-  throw new ContextError(
-    `Cannot resolve suffix '${suffix}' without project context`,
+  throw new ResolutionError(
+    `Issue suffix '${suffix}'`,
+    "could not be resolved without project context",
     commandHint,
     [
       `The format '${org}/${suffix}' requires a project to build the full issue ID.`,
@@ -231,6 +243,63 @@ export type ResolveIssueOptions = {
 };
 
 /**
+ * Extract the organization slug from a Sentry issue permalink.
+ *
+ * Handles both path-based (`https://sentry.io/organizations/{org}/issues/...`)
+ * and subdomain-style (`https://{org}.sentry.io/issues/...`) SaaS URLs.
+ * Returns undefined if the permalink is missing or not a recognized format.
+ *
+ * @param permalink - Issue permalink URL from the Sentry API response
+ */
+function extractOrgFromPermalink(
+  permalink: string | undefined
+): string | undefined {
+  if (!permalink) {
+    return;
+  }
+  return parseSentryUrl(permalink)?.org;
+}
+
+/**
+ * Resolve a bare numeric issue ID.
+ *
+ * Attempts org-scoped resolution with region routing when org context can be
+ * derived from the working directory (DSN / env vars / config defaults).
+ * Falls back to the legacy unscoped endpoint otherwise.
+ * Extracts the org slug from the response permalink so callers like
+ * {@link resolveOrgAndIssueId} can proceed without explicit org context.
+ */
+async function resolveNumericIssue(
+  id: string,
+  cwd: string,
+  command: string,
+  commandHint: string
+): Promise<ResolvedIssueResult> {
+  const resolvedOrg = await resolveOrg({ cwd });
+  try {
+    const issue = resolvedOrg
+      ? await getIssueInOrg(resolvedOrg.org, id)
+      : await getIssue(id);
+    // Extract org from the response permalink as a fallback so that callers
+    // like resolveOrgAndIssueId (used by explain/plan) get the org slug even
+    // when no org context was available before the fetch.
+    const org = resolvedOrg?.org ?? extractOrgFromPermalink(issue.permalink);
+    return { org, issue };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      // Improve on the generic "Issue not found" message by including the ID
+      // and suggesting the short-ID format, since users often confuse numeric
+      // group IDs with short-ID suffixes.
+      throw new ResolutionError(`Issue ${id}`, "not found", commandHint, [
+        `No issue with numeric ID ${id} found — you may not have access, or it may have been deleted.`,
+        `If this is a short ID suffix, try: sentry issue ${command} <project>-${id}`,
+      ]);
+    }
+    throw err;
+  }
+}
+
+/**
  * Resolve an issue ID to organization slug and full issue object.
  *
  * Supports all issue ID formats (now parsed by parseIssueArg in arg-parsing.ts):
@@ -243,7 +312,8 @@ export type ResolveIssueOptions = {
  *
  * @param options - Resolution options
  * @returns Object with org slug and full issue
- * @throws {ContextError} When required context cannot be resolved
+ * @throws {ContextError} When required context (org) is missing
+ * @throws {ResolutionError} When an issue or project could not be found or resolved
  */
 export async function resolveIssue(
   options: ResolveIssueOptions
@@ -253,11 +323,8 @@ export async function resolveIssue(
   const commandHint = buildCommandHint(command, issueArg);
 
   switch (parsed.type) {
-    case "numeric": {
-      // Direct fetch by numeric ID - no org context
-      const issue = await getIssue(parsed.id);
-      return { org: undefined, issue };
-    }
+    case "numeric":
+      return resolveNumericIssue(parsed.id, cwd, command, commandHint);
 
     case "explicit": {
       // Full context: org + project + suffix
@@ -267,9 +334,24 @@ export async function resolveIssue(
     }
 
     case "explicit-org-numeric": {
-      // Org + numeric ID
-      const issue = await getIssue(parsed.numericId);
-      return { org: parsed.org, issue };
+      // Org + numeric ID — use org-scoped endpoint for proper region routing.
+      try {
+        const issue = await getIssueInOrg(parsed.org, parsed.numericId);
+        return { org: parsed.org, issue };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          throw new ResolutionError(
+            `Issue ${parsed.numericId}`,
+            "not found",
+            commandHint,
+            [
+              `No issue with numeric ID ${parsed.numericId} found in org '${parsed.org}' — you may not have access, or it may have been deleted.`,
+              `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
+            ]
+          );
+        }
+        throw err;
+      }
     }
 
     case "explicit-org-suffix":

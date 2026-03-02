@@ -20,6 +20,7 @@ import {
   writeJson,
   writeOutput,
 } from "../../lib/formatters/index.js";
+import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
@@ -186,9 +187,7 @@ function writeMultipleProjects(
     }
 
     if (project) {
-      const details = formatProjectDetails(project, dsn);
-      stdout.write(details.join("\n"));
-      stdout.write("\n");
+      stdout.write(`${formatProjectDetails(project, dsn)}\n`);
       if (target?.detectedFrom) {
         stdout.write(`\nDetected from: ${target.detectedFrom}\n`);
       }
@@ -201,10 +200,11 @@ export const viewCommand = buildCommand({
     brief: "View details of a project",
     fullDescription:
       "View detailed information about Sentry projects.\n\n" +
-      "Target specification:\n" +
+      "Target patterns:\n" +
       "  sentry project view                       # auto-detect from DSN or config\n" +
       "  sentry project view <org>/<project>       # explicit org and project\n" +
       "  sentry project view <project>             # find project across all orgs\n\n" +
+      `${TARGET_PATTERN_NOTE}\n\n` +
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
   parameters: {
@@ -212,8 +212,8 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "target",
-          brief: "Target: <org>/<project>, <project>, or omit for auto-detect",
+          placeholder: "org/project",
+          brief: "<org>/<project>, <project> (search), or omit for auto-detect",
           parse: String,
           optional: true,
         },
@@ -263,7 +263,8 @@ export const viewCommand = buildCommand({
         const resolved = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry project view <org>/${parsed.projectSlug}`
+          `sentry project view <org>/${parsed.projectSlug}`,
+          this.stderr
         );
         resolvedTargets = [
           {

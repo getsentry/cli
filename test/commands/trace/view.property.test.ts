@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   array,
   assert as fcAssert,
+  pre,
   property,
   string,
   stringMatching,
@@ -27,13 +28,42 @@ const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
 /** Non-empty strings for general args */
 const nonEmptyStringArb = string({ minLength: 1, maxLength: 50 });
 
+/** Non-empty strings without slashes (valid plain IDs) */
+const plainIdArb = nonEmptyStringArb.filter((s) => !s.includes("/"));
+
 describe("parsePositionalArgs properties", () => {
-  test("single arg: always returns it as traceId with undefined targetArg", async () => {
+  test("single arg without slashes: returns it as traceId with undefined targetArg", async () => {
     await fcAssert(
-      property(nonEmptyStringArb, (input) => {
+      property(plainIdArb, (input) => {
         const result = parsePositionalArgs([input]);
         expect(result.traceId).toBe(input);
         expect(result.targetArg).toBeUndefined();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("single arg org/project/traceId: splits into target and traceId", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, traceIdArb),
+        ([org, project, traceId]) => {
+          const combined = `${org}/${project}/${traceId}`;
+          const result = parsePositionalArgs([combined]);
+          expect(result.targetArg).toBe(`${org}/${project}`);
+          expect(result.traceId).toBe(traceId);
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("single arg with one slash: throws ContextError (missing trace ID)", async () => {
+    await fcAssert(
+      property(tuple(slugArb, slugArb), ([org, project]) => {
+        expect(() => parsePositionalArgs([`${org}/${project}`])).toThrow(
+          ContextError
+        );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -94,6 +124,9 @@ describe("parsePositionalArgs properties", () => {
       property(
         array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
         (args) => {
+          // Skip single-arg with slashes — those throw ContextError (tested separately)
+          pre(args.length > 1 || !args[0]?.includes("/"));
+
           const result1 = parsePositionalArgs(args);
           const result2 = parsePositionalArgs(args);
           expect(result1).toEqual(result2);
@@ -112,6 +145,9 @@ describe("parsePositionalArgs properties", () => {
       property(
         array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
         (args) => {
+          // Skip single-arg with slashes — those throw ContextError (tested separately)
+          pre(args.length > 1 || !args[0]?.includes("/"));
+
           const result = parsePositionalArgs(args);
           expect(result.traceId).toBeDefined();
           expect(typeof result.traceId).toBe("string");

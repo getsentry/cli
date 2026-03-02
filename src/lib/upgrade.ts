@@ -7,7 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, unlinkSync } from "node:fs";
+import { chmodSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import {
@@ -23,12 +23,21 @@ import {
 } from "./binary.js";
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
-import { UpgradeError } from "./errors.js";
+import type { ReleaseChannel } from "./db/release-channel.js";
+import { AbortError, UpgradeError } from "./errors.js";
+import {
+  downloadNightlyBlob,
+  fetchNightlyManifest,
+  findLayerByFilename,
+  getAnonymousToken,
+  getNightlyVersion,
+} from "./ghcr.js";
 
 // Types
 
 export type InstallationMethod =
   | "curl"
+  | "brew"
   | "npm"
   | "pnpm"
   | "bun"
@@ -44,8 +53,20 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/getsentry/cli/releases";
 
+/** The git tag used for the rolling nightly GitHub release (stable fallback only). */
+export const NIGHTLY_TAG = "nightly";
+
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
+
+/** Maps `process.platform` to the OS name used in binary filenames. */
+const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  darwin: "darwin",
+  win32: "windows",
+});
+
+/** Fallback OS name when `process.platform` is not in {@link PLATFORM_NAMES}. */
+const DEFAULT_PLATFORM = "linux";
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
@@ -163,6 +184,26 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
 }
 
 /**
+ * Detect if the CLI binary is running from a Homebrew Cellar.
+ *
+ * Homebrew places the real binary deep in the Cellar
+ * (e.g. `/opt/homebrew/Cellar/sentry/1.2.3/bin/sentry`) and exposes it
+ * via a symlink at the prefix bin dir (e.g. `/opt/homebrew/bin/sentry`).
+ * `process.execPath` typically reflects the symlink, not the realpath, so
+ * we resolve symlinks first before checking for `/Cellar/`. Falls back to
+ * the unresolved path if `realpathSync` throws (e.g. binary was deleted).
+ */
+function isHomebrewInstall(): boolean {
+  let execPath = process.execPath;
+  try {
+    execPath = realpathSync(execPath);
+  } catch {
+    // Binary may have been deleted or moved; use the original path
+  }
+  return execPath.includes("/Cellar/");
+}
+
+/**
  * Legacy detection for existing installs that don't have stored install info.
  * Checks known curl install paths and package managers.
  *
@@ -199,7 +240,14 @@ async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
  * @returns Detected installation method, or "unknown" if unable to determine
  */
 export async function detectInstallationMethod(): Promise<InstallationMethod> {
-  // 1. Check stored info (fast path)
+  // Always check for Homebrew first — the stored install info may be stale
+  // (e.g. user previously had a curl install recorded, then switched to
+  // Homebrew). The realpath check is cheap and authoritative.
+  if (isHomebrewInstall()) {
+    return "brew";
+  }
+
+  // 1. Check stored info (fast path for non-Homebrew installs)
   const stored = getInstallInfo();
   if (stored?.method) {
     return stored.method;
@@ -288,17 +336,70 @@ export async function fetchLatestFromNpm(): Promise<string> {
 }
 
 /**
- * Fetch the latest available version based on installation method.
- * curl installations check GitHub releases; package managers check npm.
+ * Fetch the latest nightly version from GHCR.
+ *
+ * Performs an anonymous token exchange then fetches the OCI manifest for the
+ * `:nightly` tag. The version is extracted from the manifest annotation —
+ * only 2 HTTP requests total (token + manifest), no blob download needed.
+ *
+ * @param signal - Optional AbortSignal to cancel the requests
+ * @returns Latest nightly version string (e.g., "0.13.0-dev.1740000000")
+ * @throws {UpgradeError} When fetch fails or the version annotation is missing
+ */
+export async function fetchLatestNightlyVersion(
+  signal?: AbortSignal
+): Promise<string> {
+  // AbortSignal is not threaded through ghcr helpers, but checking it before
+  // each network call ensures we bail out promptly when the process exits.
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
+
+  const token = await getAnonymousToken();
+
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
+
+  const manifest = await fetchNightlyManifest(token);
+  return getNightlyVersion(manifest);
+}
+
+/**
+ * Detect if the given version string represents a nightly build.
+ *
+ * Nightly versions follow the pattern `X.Y.Z-dev.<timestamp>` (the same
+ * format the build system bakes in via `sed "s/-dev\.[0-9]*$/-dev.${TS}/"`).
+ *
+ * @param version - Version string to check
+ * @returns true if the version is a nightly build
+ */
+export function isNightlyVersion(version: string): boolean {
+  return version.includes("-dev.");
+}
+
+/**
+ * Fetch the latest available version based on installation method and channel.
+ *
+ * - nightly channel: fetches version from GHCR manifest annotation
+ * - curl/brew on stable: checks GitHub /releases/latest
+ * - package managers on stable: checks npm registry
  *
  * @param method - How the CLI was installed
+ * @param channel - Release channel ("stable" or "nightly"), defaults to "stable"
  * @returns Latest version string (without 'v' prefix)
  * @throws {UpgradeError} When version fetch fails
  */
 export function fetchLatestVersion(
-  method: InstallationMethod
+  method: InstallationMethod,
+  channel: ReleaseChannel = "stable"
 ): Promise<string> {
-  return method === "curl" ? fetchLatestFromGitHub() : fetchLatestFromNpm();
+  if (channel === "nightly") {
+    return fetchLatestNightlyVersion();
+  }
+  return method === "curl" || method === "brew"
+    ? fetchLatestFromGitHub()
+    : fetchLatestFromNpm();
 }
 
 /**
@@ -314,7 +415,7 @@ export async function versionExists(
   method: InstallationMethod,
   version: string
 ): Promise<boolean> {
-  if (method === "curl") {
+  if (method === "curl" || method === "brew") {
     const response = await fetchWithUpgradeError(
       `${GITHUB_RELEASES_URL}/tags/${version}`,
       { method: "HEAD", headers: getGitHubHeaders() },
@@ -368,12 +469,107 @@ async function streamDecompressToFile(
 }
 
 /**
- * Download the new binary to a temporary path and return its location.
- * Used by the upgrade command to download before spawning setup --install.
+ * Build the gzip filename for the current platform binary.
+ *
+ * Nightly builds are stored in GHCR as `sentry-<os>-<arch>.gz` (or
+ * `sentry-windows-x64.exe.gz` on Windows). This filename is the
+ * `org.opencontainers.image.title` annotation on the matching OCI layer.
+ *
+ * @returns Filename of the gzip-compressed binary for this platform
+ */
+function getNightlyGzFilename(): string {
+  const os = PLATFORM_NAMES[process.platform] ?? DEFAULT_PLATFORM;
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  return `sentry-${os}-${arch}${suffix}.gz`;
+}
+
+/**
+ * Download a nightly binary from GHCR and decompress it to `destPath`.
+ *
+ * Fetches an anonymous token, retrieves the OCI manifest, finds the layer
+ * matching this platform's `.gz` filename, then downloads and decompresses
+ * the blob in-stream.
+ *
+ * @param destPath - File path to write the decompressed binary
+ * @throws {UpgradeError} When GHCR fetch or blob download fails
+ */
+async function downloadNightlyToPath(destPath: string): Promise<void> {
+  const token = await getAnonymousToken();
+  const manifest = await fetchNightlyManifest(token);
+  const filename = getNightlyGzFilename();
+  const layer = findLayerByFilename(manifest, filename);
+  const response = await downloadNightlyBlob(token, layer.digest);
+
+  if (!response.body) {
+    throw new UpgradeError(
+      "execution_failed",
+      "GHCR blob response had no body"
+    );
+  }
+  await streamDecompressToFile(response.body, destPath);
+}
+
+/**
+ * Download a stable binary from GitHub Releases and write it to `destPath`.
  *
  * Tries the gzip-compressed URL first (`{url}.gz`, ~37 MB vs ~99 MB),
  * falling back to the raw binary URL on any failure. The compressed
  * download is streamed through DecompressionStream for minimal memory usage.
+ *
+ * @param version - Stable version string (without 'v' prefix)
+ * @param destPath - File path to write the binary (decompressed if gzip)
+ * @throws {UpgradeError} When both download attempts fail
+ */
+async function downloadStableToPath(
+  version: string,
+  destPath: string
+): Promise<void> {
+  const url = getBinaryDownloadUrl(version);
+  const headers = getGitHubHeaders();
+
+  // Try gzip-compressed download first (~60% smaller)
+  try {
+    const gzResponse = await fetchWithUpgradeError(
+      `${url}.gz`,
+      { headers },
+      "GitHub"
+    );
+    if (gzResponse.ok && gzResponse.body) {
+      await streamDecompressToFile(gzResponse.body, destPath);
+      return;
+    }
+  } catch {
+    // Fall through to raw download
+  }
+
+  // Fall back to raw (uncompressed) binary
+  const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "execution_failed",
+      `Failed to download binary: HTTP ${response.status}`
+    );
+  }
+
+  // Fully consume the response body before writing to disk.
+  // Bun.write(path, Response) with a large streaming body can exit the
+  // process before the download completes (Bun event-loop bug).
+  // See: https://github.com/oven-sh/bun/issues/13237
+  const body = await response.arrayBuffer();
+  await Bun.write(destPath, body);
+}
+
+/**
+ * Download the new binary to a temporary path and return its location.
+ * Used by the upgrade command to download before spawning setup --install.
+ *
+ * For **nightly** versions (detected via {@link isNightlyVersion}), downloads
+ * from GHCR using the OCI blob download protocol via {@link downloadNightlyToPath}.
+ *
+ * For **stable** versions, downloads from GitHub Releases via
+ * {@link downloadStableToPath}.
  *
  * The lock is held on success so concurrent upgrades are blocked during the
  * download→spawn→install pipeline. The caller MUST release the lock after the
@@ -384,14 +580,17 @@ async function streamDecompressToFile(
  * process.ppid recognition in acquireLock — the parent's subsequent release
  * is then a harmless no-op.
  *
- * @param version - Target version to download
+ * @param version - Target version to download (used for display and comparison)
+ * @param downloadTag - Git tag to use in the download URL. Defaults to `version`.
+ *   Pass `NIGHTLY_TAG` ("nightly") when installing from the rolling nightly release
+ *   so the URL points to the prerelease assets regardless of the version string.
  * @returns The downloaded binary path and lock path to release
  * @throws {UpgradeError} When download fails
  */
 export async function downloadBinaryToTemp(
-  version: string
+  version: string,
+  downloadTag?: string
 ): Promise<DownloadResult> {
-  const url = getBinaryDownloadUrl(version);
   const { tempPath, lockPath } = getCurlInstallPaths();
 
   acquireLock(lockPath);
@@ -404,41 +603,11 @@ export async function downloadBinaryToTemp(
       // Ignore if doesn't exist
     }
 
-    const headers = getGitHubHeaders();
-
-    // Try gzip-compressed download first (~60% smaller)
-    let downloaded = false;
-    try {
-      const gzResponse = await fetchWithUpgradeError(
-        `${url}.gz`,
-        { headers },
-        "GitHub"
-      );
-      if (gzResponse.ok && gzResponse.body) {
-        await streamDecompressToFile(gzResponse.body, tempPath);
-        downloaded = true;
-      }
-    } catch {
-      // Fall through to raw download
-    }
-
-    // Fall back to raw (uncompressed) binary
-    if (!downloaded) {
-      const response = await fetchWithUpgradeError(url, { headers }, "GitHub");
-
-      if (!response.ok) {
-        throw new UpgradeError(
-          "execution_failed",
-          `Failed to download binary: HTTP ${response.status}`
-        );
-      }
-
-      // Fully consume the response body before writing to disk.
-      // Bun.write(path, Response) with a large streaming body can exit the
-      // process before the download completes (Bun event-loop bug).
-      // See: https://github.com/oven-sh/bun/issues/13237
-      const body = await response.arrayBuffer();
-      await Bun.write(tempPath, body);
+    if (isNightlyVersion(version)) {
+      // Nightly binaries are on GHCR — downloadTag is not used for nightly
+      await downloadNightlyToPath(tempPath);
+    } else {
+      await downloadStableToPath(downloadTag ?? version, tempPath);
     }
 
     // Set executable permission (Unix only)
@@ -451,6 +620,43 @@ export async function downloadBinaryToTemp(
     releaseLock(lockPath);
     throw error;
   }
+}
+
+/**
+ * Execute upgrade via Homebrew.
+ *
+ * Runs `brew upgrade getsentry/tools/sentry` which fetches the latest
+ * formula from the tap and installs the new version. The version argument
+ * is intentionally ignored: Homebrew manages versioning through the formula
+ * file in the tap and does not support pinning to an arbitrary release.
+ *
+ * @throws {UpgradeError} When brew upgrade fails
+ */
+function executeUpgradeHomebrew(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("brew", ["upgrade", "getsentry/tools/sentry"], {
+      stdio: "inherit",
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new UpgradeError(
+            "execution_failed",
+            `brew upgrade failed with exit code ${code}`
+          )
+        );
+      }
+    });
+
+    proc.on("error", (err) => {
+      reject(
+        new UpgradeError("execution_failed", `brew failed: ${err.message}`)
+      );
+    });
+  });
 }
 
 /**
@@ -505,17 +711,23 @@ function executeUpgradePackageManager(
  * spawn `setup` on the new binary for completions/agent skills.
  *
  * @param method - How the CLI was installed
- * @param version - Target version to install
+ * @param version - Target version to install (used for display)
+ * @param downloadTag - Git tag to download from. Defaults to `version`.
+ *   Pass `NIGHTLY_TAG` for nightly installs so the URL uses the "nightly" tag.
  * @returns Download result with paths (curl), or null (package manager)
  * @throws {UpgradeError} When method is unknown or installation fails
  */
 export async function executeUpgrade(
   method: InstallationMethod,
-  version: string
+  version: string,
+  downloadTag?: string
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return downloadBinaryToTemp(version);
+      return downloadBinaryToTemp(version, downloadTag);
+    case "brew":
+      await executeUpgradeHomebrew();
+      return null;
     case "npm":
     case "pnpm":
     case "bun":
@@ -530,6 +742,7 @@ export async function executeUpgrade(
 /** Valid methods that can be specified via --method flag */
 const VALID_METHODS: InstallationMethod[] = [
   "curl",
+  "brew",
   "npm",
   "pnpm",
   "bun",
