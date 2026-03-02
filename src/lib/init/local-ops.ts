@@ -39,6 +39,9 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "$(", label: "command substitution ($()" },
     { pattern: "\n", label: "newline" },
     { pattern: "\r", label: "carriage return" },
+    { pattern: ">", label: "redirection (>)" },
+    { pattern: "<", label: "redirection (<)" },
+    { pattern: "&", label: "background execution (&)" },
   ];
 
 const WHITESPACE_RE = /\s+/;
@@ -325,7 +328,8 @@ function runSingleCommand(
   stderr: string;
 }> {
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", command], {
+    const child = spawn(command, [], {
+      shell: true,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,
