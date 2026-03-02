@@ -162,6 +162,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     spin.stop("Connection failed", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
+    process.exitCode = 1;
     return;
   }
 
@@ -193,11 +194,13 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
+      process.exitCode = 1;
       return;
     }
     spin.stop("Cancelled", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
+    process.exitCode = 1;
     return;
   }
 
@@ -212,6 +215,7 @@ function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
   if (hasError) {
     spin.stop("Failed", 1);
     formatError(output);
+    process.exitCode = 1;
   } else {
     spin.stop("Done");
     formatResult(output);
