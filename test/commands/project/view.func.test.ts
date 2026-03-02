@@ -109,7 +109,7 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("test-project");
-    expect(output).toContain("Slug:");
+    expect(output).toContain("Slug");
   });
 
   test("explicit org/project with --web opens browser", async () => {

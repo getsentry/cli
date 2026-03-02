@@ -92,8 +92,7 @@ function writeHumanOutput(
   orgSlug: string,
   detectedFrom?: string
 ): void {
-  const lines = formatLogDetails(log, orgSlug);
-  stdout.write(`${lines.join("\n")}\n`);
+  stdout.write(`${formatLogDetails(log, orgSlug)}\n`);
 
   if (detectedFrom) {
     stdout.write(`\nDetected from ${detectedFrom}\n`);

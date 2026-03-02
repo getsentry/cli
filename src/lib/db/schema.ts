@@ -14,7 +14,7 @@
 import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -85,6 +85,7 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       org_name: { type: "TEXT", notNull: true },
       project_slug: { type: "TEXT", notNull: true },
       project_name: { type: "TEXT", notNull: true },
+      project_id: { type: "TEXT", addedInVersion: 7 },
       cached_at: {
         type: "INTEGER",
         notNull: true,
@@ -706,6 +707,11 @@ export function runMigrations(db: Database): void {
   ) {
     db.exec("DROP TABLE pagination_cursors");
     db.exec(EXPECTED_TABLES.pagination_cursors as string);
+  }
+
+  // Migration 6 -> 7: Add project_id column to project_cache for numeric project filtering
+  if (currentVersion < 7) {
+    addColumnIfMissing(db, "project_cache", "project_id", "TEXT");
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

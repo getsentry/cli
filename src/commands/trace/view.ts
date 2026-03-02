@@ -96,13 +96,13 @@ export type ResolvedTraceTarget = {
 export function writeHumanOutput(
   stdout: Writer,
   options: {
-    summaryLines: string[];
+    summaryLines: string;
     spanTreeLines?: string[];
   }
 ): void {
   const { summaryLines, spanTreeLines } = options;
 
-  stdout.write(`${summaryLines.join("\n")}\n`);
+  stdout.write(`${summaryLines}\n`);
 
   if (spanTreeLines && spanTreeLines.length > 0) {
     stdout.write(`${spanTreeLines.join("\n")}\n`);

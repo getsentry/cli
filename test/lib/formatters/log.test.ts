@@ -2,13 +2,47 @@
  * Tests for log formatters
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  createLogStreamingTable,
   formatLogDetails,
   formatLogRow,
   formatLogsHeader,
+  formatLogTable,
 } from "../../../src/lib/formatters/log.js";
 import type { DetailedSentryLog, SentryLog } from "../../../src/types/index.js";
+
+/** Force rendered (TTY) mode for a describe block */
+function useRenderedMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
+
+/** Force plain mode for a describe block */
+function usePlainMode() {
+  let savedPlain: string | undefined;
+  beforeEach(() => {
+    savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+  });
+  afterEach(() => {
+    if (savedPlain === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+    }
+  });
+}
 
 function createTestLog(overrides: Partial<SentryLog> = {}): SentryLog {
   return {
@@ -28,7 +62,9 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-describe("formatLogRow", () => {
+describe("formatLogRow (rendered mode)", () => {
+  useRenderedMode();
+
   test("formats basic log entry", () => {
     const log = createTestLog();
     const result = formatLogRow(log);
@@ -116,25 +152,103 @@ describe("formatLogRow", () => {
   });
 });
 
-describe("formatLogsHeader", () => {
-  test("contains column titles", () => {
-    const result = stripAnsi(formatLogsHeader());
+describe("createLogStreamingTable", () => {
+  test("header() contains column titles and box-drawing borders", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.header();
 
-    expect(result).toContain("TIMESTAMP");
-    expect(result).toContain("LEVEL");
-    expect(result).toContain("MESSAGE");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Level");
+    expect(result).toContain("Message");
+    // Box-drawing border characters
+    expect(result).toContain("─");
+    expect(result).toContain("╭");
   });
 
-  test("contains divider line", () => {
-    const result = formatLogsHeader();
+  test("row() renders cells with side borders", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.row(["2026-01-15 10:00:00", "ERROR", "something"]);
 
-    // Should have divider characters
+    expect(result).toContain("2026-01-15 10:00:00");
+    expect(result).toContain("ERROR");
+    expect(result).toContain("something");
+    // Side borders
+    expect(result).toContain("│");
+  });
+
+  test("footer() renders bottom border", () => {
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    const result = table.footer();
+
     expect(result).toContain("─");
+    expect(result).toContain("╯");
   });
 
   test("ends with newline", () => {
-    const result = formatLogsHeader();
+    const table = createLogStreamingTable({ maxWidth: 80 });
+    expect(table.header()).toEndWith("\n");
+    expect(table.row(["a", "b", "c"])).toEndWith("\n");
+    expect(table.footer()).toEndWith("\n");
+  });
+});
+
+describe("formatLogRow (plain mode)", () => {
+  usePlainMode();
+
+  test("emits a markdown table row", () => {
+    const log = createTestLog();
+    const result = formatLogRow(log);
+    expect(result).toMatch(/^\|.+\|.+\|.+\|\n$/);
+  });
+
+  test("contains timestamp, severity, message", () => {
+    const log = createTestLog({
+      severity: "error",
+      message: "connection failed",
+    });
+    const result = formatLogRow(log);
+    expect(result).toContain("connection failed");
+    expect(result).toContain("ERROR");
+    expect(result).toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  test("contains trace ID as inline code", () => {
+    const log = createTestLog({ trace: "abc123def456" });
+    const result = formatLogRow(log);
+    expect(result).toContain("[abc123de]");
+  });
+
+  test("omits trace cell when trace is null", () => {
+    const log = createTestLog({ trace: null });
+    const result = formatLogRow(log);
+    expect(result).not.toContain("[");
+  });
+
+  test("escapes pipe characters in message", () => {
+    const log = createTestLog({ message: "a|b" });
+    const result = formatLogRow(log);
+    // Raw pipe in message must be escaped so it doesn't break the table
+    expect(result).toContain("a\\|b");
+  });
+
+  test("ends with newline", () => {
+    const result = formatLogRow(createTestLog());
     expect(result).toEndWith("\n");
+  });
+});
+
+describe("formatLogsHeader (plain mode)", () => {
+  usePlainMode();
+
+  test("emits markdown table header and separator", () => {
+    const result = formatLogsHeader();
+    // Plain mode produces mdTableHeader output (no bold markup), followed by separator
+    expect(result).toContain("| Timestamp | Level | Message |");
+    expect(result).toContain("| --- | --- | --- |");
+  });
+
+  test("ends with newline", () => {
+    expect(formatLogsHeader()).toEndWith("\n");
   });
 });
 
@@ -167,31 +281,29 @@ function createDetailedTestLog(
 describe("formatLogDetails", () => {
   test("formats basic log entry with header", () => {
     const log = createDetailedTestLog();
-    const lines = formatLogDetails(log, "test-org");
-    const result = lines.join("\n");
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
-    expect(result).toContain("Log test-log-id");
-    expect(result).toContain("═"); // Header separator
+    // Header contains log ID prefix
+    expect(result).toContain("Log");
+    expect(result).toContain("test-log-id");
   });
 
   test("includes ID, timestamp, and severity", () => {
     const log = createDetailedTestLog();
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
-    expect(result).toContain("ID:");
+    expect(result).toContain("ID");
     expect(result).toContain("test-log-id-123456789012345678901234");
-    expect(result).toContain("Timestamp:");
-    expect(result).toContain("Severity:");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Severity");
     expect(result).toContain("INFO");
   });
 
   test("includes message when present", () => {
     const log = createDetailedTestLog({ message: "Custom error message" });
-    const lines = formatLogDetails(log, "test-org");
-    const result = lines.join("\n");
+    const result = formatLogDetails(log, "test-org");
 
-    expect(result).toContain("Message:");
+    expect(result).toContain("Message");
     expect(result).toContain("Custom error message");
   });
 
@@ -201,15 +313,14 @@ describe("formatLogDetails", () => {
       environment: "staging",
       release: "2.0.0",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("Context");
-    expect(result).toContain("Project:");
+    expect(result).toContain("Project");
     expect(result).toContain("my-project");
-    expect(result).toContain("Environment:");
+    expect(result).toContain("Environment");
     expect(result).toContain("staging");
-    expect(result).toContain("Release:");
+    expect(result).toContain("Release");
     expect(result).toContain("2.0.0");
   });
 
@@ -218,8 +329,7 @@ describe("formatLogDetails", () => {
       "sdk.name": "sentry.python",
       "sdk.version": "2.0.0",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("SDK");
     expect(result).toContain("sentry.python");
@@ -231,15 +341,14 @@ describe("formatLogDetails", () => {
       trace: "trace123abc456def789",
       span_id: "span-abc-123",
     });
-    const lines = formatLogDetails(log, "my-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "my-org"));
 
     expect(result).toContain("Trace");
-    expect(result).toContain("Trace ID:");
+    expect(result).toContain("Trace ID");
     expect(result).toContain("trace123abc456def789");
-    expect(result).toContain("Span ID:");
+    expect(result).toContain("Span ID");
     expect(result).toContain("span-abc-123");
-    expect(result).toContain("Link:");
+    expect(result).toContain("Link");
     expect(result).toContain("my-org/traces/trace123abc456def789");
   });
 
@@ -249,13 +358,12 @@ describe("formatLogDetails", () => {
       "code.file.path": "src/api/handler.ts",
       "code.line.number": "42",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("Source Location");
-    expect(result).toContain("Function:");
+    expect(result).toContain("Function");
     expect(result).toContain("handleRequest");
-    expect(result).toContain("File:");
+    expect(result).toContain("File");
     expect(result).toContain("src/api/handler.ts:42");
   });
 
@@ -265,15 +373,14 @@ describe("formatLogDetails", () => {
       "sentry.otel.status_code": "OK",
       "sentry.otel.instrumentation_scope.name": "express",
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     expect(result).toContain("OpenTelemetry");
-    expect(result).toContain("Kind:");
+    expect(result).toContain("Kind");
     expect(result).toContain("server");
-    expect(result).toContain("Status:");
+    expect(result).toContain("Status");
     expect(result).toContain("OK");
-    expect(result).toContain("Scope:");
+    expect(result).toContain("Scope");
     expect(result).toContain("express");
   });
 
@@ -287,17 +394,52 @@ describe("formatLogDetails", () => {
       "sdk.name": null,
       "sdk.version": null,
     });
-    const lines = formatLogDetails(log, "test-org");
-    const result = stripAnsi(lines.join("\n"));
+    const result = stripAnsi(formatLogDetails(log, "test-org"));
 
     // Should still have basic info
-    expect(result).toContain("ID:");
-    expect(result).toContain("Timestamp:");
-    expect(result).toContain("Severity:");
+    expect(result).toContain("ID");
+    expect(result).toContain("Timestamp");
+    expect(result).toContain("Severity");
 
     // Should not have optional sections
     expect(result).not.toContain("Context");
     expect(result).not.toContain("SDK");
     expect(result).not.toContain("Trace");
+  });
+});
+
+describe("formatLogTable", () => {
+  test("returns a string", () => {
+    const result = formatLogTable([createTestLog()]);
+    expect(typeof result).toBe("string");
+  });
+
+  test("includes all log messages", () => {
+    const logs = [
+      createTestLog({ message: "First log" }),
+      createTestLog({ message: "Second log" }),
+    ];
+    const result = stripAnsi(formatLogTable(logs));
+    expect(result).toContain("First log");
+    expect(result).toContain("Second log");
+  });
+
+  test("includes severity levels", () => {
+    const result = stripAnsi(
+      formatLogTable([createTestLog({ severity: "error" })])
+    );
+    expect(result).toContain("ERROR");
+  });
+
+  test("includes trace IDs when present", () => {
+    const result = stripAnsi(
+      formatLogTable([createTestLog({ trace: "abcdef1234567890" })])
+    );
+    expect(result).toContain("abcdef12");
+  });
+
+  test("handles empty messages", () => {
+    const result = formatLogTable([createTestLog({ message: "" })]);
+    expect(typeof result).toBe("string");
   });
 });

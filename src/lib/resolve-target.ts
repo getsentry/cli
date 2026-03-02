@@ -38,6 +38,7 @@ import {
   getDsnSourceDescription,
 } from "./dsn/index.js";
 import {
+  ApiError,
   AuthError,
   ContextError,
   ResolutionError,
@@ -47,6 +48,23 @@ import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
 /**
+ * Convert a string or numeric ID to a positive integer, or `undefined` if the
+ * value is absent, non-numeric, or not a positive integer.
+ *
+ * Sentry project/org IDs are always positive integers, so `0` and negative
+ * values are treated as absent rather than valid IDs.
+ */
+export function toNumericId(
+  id: string | number | null | undefined
+): number | undefined {
+  if (id === null || id === undefined) {
+    return;
+  }
+  const n = Number(id);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Resolved organization and project target for API calls.
  */
 export type ResolvedTarget = {
@@ -54,6 +72,8 @@ export type ResolvedTarget = {
   org: string;
   /** Project slug for API calls */
   project: string;
+  /** Numeric project ID for API query params (avoids "not actively selected" errors) */
+  projectId?: number;
   /** Human-readable org name (falls back to slug) */
   orgDisplay: string;
   /** Human-readable project name (falls back to slug) */
@@ -135,6 +155,7 @@ export async function resolveFromDsn(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -150,11 +171,13 @@ export async function resolveFromDsn(
       orgName: projectInfo.organization.name,
       projectSlug: projectInfo.slug,
       projectName: projectInfo.name,
+      projectId: projectInfo.id,
     });
 
     return {
       org: projectInfo.organization.slug,
       project: projectInfo.slug,
+      projectId: toNumericId(projectInfo.id),
       orgDisplay: projectInfo.organization.name,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -165,6 +188,7 @@ export async function resolveFromDsn(
   return {
     org: dsn.orgId,
     project: dsn.projectId,
+    projectId: toNumericId(projectInfo.id),
     orgDisplay: dsn.orgId,
     projectDisplay: projectInfo.name,
     detectedFrom,
@@ -223,6 +247,7 @@ async function resolveDsnByPublicKey(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -244,11 +269,13 @@ async function resolveDsnByPublicKey(
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
+        projectId: projectInfo.id,
       });
 
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
+        projectId: toNumericId(projectInfo.id),
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -294,6 +321,7 @@ async function resolveDsnToTarget(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -311,11 +339,13 @@ async function resolveDsnToTarget(
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
         projectName: projectInfo.name,
+        projectId: projectInfo.id,
       });
 
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
+        projectId: toNumericId(projectInfo.id),
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -327,6 +357,7 @@ async function resolveDsnToTarget(
     return {
       org: dsn.orgId,
       project: dsn.projectId,
+      projectId: toNumericId(projectInfo.id),
       orgDisplay: dsn.orgId,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -456,6 +487,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
   const targets: ResolvedTarget[] = matches.map((m) => ({
     org: m.orgSlug,
     project: m.slug,
+    projectId: toNumericId(m.id),
     orgDisplay: m.organization?.name ?? m.orgSlug,
     projectDisplay: m.name,
     detectedFrom,
@@ -517,6 +549,38 @@ function resolveFromEnvVars(): {
   }
 
   return null;
+}
+
+/**
+ * Fetch the numeric project ID for an explicit org/project pair.
+ *
+ * Throws on auth errors and 404s (user-actionable). Returns undefined
+ * for transient failures (network, 500s) so the command can still
+ * attempt slug-based querying as a fallback.
+ */
+export async function fetchProjectId(
+  org: string,
+  project: string
+): Promise<number | undefined> {
+  try {
+    const projectInfo = await getProject(org, project);
+    return toNumericId(projectInfo.id);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ResolutionError(
+        `Project '${project}'`,
+        `not found in organization '${org}'`,
+        `sentry issue list ${org}/<project>`,
+        [
+          `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
+        ]
+      );
+    }
+    return;
+  }
 }
 
 /**

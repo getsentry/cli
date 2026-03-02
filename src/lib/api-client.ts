@@ -8,8 +8,10 @@
  * Falls back to raw requests for internal/undocumented endpoints.
  */
 
+import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
   createANewProject,
+  listAnOrganization_sIssues,
   listAnOrganization_sRepositories,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
@@ -124,11 +126,36 @@ function unwrapResult<T>(
     if (error instanceof AuthError || error instanceof ApiError) {
       throw error;
     }
+    // The @sentry/api SDK always includes `response` on the returned object in
+    // the default "fields" responseStyle (see createClient request() in the SDK
+    // source — it spreads `{ request, response }` into every return value).
+    // The cast is typed as optional only because the SDK's TypeScript types omit
+    // `response` from the return type, not because it can be absent at runtime.
     const response = (result as { response?: Response }).response;
     throwApiError(error, response, context);
   }
 
   return data as T;
+}
+
+/**
+ * Unwrap an @sentry/api SDK result AND extract pagination from the Link header.
+ *
+ * Unlike {@link unwrapResult} which discards the Response, this preserves the
+ * Link header for cursor-based pagination. Use for SDK-backed paginated endpoints.
+ *
+ * @param result - The result from an SDK function call (includes `response`)
+ * @param context - Human-readable context for error messages
+ * @returns Data and optional next-page cursor
+ */
+function unwrapPaginatedResult<T>(
+  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  context: string
+): PaginatedResponse<T> {
+  const response = (result as { response?: Response }).response;
+  const data = unwrapResult(result, context);
+  const { nextCursor } = parseLinkHeader(response?.headers.get("link") ?? null);
+  return { data, nextCursor };
 }
 
 /**
@@ -1063,46 +1090,71 @@ export async function tryGetPrimaryDsn(
 }
 
 /**
+ * Sort options for issue listing, derived from the @sentry/api SDK types.
+ * Uses the SDK type directly for compile-time safety against parameter drift.
+ */
+export type IssueSort = NonNullable<
+  NonNullable<ListAnOrganizationSissuesData["query"]>["sort"]
+>;
+
+/**
  * List issues for a project with pagination control.
- * Returns a single page of results with cursor metadata for manual pagination.
- * Uses the org-scoped endpoint with a `project:{slug}` filter.
+ *
+ * Uses the @sentry/api SDK's `listAnOrganization_sIssues` for type-safe
+ * query parameters, and extracts pagination from the response Link header.
  *
  * @param orgSlug - Organization slug
- * @param projectSlug - Project slug
+ * @param projectSlug - Project slug (empty string for org-wide listing)
  * @param options - Query and pagination options
  * @returns Single page of issues with cursor metadata
  */
-export function listIssuesPaginated(
+export async function listIssuesPaginated(
   orgSlug: string,
   projectSlug: string,
   options: {
     query?: string;
     cursor?: string;
     perPage?: number;
-    sort?: "date" | "new" | "freq" | "user";
+    sort?: IssueSort;
     statsPeriod?: string;
+    /** Numeric project ID. When provided, uses the `project` query param
+     *  instead of `project:<slug>` search syntax, avoiding "not actively
+     *  selected" errors. */
+    projectId?: number;
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
-  // Only add project filter when projectSlug is non-empty; an empty slug would
-  // produce "project:" (a truthy string that .filter(Boolean) won't remove),
-  // sending a malformed query to the API for org-wide listing.
-  const projectFilter = projectSlug ? `project:${projectSlug}` : "";
+  // When we have a numeric project ID, use the `project` query param (Array<number>)
+  // instead of `project:<slug>` in the search query. The API's `project` param
+  // selects the project directly, bypassing the "actively selected" requirement.
+  let projectFilter = "";
+  if (!options.projectId && projectSlug) {
+    projectFilter = `project:${projectSlug}`;
+  }
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  return orgScopedRequestPaginated<SentryIssue[]>(
-    `/organizations/${orgSlug}/issues/`,
-    {
-      params: {
-        // Convert empty string to undefined so ky omits the param entirely;
-        // sending `query=` causes the Sentry API to behave differently than
-        // omitting the parameter.
-        query: fullQuery || undefined,
-        cursor: options.cursor,
-        per_page: options.perPage ?? 25,
-        sort: options.sort,
-        statsPeriod: options.statsPeriod,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sIssues({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      project: options.projectId ? [options.projectId] : undefined,
+      // Convert empty string to undefined so the SDK omits the param entirely;
+      // sending `query=` causes the Sentry API to behave differently than
+      // omitting the parameter.
+      query: fullQuery || undefined,
+      cursor: options.cursor,
+      limit: options.perPage ?? 25,
+      sort: options.sort,
+      statsPeriod: options.statsPeriod,
+    },
+  });
+
+  return unwrapPaginatedResult<SentryIssue[]>(
+    result as
+      | { data: SentryIssue[]; error: undefined }
+      | { data: undefined; error: unknown },
+    "Failed to list issues"
   );
 }
 
@@ -1137,8 +1189,12 @@ export async function listIssuesAllPages(
   options: {
     query?: string;
     limit: number;
-    sort?: "date" | "new" | "freq" | "user";
+    sort?: IssueSort;
     statsPeriod?: string;
+    /** Numeric project ID for direct project selection via query param. */
+    projectId?: number;
+    /** Resume pagination from this cursor instead of starting from the beginning. */
+    startCursor?: string;
     /** Called after each page is fetched. Useful for progress indicators. */
     onPage?: (fetched: number, limit: number) => void;
   }
@@ -1150,7 +1206,7 @@ export async function listIssuesAllPages(
   }
 
   const allResults: SentryIssue[] = [];
-  let cursor: string | undefined;
+  let cursor: string | undefined = options.startCursor;
 
   // Use the smaller of the requested limit and the API max as page size
   const perPage = Math.min(options.limit, API_MAX_PER_PAGE);
@@ -1162,6 +1218,7 @@ export async function listIssuesAllPages(
       perPage,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
+      projectId: options.projectId,
     });
 
     allResults.push(...response.data);

@@ -15,6 +15,7 @@ import {
   listTeams,
   listTeamsPaginated,
 } from "../../lib/api-client.js";
+import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   buildOrgListCommand,
@@ -31,14 +32,13 @@ type TeamWithOrg = SentryTeam & { orgSlug?: string };
 
 /** Column definitions for the team table. */
 const TEAM_COLUMNS: Column<TeamWithOrg>[] = [
-  { header: "ORG", value: (t) => t.orgSlug || "", minWidth: 3 },
-  { header: "SLUG", value: (t) => t.slug, minWidth: 4 },
-  { header: "NAME", value: (t) => t.name, minWidth: 4 },
+  { header: "ORG", value: (t) => t.orgSlug || "" },
+  { header: "SLUG", value: (t) => t.slug },
+  { header: "NAME", value: (t) => escapeMarkdownCell(t.name) },
   {
     header: "MEMBERS",
     value: (t) => String(t.memberCount ?? ""),
     align: "right",
-    minWidth: 7,
   },
 ];
 
