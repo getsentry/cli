@@ -1,34 +1,28 @@
 /**
- * Isolated tests for init wizard interactive prompts.
+ * Interactive Dispatcher Tests
  *
- * Uses mock.module() to stub @clack/prompts — kept isolated so the
- * module-level mock does not leak into other test files.
+ * Tests for the init wizard interactive prompt handlers. Uses spyOn on
+ * @clack/prompts namespace to intercept calls from named imports.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { WizardOptions } from "../../src/lib/init/types.js";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as clack from "@clack/prompts";
+import { handleInteractive } from "../../../src/lib/init/interactive.js";
+import type { WizardOptions } from "../../../src/lib/init/types.js";
 
-// Controllable mock implementations — reset per test via beforeEach
-let selectImpl: ReturnType<typeof mock>;
-let multiselectImpl: ReturnType<typeof mock>;
-let confirmImpl: ReturnType<typeof mock>;
-const logMock = { info: mock(), error: mock(), warn: mock() };
-const cancelMock = mock();
+const noop = () => {
+  /* suppress clack output */
+};
 
-mock.module("@clack/prompts", () => ({
-  select: (...args: unknown[]) => selectImpl(...args),
-  multiselect: (...args: unknown[]) => multiselectImpl(...args),
-  confirm: (...args: unknown[]) => confirmImpl(...args),
-  log: logMock,
-  cancel: (...args: unknown[]) => cancelMock(...args),
-  isCancel: (v: unknown) => v === Symbol.for("cancel"),
-  note: mock(),
-  outro: mock(),
-  intro: mock(),
-  spinner: () => ({ start: mock(), stop: mock(), message: mock() }),
-}));
-
-const { handleInteractive } = await import("../../src/lib/init/interactive.js");
+let selectSpy: ReturnType<typeof spyOn>;
+let multiselectSpy: ReturnType<typeof spyOn>;
+let confirmSpy: ReturnType<typeof spyOn>;
+let logInfoSpy: ReturnType<typeof spyOn>;
+let logErrorSpy: ReturnType<typeof spyOn>;
+let logWarnSpy: ReturnType<typeof spyOn>;
+let cancelSpy: ReturnType<typeof spyOn>;
+let isCancelSpy: ReturnType<typeof spyOn>;
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -44,13 +38,33 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
 }
 
 beforeEach(() => {
-  selectImpl = mock(() => Promise.resolve("default"));
-  multiselectImpl = mock(() => Promise.resolve([]));
-  confirmImpl = mock(() => Promise.resolve(true));
-  logMock.info.mockClear();
-  logMock.error.mockClear();
-  logMock.warn.mockClear();
-  cancelMock.mockClear();
+  selectSpy = spyOn(clack, "select").mockImplementation(
+    () => Promise.resolve("default") as any
+  );
+  multiselectSpy = spyOn(clack, "multiselect").mockImplementation(
+    () => Promise.resolve([]) as any
+  );
+  confirmSpy = spyOn(clack, "confirm").mockImplementation(
+    () => Promise.resolve(true) as any
+  );
+  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
+  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
+  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
+  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
+  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
+    (v: unknown) => v === Symbol.for("cancel")
+  );
+});
+
+afterEach(() => {
+  selectSpy.mockRestore();
+  multiselectSpy.mockRestore();
+  confirmSpy.mockRestore();
+  logInfoSpy.mockRestore();
+  logErrorSpy.mockRestore();
+  logWarnSpy.mockRestore();
+  cancelSpy.mockRestore();
+  isCancelSpy.mockRestore();
 });
 
 describe("handleInteractive dispatcher", () => {
@@ -76,7 +90,7 @@ describe("handleSelect", () => {
     );
 
     expect(result).toEqual({ selectedApp: "my-app" });
-    expect(logMock.info).toHaveBeenCalled();
+    expect(logInfoSpy).toHaveBeenCalled();
   });
 
   test("cancels with --yes when multiple options exist", async () => {
@@ -91,7 +105,7 @@ describe("handleSelect", () => {
     );
 
     expect(result).toEqual({ cancelled: true });
-    expect(logMock.error).toHaveBeenCalled();
+    expect(logErrorSpy).toHaveBeenCalled();
   });
 
   test("cancels when options list is empty", async () => {
@@ -123,7 +137,7 @@ describe("handleSelect", () => {
   });
 
   test("calls clack select in interactive mode", async () => {
-    selectImpl = mock(() => Promise.resolve("vue"));
+    selectSpy.mockImplementation(() => Promise.resolve("vue") as any);
 
     const result = await handleInteractive(
       {
@@ -136,11 +150,13 @@ describe("handleSelect", () => {
     );
 
     expect(result).toEqual({ selectedApp: "vue" });
-    expect(selectImpl).toHaveBeenCalled();
+    expect(selectSpy).toHaveBeenCalled();
   });
 
   test("throws WizardCancelledError on user cancellation", async () => {
-    selectImpl = mock(() => Promise.resolve(Symbol.for("cancel")));
+    selectSpy.mockImplementation(
+      () => Promise.resolve(Symbol.for("cancel")) as any
+    );
 
     await expect(
       handleInteractive(
@@ -195,7 +211,9 @@ describe("handleMultiSelect", () => {
 
   test("prepends errorMonitoring when available but not user-selected", async () => {
     // User selects only sessionReplay, but errorMonitoring is available (required)
-    multiselectImpl = mock(() => Promise.resolve(["sessionReplay"]));
+    multiselectSpy.mockImplementation(
+      () => Promise.resolve(["sessionReplay"]) as any
+    );
 
     const result = await handleInteractive(
       {
@@ -217,7 +235,9 @@ describe("handleMultiSelect", () => {
   });
 
   test("throws WizardCancelledError when user cancels multi-select", async () => {
-    multiselectImpl = mock(() => Promise.resolve(Symbol.for("cancel")));
+    multiselectSpy.mockImplementation(
+      () => Promise.resolve(Symbol.for("cancel")) as any
+    );
 
     await expect(
       handleInteractive(
@@ -233,7 +253,9 @@ describe("handleMultiSelect", () => {
   });
 
   test("excludes errorMonitoring from multiselect options (always included)", async () => {
-    multiselectImpl = mock(() => Promise.resolve(["performanceMonitoring"]));
+    multiselectSpy.mockImplementation(
+      () => Promise.resolve(["performanceMonitoring"]) as any
+    );
 
     await handleInteractive(
       {
@@ -246,7 +268,7 @@ describe("handleMultiSelect", () => {
     );
 
     // The options passed to multiselect should NOT include errorMonitoring
-    const callArgs = multiselectImpl.mock.calls[0][0] as {
+    const callArgs = multiselectSpy.mock.calls[0][0] as {
       options: Array<{ value: string }>;
     };
     const values = callArgs.options.map((o: { value: string }) => o.value);
@@ -283,7 +305,7 @@ describe("handleConfirm", () => {
   });
 
   test("returns addExample based on user choice for example prompts", async () => {
-    confirmImpl = mock(() => Promise.resolve(false));
+    confirmSpy.mockImplementation(() => Promise.resolve(false) as any);
 
     const result = await handleInteractive(
       {
@@ -298,7 +320,9 @@ describe("handleConfirm", () => {
   });
 
   test("throws WizardCancelledError when user cancels confirm", async () => {
-    confirmImpl = mock(() => Promise.resolve(Symbol.for("cancel")));
+    confirmSpy.mockImplementation(
+      () => Promise.resolve(Symbol.for("cancel")) as any
+    );
 
     await expect(
       handleInteractive(
@@ -313,7 +337,7 @@ describe("handleConfirm", () => {
   });
 
   test("returns action: stop when user declines non-example prompt", async () => {
-    confirmImpl = mock(() => Promise.resolve(false));
+    confirmSpy.mockImplementation(() => Promise.resolve(false) as any);
 
     const result = await handleInteractive(
       {

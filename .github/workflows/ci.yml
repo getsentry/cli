@@ -174,7 +174,9 @@ jobs:
       - name: Isolated Tests
         run: bun run test:isolated
       - name: Merge Coverage
-        run: cat coverage/unit-lcov.info coverage/lcov.info > coverage/merged-lcov.info
+        run: |
+          cat coverage/unit-lcov.info coverage/lcov.info > coverage/combined-lcov.info
+          bash script/merge-lcov.sh coverage/combined-lcov.info > coverage/merged-lcov.info
       - name: Upload Coverage
         uses: getsentry/codecov-action@main
         with:
