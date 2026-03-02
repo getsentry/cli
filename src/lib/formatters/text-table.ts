@@ -626,8 +626,8 @@ export class StreamingTable {
     const totalFitted = this.columnWidths.reduce((s, w) => s + w, 0);
     const lastIdx = this.columnWidths.length - 1;
     if (totalFitted < maxContentWidth && lastIdx >= 0) {
-      this.columnWidths[lastIdx] = (this.columnWidths[lastIdx] ?? 0) +
-        (maxContentWidth - totalFitted);
+      this.columnWidths[lastIdx] =
+        (this.columnWidths[lastIdx] ?? 0) + (maxContentWidth - totalFitted);
     }
   }
 
