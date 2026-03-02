@@ -47,6 +47,14 @@ import {
 import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
+/** Convert a string or numeric ID to a number, or `undefined` if falsy/NaN. */
+export function toNumericId(
+  id: string | number | undefined,
+): number | undefined {
+  if (id == null) return undefined;
+  return Number(id) || undefined;
+}
+
 /**
  * Resolved organization and project target for API calls.
  */
@@ -138,7 +146,7 @@ export async function resolveFromDsn(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
-      projectId: cached.projectId ? Number(cached.projectId) : undefined,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -147,7 +155,6 @@ export async function resolveFromDsn(
 
   // Cache miss — fetch project details and cache them
   const projectInfo = await getProject(dsn.orgId, dsn.projectId);
-  const numericProjectId = Number(projectInfo.id) || undefined;
 
   if (projectInfo.organization) {
     await setCachedProject(dsn.orgId, dsn.projectId, {
@@ -161,7 +168,7 @@ export async function resolveFromDsn(
     return {
       org: projectInfo.organization.slug,
       project: projectInfo.slug,
-      projectId: numericProjectId,
+      projectId: toNumericId(projectInfo.id),
       orgDisplay: projectInfo.organization.name,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -172,7 +179,7 @@ export async function resolveFromDsn(
   return {
     org: dsn.orgId,
     project: dsn.projectId,
-    projectId: numericProjectId,
+    projectId: toNumericId(projectInfo.id),
     orgDisplay: dsn.orgId,
     projectDisplay: projectInfo.name,
     detectedFrom,
@@ -231,7 +238,7 @@ async function resolveDsnByPublicKey(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
-      projectId: cached.projectId ? Number(cached.projectId) : undefined,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -259,7 +266,7 @@ async function resolveDsnByPublicKey(
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
-        projectId: Number(projectInfo.id) || undefined,
+        projectId: toNumericId(projectInfo.id),
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -305,7 +312,7 @@ async function resolveDsnToTarget(
     return {
       org: cached.orgSlug,
       project: cached.projectSlug,
-      projectId: cached.projectId ? Number(cached.projectId) : undefined,
+      projectId: toNumericId(cached.projectId),
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
@@ -316,7 +323,6 @@ async function resolveDsnToTarget(
   // Cache miss — fetch project details and cache them
   try {
     const projectInfo = await getProject(dsn.orgId, dsn.projectId);
-    const numericProjectId = Number(projectInfo.id) || undefined;
 
     if (projectInfo.organization) {
       await setCachedProject(dsn.orgId, dsn.projectId, {
@@ -330,7 +336,7 @@ async function resolveDsnToTarget(
       return {
         org: projectInfo.organization.slug,
         project: projectInfo.slug,
-        projectId: numericProjectId,
+        projectId: toNumericId(projectInfo.id),
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
@@ -342,7 +348,7 @@ async function resolveDsnToTarget(
     return {
       org: dsn.orgId,
       project: dsn.projectId,
-      projectId: numericProjectId,
+      projectId: toNumericId(projectInfo.id),
       orgDisplay: dsn.orgId,
       projectDisplay: projectInfo.name,
       detectedFrom,
@@ -472,7 +478,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
   const targets: ResolvedTarget[] = matches.map((m) => ({
     org: m.orgSlug,
     project: m.slug,
-    projectId: Number(m.id) || undefined,
+    projectId: toNumericId(m.id),
     orgDisplay: m.organization?.name ?? m.orgSlug,
     projectDisplay: m.name,
     detectedFrom,
@@ -549,7 +555,7 @@ export async function fetchProjectId(
 ): Promise<number | undefined> {
   try {
     const projectInfo = await getProject(org, project);
-    return Number(projectInfo.id) || undefined;
+    return toNumericId(projectInfo.id);
   } catch (error) {
     if (error instanceof AuthError) {
       throw error;

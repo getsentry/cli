@@ -58,6 +58,7 @@ import {
   fetchProjectId,
   type ResolvedTarget,
   resolveAllTargets,
+  toNumericId,
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type {
@@ -309,7 +310,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = projects.map((p) => ({
         org: parsed.org,
         project: p.slug,
-        projectId: Number(p.id) || undefined,
+        projectId: toNumericId(p.id),
         orgDisplay: parsed.org,
         projectDisplay: p.name,
       }));
@@ -346,7 +347,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = matches.map((m) => ({
         org: m.orgSlug,
         project: m.slug,
-        projectId: Number(m.id) || undefined,
+        projectId: toNumericId(m.id),
         orgDisplay: m.orgSlug,
         projectDisplay: m.name,
       }));
