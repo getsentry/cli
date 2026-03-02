@@ -81,21 +81,31 @@ export function isMultiRegionEnabled(): boolean {
 }
 
 /**
- * Try to resolve a DSN-style org identifier using the local org cache.
+ * Try to resolve an org identifier from the local org cache.
  *
- * Strips the DSN `o` prefix and looks up the numeric ID in the org_regions
- * table. Returns the cached slug if found, or `undefined` to signal that
- * the input isn't a DSN-style identifier or isn't in the cache.
+ * Checks the slug directly first, then falls back to DSN-style numeric ID
+ * lookup (stripping the `o` prefix and querying by `org_id`).
+ *
+ * @param orgSlug - Raw org identifier (may be a slug or `oNNNNN` DSN form)
+ * @returns The resolved slug if found in cache, `undefined` on cache miss
  */
-async function lookupDsnOrgInCache(
+async function resolveOrgFromCache(
   orgSlug: string
 ): Promise<string | undefined> {
-  const numericId = stripDsnOrgPrefix(orgSlug);
-  if (numericId === orgSlug) {
-    return;
+  // Check if slug is directly cached
+  const cached = await getOrgRegion(orgSlug);
+  if (cached) {
+    return orgSlug;
   }
-  const match = await getOrgByNumericId(numericId);
-  return match?.slug;
+
+  // Try DSN-style numeric ID lookup (e.g., `o1081365` → `1081365` → slug)
+  const numericId = stripDsnOrgPrefix(orgSlug);
+  if (numericId !== orgSlug) {
+    const match = await getOrgByNumericId(numericId);
+    if (match) {
+      return match.slug;
+    }
+  }
 }
 
 /**
@@ -106,27 +116,19 @@ async function lookupDsnOrgInCache(
  * form isn't recognized by the Sentry API. This function resolves the
  * identifier using the locally cached org list:
  *
- * 1. Check if the slug is already cached → return as-is
- * 2. If it looks like a DSN identifier (`oNNNNN`), look up the numeric ID
- *    in the org cache → return the matching slug
- * 3. If cache miss, refresh the org list from the API (one fan-out call)
- *    and retry both lookups
- * 4. Fall back to returning the original slug for downstream error handling
+ * 1. Check local cache (slug or DSN numeric ID) → return resolved slug
+ * 2. If cache miss, refresh the org list from the API (one fan-out call)
+ *    and retry the local cache lookup
+ * 3. Fall back to returning the original slug for downstream error handling
  *
  * @param orgSlug - Raw org identifier from user input
  * @returns The org slug to use for API calls (may be normalized)
  */
 export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
-  // Fast path: slug is already known
-  const cached = await getOrgRegion(orgSlug);
-  if (cached) {
-    return orgSlug;
-  }
-
-  // Offline lookup: try as a DSN-style numeric ID
-  const cachedSlug = await lookupDsnOrgInCache(orgSlug);
-  if (cachedSlug) {
-    return cachedSlug;
+  // First attempt: use local cache
+  const fromCache = await resolveOrgFromCache(orgSlug);
+  if (fromCache) {
+    return fromCache;
   }
 
   // Cache is cold or identifier is unknown — refresh the org list.
@@ -141,18 +143,7 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
     throw error;
   }
 
-  // Retry: check if slug is now cached
-  const afterRefresh = await getOrgRegion(orgSlug);
-  if (afterRefresh) {
-    return orgSlug;
-  }
-
-  // Retry: check numeric ID after refresh
-  const refreshedSlug = await lookupDsnOrgInCache(orgSlug);
-  if (refreshedSlug) {
-    return refreshedSlug;
-  }
-
-  // Neither worked — return original, let downstream produce the error
-  return orgSlug;
+  // Retry after refresh
+  const afterRefresh = await resolveOrgFromCache(orgSlug);
+  return afterRefresh ?? orgSlug;
 }
