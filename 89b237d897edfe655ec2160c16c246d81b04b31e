@@ -1,0 +1,29 @@
+## Implementation Plan
+
+### Root Cause (Sentry issue CLI-AA)
+
+An AI coding agent called `sentry event view o1081365/ <event-id>` where `o1081365`
+was extracted from a DSN host (o1081365.ingest.us.sentry.io). The CLI passed that
+value as-is to the Sentry API via `organization_id_or_slug`, which does not accept
+the DSN-prefixed form — only a slug or bare numeric ID.
+
+The DSN parser (parser.ts) already strips the `o` prefix via regex when detecting
+DSNs from source files. But when users/agents manually supply an `oNNNNN` org
+identifier as a CLI argument, no normalization occurred.
+
+### Decision
+
+Proactive normalization in `parseOrgProjectArg()` and `parseWithSlash()` was chosen
+over a per-callsite retry approach. The regex `/^o(\d+)$/` matches only 'o' followed
+by pure digits — an unambiguous DSN artifact — so normal slugs like 'organic' or
+'o1abc' pass through unchanged. The fix covers all ~15 API call paths that consume
+`parsed.org`, including event view, issue list/view/explain/plan, project list,
+team list, repo list.
+
+### Changes
+
+- `src/lib/arg-parsing.ts`: Add `stripDsnOrgPrefix()` helper with `DSN_ORG_PREFIX_PATTERN`.
+  Apply it in `parseOrgProjectArg()` (org-all and explicit branches) and
+  `parseWithSlash()` (issue arg parsing) at the point where the org is first extracted.
+- `test/lib/arg-parsing.test.ts`: 15 new unit tests covering the helper directly
+  and both parsers for DSN-style org inputs and non-matching slugs.
