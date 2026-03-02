@@ -15,6 +15,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
 type ApiFlags = {
   readonly method: HttpMethod;
+  readonly data?: string;
   readonly field?: string[];
   readonly "raw-field"?: string[];
   readonly header?: string[];
@@ -333,6 +334,13 @@ export function normalizeFields(
       return field;
     }
 
+    // JSON-shaped strings (starting with { or [) must not be "corrected" —
+    // the colon inside is JSON syntax, not a key:value separator.  Let the
+    // downstream pipeline handle it (extractJsonBody or processField error).
+    if (field.startsWith("{") || field.startsWith("[")) {
+      return field;
+    }
+
     const colonIndex = field.indexOf(":");
     // ':' must exist and not be the very first character (that would make an
     // empty key, which the parser rejects regardless)
@@ -601,6 +609,100 @@ export function parseHeaders(headers: string[]): Record<string, string> {
 // Request Body Building
 
 /**
+ * Parse an inline string as a request body.  Tries JSON first; falls back to
+ * the raw string so non-JSON payloads still work.
+ *
+ * @param data - Raw string from --data flag
+ * @returns Parsed JSON object/array, or the original string
+ * @internal Exported for testing
+ */
+export function parseDataBody(
+  data: string
+): Record<string, unknown> | unknown[] | string {
+  try {
+    return JSON.parse(data) as Record<string, unknown> | unknown[];
+  } catch {
+    return data;
+  }
+}
+
+/**
+ * Try to parse a single field as a bare JSON body.  Returns the parsed value
+ * if the field has no `=` and is valid JSON starting with `{` or `[`;
+ * otherwise returns `undefined`.
+ * @internal
+ */
+function tryParseJsonField(field: string): unknown | undefined {
+  if (field.includes("=")) {
+    return;
+  }
+  if (!(field.startsWith("{") || field.startsWith("["))) {
+    return;
+  }
+
+  try {
+    return JSON.parse(field);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Scan a field list for bare JSON values (no `=`) and extract the first one
+ * as the intended request body.  This handles the common mistake of passing
+ * `-f '{"status":"ignored"}'` instead of `-d '{"status":"ignored"}'`.
+ *
+ * Detection is conservative: the field must have no `=`, start with `{` or
+ * `[`, *and* parse as valid JSON.  Only one JSON body is allowed — multiple
+ * JSON fields are ambiguous and produce a {@link ValidationError}.
+ *
+ * @returns An object with the extracted `body` (if any) and the `remaining`
+ *   fields that are normal key=value entries, or `undefined` if the input
+ *   was empty/undefined.
+ * @internal Exported for testing
+ */
+export function extractJsonBody(
+  fields: string[] | undefined,
+  stderr: Writer
+): { body?: Record<string, unknown> | unknown[]; remaining?: string[] } {
+  if (!fields || fields.length === 0) {
+    return {};
+  }
+
+  let jsonBody: Record<string, unknown> | unknown[] | undefined;
+  const remaining: string[] = [];
+
+  for (const field of fields) {
+    const parsed = tryParseJsonField(field);
+
+    if (parsed === undefined) {
+      remaining.push(field);
+      continue;
+    }
+
+    if (jsonBody !== undefined) {
+      throw new ValidationError(
+        "Multiple JSON bodies detected in field arguments. " +
+          "Use --data/-d to pass an inline JSON body explicitly.",
+        "field"
+      );
+    }
+
+    jsonBody = parsed as Record<string, unknown> | unknown[];
+    const preview = field.length > 60 ? `${field.substring(0, 57)}...` : field;
+    stderr.write(
+      `hint: '${preview}' was used as the request body. ` +
+        "Use --data/-d to pass inline JSON next time.\n"
+    );
+  }
+
+  return {
+    body: jsonBody,
+    remaining: remaining.length > 0 ? remaining : undefined,
+  };
+}
+
+/**
  * Build request body from --input flag (file or stdin).
  * Tries to parse the content as JSON, otherwise returns as string.
  * @internal Exported for testing
@@ -766,6 +868,45 @@ export function handleResponse(
   }
 }
 
+/**
+ * Build body and params from field flags, auto-detecting bare JSON bodies.
+ *
+ * Runs colon-to-equals normalization, extracts any JSON body passed as a
+ * field value (with a stderr hint about `--data`), and routes the remaining
+ * fields to body or query params based on the HTTP method.
+ *
+ * @internal Exported for testing
+ */
+export function buildFromFields(
+  method: HttpMethod,
+  flags: Pick<ApiFlags, "field" | "raw-field">,
+  stderr: Writer
+): {
+  body?: Record<string, unknown> | unknown[];
+  params?: Record<string, string | string[]>;
+} {
+  const field = normalizeFields(flags.field, stderr);
+  let rawField = normalizeFields(flags["raw-field"], stderr);
+
+  // Auto-detect bare JSON passed as a field value (common mistake).
+  // Extract it as the body and hint about --data/-d for next time.
+  const extracted = extractJsonBody(rawField, stderr);
+  let body: Record<string, unknown> | unknown[] | undefined = extracted.body;
+  rawField = extracted.remaining;
+
+  // Route remaining fields to body (merge) or params based on HTTP method
+  const options = prepareRequestOptions(method, field, rawField);
+  if (options.body) {
+    // Merge field-built key=value entries into the auto-detected JSON body
+    body =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? { ...body, ...options.body }
+        : (options.body ?? body);
+  }
+
+  return { body, params: options.params };
+}
+
 // Command Definition
 
 export const apiCommand = buildCommand({
@@ -775,6 +916,9 @@ export const apiCommand = buildCommand({
       "Make a raw API request to the Sentry API. Similar to 'gh api' for GitHub. " +
       "The endpoint is relative to /api/0/ (do not include the prefix). " +
       "Authentication is handled automatically using your stored credentials.\n\n" +
+      "Body options:\n" +
+      '  --data/-d \'{"key":"value"}\'   Inline JSON body (like curl -d)\n' +
+      '  --input/-i file.json          Read body from file (or "-" for stdin)\n\n' +
       "Field syntax (--field/-F):\n" +
       "  key=value          Simple field (values parsed as JSON if valid)\n" +
       "  key[sub]=value     Nested object: {key: {sub: value}}\n" +
@@ -784,6 +928,7 @@ export const apiCommand = buildCommand({
       "Examples:\n" +
       "  sentry api organizations/\n" +
       "  sentry api issues/123/ -X PUT -F status=resolved\n" +
+      '  sentry api issues/123/ -X PUT -d \'{"status":"resolved"}\'\n' +
       "  sentry api projects/my-org/my-project/ -F options[sampleRate]=0.5\n" +
       "  sentry api teams/my-org/my-team/members/ -F user[email]=user@example.com",
   },
@@ -805,6 +950,13 @@ export const apiCommand = buildCommand({
         brief: "The HTTP method for the request",
         default: "GET" as const,
         placeholder: "method",
+      },
+      data: {
+        kind: "parsed",
+        parse: String,
+        brief: "Inline JSON body for the request (like curl -d)",
+        optional: true,
+        placeholder: "json",
       },
       field: {
         kind: "parsed",
@@ -853,6 +1005,7 @@ export const apiCommand = buildCommand({
     },
     aliases: {
       X: "method",
+      d: "data",
       F: "field",
       f: "raw-field",
       H: "header",
@@ -869,24 +1022,27 @@ export const apiCommand = buildCommand({
     // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
-    // Build request body/params from --input, --field, or --raw-field
-    // --input takes precedence; otherwise route fields based on HTTP method
-    let body: Record<string, unknown> | string | undefined;
+    // Build request body/params.  Priority: --data > --input > fields.
+    // --data and --input are mutually exclusive (both provide the full body).
+    let body: Record<string, unknown> | unknown[] | string | undefined;
     let params: Record<string, string | string[]> | undefined;
 
-    if (flags.input !== undefined) {
-      // --input takes precedence for body content
+    if (flags.data !== undefined && flags.input !== undefined) {
+      throw new ValidationError(
+        "Cannot use --data and --input together. " +
+          "Use --data/-d for inline JSON, or --input for file/stdin.",
+        "data"
+      );
+    }
+
+    if (flags.data !== undefined) {
+      body = parseDataBody(flags.data);
+    } else if (flags.input !== undefined) {
       body = await buildBodyFromInput(flags.input, stdin);
     } else {
-      // Auto-correct ':'-separated fields (e.g. -F status:resolved → -F status=resolved)
-      // before routing to body or params so the correction applies everywhere.
-      const field = normalizeFields(flags.field, stderr);
-      const rawField = normalizeFields(flags["raw-field"], stderr);
-
-      // Route fields to body or params based on HTTP method
-      const options = prepareRequestOptions(flags.method, field, rawField);
-      body = options.body;
-      params = options.params;
+      const result = buildFromFields(flags.method, flags, stderr);
+      body = result.body;
+      params = result.params;
     }
 
     const headers =
