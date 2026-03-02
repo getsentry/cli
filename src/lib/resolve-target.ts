@@ -49,9 +49,11 @@ import { isAllDigits } from "./utils.js";
 
 /** Convert a string or numeric ID to a number, or `undefined` if falsy/NaN. */
 export function toNumericId(
-  id: string | number | undefined,
+  id: string | number | undefined
 ): number | undefined {
-  if (id == null) return undefined;
+  if (id === null) {
+    return;
+  }
   return Number(id) || undefined;
 }
 
@@ -551,7 +553,7 @@ function resolveFromEnvVars(): {
  */
 export async function fetchProjectId(
   org: string,
-  project: string,
+  project: string
 ): Promise<number | undefined> {
   try {
     const projectInfo = await getProject(org, project);
@@ -567,7 +569,7 @@ export async function fetchProjectId(
         `sentry issue list ${org}/<project>`,
         [
           `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
-        ],
+        ]
       );
     }
     return;

@@ -938,10 +938,12 @@ async function handleResolvedTargets(
   const failures: { target: ResolvedTarget; error: Error }[] = [];
 
   for (let i = 0; i < results.length; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: index within bounds
     const result = results[i]!;
     if (result.success) {
       validResults.push(result.data);
     } else {
+      // biome-ignore lint/style/noNonNullAssertion: index within bounds
       failures.push({ target: activeTargets[i]!, error: result.error });
     }
   }
@@ -957,7 +959,7 @@ async function handleResolvedTargets(
         `${prefix}: ${first.message}`,
         first.status,
         first.detail,
-        first.endpoint,
+        first.endpoint
       );
     }
 
@@ -1007,8 +1009,12 @@ async function handleResolvedTargets(
     if (failures.length > 0) {
       output.errors = failures.map(({ target: t, error: e }) =>
         e instanceof ApiError
-          ? { project: `${t.org}/${t.project}`, status: e.status, message: e.message }
-          : { project: `${t.org}/${t.project}`, message: e.message },
+          ? {
+              project: `${t.org}/${t.project}`,
+              status: e.status,
+              message: e.message,
+            }
+          : { project: `${t.org}/${t.project}`, message: e.message }
       );
     }
     writeJson(stdout, output);
@@ -1021,8 +1027,8 @@ async function handleResolvedTargets(
       .join(", ");
     stderr.write(
       muted(
-        `\nNote: Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).\n`,
-      ),
+        `\nNote: Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).\n`
+      )
     );
   }
 

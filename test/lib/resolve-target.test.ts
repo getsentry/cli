@@ -8,7 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
-
+import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
+import { setAuthToken } from "../../src/lib/db/auth.js";
+import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
   isValidDirNameForInference,
   resolveAllTargets,
@@ -16,6 +18,7 @@ import {
   resolveOrgAndProject,
   resolveOrgsForListing,
 } from "../../src/lib/resolve-target.js";
+import { mockFetch, useTestConfigDir } from "../helpers.js";
 
 // ============================================================================
 // Arbitraries for Property-Based Testing
@@ -111,12 +114,18 @@ describe("isValidDirNameForInference edge cases", () => {
 // ============================================================================
 
 describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => {
+  useTestConfigDir("test-resolve-target-");
+
+  let originalFetch: typeof globalThis.fetch;
+
   beforeEach(() => {
+    originalFetch = globalThis.fetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     delete process.env.SENTRY_ORG;
     delete process.env.SENTRY_PROJECT;
   });
@@ -171,6 +180,23 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
   test("resolveOrgAndProject: CLI flags override env vars", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
+
+    await setAuthToken("test-token");
+    await setOrgRegion("flag-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/flag-org/flag-project/")) {
+        return Response.json({
+          id: "123",
+          slug: "flag-project",
+          name: "Flag Project",
+        });
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
     const result = await resolveOrgAndProject({
       org: "flag-org",
       project: "flag-project",
@@ -236,6 +262,23 @@ describe("Environment variable resolution (SENTRY_ORG / SENTRY_PROJECT)", () => 
   test("resolveAllTargets: CLI flags override env vars", async () => {
     process.env.SENTRY_ORG = "env-org";
     process.env.SENTRY_PROJECT = "env-project";
+
+    await setAuthToken("test-token");
+    await setOrgRegion("flag-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/flag-org/flag-project/")) {
+        return Response.json({
+          id: "123",
+          slug: "flag-project",
+          name: "Flag Project",
+        });
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
     const result = await resolveAllTargets({
       org: "flag-org",
       project: "flag-project",
