@@ -943,6 +943,53 @@ export function buildFromFields(
   return { body, params: options.params };
 }
 
+/**
+ * Resolve the request body and query params from the user-provided flags.
+ *
+ * Priority order: `--data` > `--input` > field flags (`-F`/`-f`).
+ * Mutually-exclusive combinations throw {@link ValidationError}.
+ *
+ * @returns body and params ready for the API request
+ * @internal Exported for testing
+ */
+export async function resolveBody(
+  flags: Pick<ApiFlags, "method" | "data" | "input" | "field" | "raw-field">,
+  stdin: NodeJS.ReadStream & { fd: 0 },
+  stderr: Writer
+): Promise<{
+  body?: Record<string, unknown> | unknown[] | string;
+  params?: Record<string, string | string[]>;
+}> {
+  if (flags.data !== undefined && flags.input !== undefined) {
+    throw new ValidationError(
+      "Cannot use --data and --input together. " +
+        "Use --data/-d for inline JSON, or --input for file/stdin.",
+      "data"
+    );
+  }
+
+  if (
+    flags.data !== undefined &&
+    (flags.field?.length || flags["raw-field"]?.length)
+  ) {
+    throw new ValidationError(
+      "Cannot use --data with --field or --raw-field. " +
+        "Use --data/-d for a full JSON body, or -F/-f for individual fields.",
+      "data"
+    );
+  }
+
+  if (flags.data !== undefined) {
+    return { body: parseDataBody(flags.data) };
+  }
+
+  if (flags.input !== undefined) {
+    return { body: await buildBodyFromInput(flags.input, stdin) };
+  }
+
+  return buildFromFields(flags.method, flags, stderr);
+}
+
 // Command Definition
 
 export const apiCommand = buildCommand({
@@ -1058,39 +1105,8 @@ export const apiCommand = buildCommand({
     // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
 
-    // Build request body/params.  Priority: --data > --input > fields.
-    // --data and --input are mutually exclusive (both provide the full body).
-    let body: Record<string, unknown> | unknown[] | string | undefined;
-    let params: Record<string, string | string[]> | undefined;
-
-    if (flags.data !== undefined && flags.input !== undefined) {
-      throw new ValidationError(
-        "Cannot use --data and --input together. " +
-          "Use --data/-d for inline JSON, or --input for file/stdin.",
-        "data"
-      );
-    }
-
-    if (
-      flags.data !== undefined &&
-      (flags.field?.length || flags["raw-field"]?.length)
-    ) {
-      throw new ValidationError(
-        "Cannot use --data with --field or --raw-field. " +
-          "Use --data/-d for a full JSON body, or -F/-f for individual fields.",
-        "data"
-      );
-    }
-
-    if (flags.data !== undefined) {
-      body = parseDataBody(flags.data);
-    } else if (flags.input !== undefined) {
-      body = await buildBodyFromInput(flags.input, stdin);
-    } else {
-      const result = buildFromFields(flags.method, flags, stderr);
-      body = result.body;
-      params = result.params;
-    }
+    // Resolve body and query params from flags (--data, --input, or fields)
+    const { body, params } = await resolveBody(flags, stdin, stderr);
 
     const headers =
       flags.header && flags.header.length > 0

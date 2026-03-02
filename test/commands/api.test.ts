@@ -24,6 +24,7 @@ import {
   parseHeaders,
   prepareRequestOptions,
   readStdin,
+  resolveBody,
   setNestedValue,
   writeResponseBody,
   writeResponseHeaders,
@@ -1475,5 +1476,103 @@ describe("buildFromFields", () => {
       stderr
     );
     expect(result.body).toEqual({ status: "ignored", assignee: "me" });
+  });
+});
+
+// -- resolveBody: the priority/exclusivity layer above individual builders --
+// This was extracted from the Stricli command handler (func) so that
+// --data, --input, and field flag mutual-exclusivity logic can be unit-tested.
+
+const MOCK_STDIN = process.stdin as unknown as NodeJS.ReadStream & { fd: 0 };
+
+describe("resolveBody", () => {
+  test("--data returns parsed JSON body", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "PUT", data: '{"status":"resolved"}' },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toEqual({ status: "resolved" });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("--data with non-JSON returns raw string body", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "POST", data: "hello world" },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toBe("hello world");
+  });
+
+  test("throws when --data and --input are both set", async () => {
+    const stderr = createMockWriter();
+    await expect(
+      resolveBody(
+        { method: "PUT", data: '{"a":1}', input: "file.json" },
+        MOCK_STDIN,
+        stderr
+      )
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      resolveBody(
+        { method: "PUT", data: '{"a":1}', input: "file.json" },
+        MOCK_STDIN,
+        stderr
+      )
+    ).rejects.toThrow(/--data.*--input/i);
+  });
+
+  test("throws when --data and --field are both set", async () => {
+    const stderr = createMockWriter();
+    await expect(
+      resolveBody(
+        { method: "PUT", data: '{"a":1}', field: ["key=value"] },
+        MOCK_STDIN,
+        stderr
+      )
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      resolveBody(
+        { method: "PUT", data: '{"a":1}', field: ["key=value"] },
+        MOCK_STDIN,
+        stderr
+      )
+    ).rejects.toThrow(/--data.*--field|--field.*--data/i);
+  });
+
+  test("throws when --data and --raw-field are both set", async () => {
+    const stderr = createMockWriter();
+    await expect(
+      resolveBody(
+        { method: "PUT", data: '{"a":1}', "raw-field": ["key=value"] },
+        MOCK_STDIN,
+        stderr
+      )
+    ).rejects.toThrow(ValidationError);
+  });
+
+  test("falls through to buildFromFields when neither --data nor --input", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "PUT", field: ["status=resolved"] },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toEqual({ status: "resolved" });
+    expect(result.params).toBeUndefined();
+  });
+
+  test("GET fields produce params, not body", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "GET", "raw-field": ["query=is:unresolved"] },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toBeUndefined();
+    expect(result.params).toEqual({ query: "is:unresolved" });
   });
 });

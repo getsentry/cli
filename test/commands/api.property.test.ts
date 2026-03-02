@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   array,
+  asyncProperty,
   constantFrom,
   dictionary,
   assert as fcAssert,
@@ -28,6 +29,7 @@ import {
   parseFieldKey,
   parseFieldValue,
   parseMethod,
+  resolveBody,
   setNestedValue,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
@@ -724,6 +726,62 @@ describe("property: buildFromFields", () => {
           expect(result.body).toBeDefined();
           // No JSON hint — only colon-correction warnings might appear
           expect(stderr.output).not.toContain("hint:");
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+const MOCK_STDIN = process.stdin as unknown as NodeJS.ReadStream & { fd: 0 };
+
+describe("property: resolveBody", () => {
+  test("--data always returns a body (no params)", async () => {
+    await fcAssert(
+      asyncProperty(jsonObjectStringArb, async (json) => {
+        const stderr = createMockWriter();
+        const result = await resolveBody(
+          { method: "PUT", data: json },
+          MOCK_STDIN,
+          stderr
+        );
+        expect(result.body).toBeDefined();
+        expect(result.params).toBeUndefined();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("--data + --input always throws", async () => {
+    await fcAssert(
+      asyncProperty(jsonObjectStringArb, async (json) => {
+        const stderr = createMockWriter();
+        await expect(
+          resolveBody(
+            { method: "PUT", data: json, input: "file.json" },
+            MOCK_STDIN,
+            stderr
+          )
+        ).rejects.toThrow(ValidationError);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("--data + fields always throws", async () => {
+    await fcAssert(
+      asyncProperty(
+        jsonObjectStringArb,
+        keyValueFieldArb,
+        async (json, field) => {
+          const stderr = createMockWriter();
+          await expect(
+            resolveBody(
+              { method: "PUT", data: json, field: [field] },
+              MOCK_STDIN,
+              stderr
+            )
+          ).rejects.toThrow(ValidationError);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
