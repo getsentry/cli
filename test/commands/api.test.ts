@@ -1398,4 +1398,22 @@ describe("buildFromFields", () => {
     expect(result.body).toEqual({ status: "resolved" });
     expect(stderr.output).toBe("");
   });
+
+  test("throws ValidationError when JSON array body is mixed with field flags", () => {
+    const stderr = createMockWriter();
+    expect(() =>
+      buildFromFields(
+        "PUT",
+        { "raw-field": ["[1,2,3]"], field: ["extra=field"] },
+        stderr
+      )
+    ).toThrow(ValidationError);
+    expect(() =>
+      buildFromFields(
+        "PUT",
+        { "raw-field": ["[1,2,3]"], field: ["extra=field"] },
+        stderr
+      )
+    ).toThrow(/Cannot combine a JSON array/);
+  });
 });

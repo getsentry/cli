@@ -648,8 +648,6 @@ mock.module("./some-module", () => ({
 
 ### Gotcha
 
-<!-- lore:019c8b78-965f-7f67-ae31-d24961133260 -->
-* **Codecov patch coverage requires --coverage flag on ALL test invocations**: The test script runs \`bun run test:unit && bun run test:isolated\`. Only \`test:unit\` has \`--coverage\`. Code paths exercised only in isolated tests won't count toward Codecov patch coverage. Fix: add \`--coverage\` to the isolated script, or write unit tests calling real (non-mocked) functions where possible.
 <!-- lore:ce43057f-2eff-461f-b49b-fb9ebaadff9d -->
 * **Sentry /users/me/ endpoint returns 403 for OAuth tokens — use /auth/ instead**: The Sentry \`/users/me/\` endpoint returns 403 for OAuth tokens. Use \`/auth/\` instead — it works with ALL token types and lives on the control silo. In the CLI, \`getControlSiloUrl()\` handles routing correctly. \`SentryUserSchema\` (with \`.passthrough()\`) handles the \`/auth/\` response since it only requires \`id\`.
 <!-- lore:8c0fabbb-590c-4a7b-812b-15accf978748 -->
@@ -664,8 +662,6 @@ mock.module("./some-module", () => ({
 * **Multiregion mock must include all control silo API routes**: When changing which Sentry API endpoint a function uses (e.g., switching getCurrentUser() from /users/me/ to /auth/), the mock route must be updated in BOTH test/mocks/routes.ts (single-region) AND test/mocks/multiregion.ts createControlSiloRoutes() (multi-region). Missing the multiregion mock causes 404s in multi-region test scenarios. The multiregion control silo mock serves auth, user info, and region discovery routes. Cursor Bugbot caught this gap when /api/0/auth/ was added to routes.ts but not multiregion.ts.
 <!-- lore:5efa0434-09ff-49b6-b0a1-d8a7e740855b -->
 * **resolveCursor must be called inside org-all closure, not before dispatch**: In list commands using dispatchOrgScopedList with cursor pagination (e.g., project/list.ts), resolveCursor() must be called inside the 'org-all' override closure, not before dispatchOrgScopedList. If called before, it throws a ContextError before dispatch can throw the correct ValidationError for --cursor being used in non-org-all modes.
-<!-- lore:76c673bf-0417-47cb-a73d-9c941fbd182c -->
-* **handleProjectSearch ContextError resource must be "Project" not config.entityName**: In src/lib/org-list.ts handleProjectSearch, the first argument to ContextError is the resource name rendered as "${resource} is required.". Always pass "Project" (not config.entityName like "team" or "repository") since the error is about a missing project slug, not a missing entity of the command's type. A code comment documents the rationale inline.
 
 ### Pattern
 
@@ -676,7 +672,7 @@ mock.module("./some-module", () => ({
 <!-- lore:019c8aed-4458-79c5-b5eb-01a3f7e926e0 -->
 * **Sentry CLI setFlagContext redacts sensitive flags before telemetry**: The setFlagContext() function in src/lib/telemetry.ts must redact sensitive flag values (like --token) before setting Sentry tags. A SENSITIVE\_FLAGS set contains flag names that should have their values replaced with '\[REDACTED]' instead of the actual value. This prevents secrets from leaking into telemetry. The scrub happens at the source (in setFlagContext itself) rather than in beforeSend, so the sensitive value never reaches the Sentry SDK.
 <!-- lore:019c9bb9-a797-725d-a271-702795d11894 -->
-* **Sentry CLI api command: normalizeFields auto-corrects colon separators with stderr warning**: The \`sentry api\` command's \`--field\`/\`--raw-field\` flags require \`key=value\` format. \`normalizeFields()\` auto-corrects \`:\` to \`=\` with a stderr warning when no \`=\` exists, but must skip JSON-shaped strings (starting with \`{\` or \`\[\`) to avoid silent data corruption. A \`--data\`/\`-d\` flag (curl convention) handles inline JSON bodies directly, mutually exclusive with \`--input\` and field flags. Positional args as implicit body was rejected: context-dependent behavior violates least surprise, ambiguity with mistyped endpoints, even curl uses explicit \`-d\`. When bare JSON is detected in a field value, auto-detect and use as body with a stderr hint suggesting \`--data\`. General pattern: auto-correct unambiguous user mistakes at command level with stderr warnings, keeping parsing functions pure.
+* **Sentry CLI api command: normalizeFields auto-corrects colon separators with stderr warning**: The \`sentry api\` command's \`--field\`/\`--raw-field\` flags require \`key=value\` format. \`normalizeFields()\` auto-corrects \`:\` to \`=\` with stderr warning, but skips JSON-shaped strings (starting with \`{\` or \`\[\`) to avoid data corruption. \`--data\`/\`-d\` flag (curl convention) handles inline JSON bodies, mutually exclusive with \`--input\` and field flags. \`extractJsonBody()\` scans fields for bare JSON, extracts as body, hints about \`--data\`. \`buildFromFields()\` orchestrates: normalize → extract JSON → route fields. Positional args as implicit body was rejected: context-dependent behavior violates least surprise. General pattern: auto-correct unambiguous user mistakes at command level with stderr warnings, keeping parsing functions pure.
 
 ### Preference
 

@@ -897,11 +897,19 @@ export function buildFromFields(
   // Route remaining fields to body (merge) or params based on HTTP method
   const options = prepareRequestOptions(method, field, rawField);
   if (options.body) {
-    // Merge field-built key=value entries into the auto-detected JSON body
+    if (Array.isArray(body)) {
+      // Can't meaningfully merge key=value fields into a JSON array body.
+      throw new ValidationError(
+        "Cannot combine a JSON array body with field flags (-F/-f). " +
+          "Use --data/-d to pass the array as the full body without extra fields.",
+        "field"
+      );
+    }
+    // Merge field-built key=value entries into the auto-detected JSON object body
     body =
-      body && typeof body === "object" && !Array.isArray(body)
+      body && typeof body === "object"
         ? { ...body, ...options.body }
-        : (options.body ?? body);
+        : options.body;
   }
 
   return { body, params: options.params };
@@ -1031,6 +1039,17 @@ export const apiCommand = buildCommand({
       throw new ValidationError(
         "Cannot use --data and --input together. " +
           "Use --data/-d for inline JSON, or --input for file/stdin.",
+        "data"
+      );
+    }
+
+    if (
+      flags.data !== undefined &&
+      (flags.field?.length || flags["raw-field"]?.length)
+    ) {
+      throw new ValidationError(
+        "Cannot use --data with --field or --raw-field. " +
+          "Use --data/-d for a full JSON body, or -F/-f for individual fields.",
         "data"
       );
     }
