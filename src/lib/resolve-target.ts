@@ -47,14 +47,21 @@ import {
 import { warning } from "./formatters/colors.js";
 import { isAllDigits } from "./utils.js";
 
-/** Convert a string or numeric ID to a number, or `undefined` if falsy/NaN. */
+/**
+ * Convert a string or numeric ID to a positive integer, or `undefined` if the
+ * value is absent, non-numeric, or not a positive integer.
+ *
+ * Sentry project/org IDs are always positive integers, so `0` and negative
+ * values are treated as absent rather than valid IDs.
+ */
 export function toNumericId(
-  id: string | number | undefined
+  id: string | number | null | undefined
 ): number | undefined {
-  if (id === null) {
+  if (id === null || id === undefined) {
     return;
   }
-  return Number(id) || undefined;
+  const n = Number(id);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 /**
@@ -600,13 +607,11 @@ export async function resolveAllTargets(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    const projectId = await fetchProjectId(org, project);
     return {
       targets: [
         {
           org,
           project,
-          projectId,
           orgDisplay: org,
           projectDisplay: project,
         },
@@ -726,11 +731,9 @@ export async function resolveOrgAndProject(
 
   // 1. CLI flags take priority (both must be provided together)
   if (org && project) {
-    const projectId = await fetchProjectId(org, project);
     return {
       org,
       project,
-      projectId,
       orgDisplay: org,
       projectDisplay: project,
     };

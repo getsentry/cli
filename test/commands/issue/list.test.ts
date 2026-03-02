@@ -467,17 +467,29 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       nextCursor: undefined,
     });
 
+    // The explicit target path calls fetchProjectId → getProject before listing.
+    // Spy on getProject so we don't hit the network.
+    const getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+      id: "1",
+      slug: "test-project",
+      name: "Test Project",
+    } as Awaited<ReturnType<typeof apiClient.getProject>>);
+
     const { context } = createOrgAllContext();
 
-    // Using a real-looking cursor value (not "last") bypasses DB lookup.
-    // The command should resolve, fetch, and complete without throwing.
-    await expect(
-      orgAllFunc.call(
-        context,
-        { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
-        "test-org/test-project"
-      )
-    ).resolves.toBeUndefined();
+    try {
+      // Using a real-looking cursor value (not "last") bypasses DB lookup.
+      // The command should resolve, fetch, and complete without throwing.
+      await expect(
+        orgAllFunc.call(
+          context,
+          { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
+          "test-org/test-project"
+        )
+      ).resolves.toBeUndefined();
+    } finally {
+      getProjectSpy.mockRestore();
+    }
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
