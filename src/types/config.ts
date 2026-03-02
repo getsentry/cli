@@ -15,6 +15,7 @@ export const CachedProjectSchema = z.object({
   orgName: z.string(),
   projectSlug: z.string(),
   projectName: z.string(),
+  projectId: z.string().optional(),
   cachedAt: z.number(),
 });
 
