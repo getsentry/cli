@@ -22,6 +22,8 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { validateLimit } from "../../../src/lib/arg-parsing.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
@@ -87,9 +89,11 @@ describe("resolveOrgProjectFromArg", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    // Pre-populate org cache so resolveEffectiveOrg hits the fast path
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
