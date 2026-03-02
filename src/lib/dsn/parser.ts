@@ -211,25 +211,16 @@ export function createDsnFingerprint(dsns: DetectedDsn[]): string {
 }
 
 /**
- * Pattern matching bare DSN-style org identifiers: "o" followed by only digits.
- *
- * This is the bare-identifier counterpart of {@link ORG_ID_PATTERN} (which
- * matches the full ingest host). Used to normalize org identifiers that
- * were extracted from a DSN host and passed as CLI arguments.
- */
-const DSN_ORG_PREFIX_PATTERN = /^o(\d+)$/;
-
-/**
  * Normalize a DSN-style org identifier to a numeric org ID.
  *
  * DSN hosts encode org IDs as `oNNNNN` (e.g., `o1081365` from
  * `o1081365.ingest.us.sentry.io`). The Sentry API accepts numeric IDs
  * via `organization_id_or_slug` but not the `o`-prefixed DSN form.
  *
- * Only matches the exact pattern "o" + digits — normal slugs like
- * `organic` or `o1abc` pass through unchanged.
+ * Reuses `extractOrgIdFromHost` by constructing a synthetic ingest hostname
+ * from the bare identifier, sharing the same pattern logic.
  *
- * @param org - Raw org identifier
+ * @param org - Raw org identifier (e.g. `"o1081365"` or `"my-org"`)
  * @returns Numeric org ID if input matches `oNNNNN`, otherwise unchanged
  *
  * @example
@@ -239,5 +230,5 @@ const DSN_ORG_PREFIX_PATTERN = /^o(\d+)$/;
  * stripDsnOrgPrefix("organic")   // "organic" (no change — not all digits after 'o')
  */
 export function stripDsnOrgPrefix(org: string): string {
-  return org.replace(DSN_ORG_PREFIX_PATTERN, "$1");
+  return extractOrgIdFromHost(`${org}.ingest.sentry.io`) ?? org;
 }
