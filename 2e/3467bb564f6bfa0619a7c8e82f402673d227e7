@@ -1,0 +1,46 @@
+## Implementation Plan
+
+### Background
+
+Issue #59 (unwrapResult discards Link headers) and Issue #60 (missing cursor
+param in OpenAPI spec) were both addressed by getsentry/sentry#109642 (merged
+2026-03-02), which added CursorQueryParam to 19 paginated OpenAPI schemas.
+This was regenerated into @sentry/api@0.21.0 (published same day).
+
+### Workaround inventory (pre-fix)
+
+| Function            | Approach               | Reason bypassed SDK                      |
+|---------------------|------------------------|------------------------------------------|
+| listTeamsPaginated  | orgScopedRequestPaginated (raw HTTP) | SDK Link header issue (#59)  |
+| listProjectsPaginated | orgScopedRequestPaginated (raw HTTP) | SDK Link header issue (#59) |
+| listRepositoriesPaginated | orgScopedRequestPaginated (raw HTTP) | No cursor in spec (#60) + Link header (#59) |
+| listProjects        | orgScopedPaginateAll → orgScopedRequestPaginated | Built atop paginated workaround |
+| listRepositories    | apiRequestToRegion (raw HTTP) | SDK had query?: never for repos |
+| listIssuesPaginated | SDK + unwrapPaginatedResult | Already migrated previously |
+
+### Steps
+
+1. Upgrade @sentry/api from ^0.1.0 to ^0.21.0
+2. Migrate 3 paginated functions to SDK + unwrapPaginatedResult:
+   - listTeamsPaginated → listAnOrganization_sTeams
+   - listProjectsPaginated → listAnOrganization_sProjects
+   - listRepositoriesPaginated → listAnOrganization_sRepositories
+3. Migrate 2 non-paginated functions to SDK:
+   - listProjects → SDK loop with listAnOrganization_sProjects
+   - listRepositories → listAnOrganization_sRepositories + unwrapResult
+4. Remove dead raw-HTTP pagination infrastructure:
+   - extractOrgSlugFromEndpoint + regex constants
+   - orgScopedRequestPaginated
+   - orgScopedPaginateAll
+
+### What stays unchanged
+
+- unwrapResult / unwrapPaginatedResult / parseLinkHeader
+- apiRequestToRegion (still needed for internal/undocumented endpoints)
+- listTeams non-paginated / listProjectTeams (already used SDK correctly)
+
+### Note on per_page
+
+The OpenAPI spec only added cursor; per_page is not yet declared in the types.
+Cast query to { cursor?: string } to satisfy TypeScript while passing per_page
+at runtime (Sentry's pagination framework reads it from request.GET regardless).
