@@ -51,6 +51,7 @@ export {
   inferPackagePath,
   isValidDsn,
   parseDsn,
+  stripDsnOrgPrefix,
 } from "./parser.js";
 // Project Root Detection
 export type { ProjectRootReason, ProjectRootResult } from "./project-root.js";
