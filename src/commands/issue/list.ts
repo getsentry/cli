@@ -670,9 +670,10 @@ function buildMultiTargetContextKey(
     ? escapeContextKeyValue(flags.query)
     : undefined;
   const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  const escapedSort = escapeContextKeyValue(flags.sort);
   return (
     `host:${host}|type:multi:${targetFingerprint}` +
-    `|sort:${flags.sort}|period:${escapedPeriod}` +
+    `|sort:${escapedSort}|period:${escapedPeriod}` +
     (escapedQuery ? `|q:${escapedQuery}` : "")
   );
 }
