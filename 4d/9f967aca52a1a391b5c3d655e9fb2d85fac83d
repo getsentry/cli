@@ -1,0 +1,41 @@
+## Implementation Plan
+
+### Problem
+After upgrading the CLI, the setup command (called by upgrade) outputs:
+1. 'Agent skills: Updated <path>' — on every upgrade, even though nothing changed for the user
+2. 'Get started:' welcome message — irrelevant for existing users upgrading
+3. 'Setup complete!' — redundant since the upgrade command prints its own success message
+
+### Changes
+
+#### 1. handleAgentSkills() — suppress on update (setup.ts:224-232)
+Same pattern as completions fix in PR #326. installAgentSkills() already returns
+`created: boolean`. Changed from printing 'Installed to' / 'Updated' to only
+printing when `created === true`.
+
+#### 2. handleInstall() — track if binary already existed (setup.ts:65-93)
+Added `existsSync(targetPath)` check before calling `installBinary()`.
+Returns new `created: boolean` field in result object. Uses getBinaryFilename()
++ join() to construct the expected install path before installation.
+
+#### 3. func() — welcome only on fresh install (setup.ts:457-489)
+Track `freshInstall` from handleInstall's `created` field. Welcome message
+(printWelcomeMessage) only shown when `freshInstall === true`.
+Removed the 'Setup complete!' fallback entirely — it served no purpose when
+called from upgrade (which prints its own success message).
+
+### Behavior Table
+| Scenario | Output |
+|----------|--------|
+| Fresh install (--install, no binary) | Binary path + welcome + getting started |
+| Curl upgrade (--install, binary exists) | Binary path only |
+| npm/pnpm upgrade (no --install) | Silent |
+| Manual re-run | Silent |
+| Any + --quiet | Silent |
+
+### Tests Added/Updated
+- 'produces no welcome or completion output without --install' (was 'outputs Setup complete!')
+- '--install suppresses welcome when binary already exists (upgrade)' (new)
+- 'suppresses agent skills message on subsequent runs (upgrade scenario)' (new)
+- 'does not break setup on network failure' — updated to not expect 'Setup complete!'
+- 'bestEffort catches errors...' — updated to check for Warning instead of 'Setup complete!'
