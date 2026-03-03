@@ -79,6 +79,10 @@ let stderrSpy: ReturnType<typeof spyOn>;
 let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount: number;
+let mockRun: {
+  startAsync: ReturnType<typeof mock>;
+  resumeAsync: ReturnType<typeof mock>;
+};
 
 const spinnerMock = {
   start: mock(),
@@ -87,7 +91,7 @@ const spinnerMock = {
 };
 
 function setupWorkflowSpy() {
-  const mockRun = {
+  mockRun = {
     startAsync: mock(() => Promise.resolve(mockStartResult)),
     resumeAsync: mock(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
@@ -106,7 +110,7 @@ function setupWorkflowSpy() {
     mockWorkflow as any
   );
 
-  return { mockRun, mockWorkflow };
+  return { mockWorkflow };
 }
 
 // ── Setup / Teardown ────────────────────────────────────────────────────────
@@ -211,12 +215,12 @@ describe("runWizard", () => {
 
   describe("connection error", () => {
     test("handles startAsync rejection gracefully", async () => {
-      const mockRun = {
+      const failingRun = {
         startAsync: mock(() => Promise.reject(new Error("Connection refused"))),
         resumeAsync: mock(),
       };
       const mockWorkflow = {
-        createRun: mock(() => Promise.resolve(mockRun)),
+        createRun: mock(() => Promise.resolve(failingRun)),
       };
       getWorkflowSpy.mockReturnValue(mockWorkflow as any);
 
@@ -442,6 +446,11 @@ describe("runWizard", () => {
       await runWizard(makeOptions());
 
       expect(handleLocalOpSpy).toHaveBeenCalled();
+      // resumeAsync should be called with the actual key ("step-b"), not the
+      // original stepId ("step-a") from result.suspended
+      expect(mockRun.resumeAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ step: "step-b" })
+      );
     });
 
     test("handles multiple suspend/resume iterations", async () => {

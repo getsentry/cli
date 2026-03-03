@@ -174,8 +174,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       const stepPath = result.suspended?.at(0) ?? [];
       const stepId: string = stepPath.at(-1) ?? "unknown";
 
-      const payload = extractSuspendPayload(result, stepId);
-      if (!payload) {
+      const extracted = extractSuspendPayload(result, stepId);
+      if (!extracted) {
         spin.stop("Error", 1);
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
@@ -184,12 +184,12 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       }
 
       const resumeData = await handleSuspendedStep(
-        { payload, stepId, spin, options },
+        { payload: extracted.payload, stepId: extracted.stepId, spin, options },
         stepPhases
       );
 
       result = (await run.resumeAsync({
-        step: stepId,
+        step: extracted.stepId,
         resumeData,
         tracingOptions,
       })) as WorkflowRunResult;
@@ -227,20 +227,20 @@ function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
 function extractSuspendPayload(
   result: WorkflowRunResult,
   stepId: string
-): unknown | undefined {
+): { payload: unknown; stepId: string } | undefined {
   const stepPayload = result.steps?.[stepId]?.suspendPayload;
   if (stepPayload) {
-    return stepPayload;
+    return { payload: stepPayload, stepId };
   }
 
   if (result.suspendPayload) {
-    return result.suspendPayload;
+    return { payload: result.suspendPayload, stepId };
   }
 
   for (const key of Object.keys(result.steps ?? {})) {
     const step = result.steps?.[key];
     if (step?.suspendPayload) {
-      return step.suspendPayload;
+      return { payload: step.suspendPayload, stepId: key };
     }
   }
 

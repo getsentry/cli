@@ -131,11 +131,16 @@ export function validateCommand(command: string): string | undefined {
     }
   }
 
-  // Layer 2: Block dangerous executables
+  // Layer 2: Block environment variable injection (VAR=value cmd)
   const firstToken = command.trimStart().split(WHITESPACE_RE)[0];
   if (!firstToken) {
     return "Blocked command: empty command";
   }
+  if (firstToken.includes("=")) {
+    return `Blocked command: contains environment variable assignment — "${command}"`;
+  }
+
+  // Layer 3: Block dangerous executables
   const executable = path.basename(firstToken);
   if (BLOCKED_EXECUTABLES.has(executable)) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;

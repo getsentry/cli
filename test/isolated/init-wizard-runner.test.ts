@@ -74,6 +74,14 @@ let mockResumeResults: WorkflowRunResult[] = [];
 let resumeCallCount = 0;
 let startShouldThrow = false;
 
+const mockResumeAsync = mock(() => {
+  const result = mockResumeResults[resumeCallCount] ?? {
+    status: "success",
+  };
+  resumeCallCount += 1;
+  return Promise.resolve(result);
+});
+
 mock.module("@mastra/client-js", () => ({
   MastraClient: class {
     getWorkflow() {
@@ -86,13 +94,7 @@ mock.module("@mastra/client-js", () => ({
               }
               return Promise.resolve(mockStartResult);
             },
-            resumeAsync: () => {
-              const result = mockResumeResults[resumeCallCount] ?? {
-                status: "success",
-              };
-              resumeCallCount += 1;
-              return Promise.resolve(result);
-            },
+            resumeAsync: mockResumeAsync,
           }),
       };
     }
@@ -129,6 +131,7 @@ function resetAllMocks() {
   mockResumeResults = [];
   resumeCallCount = 0;
   startShouldThrow = false;
+  mockResumeAsync.mockClear();
   process.exitCode = 0;
 }
 
@@ -408,6 +411,11 @@ describe("runWizard", () => {
       await runWizard(makeOptions());
 
       expect(mockHandleLocalOp).toHaveBeenCalled();
+      // resumeAsync should be called with the actual key ("step-b"), not the
+      // original stepId ("step-a") from result.suspended
+      expect(mockResumeAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ step: "step-b" })
+      );
     });
 
     test("handles missing suspend payload", async () => {
