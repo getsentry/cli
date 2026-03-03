@@ -11,6 +11,7 @@
 import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
   createANewProject,
+  createANewTeam,
   listAnOrganization_sIssues,
   listAnOrganization_sProjects,
   listAnOrganization_sRepositories,
@@ -708,6 +709,27 @@ export async function createProject(
   });
   const data = unwrapResult(result, "Failed to create project");
   return data as unknown as SentryProject;
+}
+
+/**
+ * Create a new team in an organization.
+ *
+ * @param orgSlug - The organization slug
+ * @param slug - Team slug (also used as display name)
+ * @returns The created team
+ */
+export async function createTeam(
+  orgSlug: string,
+  slug: string
+): Promise<SentryTeam> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await createANewTeam({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    body: { slug },
+  });
+  const data = unwrapResult(result, "Failed to create team");
+  return data as unknown as SentryTeam;
 }
 
 /**

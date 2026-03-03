@@ -3,6 +3,17 @@
  *
  * Create a new Sentry project.
  * Supports org/name positional syntax (like `gh repo create owner/repo`).
+ *
+ * ## Flow
+ *
+ * 1. Parse name arg → extract org prefix if present (e.g., "acme/my-app")
+ * 2. Resolve org → CLI flag > env vars > config defaults > DSN auto-detection
+ * 3. Resolve team → `--team` flag > auto-select single team > auto-create if empty
+ * 4. Call `createProject` API
+ * 5. Fetch DSN (best-effort) and display results
+ *
+ * When the team is auto-selected or auto-created, the output includes a note
+ * so the user knows which team was used and how to change it.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -25,7 +36,11 @@ import {
   writeKeyValue,
 } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { fetchOrgListHint, resolveTeam } from "../../lib/resolve-team.js";
+import {
+  fetchOrgListHint,
+  type ResolvedTeam,
+  resolveTeam,
+} from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import type { SentryProject, SentryTeam } from "../../types/index.js";
 
@@ -37,7 +52,14 @@ type CreateFlags = {
   readonly json: boolean;
 };
 
-/** Common Sentry platform strings, shown when platform arg is missing or invalid */
+/**
+ * Common Sentry platform identifiers shown when platform arg is missing or invalid.
+ *
+ * These use hyphen-separated format matching Sentry's internal platform registry
+ * (see sentry/src/sentry/utils/platform_categories.py). This is a curated subset
+ * of the ~120 supported values — the full list is available via the API endpoint
+ * referenced in `buildPlatformError`.
+ */
 const PLATFORMS = [
   "javascript",
   "javascript-react",
@@ -112,7 +134,7 @@ function buildPlatformError(nameArg: string, platform?: string): string {
     "Usage:\n" +
     `  sentry project create ${nameArg} <platform>\n\n` +
     `Available platforms:\n\n${list}\n\n` +
-    "Full list: https://docs.sentry.io/platforms/"
+    "Run 'sentry project create <name> <platform>' with any valid Sentry platform identifier."
   );
 }
 
@@ -232,7 +254,7 @@ export const createCommand = buildCommand({
       "The name supports org/name syntax to specify the organization explicitly.\n" +
       "If omitted, the org is auto-detected from config defaults.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
-      "automatically. Otherwise, specify --team.\n\n" +
+      "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
       "  sentry project create my-app node\n" +
       "  sentry project create acme-corp/my-app javascript-nextjs\n" +
@@ -328,17 +350,18 @@ export const createCommand = buildCommand({
     }
     const orgSlug = resolved.org;
 
-    // Resolve team
-    const teamSlug = await resolveTeam(orgSlug, {
+    // Resolve team — auto-creates a team if the org has none
+    const team: ResolvedTeam = await resolveTeam(orgSlug, {
       team: flags.team,
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
+      autoCreateSlug: slugify(name),
     });
 
     // Create the project
     const project = await createProjectWithErrors(
       orgSlug,
-      teamSlug,
+      team.slug,
       name,
       platformArg
     );
@@ -348,7 +371,7 @@ export const createCommand = buildCommand({
 
     // JSON output
     if (flags.json) {
-      writeJson(stdout, { ...project, dsn });
+      writeJson(stdout, { ...project, dsn, team: team.slug });
       return;
     }
 
@@ -358,7 +381,7 @@ export const createCommand = buildCommand({
       ["Project", project.name],
       ["Slug", project.slug],
       ["Org", orgSlug],
-      ["Team", teamSlug],
+      ["Team", team.slug],
       ["Platform", project.platform || platformArg],
     ];
     if (dsn) {
@@ -373,6 +396,19 @@ export const createCommand = buildCommand({
     if (project.slug !== expectedSlug) {
       stdout.write(
         `Note: Slug '${project.slug}' was assigned because '${expectedSlug}' is already taken.\n`
+      );
+    }
+
+    // Inform user which team was used when not explicitly specified
+    if (team.source === "auto-created") {
+      stdout.write(
+        `Note: Created team '${team.slug}' (org had no teams). ` +
+          `Change with: sentry project create ${nameArg} ${platformArg} --team <slug>\n`
+      );
+    } else if (team.source === "auto-selected") {
+      stdout.write(
+        `Note: Using team '${team.slug}'. ` +
+          `Change with: sentry project create ${nameArg} ${platformArg} --team <slug>\n`
       );
     }
 

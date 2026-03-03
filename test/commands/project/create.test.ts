@@ -70,6 +70,7 @@ function createMockContext() {
 describe("project create", () => {
   let listTeamsSpy: ReturnType<typeof spyOn>;
   let createProjectSpy: ReturnType<typeof spyOn>;
+  let createTeamSpy: ReturnType<typeof spyOn>;
   let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
   let listOrgsSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
@@ -77,6 +78,7 @@ describe("project create", () => {
   beforeEach(() => {
     listTeamsSpy = spyOn(apiClient, "listTeams");
     createProjectSpy = spyOn(apiClient, "createProject");
+    createTeamSpy = spyOn(apiClient, "createTeam");
     tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn");
     listOrgsSpy = spyOn(apiClient, "listOrganizations");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
@@ -85,6 +87,7 @@ describe("project create", () => {
     resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
     listTeamsSpy.mockResolvedValue([sampleTeam]);
     createProjectSpy.mockResolvedValue(sampleProject);
+    createTeamSpy.mockResolvedValue(sampleTeam);
     tryGetPrimaryDsnSpy.mockResolvedValue(
       "https://abc@o123.ingest.us.sentry.io/999"
     );
@@ -97,6 +100,7 @@ describe("project create", () => {
   afterEach(() => {
     listTeamsSpy.mockRestore();
     createProjectSpy.mockRestore();
+    createTeamSpy.mockRestore();
     tryGetPrimaryDsnSpy.mockRestore();
     listOrgsSpy.mockRestore();
     resolveOrgSpy.mockRestore();
@@ -228,15 +232,27 @@ describe("project create", () => {
     expect(err.message).toContain("beta");
   });
 
-  test("errors when no teams exist", async () => {
+  test("auto-creates team when org has no teams", async () => {
     listTeamsSpy.mockResolvedValue([]);
+    createTeamSpy.mockResolvedValue({
+      id: "10",
+      slug: "my-app",
+      name: "my-app",
+    });
 
-    const { context } = createMockContext();
+    const { context, stdoutWrite } = createMockContext();
     const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "node");
 
-    await expect(
-      func.call(context, { json: false }, "my-app", "node")
-    ).rejects.toThrow(ContextError);
+    expect(createTeamSpy).toHaveBeenCalledWith("acme-corp", "my-app");
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app", {
+      name: "my-app",
+      platform: "node",
+    });
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Created team 'my-app'");
+    expect(output).toContain("org had no teams");
   });
 
   test("errors when org cannot be resolved", async () => {
@@ -375,7 +391,6 @@ describe("project create", () => {
     expect(err.message).toContain("Invalid platform 'node'");
     expect(err.message).toContain("Available platforms:");
     expect(err.message).toContain("javascript-nextjs");
-    expect(err.message).toContain("docs.sentry.io/platforms");
   });
 
   test("wraps other API errors with context", async () => {
@@ -496,7 +511,6 @@ describe("project create", () => {
     expect(err.message).toContain("Available platforms:");
     expect(err.message).toContain("javascript-nextjs");
     expect(err.message).toContain("python");
-    expect(err.message).toContain("docs.sentry.io/platforms");
   });
 
   test("wraps listTeams API failure with org list", async () => {
