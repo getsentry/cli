@@ -21,7 +21,7 @@ import {
 } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
-import { handleLocalOp } from "./local-ops.js";
+import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
 import type {
   InteractivePayload,
   LocalOpPayload,
@@ -150,13 +150,16 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
   const spin = spinner();
 
+  spin.start("Scanning project...");
+  const dirListing = precomputeDirListing(directory);
+
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    spin.start("Connecting to wizard...");
+    spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = (await run.startAsync({
-      inputData: { directory, force, yes, dryRun, features },
+      inputData: { directory, force, yes, dryRun, features, dirListing },
       tracingOptions,
     })) as WorkflowRunResult;
   } catch (err) {
