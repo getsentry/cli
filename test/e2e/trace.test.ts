@@ -81,9 +81,10 @@ describe("sentry trace list", () => {
     ]);
 
     expect(result.exitCode).toBe(0);
-    // Should be valid JSON array
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
+    // Should be valid JSON envelope with data array and hasMore flag
+    const parsed = JSON.parse(result.stdout);
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(typeof parsed.hasMore).toBe("boolean");
   });
 
   test("supports --limit flag", async () => {

@@ -333,4 +333,76 @@ describe("sentry api", () => {
     },
     { timeout: 15_000 }
   );
+
+  test(
+    "--data and --input are mutually exclusive",
+    async () => {
+      await ctx.setAuthToken(TEST_TOKEN);
+
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "PUT",
+        "--data",
+        '{"name":"test"}',
+        "--input",
+        "-",
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr + result.stdout).toMatch(
+        /--data.*--input|--input.*--data/i
+      );
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "--data and --field are mutually exclusive",
+    async () => {
+      await ctx.setAuthToken(TEST_TOKEN);
+
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "PUT",
+        "--data",
+        '{"name":"test"}',
+        "--field",
+        "slug=my-org",
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr + result.stdout).toMatch(
+        /--data.*--field|--field.*--data/i
+      );
+    },
+    { timeout: 15_000 }
+  );
+
+  test(
+    "--data and --raw-field are mutually exclusive",
+    async () => {
+      await ctx.setAuthToken(TEST_TOKEN);
+
+      const result = await ctx.run([
+        "api",
+        "organizations/",
+        "--method",
+        "PUT",
+        "-d",
+        '{"name":"test"}',
+        "-f",
+        "slug=my-org",
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr + result.stdout).toMatch(
+        /--data.*--field|--field.*--data/i
+      );
+    },
+    { timeout: 15_000 }
+  );
 });

@@ -39,6 +39,19 @@ const SEVERITY_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
 const LOG_TABLE_COLS = ["Timestamp", "Level", "Message"] as const;
 
 /**
+ * Minimal log-row shape shared by {@link SentryLog} (Explore/Events) and
+ * trace-log entries (`TraceLog` from the trace-logs endpoint).
+ * Both types carry these three fields with the same semantics.
+ */
+type LogLike = {
+  timestamp: string;
+  severity?: string | null;
+  message?: string | null;
+  /** Present on Explore/Events logs; absent on trace-logs (all rows share one trace). */
+  trace?: string | null;
+};
+
+/**
  * Format severity level with appropriate color tag.
  * Pads to 7 characters for alignment (longest: "warning").
  *
@@ -74,20 +87,28 @@ function formatTimestamp(timestamp: string): string {
 /**
  * Extract cell values for a log row (shared by streaming and batch paths).
  *
- * @param log - The log entry
+ * When `includeTrace` is true (the default), a short trace-ID suffix is
+ * appended to the message cell — useful in Explore/Events lists where rows
+ * may span many traces. Pass `false` when all rows already share the same
+ * trace (e.g., `sentry trace logs`) so the redundant suffix is omitted.
+ *
+ * @param log - The log entry (any {@link LogLike} shape)
  * @param padSeverity - Whether to pad severity to 7 chars for alignment
- * @returns `[timestamp, severity, message]` strings
+ * @param includeTrace - Whether to append a short trace-ID suffix to the message
+ * @returns `[timestamp, severity, message]` markdown-safe cell strings
  */
 export function buildLogRowCells(
-  log: SentryLog,
-  padSeverity = true
+  log: LogLike,
+  padSeverity = true,
+  includeTrace = true
 ): [string, string, string] {
   const timestamp = formatTimestamp(log.timestamp);
   const level = padSeverity
     ? formatSeverity(log.severity)
     : formatSeverityLabel(log.severity);
   const message = escapeMarkdownCell(log.message ?? "");
-  const trace = log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
+  const trace =
+    includeTrace && log.trace ? ` \`[${log.trace.slice(0, 8)}]\`` : "";
   return [timestamp, level, `${message}${trace}`];
 }
 
@@ -95,11 +116,12 @@ export function buildLogRowCells(
  * Format a single log entry as a plain markdown table row.
  * Used for non-TTY / piped output where StreamingTable isn't appropriate.
  *
- * @param log - The log entry to format
+ * @param log - The log entry (any {@link LogLike} shape)
+ * @param includeTrace - Whether to append a short trace-ID suffix (default: true)
  * @returns Formatted log line with newline
  */
-export function formatLogRow(log: SentryLog): string {
-  return mdRow(buildLogRowCells(log));
+export function formatLogRow(log: LogLike, includeTrace = true): string {
+  return mdRow(buildLogRowCells(log, true, includeTrace));
 }
 
 /** Hint rows for column width estimation in streaming mode. */
@@ -141,21 +163,28 @@ export function formatLogsHeader(): string {
 /**
  * Build a markdown table for a list of log entries.
  *
+ * Accepts any {@link LogLike} shape — both {@link SentryLog} (Explore/Events)
+ * and trace-log entries. Pass `includeTrace: false` when all rows already share
+ * the same trace (e.g., `sentry trace logs`) to omit the redundant trace suffix.
+ *
  * Pre-rendered ANSI codes in cell values (e.g. colored severity) are preserved.
  *
  * @param logs - Log entries to display
+ * @param includeTrace - Whether to append a short trace-ID suffix (default: true)
  * @returns Rendered terminal string with Unicode-bordered table
  */
-export function formatLogTable(logs: SentryLog[]): string {
+export function formatLogTable(logs: LogLike[], includeTrace = true): string {
   if (isPlainOutput()) {
     const rows = logs
-      .map((log) => mdRow(buildLogRowCells(log, false)).trimEnd())
+      .map((log) => mdRow(buildLogRowCells(log, false, includeTrace)).trimEnd())
       .join("\n");
     return `${stripColorTags(mdTableHeader(LOG_TABLE_COLS))}\n${rows}\n`;
   }
   const headers = [...LOG_TABLE_COLS];
   const rows = logs.map((log) =>
-    buildLogRowCells(log, false).map((c) => renderInlineMarkdown(c))
+    buildLogRowCells(log, false, includeTrace).map((c) =>
+      renderInlineMarkdown(c)
+    )
   );
   return renderTextTable(headers, rows);
 }

@@ -18,6 +18,7 @@ import {
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import {
+  buildPaginationContextKey,
   clearPaginationCursor,
   escapeContextKeyValue,
   resolveOrgCursor,
@@ -47,6 +48,7 @@ import {
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
+  parseCursorFlag,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
@@ -86,9 +88,6 @@ const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
-
-/** Matches strings that are all digits — used to detect invalid cursor values */
-const ALL_DIGITS_RE = /^\d+$/;
 
 /**
  * Maximum --limit value (user-facing ceiling for practical CLI response times).
@@ -671,9 +670,10 @@ function buildMultiTargetContextKey(
     ? escapeContextKeyValue(flags.query)
     : undefined;
   const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
+  const escapedSort = escapeContextKeyValue(flags.sort);
   return (
     `host:${host}|type:multi:${targetFingerprint}` +
-    `|sort:${flags.sort}|period:${escapedPeriod}` +
+    `|sort:${escapedSort}|period:${escapedPeriod}` +
     (escapedQuery ? `|q:${escapedQuery}` : "")
   );
 }
@@ -748,11 +748,11 @@ type OrgAllIssuesOptions = {
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const { stdout, stderr, org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
-  const escapedQuery = flags.query
-    ? escapeContextKeyValue(flags.query)
-    : undefined;
-  const escapedPeriod = escapeContextKeyValue(flags.period ?? "90d");
-  const contextKey = `host:${getApiBaseUrl()}|type:org:${org}|sort:${flags.sort}|period:${escapedPeriod}${escapedQuery ? `|q:${escapedQuery}` : ""}`;
+  const contextKey = buildPaginationContextKey("org", org, {
+    sort: flags.sort,
+    period: flags.period ?? "90d",
+    q: flags.query,
+  });
   const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
   setContext([org], []);
@@ -1172,21 +1172,7 @@ export const listCommand = buildListCommand("issue", {
       json: LIST_JSON_FLAG,
       cursor: {
         kind: "parsed",
-        parse: (value: string) => {
-          // "last" is the magic keyword to resume from the saved cursor
-          if (value === "last") {
-            return value;
-          }
-          // Sentry pagination cursors are opaque strings like "1735689600:0:0".
-          // Plain integers are not valid cursors — catch this early so the user
-          // gets a clear error rather than a cryptic 400 from the API.
-          if (ALL_DIGITS_RE.test(value)) {
-            throw new Error(
-              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
-            );
-          }
-          return value;
-        },
+        parse: parseCursorFlag,
         brief:
           'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
