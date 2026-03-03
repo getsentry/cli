@@ -3,7 +3,6 @@ import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   handleLocalOp,
-  precomputeDirListing,
   validateCommand,
 } from "../../../src/lib/init/local-ops.js";
 import type {
@@ -767,51 +766,5 @@ describe("handleLocalOp", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toContain("outside project directory");
     });
-  });
-});
-
-describe("precomputeDirListing", () => {
-  let testDir: string;
-
-  beforeEach(() => {
-    testDir = mkdtempSync(join("/tmp", "precompute-test-"));
-  });
-
-  afterEach(() => {
-    rmSync(testDir, { recursive: true, force: true });
-  });
-
-  test("returns DirEntry[] directly", () => {
-    writeFileSync(join(testDir, "app.ts"), "x");
-    mkdirSync(join(testDir, "src"));
-
-    const entries = precomputeDirListing(testDir);
-
-    expect(Array.isArray(entries)).toBe(true);
-    expect(entries.length).toBeGreaterThanOrEqual(2);
-
-    const names = entries.map((e) => e.name).sort();
-    expect(names).toContain("app.ts");
-    expect(names).toContain("src");
-
-    const file = entries.find((e) => e.name === "app.ts");
-    expect(file?.type).toBe("file");
-
-    const dir = entries.find((e) => e.name === "src");
-    expect(dir?.type).toBe("directory");
-  });
-
-  test("returns empty array for non-existent directory", () => {
-    const entries = precomputeDirListing(join(testDir, "nope"));
-    expect(entries).toEqual([]);
-  });
-
-  test("recursively lists nested entries", () => {
-    mkdirSync(join(testDir, "a"));
-    writeFileSync(join(testDir, "a", "nested.ts"), "x");
-
-    const entries = precomputeDirListing(testDir);
-    const paths = entries.map((e) => e.path);
-    expect(paths).toContain(join("a", "nested.ts"));
   });
 });

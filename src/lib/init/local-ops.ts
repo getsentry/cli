@@ -15,7 +15,6 @@ import {
 } from "./constants.js";
 import type {
   ApplyPatchsetPayload,
-  DirEntry,
   FileExistsBatchPayload,
   ListDirPayload,
   LocalOpPayload,
@@ -219,7 +218,11 @@ function listDir(payload: ListDirPayload): LocalOpResult {
   const maxEntries = params.maxEntries ?? 500;
   const recursive = params.recursive ?? false;
 
-  const entries: DirEntry[] = [];
+  const entries: Array<{
+    name: string;
+    path: string;
+    type: "file" | "directory";
+  }> = [];
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: walking the directory tree is a complex operation
   function walk(dir: string, depth: number): void {
@@ -466,14 +469,4 @@ function applyPatchset(
   }
 
   return { ok: true, data: { applied } };
-}
-
-export function precomputeDirListing(directory: string): DirEntry[] {
-  const result = listDir({
-    type: "local-op",
-    operation: "list-dir",
-    cwd: directory,
-    params: { path: ".", recursive: true, maxDepth: 3, maxEntries: 500 },
-  });
-  return (result.data as { entries?: DirEntry[] })?.entries ?? [];
 }

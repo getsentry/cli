@@ -1,9 +1,3 @@
-export type DirEntry = {
-  name: string;
-  path: string;
-  type: "file" | "directory";
-};
-
 export type WizardOptions = {
   directory: string;
   force: boolean;

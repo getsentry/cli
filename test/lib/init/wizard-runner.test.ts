@@ -66,7 +66,6 @@ let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
 let handleLocalOpSpy: ReturnType<typeof spyOn>;
-let precomputeDirListingSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
 
 // MastraClient
@@ -144,9 +143,6 @@ beforeEach(() => {
     ok: true,
     data: { results: [] },
   });
-  precomputeDirListingSpy = spyOn(ops, "precomputeDirListing").mockReturnValue(
-    []
-  );
   handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
     action: "continue",
   });
@@ -173,7 +169,6 @@ afterEach(() => {
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
   handleLocalOpSpy.mockRestore();
-  precomputeDirListingSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
 
   stderrSpy.mockRestore();
