@@ -603,11 +603,11 @@ export async function downloadBinaryToTemp(
       // Ignore if doesn't exist
     }
 
-    if (isNightlyVersion(version)) {
-      // Nightly binaries are on GHCR — downloadTag is not used for nightly
-      await downloadNightlyToPath(tempPath);
-    } else {
-      await downloadStableToPath(downloadTag ?? version, tempPath);
+    // Try delta upgrade first — downloads tiny patches instead of full binary.
+    // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
+    const deltaResult = await tryDeltaUpgrade(version, tempPath);
+    if (!deltaResult) {
+      await downloadFullBinary(version, downloadTag, tempPath);
     }
 
     // Set executable permission (Unix only)
@@ -619,6 +619,47 @@ export async function downloadBinaryToTemp(
   } catch (error) {
     releaseLock(lockPath);
     throw error;
+  }
+}
+
+/**
+ * Attempt delta upgrade using binary patches.
+ *
+ * Uses the currently running binary as the base for patching.
+ * Returns null silently on any failure so the caller can fall back.
+ *
+ * @param version - Target version to upgrade to
+ * @param destPath - Path to write the patched binary
+ * @returns SHA-256 hex of the patched binary, or null if delta is unavailable
+ */
+async function tryDeltaUpgrade(
+  version: string,
+  destPath: string
+): Promise<string | null> {
+  try {
+    const { attemptDeltaUpgrade } = await import("./delta-upgrade.js");
+    return await attemptDeltaUpgrade(version, process.execPath, destPath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Download the full binary (non-delta path).
+ *
+ * @param version - Target version
+ * @param downloadTag - Git tag override for the download URL
+ * @param destPath - Path to write the binary
+ */
+async function downloadFullBinary(
+  version: string,
+  downloadTag: string | undefined,
+  destPath: string
+): Promise<void> {
+  if (isNightlyVersion(version)) {
+    await downloadNightlyToPath(destPath);
+  } else {
+    await downloadStableToPath(downloadTag ?? version, destPath);
   }
 }
 

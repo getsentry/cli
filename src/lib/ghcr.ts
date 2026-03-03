@@ -113,16 +113,18 @@ export async function getAnonymousToken(): Promise<string> {
 }
 
 /**
- * Fetch the OCI manifest for the `:nightly` tag.
+ * Fetch the OCI manifest for an arbitrary tag from GHCR.
  *
  * @param token - Anonymous bearer token from {@link getAnonymousToken}
+ * @param tag - OCI tag to fetch (e.g., "nightly", "nightly-0.14.0-dev.123", "patch-0.14.0-dev.123")
  * @returns Parsed OCI manifest
  * @throws {UpgradeError} On network failure or non-200 response
  */
-export async function fetchNightlyManifest(
-  token: string
+export async function fetchManifest(
+  token: string,
+  tag: string
 ): Promise<OciManifest> {
-  const url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/manifests/${GHCR_TAG}`;
+  const url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/manifests/${tag}`;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -143,11 +145,24 @@ export async function fetchNightlyManifest(
   if (!response.ok) {
     throw new UpgradeError(
       "network_error",
-      `Failed to fetch nightly manifest: HTTP ${response.status}`
+      `Failed to fetch manifest for tag "${tag}": HTTP ${response.status}`
     );
   }
 
   return (await response.json()) as OciManifest;
+}
+
+/**
+ * Fetch the OCI manifest for the `:nightly` tag.
+ *
+ * Convenience wrapper around {@link fetchManifest} for the rolling nightly tag.
+ *
+ * @param token - Anonymous bearer token from {@link getAnonymousToken}
+ * @returns Parsed OCI manifest
+ * @throws {UpgradeError} On network failure or non-200 response
+ */
+export function fetchNightlyManifest(token: string): Promise<OciManifest> {
+  return fetchManifest(token, GHCR_TAG);
 }
 
 /**
@@ -285,4 +300,108 @@ export async function downloadNightlyBlob(
     "network_error",
     `Unexpected GHCR blob response: HTTP ${blobResponse.status}`
   );
+}
+
+/** Page size for tag listing pagination */
+const TAGS_PAGE_SIZE = 100;
+
+/**
+ * Fetch a single page of tags from the GHCR registry.
+ *
+ * @param token - Bearer token for authentication
+ * @param lastTag - Last tag from previous page (for pagination), or undefined for the first page
+ * @returns Array of tag strings for this page
+ * @throws {UpgradeError} On network failure
+ */
+async function fetchTagPage(
+  token: string,
+  lastTag?: string
+): Promise<string[]> {
+  let url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/tags/list?n=${TAGS_PAGE_SIZE}`;
+  if (lastTag) {
+    url += `&last=${encodeURIComponent(lastTag)}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": getUserAgent(),
+      },
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new UpgradeError("network_error", `Failed to list GHCR tags: ${msg}`);
+  }
+
+  if (!response.ok) {
+    throw new UpgradeError(
+      "network_error",
+      `Failed to list GHCR tags: HTTP ${response.status}`
+    );
+  }
+
+  const data = (await response.json()) as { tags?: string[] };
+  return data.tags ?? [];
+}
+
+/**
+ * List tags in the GHCR repository, optionally filtered by prefix.
+ *
+ * Uses the OCI Distribution Spec `/v2/<name>/tags/list` endpoint with
+ * pagination. Returns tags sorted lexicographically by the registry.
+ *
+ * @param token - Anonymous bearer token from {@link getAnonymousToken}
+ * @param prefix - Optional prefix filter (e.g., "nightly-" to list versioned nightlies)
+ * @returns Array of matching tag strings
+ * @throws {UpgradeError} On network failure
+ */
+export async function listTags(
+  token: string,
+  prefix?: string
+): Promise<string[]> {
+  const allTags: string[] = [];
+  let lastTag: string | undefined;
+
+  for (;;) {
+    const tags = await fetchTagPage(token, lastTag);
+    if (tags.length === 0) {
+      break;
+    }
+
+    for (const tag of tags) {
+      if (!prefix || tag.startsWith(prefix)) {
+        allTags.push(tag);
+      }
+    }
+
+    if (tags.length < TAGS_PAGE_SIZE) {
+      break;
+    }
+
+    lastTag = tags.at(-1);
+  }
+
+  return allTags;
+}
+
+/**
+ * Download an OCI layer blob as an ArrayBuffer.
+ *
+ * Uses the same redirect-without-auth pattern as {@link downloadNightlyBlob},
+ * but returns the fully-buffered ArrayBuffer instead of a streaming Response.
+ * Suitable for small payloads like patch files (50-500 KB).
+ *
+ * @param token - Anonymous bearer token from {@link getAnonymousToken}
+ * @param digest - Layer digest to download (e.g., "sha256:abc123...")
+ * @returns Raw blob contents as ArrayBuffer
+ * @throws {UpgradeError} On network failure or bad response
+ */
+export async function downloadLayerBlob(
+  token: string,
+  digest: string
+): Promise<ArrayBuffer> {
+  const response = await downloadNightlyBlob(token, digest);
+  return response.arrayBuffer();
 }

@@ -155,7 +155,7 @@ describe("fetchNightlyManifest", () => {
 
     await expect(fetchNightlyManifest("token")).rejects.toThrow(UpgradeError);
     await expect(fetchNightlyManifest("token")).rejects.toThrow(
-      "Failed to fetch nightly manifest: HTTP 404"
+      'Failed to fetch manifest for tag "nightly": HTTP 404'
     );
   });
 
