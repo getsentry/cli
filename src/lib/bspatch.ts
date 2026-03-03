@@ -61,8 +61,9 @@ export function offtin(buf: Uint8Array, offset: number): number {
   // getUint32 already returns unsigned, so hi is in [0, 2^32).
   const magnitude = (hi % 0x80_00_00_00) * 0x1_00_00_00_00 + lo;
 
-  // Sign in bit 7 of byte 7 (bit 31 of high word)
-  if (hi >= 0x80_00_00_00) {
+  // Sign in bit 7 of byte 7 (bit 31 of high word).
+  // Guard magnitude === 0 to avoid returning -0.
+  if (magnitude !== 0 && hi >= 0x80_00_00_00) {
     return -magnitude;
   }
   return magnitude;

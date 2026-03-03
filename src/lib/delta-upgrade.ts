@@ -245,31 +245,36 @@ function getStableTargetSha256(
   return extractSha256(binaryAsset);
 }
 
-/** Result from fetching a single stable release's patch info */
-type StablePatchStep = {
-  /** Patch file data */
-  patchData: Uint8Array;
+/** Metadata discovered for a single stable release (before downloading patch data) */
+type StableChainLink = {
+  /** Download URL for the patch asset */
+  patchUrl: string;
+  /** Reported size of the patch asset (bytes) */
+  patchSize: number;
   /** Version this patch applies from */
   fromVersion: string;
-  /** SHA-256 of the target binary (only set on the target release) */
+  /** SHA-256 of the target binary (only set on the first/target release) */
   targetSha256: string | null;
 };
 
 /**
- * Fetch patch data and metadata for a single stable release.
+ * Discover metadata for a single stable release in the chain.
+ *
+ * Fetches the release JSON and previous-version info without downloading
+ * the actual patch data. This keeps the serial discovery phase lightweight.
  *
  * @param version - Release tag to fetch
  * @param patchAssetName - Expected patch asset name for this platform
  * @param binaryName - Binary asset name for SHA-256 extraction
  * @param isTarget - Whether this is the target (first) release in the chain
- * @returns Step info, or null if any data is unavailable
+ * @returns Chain link metadata, or null if any data is unavailable
  */
-async function fetchStablePatchStep(
+async function discoverStableLink(
   version: string,
   patchAssetName: string,
   binaryName: string,
   isTarget: boolean
-): Promise<StablePatchStep | null> {
+): Promise<StableChainLink | null> {
   const release = await fetchRelease(version);
   if (!release) {
     return null;
@@ -277,11 +282,6 @@ async function fetchStablePatchStep(
 
   const patchAsset = release.assets.find((a) => a.name === patchAssetName);
   if (!patchAsset) {
-    return null;
-  }
-
-  const patchData = await downloadStablePatch(patchAsset.browser_download_url);
-  if (!patchData) {
     return null;
   }
 
@@ -294,15 +294,98 @@ async function fetchStablePatchStep(
     ? getStableTargetSha256(release, binaryName)
     : null;
 
-  return { patchData, fromVersion, targetSha256 };
+  return {
+    patchUrl: patchAsset.browser_download_url,
+    patchSize: patchAsset.size,
+    fromVersion,
+    targetSha256,
+  };
+}
+
+/** Result from the serial discovery phase of stable chain resolution */
+type StableDiscoveryResult = {
+  /** Ordered links (oldest first) forming the chain */
+  links: StableChainLink[];
+  /** Expected SHA-256 of the final target binary */
+  expectedSha256: string;
+};
+
+/** Options for stable chain discovery */
+type StableDiscoveryOpts = {
+  currentVersion: string;
+  targetVersion: string;
+  fullGzSize: number;
+  patchAssetName: string;
+  binaryName: string;
+};
+
+/**
+ * Discover the full chain of stable patches by walking release metadata.
+ *
+ * Serial phase: fetches only lightweight release JSON + previous-version
+ * info, no patch data. Validates the size threshold against reported asset
+ * sizes as it walks.
+ *
+ * @returns Discovery result, or null if the chain is broken/exceeds threshold
+ */
+async function discoverStableChain(
+  opts: StableDiscoveryOpts
+): Promise<StableDiscoveryResult | null> {
+  const {
+    currentVersion,
+    targetVersion,
+    fullGzSize,
+    patchAssetName,
+    binaryName,
+  } = opts;
+  const links: StableChainLink[] = [];
+  let totalSize = 0;
+  let expectedSha256 = "";
+  let version = targetVersion;
+
+  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
+    const link = await discoverStableLink(
+      version,
+      patchAssetName,
+      binaryName,
+      depth === 0
+    );
+    if (!link) {
+      return null;
+    }
+
+    if (depth === 0) {
+      expectedSha256 = link.targetSha256 ?? "";
+      if (!expectedSha256) {
+        return null;
+      }
+    }
+
+    links.unshift(link);
+    totalSize += link.patchSize;
+
+    if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
+      return null;
+    }
+
+    if (link.fromVersion === currentVersion) {
+      return { links, expectedSha256 };
+    }
+
+    version = link.fromVersion;
+  }
+
+  return null;
 }
 
 /**
  * Attempt to resolve a chain of stable patches from current to target version.
  *
- * Walks backwards from the target release, checking each release for a
- * patch file for the current platform. Stops when we reach the current
- * version or exhaust the chain.
+ * Phase 1 (serial): Walk backwards from the target release, fetching only
+ * lightweight metadata (release JSON + previous-version) to discover the
+ * full chain and check the size threshold.
+ *
+ * Phase 2 (parallel): Download all patch files concurrently.
  *
  * @param currentVersion - Currently installed version
  * @param targetVersion - Version to upgrade to
@@ -317,44 +400,33 @@ async function resolveStableChain(
   const binaryName = getPlatformBinaryName();
   const patchAssetName = `${binaryName}.patch`;
 
-  const links: PatchLink[] = [];
-  let totalSize = 0;
-  let expectedSha256 = "";
-  let version = targetVersion;
-
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-    const step = await fetchStablePatchStep(
-      version,
-      patchAssetName,
-      binaryName,
-      depth === 0
-    );
-    if (!step) {
-      return null;
-    }
-
-    if (depth === 0) {
-      expectedSha256 = step.targetSha256 ?? "";
-      if (!expectedSha256) {
-        return null;
-      }
-    }
-
-    links.unshift({ data: step.patchData, size: step.patchData.byteLength });
-    totalSize += step.patchData.byteLength;
-
-    if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
-      return null;
-    }
-
-    if (step.fromVersion === currentVersion) {
-      return { patches: links, totalSize, expectedSha256 };
-    }
-
-    version = step.fromVersion;
+  const discovered = await discoverStableChain({
+    currentVersion,
+    targetVersion,
+    fullGzSize,
+    patchAssetName,
+    binaryName,
+  });
+  if (!discovered) {
+    return null;
   }
 
-  return null;
+  // Phase 2: Parallel patch download
+  const downloadResults = await Promise.all(
+    discovered.links.map((link) => downloadStablePatch(link.patchUrl))
+  );
+
+  const patches: PatchLink[] = [];
+  let totalSize = 0;
+  for (const data of downloadResults) {
+    if (!data) {
+      return null;
+    }
+    patches.push({ data, size: data.byteLength });
+    totalSize += data.byteLength;
+  }
+
+  return { patches, totalSize, expectedSha256: discovered.expectedSha256 };
 }
 
 // Nightly channel: GHCR
@@ -388,41 +460,44 @@ function getPatchTargetSha256(
 /** GHCR tag prefix for patch manifests */
 const PATCH_TAG_PREFIX = "patch-";
 
-/** Result from fetching a single nightly patch manifest */
-type NightlyPatchStep = {
-  /** Patch file data */
-  patchData: Uint8Array;
+/** Metadata discovered for a single nightly patch manifest (before downloading blob) */
+type NightlyChainLink = {
+  /** Layer digest for downloading the patch blob */
+  patchDigest: string;
+  /** Reported size of the patch layer (bytes) */
+  patchSize: number;
   /** Version this patch applies from */
   fromVersion: string;
-  /** SHA-256 of the target binary (only if requested) */
+  /** SHA-256 of the target binary (only set on the first/target link) */
   targetSha256: string | null;
 };
 
-/** Options for fetching a single nightly patch step */
-type NightlyPatchOpts = {
+/** Options for nightly chain discovery */
+type NightlyDiscoveryOpts = {
   token: string;
-  version: string;
   patchLayerName: string;
   binaryName: string;
 };
 
 /**
- * Fetch patch data and metadata for a single nightly version from GHCR.
+ * Discover metadata for a single nightly patch manifest.
  *
- * @param opts - Fetch parameters
+ * Fetches the GHCR `:patch-<version>` manifest to extract fromVersion
+ * and patch layer digest, without downloading the actual blob data.
+ *
+ * @param opts - Discovery parameters (token, layer/binary names)
+ * @param version - Nightly version to look up
  * @param isTarget - Whether to extract target SHA-256
- * @returns Step info, or null if unavailable
+ * @returns Chain link metadata, or null if unavailable
  */
-async function fetchNightlyPatchStep(
-  opts: NightlyPatchOpts,
+async function discoverNightlyLink(
+  opts: NightlyDiscoveryOpts,
+  version: string,
   isTarget: boolean
-): Promise<NightlyPatchStep | null> {
+): Promise<NightlyChainLink | null> {
   let manifest: OciManifest;
   try {
-    manifest = await fetchManifest(
-      opts.token,
-      `${PATCH_TAG_PREFIX}${opts.version}`
-    );
+    manifest = await fetchManifest(opts.token, `${PATCH_TAG_PREFIX}${version}`);
   } catch {
     return null;
   }
@@ -440,20 +515,83 @@ async function fetchNightlyPatchStep(
     return null;
   }
 
-  const patchBuffer = await downloadLayerBlob(opts.token, patchLayer.digest);
-  const patchData = new Uint8Array(patchBuffer);
   const targetSha256 = isTarget
     ? getPatchTargetSha256(manifest, opts.binaryName)
     : null;
 
-  return { patchData, fromVersion, targetSha256 };
+  return {
+    patchDigest: patchLayer.digest,
+    patchSize: patchLayer.size,
+    fromVersion,
+    targetSha256,
+  };
+}
+
+/** Result from the serial discovery phase of nightly chain resolution */
+type NightlyDiscoveryResult = {
+  /** Ordered links (oldest first) forming the chain */
+  links: NightlyChainLink[];
+  /** Expected SHA-256 of the final target binary */
+  expectedSha256: string;
+};
+
+/**
+ * Discover the full chain of nightly patches by walking manifest annotations.
+ *
+ * Serial phase: fetches only lightweight manifest JSON to extract
+ * fromVersion and layer digest/size. Validates the size threshold
+ * against reported layer sizes as it walks.
+ *
+ * @returns Discovery result, or null if the chain is broken/exceeds threshold
+ */
+async function discoverNightlyChain(
+  opts: NightlyDiscoveryOpts,
+  currentVersion: string,
+  targetVersion: string,
+  fullGzSize: number
+): Promise<NightlyDiscoveryResult | null> {
+  const links: NightlyChainLink[] = [];
+  let totalSize = 0;
+  let expectedSha256 = "";
+  let version = targetVersion;
+
+  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
+    const link = await discoverNightlyLink(opts, version, depth === 0);
+    if (!link) {
+      return null;
+    }
+
+    if (depth === 0) {
+      expectedSha256 = link.targetSha256 ?? "";
+      if (!expectedSha256) {
+        return null;
+      }
+    }
+
+    links.unshift(link);
+    totalSize += link.patchSize;
+
+    if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
+      return null;
+    }
+
+    if (link.fromVersion === currentVersion) {
+      return { links, expectedSha256 };
+    }
+
+    version = link.fromVersion;
+  }
+
+  return null;
 }
 
 /**
  * Attempt to resolve a chain of nightly patches from current to target version.
  *
- * Uses GHCR `:patch-<version>` tags with `from-version` annotations to
- * walk backwards from the target version to the current version.
+ * Phase 1 (serial): Walk backwards using GHCR `:patch-<version>` manifest
+ * annotations to discover the chain and validate size thresholds.
+ *
+ * Phase 2 (parallel): Download all patch layer blobs concurrently.
  *
  * @param token - GHCR anonymous bearer token
  * @param currentVersion - Currently installed nightly version
@@ -469,45 +607,35 @@ async function resolveNightlyChain(
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
   const patchLayerName = `${binaryName}.patch`;
-  const opts: NightlyPatchOpts = {
-    token,
-    version: targetVersion,
-    patchLayerName,
-    binaryName,
-  };
+  const opts: NightlyDiscoveryOpts = { token, patchLayerName, binaryName };
 
-  const links: PatchLink[] = [];
-  let totalSize = 0;
-  let expectedSha256 = "";
-
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-    const step = await fetchNightlyPatchStep(opts, depth === 0);
-    if (!step) {
-      return null;
-    }
-
-    if (depth === 0) {
-      expectedSha256 = step.targetSha256 ?? "";
-      if (!expectedSha256) {
-        return null;
-      }
-    }
-
-    links.unshift({ data: step.patchData, size: step.patchData.byteLength });
-    totalSize += step.patchData.byteLength;
-
-    if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
-      return null;
-    }
-
-    if (step.fromVersion === currentVersion) {
-      return { patches: links, totalSize, expectedSha256 };
-    }
-
-    opts.version = step.fromVersion;
+  const discovered = await discoverNightlyChain(
+    opts,
+    currentVersion,
+    targetVersion,
+    fullGzSize
+  );
+  if (!discovered) {
+    return null;
   }
 
-  return null;
+  // Phase 2: Parallel patch download
+  const downloadResults = await Promise.all(
+    discovered.links.map((link) =>
+      downloadLayerBlob(token, link.patchDigest).then(
+        (buf) => new Uint8Array(buf)
+      )
+    )
+  );
+
+  const patches: PatchLink[] = [];
+  let totalSize = 0;
+  for (const data of downloadResults) {
+    patches.push({ data, size: data.byteLength });
+    totalSize += data.byteLength;
+  }
+
+  return { patches, totalSize, expectedSha256: discovered.expectedSha256 };
 }
 
 /**
