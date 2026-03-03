@@ -1,0 +1,41 @@
+## Implementation Plan
+
+### Problem
+Shell completion messages were printed after every upgrade:
+- Supported shells: "Completions: Updated /path/..."
+- Unsupported shell + bash fallback: "Your shell (xonsh) is not directly supported" + "Updated bash completions as a fallback: /path/..."
+- Unsupported shell + no bash: "Completions: Not supported for X shell"
+
+The `installCompletions()` function in completions.ts already returned a
+`created: boolean` flag distinguishing first-install from update. The setup
+command was not using this to suppress output.
+
+### Fix
+
+**`tryBashCompletionFallback()`**
+- Return type changed from `string | null` to `CompletionLocation | null`
+- Returns raw location object instead of pre-formatted message string
+- Caller can now inspect `created` flag on the fallback path
+
+**`handleCompletions()`**
+Suppress output based on `created` flag:
+- Supported shell, file updated (`created === false`) → return `[]` (silent)
+- Supported shell, file created (`created === true`) → show "Installed to" + zsh fpath hint
+- Unsupported shell + bash fallback updated (`created === false`) → return `[]` (silent)
+- Unsupported shell + bash fallback created (`created === true`) → show "not directly supported" + "Installed bash completions as fallback"
+- Unsupported shell + no bash → return `[]` (nothing actionable, stop repeating)
+- sh/ash → return `[]` (unchanged, minimal shells never get completions)
+
+### Behavior table
+
+| Scenario                                | Before                         | After        |
+|-----------------------------------------|-------------------------------|--------------|
+| Fresh install, supported shell          | "Installed to /path"          | Same         |
+| Upgrade, supported shell                | "Updated /path"               | Silent       |
+| Fresh install, unsupported + bash       | "Not supported" + "Installed" | Same         |
+| Upgrade, unsupported + bash             | "Not supported" + "Updated"  | Silent       |
+| Any run, unsupported + no bash          | "Not supported for X"         | Silent       |
+
+Completion scripts are still written/updated on every run — only terminal
+output is suppressed. No new flags, no DB state, no behaviour change for
+fresh installs.
