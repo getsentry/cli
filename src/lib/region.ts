@@ -6,7 +6,8 @@
  */
 
 import { retrieveAnOrganization } from "@sentry/api";
-import { getOrgRegion, setOrgRegion } from "./db/regions.js";
+import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
+import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { AuthError } from "./errors.js";
 import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
@@ -77,4 +78,71 @@ export function isMultiRegionEnabled(): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * Try to resolve an org identifier from the local org cache.
+ *
+ * Checks the slug directly first, then falls back to DSN-style numeric ID
+ * lookup (stripping the `o` prefix and querying by `org_id`).
+ *
+ * @param orgSlug - Raw org identifier (may be a slug or `oNNNNN` DSN form)
+ * @returns The resolved slug if found in cache, `undefined` on cache miss
+ */
+async function resolveOrgFromCache(
+  orgSlug: string
+): Promise<string | undefined> {
+  // Check if slug is directly cached
+  const cached = await getOrgRegion(orgSlug);
+  if (cached) {
+    return orgSlug;
+  }
+
+  // Try DSN-style numeric ID lookup (e.g., `o1081365` → `1081365` → slug)
+  const numericId = stripDsnOrgPrefix(orgSlug);
+  if (numericId !== orgSlug) {
+    const match = await getOrgByNumericId(numericId);
+    if (match) {
+      return match.slug;
+    }
+  }
+}
+
+/**
+ * Resolve the effective org slug for API calls, with offline cache fallback.
+ *
+ * When users or AI agents extract org identifiers from DSN hosts
+ * (e.g., `o1081365` from `o1081365.ingest.us.sentry.io`), the `o`-prefixed
+ * form isn't recognized by the Sentry API. This function resolves the
+ * identifier using the locally cached org list:
+ *
+ * 1. Check local cache (slug or DSN numeric ID) → return resolved slug
+ * 2. If cache miss, refresh the org list from the API (one fan-out call)
+ *    and retry the local cache lookup
+ * 3. Fall back to returning the original slug for downstream error handling
+ *
+ * @param orgSlug - Raw org identifier from user input
+ * @returns The org slug to use for API calls (may be normalized)
+ */
+export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
+  // First attempt: use local cache
+  const fromCache = await resolveOrgFromCache(orgSlug);
+  if (fromCache) {
+    return fromCache;
+  }
+
+  // Cache is cold or identifier is unknown — refresh the org list.
+  // listOrganizations() populates org_regions with slug, region, and org_id.
+  // Any error (auth failure, network error, etc.) falls back to the original
+  // slug; the downstream API call will produce a relevant error if needed.
+  try {
+    const { listOrganizations } = await import("./api-client.js");
+    await listOrganizations();
+  } catch {
+    return orgSlug;
+  }
+
+  // Retry after refresh
+  const afterRefresh = await resolveOrgFromCache(orgSlug);
+  return afterRefresh ?? orgSlug;
 }

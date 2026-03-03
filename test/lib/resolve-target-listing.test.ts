@@ -9,8 +9,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../src/lib/api-client.js";
+import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../src/lib/db/defaults.js";
+import { setOrgRegion } from "../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
@@ -237,12 +239,13 @@ describe("resolveOrgProjectFromArg", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(
       resolveTargetModule,
       "resolveOrgAndProject"
     );
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

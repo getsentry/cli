@@ -457,7 +457,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     project: { slug: "test-proj" },
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
     getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
     setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
@@ -465,6 +465,9 @@ describe("issue list: org-all mode (cursor pagination)", () => {
 
     setPaginationCursorSpy.mockReturnValue(undefined);
     clearPaginationCursorSpy.mockReturnValue(undefined);
+
+    // Pre-populate org cache so resolveEffectiveOrg hits the fast path
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

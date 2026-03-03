@@ -18,10 +18,12 @@ import {
 import { listCommand } from "../../../src/commands/team/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
@@ -198,8 +200,9 @@ describe("listCommand.func — project-search (bare slug)", () => {
 describe("listCommand.func — explicit org/project", () => {
   let listProjectTeamsSpy: ReturnType<typeof spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -336,7 +339,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
   let setPaginationCursorSpy: ReturnType<typeof spyOn>;
   let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     listTeamsPaginatedSpy = spyOn(apiClient, "listTeamsPaginated");
     getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
     setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
@@ -344,6 +347,7 @@ describe("listCommand.func — org-all mode (cursor pagination)", () => {
 
     setPaginationCursorSpy.mockReturnValue(undefined);
     clearPaginationCursorSpy.mockReturnValue(undefined);
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
