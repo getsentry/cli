@@ -81,14 +81,54 @@ export type LocalOpResult = {
   data?: unknown;
 };
 
+// Wizard output — typed shape of the `result` field returned by the server
+
+export type WizardOutput = {
+  platform?: string;
+  projectDir?: string;
+  features?: string[];
+  commands?: string[];
+  changedFiles?: Array<{ action: string; path: string }>;
+  warnings?: string[];
+  exitCode?: number;
+  docsUrl?: string;
+  sentryProjectUrl?: string;
+  message?: string;
+};
+
 // Interactive suspend payloads
 
-export type InteractivePayload = {
+export type InteractivePayload =
+  | SelectPayload
+  | MultiSelectPayload
+  | ConfirmPayload;
+
+export type SelectPayload = {
   type: "interactive";
+  kind: "select";
   prompt: string;
-  kind: "select" | "multi-select" | "confirm";
-  [key: string]: unknown;
+  options?: string[];
+  apps?: Array<{ name: string; path: string; framework?: string }>;
 };
+
+export type MultiSelectPayload = {
+  type: "interactive";
+  kind: "multi-select";
+  prompt: string;
+  availableFeatures?: string[];
+  options?: string[];
+};
+
+export type ConfirmPayload = {
+  type: "interactive";
+  kind: "confirm";
+  prompt: string;
+  purpose?: string;
+};
+
+// Combined suspend payload — either a local-op or an interactive prompt
+
+export type SuspendPayload = LocalOpPayload | InteractivePayload;
 
 // Workflow run result
 
@@ -97,6 +137,6 @@ export type WorkflowRunResult = {
   suspended?: string[][];
   steps?: Record<string, { suspendPayload?: unknown }>;
   suspendPayload?: unknown;
-  result?: unknown;
+  result?: WizardOutput;
   error?: string;
 };

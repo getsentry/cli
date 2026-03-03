@@ -10,15 +10,19 @@ import { confirm, log, multiselect, select } from "@clack/prompts";
 import chalk from "chalk";
 import { abortIfCancelled, featureHint, featureLabel } from "./clack-utils.js";
 import { REQUIRED_FEATURE } from "./constants.js";
-import type { InteractivePayload, WizardOptions } from "./types.js";
+import type {
+  ConfirmPayload,
+  InteractivePayload,
+  MultiSelectPayload,
+  SelectPayload,
+  WizardOptions,
+} from "./types.js";
 
 export async function handleInteractive(
   payload: InteractivePayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  const { kind } = payload;
-
-  switch (kind) {
+  switch (payload.kind) {
     case "select":
       return await handleSelect(payload, options);
     case "multi-select":
@@ -31,16 +35,11 @@ export async function handleInteractive(
 }
 
 async function handleSelect(
-  payload: InteractivePayload,
+  payload: SelectPayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  const apps =
-    (payload.apps as Array<{
-      name: string;
-      path: string;
-      framework?: string;
-    }>) ?? [];
-  const items = (payload.options as string[]) ?? apps.map((a) => a.name);
+  const apps = payload.apps ?? [];
+  const items = payload.options ?? apps.map((a) => a.name);
 
   if (items.length === 0) {
     return { cancelled: true };
@@ -73,13 +72,10 @@ async function handleSelect(
 }
 
 async function handleMultiSelect(
-  payload: InteractivePayload,
+  payload: MultiSelectPayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  const available =
-    (payload.availableFeatures as string[]) ??
-    (payload.options as string[]) ??
-    [];
+  const available = payload.availableFeatures ?? payload.options ?? [];
 
   if (available.length === 0) {
     return { features: [] };
@@ -131,7 +127,7 @@ async function handleMultiSelect(
 }
 
 async function handleConfirm(
-  payload: InteractivePayload,
+  payload: ConfirmPayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
   const isExample =

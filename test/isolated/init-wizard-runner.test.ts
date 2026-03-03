@@ -190,7 +190,7 @@ describe("runWizard", () => {
     test("treats success with exitCode as error", async () => {
       mockStartResult = {
         status: "success",
-        result: { exitCode: 10 } as unknown,
+        result: { exitCode: 10 },
       };
 
       await runWizard(makeOptions());

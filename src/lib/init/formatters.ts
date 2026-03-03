@@ -12,8 +12,7 @@ import {
   EXIT_SENTRY_ALREADY_INSTALLED,
   EXIT_VERIFICATION_FAILED,
 } from "./constants.js";
-
-type WizardOutput = Record<string, unknown>;
+import type { WizardOutput, WorkflowRunResult } from "./types.js";
 
 function fileActionIcon(action: string): string {
   if (action === "create") {
@@ -35,14 +34,12 @@ function buildSummaryLines(output: WizardOutput): string[] {
     lines.push(`Directory:   ${output.projectDir}`);
   }
 
-  const features = output.features as string[] | undefined;
-  if (features?.length) {
-    lines.push(`Features:    ${features.map(featureLabel).join(", ")}`);
+  if (output.features?.length) {
+    lines.push(`Features:    ${output.features.map(featureLabel).join(", ")}`);
   }
 
-  const commands = output.commands as string[] | undefined;
-  if (commands?.length) {
-    lines.push(`Commands:    ${commands.join("; ")}`);
+  if (output.commands?.length) {
+    lines.push(`Commands:    ${output.commands.join("; ")}`);
   }
   if (output.sentryProjectUrl) {
     lines.push(`Project:     ${output.sentryProjectUrl}`);
@@ -51,9 +48,7 @@ function buildSummaryLines(output: WizardOutput): string[] {
     lines.push(`Docs:        ${output.docsUrl}`);
   }
 
-  const changedFiles = output.changedFiles as
-    | Array<{ action: string; path: string }>
-    | undefined;
+  const changedFiles = output.changedFiles;
   if (changedFiles?.length) {
     lines.push("");
     lines.push("Changed files:");
@@ -65,17 +60,16 @@ function buildSummaryLines(output: WizardOutput): string[] {
   return lines;
 }
 
-export function formatResult(result: WizardOutput): void {
-  const output = (result.result as WizardOutput) ?? result;
+export function formatResult(result: WorkflowRunResult): void {
+  const output: WizardOutput = result.result ?? {};
   const lines = buildSummaryLines(output);
 
   if (lines.length > 0) {
     note(lines.join("\n"), "Setup complete");
   }
 
-  const warnings = output.warnings as string[] | undefined;
-  if (warnings?.length) {
-    for (const w of warnings) {
+  if (output.warnings?.length) {
+    for (const w of output.warnings) {
       log.warn(w);
     }
   }
@@ -85,11 +79,11 @@ export function formatResult(result: WizardOutput): void {
   outro("Sentry SDK installed successfully!");
 }
 
-export function formatError(result: WizardOutput): void {
-  const inner = result.result as WizardOutput | undefined;
+export function formatError(result: WorkflowRunResult): void {
+  const inner = result.result;
   const message =
     result.error ?? inner?.message ?? "Wizard failed with an unknown error";
-  const exitCode = (inner?.exitCode as number) ?? 1;
+  const exitCode = inner?.exitCode ?? 1;
 
   log.error(String(message));
 
@@ -100,7 +94,7 @@ export function formatError(result: WizardOutput): void {
       "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
     );
   } else if (exitCode === EXIT_DEPENDENCY_INSTALL_FAILED) {
-    const commands = inner?.commands as string[] | undefined;
+    const commands = inner?.commands;
     if (commands?.length) {
       log.warn(
         `You can install dependencies manually:\n${commands.map((cmd) => `  $ ${cmd}`).join("\n")}`

@@ -331,6 +331,15 @@ async function runCommands(
   const { cwd, params } = payload;
   const timeoutMs = params.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
+  // Phase 1: Validate ALL commands upfront (including dry-run)
+  for (const command of params.commands) {
+    const validationError = validateCommand(command);
+    if (validationError) {
+      return { ok: false, error: validationError };
+    }
+  }
+
+  // Phase 2: Execute (skip in dry-run)
   const results: Array<{
     command: string;
     exitCode: number;
@@ -347,11 +356,6 @@ async function runCommands(
         stderr: "",
       });
       continue;
-    }
-
-    const validationError = validateCommand(command);
-    if (validationError) {
-      return { ok: false, error: validationError };
     }
 
     const result = await runSingleCommand(command, cwd, timeoutMs);

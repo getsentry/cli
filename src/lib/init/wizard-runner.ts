@@ -23,8 +23,7 @@ import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
 import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
 import type {
-  InteractivePayload,
-  LocalOpPayload,
+  SuspendPayload,
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
@@ -32,7 +31,7 @@ import type {
 type Spinner = ReturnType<typeof spinner>;
 
 type StepContext = {
-  payload: unknown;
+  payload: SuspendPayload;
   stepId: string;
   spin: Spinner;
   options: WizardOptions;
@@ -54,17 +53,13 @@ async function handleSuspendedStep(
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
   const { payload, stepId, spin, options } = ctx;
-  const { type: payloadType, operation } = payload as {
-    type: string;
-    operation?: string;
-  };
   const label = STEP_LABELS[stepId] ?? stepId;
 
-  if (payloadType === "local-op") {
-    const detail = operation ? ` (${operation})` : "";
+  if (payload.type === "local-op") {
+    const detail = payload.operation ? ` (${payload.operation})` : "";
     spin.message(`${label}${detail}...`);
 
-    const localResult = await handleLocalOp(payload as LocalOpPayload, options);
+    const localResult = await handleLocalOp(payload, options);
 
     const history = stepHistory.get(stepId) ?? [];
     history.push(localResult);
@@ -77,7 +72,7 @@ async function handleSuspendedStep(
     };
   }
 
-  if (payloadType === "interactive") {
+  if (payload.type === "interactive") {
     // In dry-run mode, verification always fails because no files were written
     // (the server skips apply-patchset). Auto-continue since this is expected.
     if (options.dryRun && stepId === VERIFY_CHANGES_STEP) {
@@ -89,10 +84,7 @@ async function handleSuspendedStep(
 
     spin.stop(label);
 
-    const interactiveResult = await handleInteractive(
-      payload as InteractivePayload,
-      options
-    );
+    const interactiveResult = await handleInteractive(payload, options);
 
     spin.start("Processing...");
 
@@ -102,14 +94,46 @@ async function handleSuspendedStep(
     };
   }
 
+  // Unreachable: assertSuspendPayload validates the type before we get here.
+  // Kept as a defensive fallback.
   spin.stop("Error", 1);
-  log.error(`Unknown suspend payload type "${payloadType}"`);
+  log.error(
+    `Unknown suspend payload type "${(payload as { type: string }).type}"`
+  );
   cancel("Setup failed");
   throw new WizardCancelledError();
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function assertWorkflowResult(raw: unknown): WorkflowRunResult {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Invalid workflow response: expected object");
+  }
+  const obj = raw as Record<string, unknown>;
+  if (
+    typeof obj.status !== "string" ||
+    !["suspended", "success", "failed"].includes(obj.status)
+  ) {
+    throw new Error(`Unexpected workflow status: ${String(obj.status)}`);
+  }
+  return obj as WorkflowRunResult;
+}
+
+function assertSuspendPayload(raw: unknown): SuspendPayload {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Invalid suspend payload: expected object");
+  }
+  const obj = raw as Record<string, unknown>;
+  if (
+    typeof obj.type !== "string" ||
+    !["local-op", "interactive"].includes(obj.type)
+  ) {
+    throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
+  }
+  return obj as SuspendPayload;
 }
 
 export async function runWizard(options: WizardOptions): Promise<void> {
@@ -164,10 +188,12 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   try {
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
-    result = (await run.startAsync({
-      inputData: { directory, force, yes, dryRun, features, dirListing },
-      tracingOptions,
-    })) as WorkflowRunResult;
+    result = assertWorkflowResult(
+      await run.startAsync({
+        inputData: { directory, force, yes, dryRun, features, dirListing },
+        tracingOptions,
+      })
+    );
   } catch (err) {
     spin.stop("Connection failed", 1);
     log.error(errorMessage(err));
@@ -199,11 +225,13 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         stepHistory
       );
 
-      result = (await run.resumeAsync({
-        step: extracted.stepId,
-        resumeData,
-        tracingOptions,
-      })) as WorkflowRunResult;
+      result = assertWorkflowResult(
+        await run.resumeAsync({
+          step: extracted.stepId,
+          resumeData,
+          tracingOptions,
+        })
+      );
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
@@ -221,37 +249,38 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 }
 
 function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
-  const output = result as unknown as Record<string, unknown>;
-  const inner = (output.result as Record<string, unknown>) ?? output;
-  const hasError = result.status !== "success" || inner.exitCode;
+  const hasError = result.status !== "success" || result.result?.exitCode;
 
   if (hasError) {
     spin.stop("Failed", 1);
-    formatError(output);
+    formatError(result);
     process.exitCode = 1;
   } else {
     spin.stop("Done");
-    formatResult(output);
+    formatResult(result);
   }
 }
 
 function extractSuspendPayload(
   result: WorkflowRunResult,
   stepId: string
-): { payload: unknown; stepId: string } | undefined {
+): { payload: SuspendPayload; stepId: string } | undefined {
   const stepPayload = result.steps?.[stepId]?.suspendPayload;
   if (stepPayload) {
-    return { payload: stepPayload, stepId };
+    return { payload: assertSuspendPayload(stepPayload), stepId };
   }
 
   if (result.suspendPayload) {
-    return { payload: result.suspendPayload, stepId };
+    return { payload: assertSuspendPayload(result.suspendPayload), stepId };
   }
 
   for (const key of Object.keys(result.steps ?? {})) {
     const step = result.steps?.[key];
     if (step?.suspendPayload) {
-      return { payload: step.suspendPayload, stepId: key };
+      return {
+        payload: assertSuspendPayload(step.suspendPayload),
+        stepId: key,
+      };
     }
   }
 

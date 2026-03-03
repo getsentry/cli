@@ -253,7 +253,7 @@ describe("runWizard", () => {
     test("treats success with exitCode as error", async () => {
       mockStartResult = {
         status: "success",
-        result: { exitCode: 10 } as unknown,
+        result: { exitCode: 10 },
       };
 
       await runWizard(makeOptions());
@@ -496,6 +496,64 @@ describe("runWizard", () => {
       expect(handleLocalOpSpy).toHaveBeenCalledTimes(1);
       expect(handleInteractiveSpy).toHaveBeenCalledTimes(1);
       expect(formatResultSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("malformed server responses", () => {
+    test("rejects non-object response from startAsync", async () => {
+      const badRun = {
+        startAsync: mock(() => Promise.resolve("not an object")),
+        resumeAsync: mock(),
+      };
+      const badWorkflow = {
+        createRun: mock(() => Promise.resolve(badRun)),
+      };
+      getWorkflowSpy.mockReturnValue(badWorkflow as any);
+
+      await runWizard(makeOptions());
+
+      expect(logErrorSpy).toHaveBeenCalledWith(
+        "Invalid workflow response: expected object"
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    test("rejects response with invalid status", async () => {
+      const badRun = {
+        startAsync: mock(() =>
+          Promise.resolve({ status: "banana", result: {} })
+        ),
+        resumeAsync: mock(),
+      };
+      const badWorkflow = {
+        createRun: mock(() => Promise.resolve(badRun)),
+      };
+      getWorkflowSpy.mockReturnValue(badWorkflow as any);
+
+      await runWizard(makeOptions());
+
+      expect(logErrorSpy).toHaveBeenCalledWith(
+        "Unexpected workflow status: banana"
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    test("rejects null response from startAsync", async () => {
+      const badRun = {
+        startAsync: mock(() => Promise.resolve(null)),
+        resumeAsync: mock(),
+      };
+      const badWorkflow = {
+        createRun: mock(() => Promise.resolve(badRun)),
+      };
+      getWorkflowSpy.mockReturnValue(badWorkflow as any);
+
+      await runWizard(makeOptions());
+
+      expect(logErrorSpy).toHaveBeenCalledWith(
+        "Invalid workflow response: expected object"
+      );
+      expect(process.exitCode).toBe(1);
     });
   });
 });

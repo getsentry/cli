@@ -571,12 +571,26 @@ describe("handleLocalOp", () => {
       expect(results[0].command).toBe("false");
     });
 
-    test("dry-run skips execution and validation", async () => {
+    test("dry-run validates commands but skips execution", async () => {
       const payload: RunCommandsPayload = {
         type: "local-op",
         operation: "run-commands",
         cwd: testDir,
         params: { commands: ["rm -rf /", "echo hello"] },
+      };
+
+      const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
+      const result = await handleLocalOp(payload, dryRunOptions);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("Blocked command");
+    });
+
+    test("dry-run skips execution for valid commands", async () => {
+      const payload: RunCommandsPayload = {
+        type: "local-op",
+        operation: "run-commands",
+        cwd: testDir,
+        params: { commands: ["npm install @sentry/node", "echo hello"] },
       };
 
       const dryRunOptions = makeOptions({ dryRun: true, directory: testDir });
@@ -590,6 +604,21 @@ describe("handleLocalOp", () => {
       expect(results).toHaveLength(2);
       expect(results[0].stdout).toBe("(dry-run: skipped)");
       expect(results[0].exitCode).toBe(0);
+    });
+
+    test("rejects entire batch if any command fails validation", async () => {
+      const payload: RunCommandsPayload = {
+        type: "local-op",
+        operation: "run-commands",
+        cwd: testDir,
+        params: { commands: ["echo hello", "rm -rf /"] },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("Blocked command");
+      // No commands should have executed (no data.results)
+      expect(result.data).toBeUndefined();
     });
   });
 
