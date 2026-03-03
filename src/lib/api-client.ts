@@ -11,6 +11,8 @@
 import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
   listAnOrganization_sIssues,
+  listAnOrganization_sProjects,
+  listAnOrganization_sRepositories,
   listAnOrganization_sTeams,
   listAProject_sClientKeys,
   listAProject_sTeams,
@@ -43,6 +45,8 @@ import {
   type SentryTeam,
   type SentryUser,
   SentryUserSchema,
+  type TraceLog,
+  TraceLogsResponseSchema,
   type TraceSpan,
   type TransactionListItem,
   type TransactionsResponse,
@@ -482,111 +486,6 @@ export async function listOrganizationsInRegion(
   return data as unknown as SentryOrganization[];
 }
 
-// Pagination infrastructure for raw API endpoints
-
-/** Regex patterns for extracting org slugs from endpoint paths */
-const ORG_ENDPOINT_REGEX = /\/organizations\/([^/]+)\//;
-const PROJECT_ENDPOINT_REGEX = /\/projects\/([^/]+)\//;
-
-/**
- * Extract organization slug from an endpoint path.
- * Supports:
- * - `/organizations/{slug}/...` - standard organization endpoints
- * - `/projects/{org}/{project}/...` - project-scoped endpoints
- */
-function extractOrgSlugFromEndpoint(endpoint: string): string | null {
-  const orgMatch = endpoint.match(ORG_ENDPOINT_REGEX);
-  if (orgMatch?.[1]) {
-    return orgMatch[1];
-  }
-
-  const projectMatch = endpoint.match(PROJECT_ENDPOINT_REGEX);
-  if (projectMatch?.[1]) {
-    return projectMatch[1];
-  }
-
-  return null;
-}
-
-/**
- * Make an org-scoped API request that returns pagination metadata.
- * Used for single-page fetches where the caller needs cursor info.
- *
- * The endpoint must contain the org slug in the path (e.g., `/organizations/{slug}/...`).
- * The org slug is extracted to look up the correct region URL.
- *
- * @param endpoint - API endpoint path containing the org slug
- * @param options - Request options
- * @returns Response data with pagination cursor metadata
- */
-async function orgScopedRequestPaginated<T>(
-  endpoint: string,
-  options: ApiRequestOptions<T> = {}
-): Promise<PaginatedResponse<T>> {
-  const orgSlug = extractOrgSlugFromEndpoint(endpoint);
-  if (!orgSlug) {
-    throw new Error(
-      `Cannot extract org slug from endpoint: ${endpoint}. ` +
-        "Endpoint must match /organizations/{slug}/..."
-    );
-  }
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegion(
-    regionUrl,
-    endpoint,
-    options
-  );
-  const { nextCursor } = parseLinkHeader(headers.get("link"));
-  return { data, nextCursor };
-}
-
-/**
- * Auto-paginate through all pages of an org-scoped API endpoint.
- * Follows cursor links until no more results or the safety limit is reached.
- *
- * @param endpoint - API endpoint path containing the org slug
- * @param options - Request options (schema must validate an array type)
- * @param perPage - Number of items per API page (default: API_MAX_PER_PAGE)
- * @returns Combined array of all results across all pages
- */
-async function orgScopedPaginateAll<T>(
-  endpoint: string,
-  options: ApiRequestOptions<T[]>,
-  perPage = API_MAX_PER_PAGE
-): Promise<T[]> {
-  const allResults: T[] = [];
-  let cursor: string | undefined;
-  let truncated = false;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-    const params = { ...options.params, per_page: perPage, cursor };
-    const response = await orgScopedRequestPaginated<T[]>(endpoint, {
-      ...options,
-      params,
-    });
-    allResults.push(...response.data);
-
-    if (!response.nextCursor) {
-      break;
-    }
-    cursor = response.nextCursor;
-
-    // Detect if we're about to exit due to the safety limit
-    if (page === MAX_PAGINATION_PAGES - 1) {
-      truncated = true;
-    }
-  }
-
-  if (truncated) {
-    console.error(
-      `Warning: Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
-        "Results may be incomplete for this organization."
-    );
-  }
-
-  return allResults;
-}
-
 /**
  * List all organizations the user has access to across all regions.
  * Performs a fan-out to each region and combines results.
@@ -628,10 +527,11 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   const flatResults = results.flat();
   const orgs = flatResults.map((r) => r.org);
 
-  const regionEntries: [string, string][] = flatResults.map((r) => [
-    r.org.slug,
-    r.regionUrl,
-  ]);
+  const regionEntries = flatResults.map((r) => ({
+    slug: r.org.slug,
+    regionUrl: r.regionUrl,
+    orgId: r.org.id,
+  }));
   await setOrgRegions(regionEntries);
 
   return orgs;
@@ -665,11 +565,42 @@ export async function getOrganization(
  * @param orgSlug - Organization slug
  * @returns All projects in the organization
  */
-export function listProjects(orgSlug: string): Promise<SentryProject[]> {
-  return orgScopedPaginateAll<SentryProject>(
-    `/organizations/${orgSlug}/projects/`,
-    {}
-  );
+export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const allResults: SentryProject[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const result = await listAnOrganization_sProjects({
+      ...config,
+      path: { organization_id_or_slug: orgSlug },
+      // per_page is supported by Sentry's pagination framework at runtime
+      // but not yet in the OpenAPI spec
+      query: { cursor, per_page: API_MAX_PER_PAGE } as { cursor?: string },
+    });
+
+    const { data, nextCursor } = unwrapPaginatedResult<SentryProject[]>(
+      result as
+        | { data: SentryProject[]; error: undefined }
+        | { data: undefined; error: unknown },
+      "Failed to list projects"
+    );
+    allResults.push(...data);
+
+    if (!nextCursor) {
+      break;
+    }
+    cursor = nextCursor;
+
+    if (page === MAX_PAGINATION_PAGES - 1) {
+      console.error(
+        `Warning: Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
+          "Results may be incomplete for this organization."
+      );
+    }
+  }
+
+  return allResults;
 }
 
 /**
@@ -681,18 +612,26 @@ export function listProjects(orgSlug: string): Promise<SentryProject[]> {
  * @param options - Pagination options
  * @returns Single page of projects with cursor metadata
  */
-export function listProjectsPaginated(
+export async function listProjectsPaginated(
   orgSlug: string,
   options: { cursor?: string; perPage?: number } = {}
 ): Promise<PaginatedResponse<SentryProject[]>> {
-  return orgScopedRequestPaginated<SentryProject[]>(
-    `/organizations/${orgSlug}/projects/`,
-    {
-      params: {
-        per_page: options.perPage ?? API_MAX_PER_PAGE,
-        cursor: options.cursor,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sProjects({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      cursor: options.cursor,
+      per_page: options.perPage ?? API_MAX_PER_PAGE,
+    } as { cursor?: string },
+  });
+
+  return unwrapPaginatedResult<SentryProject[]>(
+    result as
+      | { data: SentryProject[]; error: undefined }
+      | { data: undefined; error: unknown },
+    "Failed to list projects"
   );
 }
 
@@ -709,13 +648,15 @@ export type ProjectWithOrg = SentryProject & {
 export async function listRepositories(
   orgSlug: string
 ): Promise<SentryRepository[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
+  const config = await getOrgSdkConfig(orgSlug);
 
-  const { data } = await apiRequestToRegion<SentryRepository[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/repos/`
-  );
-  return data;
+  const result = await listAnOrganization_sRepositories({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+
+  const data = unwrapResult(result, "Failed to list repositories");
+  return data as unknown as SentryRepository[];
 }
 
 /**
@@ -742,18 +683,28 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
  * @param options - Pagination options
  * @returns Single page of teams with cursor metadata
  */
-export function listTeamsPaginated(
+export async function listTeamsPaginated(
   orgSlug: string,
   options: { cursor?: string; perPage?: number } = {}
 ): Promise<PaginatedResponse<SentryTeam[]>> {
-  return orgScopedRequestPaginated<SentryTeam[]>(
-    `/organizations/${orgSlug}/teams/`,
-    {
-      params: {
-        per_page: options.perPage ?? 25,
-        cursor: options.cursor,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sTeams({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    // per_page is supported by Sentry's pagination framework at runtime
+    // but not yet in the OpenAPI spec
+    query: {
+      cursor: options.cursor,
+      per_page: options.perPage ?? 25,
+    } as { cursor?: string },
+  });
+
+  return unwrapPaginatedResult<SentryTeam[]>(
+    result as
+      | { data: SentryTeam[]; error: undefined }
+      | { data: undefined; error: unknown },
+    "Failed to list teams"
   );
 }
 
@@ -791,18 +742,28 @@ export async function listProjectTeams(
  * @param options - Pagination options
  * @returns Single page of repositories with cursor metadata
  */
-export function listRepositoriesPaginated(
+export async function listRepositoriesPaginated(
   orgSlug: string,
   options: { cursor?: string; perPage?: number } = {}
 ): Promise<PaginatedResponse<SentryRepository[]>> {
-  return orgScopedRequestPaginated<SentryRepository[]>(
-    `/organizations/${orgSlug}/repos/`,
-    {
-      params: {
-        per_page: options.perPage ?? 25,
-        cursor: options.cursor,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sRepositories({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    // per_page is supported by Sentry's pagination framework at runtime
+    // but not yet in the OpenAPI spec
+    query: {
+      cursor: options.cursor,
+      per_page: options.perPage ?? 25,
+    } as { cursor?: string },
+  });
+
+  return unwrapPaginatedResult<SentryRepository[]>(
+    result as
+      | { data: SentryRepository[]; error: undefined }
+      | { data: undefined; error: unknown },
+    "Failed to list repositories"
   );
 }
 
@@ -1722,4 +1683,60 @@ export async function getLog(
   const data = unwrapResult(result, "Failed to get log");
   const logsResponse = DetailedLogsResponseSchema.parse(data);
   return logsResponse.data[0] ?? null;
+}
+
+// Trace-log functions
+
+type ListTraceLogsOptions = {
+  /** Additional search query to filter results (Sentry query syntax) */
+  query?: string;
+  /** Maximum number of log entries to return (max 9999) */
+  limit?: number;
+  /**
+   * Time period to search in (e.g., "14d", "7d", "24h").
+   * Required by the API — without it the response may be empty even when
+   * logs exist for the trace. Defaults to "14d".
+   */
+  statsPeriod?: string;
+};
+
+/**
+ * List logs associated with a specific trace.
+ *
+ * Uses the dedicated `/organizations/{org}/trace-logs/` endpoint, which is
+ * org-scoped and automatically queries all projects in the org. This is
+ * distinct from the Explore/Events logs endpoint (`/events/?dataset=logs`)
+ * which does not support filtering by trace ID in query syntax.
+ *
+ * `statsPeriod` defaults to `"14d"`. Without a stats period the API may
+ * return empty results even when logs exist for the trace.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The 32-character hex trace ID
+ * @param options - Optional query/limit/statsPeriod overrides
+ * @returns Array of trace log entries, ordered newest-first
+ */
+export async function listTraceLogs(
+  orgSlug: string,
+  traceId: string,
+  options: ListTraceLogsOptions = {}
+): Promise<TraceLog[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data: response } = await apiRequestToRegion<{ data: TraceLog[] }>(
+    regionUrl,
+    `/organizations/${orgSlug}/trace-logs/`,
+    {
+      params: {
+        traceId,
+        statsPeriod: options.statsPeriod ?? "14d",
+        per_page: options.limit ?? API_MAX_PER_PAGE,
+        query: options.query,
+        sort: "-timestamp",
+      },
+      schema: TraceLogsResponseSchema,
+    }
+  );
+
+  return response.data;
 }
