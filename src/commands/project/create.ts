@@ -39,7 +39,7 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   fetchOrgListHint,
   type ResolvedTeam,
-  resolveTeam,
+  resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import type { SentryProject, SentryTeam } from "../../types/index.js";
@@ -235,7 +235,7 @@ async function createProjectWithErrors(
         throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
-        return handleCreateProject404(orgSlug, teamSlug, name, platform);
+        return await handleCreateProject404(orgSlug, teamSlug, name, platform);
       }
       throw new CliError(
         `Failed to create project '${name}' in ${orgSlug}.\n\n` +
@@ -351,7 +351,7 @@ export const createCommand = buildCommand({
     const orgSlug = resolved.org;
 
     // Resolve team — auto-creates a team if the org has none
-    const team: ResolvedTeam = await resolveTeam(orgSlug, {
+    const team: ResolvedTeam = await resolveOrCreateTeam(orgSlug, {
       team: flags.team,
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
@@ -401,14 +401,11 @@ export const createCommand = buildCommand({
 
     // Inform user which team was used when not explicitly specified
     if (team.source === "auto-created") {
-      stdout.write(
-        `Note: Created team '${team.slug}' (org had no teams). ` +
-          `Change with: sentry project create ${nameArg} ${platformArg} --team <slug>\n`
-      );
+      stdout.write(`Note: Created team '${team.slug}' (org had no teams).\n`);
     } else if (team.source === "auto-selected") {
       stdout.write(
         `Note: Using team '${team.slug}'. ` +
-          `Change with: sentry project create ${nameArg} ${platformArg} --team <slug>\n`
+          "See all teams: sentry team list\n"
       );
     }
 

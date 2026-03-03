@@ -10,6 +10,7 @@
 
 import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
+  addAnOrganizationMemberToATeam,
   createANewProject,
   createANewTeam,
   listAnOrganization_sIssues,
@@ -712,7 +713,12 @@ export async function createProject(
 }
 
 /**
- * Create a new team in an organization.
+ * Create a new team in an organization and add the current user as a member.
+ *
+ * The Sentry API does not automatically add the creator to a new team,
+ * so we follow up with an `addMemberToTeam("me")` call. The member-add
+ * is best-effort — if it fails (e.g., permissions), the team is still
+ * returned successfully.
  *
  * @param orgSlug - The organization slug
  * @param slug - Team slug (also used as display name)
@@ -729,7 +735,40 @@ export async function createTeam(
     body: { slug },
   });
   const data = unwrapResult(result, "Failed to create team");
-  return data as unknown as SentryTeam;
+  const team = data as unknown as SentryTeam;
+
+  // Best-effort: add the current user to the team
+  try {
+    await addMemberToTeam(orgSlug, team.slug, "me");
+  } catch {
+    // Non-fatal — team was created, user just won't be a member
+  }
+
+  return team;
+}
+
+/**
+ * Add an organization member to a team.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug
+ * @param memberId - The member ID (use "me" for the current user)
+ */
+export async function addMemberToTeam(
+  orgSlug: string,
+  teamSlug: string,
+  memberId: string
+): Promise<void> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await addAnOrganizationMemberToATeam({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      member_id: memberId,
+      team_id_or_slug: teamSlug,
+    },
+  });
+  unwrapResult(result, "Failed to add member to team");
 }
 
 /**

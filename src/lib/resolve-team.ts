@@ -22,7 +22,13 @@
 
 import type { SentryTeam } from "../types/index.js";
 import { createTeam, listOrganizations, listTeams } from "./api-client.js";
-import { ApiError, CliError, ContextError, ResolutionError } from "./errors.js";
+import {
+  ApiError,
+  AuthError,
+  CliError,
+  ContextError,
+  ResolutionError,
+} from "./errors.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { getSentryBaseUrl } from "./sentry-urls.js";
 
@@ -78,7 +84,7 @@ export type ResolvedTeam = {
  * @throws {ContextError} When team cannot be resolved
  * @throws {ResolutionError} When org slug returns 404
  */
-export async function resolveTeam(
+export async function resolveOrCreateTeam(
   orgSlug: string,
   options: ResolveTeamOptions
 ): Promise<ResolvedTeam> {
@@ -157,7 +163,11 @@ async function autoCreateTeam(
     const team = await createTeam(orgSlug, slug);
     return { slug: team.slug, source: "auto-created" };
   } catch (error) {
-    // If team creation fails (permissions, etc.), fall back to error
+    // Let auth errors propagate so the central handler can trigger auto-login
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    // Other failures (permissions, network, etc.) — surface with manual fallback
     throw new CliError(
       `No teams found in org '${orgSlug}' and automatic team creation failed.\n\n` +
         `Create a team manually at ${getSentryBaseUrl()}/settings/${orgSlug}/teams/` +
@@ -185,7 +195,7 @@ async function buildOrgFailureError(
       `Organization '${orgSlug}'`,
       `not found (did you mean '${effectiveOrg}'?)`,
       `${options.usageHint} --team <team-slug>`,
-      [`Try: ${options.usageHint.replace(orgSlug, effectiveOrg)}`]
+      [`Try using '${effectiveOrg}' as the org slug instead of '${orgSlug}'`]
     );
   }
 

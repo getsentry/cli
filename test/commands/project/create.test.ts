@@ -313,7 +313,7 @@ describe("project create", () => {
       new ApiError("API request failed: 404 Not Found", 404)
     );
     // Default listTeams returns [sampleTeam] (slug: "engineering")
-    // resolveTeam auto-selects "engineering", then handleCreateProject404
+    // resolveOrCreateTeam auto-selects "engineering", then handleCreateProject404
     // calls listTeams again and finds "engineering" in the list.
 
     const { context } = createMockContext();
@@ -553,7 +553,7 @@ describe("project create", () => {
     expect(err.message).toContain("Your organizations");
   });
 
-  test("resolveTeam with non-404 listTeams failure shows generic error", async () => {
+  test("resolveOrCreateTeam with non-404 listTeams failure shows generic error", async () => {
     // listTeams returns 403 — org may exist, but user lacks access
     listTeamsSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403)
