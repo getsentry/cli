@@ -644,10 +644,6 @@ mock.module("./some-module", () => ({
 
 ### Gotcha
 
-<!-- lore:019cb117-9f72-77b2-aa3f-1528a1d23210 -->
-* **React useState async pitfall**: React useState setter is async — reading state immediately after setState returns stale value in dashboard components
-<!-- lore:019cb117-9f27-75c7-aa08-1eb7f3ff5568 -->
-* **TypeScript strict mode caveat**: TypeScript strict null checks require explicit undefined handling
 <!-- lore:019c9a88-bf99-7322-b192-aafe4636c600 -->
 * **getsentry/codecov-action enables JUnit XML test reporting by default**: The \`getsentry/codecov-action@main\` has \`enable-tests: true\` by default, which searches for JUnit XML files matching \`\*\*/\*.junit.xml\`. If the test framework doesn't produce JUnit XML, the action emits 3 warnings on every CI run: "No files found matching pattern", "No JUnit XML files found", and "Please ensure your test framework is generating JUnit XML output". Fix: either set \`enable-tests: false\` in the action inputs, or configure the test runner to output JUnit XML. For Bun, add \`\[test.reporter] junit = "test-results.junit.xml"\` to \`bunfig.toml\` and add \`\*.junit.xml\` to \`.gitignore\`.
 <!-- lore:019c8c31-f52f-7230-9252-cceb907f3e87 -->
@@ -659,8 +655,6 @@ mock.module("./some-module", () => ({
 
 ### Pattern
 
-<!-- lore:019cb117-9f29-7c64-84c3-99ca7f3e8f49 -->
-* **Kubernetes deployment pattern**: Use helm charts for Kubernetes deployments with resource limits
 <!-- lore:019c8c17-f5de-71f2-93b5-c78231e29519 -->
 * **Make Bun.which testable by accepting optional PATH parameter**: When wrapping \`Bun.which()\` in a helper function, accept an optional \`pathEnv?: string\` parameter and pass it as \`{ PATH: pathEnv }\` to \`Bun.which\`. This makes the function deterministically testable without mocking — tests can pass a controlled PATH (e.g., \`/nonexistent\` for false, \`dirname(Bun.which('bash'))\` for true). Pattern: \`const opts = pathEnv !== undefined ? { PATH: pathEnv } : undefined; return Bun.which(name, opts) !== null;\`
 <!-- lore:019c8a8a-64ee-703c-8c1e-ed32ae8a90a7 -->
