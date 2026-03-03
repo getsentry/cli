@@ -1,0 +1,25 @@
+## Implementation Plan: Add sentry-release-registry target to .craft.yml
+
+### Background
+The sentry-release-registry (getsentry/sentry-release-registry) is Sentry's central catalog of all SDK and application releases. Craft's `registry` target clones the repo, writes a versioned manifest (e.g., `apps/sentry/1.0.0.json`) with download URLs and checksums, updates the `latest.json` symlink, and pushes.
+
+### Research
+- Compared getsentry/sentry-cli and getsentry/craft as reference repos
+- Both use `apps` key with a canonical identifier (`app:sentry-cli`, `app:craft`)
+- Both include `urlTemplate`, `includeNames`, and SHA-256 `checksums`
+- Both point URLs at `downloads.sentry-cdn.com` backed by a GCS target — we opted for GitHub release URLs instead since that's simpler and already what Brew uses
+- No existing `app:sentry` entry in the registry; `app:sentry-cli` belongs to the old Rust CLI
+
+### Decisions
+- Canonical name: `app:sentry` (new entry, clean break from old CLI; matches binary name)
+- Download URLs: GitHub releases (https://github.com/getsentry/cli/releases/download/{{version}}/{{file}})
+  - Avoids adding a GCS target; consistent with the Brew formula
+- No `gcs` target needed
+- Include metadata fields (`name`, `packageUrl`, `mainDocsUrl`) for first-time registry entry creation
+
+### Change
+Added `registry` target to `.craft.yml` after `gh-pages` and before `brew`:
+- `includeNames: /^sentry-.*\.gz$/` matches all five compressed release artifacts:
+  sentry-darwin-arm64.gz, sentry-darwin-x64.gz, sentry-linux-arm64.gz, sentry-linux-x64.gz, sentry-windows-x64.exe.gz
+- SHA-256 hex checksums published alongside each artifact
+- The artifactProvider already downloads .gz files via the existing /^sentry-.*$/ pattern; no CI changes needed
