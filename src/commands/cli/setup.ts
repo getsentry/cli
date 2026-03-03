@@ -6,11 +6,15 @@
  * and the upgrade command for curl-based installs).
  */
 
-import { unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
-import { determineInstallDir, installBinary } from "../../lib/binary.js";
+import {
+  determineInstallDir,
+  getBinaryFilename,
+  installBinary,
+} from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   type CompletionLocation,
@@ -60,15 +64,19 @@ type Logger = (msg: string) => void;
  * On Windows, the temp binary cannot be deleted while running. It will
  * be cleaned up by the OS when the temp directory is purged.
  *
- * @returns The absolute path of the installed binary and its directory
+ * @returns The installed binary path, its directory, and whether this
+ *   was a fresh install (`created`) or an upgrade of an existing binary
  */
 async function handleInstall(
   execPath: string,
   homeDir: string,
   env: NodeJS.ProcessEnv,
   log: Logger
-): Promise<{ binaryPath: string; binaryDir: string }> {
+): Promise<{ binaryPath: string; binaryDir: string; created: boolean }> {
   const installDir = determineInstallDir(homeDir, env);
+  const targetPath = join(installDir, getBinaryFilename());
+  const alreadyExists = existsSync(targetPath);
+
   const binaryPath = await installBinary(execPath, installDir);
   const binaryDir = dirname(binaryPath);
 
@@ -83,7 +91,7 @@ async function handleInstall(
     }
   }
 
-  return { binaryPath, binaryDir };
+  return { binaryPath, binaryDir, created: !alreadyExists };
 }
 
 /**
@@ -220,13 +228,15 @@ async function handleCompletions(
  *
  * Detects supported agents (currently Claude Code) and installs the
  * version-pinned skill file. Silent when no agent is detected.
+ *
+ * Only produces output when the skill file is freshly created. Subsequent
+ * runs (e.g. after upgrade) silently update without printing.
  */
 async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
   const location = await installAgentSkills(homeDir, CLI_VERSION);
 
-  if (location) {
-    const action = location.created ? "Installed to" : "Updated";
-    log(`Agent skills: ${action} ${location.path}`);
+  if (location?.created) {
+    log(`Agent skills: Installed to ${location.path}`);
   }
 }
 
@@ -446,6 +456,7 @@ export const setupCommand = buildCommand({
 
     let binaryPath = process.execPath;
     let binaryDir = dirname(binaryPath);
+    let freshInstall = false;
 
     // 0. Install binary from temp location (when --install is set)
     if (flags.install) {
@@ -457,6 +468,7 @@ export const setupCommand = buildCommand({
       );
       binaryPath = result.binaryPath;
       binaryDir = result.binaryDir;
+      freshInstall = result.created;
     }
 
     // 1–4. Run best-effort configuration steps
@@ -470,13 +482,10 @@ export const setupCommand = buildCommand({
       warn,
     });
 
-    // 5. Print welcome message (fresh install) or completion message
-    if (!flags.quiet) {
-      if (flags.install) {
-        printWelcomeMessage(log, CLI_VERSION, binaryPath);
-      } else {
-        stdout.write("\nSetup complete!\n");
-      }
+    // 5. Print welcome message only on fresh install — upgrades are silent
+    // since the upgrade command itself prints a success message.
+    if (!flags.quiet && freshInstall) {
+      printWelcomeMessage(log, CLI_VERSION, binaryPath);
     }
   },
 });
