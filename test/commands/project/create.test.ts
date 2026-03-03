@@ -418,6 +418,7 @@ describe("project create", () => {
     const parsed = JSON.parse(output);
     expect(parsed.slug).toBe("my-app");
     expect(parsed.dsn).toBe("https://abc@o123.ingest.us.sentry.io/999");
+    expect(parsed.teamSlug).toBe("engineering");
   });
 
   test("handles DSN fetch failure gracefully", async () => {

@@ -31,6 +31,8 @@ import {
   resolveAnEventId as sdkResolveAnEventId,
   startSeerIssueFix,
 } from "@sentry/api";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import type { z } from "zod";
 
 import {
@@ -740,8 +742,13 @@ export async function createTeam(
   // Best-effort: add the current user to the team
   try {
     await addMemberToTeam(orgSlug, team.slug, "me");
-  } catch {
-    // Non-fatal — team was created, user just won't be a member
+  } catch (error) {
+    Sentry.captureException(error, {
+      extra: { orgSlug, teamSlug: team.slug, context: "auto-add member" },
+    });
+    process.stderr.write(
+      `Warning: Team '${team.slug}' was created but you could not be added as a member.\n`
+    );
   }
 
   return team;

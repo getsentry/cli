@@ -39,7 +39,7 @@ import { getSentryBaseUrl } from "./sentry-urls.js";
  * @param fallbackHint - Shown when the org list can't be fetched
  * @returns Formatted org list like "Your organizations:\n\n  acme-corp\n  other-org"
  */
-export async function fetchOrgListHint(fallbackHint: string): Promise<string> {
+async function fetchOrgListHint(fallbackHint: string): Promise<string> {
   try {
     const orgs = await listOrganizations();
     if (orgs.length > 0) {
@@ -98,7 +98,11 @@ export async function resolveOrCreateTeam(
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 404) {
-        return await buildOrgFailureError(orgSlug, error, options);
+        return await buildOrgNotFoundError(
+          orgSlug,
+          options.usageHint,
+          options.detectedFrom
+        );
       }
       // 403, 5xx, etc. — can't determine if org is wrong or something else
       throw new CliError(
@@ -179,14 +183,18 @@ async function autoCreateTeam(
 }
 
 /**
- * Build an error for when listTeams fails (usually a bad org slug).
+ * Build an error for when an org slug is not found (404).
  * Uses resolveEffectiveOrg for offline validation of DSN org prefixes,
  * then best-effort fetches the user's actual organizations to help them fix it.
+ *
+ * @param orgSlug - The org slug that was not found
+ * @param usageHint - Usage example shown in error message
+ * @param detectedFrom - Where the org was auto-detected from, if applicable
  */
-async function buildOrgFailureError(
+export async function buildOrgNotFoundError(
   orgSlug: string,
-  _error: ApiError,
-  options: ResolveTeamOptions
+  usageHint: string,
+  detectedFrom?: string
 ): Promise<never> {
   // Try resolving DSN-style org IDs (e.g., o1081365 → actual slug)
   const effectiveOrg = await resolveEffectiveOrg(orgSlug);
@@ -194,27 +202,25 @@ async function buildOrgFailureError(
     throw new ResolutionError(
       `Organization '${orgSlug}'`,
       `not found (did you mean '${effectiveOrg}'?)`,
-      `${options.usageHint} --team <team-slug>`,
+      `${usageHint} --team <team-slug>`,
       [`Try using '${effectiveOrg}' as the org slug instead of '${orgSlug}'`]
     );
   }
 
   const orgHint = await fetchOrgListHint(
-    `Specify org explicitly: ${options.usageHint}`
+    `Specify org explicitly: ${usageHint}`
   );
 
   const suggestions: string[] = [];
-  if (options.detectedFrom) {
-    suggestions.push(
-      `Org '${orgSlug}' was auto-detected from ${options.detectedFrom}`
-    );
+  if (detectedFrom) {
+    suggestions.push(`Org '${orgSlug}' was auto-detected from ${detectedFrom}`);
   }
   suggestions.push(orgHint);
 
   throw new ResolutionError(
     `Organization '${orgSlug}'`,
     "not found",
-    `${options.usageHint} --team <team-slug>`,
+    `${usageHint} --team <team-slug>`,
     suggestions
   );
 }

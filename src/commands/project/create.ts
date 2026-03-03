@@ -37,7 +37,7 @@ import {
 } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
-  fetchOrgListHint,
+  buildOrgNotFoundError,
   type ResolvedTeam,
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
@@ -194,11 +194,9 @@ async function handleCreateProject404(
   }
 
   // listTeams returned 404 → org doesn't exist
+  // Delegates to shared helper that handles DSN org ID resolution and org listing
   if (listTeamsError instanceof ApiError && listTeamsError.status === 404) {
-    const orgHint = await fetchOrgListHint(
-      `Specify org explicitly: ${USAGE_HINT}`
-    );
-    throw new CliError(`Organization '${orgSlug}' not found.\n\n${orgHint}`);
+    return await buildOrgNotFoundError(orgSlug, USAGE_HINT);
   }
 
   // listTeams failed for other reasons (403, 5xx, network) — can't disambiguate
@@ -371,7 +369,7 @@ export const createCommand = buildCommand({
 
     // JSON output
     if (flags.json) {
-      writeJson(stdout, { ...project, dsn, team: team.slug });
+      writeJson(stdout, { ...project, dsn, teamSlug: team.slug });
       return;
     }
 
