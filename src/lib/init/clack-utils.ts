@@ -22,7 +22,7 @@ export function abortIfCancelled<T>(value: T | symbol): T {
   return value as T;
 }
 
-export const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
+const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
     hint: "Automatic error and crash reporting",

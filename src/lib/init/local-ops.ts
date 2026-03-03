@@ -59,6 +59,7 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "}", label: "brace expansion (})" },
     { pattern: "*", label: "glob expansion (*)" },
     { pattern: "?", label: "glob expansion (?)" },
+    { pattern: "#", label: "shell comment (#)" },
   ];
 
 const WHITESPACE_RE = /\s+/;
@@ -141,7 +142,12 @@ export function validateCommand(command: string): string | undefined {
     return `Blocked command: contains environment variable assignment — "${command}"`;
   }
 
-  // Layer 3: Block dangerous executables
+  // Layer 3: Block dangerous executables (first token only).
+  // NOTE: This only checks the primary executable (e.g. "npm"), not
+  // subcommands. A command like "npm exec -- rm -rf /" passes because
+  // "npm" is the first token. Comprehensive subcommand parsing across
+  // package managers is not implemented — commands originate from the
+  // Sentry API server, and Layer 1 already blocks most injection patterns.
   const executable = path.basename(firstToken);
   if (BLOCKED_EXECUTABLES.has(executable)) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;

