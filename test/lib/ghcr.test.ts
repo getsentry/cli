@@ -8,13 +8,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
+  downloadLayerBlob,
   downloadNightlyBlob,
+  fetchManifest,
   fetchNightlyManifest,
   findLayerByFilename,
   GHCR_REPO,
   GHCR_TAG,
   getAnonymousToken,
   getNightlyVersion,
+  listTags,
   type OciManifest,
 } from "../../src/lib/ghcr.js";
 
@@ -357,6 +360,199 @@ describe("downloadNightlyBlob", () => {
     expect(error).toBeInstanceOf(UpgradeError);
     expect(error.message).toContain(
       "Failed to download from blob storage: fetch failed"
+    );
+  });
+});
+
+// fetchManifest (generic tag variant)
+
+describe("fetchManifest", () => {
+  test("fetches manifest for an arbitrary tag", async () => {
+    const manifest = makeManifest();
+
+    mockFetch(async (url) => {
+      expect(String(url)).toContain(`/v2/${GHCR_REPO}/manifests/patch-0.13.0`);
+      return new Response(JSON.stringify(manifest), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.oci.image.manifest.v1+json",
+        },
+      });
+    });
+
+    const result = await fetchManifest("token", "patch-0.13.0");
+    expect(result).toEqual(manifest);
+  });
+
+  test("throws UpgradeError on HTTP 404", async () => {
+    mockFetch(async () => new Response("Not Found", { status: 404 }));
+
+    await expect(fetchManifest("token", "patch-0.13.0")).rejects.toThrow(
+      UpgradeError
+    );
+    await expect(fetchManifest("token", "patch-0.13.0")).rejects.toThrow(
+      'Failed to fetch manifest for tag "patch-0.13.0": HTTP 404'
+    );
+  });
+
+  test("throws UpgradeError on network failure", async () => {
+    mockFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(fetchManifest("token", "some-tag")).rejects.toThrow(
+      UpgradeError
+    );
+    await expect(fetchManifest("token", "some-tag")).rejects.toThrow(
+      "Failed to connect to GHCR: fetch failed"
+    );
+  });
+});
+
+// listTags
+
+describe("listTags", () => {
+  test("returns all tags when no prefix filter", async () => {
+    mockFetch(async (url) => {
+      expect(String(url)).toContain(`/v2/${GHCR_REPO}/tags/list`);
+      return new Response(
+        JSON.stringify({ tags: ["nightly", "patch-0.13.0", "patch-0.14.0"] }),
+        { status: 200 }
+      );
+    });
+
+    const tags = await listTags("token");
+    expect(tags).toEqual(["nightly", "patch-0.13.0", "patch-0.14.0"]);
+  });
+
+  test("filters tags by prefix", async () => {
+    mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({ tags: ["nightly", "patch-0.13.0", "patch-0.14.0"] }),
+          { status: 200 }
+        )
+    );
+
+    const tags = await listTags("token", "patch-");
+    expect(tags).toEqual(["patch-0.13.0", "patch-0.14.0"]);
+  });
+
+  test("returns empty array when no tags match prefix", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tags: ["nightly", "latest"] }), {
+          status: 200,
+        })
+    );
+
+    const tags = await listTags("token", "patch-");
+    expect(tags).toEqual([]);
+  });
+
+  test("returns empty array when response has no tags field", async () => {
+    mockFetch(async () => new Response(JSON.stringify({}), { status: 200 }));
+
+    const tags = await listTags("token");
+    expect(tags).toEqual([]);
+  });
+
+  test("throws UpgradeError on HTTP error", async () => {
+    mockFetch(async () => new Response("Error", { status: 500 }));
+
+    await expect(listTags("token")).rejects.toThrow(UpgradeError);
+    await expect(listTags("token")).rejects.toThrow(
+      "Failed to list GHCR tags: HTTP 500"
+    );
+  });
+
+  test("throws UpgradeError on network failure", async () => {
+    mockFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(listTags("token")).rejects.toThrow(UpgradeError);
+    await expect(listTags("token")).rejects.toThrow(
+      "Failed to list GHCR tags: fetch failed"
+    );
+  });
+
+  test("paginates when first page is full (100 tags)", async () => {
+    // Generate exactly 100 tags for page 1 (triggers pagination), then 2 for page 2
+    const page1Tags = Array.from(
+      { length: 100 },
+      (_, i) => `tag-${String(i).padStart(3, "0")}`
+    );
+    const page2Tags = ["tag-100", "tag-101"];
+    const responses = [page1Tags, page2Tags];
+    let pageCall = 0;
+
+    mockFetch(async () => {
+      const tags = responses[pageCall] ?? [];
+      pageCall += 1;
+      return new Response(JSON.stringify({ tags }), { status: 200 });
+    });
+
+    const tags = await listTags("token");
+    expect(tags).toHaveLength(102);
+    expect(tags[0]).toBe("tag-000");
+    expect(tags[99]).toBe("tag-099");
+    expect(tags[100]).toBe("tag-100");
+    expect(tags[101]).toBe("tag-101");
+    expect(pageCall).toBe(2);
+  });
+
+  test("pagination with prefix filter only returns matching tags", async () => {
+    // Mix of matching and non-matching tags, fewer than page size
+    const mixedTags = Array.from({ length: 80 }, (_, i) => {
+      if (i < 40) {
+        return `patch-${i}`;
+      }
+      return `nightly-${i}`;
+    });
+
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tags: mixedTags }), {
+          status: 200,
+        })
+    );
+
+    const tags = await listTags("token", "patch-");
+    expect(tags).toHaveLength(40);
+    for (const tag of tags) {
+      expect(tag.startsWith("patch-")).toBe(true);
+    }
+  });
+});
+
+// downloadLayerBlob
+
+describe("downloadLayerBlob", () => {
+  test("returns ArrayBuffer from blob download", async () => {
+    const content = new Uint8Array([1, 2, 3, 4, 5]);
+    let requestCount = 0;
+
+    mockFetch(async (url) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        expect(String(url)).toContain(`/v2/${GHCR_REPO}/blobs/sha256:abc123`);
+        return Response.redirect("https://blob.storage.azure.com/file", 307);
+      }
+      return new Response(content, { status: 200 });
+    });
+
+    const result = await downloadLayerBlob("token", "sha256:abc123");
+    expect(new Uint8Array(result)).toEqual(content);
+  });
+
+  test("throws UpgradeError on download failure", async () => {
+    mockFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(downloadLayerBlob("token", "sha256:abc")).rejects.toThrow(
+      UpgradeError
     );
   });
 });

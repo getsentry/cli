@@ -24,6 +24,7 @@ import {
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
+import { attemptDeltaUpgrade } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
 import {
   downloadNightlyBlob,
@@ -637,7 +638,6 @@ async function tryDeltaUpgrade(
   destPath: string
 ): Promise<string | null> {
   try {
-    const { attemptDeltaUpgrade } = await import("./delta-upgrade.js");
     return await attemptDeltaUpgrade(version, process.execPath, destPath);
   } catch {
     return null;

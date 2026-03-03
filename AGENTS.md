@@ -704,6 +704,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019c9a88-bf99-7322-b192-aafe4636c600 -->
 * **getsentry/codecov-action enables JUnit XML test reporting by default**: The \`getsentry/codecov-action@main\` has \`enable-tests: true\` by default, which searches for JUnit XML files matching \`\*\*/\*.junit.xml\`. If the test framework doesn't produce JUnit XML, the action emits 3 warnings on every CI run: "No files found matching pattern", "No JUnit XML files found", and "Please ensure your test framework is generating JUnit XML output". Fix: either set \`enable-tests: false\` in the action inputs, or configure the test runner to output JUnit XML. For Bun, add \`\[test.reporter] junit = "test-results.junit.xml"\` to \`bunfig.toml\` and add \`\*.junit.xml\` to \`.gitignore\`.
 
+<!-- lore:019cb3e6-da66-7534-a573-30d2ecadfd53 -->
+* **Returning bare promises loses async function from error stack traces**: When an \`async\` function returns another promise without \`await\`, the calling function disappears from error stack traces if the inner promise rejects. A function that drops \`async\` and does \`return someAsyncCall()\` loses its frame entirely. Fix: keep the function \`async\` and use \`return await someAsyncCall()\`. This matters for debugging — the intermediate function name in the stack trace helps locate which code path triggered the failure. ESLint rule \`no-return-await\` is outdated; modern engines optimize \`return await\` in async functions.
+
 ### Pattern
 
 <!-- lore:019cb100-4630-79ac-8a13-185ea3d7bbb7 -->

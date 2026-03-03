@@ -24,6 +24,7 @@ import {
   downloadLayerBlob,
   fetchManifest,
   getAnonymousToken,
+  listTags,
   type OciManifest,
 } from "./ghcr.js";
 import { isNightlyVersion } from "./upgrade.js";
@@ -116,7 +117,7 @@ export function canAttemptDelta(targetVersion: string): boolean {
 // Stable channel: GitHub Releases
 
 /** GitHub Release asset metadata (subset of API response) */
-type GitHubAsset = {
+export type GitHubAsset = {
   name: string;
   size: number;
   /** SHA-256 digest in the form "sha256:<hex>" */
@@ -125,71 +126,36 @@ type GitHubAsset = {
 };
 
 /** GitHub Release metadata (subset of API response) */
-type GitHubRelease = {
+export type GitHubRelease = {
   tag_name: string;
   assets: GitHubAsset[];
 };
 
 /**
- * Fetch a GitHub Release by tag.
+ * Fetch recent releases from GitHub, ordered newest-first.
  *
- * @param tag - Git tag (e.g., "0.13.0")
- * @returns Release metadata, or null if not found
+ * A single API call returns full release metadata including assets,
+ * eliminating the need for per-release fetches during chain resolution.
+ *
+ * @returns Array of releases (newest first), or empty array on failure
  */
-async function fetchRelease(tag: string): Promise<GitHubRelease | null> {
+async function fetchRecentReleases(): Promise<GitHubRelease[]> {
+  const perPage = MAX_CHAIN_DEPTH + 2;
   let response: Response;
   try {
-    response = await fetch(`${GITHUB_RELEASES_URL}/tags/${tag}`, {
+    response = await fetch(`${GITHUB_RELEASES_URL}?per_page=${perPage}`, {
       headers: {
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "sentry-cli",
       },
     });
   } catch {
-    return null;
+    return [];
   }
   if (!response.ok) {
-    return null;
+    return [];
   }
-  return (await response.json()) as GitHubRelease;
-}
-
-/**
- * Find the version that a stable release was patched from.
- *
- * Fetches the GitHub Release and looks for the previous release's tag.
- * Uses the GitHub API to find the release immediately before this one.
- *
- * @param tag - Git tag of the release to check
- * @returns Previous release tag, or null if unavailable
- */
-async function findStablePreviousVersion(tag: string): Promise<string | null> {
-  // List the 10 most recent releases and find our tag's position
-  let response: Response;
-  try {
-    response = await fetch(`${GITHUB_RELEASES_URL}?per_page=10`, {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "sentry-cli",
-      },
-    });
-  } catch {
-    return null;
-  }
-  if (!response.ok) {
-    return null;
-  }
-  const releases = (await response.json()) as GitHubRelease[];
-
-  // Find the release after our tag in the list (releases are newest-first)
-  for (let i = 0; i < releases.length - 1; i++) {
-    const current = releases[i];
-    const next = releases[i + 1];
-    if (current && next && current.tag_name === tag) {
-      return next.tag_name;
-    }
-  }
-  return null;
+  return (await response.json()) as GitHubRelease[];
 }
 
 /**
@@ -200,7 +166,7 @@ async function findStablePreviousVersion(tag: string): Promise<string | null> {
  * @param asset - GitHub Release asset
  * @returns Hex digest string, or null if no digest available
  */
-function extractSha256(asset: GitHubAsset): string | null {
+export function extractSha256(asset: GitHubAsset): string | null {
   if (!asset.digest) {
     return null;
   }
@@ -234,7 +200,7 @@ async function downloadStablePatch(url: string): Promise<Uint8Array | null> {
  * @param binaryName - Platform binary name (e.g., "sentry-linux-x64")
  * @returns Hex SHA-256 digest, or null if unavailable
  */
-function getStableTargetSha256(
+export function getStableTargetSha256(
   release: GitHubRelease,
   binaryName: string
 ): string | null {
@@ -245,175 +211,126 @@ function getStableTargetSha256(
   return extractSha256(binaryAsset);
 }
 
-/** Metadata discovered for a single stable release (before downloading patch data) */
-type StableChainLink = {
-  /** Download URL for the patch asset */
-  patchUrl: string;
-  /** Reported size of the patch asset (bytes) */
-  patchSize: number;
-  /** Version this patch applies from */
-  fromVersion: string;
-  /** SHA-256 of the target binary (only set on the first/target release) */
-  targetSha256: string | null;
+/** Options for extracting the stable version chain from a release list */
+export type ExtractStableChainOpts = {
+  releases: GitHubRelease[];
+  currentVersion: string;
+  targetVersion: string;
+  binaryName: string;
+  fullGzSize: number;
 };
 
-/**
- * Discover metadata for a single stable release in the chain.
- *
- * Fetches the release JSON and previous-version info without downloading
- * the actual patch data. This keeps the serial discovery phase lightweight.
- *
- * @param version - Release tag to fetch
- * @param patchAssetName - Expected patch asset name for this platform
- * @param binaryName - Binary asset name for SHA-256 extraction
- * @param isTarget - Whether this is the target (first) release in the chain
- * @returns Chain link metadata, or null if any data is unavailable
- */
-async function discoverStableLink(
-  version: string,
-  patchAssetName: string,
-  binaryName: string,
-  isTarget: boolean
-): Promise<StableChainLink | null> {
-  const release = await fetchRelease(version);
-  if (!release) {
-    return null;
-  }
-
-  const patchAsset = release.assets.find((a) => a.name === patchAssetName);
-  if (!patchAsset) {
-    return null;
-  }
-
-  const fromVersion = await findStablePreviousVersion(version);
-  if (!fromVersion) {
-    return null;
-  }
-
-  const targetSha256 = isTarget
-    ? getStableTargetSha256(release, binaryName)
-    : null;
-
-  return {
-    patchUrl: patchAsset.browser_download_url,
-    patchSize: patchAsset.size,
-    fromVersion,
-    targetSha256,
-  };
-}
-
-/** Result from the serial discovery phase of stable chain resolution */
-type StableDiscoveryResult = {
-  /** Ordered links (oldest first) forming the chain */
-  links: StableChainLink[];
+/** Extracted stable chain info (patch URLs in apply order + target hash) */
+export type StableChainInfo = {
+  /** Patch download URLs in apply order (oldest patch first) */
+  patchUrls: string[];
   /** Expected SHA-256 of the final target binary */
   expectedSha256: string;
 };
 
-/** Options for stable chain discovery */
-type StableDiscoveryOpts = {
-  currentVersion: string;
-  targetVersion: string;
-  fullGzSize: number;
-  patchAssetName: string;
-  binaryName: string;
-};
-
 /**
- * Discover the full chain of stable patches by walking release metadata.
+ * Extract the chain of patch URLs from an already-fetched release list.
  *
- * Serial phase: fetches only lightweight release JSON + previous-version
- * info, no patch data. Validates the size threshold against reported asset
- * sizes as it walks.
+ * Pure computation over the release array — no HTTP calls. Validates that
+ * every release in the chain has a patch asset and that the cumulative
+ * size stays under the threshold.
  *
- * @returns Discovery result, or null if the chain is broken/exceeds threshold
+ * @returns Chain info with URLs in apply order, or null if unavailable
  */
-async function discoverStableChain(
-  opts: StableDiscoveryOpts
-): Promise<StableDiscoveryResult | null> {
-  const {
-    currentVersion,
-    targetVersion,
-    fullGzSize,
-    patchAssetName,
-    binaryName,
-  } = opts;
-  const links: StableChainLink[] = [];
-  let totalSize = 0;
-  let expectedSha256 = "";
-  let version = targetVersion;
+export function extractStableChain(
+  opts: ExtractStableChainOpts
+): StableChainInfo | null {
+  const { releases, currentVersion, targetVersion, binaryName, fullGzSize } =
+    opts;
+  const patchAssetName = `${binaryName}.patch`;
 
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-    const link = await discoverStableLink(
-      version,
-      patchAssetName,
-      binaryName,
-      depth === 0
-    );
-    if (!link) {
+  // Releases are newest-first; find target and current positions
+  const targetIdx = releases.findIndex((r) => r.tag_name === targetVersion);
+  const currentIdx = releases.findIndex((r) => r.tag_name === currentVersion);
+  if (targetIdx === -1 || currentIdx === -1 || targetIdx >= currentIdx) {
+    return null;
+  }
+
+  // Chain: [target, ..., current+1] (newest first, excludes current)
+  const chainReleases = releases.slice(targetIdx, currentIdx);
+  if (chainReleases.length > MAX_CHAIN_DEPTH) {
+    return null;
+  }
+
+  // SHA-256 comes from the target release's binary asset
+  const targetRelease = chainReleases[0];
+  if (!targetRelease) {
+    return null;
+  }
+  const expectedSha256 = getStableTargetSha256(targetRelease, binaryName) ?? "";
+  if (!expectedSha256) {
+    return null;
+  }
+
+  // Collect patch URLs and validate size threshold
+  const patchUrls: string[] = [];
+  let totalSize = 0;
+  for (const release of chainReleases) {
+    const patchAsset = release.assets.find((a) => a.name === patchAssetName);
+    if (!patchAsset) {
       return null;
     }
-
-    if (depth === 0) {
-      expectedSha256 = link.targetSha256 ?? "";
-      if (!expectedSha256) {
-        return null;
-      }
-    }
-
-    links.unshift(link);
-    totalSize += link.patchSize;
-
+    patchUrls.push(patchAsset.browser_download_url);
+    totalSize += patchAsset.size;
     if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
       return null;
     }
-
-    if (link.fromVersion === currentVersion) {
-      return { links, expectedSha256 };
-    }
-
-    version = link.fromVersion;
   }
 
-  return null;
+  // Reverse to get apply order: oldest patch first
+  patchUrls.reverse();
+  return { patchUrls, expectedSha256 };
 }
 
 /**
- * Attempt to resolve a chain of stable patches from current to target version.
+ * Resolve a chain of stable patches from current to target version.
  *
- * Phase 1 (serial): Walk backwards from the target release, fetching only
- * lightweight metadata (release JSON + previous-version) to discover the
- * full chain and check the size threshold.
- *
- * Phase 2 (parallel): Download all patch files concurrently.
+ * 1. Single API call: fetch recent releases (includes full asset metadata)
+ * 2. Extract chain info from the list (pure computation, no I/O)
+ * 3. Parallel: download all patch files concurrently
  *
  * @param currentVersion - Currently installed version
  * @param targetVersion - Version to upgrade to
- * @param fullGzSize - Size of the full .gz download for threshold calculation
  * @returns Resolved patch chain, or null if unavailable
  */
 async function resolveStableChain(
   currentVersion: string,
-  targetVersion: string,
-  fullGzSize: number
+  targetVersion: string
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
-  const patchAssetName = `${binaryName}.patch`;
+  const releases = await fetchRecentReleases();
 
-  const discovered = await discoverStableChain({
-    currentVersion,
-    targetVersion,
-    fullGzSize,
-    patchAssetName,
-    binaryName,
-  });
-  if (!discovered) {
+  // Get .gz size from the target release for threshold calculation
+  const targetRelease = releases.find((r) => r.tag_name === targetVersion);
+  if (!targetRelease) {
+    return null;
+  }
+  const gzAsset = targetRelease.assets.find(
+    (a) => a.name === `${binaryName}.gz`
+  );
+  if (!gzAsset) {
     return null;
   }
 
-  // Phase 2: Parallel patch download
+  const chainInfo = extractStableChain({
+    releases,
+    currentVersion,
+    targetVersion,
+    binaryName,
+    fullGzSize: gzAsset.size,
+  });
+  if (!chainInfo) {
+    return null;
+  }
+
+  // Parallel patch download
   const downloadResults = await Promise.all(
-    discovered.links.map((link) => downloadStablePatch(link.patchUrl))
+    chainInfo.patchUrls.map((url) => downloadStablePatch(url))
   );
 
   const patches: PatchLink[] = [];
@@ -426,7 +343,7 @@ async function resolveStableChain(
     totalSize += data.byteLength;
   }
 
-  return { patches, totalSize, expectedSha256: discovered.expectedSha256 };
+  return { patches, totalSize, expectedSha256: chainInfo.expectedSha256 };
 }
 
 // Nightly channel: GHCR
@@ -437,7 +354,7 @@ async function resolveStableChain(
  * @param manifest - OCI manifest for a `:patch-<version>` tag
  * @returns The base version this patch applies to, or null if missing
  */
-function getPatchFromVersion(manifest: OciManifest): string | null {
+export function getPatchFromVersion(manifest: OciManifest): string | null {
   return manifest.annotations?.["from-version"] ?? null;
 }
 
@@ -450,7 +367,7 @@ function getPatchFromVersion(manifest: OciManifest): string | null {
  * @param binaryName - Platform binary name (e.g., "sentry-linux-x64")
  * @returns Hex digest string, or null if not found
  */
-function getPatchTargetSha256(
+export function getPatchTargetSha256(
   manifest: OciManifest,
   binaryName: string
 ): string | null {
@@ -460,138 +377,139 @@ function getPatchTargetSha256(
 /** GHCR tag prefix for patch manifests */
 const PATCH_TAG_PREFIX = "patch-";
 
-/** Metadata discovered for a single nightly patch manifest (before downloading blob) */
-type NightlyChainLink = {
-  /** Layer digest for downloading the patch blob */
-  patchDigest: string;
-  /** Reported size of the patch layer (bytes) */
-  patchSize: number;
-  /** Version this patch applies from */
-  fromVersion: string;
-  /** SHA-256 of the target binary (only set on the first/target link) */
-  targetSha256: string | null;
-};
-
-/** Options for nightly chain discovery */
-type NightlyDiscoveryOpts = {
-  token: string;
-  patchLayerName: string;
-  binaryName: string;
+/** A node in the patch graph: maps a fromVersion to the next version + manifest */
+export type PatchGraphEntry = {
+  /** Version this patch produces */
+  version: string;
+  /** Full OCI manifest (contains layer digests and annotations) */
+  manifest: OciManifest;
 };
 
 /**
- * Discover metadata for a single nightly patch manifest.
+ * Build a directed graph of all available nightly patches.
  *
- * Fetches the GHCR `:patch-<version>` manifest to extract fromVersion
- * and patch layer digest, without downloading the actual blob data.
+ * Fetches all `patch-*` tags from GHCR and their manifests in parallel,
+ * then indexes by `from-version` annotation. The resulting map allows
+ * instant chain walking from any version to its successor.
  *
- * @param opts - Discovery parameters (token, layer/binary names)
- * @param version - Nightly version to look up
- * @param isTarget - Whether to extract target SHA-256
- * @returns Chain link metadata, or null if unavailable
+ * @param token - GHCR anonymous bearer token
+ * @returns Map from fromVersion → { version, manifest }
  */
-async function discoverNightlyLink(
-  opts: NightlyDiscoveryOpts,
-  version: string,
-  isTarget: boolean
-): Promise<NightlyChainLink | null> {
-  let manifest: OciManifest;
-  try {
-    manifest = await fetchManifest(opts.token, `${PATCH_TAG_PREFIX}${version}`);
-  } catch {
-    return null;
+async function buildNightlyPatchGraph(
+  token: string
+): Promise<Map<string, PatchGraphEntry>> {
+  const tags = await listTags(token, PATCH_TAG_PREFIX);
+  const graph = new Map<string, PatchGraphEntry>();
+
+  const entries = await Promise.all(
+    tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
+      const version = tag.slice(PATCH_TAG_PREFIX.length);
+      try {
+        const manifest = await fetchManifest(token, tag);
+        const fromVersion = getPatchFromVersion(manifest);
+        if (!fromVersion) {
+          return null;
+        }
+        return [fromVersion, { version, manifest }];
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  for (const entry of entries) {
+    if (entry) {
+      graph.set(entry[0], entry[1]);
+    }
   }
 
-  const fromVersion = getPatchFromVersion(manifest);
-  if (!fromVersion) {
-    return null;
-  }
-
-  const patchLayer = manifest.layers.find((l) => {
-    const title = l.annotations?.["org.opencontainers.image.title"];
-    return title === opts.patchLayerName;
-  });
-  if (!patchLayer) {
-    return null;
-  }
-
-  const targetSha256 = isTarget
-    ? getPatchTargetSha256(manifest, opts.binaryName)
-    : null;
-
-  return {
-    patchDigest: patchLayer.digest,
-    patchSize: patchLayer.size,
-    fromVersion,
-    targetSha256,
-  };
+  return graph;
 }
 
-/** Result from the serial discovery phase of nightly chain resolution */
-type NightlyDiscoveryResult = {
-  /** Ordered links (oldest first) forming the chain */
-  links: NightlyChainLink[];
+/** Options for walking the nightly patch chain through the graph */
+export type WalkNightlyChainOpts = {
+  graph: Map<string, PatchGraphEntry>;
+  currentVersion: string;
+  targetVersion: string;
+  patchLayerName: string;
+  binaryName: string;
+  fullGzSize: number;
+};
+
+/** Result of walking the nightly patch chain */
+export type NightlyChainInfo = {
+  /** Layer digests in apply order (oldest first) */
+  layerDigests: string[];
   /** Expected SHA-256 of the final target binary */
   expectedSha256: string;
 };
 
 /**
- * Discover the full chain of nightly patches by walking manifest annotations.
+ * Walk the pre-built patch graph from current to target version.
  *
- * Serial phase: fetches only lightweight manifest JSON to extract
- * fromVersion and layer digest/size. Validates the size threshold
- * against reported layer sizes as it walks.
+ * Pure in-memory traversal — no HTTP calls. Validates that each step
+ * has the expected platform layer and that cumulative size stays under
+ * the threshold.
  *
- * @returns Discovery result, or null if the chain is broken/exceeds threshold
+ * @returns Chain info with layer digests in apply order, or null
  */
-async function discoverNightlyChain(
-  opts: NightlyDiscoveryOpts,
-  currentVersion: string,
-  targetVersion: string,
-  fullGzSize: number
-): Promise<NightlyDiscoveryResult | null> {
-  const links: NightlyChainLink[] = [];
+export function walkNightlyChain(
+  opts: WalkNightlyChainOpts
+): NightlyChainInfo | null {
+  const {
+    graph,
+    currentVersion,
+    targetVersion,
+    patchLayerName,
+    binaryName,
+    fullGzSize,
+  } = opts;
+  const digests: string[] = [];
   let totalSize = 0;
-  let expectedSha256 = "";
-  let version = targetVersion;
+  let version = currentVersion;
 
   for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-    const link = await discoverNightlyLink(opts, version, depth === 0);
-    if (!link) {
+    const entry = graph.get(version);
+    if (!entry) {
       return null;
     }
 
-    if (depth === 0) {
-      expectedSha256 = link.targetSha256 ?? "";
-      if (!expectedSha256) {
-        return null;
-      }
+    const layer = entry.manifest.layers.find((l) => {
+      const title = l.annotations?.["org.opencontainers.image.title"];
+      return title === patchLayerName;
+    });
+    if (!layer) {
+      return null;
     }
 
-    links.unshift(link);
-    totalSize += link.patchSize;
+    digests.push(layer.digest);
+    totalSize += layer.size;
 
     if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
       return null;
     }
 
-    if (link.fromVersion === currentVersion) {
-      return { links, expectedSha256 };
+    if (entry.version === targetVersion) {
+      const sha256 = getPatchTargetSha256(entry.manifest, binaryName) ?? "";
+      if (!sha256) {
+        return null;
+      }
+      return { layerDigests: digests, expectedSha256: sha256 };
     }
 
-    version = link.fromVersion;
+    version = entry.version;
   }
 
   return null;
 }
 
 /**
- * Attempt to resolve a chain of nightly patches from current to target version.
+ * Resolve a chain of nightly patches from current to target version.
  *
- * Phase 1 (serial): Walk backwards using GHCR `:patch-<version>` manifest
- * annotations to discover the chain and validate size thresholds.
- *
- * Phase 2 (parallel): Download all patch layer blobs concurrently.
+ * 1. Single API call: list all `patch-*` tags
+ * 2. Parallel: fetch all patch manifests concurrently → build graph
+ * 3. Walk graph in-memory to find chain (pure computation, no I/O)
+ * 4. Parallel: download all patch layer blobs concurrently
  *
  * @param token - GHCR anonymous bearer token
  * @param currentVersion - Currently installed nightly version
@@ -607,24 +525,25 @@ async function resolveNightlyChain(
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
   const patchLayerName = `${binaryName}.patch`;
-  const opts: NightlyDiscoveryOpts = { token, patchLayerName, binaryName };
 
-  const discovered = await discoverNightlyChain(
-    opts,
+  const graph = await buildNightlyPatchGraph(token);
+
+  const chainInfo = walkNightlyChain({
+    graph,
     currentVersion,
     targetVersion,
-    fullGzSize
-  );
-  if (!discovered) {
+    patchLayerName,
+    binaryName,
+    fullGzSize,
+  });
+  if (!chainInfo) {
     return null;
   }
 
-  // Phase 2: Parallel patch download
+  // Parallel blob download
   const downloadResults = await Promise.all(
-    discovered.links.map((link) =>
-      downloadLayerBlob(token, link.patchDigest).then(
-        (buf) => new Uint8Array(buf)
-      )
+    chainInfo.layerDigests.map((digest) =>
+      downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
     )
   );
 
@@ -635,7 +554,7 @@ async function resolveNightlyChain(
     totalSize += data.byteLength;
   }
 
-  return { patches, totalSize, expectedSha256: discovered.expectedSha256 };
+  return { patches, totalSize, expectedSha256: chainInfo.expectedSha256 };
 }
 
 /**
@@ -680,28 +599,12 @@ async function resolveStableDelta(
   oldBinaryPath: string,
   destPath: string
 ): Promise<string | null> {
-  // Fetch the target release to get the .gz size for threshold
-  const release = await fetchRelease(targetVersion);
-  if (!release) {
-    return null;
-  }
-
-  const binaryName = getPlatformBinaryName();
-  const gzAsset = release.assets.find((a) => a.name === `${binaryName}.gz`);
-  if (!gzAsset) {
-    return null;
-  }
-
-  const chain = await resolveStableChain(
-    CLI_VERSION,
-    targetVersion,
-    gzAsset.size
-  );
+  const chain = await resolveStableChain(CLI_VERSION, targetVersion);
   if (!chain) {
     return null;
   }
 
-  return applyPatchChain(chain, oldBinaryPath, destPath);
+  return await applyPatchChain(chain, oldBinaryPath, destPath);
 }
 
 /**
