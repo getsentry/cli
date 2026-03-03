@@ -1385,6 +1385,8 @@ type ListTransactionsOptions = {
   sort?: "date" | "duration";
   /** Time period for transactions (e.g., "7d", "24h") */
   statsPeriod?: string;
+  /** Pagination cursor to resume from a previous page */
+  cursor?: string;
 };
 
 /**
@@ -1397,14 +1399,14 @@ type ListTransactionsOptions = {
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod)
- * @returns Array of transaction items
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with transaction items and optional next cursor
  */
 export async function listTransactions(
   orgSlug: string,
   projectSlug: string,
   options: ListTransactionsOptions = {}
-): Promise<TransactionListItem[]> {
+): Promise<PaginatedResponse<TransactionListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
@@ -1412,28 +1414,33 @@ export async function listTransactions(
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   // Use raw request: the SDK's dataset type doesn't include "transactions"
-  const { data: response } = await apiRequestToRegion<TransactionsResponse>(
-    regionUrl,
-    `/organizations/${orgSlug}/events/`,
-    {
-      params: {
-        dataset: "transactions",
-        field: TRANSACTION_FIELDS,
-        project: isNumericProject ? projectSlug : undefined,
-        // Convert empty string to undefined so ky omits the param entirely;
-        // sending `query=` causes the Sentry API to behave differently than
-        // omitting the parameter.
-        query: fullQuery || undefined,
-        per_page: options.limit || 10,
-        statsPeriod: options.statsPeriod ?? "7d",
-        sort:
-          options.sort === "duration" ? "-transaction.duration" : "-timestamp",
-      },
-      schema: TransactionsResponseSchema,
-    }
-  );
+  const { data: response, headers } =
+    await apiRequestToRegion<TransactionsResponse>(
+      regionUrl,
+      `/organizations/${orgSlug}/events/`,
+      {
+        params: {
+          dataset: "transactions",
+          field: TRANSACTION_FIELDS,
+          project: isNumericProject ? projectSlug : undefined,
+          // Convert empty string to undefined so ky omits the param entirely;
+          // sending `query=` causes the Sentry API to behave differently than
+          // omitting the parameter.
+          query: fullQuery || undefined,
+          per_page: options.limit || 10,
+          statsPeriod: options.statsPeriod ?? "7d",
+          sort:
+            options.sort === "duration"
+              ? "-transaction.duration"
+              : "-timestamp",
+          cursor: options.cursor,
+        },
+        schema: TransactionsResponseSchema,
+      }
+    );
 
-  return response.data;
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data: response.data, nextCursor };
 }
 
 // Issue update functions

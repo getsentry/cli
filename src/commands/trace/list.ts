@@ -8,12 +8,19 @@ import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
+  buildPaginationContextKey,
+  clearPaginationCursor,
+  resolveOrgCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
+import {
   formatTraceTable,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
   buildListCommand,
+  LIST_CURSOR_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
@@ -23,6 +30,7 @@ type ListFlags = {
   readonly query?: string;
   readonly sort: "date" | "duration";
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 type SortValue = "date" | "duration";
@@ -41,6 +49,22 @@ const DEFAULT_LIMIT = 20;
 
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "trace list";
+
+/** Command key for pagination cursor storage */
+export const PAGINATION_KEY = "trace-list";
+
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(org: string, project: string, flags: ListFlags): string {
+  const base = `sentry trace list ${org}/${project} -c last`;
+  const parts: string[] = [];
+  if (flags.sort !== "date") {
+    parts.push(`--sort ${flags.sort}`);
+  }
+  if (flags.query) {
+    parts.push(`-q "${flags.query}"`);
+  }
+  return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -111,13 +135,14 @@ export const listCommand = buildListCommand("trace", {
         brief: "Sort by: date, duration",
         default: "date" as const,
       },
+      cursor: LIST_CURSOR_FLAG,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
         default: false,
       },
     },
-    aliases: { n: "limit", q: "query", s: "sort" },
+    aliases: { n: "limit", q: "query", s: "sort", c: "cursor" },
   },
   async func(
     this: SentryContext,
@@ -134,32 +159,63 @@ export const listCommand = buildListCommand("trace", {
     );
     setContext([org], [project]);
 
-    const traces = await listTransactions(org, project, {
+    // Build context key and resolve cursor for pagination
+    const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
+      sort: flags.sort,
+      q: flags.query,
+    });
+    const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+
+    const { data: traces, nextCursor } = await listTransactions(org, project, {
       query: flags.query,
       limit: flags.limit,
       sort: flags.sort,
+      cursor,
     });
 
+    // Store or clear pagination cursor
+    if (nextCursor) {
+      setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
+    } else {
+      clearPaginationCursor(PAGINATION_KEY, contextKey);
+    }
+
+    const hasMore = !!nextCursor;
+
     if (flags.json) {
-      writeJson(stdout, traces);
+      const output = hasMore
+        ? { data: traces, nextCursor, hasMore: true }
+        : { data: traces, hasMore: false };
+      writeJson(stdout, output);
       return;
     }
 
     if (traces.length === 0) {
-      stdout.write("No traces found.\n");
+      if (hasMore) {
+        stdout.write(
+          `No traces on this page. Try the next page: ${nextPageHint(org, project, flags)}\n`
+        );
+      } else {
+        stdout.write("No traces found.\n");
+      }
       return;
     }
 
     stdout.write(`Recent traces in ${org}/${project}:\n\n`);
     stdout.write(formatTraceTable(traces));
 
-    // Show footer with tip
-    const hasMore = traces.length >= flags.limit;
+    // Show footer with pagination info
     const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
-    const tip = hasMore ? " Use --limit to show more." : "";
-    writeFooter(
-      stdout,
-      `${countText}${tip} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`
-    );
+    if (hasMore) {
+      writeFooter(
+        stdout,
+        `${countText} Next page: ${nextPageHint(org, project, flags)}`
+      );
+    } else {
+      writeFooter(
+        stdout,
+        `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`
+      );
+    }
   },
 });
