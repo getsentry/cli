@@ -159,7 +159,7 @@ const sampleLogs: TraceLog[] = [
     severity_number: 9,
     severity: "info",
     timestamp: "2025-01-30T14:32:15+00:00",
-    timestamp_precise: "2025-01-30T14:32:15.123456+00:00",
+    timestamp_precise: 1_738_247_535_123_456_000,
     message: "Request received",
   },
   {
@@ -169,7 +169,7 @@ const sampleLogs: TraceLog[] = [
     severity_number: 13,
     severity: "warn",
     timestamp: "2025-01-30T14:32:16+00:00",
-    timestamp_precise: "2025-01-30T14:32:16.456789+00:00",
+    timestamp_precise: 1_738_247_536_456_789_000,
     message: "Slow query detected",
   },
   {
@@ -179,7 +179,7 @@ const sampleLogs: TraceLog[] = [
     severity_number: 17,
     severity: "error",
     timestamp: "2025-01-30T14:32:17+00:00",
-    timestamp_precise: "2025-01-30T14:32:17.789012+00:00",
+    timestamp_precise: 1_738_247_537_789_012_000,
     message: "Database connection failed",
   },
 ];
