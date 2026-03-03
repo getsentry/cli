@@ -1,0 +1,26 @@
+## Implementation Plan: Extract shared pagination infrastructure
+
+### Problem
+The first commit introduced cursor pagination for `trace list` but duplicated
+logic that already existed in `issue list` and the shared pagination module:
+- `ALL_DIGITS_RE` + cursor digits validation: identical in both commands
+- Context key construction (`host:…|type:…|sort:…|q:…`): hand-rolled in 3 places
+- `getApiBaseUrl` and `escapeContextKeyValue` imports in every command
+
+### Extractions
+
+1. **`buildPaginationContextKey(type, scope, params?)`** in `db/pagination.ts`
+   - Generalized builder: `host:${host}|type:${type}:${scope}[|key:escapedValue]*`
+   - `buildOrgContextKey(org)` now delegates to it (backward compatible)
+   - Commands stop importing `getApiBaseUrl`/`escapeContextKeyValue` for this pattern
+
+2. **`parseCursorFlag(value)`** in `list-command.ts`
+   - Accepts `"last"`, rejects bare digits, passes through opaque cursor strings
+   - `LIST_CURSOR_FLAG` updated to use it (all commands get validation for free)
+   - `trace list` now uses `LIST_CURSOR_FLAG` directly
+   - `issue list` uses `parseCursorFlag` in its custom cursor flag definition
+
+### What was NOT changed
+- `project list`'s complex `buildContextKey` (switches on ParsedOrgProject type) — separate cleanup
+- `issue list`'s `buildMultiTargetContextKey` (multi-target fingerprint) — too specialized
+- `org-list.ts` — already delegates through `buildOrgContextKey`, no changes needed
