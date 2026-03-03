@@ -119,6 +119,44 @@ export function escapeContextKeyValue(value: string): string {
 }
 
 /**
+ * Build a composite context key for pagination cursor storage.
+ *
+ * Encodes the API host, a type discriminant, a scope string, and optional
+ * key-value params (sort, query, period, platform, …) so cursors from
+ * different searches are never mixed.
+ *
+ * @param type  - Discriminant for the kind of listing (e.g. "org", "trace", "multi")
+ * @param scope - Scoping string (e.g. org slug, "org/project", sorted target fingerprint)
+ * @param params - Optional extra segments. Only defined values are included;
+ *   each value is escaped via {@link escapeContextKeyValue}.
+ * @returns Composite context key string
+ *
+ * @example
+ * // Simple org-scoped key (equivalent to legacy buildOrgContextKey)
+ * buildPaginationContextKey("org", "my-org")
+ * // → "host:https://sentry.io|type:org:my-org"
+ *
+ * // Trace list with sort + query
+ * buildPaginationContextKey("trace", "my-org/my-project", { sort: "date", q: "GET" })
+ * // → "host:https://sentry.io|type:trace:my-org/my-project|sort:date|q:GET"
+ */
+export function buildPaginationContextKey(
+  type: string,
+  scope: string,
+  params?: Record<string, string | undefined>
+): string {
+  let key = `host:${getApiBaseUrl()}|type:${type}:${scope}`;
+  if (params) {
+    for (const [name, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        key += `|${name}:${escapeContextKeyValue(value)}`;
+      }
+    }
+  }
+  return key;
+}
+
+/**
  * Build a context key for org-scoped pagination cursor storage.
  *
  * Encodes the API base URL and org slug so cursors from different hosts or
@@ -128,7 +166,7 @@ export function escapeContextKeyValue(value: string): string {
  * @returns Composite context key string
  */
 export function buildOrgContextKey(org: string): string {
-  return `host:${getApiBaseUrl()}|type:org:${org}`;
+  return buildPaginationContextKey("org", org);
 }
 
 /**

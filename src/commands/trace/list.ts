@@ -8,8 +8,8 @@ import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
+  buildPaginationContextKey,
   clearPaginationCursor,
-  escapeContextKeyValue,
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
@@ -20,10 +20,10 @@ import {
 } from "../../lib/formatters/index.js";
 import {
   buildListCommand,
+  LIST_CURSOR_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import { getApiBaseUrl } from "../../lib/sentry-client.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -52,31 +52,6 @@ const COMMAND_NAME = "trace list";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "trace-list";
-
-/** Matches strings that are all digits — used to detect invalid cursor values */
-const ALL_DIGITS_RE = /^\d+$/;
-
-/**
- * Build a context key for pagination cursor storage.
- *
- * Encodes the API host, org, project, sort, and query so cursors from
- * different searches are never mixed.
- */
-function buildContextKey(
-  org: string,
-  project: string,
-  flags: Pick<ListFlags, "sort" | "query">
-): string {
-  const host = getApiBaseUrl();
-  const escapedQuery = flags.query
-    ? escapeContextKeyValue(flags.query)
-    : undefined;
-  return (
-    `host:${host}|type:trace:${org}/${project}` +
-    `|sort:${flags.sort}` +
-    (escapedQuery ? `|q:${escapedQuery}` : "")
-  );
-}
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */
 function nextPageHint(org: string, project: string, flags: ListFlags): string {
@@ -160,22 +135,7 @@ export const listCommand = buildListCommand("trace", {
         brief: "Sort by: date, duration",
         default: "date" as const,
       },
-      cursor: {
-        kind: "parsed",
-        parse: (value: string) => {
-          if (value === "last") {
-            return value;
-          }
-          if (ALL_DIGITS_RE.test(value)) {
-            throw new Error(
-              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
-            );
-          }
-          return value;
-        },
-        brief: 'Pagination cursor (use "last" to continue from previous page)',
-        optional: true,
-      },
+      cursor: LIST_CURSOR_FLAG,
       json: {
         kind: "boolean",
         brief: "Output as JSON",
@@ -200,7 +160,10 @@ export const listCommand = buildListCommand("trace", {
     setContext([org], [project]);
 
     // Build context key and resolve cursor for pagination
-    const contextKey = buildContextKey(org, project, flags);
+    const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
+      sort: flags.sort,
+      q: flags.query,
+    });
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
     const { data: traces, nextCursor } = await listTransactions(org, project, {
