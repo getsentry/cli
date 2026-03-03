@@ -50,7 +50,8 @@ function nextPhase(
 
 async function handleSuspendedStep(
   ctx: StepContext,
-  stepPhases: Map<string, number>
+  stepPhases: Map<string, number>,
+  stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
   const { payload, stepId, spin, options } = ctx;
   const { type: payloadType, operation } = payload as {
@@ -65,9 +66,14 @@ async function handleSuspendedStep(
 
     const localResult = await handleLocalOp(payload as LocalOpPayload, options);
 
+    const history = stepHistory.get(stepId) ?? [];
+    history.push(localResult);
+    stepHistory.set(stepId, history);
+
     return {
       ...localResult,
       _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
+      _prevPhases: history.slice(0, -1),
     };
   }
 
@@ -171,6 +177,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   }
 
   const stepPhases = new Map<string, number>();
+  const stepHistory = new Map<string, Record<string, unknown>[]>();
 
   try {
     while (result.status === "suspended") {
@@ -188,7 +195,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
       const resumeData = await handleSuspendedStep(
         { payload: extracted.payload, stepId: extracted.stepId, spin, options },
-        stepPhases
+        stepPhases,
+        stepHistory
       );
 
       result = (await run.resumeAsync({
