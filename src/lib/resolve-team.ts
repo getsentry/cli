@@ -202,7 +202,7 @@ export async function buildOrgNotFoundError(
     throw new ResolutionError(
       `Organization '${orgSlug}'`,
       `not found (did you mean '${effectiveOrg}'?)`,
-      `${usageHint} --team <team-slug>`,
+      usageHint,
       [`Try using '${effectiveOrg}' as the org slug instead of '${orgSlug}'`]
     );
   }
@@ -220,7 +220,7 @@ export async function buildOrgNotFoundError(
   throw new ResolutionError(
     `Organization '${orgSlug}'`,
     "not found",
-    `${usageHint} --team <team-slug>`,
+    usageHint,
     suggestions
   );
 }
