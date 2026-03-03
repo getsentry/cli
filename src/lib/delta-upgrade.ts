@@ -17,7 +17,8 @@
  * - Any error occurs during patch download or application
  */
 
-import { chmodSync } from "node:fs";
+import { unlinkSync } from "node:fs";
+
 import { applyPatch } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import {
@@ -621,9 +622,12 @@ export async function resolveNightlyDelta(
 ): Promise<string | null> {
   const token = await getAnonymousToken();
 
-  // Get the .gz layer size from the nightly manifest for threshold
+  // Get the .gz layer size from the target version's manifest for threshold.
+  // Use the versioned tag (nightly-<version>) so the threshold reflects the
+  // actual binary being upgraded to, not the latest rolling nightly.
   const binaryName = getPlatformBinaryName();
-  const nightlyManifest = await fetchManifest(token, "nightly");
+  const targetTag = `nightly-${targetVersion}`;
+  const nightlyManifest = await fetchManifest(token, targetTag);
   const gzLayer = nightlyManifest.layers.find((l) => {
     const title = l.annotations?.["org.opencontainers.image.title"];
     return title === `${binaryName}.gz`;
@@ -642,15 +646,31 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  return applyPatchChain(chain, oldBinaryPath, destPath);
+  return await applyPatchChain(chain, oldBinaryPath, destPath);
+}
+
+/** Remove intermediate patching files, ignoring errors. */
+function cleanupIntermediates(destPath: string): void {
+  for (const suffix of [".patching.a", ".patching.b"]) {
+    try {
+      unlinkSync(`${destPath}${suffix}`);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 /**
  * Apply a resolved patch chain sequentially and verify the result.
  *
  * For single-patch chains, applies directly from old binary to dest.
- * For multi-patch chains, uses an intermediate temp file: each step
- * produces a new file that becomes the input for the next step.
+ * For multi-patch chains, alternates between two intermediate files
+ * so that read (mmap) and write never target the same path — writing
+ * to the mmap source would truncate it and corrupt the output.
+ *
+ * Does **not** set executable permissions — the caller
+ * (`downloadBinaryToTemp`) handles that uniformly for both delta
+ * and full-download paths.
  *
  * @param chain - Resolved patch chain with patches and expected hash
  * @param oldBinaryPath - Path to the original binary
@@ -666,8 +686,10 @@ export async function applyPatchChain(
   let currentOldPath = oldBinaryPath;
   let sha256 = "";
 
-  // For multi-step chains, intermediate results go to destPath with a step suffix
-  const intermediatePath = `${destPath}.patching`;
+  // Alternate between two intermediate paths to avoid reading and writing
+  // the same file (mmap'd read + writer truncation = corruption).
+  const intermediateA = `${destPath}.patching.a`;
+  const intermediateB = `${destPath}.patching.b`;
 
   for (let i = 0; i < chain.patches.length; i++) {
     const patch = chain.patches[i];
@@ -675,24 +697,19 @@ export async function applyPatchChain(
       throw new Error(`Missing patch at index ${i}`);
     }
     const isLast = i === chain.patches.length - 1;
-    const outputPath = isLast ? destPath : intermediatePath;
+    const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
+    const outputPath = isLast ? destPath : intermediate;
 
     sha256 = await applyPatch(currentOldPath, patch.data, outputPath);
 
-    // For multi-step: the output of this step becomes the input for the next
     if (!isLast) {
-      currentOldPath = intermediatePath;
+      currentOldPath = outputPath;
     }
   }
 
-  // Clean up intermediate file if it exists
+  // Clean up intermediate files
   if (chain.patches.length > 1) {
-    try {
-      const { unlinkSync: unlink } = await import("node:fs");
-      unlink(intermediatePath);
-    } catch {
-      // Ignore cleanup errors
-    }
+    cleanupIntermediates(destPath);
   }
 
   // Verify the final SHA-256 matches
@@ -700,11 +717,6 @@ export async function applyPatchChain(
     throw new Error(
       `SHA-256 mismatch after patching: got ${sha256}, expected ${chain.expectedSha256}`
     );
-  }
-
-  // Set executable permission (Unix only)
-  if (process.platform !== "win32") {
-    chmodSync(destPath, 0o755);
   }
 
   return sha256;

@@ -915,7 +915,7 @@ describe("resolveStableChain", () => {
   ): void {
     mockFetch(async (url) => {
       const urlStr = String(url);
-      if (urlStr.includes("api.github.com")) {
+      if (urlStr.startsWith("https://api.github.com/")) {
         return new Response(JSON.stringify(releases), { status: 200 });
       }
       const patchData = patches.get(urlStr);
@@ -1371,7 +1371,8 @@ describe("applyPatchChain", () => {
     // the cleanup logic works by checking intermediate files don't leak.
     const oldPath = join(fixturesDir, "small-old.bin");
     const destPath = tempFile("multi-chain-out.bin");
-    const intermediatePath = `${destPath}.patching`;
+    const intermediateA = `${destPath}.patching.a`;
+    const intermediateB = `${destPath}.patching.b`;
     const patchData = await Bun.file(
       join(fixturesDir, "small.trdiff10")
     ).bytes();
@@ -1405,19 +1406,17 @@ describe("applyPatchChain", () => {
       if (existsSync(destPath)) {
         unlinkSync(destPath);
       }
-      if (existsSync(intermediatePath)) {
-        unlinkSync(intermediatePath);
+      for (const p of [intermediateA, intermediateB]) {
+        if (existsSync(p)) {
+          unlinkSync(p);
+        }
       }
     }
   });
 
-  test("sets executable permission on output (Unix)", async () => {
-    if (process.platform === "win32") {
-      return; // Skip on Windows
-    }
-
+  test("creates output file that is readable", async () => {
     const oldPath = join(fixturesDir, "small-old.bin");
-    const destPath = tempFile("perms-out.bin");
+    const destPath = tempFile("output-readable.bin");
     const patchData = await Bun.file(
       join(fixturesDir, "small.trdiff10")
     ).bytes();
@@ -1443,7 +1442,6 @@ describe("applyPatchChain", () => {
       await applyPatchChain(chain, oldPath, destPath);
 
       const stat = Bun.file(destPath);
-      // File should exist and be readable
       expect(await stat.exists()).toBe(true);
     } finally {
       if (existsSync(destPath)) {

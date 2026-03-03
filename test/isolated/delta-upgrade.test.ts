@@ -133,7 +133,7 @@ describe("resolveStableDelta", () => {
 
     mockFetch(async (url) => {
       const urlStr = String(url);
-      if (urlStr.includes("api.github.com")) {
+      if (urlStr.startsWith("https://api.github.com/")) {
         return new Response(JSON.stringify(releases), { status: 200 });
       }
       if (urlStr === patchUrl) {
@@ -198,7 +198,7 @@ describe("resolveNightlyDelta", () => {
           status: 200,
         });
       }
-      if (urlStr.includes("/manifests/nightly")) {
+      if (urlStr.includes("/manifests/nightly-")) {
         return new Response(
           JSON.stringify({
             schemaVersion: 2,
@@ -250,7 +250,7 @@ describe("resolveNightlyDelta", () => {
           status: 200,
         });
       }
-      if (urlStr.includes("/manifests/nightly")) {
+      if (urlStr.includes("/manifests/nightly-")) {
         return new Response(
           JSON.stringify({
             schemaVersion: 2,
@@ -372,7 +372,7 @@ describe("attemptDeltaUpgrade", () => {
     // Return garbage patch data
     mockFetch(async (url) => {
       const urlStr = String(url);
-      if (urlStr.includes("api.github.com")) {
+      if (urlStr.startsWith("https://api.github.com/")) {
         return new Response(JSON.stringify(releases), { status: 200 });
       }
       if (urlStr === patchUrl) {
