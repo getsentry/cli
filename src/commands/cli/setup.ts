@@ -12,7 +12,10 @@ import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
 import { determineInstallDir, installBinary } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
-import { installCompletions } from "../../lib/completions.js";
+import {
+  type CompletionLocation,
+  installCompletions,
+} from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
@@ -131,25 +134,21 @@ async function handlePathModification(
  * so this is a useful fallback when the user's shell isn't directly supported.
  *
  * @param pathEnv - The PATH to search for bash, forwarded from the process env.
+ * @returns The completion location if bash is available, null otherwise.
  */
-async function tryBashCompletionFallback(
+function tryBashCompletionFallback(
   homeDir: string,
   xdgDataHome: string | undefined,
   pathEnv: string | undefined
-): Promise<string | null> {
+): Promise<CompletionLocation | null> {
   if (!isBashAvailable(pathEnv)) {
-    return null;
+    return Promise.resolve(null);
   }
 
-  const fallback = await installCompletions("bash", homeDir, xdgDataHome);
-  if (!fallback) {
-    // Defensive: installCompletions returns null only if the shell type has no
-    // completion script or path configured. "bash" is always supported, but
-    // we guard here in case that changes in future.
-    return null;
-  }
-  const action = fallback.created ? "Installed" : "Updated";
-  return `      ${action} bash completions as a fallback: ${fallback.path}`;
+  // Defensive: installCompletions returns null only if the shell type has no
+  // completion script or path configured. "bash" is always supported, but
+  // we guard here in case that changes in future.
+  return installCompletions("bash", homeDir, xdgDataHome);
 }
 
 /**
@@ -158,6 +157,10 @@ async function tryBashCompletionFallback(
  * For unsupported shells (xonsh, nushell, etc.), falls back to installing
  * bash completions if bash is available on the system. Uses the provided
  * PATH env to check for bash so the call is testable without side effects.
+ *
+ * Only produces output when completions are freshly created. Subsequent
+ * runs (e.g. after upgrade) silently update the file without printing,
+ * avoiding noisy repeated messages.
  */
 async function handleCompletions(
   shell: ShellInfo,
@@ -168,8 +171,12 @@ async function handleCompletions(
   const location = await installCompletions(shell.type, homeDir, xdgDataHome);
 
   if (location) {
-    const action = location.created ? "Installed to" : "Updated";
-    const lines = [`Completions: ${action} ${location.path}`];
+    // Silently updated — no need to tell the user on every upgrade
+    if (!location.created) {
+      return [];
+    }
+
+    const lines = [`Completions: Installed to ${location.path}`];
 
     // Zsh may need fpath hint
     if (shell.type === "zsh") {
@@ -186,20 +193,26 @@ async function handleCompletions(
     return [];
   }
 
-  const fallbackMsg = await tryBashCompletionFallback(
+  const fallback = await tryBashCompletionFallback(
     homeDir,
     xdgDataHome,
     pathEnv
   );
 
-  if (fallbackMsg) {
+  if (fallback) {
+    // Bash fallback was silently updated — nothing new to report
+    if (!fallback.created) {
+      return [];
+    }
+
     return [
       `Completions: Your shell (${shell.name}) is not directly supported`,
-      fallbackMsg,
+      `      Installed bash completions as a fallback: ${fallback.path}`,
     ];
   }
 
-  return [`Completions: Not supported for ${shell.name} shell`];
+  // No completions possible and nothing actionable — stay silent
+  return [];
 }
 
 /**
