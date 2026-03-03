@@ -11,6 +11,8 @@ import {
   listIssuesPaginated,
   listRepositoriesPaginated,
   listTeamsPaginated,
+  listTraceLogs,
+  listTransactions,
   rawApiRequest,
 } from "../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
@@ -1342,5 +1344,234 @@ describe("listIssuesPaginated", () => {
     const query = url.searchParams.get("query") ?? "";
     expect(query).toContain("is:unresolved");
     expect(query).not.toContain("project:my-proj");
+  });
+});
+
+describe("listTransactions", () => {
+  const transactionData = {
+    data: [
+      {
+        trace: "aaaa1111bbbb2222cccc3333dddd4444",
+        id: "evt001",
+        transaction: "GET /api/users",
+        timestamp: "2025-01-30T14:32:15+00:00",
+        "transaction.duration": 245,
+        project: "my-project",
+      },
+    ],
+    meta: { fields: { trace: "string" } },
+  };
+
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns data and nextCursor from Link header", async () => {
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        return new Response(JSON.stringify(transactionData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/events/>; rel="next"; results="true"; cursor="1735689600:0:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTransactions("my-org", "my-project");
+    expect(Array.isArray(result.data)).toBe(true);
+    expect(result.data).toHaveLength(1);
+    expect(result.nextCursor).toBe("1735689600:0:0");
+  });
+
+  test("returns no nextCursor when link header has results=false", async () => {
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        return new Response(JSON.stringify(transactionData), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            link: '<https://sentry.io/api/0/events/>; rel="next"; results="false"; cursor="1735689600:1:0"',
+          },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTransactions("my-org", "my-project");
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("passes cursor, sort, limit, and query as params", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify(transactionData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await listTransactions("my-org", "my-project", {
+      cursor: "1735689600:0:0",
+      sort: "duration",
+      limit: 50,
+      query: "transaction:GET",
+    });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("cursor")).toBe("1735689600:0:0");
+    expect(url.searchParams.get("sort")).toBe("-transaction.duration");
+    expect(url.searchParams.get("per_page")).toBe("50");
+    expect(url.searchParams.get("query")).toContain("transaction:GET");
+  });
+
+  test("uses project query param for numeric project IDs", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify(transactionData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await listTransactions("my-org", "12345");
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("project")).toBe("12345");
+    // Should NOT include project:12345 in the query
+    const query = url.searchParams.get("query");
+    expect(query).toBeNull();
+  });
+
+  test("uses project:slug in query for non-numeric project slugs", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify(transactionData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await listTransactions("my-org", "my-project");
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("project")).toBeNull();
+    expect(url.searchParams.get("query")).toContain("project:my-project");
+  });
+});
+
+describe("listTraceLogs", () => {
+  const traceLogsData = {
+    data: [
+      {
+        id: "log001",
+        "project.id": 123,
+        trace: "aaaa1111bbbb2222cccc3333dddd4444",
+        severity_number: 9,
+        severity: "info",
+        timestamp: "2025-01-30T14:32:15+00:00",
+        timestamp_precise: 1_738_247_535_000_000_000,
+        message: "Request received",
+      },
+    ],
+    meta: { fields: { id: "string" } },
+  };
+
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns trace log entries", async () => {
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        return new Response(JSON.stringify(traceLogsData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTraceLogs(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toHaveLength(1);
+    expect(result[0].severity).toBe("info");
+  });
+
+  test("passes traceId, statsPeriod, limit, and query as params", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify(traceLogsData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await listTraceLogs("my-org", "aaaa1111bbbb2222cccc3333dddd4444", {
+      statsPeriod: "7d",
+      limit: 100,
+      query: "severity:error",
+    });
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("traceId")).toBe(
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(url.searchParams.get("statsPeriod")).toBe("7d");
+    expect(url.searchParams.get("per_page")).toBe("100");
+    expect(url.searchParams.get("query")).toBe("severity:error");
+  });
+
+  test("defaults statsPeriod to 14d when not specified", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        capturedUrl = req.url;
+        return new Response(JSON.stringify(traceLogsData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await listTraceLogs("my-org", "aaaa1111bbbb2222cccc3333dddd4444");
+
+    const url = new URL(capturedUrl);
+    expect(url.searchParams.get("statsPeriod")).toBe("14d");
   });
 });

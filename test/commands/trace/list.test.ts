@@ -475,4 +475,59 @@ describe("listCommand.func", () => {
     const callArgs = listTransactionsSpy.mock.calls[0];
     expect(callArgs[2].cursor).toBeUndefined();
   });
+
+  test("shows 'try next page' hint when no traces on page but hasMore", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: [],
+      nextCursor: "1735689600:0:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: false },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("No traces on this page");
+    expect(output).toContain("-c last");
+  });
+
+  test("next page hint includes query flag when --query is set", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: sampleTraces,
+      nextCursor: "1735689600:0:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: false, query: "transaction:POST" },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain('-q "transaction:POST"');
+    expect(output).toContain("-c last");
+  });
+
+  test("JSON output with no nextCursor has hasMore false", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: sampleTraces });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: true },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.hasMore).toBe(false);
+    expect(parsed.nextCursor).toBeUndefined();
+  });
 });
