@@ -620,6 +620,15 @@ export class StreamingTable {
       minWidths,
       shrinkable,
     });
+
+    // Expand last column to fill remaining terminal width — hint rows
+    // underestimate the true content width, so absorb the slack.
+    const totalFitted = this.columnWidths.reduce((s, w) => s + w, 0);
+    const lastIdx = this.columnWidths.length - 1;
+    if (totalFitted < maxContentWidth && lastIdx >= 0) {
+      this.columnWidths[lastIdx] =
+        (this.columnWidths[lastIdx] ?? 0) + (maxContentWidth - totalFitted);
+    }
   }
 
   /**

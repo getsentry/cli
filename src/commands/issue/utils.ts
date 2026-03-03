@@ -19,6 +19,7 @@ import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { poll } from "../../lib/polling.js";
+import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { isAllDigits } from "../../lib/utils.js";
@@ -328,16 +329,18 @@ export async function resolveIssue(
 
     case "explicit": {
       // Full context: org + project + suffix
+      const org = await resolveEffectiveOrg(parsed.org);
       const fullShortId = expandToFullShortId(parsed.suffix, parsed.project);
-      const issue = await getIssueByShortId(parsed.org, fullShortId);
-      return { org: parsed.org, issue };
+      const issue = await getIssueByShortId(org, fullShortId);
+      return { org, issue };
     }
 
     case "explicit-org-numeric": {
       // Org + numeric ID — use org-scoped endpoint for proper region routing.
+      const org = await resolveEffectiveOrg(parsed.org);
       try {
-        const issue = await getIssueInOrg(parsed.org, parsed.numericId);
-        return { org: parsed.org, issue };
+        const issue = await getIssueInOrg(org, parsed.numericId);
+        return { org, issue };
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           throw new ResolutionError(
@@ -345,7 +348,7 @@ export async function resolveIssue(
             "not found",
             commandHint,
             [
-              `No issue with numeric ID ${parsed.numericId} found in org '${parsed.org}' — you may not have access, or it may have been deleted.`,
+              `No issue with numeric ID ${parsed.numericId} found in org '${org}' — you may not have access, or it may have been deleted.`,
               `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
             ]
           );
@@ -354,9 +357,11 @@ export async function resolveIssue(
       }
     }
 
-    case "explicit-org-suffix":
+    case "explicit-org-suffix": {
       // Org + suffix only - ambiguous without project, always errors
-      return resolveExplicitOrgSuffix(parsed.org, parsed.suffix, commandHint);
+      const org = await resolveEffectiveOrg(parsed.org);
+      return resolveExplicitOrgSuffix(org, parsed.suffix, commandHint);
+    }
 
     case "project-search":
       // Project slug + suffix - search across orgs

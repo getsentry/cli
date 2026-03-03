@@ -209,3 +209,26 @@ export function createDsnFingerprint(dsns: DetectedDsn[]): string {
   // Deduplicate (same DSN might be detected from multiple sources)
   return [...new Set(keys)].join(",");
 }
+
+/**
+ * Normalize a DSN-style org identifier to a numeric org ID.
+ *
+ * DSN hosts encode org IDs as `oNNNNN` (e.g., `o1081365` from
+ * `o1081365.ingest.us.sentry.io`). The Sentry API accepts numeric IDs
+ * via `organization_id_or_slug` but not the `o`-prefixed DSN form.
+ *
+ * Reuses `extractOrgIdFromHost` by constructing a synthetic ingest hostname
+ * from the bare identifier, sharing the same pattern logic.
+ *
+ * @param org - Raw org identifier (e.g. `"o1081365"` or `"my-org"`)
+ * @returns Numeric org ID if input matches `oNNNNN`, otherwise unchanged
+ *
+ * @example
+ * stripDsnOrgPrefix("o1081365")  // "1081365"
+ * stripDsnOrgPrefix("o123")      // "123"
+ * stripDsnOrgPrefix("sentry")    // "sentry"  (no change)
+ * stripDsnOrgPrefix("organic")   // "organic" (no change — not all digits after 'o')
+ */
+export function stripDsnOrgPrefix(org: string): string {
+  return extractOrgIdFromHost(`${org}.ingest.sentry.io`) ?? org;
+}

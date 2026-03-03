@@ -10,6 +10,7 @@ import { buildOrgAwareAliases } from "../../lib/alias.js";
 import {
   API_MAX_PER_PAGE,
   findProjectsBySlug,
+  getProject,
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
@@ -55,8 +56,10 @@ import {
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  fetchProjectId,
   type ResolvedTarget,
   resolveAllTargets,
+  toNumericId,
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type {
@@ -282,22 +285,46 @@ async function resolveTargetsFromParsedArg(
   cwd: string
 ): Promise<TargetResolutionResult> {
   switch (parsed.type) {
-    case "auto-detect":
+    case "auto-detect": {
       // Use existing resolution logic (DSN detection, config defaults)
-      return resolveAllTargets({ cwd, usageHint: USAGE_HINT });
+      const result = await resolveAllTargets({ cwd, usageHint: USAGE_HINT });
+      // DSN-detected and directory-inferred targets already carry a projectId.
+      // Env var / config-default paths return targets without one, so enrich
+      // them now using the project API. Any failure silently falls back to
+      // slug-based querying — the target was already resolved, so we never
+      // surface a ResolutionError here (that's only for the explicit case).
+      result.targets = await Promise.all(
+        result.targets.map(async (t) => {
+          if (t.projectId !== undefined) {
+            return t;
+          }
+          try {
+            const info = await getProject(t.org, t.project);
+            const id = toNumericId(info.id);
+            return id !== undefined ? { ...t, projectId: id } : t;
+          } catch {
+            return t;
+          }
+        })
+      );
+      return result;
+    }
 
-    case "explicit":
-      // Single explicit target
+    case "explicit": {
+      // Single explicit target — fetch project ID for API query param
+      const projectId = await fetchProjectId(parsed.org, parsed.project);
       return {
         targets: [
           {
             org: parsed.org,
             project: parsed.project,
+            projectId,
             orgDisplay: parsed.org,
             projectDisplay: parsed.project,
           },
         ],
       };
+    }
 
     case "org-all": {
       // List all projects in the specified org
@@ -305,6 +332,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = projects.map((p) => ({
         org: parsed.org,
         project: p.slug,
+        projectId: toNumericId(p.id),
         orgDisplay: parsed.org,
         projectDisplay: p.name,
       }));
@@ -341,6 +369,7 @@ async function resolveTargetsFromParsedArg(
       const targets: ResolvedTarget[] = matches.map((m) => ({
         org: m.orgSlug,
         project: m.slug,
+        projectId: toNumericId(m.id),
         orgDisplay: m.orgSlug,
         projectDisplay: m.name,
       }));
@@ -386,7 +415,7 @@ async function fetchIssuesForTarget(
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
-      options
+      { ...options, projectId: target.projectId }
     );
     return {
       success: true,
@@ -928,19 +957,22 @@ async function handleResolvedTargets(
   }
 
   const validResults: IssueListResult[] = [];
-  const failures: Error[] = [];
+  const failures: { target: ResolvedTarget; error: Error }[] = [];
 
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: index within bounds
+    const result = results[i]!;
     if (result.success) {
       validResults.push(result.data);
     } else {
-      failures.push(result.error);
+      // biome-ignore lint/style/noNonNullAssertion: index within bounds
+      failures.push({ target: activeTargets[i]!, error: result.error });
     }
   }
 
   if (validResults.length === 0 && failures.length > 0) {
     // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
-    const first = failures[0]!;
+    const { error: first } = failures[0]!;
     const prefix = `Failed to fetch issues from ${targets.length} project(s)`;
 
     // Propagate ApiError so telemetry sees the original status code
@@ -997,10 +1029,14 @@ async function handleResolvedTargets(
       hasMore: hasMoreToShow,
     };
     if (failures.length > 0) {
-      output.errors = failures.map((e) =>
+      output.errors = failures.map(({ target: t, error: e }) =>
         e instanceof ApiError
-          ? { status: e.status, message: e.message }
-          : { message: e.message }
+          ? {
+              project: `${t.org}/${t.project}`,
+              status: e.status,
+              message: e.message,
+            }
+          : { project: `${t.org}/${t.project}`, message: e.message }
       );
     }
     writeJson(stdout, output);
@@ -1008,9 +1044,12 @@ async function handleResolvedTargets(
   }
 
   if (failures.length > 0) {
+    const failedNames = failures
+      .map(({ target: t }) => `${t.org}/${t.project}`)
+      .join(", ");
     stderr.write(
       muted(
-        `\nNote: Failed to fetch issues from ${failures.length} project(s). Showing results from ${validResults.length} project(s).\n`
+        `\nNote: Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).\n`
       )
     );
   }

@@ -90,6 +90,18 @@ function createContext() {
   return { context, stdout, stderr };
 }
 
+/** Return a mock project response if the URL matches the default test project endpoint, or null. */
+function mockDefaultProject(url: string): Response | null {
+  if (url.includes("/api/0/projects/test-org/test-project/")) {
+    return Response.json({
+      id: "789",
+      slug: "test-project",
+      name: "Test Project",
+    });
+  }
+  return null;
+}
+
 /** Build a mock issue response */
 function mockIssue(overrides?: Record<string, unknown>) {
   return {
@@ -114,6 +126,8 @@ describe("issue list: error propagation", () => {
     // listIssues hits: /api/0/organizations/test-org/issues/?query=project:test-project
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(
           JSON.stringify({ detail: "Invalid query: unknown field" }),
@@ -140,6 +154,8 @@ describe("issue list: error propagation", () => {
   test("throws ApiError with 404 status when project not found", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify({ detail: "Project not found" }), {
           status: 404,
@@ -165,6 +181,8 @@ describe("issue list: error propagation", () => {
   test("throws ApiError with 429 status on rate limiting", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify({ detail: "Too many requests" }), {
           status: 429,
@@ -190,6 +208,8 @@ describe("issue list: error propagation", () => {
   test("preserves ApiError detail from original error", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(
           JSON.stringify({ detail: "Invalid search query: bad syntax" }),
@@ -297,6 +317,7 @@ describe("issue list: partial failure handling", () => {
     expect(output.data.length).toBe(1);
     expect(output.errors.length).toBe(1);
     expect(output.errors[0].status).toBe(400);
+    expect(output.errors[0].project).toBe("org-two/myproj");
   });
 
   test("stderr warning on partial failures in human output", async () => {
@@ -363,13 +384,17 @@ describe("issue list: partial failure handling", () => {
       "myproj"
     );
 
-    expect(stderr.output).toContain("Failed to fetch issues from 1 project(s)");
+    expect(stderr.output).toContain(
+      "Failed to fetch issues from org-two/myproj"
+    );
     expect(stderr.output).toContain("Showing results from 1 project(s)");
   });
 
   test("JSON output wraps in {data, hasMore} object", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
       if (req.url.includes("/issues/")) {
         return new Response(JSON.stringify([mockIssue()]), {
           status: 200,
@@ -432,7 +457,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     project: { slug: "test-proj" },
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
     getPaginationCursorSpy = spyOn(paginationDb, "getPaginationCursor");
     setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
@@ -440,6 +465,9 @@ describe("issue list: org-all mode (cursor pagination)", () => {
 
     setPaginationCursorSpy.mockReturnValue(undefined);
     clearPaginationCursorSpy.mockReturnValue(undefined);
+
+    // Pre-populate org cache so resolveEffectiveOrg hits the fast path
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
@@ -464,17 +492,29 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       nextCursor: undefined,
     });
 
+    // The explicit target path calls fetchProjectId → getProject before listing.
+    // Spy on getProject so we don't hit the network.
+    const getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+      id: "1",
+      slug: "test-project",
+      name: "Test Project",
+    } as Awaited<ReturnType<typeof apiClient.getProject>>);
+
     const { context } = createOrgAllContext();
 
-    // Using a real-looking cursor value (not "last") bypasses DB lookup.
-    // The command should resolve, fetch, and complete without throwing.
-    await expect(
-      orgAllFunc.call(
-        context,
-        { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
-        "test-org/test-project"
-      )
-    ).resolves.toBeUndefined();
+    try {
+      // Using a real-looking cursor value (not "last") bypasses DB lookup.
+      // The command should resolve, fetch, and complete without throwing.
+      await expect(
+        orgAllFunc.call(
+          context,
+          { limit: 10, sort: "date", json: false, cursor: "1735689600:0:0" },
+          "test-org/test-project"
+        )
+      ).resolves.toBeUndefined();
+    } finally {
+      getProjectSpy.mockRestore();
+    }
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
@@ -840,6 +880,15 @@ describe("issue list: compound cursor resume", () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = req.url;
+
+      // fetchProjectId enrichment for explicit target
+      if (url.includes("/api/0/projects/test-org/proj-a/")) {
+        return Response.json({
+          id: "100",
+          slug: "proj-a",
+          name: "Proj A",
+        });
+      }
 
       // listIssues for proj-a: resumed from cursor
       if (url.includes("/organizations/test-org/issues/")) {
