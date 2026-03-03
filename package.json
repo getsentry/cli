@@ -65,7 +65,7 @@
     "lint:fix": "bunx ultracite fix",
     "test": "bun run test:unit && bun run test:isolated",
     "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
-    "test:isolated": "rm -f coverage/_iso.info && for f in $(find test/isolated -name '*.test.ts' | sort); do bun test \"$f\" --coverage --coverage-reporter=lcov || exit 1; cat coverage/lcov.info >> coverage/_iso.info; done && bash script/merge-lcov.sh coverage/_iso.info > coverage/lcov.info && rm coverage/_iso.info",
+    "test:isolated": "bun test test/isolated",
     "test:e2e": "bun test test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
     "generate:skill": "bun run script/generate-skill.ts",
