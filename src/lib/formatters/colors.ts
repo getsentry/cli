@@ -9,7 +9,7 @@ import type { IssueLevel, IssueStatus } from "../../types/index.js";
 
 // Color Palette (Full Sentinel palette)
 
-const COLORS = {
+export const COLORS = {
   red: "#fe4144",
   green: "#83da90",
   yellow: "#FDB81B",
@@ -35,6 +35,28 @@ export const bold = (text: string): string => chalk.bold(text);
 export const underline = (text: string): string => chalk.underline(text);
 export const boldUnderline = (text: string): string =>
   chalk.bold.underline(text);
+
+/**
+ * Wrap text in an OSC 8 terminal hyperlink.
+ *
+ * On terminals that support OSC 8 (iTerm2, Windows Terminal, VS Code,
+ * most modern emulators), the text becomes clickable. On terminals that
+ * don't, the escape sequences are silently ignored and the text renders
+ * normally.
+ *
+ * `string-width` treats OSC 8 sequences as zero-width, so column sizing
+ * in tables is not affected.
+ *
+ * @param text - Display text
+ * @param url - Target URL
+ * @returns Text wrapped in OSC 8 hyperlink escape sequences
+ */
+export function terminalLink(text: string, url: string): string {
+  // OSC 8 ; params ; URI BEL  text  OSC 8 ; ; BEL
+  // \x1b] opens the OSC sequence; \x07 (BEL) terminates it.
+  // Using BEL instead of ST (\x1b\\) for broad terminal compatibility.
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
 
 // Semantic Helpers
 

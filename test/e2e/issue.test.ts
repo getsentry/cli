@@ -81,9 +81,11 @@ describe("sentry issue list", () => {
     ]);
 
     expect(result.exitCode).toBe(0);
-    // Should be valid JSON array
-    const data = JSON.parse(result.stdout);
-    expect(Array.isArray(data)).toBe(true);
+    // Multi-target mode wraps output in {data, hasMore} object
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed).toHaveProperty("data");
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed).toHaveProperty("hasMore");
   });
 
   test("lists all projects in org with trailing slash", async () => {
@@ -107,8 +109,10 @@ describe("sentry issue list", () => {
     // Should succeed if project exists in any accessible org
     // or fail with a "not found" error if not
     if (result.exitCode === 0) {
-      const data = JSON.parse(result.stdout);
-      expect(Array.isArray(data)).toBe(true);
+      // Multi-target mode wraps output in {data, hasMore} object
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("data");
+      expect(Array.isArray(parsed.data)).toBe(true);
     } else {
       expect(result.stderr + result.stdout).toMatch(/not found|no project/i);
     }

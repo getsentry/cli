@@ -9,9 +9,9 @@
 import { randomBytes } from "node:crypto";
 import { cancel, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
+import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
-import { formatBanner } from "../help.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import {
   MASTRA_API_URL,
@@ -147,10 +147,10 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
-  const run = await workflow.createRun();
 
   const spin = spinner();
 
+  let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
     spin.start("Scanning project...");
@@ -167,6 +167,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       )?.entries ?? [];
 
     spin.message("Connecting to wizard...");
+    run = await workflow.createRun();
     result = (await run.startAsync({
       inputData: { directory, force, yes, dryRun, features, dirListing },
       tracingOptions,
@@ -175,6 +176,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     spin.stop("Connection failed", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
+    process.exitCode = 1;
     return;
   }
 
@@ -185,32 +187,35 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       const stepPath = result.suspended?.at(0) ?? [];
       const stepId: string = stepPath.at(-1) ?? "unknown";
 
-      const payload = extractSuspendPayload(result, stepId);
-      if (!payload) {
+      const extracted = extractSuspendPayload(result, stepId);
+      if (!extracted) {
         spin.stop("Error", 1);
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
+        process.exitCode = 1;
         return;
       }
 
       const resumeData = await handleSuspendedStep(
-        { payload, stepId, spin, options },
+        { payload: extracted.payload, stepId: extracted.stepId, spin, options },
         stepPhases
       );
 
       result = (await run.resumeAsync({
-        step: stepId,
+        step: extracted.stepId,
         resumeData,
         tracingOptions,
       })) as WorkflowRunResult;
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
+      process.exitCode = 1;
       return;
     }
     spin.stop("Cancelled", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
+    process.exitCode = 1;
     return;
   }
 
@@ -225,6 +230,7 @@ function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
   if (hasError) {
     spin.stop("Failed", 1);
     formatError(output);
+    process.exitCode = 1;
   } else {
     spin.stop("Done");
     formatResult(output);
@@ -234,20 +240,20 @@ function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
 function extractSuspendPayload(
   result: WorkflowRunResult,
   stepId: string
-): unknown | undefined {
+): { payload: unknown; stepId: string } | undefined {
   const stepPayload = result.steps?.[stepId]?.suspendPayload;
   if (stepPayload) {
-    return stepPayload;
+    return { payload: stepPayload, stepId };
   }
 
   if (result.suspendPayload) {
-    return result.suspendPayload;
+    return { payload: result.suspendPayload, stepId };
   }
 
   for (const key of Object.keys(result.steps ?? {})) {
     const step = result.steps?.[key];
     if (step?.suspendPayload) {
-      return step.suspendPayload;
+      return { payload: step.suspendPayload, stepId: key };
     }
   }
 

@@ -25,6 +25,8 @@ import {
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
@@ -131,11 +133,13 @@ describe("viewCommand.func", () => {
     };
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

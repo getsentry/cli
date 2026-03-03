@@ -24,6 +24,8 @@ import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
+import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
+import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
   ContextError,
   ResolutionError,
@@ -420,11 +422,12 @@ describe("resolveEventTarget", () => {
 
   const mockStderr = { write: mock(() => true) };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
     findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
     resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
+    await setOrgRegion("acme", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {

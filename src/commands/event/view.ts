@@ -21,6 +21,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
+import { resolveEffectiveOrg } from "../../lib/region.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
@@ -54,11 +55,7 @@ type HumanOutputOptions = {
 function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
   const { event, detectedFrom, spanTreeLines } = options;
 
-  const lines = formatEventDetails(event, `Event ${event.eventID}`);
-
-  // Skip leading empty line for standalone display
-  const output = lines.slice(1);
-  stdout.write(`${output.join("\n")}\n`);
+  stdout.write(`${formatEventDetails(event, `Event ${event.eventID}`)}\n`);
 
   if (spanTreeLines && spanTreeLines.length > 0) {
     stdout.write(`${spanTreeLines.join("\n")}\n`);
@@ -172,13 +169,15 @@ export async function resolveEventTarget(
   const { parsed, eventId, cwd, stderr } = options;
 
   switch (parsed.type) {
-    case ProjectSpecificationType.Explicit:
+    case ProjectSpecificationType.Explicit: {
+      const org = await resolveEffectiveOrg(parsed.org);
       return {
-        org: parsed.org,
+        org,
         project: parsed.project,
         orgDisplay: parsed.org,
         projectDisplay: parsed.project,
       };
+    }
 
     case ProjectSpecificationType.ProjectSearch: {
       const resolved = await resolveProjectBySlug(
@@ -194,8 +193,10 @@ export async function resolveEventTarget(
       };
     }
 
-    case ProjectSpecificationType.OrgAll:
-      return resolveOrgAllTarget(parsed.org, eventId, cwd);
+    case ProjectSpecificationType.OrgAll: {
+      const org = await resolveEffectiveOrg(parsed.org);
+      return resolveOrgAllTarget(org, eventId, cwd);
+    }
 
     case ProjectSpecificationType.AutoDetect:
       return resolveAutoDetectTarget(eventId, cwd, stderr);

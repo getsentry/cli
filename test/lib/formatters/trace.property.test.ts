@@ -259,12 +259,18 @@ describe("property: computeTraceSummary", () => {
   });
 });
 
+/** Strip ANSI escape codes */
+function stripAnsi(str: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI control chars
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 describe("property: formatTraceSummary", () => {
   test("always contains the trace ID", () => {
     fcAssert(
       property(hexId32Arb, spanListArb, (traceId, spans) => {
         const summary = computeTraceSummary(traceId, spans);
-        const output = formatTraceSummary(summary).join("\n");
+        const output = stripAnsi(formatTraceSummary(summary));
         expect(output).toContain(traceId);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -275,33 +281,31 @@ describe("property: formatTraceSummary", () => {
     fcAssert(
       property(hexId32Arb, spanListArb, (traceId, spans) => {
         const summary = computeTraceSummary(traceId, spans);
-        const output = formatTraceSummary(summary).join("\n");
-        expect(output).toContain("Duration:");
+        const output = stripAnsi(formatTraceSummary(summary));
+        expect(output).toContain("Duration");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("always contains Span Count label", () => {
+  test("always contains Spans label", () => {
     fcAssert(
       property(hexId32Arb, spanListArb, (traceId, spans) => {
         const summary = computeTraceSummary(traceId, spans);
-        const output = formatTraceSummary(summary).join("\n");
-        expect(output).toContain("Span Count:");
+        const output = stripAnsi(formatTraceSummary(summary));
+        expect(output).toContain("Spans");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("returns array of strings", () => {
+  test("returns a string", () => {
     fcAssert(
       property(hexId32Arb, spanListArb, (traceId, spans) => {
         const summary = computeTraceSummary(traceId, spans);
         const result = formatTraceSummary(summary);
-        expect(Array.isArray(result)).toBe(true);
-        for (const line of result) {
-          expect(typeof line).toBe("string");
-        }
+        expect(typeof result).toBe("string");
+        expect(result.length).toBeGreaterThan(0);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

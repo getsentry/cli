@@ -5,8 +5,18 @@
  */
 
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
-import { muted } from "./colors.js";
-import { divider, formatRelativeTime } from "./human.js";
+import { formatRelativeTime } from "./human.js";
+import {
+  escapeMarkdownCell,
+  isPlainOutput,
+  mdKvTable,
+  mdRow,
+  mdTableHeader,
+  renderInlineMarkdown,
+  renderMarkdown,
+  stripColorTags,
+} from "./markdown.js";
+import { renderTextTable } from "./text-table.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -40,44 +50,83 @@ export function formatTraceDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
+/** Column headers for the streaming trace table (`:` suffix = right-aligned) */
+const TRACE_TABLE_COLS = ["Trace ID", "Transaction", "Duration:", "When"];
+
 /**
- * Format column header for traces list.
+ * Extract the four cell values for a trace row.
  *
- * @returns Header line with column titles and divider
+ * Shared by {@link formatTraceRow} (streaming) and {@link formatTraceTable}
+ * (batch) so cell formatting stays consistent between the two paths.
+ *
+ * @param item - Transaction list item from the API
+ * @returns `[traceId, transaction, duration, when]` markdown-safe strings
  */
-export function formatTracesHeader(): string {
-  const header = muted(
-    "TRACE ID                          TRANSACTION                    DURATION    WHEN"
-  );
-  return `${header}\n${divider(96)}\n`;
+export function buildTraceRowCells(
+  item: TransactionListItem
+): [string, string, string, string] {
+  return [
+    `\`${item.trace}\``,
+    escapeMarkdownCell(item.transaction || "unknown"),
+    formatTraceDuration(item["transaction.duration"]),
+    formatRelativeTime(item.timestamp),
+  ];
 }
 
-/** Maximum transaction name length before truncation */
-const MAX_TRANSACTION_LENGTH = 30;
-
-/** Column width for trace ID display */
-const TRACE_ID_WIDTH = 32;
-
-/** Column width for duration display */
-const DURATION_WIDTH = 10;
-
 /**
- * Format a single transaction row for the traces list.
+ * Format a single transaction row for streaming output (follow/live mode).
+ *
+ * In plain mode (non-TTY / `SENTRY_PLAIN_OUTPUT=1`): emits a markdown table
+ * row so streamed output composes into a valid CommonMark document.
+ * In rendered mode (TTY): emits ANSI-styled text via `mdRow`.
  *
  * @param item - Transaction list item from the API
  * @returns Formatted row string with newline
  */
 export function formatTraceRow(item: TransactionListItem): string {
-  const traceId = item.trace.slice(0, TRACE_ID_WIDTH).padEnd(TRACE_ID_WIDTH);
-  const transaction = (item.transaction || "unknown")
-    .slice(0, MAX_TRANSACTION_LENGTH)
-    .padEnd(MAX_TRANSACTION_LENGTH);
-  const duration = formatTraceDuration(item["transaction.duration"]).padStart(
-    DURATION_WIDTH
-  );
-  const when = formatRelativeTime(item.timestamp);
+  return mdRow(buildTraceRowCells(item));
+}
 
-  return `${traceId}  ${transaction}  ${duration}  ${when}\n`;
+/**
+ * Format column header for traces list in plain (non-TTY) mode.
+ *
+ * Emits a proper markdown table header + separator row so that
+ * the streamed rows compose into a valid CommonMark document when redirected.
+ * In TTY mode, use StreamingTable for row-by-row output instead.
+ *
+ * @returns Header string (includes trailing newline)
+ */
+export function formatTracesHeader(): string {
+  return `${mdTableHeader(TRACE_TABLE_COLS)}\n`;
+}
+
+/**
+ * Build a rendered markdown table for a batch list of trace transactions.
+ *
+ * Uses {@link buildTraceRowCells} to share cell formatting with
+ * {@link formatTraceRow}. Pre-rendered ANSI codes are preserved through the
+ * pipeline via cli-table3's `string-width`-aware column sizing.
+ *
+ * @param items - Transaction list items from the API
+ * @returns Rendered terminal string with Unicode-bordered table
+ */
+export function formatTraceTable(items: TransactionListItem[]): string {
+  if (isPlainOutput()) {
+    const rows = items
+      .map((item) => mdRow(buildTraceRowCells(item)).trimEnd())
+      .join("\n");
+    return `${stripColorTags(mdTableHeader(TRACE_TABLE_COLS))}\n${rows}\n`;
+  }
+  const headers = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? c.slice(0, -1) : c
+  );
+  const rows = items.map((item) =>
+    buildTraceRowCells(item).map((c) => renderInlineMarkdown(c))
+  );
+  const alignments = TRACE_TABLE_COLS.map((c) =>
+    c.endsWith(":") ? ("right" as const) : ("left" as const)
+  );
+  return renderTextTable(headers, rows, { alignments });
 }
 
 /** Trace summary computed from a span tree */
@@ -200,43 +249,33 @@ export function computeTraceSummary(
   };
 }
 
-/** Minimum width for header separator line */
-const MIN_HEADER_WIDTH = 20;
-
 /**
- * Format trace summary for human-readable display.
+ * Format trace summary for human-readable display as rendered markdown.
  * Shows metadata including root transaction, duration, span count, and projects.
  *
  * @param summary - Computed trace summary
- * @returns Array of formatted lines
+ * @returns Rendered terminal string
  */
-export function formatTraceSummary(summary: TraceSummary): string[] {
-  const lines: string[] = [];
-
-  // Header
-  const headerText = `Trace ${summary.traceId}`;
-  const separatorWidth = Math.max(
-    MIN_HEADER_WIDTH,
-    Math.min(80, headerText.length)
-  );
-  lines.push(headerText);
-  lines.push(muted("═".repeat(separatorWidth)));
-  lines.push("");
+export function formatTraceSummary(summary: TraceSummary): string {
+  const kvRows: [string, string][] = [];
 
   if (summary.rootTransaction) {
-    const opPrefix = summary.rootOp ? `[${summary.rootOp}] ` : "";
-    lines.push(`Root:        ${opPrefix}${summary.rootTransaction}`);
+    const opPrefix = summary.rootOp ? `[\`${summary.rootOp}\`] ` : "";
+    kvRows.push([
+      "Root",
+      `${opPrefix}${escapeMarkdownCell(summary.rootTransaction)}`,
+    ]);
   }
-  lines.push(`Duration:    ${formatTraceDuration(summary.duration)}`);
-  lines.push(`Span Count:  ${summary.spanCount}`);
+  kvRows.push(["Duration", formatTraceDuration(summary.duration)]);
+  kvRows.push(["Spans", String(summary.spanCount)]);
   if (summary.projects.length > 0) {
-    lines.push(`Projects:    ${summary.projects.join(", ")}`);
+    kvRows.push(["Projects", summary.projects.join(", ")]);
   }
   if (Number.isFinite(summary.startTimestamp) && summary.startTimestamp > 0) {
     const date = new Date(summary.startTimestamp * 1000);
-    lines.push(`Started:     ${date.toLocaleString("sv-SE")}`);
+    kvRows.push(["Started", date.toLocaleString("sv-SE")]);
   }
-  lines.push("");
 
-  return lines;
+  const md = `## Trace \`${summary.traceId}\`\n\n${mdKvTable(kvRows)}\n`;
+  return renderMarkdown(md);
 }

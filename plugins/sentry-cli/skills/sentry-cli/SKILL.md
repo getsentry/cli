@@ -207,7 +207,7 @@ List issues in a project
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
-- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
+- `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 
 **Examples:**
 
@@ -354,6 +354,7 @@ Make an authenticated API request
 
 **Flags:**
 - `-X, --method <value> - The HTTP method for the request - (default: "GET")`
+- `-d, --data <value> - Inline JSON body for the request (like curl -d)`
 - `-F, --field <value>... - Add a typed parameter (key=value, key[sub]=value, key[]=value)`
 - `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
 - `-H, --header <value>... - Add a HTTP request header in key:value format`
@@ -586,6 +587,17 @@ View details of a specific trace
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 
+#### `sentry trace logs <args...>`
+
+View logs associated with a trace
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open trace in browser`
+- `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Additional filter query (Sentry search syntax)`
+
 ### Init
 
 Initialize Sentry in your project
@@ -614,7 +626,7 @@ List issues in a project
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
-- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
+- `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 
 ### Orgs
 

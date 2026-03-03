@@ -96,6 +96,13 @@ async function handleMultiSelect(
 
   const optional = available.filter((f) => f !== REQUIRED_FEATURE);
 
+  if (optional.length === 0) {
+    if (hasRequired) {
+      log.info(`${featureLabel(REQUIRED_FEATURE)} is always included.`);
+    }
+    return { features: hasRequired ? [REQUIRED_FEATURE] : [] };
+  }
+
   const hints: string[] = [];
   if (hasRequired) {
     hints.push(
@@ -127,8 +134,11 @@ async function handleConfirm(
   payload: InteractivePayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
+  const isExample =
+    payload.purpose === "add-example" || payload.prompt.includes("example");
+
   if (options.yes) {
-    if (payload.prompt.includes("example")) {
+    if (isExample) {
       log.info("Auto-confirmed: adding example trigger");
       return { addExample: true };
     }
@@ -143,7 +153,7 @@ async function handleConfirm(
 
   const value = abortIfCancelled(confirmed);
 
-  if (payload.prompt.includes("example")) {
+  if (isExample) {
     return { addExample: value };
   }
   return { action: value ? "continue" : "stop" };

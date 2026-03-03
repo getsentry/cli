@@ -27,18 +27,37 @@ import type {
 /**
  * Shell metacharacters that enable chaining, piping, substitution, or redirection.
  * All legitimate install commands are simple single commands that don't need these.
+ *
+ * Ordering matters for error-message accuracy (not correctness): multi-character
+ * operators like `&&` and `||` are checked before their single-character prefixes
+ * (`&`, `|`) so the reported label describes the actual construct the user wrote.
  */
 const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
   [
     { pattern: ";", label: "command chaining (;)" },
-    // Check multi-char operators before single `|` so labels are accurate
+    // Check multi-char operators before single `|` / `&` so labels are accurate
     { pattern: "&&", label: "command chaining (&&)" },
     { pattern: "||", label: "command chaining (||)" },
     { pattern: "|", label: "piping (|)" },
     { pattern: "`", label: "command substitution (`)" },
     { pattern: "$(", label: "command substitution ($()" },
+    { pattern: "(", label: "subshell/grouping (()" },
+    { pattern: ")", label: "subshell/grouping ())" },
+    { pattern: "$", label: "variable/command expansion ($)" },
+    { pattern: "'", label: "single quote (')" },
+    { pattern: '"', label: 'double quote (")' },
+    { pattern: "\\", label: "backslash escape (\\)" },
     { pattern: "\n", label: "newline" },
     { pattern: "\r", label: "carriage return" },
+    { pattern: ">", label: "redirection (>)" },
+    { pattern: "<", label: "redirection (<)" },
+    { pattern: "&", label: "background execution (&)" },
+    // Glob and brace expansion — brace expansion is the real risk
+    // (e.g. `npm install {evil,@sentry/node}`)
+    { pattern: "{", label: "brace expansion ({)" },
+    { pattern: "}", label: "brace expansion (})" },
+    { pattern: "*", label: "glob expansion (*)" },
+    { pattern: "?", label: "glob expansion (?)" },
   ];
 
 const WHITESPACE_RE = /\s+/;
@@ -112,11 +131,16 @@ export function validateCommand(command: string): string | undefined {
     }
   }
 
-  // Layer 2: Block dangerous executables
+  // Layer 2: Block environment variable injection (VAR=value cmd)
   const firstToken = command.trimStart().split(WHITESPACE_RE)[0];
   if (!firstToken) {
     return "Blocked command: empty command";
   }
+  if (firstToken.includes("=")) {
+    return `Blocked command: contains environment variable assignment — "${command}"`;
+  }
+
+  // Layer 3: Block dangerous executables
   const executable = path.basename(firstToken);
   if (BLOCKED_EXECUTABLES.has(executable)) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
@@ -159,6 +183,19 @@ export async function handleLocalOp(
   options: WizardOptions
 ): Promise<LocalOpResult> {
   try {
+    // Validate that the remote-supplied cwd is within the user's project directory
+    const normalizedCwd = path.resolve(payload.cwd);
+    const normalizedDir = path.resolve(options.directory);
+    if (
+      normalizedCwd !== normalizedDir &&
+      !normalizedCwd.startsWith(normalizedDir + path.sep)
+    ) {
+      return {
+        ok: false,
+        error: `Blocked: cwd "${payload.cwd}" is outside project directory "${options.directory}"`,
+      };
+    }
+
     switch (payload.operation) {
       case "list-dir":
         return await listDir(payload);
@@ -250,8 +287,11 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
         // Read only up to maxBytes
         const buffer = Buffer.alloc(maxBytes);
         const fd = fs.openSync(absPath, "r");
-        fs.readSync(fd, buffer, 0, maxBytes, 0);
-        fs.closeSync(fd);
+        try {
+          fs.readSync(fd, buffer, 0, maxBytes, 0);
+        } finally {
+          fs.closeSync(fd);
+        }
         files[filePath] = buffer.toString("utf-8");
       } else {
         files[filePath] = fs.readFileSync(absPath, "utf-8");
@@ -324,6 +364,8 @@ async function runCommands(
   return { ok: true, data: { results } };
 }
 
+// Note: shell: true targets Unix shells. Windows cmd.exe metacharacters
+// (%, ^) are not blocked; the CLI assumes a Unix Node.js environment.
 function runSingleCommand(
   command: string,
   cwd: string,
@@ -335,7 +377,8 @@ function runSingleCommand(
   stderr: string;
 }> {
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", command], {
+    const child = spawn(command, [], {
+      shell: true,
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: timeoutMs,

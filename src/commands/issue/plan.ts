@@ -125,8 +125,7 @@ function outputSolution(options: OutputSolutionOptions): void {
   }
 
   if (solution) {
-    const lines = formatSolution(solution);
-    stdout.write(`${lines.join("\n")}\n`);
+    stdout.write(`${formatSolution(solution)}\n`);
   } else {
     stderr.write("No solution found. Check the Sentry web UI for details.\n");
   }

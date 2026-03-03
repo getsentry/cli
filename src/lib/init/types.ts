@@ -1,14 +1,9 @@
-import type { Writer } from "../../types/index.js";
-
 export type WizardOptions = {
   directory: string;
   force: boolean;
   yes: boolean;
   dryRun: boolean;
   features?: string[];
-  stdout: Writer;
-  stderr: Writer;
-  stdin: NodeJS.ReadStream & { fd: 0 };
 };
 
 // Local-op suspend payloads

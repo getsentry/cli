@@ -187,9 +187,7 @@ function writeMultipleProjects(
     }
 
     if (project) {
-      const details = formatProjectDetails(project, dsn);
-      stdout.write(details.join("\n"));
-      stdout.write("\n");
+      stdout.write(`${formatProjectDetails(project, dsn)}\n`);
       if (target?.detectedFrom) {
         stdout.write(`\nDetected from: ${target.detectedFrom}\n`);
       }

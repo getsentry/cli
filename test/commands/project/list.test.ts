@@ -27,8 +27,6 @@ import {
   handleOrgAll,
   handleProjectSearch,
   PAGINATION_KEY,
-  writeHeader,
-  writeRows,
   writeSelfHostedWarning,
 } from "../../../src/commands/project/list.js";
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
@@ -296,56 +294,6 @@ describe("resolveOrgCursor", () => {
     expect(() => resolveOrgCursor("last", PAGINATION_KEY, contextKey)).toThrow(
       ContextError
     );
-  });
-});
-
-describe("writeHeader", () => {
-  test("writes formatted header line", () => {
-    const { writer, output } = createCapture();
-    writeHeader(writer, 10, 15, 20);
-    const line = output();
-    expect(line).toContain("ORG");
-    expect(line).toContain("PROJECT");
-    expect(line).toContain("NAME");
-    expect(line).toContain("PLATFORM");
-    expect(line).toEndWith("\n");
-  });
-
-  test("respects column widths", () => {
-    const { writer, output } = createCapture();
-    writeHeader(writer, 5, 10, 8);
-    const line = output();
-    // "ORG" padded to 5, "PROJECT" padded to 10, "NAME" padded to 8
-    expect(line).toMatch(/^ORG\s{2}\s+PROJECT\s+NAME\s+PLATFORM\n$/);
-  });
-});
-
-describe("writeRows", () => {
-  test("writes one line per project", () => {
-    const { writer, output } = createCapture();
-    const projects = [
-      makeProject({
-        slug: "proj-a",
-        name: "Project A",
-        platform: "javascript",
-        orgSlug: "org1",
-      }),
-      makeProject({
-        slug: "proj-b",
-        name: "Project B",
-        platform: "python",
-        orgSlug: "org2",
-      }),
-    ];
-    writeRows({
-      stdout: writer,
-      projects,
-      orgWidth: 10,
-      slugWidth: 15,
-      nameWidth: 20,
-    });
-    const lines = output().split("\n").filter(Boolean);
-    expect(lines).toHaveLength(2);
   });
 });
 
