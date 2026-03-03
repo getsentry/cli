@@ -40,6 +40,7 @@ const mockHandleLocalOp = mock(() =>
 );
 mock.module("../../src/lib/init/local-ops.js", () => ({
   handleLocalOp: mockHandleLocalOp,
+  precomputeDirListing: () => [],
   validateCommand: () => {
     /* noop mock */
   },

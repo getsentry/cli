@@ -21,7 +21,7 @@ import {
 } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { handleInteractive } from "./interactive.js";
-import { handleLocalOp } from "./local-ops.js";
+import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
 import type {
   InteractivePayload,
   LocalOpPayload,
@@ -50,7 +50,8 @@ function nextPhase(
 
 async function handleSuspendedStep(
   ctx: StepContext,
-  stepPhases: Map<string, number>
+  stepPhases: Map<string, number>,
+  stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
   const { payload, stepId, spin, options } = ctx;
   const { type: payloadType, operation } = payload as {
@@ -65,9 +66,14 @@ async function handleSuspendedStep(
 
     const localResult = await handleLocalOp(payload as LocalOpPayload, options);
 
+    const history = stepHistory.get(stepId) ?? [];
+    history.push(localResult);
+    stepHistory.set(stepId, history);
+
     return {
       ...localResult,
       _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
+      _prevPhases: history.slice(0, -1),
     };
   }
 
@@ -150,13 +156,16 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
   const spin = spinner();
 
+  spin.start("Scanning project...");
+  const dirListing = precomputeDirListing(directory);
+
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    spin.start("Connecting to wizard...");
+    spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = (await run.startAsync({
-      inputData: { directory, force, yes, dryRun, features },
+      inputData: { directory, force, yes, dryRun, features, dirListing },
       tracingOptions,
     })) as WorkflowRunResult;
   } catch (err) {
@@ -168,6 +177,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   }
 
   const stepPhases = new Map<string, number>();
+  const stepHistory = new Map<string, Record<string, unknown>[]>();
 
   try {
     while (result.status === "suspended") {
@@ -185,7 +195,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
       const resumeData = await handleSuspendedStep(
         { payload: extracted.payload, stepId: extracted.stepId, spin, options },
-        stepPhases
+        stepPhases,
+        stepHistory
       );
 
       result = (await run.resumeAsync({
