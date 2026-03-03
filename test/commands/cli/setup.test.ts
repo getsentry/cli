@@ -330,7 +330,7 @@ describe("sentry cli setup", () => {
     expect(combined).toContain("bash-completion");
   });
 
-  test("shows unsupported message for unknown shell when bash is not in PATH", async () => {
+  test("silently skips completions for unsupported shell when bash is not in PATH", async () => {
     const { context, output } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
@@ -348,7 +348,41 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("Not supported for xonsh shell");
+    // Nothing actionable — no message produced
+    expect(combined).not.toContain("Completions:");
+    expect(combined).not.toContain("Not supported");
+  });
+
+  test("suppresses completion messages on subsequent runs (upgrade scenario)", async () => {
+    const { context, output } = createMockContext({
+      homeDir: testDir,
+      execPath: join(testDir, "bin", "sentry"),
+      env: {
+        PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+        SHELL: "/bin/bash",
+      },
+    });
+
+    // First run — should show "Installed to"
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const firstRun = output.join("");
+    expect(firstRun).toContain("Completions: Installed to");
+
+    // Second run — completion file already exists, should be silent
+    output.length = 0;
+    await run(
+      app,
+      ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
+      context
+    );
+
+    const secondRun = output.join("");
+    expect(secondRun).not.toContain("Completions:");
   });
 
   test("silently skips completions for sh shell", async () => {
