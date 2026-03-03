@@ -133,14 +133,13 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
 
   // Cache is cold or identifier is unknown — refresh the org list.
   // listOrganizations() populates org_regions with slug, region, and org_id.
+  // Any error (auth failure, network error, etc.) falls back to the original
+  // slug; the downstream API call will produce a relevant error if needed.
   try {
     const { listOrganizations } = await import("./api-client.js");
     await listOrganizations();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      return orgSlug;
-    }
-    throw error;
+  } catch {
+    return orgSlug;
   }
 
   // Retry after refresh
