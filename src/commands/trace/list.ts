@@ -8,6 +8,12 @@ import type { SentryContext } from "../../context.js";
 import { listTransactions } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
+  clearPaginationCursor,
+  escapeContextKeyValue,
+  resolveOrgCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
+import {
   formatTraceTable,
   writeFooter,
   writeJson,
@@ -17,12 +23,14 @@ import {
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { getApiBaseUrl } from "../../lib/sentry-client.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: "date" | "duration";
   readonly json: boolean;
+  readonly cursor?: string;
 };
 
 type SortValue = "date" | "duration";
@@ -41,6 +49,47 @@ const DEFAULT_LIMIT = 20;
 
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "trace list";
+
+/** Command key for pagination cursor storage */
+export const PAGINATION_KEY = "trace-list";
+
+/** Matches strings that are all digits — used to detect invalid cursor values */
+const ALL_DIGITS_RE = /^\d+$/;
+
+/**
+ * Build a context key for pagination cursor storage.
+ *
+ * Encodes the API host, org, project, sort, and query so cursors from
+ * different searches are never mixed.
+ */
+function buildContextKey(
+  org: string,
+  project: string,
+  flags: Pick<ListFlags, "sort" | "query">
+): string {
+  const host = getApiBaseUrl();
+  const escapedQuery = flags.query
+    ? escapeContextKeyValue(flags.query)
+    : undefined;
+  return (
+    `host:${host}|type:trace:${org}/${project}` +
+    `|sort:${flags.sort}` +
+    (escapedQuery ? `|q:${escapedQuery}` : "")
+  );
+}
+
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(org: string, project: string, flags: ListFlags): string {
+  const base = `sentry trace list ${org}/${project} -c last`;
+  const parts: string[] = [];
+  if (flags.sort !== "date") {
+    parts.push(`--sort ${flags.sort}`);
+  }
+  if (flags.query) {
+    parts.push(`-q "${flags.query}"`);
+  }
+  return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -111,13 +160,29 @@ export const listCommand = buildListCommand("trace", {
         brief: "Sort by: date, duration",
         default: "date" as const,
       },
+      cursor: {
+        kind: "parsed",
+        parse: (value: string) => {
+          if (value === "last") {
+            return value;
+          }
+          if (ALL_DIGITS_RE.test(value)) {
+            throw new Error(
+              `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+            );
+          }
+          return value;
+        },
+        brief: 'Pagination cursor (use "last" to continue from previous page)',
+        optional: true,
+      },
       json: {
         kind: "boolean",
         brief: "Output as JSON",
         default: false,
       },
     },
-    aliases: { n: "limit", q: "query", s: "sort" },
+    aliases: { n: "limit", q: "query", s: "sort", c: "cursor" },
   },
   async func(
     this: SentryContext,
@@ -134,32 +199,60 @@ export const listCommand = buildListCommand("trace", {
     );
     setContext([org], [project]);
 
-    const traces = await listTransactions(org, project, {
+    // Build context key and resolve cursor for pagination
+    const contextKey = buildContextKey(org, project, flags);
+    const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+
+    const { data: traces, nextCursor } = await listTransactions(org, project, {
       query: flags.query,
       limit: flags.limit,
       sort: flags.sort,
+      cursor,
     });
 
+    // Store or clear pagination cursor
+    if (nextCursor) {
+      setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
+    } else {
+      clearPaginationCursor(PAGINATION_KEY, contextKey);
+    }
+
+    const hasMore = !!nextCursor;
+
     if (flags.json) {
-      writeJson(stdout, traces);
+      const output = hasMore
+        ? { data: traces, nextCursor, hasMore: true }
+        : { data: traces, hasMore: false };
+      writeJson(stdout, output);
       return;
     }
 
     if (traces.length === 0) {
-      stdout.write("No traces found.\n");
+      if (hasMore) {
+        stdout.write(
+          `No traces on this page. Try the next page: ${nextPageHint(org, project, flags)}\n`
+        );
+      } else {
+        stdout.write("No traces found.\n");
+      }
       return;
     }
 
     stdout.write(`Recent traces in ${org}/${project}:\n\n`);
     stdout.write(formatTraceTable(traces));
 
-    // Show footer with tip
-    const hasMore = traces.length >= flags.limit;
+    // Show footer with pagination info
     const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
-    const tip = hasMore ? " Use --limit to show more." : "";
-    writeFooter(
-      stdout,
-      `${countText}${tip} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`
-    );
+    if (hasMore) {
+      writeFooter(
+        stdout,
+        `${countText} Next page: ${nextPageHint(org, project, flags)}`
+      );
+    } else {
+      writeFooter(
+        stdout,
+        `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`
+      );
+    }
   },
 });

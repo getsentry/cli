@@ -259,8 +259,8 @@ describe("listCommand.func", () => {
     resolveOrgAndProjectSpy.mockRestore();
   });
 
-  test("outputs JSON array when --json flag is set", async () => {
-    listTransactionsSpy.mockResolvedValue(sampleTraces);
+  test("outputs JSON with data array when --json flag is set", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: sampleTraces });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -272,13 +272,14 @@ describe("listCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(2);
-    expect(parsed[0].transaction).toBe("GET /api/users");
+    expect(parsed.hasMore).toBe(false);
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed.data).toHaveLength(2);
+    expect(parsed.data[0].transaction).toBe("GET /api/users");
   });
 
-  test("outputs empty JSON array when no traces found with --json", async () => {
-    listTransactionsSpy.mockResolvedValue([]);
+  test("outputs empty JSON with hasMore false when no traces found with --json", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: [] });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -289,11 +290,11 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(JSON.parse(output)).toEqual([]);
+    expect(JSON.parse(output)).toEqual({ data: [], hasMore: false });
   });
 
   test("writes 'No traces found.' when empty without --json", async () => {
-    listTransactionsSpy.mockResolvedValue([]);
+    listTransactionsSpy.mockResolvedValue({ data: [] });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -308,7 +309,7 @@ describe("listCommand.func", () => {
   });
 
   test("writes header, rows, and footer for human output", async () => {
-    listTransactionsSpy.mockResolvedValue(sampleTraces);
+    listTransactionsSpy.mockResolvedValue({ data: sampleTraces });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -326,9 +327,11 @@ describe("listCommand.func", () => {
     expect(output).toContain("sentry trace view");
   });
 
-  test("shows 'Use --limit' tip when results match limit", async () => {
-    // 2 results with limit=2 means hasMore=true
-    listTransactionsSpy.mockResolvedValue(sampleTraces);
+  test("shows next page hint when nextCursor is present", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: sampleTraces,
+      nextCursor: "1735689600:0:0",
+    });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -339,11 +342,12 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Use --limit to show more.");
+    expect(output).toContain("Next page:");
+    expect(output).toContain("-c last");
   });
 
-  test("does not show --limit tip when fewer results than limit", async () => {
-    listTransactionsSpy.mockResolvedValue(sampleTraces);
+  test("shows trace view tip when no nextCursor", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: sampleTraces });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -354,11 +358,12 @@ describe("listCommand.func", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).not.toContain("Use --limit to show more.");
+    expect(output).not.toContain("Next page:");
+    expect(output).toContain("sentry trace view");
   });
 
   test("uses singular 'trace' for single result", async () => {
-    listTransactionsSpy.mockResolvedValue([sampleTraces[0]]);
+    listTransactionsSpy.mockResolvedValue({ data: [sampleTraces[0]] });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
@@ -374,7 +379,7 @@ describe("listCommand.func", () => {
   });
 
   test("calls setContext with resolved org and project", async () => {
-    listTransactionsSpy.mockResolvedValue([]);
+    listTransactionsSpy.mockResolvedValue({ data: [] });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
@@ -387,8 +392,8 @@ describe("listCommand.func", () => {
     expect(context.setContext).toHaveBeenCalledWith(["my-org"], ["my-project"]);
   });
 
-  test("passes query, limit, and sort to listTransactions", async () => {
-    listTransactionsSpy.mockResolvedValue([]);
+  test("passes query, limit, sort, and cursor to listTransactions", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: [] });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
@@ -401,7 +406,69 @@ describe("listCommand.func", () => {
     expect(listTransactionsSpy).toHaveBeenCalledWith(
       "test-org",
       "test-project",
-      { query: "transaction:GET", limit: 50, sort: "duration" }
+      {
+        query: "transaction:GET",
+        limit: 50,
+        sort: "duration",
+        cursor: undefined,
+      }
     );
+  });
+
+  test("JSON output includes nextCursor when more pages exist", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: sampleTraces,
+      nextCursor: "1735689600:0:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: true },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.hasMore).toBe(true);
+    expect(parsed.nextCursor).toBe("1735689600:0:0");
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed.data).toHaveLength(2);
+  });
+
+  test("shows next page hint with sort flag when more traces available", async () => {
+    listTransactionsSpy.mockResolvedValue({
+      data: sampleTraces,
+      nextCursor: "1735689600:0:0",
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "duration", json: false },
+      "test-org/test-project"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Next page:");
+    expect(output).toContain("-c last");
+    expect(output).toContain("--sort duration");
+  });
+
+  test("cursor is not passed to listTransactions when flag is not set", async () => {
+    listTransactionsSpy.mockResolvedValue({ data: [] });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { limit: 20, sort: "date", json: false },
+      "test-org/test-project"
+    );
+
+    const callArgs = listTransactionsSpy.mock.calls[0];
+    expect(callArgs[2].cursor).toBeUndefined();
   });
 });
