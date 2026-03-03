@@ -129,6 +129,7 @@ function resetAllMocks() {
   mockResumeResults = [];
   resumeCallCount = 0;
   startShouldThrow = false;
+  process.exitCode = 0;
 }
 
 describe("runWizard", () => {
