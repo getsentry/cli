@@ -179,6 +179,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         spin.stop("Error", 1);
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
+        process.exitCode = 1;
         return;
       }
 

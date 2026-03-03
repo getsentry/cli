@@ -37,6 +37,8 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "|", label: "piping (|)" },
     { pattern: "`", label: "command substitution (`)" },
     { pattern: "$(", label: "command substitution ($()" },
+    { pattern: "(", label: "subshell/grouping (()" },
+    { pattern: ")", label: "subshell/grouping ())" },
     { pattern: "$", label: "variable/command expansion ($)" },
     { pattern: "'", label: "single quote (')" },
     { pattern: '"', label: 'double quote (")' },
