@@ -578,7 +578,7 @@ export type DetailedLogsResponse = z.infer<typeof DetailedLogsResponseSchema>;
  * Key differences from {@link SentryLog} (Explore/Events):
  * - `id` instead of `sentry.item_id`
  * - Includes `project.id` (integer) and `severity_number`
- * - `timestamp_precise` is an ISO string (not a nanosecond integer)
+ * - `timestamp_precise` is a nanosecond integer (same as Explore/Events logs)
  */
 export const TraceLogSchema = z
   .object({
@@ -594,8 +594,8 @@ export const TraceLogSchema = z
     severity: z.string(),
     /** ISO 8601 timestamp */
     timestamp: z.string(),
-    /** High-precision ISO 8601 timestamp */
-    timestamp_precise: z.string(),
+    /** High-precision timestamp in nanoseconds */
+    timestamp_precise: z.number(),
     /** Log message content */
     message: z.string().nullable().optional(),
   })
