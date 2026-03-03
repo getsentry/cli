@@ -136,19 +136,19 @@ async function handlePathModification(
  * @param pathEnv - The PATH to search for bash, forwarded from the process env.
  * @returns The completion location if bash is available, null otherwise.
  */
-function tryBashCompletionFallback(
+async function tryBashCompletionFallback(
   homeDir: string,
   xdgDataHome: string | undefined,
   pathEnv: string | undefined
 ): Promise<CompletionLocation | null> {
   if (!isBashAvailable(pathEnv)) {
-    return Promise.resolve(null);
+    return null;
   }
 
   // Defensive: installCompletions returns null only if the shell type has no
   // completion script or path configured. "bash" is always supported, but
   // we guard here in case that changes in future.
-  return installCompletions("bash", homeDir, xdgDataHome);
+  return await installCompletions("bash", homeDir, xdgDataHome);
 }
 
 /**
