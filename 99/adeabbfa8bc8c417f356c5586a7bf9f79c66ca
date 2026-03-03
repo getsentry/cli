@@ -1,0 +1,32 @@
+## Implementation Plan
+
+### Problem
+`trace list` had no pagination — users could only use `--limit` to get
+more results in a single response, with no way to page through history.
+
+### Approach
+Mirror the `issue list` cursor pattern at a simpler level:
+
+1. **API layer** (`src/lib/api-client.ts`):
+   - Add `cursor?` to `ListTransactionsOptions`
+   - Change return type to `PaginatedResponse<TransactionListItem[]>`
+   - Forward cursor to Sentry events API; parse next cursor from `Link` header
+
+2. **Command layer** (`src/commands/trace/list.ts`):
+   - Add `--cursor` / `-c` flag with `"last"` magic value support
+   - Build composite context key (host|org/project|sort|query) to scope cursors
+   - Use shared `resolveOrgCursor` / `setPaginationCursor` / `clearPaginationCursor`
+   - JSON output: `{ data, nextCursor?, hasMore }` envelope
+   - Human output: "Next page: sentry trace list <target> -c last" footer
+
+3. **Tests** (`test/commands/trace/list.test.ts`):
+   - Update all mocks to return `{ data: [...] }` (PaginatedResponse shape)
+   - Add tests for next-page hints, JSON pagination envelope, cursor passthrough
+
+### Key Design Decisions
+- No `dispatchOrgScopedList` needed: `trace list` already requires an
+  explicit project, so cursor is always valid — no mode-gating required.
+- Context key includes sort + query so `-c last` after changing filters
+  always errors rather than silently returning wrong-context results.
+- Follows existing `issue list` conventions for JSON envelope and footer
+  wording for consistency across CLI commands.
