@@ -150,22 +150,12 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
   const spin = spinner();
 
+  spin.start("Scanning project...");
+  const dirListing = precomputeDirListing(directory);
+
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    spin.start("Scanning project...");
-    const listing = precomputeDirListing(directory);
-    const dirListing =
-      (
-        listing.data as {
-          entries: Array<{
-            name: string;
-            path: string;
-            type: "file" | "directory";
-          }>;
-        }
-      )?.entries ?? [];
-
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = (await run.startAsync({
