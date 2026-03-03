@@ -488,6 +488,13 @@ function applyPatchset(
   }
 
   const { cwd, params } = payload;
+
+  // Phase 1: Validate all paths before writing anything
+  for (const patch of params.patches) {
+    safePath(cwd, patch.path);
+  }
+
+  // Phase 2: Apply patches
   const applied: Array<{ path: string; action: string }> = [];
 
   for (const patch of params.patches) {

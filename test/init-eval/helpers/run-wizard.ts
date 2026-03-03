@@ -69,7 +69,7 @@ export async function runWizard(
     env: {
       ...process.env,
       // Override the hardcoded Mastra URL to point at local/test server
-      SENTRY_WIZARD_API_URL: mastraUrl,
+      MASTRA_API_URL: mastraUrl,
       // Disable telemetry
       SENTRY_CLI_NO_TELEMETRY: "1",
     },

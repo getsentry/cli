@@ -857,6 +857,27 @@ describe("handleLocalOp", () => {
       expect(fs.existsSync(join(testDir, "phantom.txt"))).toBe(false);
     });
 
+    test("rejects entire patchset if any path is unsafe (no partial writes)", async () => {
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            { path: "safe.txt", action: "create", patch: "good content" },
+            { path: "../../evil.txt", action: "create", patch: "bad" },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("outside project directory");
+
+      // First patch must NOT have been written
+      expect(fs.existsSync(join(testDir, "safe.txt"))).toBe(false);
+    });
+
     test("dry-run still validates path safety", async () => {
       const payload: ApplyPatchsetPayload = {
         type: "local-op",
