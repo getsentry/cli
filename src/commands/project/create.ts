@@ -147,12 +147,14 @@ function buildPlatformError(nameArg: string, platform?: string): string {
  *
  * Only called on the error path — no cost to the happy path.
  */
-async function handleCreateProject404(
-  orgSlug: string,
-  teamSlug: string,
-  name: string,
-  platform: string
-): Promise<never> {
+async function handleCreateProject404(opts: {
+  orgSlug: string;
+  teamSlug: string;
+  name: string;
+  platform: string;
+  detectedFrom?: string;
+}): Promise<never> {
+  const { orgSlug, teamSlug, name, platform, detectedFrom } = opts;
   let teams: SentryTeam[] | null = null;
   let listTeamsError: unknown = null;
 
@@ -196,7 +198,7 @@ async function handleCreateProject404(
   // listTeams returned 404 → org doesn't exist
   // Delegates to shared helper that handles DSN org ID resolution and org listing
   if (listTeamsError instanceof ApiError && listTeamsError.status === 404) {
-    return await buildOrgNotFoundError(orgSlug, USAGE_HINT);
+    return await buildOrgNotFoundError(orgSlug, USAGE_HINT, detectedFrom);
   }
 
   // listTeams failed for other reasons (403, 5xx, network) — can't disambiguate
@@ -212,12 +214,14 @@ async function handleCreateProject404(
  * Create a project with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
  */
-async function createProjectWithErrors(
-  orgSlug: string,
-  teamSlug: string,
-  name: string,
-  platform: string
-): Promise<SentryProject> {
+async function createProjectWithErrors(opts: {
+  orgSlug: string;
+  teamSlug: string;
+  name: string;
+  platform: string;
+  detectedFrom?: string;
+}): Promise<SentryProject> {
+  const { orgSlug, teamSlug, name, platform } = opts;
   try {
     return await createProject(orgSlug, teamSlug, { name, platform });
   } catch (error) {
@@ -233,7 +237,7 @@ async function createProjectWithErrors(
         throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
       }
       if (error.status === 404) {
-        return await handleCreateProject404(orgSlug, teamSlug, name, platform);
+        return await handleCreateProject404(opts);
       }
       throw new CliError(
         `Failed to create project '${name}' in ${orgSlug}.\n\n` +
@@ -357,12 +361,13 @@ export const createCommand = buildCommand({
     });
 
     // Create the project
-    const project = await createProjectWithErrors(
+    const project = await createProjectWithErrors({
       orgSlug,
-      team.slug,
+      teamSlug: team.slug,
       name,
-      platformArg
-    );
+      platform: platformArg,
+      detectedFrom: resolved.detectedFrom,
+    });
 
     // Fetch DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
