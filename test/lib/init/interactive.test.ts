@@ -252,6 +252,21 @@ describe("handleMultiSelect", () => {
     ).rejects.toThrow("Setup cancelled");
   });
 
+  test("returns required feature without calling multiselect when only errorMonitoring available", async () => {
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: ["errorMonitoring"],
+      },
+      makeOptions({ yes: false })
+    );
+
+    expect(result).toEqual({ features: ["errorMonitoring"] });
+    expect(multiselectSpy).not.toHaveBeenCalled();
+  });
+
   test("excludes errorMonitoring from multiselect options (always included)", async () => {
     multiselectSpy.mockImplementation(
       () => Promise.resolve(["performanceMonitoring"]) as any
@@ -334,6 +349,49 @@ describe("handleConfirm", () => {
         makeOptions({ yes: false })
       )
     ).rejects.toThrow("Setup cancelled");
+  });
+
+  test("returns addExample: true via purpose field with --yes", async () => {
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Would you like to add a trigger?",
+        kind: "confirm",
+        purpose: "add-example",
+      },
+      makeOptions({ yes: true })
+    );
+
+    expect(result).toEqual({ addExample: true });
+  });
+
+  test("returns addExample via purpose field in interactive mode", async () => {
+    confirmSpy.mockImplementation(() => Promise.resolve(false) as any);
+
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Would you like to add a trigger?",
+        kind: "confirm",
+        purpose: "add-example",
+      },
+      makeOptions({ yes: false })
+    );
+
+    expect(result).toEqual({ addExample: false });
+  });
+
+  test("falls back to prompt string match when no purpose field", async () => {
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Add an example error trigger?",
+        kind: "confirm",
+      },
+      makeOptions({ yes: true })
+    );
+
+    expect(result).toEqual({ addExample: true });
   });
 
   test("returns action: stop when user declines non-example prompt", async () => {

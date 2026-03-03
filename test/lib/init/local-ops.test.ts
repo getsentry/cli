@@ -86,6 +86,16 @@ describe("validateCommand", () => {
     }
   });
 
+  test("blocks glob and brace expansion characters", () => {
+    for (const cmd of [
+      "npm install {evil,@sentry/node}",
+      "npm install sentry-*",
+      "npm install sentry-?.js",
+    ]) {
+      expect(validateCommand(cmd)).toContain("Blocked command");
+    }
+  });
+
   test("blocks dangerous executables", () => {
     for (const cmd of [
       "rm -rf /",

@@ -27,11 +27,15 @@ import type {
 /**
  * Shell metacharacters that enable chaining, piping, substitution, or redirection.
  * All legitimate install commands are simple single commands that don't need these.
+ *
+ * Ordering matters for error-message accuracy (not correctness): multi-character
+ * operators like `&&` and `||` are checked before their single-character prefixes
+ * (`&`, `|`) so the reported label describes the actual construct the user wrote.
  */
 const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
   [
     { pattern: ";", label: "command chaining (;)" },
-    // Check multi-char operators before single `|` so labels are accurate
+    // Check multi-char operators before single `|` / `&` so labels are accurate
     { pattern: "&&", label: "command chaining (&&)" },
     { pattern: "||", label: "command chaining (||)" },
     { pattern: "|", label: "piping (|)" },
@@ -48,6 +52,12 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
     { pattern: "&", label: "background execution (&)" },
+    // Glob and brace expansion — brace expansion is the real risk
+    // (e.g. `npm install {evil,@sentry/node}`)
+    { pattern: "{", label: "brace expansion ({)" },
+    { pattern: "}", label: "brace expansion (})" },
+    { pattern: "*", label: "glob expansion (*)" },
+    { pattern: "?", label: "glob expansion (?)" },
   ];
 
 const WHITESPACE_RE = /\s+/;
@@ -336,6 +346,8 @@ async function runCommands(
   return { ok: true, data: { results } };
 }
 
+// Note: shell: true targets Unix shells. Windows cmd.exe metacharacters
+// (%, ^) are not blocked; the CLI assumes a Unix Node.js environment.
 function runSingleCommand(
   command: string,
   cwd: string,
