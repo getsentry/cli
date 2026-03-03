@@ -50,6 +50,23 @@ export function getBinaryDownloadUrl(version: string): string {
   return `https://github.com/getsentry/cli/releases/download/${version}/${getPlatformBinaryName()}`;
 }
 
+/** GitHub API base URL for releases */
+export const GITHUB_RELEASES_URL =
+  "https://api.github.com/repos/getsentry/cli/releases";
+
+/**
+ * Detect whether a version string identifies a nightly build.
+ *
+ * Nightlies use the format `X.Y.Z-dev.<unix-seconds>` (the timestamp
+ * format the build system bakes in).
+ *
+ * @param version - Version string to check
+ * @returns true if the version is a nightly build
+ */
+export function isNightlyVersion(version: string): boolean {
+  return version.includes("-dev.");
+}
+
 /**
  * Get the binary filename for the current platform.
  *

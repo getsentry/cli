@@ -161,8 +161,10 @@ export async function fetchManifest(
  * @returns Parsed OCI manifest
  * @throws {UpgradeError} On network failure or non-200 response
  */
-export function fetchNightlyManifest(token: string): Promise<OciManifest> {
-  return fetchManifest(token, GHCR_TAG);
+export async function fetchNightlyManifest(
+  token: string
+): Promise<OciManifest> {
+  return await fetchManifest(token, GHCR_TAG);
 }
 
 /**

@@ -35,7 +35,11 @@ jobs:
 
           # List all nightly-* tags sorted by version, oldest first
           NIGHTLY_TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
-          NIGHTLY_COUNT=$(echo "$NIGHTLY_TAGS" | grep -c . || echo "0")
+          if [ -z "$NIGHTLY_TAGS" ]; then
+            NIGHTLY_COUNT=0
+          else
+            NIGHTLY_COUNT=$(echo "$NIGHTLY_TAGS" | wc -l | tr -d ' ')
+          fi
 
           if [ "$NIGHTLY_COUNT" -le "$KEEP_COUNT" ]; then
             echo "Only ${NIGHTLY_COUNT} nightly tags found, keeping all (threshold: ${KEEP_COUNT})"

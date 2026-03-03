@@ -315,16 +315,8 @@ jobs:
           VERSION="${{ needs.changes.outputs.nightly-version }}"
           REPO="ghcr.io/getsentry/cli"
 
-          # Find the previous nightly version from the manifest annotations
-          PREV_MANIFEST=$(oras manifest fetch "${REPO}:nightly" 2>/dev/null || echo "")
-          if [ -z "$PREV_MANIFEST" ]; then
-            echo "No previous nightly manifest found, skipping patches"
-            exit 0
-          fi
-
-          # The manifest we just pushed has version=$VERSION, so we need to
-          # look at the versioned tags to find the previous one.
-          # List nightly-* tags, sort, and find the one before ours.
+          # Find the previous nightly by listing versioned tags and picking
+          # the one immediately before ours in version-sorted order.
           TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
           PREV_TAG=""
           for tag in $TAGS; do

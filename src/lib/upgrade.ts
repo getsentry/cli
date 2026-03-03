@@ -14,11 +14,13 @@ import {
   acquireLock,
   cleanupOldBinary,
   fetchWithUpgradeError,
+  GITHUB_RELEASES_URL,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   getGitHubHeaders,
   getPlatformBinaryName,
+  isNightlyVersion,
   KNOWN_CURL_DIRS,
   releaseLock,
 } from "./binary.js";
@@ -50,10 +52,6 @@ export type InstallationMethod =
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 
 // Constants
-
-/** GitHub API base URL for releases */
-export const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/getsentry/cli/releases";
 
 /** The git tag used for the rolling nightly GitHub release (stable fallback only). */
 export const NIGHTLY_TAG = "nightly";
@@ -356,19 +354,6 @@ export async function fetchLatestNightlyVersion(
 
   const manifest = await fetchNightlyManifest(token);
   return getNightlyVersion(manifest);
-}
-
-/**
- * Detect if the given version string represents a nightly build.
- *
- * Nightly versions follow the pattern `X.Y.Z-dev.<timestamp>` (the same
- * format the build system bakes in via `sed "s/-dev\.[0-9]*$/-dev.${TS}/"`).
- *
- * @param version - Version string to check
- * @returns true if the version is a nightly build
- */
-export function isNightlyVersion(version: string): boolean {
-  return version.includes("-dev.");
 }
 
 /**

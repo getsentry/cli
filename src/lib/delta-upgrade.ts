@@ -19,7 +19,11 @@
 
 import { unlinkSync } from "node:fs";
 
-import { getPlatformBinaryName } from "./binary.js";
+import {
+  GITHUB_RELEASES_URL,
+  getPlatformBinaryName,
+  isNightlyVersion,
+} from "./binary.js";
 import { applyPatch } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import {
@@ -29,7 +33,6 @@ import {
   listTags,
   type OciManifest,
 } from "./ghcr.js";
-import { GITHUB_RELEASES_URL, isNightlyVersion } from "./upgrade.js";
 
 /**
  * Maximum number of patches to chain before falling back to full download.
