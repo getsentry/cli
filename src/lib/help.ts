@@ -12,8 +12,6 @@ import { formatBanner } from "./banner.js";
 import { isAuthenticated } from "./db/auth.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 
-export { formatBanner };
-
 const TAGLINE = "The command-line interface for Sentry";
 
 type HelpCommand = {

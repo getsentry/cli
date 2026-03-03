@@ -7,9 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
+import { initCommand } from "../../src/commands/init.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
-import { initCommand } from "../../src/commands/init.js";
 
 // ── Spy on runWizard to capture call args ─────────────────────────────────
 let capturedArgs: Record<string, unknown> | undefined;

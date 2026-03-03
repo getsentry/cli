@@ -6,7 +6,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatBanner, printCustomHelp } from "../../src/lib/help.js";
+import { formatBanner } from "../../src/lib/banner.js";
+import { printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
 
 /** Strip ANSI escape sequences for content assertions */

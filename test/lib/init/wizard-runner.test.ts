@@ -19,9 +19,9 @@ import {
 import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as auth from "../../../src/lib/db/auth.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as auth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -379,9 +379,7 @@ describe("runWizard", () => {
     });
 
     test("non-WizardCancelledError in catch triggers log.error + cancel", async () => {
-      handleLocalOpSpy.mockImplementation(() =>
-        Promise.reject("string error")
-      );
+      handleLocalOpSpy.mockImplementation(() => Promise.reject("string error"));
 
       mockStartResult = {
         status: "suspended",
