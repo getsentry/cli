@@ -520,12 +520,35 @@ describe("sentry cli setup", () => {
   });
 
   describe("agent skills", () => {
+    const SAMPLE_INDEX_JSON = JSON.stringify({
+      skills: [
+        {
+          name: "sentry-cli",
+          files: ["SKILL.md", "references/auth.md", "references/issue.md"],
+        },
+      ],
+    });
+
     beforeEach(() => {
       originalFetch = globalThis.fetch;
-      mockFetch(
-        async () =>
-          new Response("# Sentry CLI Skill\nTest content", { status: 200 })
-      );
+      mockFetch(async (url) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        if (urlStr.endsWith("index.json")) {
+          return new Response(SAMPLE_INDEX_JSON, { status: 200 });
+        }
+        if (urlStr.endsWith("SKILL.md")) {
+          return new Response("# Sentry CLI Skill\nTest content", {
+            status: 200,
+          });
+        }
+        if (urlStr.endsWith("auth.md")) {
+          return new Response("# Auth\nAuth content", { status: 200 });
+        }
+        if (urlStr.endsWith("issue.md")) {
+          return new Response("# Issue\nIssue content", { status: 200 });
+        }
+        return new Response("Not found", { status: 404 });
+      });
     });
 
     afterEach(() => {
@@ -555,7 +578,7 @@ describe("sentry cli setup", () => {
       expect(combined).toContain("Agent skills:");
       expect(combined).toContain("Installed to");
 
-      // Verify the file was actually written
+      // Verify SKILL.md was written
       const skillPath = join(
         testDir,
         ".claude",
@@ -564,6 +587,18 @@ describe("sentry cli setup", () => {
         "SKILL.md"
       );
       expect(existsSync(skillPath)).toBe(true);
+
+      // Verify references directory was created with files
+      const refsDir = join(
+        testDir,
+        ".claude",
+        "skills",
+        "sentry-cli",
+        "references"
+      );
+      expect(existsSync(refsDir)).toBe(true);
+      expect(existsSync(join(refsDir, "auth.md"))).toBe(true);
+      expect(existsSync(join(refsDir, "issue.md"))).toBe(true);
     });
 
     test("silently skips when Claude Code is not detected", async () => {

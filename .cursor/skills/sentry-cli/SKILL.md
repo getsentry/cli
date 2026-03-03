@@ -1,1 +1,0 @@
-../../../plugins/sentry-cli/skills/sentry-cli/SKILL.md
