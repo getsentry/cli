@@ -139,7 +139,7 @@ export type GitHubRelease = {
  *
  * @returns Array of releases (newest first), or empty array on failure
  */
-async function fetchRecentReleases(): Promise<GitHubRelease[]> {
+export async function fetchRecentReleases(): Promise<GitHubRelease[]> {
   const perPage = MAX_CHAIN_DEPTH + 2;
   let response: Response;
   try {
@@ -180,7 +180,9 @@ export function extractSha256(asset: GitHubAsset): string | null {
  * @param url - Browser download URL for the asset
  * @returns Patch file data, or null on failure
  */
-async function downloadStablePatch(url: string): Promise<Uint8Array | null> {
+export async function downloadStablePatch(
+  url: string
+): Promise<Uint8Array | null> {
   let response: Response;
   try {
     response = await fetch(url, { headers: { "User-Agent": "sentry-cli" } });
@@ -298,7 +300,7 @@ export function extractStableChain(
  * @param targetVersion - Version to upgrade to
  * @returns Resolved patch chain, or null if unavailable
  */
-async function resolveStableChain(
+export async function resolveStableChain(
   currentVersion: string,
   targetVersion: string
 ): Promise<PatchChain | null> {
@@ -395,7 +397,7 @@ export type PatchGraphEntry = {
  * @param token - GHCR anonymous bearer token
  * @returns Map from fromVersion → { version, manifest }
  */
-async function buildNightlyPatchGraph(
+export async function buildNightlyPatchGraph(
   token: string
 ): Promise<Map<string, PatchGraphEntry>> {
   const tags = await listTags(token, PATCH_TAG_PREFIX);
@@ -517,7 +519,7 @@ export function walkNightlyChain(
  * @param fullGzSize - Size of the full .gz layer for threshold calculation
  * @returns Resolved patch chain, or null if unavailable
  */
-async function resolveNightlyChain(
+export async function resolveNightlyChain(
   token: string,
   currentVersion: string,
   targetVersion: string,
@@ -594,7 +596,7 @@ export async function attemptDeltaUpgrade(
  *
  * @returns SHA-256 hex of the output, or null if delta is unavailable
  */
-async function resolveStableDelta(
+export async function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
@@ -612,7 +614,7 @@ async function resolveStableDelta(
  *
  * @returns SHA-256 hex of the output, or null if delta is unavailable
  */
-async function resolveNightlyDelta(
+export async function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
@@ -656,7 +658,7 @@ async function resolveNightlyDelta(
  * @returns SHA-256 hex of the final output
  * @throws {Error} When SHA-256 verification fails
  */
-async function applyPatchChain(
+export async function applyPatchChain(
   chain: PatchChain,
   oldBinaryPath: string,
   destPath: string

@@ -628,18 +628,6 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
-<!-- lore:365e4299-37cf-48e0-8f2e-8503d4a249dd -->
-* **API client wraps all errors as CliError subclasses — no raw exceptions escape**: The API client (src/lib/api-client.ts) wraps ALL errors as CliError subclasses (ApiError or AuthError) — no raw exceptions escape. Commands don't need try-catch for error display; the central handler in app.ts formats CliError cleanly. Only add try-catch when a command needs to handle errors specially (e.g., login continuing despite user-info fetch failure).
-
-<!-- lore:019c8b60-d221-718a-823b-7c2c6e4ca1d5 -->
-* **Sentry API: events require org+project, issues have legacy global endpoint**: Sentry API scoping: Events require org+project in URL path (\`/projects/{org}/{project}/events/{id}/\`). Issues use legacy global endpoint (\`/api/0/issues/{id}/\`) without org context. Traces need only org (\`/organizations/{org}/trace/{traceId}/\`). Two-step lookup for events: fetch issue → extract org/project from response → fetch event. Cross-project event search possible via Discover endpoint \`/organizations/{org}/events/\` with \`query=id:{eventId}\`.
-
-<!-- lore:019c8c72-b871-7d5e-a1a4-5214359a5a77 -->
-* **Sentry CLI has two distribution channels with different runtimes**: Sentry CLI ships via two pipelines: (1) Standalone binary — \`Bun.build()\` with \`compile: true\`, produces native executables with embedded Bun runtime. (2) npm package — esbuild produces CJS \`dist/bin.cjs\` requiring Node.js 22+. esbuild aliases \`@sentry/bun\` → \`@sentry/node\` and injects Bun API polyfills from \`script/node-polyfills.ts\` covering \`Bun.file()\`, \`Bun.write()\`, \`Bun.which()\`, \`Bun.spawn()\`, \`Bun.sleep()\`, \`Bun.Glob\`, \`Bun.randomUUIDv7()\`, \`Bun.semver.order()\`, and \`bun:sqlite\`. \`Bun.$\` has NO polyfill — use \`execSync\` from \`node:child\_process\` instead. \`require()\` in ESM is safe: Bun supports it natively, and esbuild resolves it at bundle time.
-
-<!-- lore:019c8b60-d21a-7d44-8a88-729f74ec7e02 -->
-* **Sentry CLI resolve-target cascade has 5 priority levels with env var support**: Resolve-target cascade (src/lib/resolve-target.ts) has 5 priority levels: (1) Explicit CLI flags, (2) SENTRY\_ORG/SENTRY\_PROJECT env vars, (3) SQLite config defaults, (4) DSN auto-detection, (5) Directory name inference. SENTRY\_PROJECT supports combo notation \`org/project\` — when used, SENTRY\_ORG is ignored. If combo parse fails (e.g. \`org/\`), the entire value is discarded. The \`resolveFromEnvVars()\` helper is injected into all four resolution functions.
-
 <!-- lore:019cb37e-dd69-744f-9939-cf997ddda8c9 -->
 * **Binary delta upgrades: bsdiff patches are 300-600x smaller than full downloads**: Bun-compiled CLI binaries are ~98% runtime, so consecutive release diffs are tiny. bsdiff patches between stable versions are ~50 KB vs ~29 MB gzip (500x+ savings). Even across Bun version bumps (stable→nightly), patches are ~521 KB (57x savings). Patches are already bzip2-compressed internally — gzip adds nothing. bspatch applies in 0.6s using ~207 MB RAM. Key design: generate N-1 patches only (previous→current), fall back to full download for older versions. Store patches alongside binaries (GH Releases for stable, GHCR for nightly). Always SHA-256 verify the patched result before atomic replace. CI cost: ~45s and ~890 MB RAM per platform, parallelizable.
 
@@ -663,34 +651,10 @@ mock.module("./some-module", () => ({
 
 ### Decision
 
-<!-- lore:019c9f9c-40ee-76b5-b98d-acf1e5867ebc -->
-* **Issue list global limit with fair per-project distribution and representation guarantees**: \`issue list --limit\` is a global total across all detected projects. \`fetchWithBudget\` Phase 1 divides evenly, Phase 2 redistributes surplus via cursor resume. \`trimWithProjectGuarantee\` ensures at least 1 issue per project before filling remaining slots. JSON output wraps in \`{ data, hasMore }\` with optional \`errors\` array. Compound cursor (pipe-separated) enables \`-c last\` for multi-target pagination, keyed by sorted target fingerprint.
-
-<!-- lore:019c8f05-c86f-7b46-babc-5e4faebff2e9 -->
-* **Sentry CLI config dir should stay at ~/.sentry/, not move to XDG**: Config dir stays at \`~/.sentry/\` (not XDG). The readonly DB errors on macOS are from \`sudo brew install\` creating root-owned files. Fixes: (1) bestEffort() makes setup steps non-fatal, (2) tryRepairReadonly() detects root-owned files and prints \`sudo chown\` instructions, (3) \`sentry cli fix\` handles ownership repair. Ownership must be checked BEFORE permissions — root-owned files cause chmod to EPERM.
-
-<!-- lore:00166785-609d-4ab5-911e-ee205d17b90c -->
-* **whoami should be separate from auth status command**: The \`sentry auth whoami\` command should be a dedicated command separate from \`sentry auth status\`. They serve different purposes: \`status\` shows everything about auth state (token, expiry, defaults, org verification), while \`whoami\` just shows user identity (name, email, username, ID) by fetching live from \`/auth/\` endpoint. \`sentry whoami\` should be a top-level alias (like \`sentry issues\` → \`sentry issue list\`). \`whoami\` should support \`--json\` for machine consumption and be lightweight — no credential verification, no defaults listing.
+<!-- lore:019c8f3b-84be-79be-9518-e5ecd2ea64b9 -->
+* **Use -t (not -p) as shortcut alias for --period flag**: The --period flag on issue list uses -t (for 'time period') as its short alias, not -p. The rationale: -p could be confused with --platform from other CLI tools/contexts. -t maps naturally to 'time period' and avoids collision. This was a deliberate choice after initial implementation used -p.
 
 ### Gotcha
-
-<!-- lore:019c8ee1-affd-7198-8d01-54aa164cde35 -->
-* **brew is not in VALID\_METHODS but Homebrew formula passes --method brew**: Homebrew install: \`isHomebrewInstall()\` detects via Cellar realpath (checked before stored install info). Upgrade command tells users \`brew upgrade getsentry/tools/sentry\`. Formula runs \`sentry cli setup --method brew --no-modify-path\` as post\_install. Version pinning throws 'unsupported\_operation'. Uses .gz artifacts. Tap at getsentry/tools.
-
-<!-- lore:70319dc2-556d-4e30-9562-e51d1b68cf45 -->
-* **Bun mock.module() leaks globally across test files in same process**: Bun's mock.module() replaces modules globally and leaks across test files in the same process. Solution: tests using mock.module() must run in a separate \`bun test\` invocation. In package.json, use \`bun run test:unit && bun run test:isolated\` instead of \`bun test\`. The \`test/isolated/\` directory exists for these tests. This was the root cause of ~100 test failures (getsentry/cli#258).
-
-<!-- lore:a28c4f2a-e2b6-4f24-9663-a85461bc6412 -->
-* **Multiregion mock must include all control silo API routes**: When changing which Sentry API endpoint a function uses (e.g., switching getCurrentUser() from /users/me/ to /auth/), the mock route must be updated in BOTH test/mocks/routes.ts (single-region) AND test/mocks/multiregion.ts createControlSiloRoutes() (multi-region). Missing the multiregion mock causes 404s in multi-region test scenarios. The multiregion control silo mock serves auth, user info, and region discovery routes. Cursor Bugbot caught this gap when /api/0/auth/ was added to routes.ts but not multiregion.ts.
-
-<!-- lore:8c0fabbb-590c-4a7b-812b-15accf978748 -->
-* **pagination\_cursors table schema mismatch requires repair migration**: The pagination\_cursors SQLite table may have wrong PK (single-column instead of composite). Migration 5→6 detects via \`hasCompositePrimaryKey()\` and drops/recreates. \`repairWrongPrimaryKeys()\` in \`repairSchema()\` handles auto-repair. \`isSchemaError()\` catches 'on conflict clause does not match' to trigger repair. Data loss acceptable since cursors are ephemeral (5-min TTL).
-
-<!-- lore:ce43057f-2eff-461f-b49b-fb9ebaadff9d -->
-* **Sentry /users/me/ endpoint returns 403 for OAuth tokens — use /auth/ instead**: The Sentry \`/users/me/\` endpoint returns 403 for OAuth tokens. Use \`/auth/\` instead — it works with ALL token types and lives on the control silo. In the CLI, \`getControlSiloUrl()\` handles routing correctly. \`SentryUserSchema\` (with \`.passthrough()\`) handles the \`/auth/\` response since it only requires \`id\`.
-
-<!-- lore:019c8bbe-bc63-7b5e-a4e0-de7e968dcacb -->
-* **Stricli defaultCommand blends default command flags into route completions**: When a Stricli route map has \`defaultCommand\` set, requesting completions for that route (e.g. \`\["issues", ""]\`) returns both the subcommand names AND the default command's flags/positional completions. This means completion tests that compare against \`extractCommandTree()\` subcommand lists will fail for groups with defaultCommand, since the actual completions include extra entries like \`--limit\`, \`--query\`, etc. Solution: track \`hasDefaultCommand\` in the command tree and skip strict subcommand-matching assertions for those groups.
 
 <!-- lore:019c9994-d161-783e-8b3e-79457cd62f42 -->
 * **Biome lint: Response.redirect() required, nested ternaries forbidden**: Biome lint rules that frequently trip up this codebase: (1) \`useResponseRedirect\`: use \`Response.redirect(url, status)\` not \`new Response\`. (2) \`noNestedTernary\`: use \`if/else\`. (3) \`noComputedPropertyAccess\`: use \`obj.property\` not \`obj\["property"]\`. (4) Max cognitive complexity 15 per function — extract helpers to stay under.
@@ -709,21 +673,6 @@ mock.module("./some-module", () => ({
 
 ### Pattern
 
-<!-- lore:019cb100-4630-79ac-8a13-185ea3d7bbb7 -->
-* **Extract logic from Stricli func() handlers into standalone functions for testability**: Stricli command \`func()\` handlers are hard to unit test because they require full command context setup. To boost coverage, extract flag validation and body-building logic into standalone exported functions (e.g., \`resolveBody()\` extracted from the \`api\` command's \`func()\`). This moved ~20 lines of mutual-exclusivity checks and flag routing from an untestable handler into a directly testable pure function. Property-based tests on the extracted function drove patch coverage from 78% to 97%. The general pattern: keep \`func()\` as a thin orchestrator that calls exported helpers. This also keeps biome complexity under the limit (max 15).
-
-<!-- lore:d441d9e5-3638-4b5a-8148-f88c349b8979 -->
-* **Non-essential DB cache writes should be guarded with try-catch**: Non-essential DB cache writes (e.g., \`setUserInfo()\` in whoami.ts and login.ts) must be wrapped in try-catch. If the DB is broken, the cache write shouldn't crash the command when its primary operation already succeeded. In login.ts specifically, \`getCurrentUser()\` failure after token save must not block authentication — wrap in try-catch, log warning to stderr, let login succeed. This differs from \`getUserRegions()\` failure which should \`clearAuth()\` and fail hard (indicates invalid token).
-
-<!-- lore:019c9bb9-a797-725d-a271-702795d11894 -->
-* **Sentry CLI api command: normalizeFields auto-corrects colon separators with stderr warning**: The \`sentry api\` command's field flags require \`key=value\` format. \`normalizeFields()\` auto-corrects \`:\` to \`=\` with stderr warning (skips JSON-shaped strings). \`--data\`/\`-d\` is mutually exclusive with \`--input\` and field flags. \`extractJsonBody()\` detects bare JSON in fields and extracts as body (skipped for GET). \`tryParseJsonField\` needs \`startsWith('{')\` guard to prevent TypeError. JSON body merged with fields throws on key conflicts; array JSON bodies can't mix with fields.
-
-<!-- lore:019c8aed-445f-7bc6-98cd-971408673b04 -->
-* **Sentry CLI issue resolution wraps getIssue 404 in ContextError with ID hint**: In resolveIssue() (src/commands/issue/utils.ts), bare getIssue() calls for numeric and explicit-org-numeric cases should catch ApiError with status 404 and re-throw as ContextError that includes: (1) the ID the user provided, (2) a hint about access/deletion, (3) a suggestion to use short-ID format (\<project>-\<id>) if the user confused numeric group IDs with short-ID suffixes. Without this, the user gets a generic 'Issue not found' without knowing which ID failed or what to try instead.
-
-<!-- lore:019c8aed-4458-79c5-b5eb-01a3f7e926e0 -->
-* **Sentry CLI setFlagContext redacts sensitive flags before telemetry**: The setFlagContext() function in src/lib/telemetry.ts must redact sensitive flag values (like --token) before setting Sentry tags. A SENSITIVE\_FLAGS set contains flag names that should have their values replaced with '\[REDACTED]' instead of the actual value. This prevents secrets from leaking into telemetry. The scrub happens at the source (in setFlagContext itself) rather than in beforeSend, so the sensitive value never reaches the Sentry SDK.
-
 <!-- lore:dbd63348-2049-42b3-bb99-d6a3d64369c7 -->
 * **Branch naming and commit message conventions for Sentry CLI**: Branch naming: \`feat/\<short-description>\` or \`fix/\<issue-number>-\<short-description>\` (e.g., \`feat/ghcr-nightly-distribution\`, \`fix/268-limit-auto-pagination\`). Commit message format: \`type(scope): description (#issue)\` (e.g., \`fix(issue-list): auto-paginate --limit beyond 100 (#268)\`, \`feat(nightly): distribute via GHCR instead of GitHub Releases\`). Types seen: fix, refactor, meta, release, feat. PRs are created as drafts via \`gh pr create --draft\`. Implementation plans are attached to commits via \`git notes add\` rather than in PR body or commit message.
 
@@ -741,6 +690,6 @@ mock.module("./some-module", () => ({
 
 ### Preference
 
-<!-- lore:019c9f9c-40f3-7b3e-99ba-a3af2e56e519 -->
-* **Progress message format: 'N and counting (up to M)...' pattern**: User prefers progress messages that frame the limit as a ceiling rather than an expected total. Format: \`Fetching issues, 30 and counting (up to 50)...\` — not \`Fetching issues... 30/50\`. The 'up to' framing makes it clear the denominator is a max, not an expected count, avoiding confusion when fewer items exist than the limit. For multi-target fetches, include target count: \`Fetching issues from 10 projects, 30 and counting (up to 50)...\`. Initial message before any results: \`Fetching issues (up to 50)...\` or \`Fetching issues from 10 projects (up to 50)...\`.
+<!-- lore:019c91a8-879a-70cd-bfe4-4bb5bfb7b4d1 -->
+* **Use captureException (not captureMessage) for unexpected states, or Sentry logs**: When reporting unexpected/defensive-guard situations to Sentry (e.g., non-numeric input where a number was expected), the reviewer prefers \`Sentry.captureException(new Error(...))\` over \`Sentry.captureMessage(...)\`. \`captureMessage\` with 'warning' level was rejected in PR review. Alternatively, use the Sentry structured logger (\`Sentry.logger.warn(...)\`) for less severe diagnostic cases — this was accepted in the abbreviateCount NaN handler.
 <!-- End lore-managed section -->
