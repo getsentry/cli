@@ -158,7 +158,7 @@ export function validateCommand(command: string): string | undefined {
 
 /**
  * Resolve a path relative to cwd and verify it's inside cwd.
- * Rejects path traversal attempts.
+ * Rejects path traversal attempts and symlinks that escape the project directory.
  */
 function safePath(cwd: string, relative: string): string {
   const resolved = path.resolve(cwd, relative);
@@ -169,6 +169,41 @@ function safePath(cwd: string, relative: string): string {
   ) {
     throw new Error(`Path "${relative}" resolves outside project directory`);
   }
+
+  // Follow symlinks: verify the real path also stays within bounds.
+  // Resolve cwd through realpathSync too (e.g. macOS /tmp -> /private/tmp).
+  let realCwd: string;
+  try {
+    realCwd = fs.realpathSync(normalizedCwd);
+  } catch {
+    // cwd doesn't exist yet — no symlinks to follow
+    return resolved;
+  }
+
+  // For paths that don't exist yet (create ops), walk up to the nearest
+  // existing ancestor and check that instead.
+  let checkPath = resolved;
+  for (;;) {
+    try {
+      const real = fs.realpathSync(checkPath);
+      if (!real.startsWith(realCwd + path.sep) && real !== realCwd) {
+        throw new Error(
+          `Path "${relative}" resolves outside project directory via symlink`
+        );
+      }
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
+      const parent = path.dirname(checkPath);
+      if (parent === checkPath) {
+        break; // filesystem root
+      }
+      checkPath = parent;
+    }
+  }
+
   return resolved;
 }
 

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   handleLocalOp,
@@ -269,6 +275,67 @@ describe("handleLocalOp", () => {
 
       const result = await handleLocalOp(payload, options);
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("symlink protection", () => {
+    test("rejects symlink pointing outside project in read-files", async () => {
+      symlinkSync("/etc", join(testDir, "escape-link"));
+
+      const payload: ReadFilesPayload = {
+        type: "local-op",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["escape-link/passwd"] },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+      // read-files catches per-file errors and returns null
+      const files = (result.data as { files: Record<string, string | null> })
+        .files;
+      expect(files["escape-link/passwd"]).toBeNull();
+    });
+
+    test("rejects symlink parent directory in apply-patchset create", async () => {
+      symlinkSync("/tmp", join(testDir, "link-out"));
+
+      const payload: ApplyPatchsetPayload = {
+        type: "local-op",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "link-out/evil.txt",
+              action: "create",
+              patch: "pwned",
+            },
+          ],
+        },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("via symlink");
+    });
+
+    test("allows regular files and directories (no false positives)", async () => {
+      mkdirSync(join(testDir, "real-dir"));
+      writeFileSync(join(testDir, "real-dir", "file.txt"), "safe");
+
+      const payload: ReadFilesPayload = {
+        type: "local-op",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["real-dir/file.txt"] },
+      };
+
+      const result = await handleLocalOp(payload, options);
+      expect(result.ok).toBe(true);
+      const files = (result.data as { files: Record<string, string | null> })
+        .files;
+      expect(files["real-dir/file.txt"]).toBe("safe");
     });
   });
 

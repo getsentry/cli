@@ -14,6 +14,7 @@ import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import {
+  API_TIMEOUT_MS,
   MASTRA_API_URL,
   SENTRY_DOCS_URL,
   VERIFY_CHANGES_STEP,
@@ -136,6 +137,33 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   return obj as SuspendPayload;
 }
 
+/**
+ * Race a promise against a timeout. Rejects with a descriptive error
+ * if the promise doesn't settle within `ms` milliseconds.
+ */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms / 1000}s`)),
+      ms
+    );
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, force, yes, dryRun, features } = options;
 
@@ -189,10 +217,14 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = assertWorkflowResult(
-      await run.startAsync({
-        inputData: { directory, force, yes, dryRun, features, dirListing },
-        tracingOptions,
-      })
+      await withTimeout(
+        run.startAsync({
+          inputData: { directory, force, yes, dryRun, features, dirListing },
+          tracingOptions,
+        }),
+        API_TIMEOUT_MS,
+        "Workflow start"
+      )
     );
   } catch (err) {
     spin.stop("Connection failed", 1);
@@ -226,11 +258,15 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       );
 
       result = assertWorkflowResult(
-        await run.resumeAsync({
-          step: extracted.stepId,
-          resumeData,
-          tracingOptions,
-        })
+        await withTimeout(
+          run.resumeAsync({
+            step: extracted.stepId,
+            resumeData,
+            tracingOptions,
+          }),
+          API_TIMEOUT_MS,
+          "Workflow resume"
+        )
       );
     }
   } catch (err) {

@@ -11,6 +11,7 @@ import {
   beforeEach,
   describe,
   expect,
+  jest,
   mock,
   spyOn,
   test,
@@ -219,6 +220,46 @@ describe("runWizard", () => {
   });
 
   describe("connection error", () => {
+    test("times out if startAsync hangs", async () => {
+      jest.useFakeTimers();
+
+      const hangingRun = {
+        startAsync: mock(
+          () =>
+            new Promise(() => {
+              /* never resolves */
+            })
+        ),
+        resumeAsync: mock(),
+      };
+      const hangingWorkflow = {
+        createRun: mock(() => Promise.resolve(hangingRun)),
+      };
+      getWorkflowSpy.mockReturnValue(hangingWorkflow as any);
+
+      const { API_TIMEOUT_MS } = await import(
+        "../../../src/lib/init/constants.js"
+      );
+
+      const promise = runWizard(makeOptions());
+
+      // Flush microtasks so runWizard reaches the withTimeout setTimeout
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Advance past the timeout
+      jest.advanceTimersByTime(API_TIMEOUT_MS);
+
+      await promise;
+
+      expect(logErrorSpy).toHaveBeenCalled();
+      const errorMsg: string = logErrorSpy.mock.calls[0][0];
+      expect(errorMsg).toContain("timed out");
+      expect(process.exitCode).toBe(1);
+
+      jest.useRealTimers();
+    });
+
     test("handles startAsync rejection gracefully", async () => {
       const failingRun = {
         startAsync: mock(() => Promise.reject(new Error("Connection refused"))),
