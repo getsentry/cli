@@ -124,7 +124,9 @@ describe("sentry cli setup", () => {
     expect(output.join("")).toBe("");
   });
 
-  test("outputs 'Setup complete!' without --quiet", async () => {
+  test("produces no welcome or completion output without --install", async () => {
+    // Without --install, setup is being called for an upgrade or manual re-run.
+    // Output is suppressed — the upgrade command itself prints success.
     const { context, output } = createMockContext({ homeDir: testDir });
 
     await run(
@@ -140,7 +142,7 @@ describe("sentry cli setup", () => {
     );
 
     const combined = output.join("");
-    expect(combined).toContain("Setup complete!");
+    expect(combined).toBe("");
   });
 
   test("records install method when --method is provided", async () => {
@@ -515,6 +517,53 @@ describe("sentry cli setup", () => {
       expect(combined).not.toContain("Recorded installation method");
     });
 
+    test("--install suppresses welcome when binary already exists (upgrade)", async () => {
+      const installDir = join(testDir, "install-dir");
+      mkdirSync(installDir, { recursive: true });
+      // Pre-existing binary — this is an upgrade, not a fresh install
+      writeFileSync(join(installDir, "sentry"), "old-binary");
+
+      const sourceDir = join(testDir, "tmp");
+      mkdirSync(sourceDir, { recursive: true });
+      const sourcePath = join(sourceDir, "sentry-download");
+      writeFileSync(sourcePath, "new-binary");
+      const { chmodSync } = await import("node:fs");
+      chmodSync(sourcePath, 0o755);
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: sourcePath,
+        env: {
+          PATH: "/usr/bin:/bin",
+          SHELL: "/bin/bash",
+          SENTRY_INSTALL_DIR: installDir,
+        },
+      });
+
+      await run(
+        app,
+        [
+          "cli",
+          "setup",
+          "--install",
+          "--method",
+          "curl",
+          "--no-modify-path",
+          "--no-completions",
+          "--no-agent-skills",
+        ],
+        context
+      );
+
+      const combined = output.join("");
+
+      // Binary placement is still logged
+      expect(combined).toContain("Binary: Installed to");
+      // But welcome/getting-started is suppressed for upgrades
+      expect(combined).not.toContain("Get started:");
+      expect(combined).not.toContain("sentry auth login");
+    });
+
     test("--install with --quiet suppresses all output", async () => {
       const sourceDir = join(testDir, "tmp");
       mkdirSync(sourceDir, { recursive: true });
@@ -620,6 +669,40 @@ describe("sentry cli setup", () => {
       expect(combined).not.toContain("Agent skills:");
     });
 
+    test("suppresses agent skills message on subsequent runs (upgrade scenario)", async () => {
+      mkdirSync(join(testDir, ".claude"), { recursive: true });
+
+      const { context, output } = createMockContext({
+        homeDir: testDir,
+        execPath: join(testDir, "bin", "sentry"),
+        env: {
+          PATH: `/usr/bin:${join(testDir, "bin")}:/bin`,
+          SHELL: "/bin/bash",
+        },
+      });
+
+      // First run — should show "Installed to"
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      const firstRun = output.join("");
+      expect(firstRun).toContain("Agent skills: Installed to");
+
+      // Second run — skill file already exists, should be silent
+      output.length = 0;
+      await run(
+        app,
+        ["cli", "setup", "--no-modify-path", "--no-completions"],
+        context
+      );
+
+      const secondRun = output.join("");
+      expect(secondRun).not.toContain("Agent skills:");
+    });
+
     test("skips when --no-agent-skills is set", async () => {
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
@@ -670,10 +753,10 @@ describe("sentry cli setup", () => {
         context
       );
 
-      // Setup should still complete successfully
+      // Setup should still complete without errors (no output without --install)
       const combined = output.join("");
-      expect(combined).toContain("Setup complete!");
       expect(combined).not.toContain("Agent skills:");
+      expect(combined).not.toContain("Warning:");
     });
 
     test("bestEffort catches errors from steps and setup still completes", async () => {
@@ -704,8 +787,10 @@ describe("sentry cli setup", () => {
       );
 
       const combined = output.join("");
-      // Setup must complete even though the completions step threw
-      expect(combined).toContain("Setup complete!");
+      // Setup must complete even though the completions step threw —
+      // the warning goes to stderr but no crash
+      expect(combined).toContain("Warning:");
+      expect(combined).toContain("Shell completions failed");
 
       chmod(zshDir, 0o755);
     });
