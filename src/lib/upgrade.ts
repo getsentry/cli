@@ -18,6 +18,7 @@ import {
   getBinaryFilename,
   getBinaryPaths,
   getGitHubHeaders,
+  getPlatformBinaryName,
   KNOWN_CURL_DIRS,
   releaseLock,
 } from "./binary.js";
@@ -51,7 +52,7 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 // Constants
 
 /** GitHub API base URL for releases */
-const GITHUB_RELEASES_URL =
+export const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/getsentry/cli/releases";
 
 /** The git tag used for the rolling nightly GitHub release (stable fallback only). */
@@ -59,15 +60,6 @@ export const NIGHTLY_TAG = "nightly";
 
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
-
-/** Maps `process.platform` to the OS name used in binary filenames. */
-const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
-  darwin: "darwin",
-  win32: "windows",
-});
-
-/** Fallback OS name when `process.platform` is not in {@link PLATFORM_NAMES}. */
-const DEFAULT_PLATFORM = "linux";
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
@@ -479,10 +471,7 @@ async function streamDecompressToFile(
  * @returns Filename of the gzip-compressed binary for this platform
  */
 function getNightlyGzFilename(): string {
-  const os = PLATFORM_NAMES[process.platform] ?? DEFAULT_PLATFORM;
-  const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  return `sentry-${os}-${arch}${suffix}.gz`;
+  return `${getPlatformBinaryName()}.gz`;
 }
 
 /**
@@ -637,11 +626,7 @@ async function tryDeltaUpgrade(
   version: string,
   destPath: string
 ): Promise<string | null> {
-  try {
-    return await attemptDeltaUpgrade(version, process.execPath, destPath);
-  } catch {
-    return null;
-  }
+  return await attemptDeltaUpgrade(version, process.execPath, destPath);
 }
 
 /**

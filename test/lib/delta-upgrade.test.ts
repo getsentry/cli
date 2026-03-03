@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import {
   applyPatchChain,
   buildNightlyPatchGraph,
@@ -23,7 +24,6 @@ import {
   type GitHubRelease,
   getPatchFromVersion,
   getPatchTargetSha256,
-  getPlatformBinaryName,
   getStableTargetSha256,
   type PatchChain,
   type PatchGraphEntry,

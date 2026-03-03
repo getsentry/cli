@@ -19,6 +19,7 @@
 
 import { unlinkSync } from "node:fs";
 
+import { getPlatformBinaryName } from "./binary.js";
 import { applyPatch } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import {
@@ -28,7 +29,7 @@ import {
   listTags,
   type OciManifest,
 } from "./ghcr.js";
-import { isNightlyVersion } from "./upgrade.js";
+import { GITHUB_RELEASES_URL, isNightlyVersion } from "./upgrade.js";
 
 /**
  * Maximum number of patches to chain before falling back to full download.
@@ -43,34 +44,8 @@ const MAX_CHAIN_DEPTH = 10;
  */
 const SIZE_THRESHOLD_RATIO = 0.6;
 
-/** GitHub API base URL for releases */
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/getsentry/cli/releases";
-
 /** Pattern to extract hex from a GitHub asset digest like "sha256:<hex>" */
 const SHA256_DIGEST_PATTERN = /^sha256:([0-9a-f]+)$/i;
-
-/**
- * Build the platform-specific binary base name (without extension).
- *
- * Matches the naming convention used by both GitHub Releases and GHCR:
- * `sentry-<os>-<arch>` (e.g., `sentry-linux-x64`, `sentry-darwin-arm64`).
- *
- * @returns Platform binary base name
- */
-export function getPlatformBinaryName(): string {
-  let os: string;
-  if (process.platform === "darwin") {
-    os = "darwin";
-  } else if (process.platform === "win32") {
-    os = "windows";
-  } else {
-    os = "linux";
-  }
-  const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  return `sentry-${os}-${arch}${suffix}`;
-}
 
 /** A single link in the patch chain */
 type PatchLink = {
@@ -691,25 +666,27 @@ export async function applyPatchChain(
   const intermediateA = `${destPath}.patching.a`;
   const intermediateB = `${destPath}.patching.b`;
 
-  for (let i = 0; i < chain.patches.length; i++) {
-    const patch = chain.patches[i];
-    if (!patch) {
-      throw new Error(`Missing patch at index ${i}`);
+  try {
+    for (let i = 0; i < chain.patches.length; i++) {
+      const patch = chain.patches[i];
+      if (!patch) {
+        throw new Error(`Missing patch at index ${i}`);
+      }
+      const isLast = i === chain.patches.length - 1;
+      const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
+      const outputPath = isLast ? destPath : intermediate;
+
+      sha256 = await applyPatch(currentOldPath, patch.data, outputPath);
+
+      if (!isLast) {
+        currentOldPath = outputPath;
+      }
     }
-    const isLast = i === chain.patches.length - 1;
-    const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
-    const outputPath = isLast ? destPath : intermediate;
-
-    sha256 = await applyPatch(currentOldPath, patch.data, outputPath);
-
-    if (!isLast) {
-      currentOldPath = outputPath;
+  } finally {
+    // Always clean up intermediate files, even on failure
+    if (chain.patches.length > 1) {
+      cleanupIntermediates(destPath);
     }
-  }
-
-  // Clean up intermediate files
-  if (chain.patches.length > 1) {
-    cleanupIntermediates(destPath);
   }
 
   // Verify the final SHA-256 matches

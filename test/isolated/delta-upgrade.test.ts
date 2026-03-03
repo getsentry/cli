@@ -28,9 +28,9 @@ mock.module("../../src/lib/constants.js", () => ({
 }));
 
 // Import AFTER mock setup so the mocked constants are used
+import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import {
   attemptDeltaUpgrade,
-  getPlatformBinaryName,
   resolveNightlyDelta,
   resolveStableDelta,
 } from "../../src/lib/delta-upgrade.js";

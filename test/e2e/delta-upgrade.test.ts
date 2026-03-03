@@ -14,8 +14,8 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import { applyPatch } from "../../src/lib/bspatch.js";
-import { getPlatformBinaryName } from "../../src/lib/delta-upgrade.js";
 
 // Restore real fetch for E2E tests (preload.ts mocks it globally)
 const realFetch = (globalThis as { __originalFetch?: typeof fetch })
