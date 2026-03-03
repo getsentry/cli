@@ -11,7 +11,7 @@ import { cancel, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
-import { formatBanner } from "../help.js";
+import { formatBanner } from "../banner.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import {
   MASTRA_API_URL,

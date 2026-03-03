@@ -1,25 +1,19 @@
 /**
  * Tests for the `sentry init` command entry point.
  *
- * Mocks only wizard-runner.js to break the circular import chain
- * (init.ts → wizard-runner.js → help.js → app.ts → init.ts)
- * and capture the arguments passed to runWizard.
+ * Uses spyOn on the wizard-runner namespace to capture runWizard calls
+ * without mock.module (which leaks across test files).
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
+import { initCommand } from "../../src/commands/init.js";
 
-// ── Mock wizard-runner to capture runWizard call args ─────────────────────
+// ── Spy on runWizard to capture call args ─────────────────────────────────
 let capturedArgs: Record<string, unknown> | undefined;
-
-mock.module("../../src/lib/init/wizard-runner.js", () => ({
-  runWizard: mock((args: Record<string, unknown>) => {
-    capturedArgs = args;
-    return Promise.resolve();
-  }),
-}));
-
-const { initCommand } = await import("../../src/commands/init.js");
+let runWizardSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as (
   this: {
@@ -43,6 +37,16 @@ function makeContext(cwd = "/projects/app") {
 
 beforeEach(() => {
   capturedArgs = undefined;
+  runWizardSpy = spyOn(wizardRunner, "runWizard").mockImplementation(
+    (args: Record<string, unknown>) => {
+      capturedArgs = args;
+      return Promise.resolve();
+    }
+  );
+});
+
+afterEach(() => {
+  runWizardSpy.mockRestore();
 });
 
 describe("init command func", () => {

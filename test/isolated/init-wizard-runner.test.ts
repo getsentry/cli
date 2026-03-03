@@ -64,7 +64,7 @@ mock.module("../../src/lib/db/auth.js", () => ({
   isAuthenticated: () => Promise.resolve(false),
 }));
 
-mock.module("../../src/lib/help.js", () => ({
+mock.module("../../src/lib/banner.js", () => ({
   formatBanner: () => "BANNER",
 }));
 

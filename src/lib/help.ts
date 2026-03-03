@@ -6,42 +6,13 @@
  * Commands are auto-generated from Stricli's route structure.
  */
 
-import chalk from "chalk";
 import { routes } from "../app.js";
 import type { Writer } from "../types/index.js";
+import { formatBanner } from "./banner.js";
 import { isAuthenticated } from "./db/auth.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 
-/** ASCII art banner rows for gradient coloring */
-const BANNER_ROWS = [
-  "  ███████╗███████╗███╗   ██╗████████╗██████╗ ██╗   ██╗",
-  "  ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔══██╗╚██╗ ██╔╝",
-  "  ███████╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝ ╚████╔╝ ",
-  "  ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗  ╚██╔╝  ",
-  "  ███████║███████╗██║ ╚████║   ██║   ██║  ██║   ██║   ",
-  "  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ",
-];
-
-/** Purple gradient colors from bright to dark (Sentry brand-inspired) */
-const BANNER_GRADIENT = [
-  "#B4A4DE",
-  "#9C84D4",
-  "#8468C8",
-  "#6C4EBA",
-  "#5538A8",
-  "#432B8A",
-];
-
-/**
- * Format the banner with a vertical gradient effect.
- * Each row gets progressively darker purple.
- */
-export function formatBanner(): string {
-  return BANNER_ROWS.map((row, i) => {
-    const color = BANNER_GRADIENT[i] ?? "#B4A4DE";
-    return chalk.hex(color)(row);
-  }).join("\n");
-}
+export { formatBanner };
 
 const TAGLINE = "The command-line interface for Sentry";
 
