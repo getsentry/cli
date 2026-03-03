@@ -11,7 +11,40 @@ import {
   parseIssueArg,
   parseOrgProjectArg,
 } from "../../src/lib/arg-parsing.js";
+import { stripDsnOrgPrefix } from "../../src/lib/dsn/index.js";
 import { ValidationError } from "../../src/lib/errors.js";
+
+describe("stripDsnOrgPrefix", () => {
+  test("strips 'o' prefix from DSN-style org IDs", () => {
+    expect(stripDsnOrgPrefix("o1081365")).toBe("1081365");
+    expect(stripDsnOrgPrefix("o123")).toBe("123");
+    expect(stripDsnOrgPrefix("o0")).toBe("0");
+    expect(stripDsnOrgPrefix("o9999999999")).toBe("9999999999");
+  });
+
+  test("preserves normal org slugs", () => {
+    expect(stripDsnOrgPrefix("sentry")).toBe("sentry");
+    expect(stripDsnOrgPrefix("my-org")).toBe("my-org");
+    expect(stripDsnOrgPrefix("acme-corp")).toBe("acme-corp");
+  });
+
+  test("preserves slugs starting with 'o' that have non-digit chars", () => {
+    expect(stripDsnOrgPrefix("organic")).toBe("organic");
+    expect(stripDsnOrgPrefix("org-name")).toBe("org-name");
+    expect(stripDsnOrgPrefix("o1abc")).toBe("o1abc");
+    expect(stripDsnOrgPrefix("open123")).toBe("open123");
+  });
+
+  test("preserves pure numeric strings (no 'o' prefix)", () => {
+    expect(stripDsnOrgPrefix("1081365")).toBe("1081365");
+    expect(stripDsnOrgPrefix("123")).toBe("123");
+  });
+
+  test("preserves empty string and 'o' alone", () => {
+    expect(stripDsnOrgPrefix("")).toBe("");
+    expect(stripDsnOrgPrefix("o")).toBe("o");
+  });
+});
 
 describe("parseOrgProjectArg", () => {
   // Representative examples for documentation (invariants covered by property tests)
@@ -36,6 +69,40 @@ describe("parseOrgProjectArg", () => {
     expect(() => parseOrgProjectArg("/")).toThrow(
       'Invalid format: "/" requires a project slug'
     );
+  });
+
+  // Parser preserves DSN-style org identifiers (normalization moved to resolution layer)
+  describe("DSN-style org identifiers are preserved", () => {
+    test("preserves 'o' prefix in org-all mode", () => {
+      expect(parseOrgProjectArg("o1081365/")).toEqual({
+        type: "org-all",
+        org: "o1081365",
+      });
+    });
+
+    test("preserves 'o' prefix in explicit mode", () => {
+      expect(parseOrgProjectArg("o1081365/myproject")).toEqual({
+        type: "explicit",
+        org: "o1081365",
+        project: "myproject",
+      });
+    });
+
+    test("preserves normal org slugs", () => {
+      expect(parseOrgProjectArg("organic/cli")).toEqual({
+        type: "explicit",
+        org: "organic",
+        project: "cli",
+      });
+    });
+
+    test("preserves slugs with mixed chars after 'o'", () => {
+      expect(parseOrgProjectArg("o1abc/cli")).toEqual({
+        type: "explicit",
+        org: "o1abc",
+        project: "cli",
+      });
+    });
   });
 
   // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
@@ -261,6 +328,43 @@ describe("parseIssueArg", () => {
           "does not contain an issue ID"
         );
       }
+    });
+  });
+
+  // Parser preserves DSN-style org identifiers (normalization moved to resolution layer)
+  describe("DSN-style org identifiers are preserved", () => {
+    test("preserves 'o' prefix in explicit", () => {
+      expect(parseIssueArg("o1081365/CLI-G")).toEqual({
+        type: "explicit",
+        org: "o1081365",
+        project: "CLI",
+        suffix: "G",
+      });
+    });
+
+    test("preserves 'o' prefix in explicit-org-numeric", () => {
+      expect(parseIssueArg("o999/123456789")).toEqual({
+        type: "explicit-org-numeric",
+        org: "o999",
+        numericId: "123456789",
+      });
+    });
+
+    test("preserves 'o' prefix in explicit-org-suffix", () => {
+      expect(parseIssueArg("o1081365/G")).toEqual({
+        type: "explicit-org-suffix",
+        org: "o1081365",
+        suffix: "G",
+      });
+    });
+
+    test("preserves normal org slugs in issue args", () => {
+      expect(parseIssueArg("organic/cli-G")).toEqual({
+        type: "explicit",
+        org: "organic",
+        project: "cli",
+        suffix: "G",
+      });
     });
   });
 

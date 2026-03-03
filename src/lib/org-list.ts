@@ -39,6 +39,7 @@ import {
 } from "./db/pagination.js";
 import { AuthError, ContextError, ValidationError } from "./errors.js";
 import { writeFooter, writeJson } from "./formatters/index.js";
+import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
 
 // ---------------------------------------------------------------------------
@@ -764,11 +765,26 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     );
   }
 
+  // Normalize DSN-style org identifiers (e.g., "o1081365" → "1081365").
+  // Only fires as a fallback when the original org fails region resolution.
+  let effectiveParsed: ParsedOrgProject = parsed;
+  if (parsed.type === "explicit" || parsed.type === "org-all") {
+    const effectiveOrg = await resolveEffectiveOrg(parsed.org);
+    if (effectiveOrg !== parsed.org) {
+      effectiveParsed = { ...parsed, org: effectiveOrg };
+    }
+  }
+
   const defaults = buildDefaultHandlers(config);
   const handlers: ModeHandlerMap = { ...defaults, ...overrides };
-  const handler = handlers[parsed.type];
+  const handler = handlers[effectiveParsed.type];
 
-  const ctx: HandlerContext = { parsed, stdout, cwd, flags };
+  const ctx: HandlerContext = {
+    parsed: effectiveParsed,
+    stdout,
+    cwd,
+    flags,
+  };
 
   // TypeScript cannot prove that `parsed` narrows to `ParsedVariant<typeof parsed.type>`
   // through the dynamic handler lookup, but the handler map guarantees type safety.

@@ -45,6 +45,7 @@ import {
   ValidationError,
 } from "./errors.js";
 import { warning } from "./formatters/colors.js";
+import { resolveEffectiveOrg } from "./region.js";
 import { isAllDigits } from "./utils.js";
 
 /**
@@ -996,8 +997,10 @@ export async function resolveOrgProjectTarget(
   const usageHint = `sentry ${commandName} <org>/<project>`;
 
   switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
+    case "explicit": {
+      const org = await resolveEffectiveOrg(parsed.org);
+      return { org, project: parsed.project };
+    }
 
     case "org-all":
       throw new ContextError(

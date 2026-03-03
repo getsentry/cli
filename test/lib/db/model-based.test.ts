@@ -291,7 +291,9 @@ class SetOrgRegionsCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    await setOrgRegions(this.entries);
+    await setOrgRegions(
+      this.entries.map(([slug, regionUrl]) => ({ slug, regionUrl }))
+    );
 
     for (const [orgSlug, regionUrl] of this.entries) {
       model.regions.set(orgSlug, regionUrl);
@@ -658,7 +660,9 @@ describe("model-based: database layer", () => {
           try {
             // Set up auth and some regions
             setAuthToken("test-token");
-            await setOrgRegions(entries);
+            await setOrgRegions(
+              entries.map(([slug, regionUrl]) => ({ slug, regionUrl }))
+            );
 
             // Verify regions were set (use unique count since setOrgRegions uses upsert)
             const regionsBefore = await getAllOrgRegions();

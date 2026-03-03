@@ -45,6 +45,8 @@ import {
   type SentryTeam,
   type SentryUser,
   SentryUserSchema,
+  type TraceLog,
+  TraceLogsResponseSchema,
   type TraceSpan,
   type TransactionListItem,
   type TransactionsResponse,
@@ -525,10 +527,11 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   const flatResults = results.flat();
   const orgs = flatResults.map((r) => r.org);
 
-  const regionEntries: [string, string][] = flatResults.map((r) => [
-    r.org.slug,
-    r.regionUrl,
-  ]);
+  const regionEntries = flatResults.map((r) => ({
+    slug: r.org.slug,
+    regionUrl: r.regionUrl,
+    orgId: r.org.id,
+  }));
   await setOrgRegions(regionEntries);
 
   return orgs;
@@ -1687,4 +1690,60 @@ export async function getLog(
   const data = unwrapResult(result, "Failed to get log");
   const logsResponse = DetailedLogsResponseSchema.parse(data);
   return logsResponse.data[0] ?? null;
+}
+
+// Trace-log functions
+
+type ListTraceLogsOptions = {
+  /** Additional search query to filter results (Sentry query syntax) */
+  query?: string;
+  /** Maximum number of log entries to return (max 9999) */
+  limit?: number;
+  /**
+   * Time period to search in (e.g., "14d", "7d", "24h").
+   * Required by the API — without it the response may be empty even when
+   * logs exist for the trace. Defaults to "14d".
+   */
+  statsPeriod?: string;
+};
+
+/**
+ * List logs associated with a specific trace.
+ *
+ * Uses the dedicated `/organizations/{org}/trace-logs/` endpoint, which is
+ * org-scoped and automatically queries all projects in the org. This is
+ * distinct from the Explore/Events logs endpoint (`/events/?dataset=logs`)
+ * which does not support filtering by trace ID in query syntax.
+ *
+ * `statsPeriod` defaults to `"14d"`. Without a stats period the API may
+ * return empty results even when logs exist for the trace.
+ *
+ * @param orgSlug - Organization slug
+ * @param traceId - The 32-character hex trace ID
+ * @param options - Optional query/limit/statsPeriod overrides
+ * @returns Array of trace log entries, ordered newest-first
+ */
+export async function listTraceLogs(
+  orgSlug: string,
+  traceId: string,
+  options: ListTraceLogsOptions = {}
+): Promise<TraceLog[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data: response } = await apiRequestToRegion<{ data: TraceLog[] }>(
+    regionUrl,
+    `/organizations/${orgSlug}/trace-logs/`,
+    {
+      params: {
+        traceId,
+        statsPeriod: options.statsPeriod ?? "14d",
+        per_page: options.limit ?? API_MAX_PER_PAGE,
+        query: options.query,
+        sort: "-timestamp",
+      },
+      schema: TraceLogsResponseSchema,
+    }
+  );
+
+  return response.data;
 }
