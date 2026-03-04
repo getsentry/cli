@@ -149,9 +149,9 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 <p>The OAuth device flow requires <strong>Sentry 26.1.0 or later</strong> and a public OAuth application registered on your instance.</p>
 <h4 id="1-create-a-public-oauth-application">1. Create a Public OAuth Application</h4>
 <ol>
-<li>In your Sentry instance, go to <strong>Settings → Developer Settings → New Public Integration</strong> (or visit <code dir="auto">https://sentry.example.com/settings/sentry/developer-settings/new-public/</code>)</li>
-<li>Fill in the required fields (name, webhook URL — can be any placeholder URL)</li>
-<li>Under <strong>Permissions</strong>, grant at minimum: <code dir="auto">org:read</code>, <code dir="auto">project:read</code>, <code dir="auto">event:read</code>, <code dir="auto">member:read</code>, <code dir="auto">team:read</code></li>
+<li>In your Sentry instance, go to <strong>Settings → Developer Settings → Applications → Create New Application</strong> (or visit <code dir="auto">https://sentry.example.com/settings/account/api/applications/</code>)</li>
+<li>Select <strong>Public</strong> as the application type</li>
+<li>Fill in the required fields (name, redirect URL — can be any placeholder URL)</li>
 <li>Save the application and copy the <strong>Client ID</strong></li>
 </ol>
 <h4 id="2-log-in">2. Log In</h4>
@@ -161,8 +161,8 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 <h3 id="with-an-api-token">With an API Token</h3>
 <p>If your instance is on an older version or you prefer not to create an OAuth application, you can use an API token instead:</p>
 <ol>
-<li>Go to <strong>Settings → API → Auth Tokens</strong> in your Sentry instance (or visit <code dir="auto">https://sentry.example.com/settings/account/api/auth-tokens/</code>)</li>
-<li>Create a new token with the scopes you need</li>
+<li>Go to <strong>Settings → Developer Settings → Personal Tokens</strong> in your Sentry instance (or visit <code dir="auto">https://sentry.example.com/settings/account/api/auth-tokens/new-token/</code>)</li>
+<li>Create a new token with the following scopes: <code dir="auto">project:read</code>, <code dir="auto">project:write</code>, <code dir="auto">org:read</code>, <code dir="auto">event:read</code>, <code dir="auto">event:write</code>, <code dir="auto">member:read</code>, <code dir="auto">team:read</code></li>
 <li>Pass it to the CLI:</li>
 </ol>
 <div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#E1E4E8">SENTRY_URL</span><span style="--0:#F97583">=</span><span style="--0:#9ECBFF">https://sentry.example.com</span><span style="--0:#E1E4E8"> </span><span style="--0:#B392F0">sentry</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">auth</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">login</span><span style="--0:#E1E4E8"> </span><span style="--0:#79B8FF">--token</span><span style="--0:#E1E4E8"> </span><span style="--0:#9ECBFF">YOUR_TOKEN</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN"><div></div></button></div></figure></div>
