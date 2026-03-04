@@ -42,6 +42,7 @@ import {
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
+import { slugify } from "../../lib/utils.js";
 import type { SentryProject, SentryTeam } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
@@ -88,25 +89,6 @@ const PLATFORMS = [
   "rust",
   "elixir",
 ] as const;
-
-/**
- * Convert a project name to its expected Sentry slug.
- * Aligned with Sentry's canonical implementation:
- * https://github.com/getsentry/sentry/blob/master/static/app/utils/slugify.tsx
- *
- * @example slugify("My Cool App") // "my-cool-app"
- * @example slugify("my-app")      // "my-app"
- * @example slugify("Café Project") // "cafe-project"
- * @example slugify("my_app")      // "my_app"
- */
-function slugify(name: string): string {
-  return name
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9_\s-]/g, "")
-    .replace(/[-\s]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
 
 /**
  * Check whether an API error is about an invalid platform value.

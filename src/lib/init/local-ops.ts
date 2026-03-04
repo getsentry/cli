@@ -8,6 +8,16 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isCancel, select } from "@clack/prompts";
+import {
+  createProject,
+  listOrganizations,
+  tryGetPrimaryDsn,
+} from "../api-client.js";
+import { resolveOrg } from "../resolve-target.js";
+import { resolveOrCreateTeam } from "../resolve-team.js";
+import { buildProjectUrl } from "../sentry-urls.js";
+import { slugify } from "../utils.js";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_FILE_BYTES,
@@ -15,6 +25,7 @@ import {
 } from "./constants.js";
 import type {
   ApplyPatchsetPayload,
+  CreateSentryProjectPayload,
   DirEntry,
   FileExistsBatchPayload,
   ListDirPayload,
@@ -250,6 +261,8 @@ export async function handleLocalOp(
         return await runCommands(payload, options.dryRun);
       case "apply-patchset":
         return await applyPatchset(payload, options.dryRun);
+      case "create-sentry-project":
+        return await createSentryProject(payload, options);
       default:
         return {
           ok: false,
@@ -532,4 +545,107 @@ function applyPatchset(
   }
 
   return { ok: true, data: { applied } };
+}
+
+/**
+ * Resolve the org slug from local config, env vars, or by listing the user's
+ * organizations from the API as a fallback.
+ * Returns the slug on success, or a LocalOpResult error to return early.
+ */
+async function resolveOrgSlug(
+  cwd: string,
+  yes: boolean
+): Promise<string | LocalOpResult> {
+  const resolved = await resolveOrg({ cwd });
+  if (resolved) {
+    return resolved.org;
+  }
+
+  // Fallback: list user's organizations from API
+  const orgs = await listOrganizations();
+  if (orgs.length === 0) {
+    return {
+      ok: false,
+      error: "Not authenticated. Run 'sentry login' first.",
+    };
+  }
+  if (orgs.length === 1 && orgs[0]) {
+    return orgs[0].slug;
+  }
+
+  // Multiple orgs — interactive selection
+  if (yes) {
+    const slugs = orgs.map((o) => o.slug).join(", ");
+    return {
+      ok: false,
+      error: `Multiple organizations found (${slugs}). Set SENTRY_ORG to specify which one.`,
+    };
+  }
+  const selected = await select({
+    message: "Which organization should the project be created in?",
+    options: orgs.map((o) => ({
+      value: o.slug,
+      label: o.name,
+      hint: o.slug,
+    })),
+  });
+  if (isCancel(selected)) {
+    return { ok: false, error: "Organization selection cancelled." };
+  }
+  return selected;
+}
+
+async function createSentryProject(
+  payload: CreateSentryProjectPayload,
+  options: WizardOptions
+): Promise<LocalOpResult> {
+  const { name, platform } = payload.params;
+  const slug = slugify(name);
+  if (!slug) {
+    return {
+      ok: false,
+      error: `Invalid project name: "${name}" produces an empty slug.`,
+    };
+  }
+
+  try {
+    // 1. Resolve org
+    const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
+    if (typeof orgResult !== "string") {
+      return orgResult;
+    }
+    const orgSlug = orgResult;
+
+    // 2. Resolve or create team
+    const team = await resolveOrCreateTeam(orgSlug, {
+      autoCreateSlug: slug,
+      usageHint: "sentry init",
+    });
+
+    // 3. Create project
+    const project = await createProject(orgSlug, team.slug, {
+      name,
+      platform,
+    });
+
+    // 4. Get DSN (best-effort)
+    const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
+
+    // 5. Build URL
+    const url = buildProjectUrl(orgSlug, project.slug);
+
+    return {
+      ok: true,
+      data: {
+        orgSlug,
+        projectSlug: project.slug,
+        projectId: project.id,
+        dsn: dsn ?? "",
+        url,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: message };
+  }
 }
