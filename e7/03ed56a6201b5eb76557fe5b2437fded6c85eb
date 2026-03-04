@@ -1,0 +1,32 @@
+## Implementation Plan
+
+### Problem
+Users need to filter logs by trace ID from the CLI via `sentry log list --trace <id>`.
+
+### API Constraint
+The Explore/Events logs endpoint does not support filtering by trace ID in query
+syntax. The dedicated `/organizations/{org}/trace-logs/` endpoint does but is
+org-scoped (no project needed).
+
+### Approach
+1. Extract shared `validateTraceId` + `TRACE_ID_RE` into `src/lib/trace-id.ts`
+2. Add `--trace` flag to `sentry log list` with shared validation
+3. When `--trace` is provided, use `resolveOrg()` instead of `resolveOrgAndProject()`
+4. Unified `executeFollowMode<T>(config: FollowConfig<T>)` for both standard and trace streaming
+5. `setTimeout`-based recursive scheduling (not `while(true)` + `Bun.sleep`)
+6. SIGINT clears the timer, writes table footer, resolves the promise — process exits naturally
+
+### Design Decisions
+- Flag name: `--trace` (canonical), matches Sentry data model
+- Org-scoped resolution when `--trace` given: positional target is org slug
+- `setTimeout` scheduling: clean cancellation via `clearTimeout`, no `process.exit(0)`
+- Unified follow function parameterized by `fetchInitial`/`fetchPoll`/`extractNew` callbacks
+- Standard mode: server-side dedup via `afterTimestamp` param
+- Trace mode: client-side dedup via `timestamp_precise` filtering
+
+### Testing
+- 27 tests for trace-id validation (unit + property-based)
+- 40 tests for log list command (single-fetch + follow mode via SIGINT)
+- 17 E2E tests (12 original + 5 new trace tests)
+- Follow-mode tests use `interceptSigint()` helper to capture/trigger SIGINT handler
+- Poll interval: `follow: 1` (1 second minimum, not artificial 1ms)
