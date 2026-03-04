@@ -19,7 +19,8 @@ export type LocalOpPayload =
   | ReadFilesPayload
   | FileExistsBatchPayload
   | RunCommandsPayload
-  | ApplyPatchsetPayload;
+  | ApplyPatchsetPayload
+  | CreateSentryProjectPayload;
 
 export type ListDirPayload = {
   type: "local-op";
@@ -72,6 +73,16 @@ export type ApplyPatchsetPayload = {
       action: "create" | "modify" | "delete";
       patch: string;
     }>;
+  };
+};
+
+export type CreateSentryProjectPayload = {
+  type: "local-op";
+  operation: "create-sentry-project";
+  cwd: string;
+  params: {
+    name: string;
+    platform: string;
   };
 };
 
