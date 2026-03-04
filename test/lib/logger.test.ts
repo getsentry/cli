@@ -1,7 +1,7 @@
 /**
  * Unit tests for the logger module.
  *
- * Tests parseLogLevel, extractLogLevelFromArgs, setLogLevel,
+ * Tests parseLogLevel, getEnvLogLevel, extractLogLevelFromArgs, setLogLevel,
  * attachSentryReporter, and the logger instance configuration.
  */
 
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachSentryReporter,
   extractLogLevelFromArgs,
+  getEnvLogLevel,
   LOG_LEVEL_ENV_VAR,
   LOG_LEVEL_NAMES,
   logger,
@@ -70,6 +71,44 @@ describe("LOG_LEVEL_NAMES", () => {
 describe("LOG_LEVEL_ENV_VAR", () => {
   test("is SENTRY_LOG_LEVEL", () => {
     expect(LOG_LEVEL_ENV_VAR).toBe("SENTRY_LOG_LEVEL");
+  });
+});
+
+describe("getEnvLogLevel", () => {
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    savedEnv = process.env[LOG_LEVEL_ENV_VAR];
+  });
+
+  afterEach(() => {
+    if (savedEnv === undefined) {
+      delete process.env[LOG_LEVEL_ENV_VAR];
+    } else {
+      process.env[LOG_LEVEL_ENV_VAR] = savedEnv;
+    }
+  });
+
+  test("returns null when env var is not set", () => {
+    delete process.env[LOG_LEVEL_ENV_VAR];
+    expect(getEnvLogLevel()).toBeNull();
+  });
+
+  test("returns parsed level when env var is set", () => {
+    process.env[LOG_LEVEL_ENV_VAR] = "debug";
+    expect(getEnvLogLevel()).toBe(4);
+  });
+
+  test("returns parsed level for each valid name", () => {
+    for (const [idx, name] of LOG_LEVEL_NAMES.entries()) {
+      process.env[LOG_LEVEL_ENV_VAR] = name;
+      expect(getEnvLogLevel()).toBe(idx);
+    }
+  });
+
+  test("returns null for empty string", () => {
+    process.env[LOG_LEVEL_ENV_VAR] = "";
+    expect(getEnvLogLevel()).toBeNull();
   });
 });
 
@@ -209,10 +248,8 @@ describe("logger instance", () => {
   });
 
   test("default level is info (3)", () => {
-    // Unless SENTRY_LOG_LEVEL was set in the environment
-    if (!process.env.SENTRY_LOG_LEVEL) {
-      expect(logger.level).toBe(3);
-    }
+    // Logger always starts at info (3) — env var is applied lazily by bin.ts
+    expect(logger.level).toBe(3);
   });
 });
 

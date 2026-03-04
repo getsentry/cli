@@ -103,16 +103,19 @@ export function parseLogLevel(name: string): number {
 }
 
 /**
- * Read the initial log level from the `SENTRY_LOG_LEVEL` environment variable.
+ * Read the log level from `SENTRY_LOG_LEVEL`, called lazily by {@link setLogLevel}.
  *
- * @returns consola numeric level (defaults to 3 / info)
+ * Following the same pattern as `getSentryUrl()` in oauth.ts — env vars are read
+ * at call time (not module load time) so tests can set them after import.
+ *
+ * @returns consola numeric level, or null if not set
  */
-function getInitialLogLevel(): number {
+export function getEnvLogLevel(): number | null {
   const envLevel = process.env[LOG_LEVEL_ENV_VAR];
   if (envLevel) {
     return parseLogLevel(envLevel);
   }
-  return DEFAULT_LOG_LEVEL;
+  return null;
 }
 
 /**
@@ -124,9 +127,13 @@ function getInitialLogLevel(): number {
  *
  * The Sentry reporter is added lazily via {@link attachSentryReporter} after
  * Sentry.init() completes, since the reporter needs an active Sentry client.
+ *
+ * The initial level defaults to info (3). `SENTRY_LOG_LEVEL` is applied lazily
+ * by bin.ts calling `setLogLevel(getEnvLogLevel())` — not at module load time —
+ * so tests can override the env var after import.
  */
 export const logger = createConsola({
-  level: getInitialLogLevel(),
+  level: DEFAULT_LOG_LEVEL,
   // stderr is the correct stream for diagnostic/log output in CLIs —
   // stdout is reserved for command output (data, JSON, tables).
   stderr: process.stderr,
