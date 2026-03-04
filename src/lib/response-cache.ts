@@ -232,14 +232,16 @@ function isEntryFresh(
     return true;
   }
 
-  // CachePolicy says stale — check if we should override with fallback TTL
+  // CachePolicy says stale — check if we should override with fallback TTL.
+  // timeToLive() returns 0 when the server sent no cache headers, or a
+  // positive/negative value when it did (negative = already expired).
   const serverTtl = policy.timeToLive();
-  if (serverTtl > 0) {
-    // Server provided a TTL and it expired — respect the server
+  if (serverTtl !== 0) {
+    // Server provided an explicit TTL — respect it (even if expired)
     return false;
   }
 
-  // No server TTL — use our fallback tier
+  // No server TTL (0) — use our URL-based fallback tier
   const tier = classifyUrl(url);
   const fallbackTtl = FALLBACK_TTL_MS[tier];
   const age = Date.now() - entry.createdAt;
@@ -516,12 +518,17 @@ async function collectEntryMetadata(
       const entry = JSON.parse(raw) as CacheEntry;
       const policy = CachePolicy.fromObject(entry.policy);
 
+      // timeToLive() returns 0 when the server sent no cache headers,
+      // positive when still fresh, negative when explicitly expired.
       const serverTtl = policy.timeToLive();
       let expired: boolean;
       if (serverTtl > 0) {
         expired = false;
+      } else if (serverTtl < 0) {
+        // Server-provided TTL has expired — don't override with fallback
+        expired = true;
       } else {
-        // Use the entry's stored URL for accurate tier classification
+        // No server TTL (0) — use URL-based fallback tier
         const tier = classifyUrl(entry.url ?? "");
         expired = now - entry.createdAt > FALLBACK_TTL_MS[tier];
       }

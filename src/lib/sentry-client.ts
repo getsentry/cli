@@ -284,7 +284,14 @@ async function fetchWithRetry(
     const result = await executeAttempt(input, init, headers, isLastAttempt);
 
     if (result.action === "done") {
-      cacheResponse(method, fullUrl, authHeaders(token), result.response);
+      // Use getAuthToken() instead of captured `token` — after a 401 refresh,
+      // handleUnauthorized stores a new token in the DB
+      cacheResponse(
+        method,
+        fullUrl,
+        authHeaders(getAuthToken()),
+        result.response
+      );
       return result.response;
     }
     if (result.action === "throw") {
