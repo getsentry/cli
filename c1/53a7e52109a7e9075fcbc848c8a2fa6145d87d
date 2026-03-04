@@ -1,0 +1,104 @@
+# Markdown Rendering Style Improvements
+
+Match CLI terminal output to website screenshot aesthetic.
+
+## Part 1: Inline Code Spans — Cyan + Background
+
+**Files:** `src/lib/formatters/colors.ts`, `src/lib/formatters/markdown.ts`
+
+### colors.ts
+Add two new color constants to `COLORS`:
+```ts
+/** Background tint for inline code spans (dark teal, pairs with cyan text) */
+codeBg: "#1a2f3a",
+/** Foreground color for inline code spans */
+codeFg: "#22d3ee",
+```
+
+### markdown.ts — `renderOneInline()` (line 331)
+Change codespan rendering from plain yellow to cyan-on-tinted-background with padding:
+```ts
+// Before:
+case "codespan":
+  return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
+
+// After:
+case "codespan":
+  return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(
+    ` ${(token as Tokens.Codespan).text} `
+  );
+```
+
+The space padding around the text creates the "pill" look matching the website's
+`.code { padding: 0.1rem 0.3rem }` CSS.
+
+## Part 2: Header Emphasis — Bold Underline + Divider Bar
+
+**File:** `src/lib/formatters/markdown.ts` (lines 440-451)
+
+### Heading rendering changes:
+- **h1/h2**: Bold + underline cyan, followed by a short colored divider bar
+- **h3**: Bold cyan (currently not bold)
+
+```ts
+// Before:
+case "heading": {
+  const t = token as Tokens.Heading;
+  const text = renderInline(t.tokens);
+  const styled =
+    t.depth <= 2
+      ? chalk.hex(COLORS.cyan).bold(text)
+      : chalk.hex(COLORS.cyan)(text);
+  parts.push(styled);
+  parts.push("");
+  break;
+}
+
+// After:
+case "heading": {
+  const t = token as Tokens.Heading;
+  const text = renderInline(t.tokens);
+  if (t.depth <= 2) {
+    parts.push(chalk.hex(COLORS.cyan).bold(text));
+    // Colored divider bar under h1/h2 for visual weight
+    parts.push(chalk.hex(COLORS.cyan)("━".repeat(Math.min(stringWidth(text), 30))));
+  } else {
+    parts.push(chalk.hex(COLORS.cyan).bold(text));
+  }
+  parts.push("");
+  break;
+}
+```
+
+Need to add `import stringWidth from "string-width";` at top of markdown.ts
+(already used by text-table.ts, same dep).
+
+## Part 3: Website Terminal.astro — Update Columns
+
+**File:** `docs/src/components/Terminal.astro`
+
+The website currently shows columns `SHORT ID | ALIAS | TITLE | COUNT | FIX`
+but the real CLI now renders `LEVEL | ALIAS | SHORT ID | COUNT | SEEN | FIXABILITY | TITLE`.
+
+Update the hardcoded terminal demo:
+- Add LEVEL column first (color-coded: ERROR=red, WARNING=yellow)
+- Move ALIAS after LEVEL
+- Move TITLE to last
+- Replace FIX → FIXABILITY
+- Add SEEN column (relative timestamps)
+- Update `.col-*` CSS classes to match new layout
+- Keep it visually clean — on the hero terminal the space is limited, so
+  we might show a subset: LEVEL, SHORT ID, TITLE, COUNT, FIXABILITY
+  (drop ALIAS and SEEN for hero brevity, they're secondary info)
+
+Also update the `FeatureTerminal` in index.mdx section 1 ("It Knows Your Project")
+to match the same column set for consistency.
+
+## Part 4: Update Tests
+
+**File:** `test/lib/formatters/markdown.test.ts`
+
+- Update assertions for code span rendering (background ANSI codes instead of yellow)
+- Update assertions for heading rendering (h3 now bold, h1/h2 have divider bar)
+- Add test for divider bar length clamping (max 30 chars)
+- Plain mode tests should be unaffected (no ANSI in plain mode)
