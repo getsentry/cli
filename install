@@ -39,15 +39,19 @@ report_error() {
     local timestamp
     timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "")
 
-    # Escape message for JSON (backslashes, quotes, newlines)
-    local json_msg
-    json_msg=$(printf '%s' "$msg" | sed 's/\\/\\\\/g;s/"/\\"/g' | tr '\n' ' ')
+    # Escape a value for safe JSON string interpolation
+    _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g' | tr '\n' ' '; }
+
+    local json_msg; json_msg=$(_esc "$msg")
+    local json_step; json_step=$(_esc "$step")
+    local json_channel; json_channel=$(_esc "${requested_version:-stable}")
+    local json_version; json_version=$(_esc "${version:-unknown}")
 
     local envelope
     envelope=$(printf '%s\n%s\n%s' \
       "{\"event_id\":\"${event_id}\",\"dsn\":\"https://${SENTRY_DSN_KEY}@o1.ingest.us.sentry.io/${SENTRY_PROJECT_ID}\"}" \
       '{"type":"event"}' \
-      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"channel\":\"${requested_version:-stable}\",\"step\":\"${step}\",\"install.version\":\"${version:-unknown}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
+      "{\"event_id\":\"${event_id}\",\"timestamp\":\"${timestamp}\",\"platform\":\"other\",\"level\":\"error\",\"logger\":\"install\",\"server_name\":\"install-script\",\"message\":{\"formatted\":\"${json_msg}\"},\"tags\":{\"os\":\"${os:-unknown}\",\"arch\":\"${arch:-unknown}\",\"channel\":\"${json_channel}\",\"step\":\"${json_step}\",\"install.version\":\"${json_version}\"},\"contexts\":{\"runtime\":{\"name\":\"bash\",\"version\":\"${BASH_VERSION:-unknown}\"}}}")
 
     curl -sf --max-time 2 \
       -H "Content-Type: application/x-sentry-envelope" \
