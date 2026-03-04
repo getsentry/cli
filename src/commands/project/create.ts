@@ -30,11 +30,7 @@ import {
   CliError,
   ContextError,
 } from "../../lib/errors.js";
-import {
-  writeFooter,
-  writeJson,
-  writeKeyValue,
-} from "../../lib/formatters/index.js";
+import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
@@ -404,44 +400,20 @@ export const createCommand = buildCommand({
 
     // Human-readable output
     const url = buildProjectUrl(orgSlug, project.slug);
-    const fields: [string, string][] = [
-      ["Project", project.name],
-      ["Slug", project.slug],
-      ["Org", orgSlug],
-      ["Team", team.slug],
-      ["Platform", project.platform || platform],
-    ];
-    if (dsn) {
-      fields.push(["DSN", dsn]);
-    }
-    fields.push(["URL", url]);
-
-    stdout.write(`\nCreated project '${project.name}' in ${orgSlug}\n`);
-
-    // Sentry may adjust the slug to avoid collisions (e.g., "my-app" → "my-app-0g")
     const expectedSlug = slugify(name);
-    if (project.slug !== expectedSlug) {
-      stdout.write(
-        `Note: Slug '${project.slug}' was assigned because '${expectedSlug}' is already taken.\n`
-      );
-    }
 
-    // Inform user which team was used when not explicitly specified
-    if (team.source === "auto-created") {
-      stdout.write(`Note: Created team '${team.slug}' (org had no teams).\n`);
-    } else if (team.source === "auto-selected") {
-      stdout.write(
-        `Note: Using team '${team.slug}'. ` +
-          "See all teams: sentry team list\n"
-      );
-    }
-
-    stdout.write("\n");
-    writeKeyValue(stdout, fields);
-
-    writeFooter(
-      stdout,
-      `Tip: Use 'sentry project view ${orgSlug}/${project.slug}' for details`
+    stdout.write(
+      `${formatProjectCreated({
+        project,
+        orgSlug,
+        teamSlug: team.slug,
+        teamSource: team.source,
+        requestedPlatform: platform,
+        dsn,
+        url,
+        slugDiverged: project.slug !== expectedSlug,
+        expectedSlug,
+      })}\n`
     );
   },
 });
