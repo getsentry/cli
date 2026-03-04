@@ -106,25 +106,26 @@ describe("extractLogLevelFromArgs", () => {
     expect(args).toEqual(["issue", "list", "--json"]);
   });
 
-  test("extracts --verbose and removes it from args", () => {
+  test("reads --verbose but leaves it in args for downstream commands", () => {
     const args = ["--verbose", "issue", "list"];
     const result = extractLogLevelFromArgs(args);
     expect(result).toBe(4); // debug
-    expect(args).toEqual(["issue", "list"]);
+    // --verbose stays in argv because commands like `api` have their own --verbose flag
+    expect(args).toEqual(["--verbose", "issue", "list"]);
   });
 
-  test("extracts --verbose from middle of args", () => {
+  test("reads --verbose from middle of args without consuming it", () => {
     const args = ["issue", "--verbose", "list"];
     const result = extractLogLevelFromArgs(args);
     expect(result).toBe(4);
-    expect(args).toEqual(["issue", "list"]);
+    expect(args).toEqual(["issue", "--verbose", "list"]);
   });
 
-  test("extracts --verbose from end of args", () => {
+  test("reads --verbose from end of args without consuming it", () => {
     const args = ["issue", "list", "--verbose"];
     const result = extractLogLevelFromArgs(args);
     expect(result).toBe(4);
-    expect(args).toEqual(["issue", "list"]);
+    expect(args).toEqual(["issue", "list", "--verbose"]);
   });
 
   test("extracts --log-level with value", () => {
@@ -145,7 +146,8 @@ describe("extractLogLevelFromArgs", () => {
     const args = ["--verbose", "--log-level", "warn", "issue", "list"];
     const result = extractLogLevelFromArgs(args);
     expect(result).toBe(1); // warn wins over debug
-    expect(args).toEqual(["issue", "list"]);
+    // --log-level is consumed, --verbose stays
+    expect(args).toEqual(["--verbose", "issue", "list"]);
   });
 
   test("--log-level without value defaults to debug", () => {

@@ -90,8 +90,9 @@ async function main(): Promise<void> {
 
   const args = process.argv.slice(2);
 
-  // Extract global --verbose / --log-level flags before Stricli parses args.
-  // These are consumed (removed) from args so Stricli doesn't reject them.
+  // Extract global log-level flags before Stricli parses args.
+  // --log-level is consumed (removed); --verbose is read but left in place
+  // because some commands (e.g., `api`) define their own --verbose flag.
   const logLevel = extractLogLevelFromArgs(args);
   if (logLevel !== null) {
     setLogLevel(logLevel);

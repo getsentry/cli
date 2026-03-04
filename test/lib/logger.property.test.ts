@@ -112,7 +112,7 @@ describe("property: extractLogLevelFromArgs", () => {
     );
   });
 
-  test("--verbose always produces level 4 (debug)", () => {
+  test("--verbose always produces level 4 (debug) and stays in argv", () => {
     fcAssert(
       property(
         array(nonLogArg, { maxLength: 5 }),
@@ -121,10 +121,12 @@ describe("property: extractLogLevelFromArgs", () => {
           const args = [...otherArgs];
           const pos = Math.min(insertIdx, args.length);
           args.splice(pos, 0, "--verbose");
+          const original = [...args];
 
           const result = extractLogLevelFromArgs(args);
           expect(result).toBe(4);
-          expect(args).not.toContain("--verbose");
+          // --verbose is NOT consumed — commands like `api` have their own --verbose
+          expect(args).toEqual(original);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -158,13 +160,14 @@ describe("property: extractLogLevelFromArgs", () => {
         const args = ["--verbose", "--log-level", levelName, "cmd"];
         const result = extractLogLevelFromArgs(args);
         expect(result).toBe(parseLogLevel(levelName));
-        expect(args).toEqual(["cmd"]);
+        // --log-level consumed, --verbose stays
+        expect(args).toEqual(["--verbose", "cmd"]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("extracts exactly the right number of elements", () => {
+  test("--verbose preserves all args, --log-level removes exactly 2 elements", () => {
     fcAssert(
       property(
         array(nonLogArg, { minLength: 1, maxLength: 5 }),
@@ -174,10 +177,12 @@ describe("property: extractLogLevelFromArgs", () => {
           const originalNonLogArgs = [...otherArgs];
 
           if (flagType === "verbose") {
+            // --verbose is NOT consumed from argv
             const args = ["--verbose", ...otherArgs];
             extractLogLevelFromArgs(args);
-            expect(args).toEqual(originalNonLogArgs);
+            expect(args).toEqual(["--verbose", ...originalNonLogArgs]);
           } else {
+            // --log-level + value ARE consumed from argv
             const args = ["--log-level", levelName, ...otherArgs];
             extractLogLevelFromArgs(args);
             expect(args).toEqual(originalNonLogArgs);

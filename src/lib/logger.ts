@@ -197,8 +197,12 @@ export function setLogLevel(level: number): void {
  * Parse `--verbose` and `--log-level <level>` from raw argv.
  *
  * These are "global" flags that must be processed before Stricli sees the args,
- * because Stricli has no concept of global flags. The flags are consumed
- * (removed from the array) so Stricli doesn't reject them as unknown.
+ * because Stricli has no concept of global flags.
+ *
+ * `--log-level` is consumed (removed from argv) because it's exclusively a
+ * logger flag — no command defines it. `--verbose` is NOT consumed because
+ * some commands (e.g., `api`) define their own `--verbose` flag with
+ * command-specific semantics.
  *
  * Priority: `--log-level` wins over `--verbose` if both are specified.
  * `--verbose` is equivalent to `--log-level debug`.
@@ -209,14 +213,13 @@ export function setLogLevel(level: number): void {
 export function extractLogLevelFromArgs(argv: string[]): number | null {
   let resolvedLevel: number | null = null;
 
-  // Process --verbose (short alias: -v, but only if standalone — not -vvv or combined)
+  // Check --verbose but leave it in argv — commands like `api` have their own --verbose flag
   const verboseIdx = argv.indexOf("--verbose");
   if (verboseIdx !== -1) {
     resolvedLevel = LOG_LEVEL_MAP.debug;
-    argv.splice(verboseIdx, 1);
   }
 
-  // Process --log-level <level> (overrides --verbose)
+  // Process --log-level <level> (overrides --verbose, consumed from argv)
   const logLevelIdx = argv.indexOf("--log-level");
   if (logLevelIdx !== -1) {
     const levelValue = argv[logLevelIdx + 1];
