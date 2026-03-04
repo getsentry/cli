@@ -15,6 +15,7 @@ import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
+  displayTraceLogs,
   formatLogRow,
   formatLogsHeader,
   formatLogTable,
@@ -341,26 +342,16 @@ async function executeTraceSingleFetch(
     statsPeriod: DEFAULT_TRACE_PERIOD,
   });
 
-  if (flags.json) {
-    writeJson(stdout, [...logs].reverse());
-    return;
-  }
-
-  if (logs.length === 0) {
-    stdout.write(
+  displayTraceLogs({
+    stdout,
+    logs,
+    traceId,
+    limit: flags.limit,
+    asJson: flags.json,
+    emptyMessage:
       `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
-        "Try 'sentry trace logs' for more options (e.g., --period 30d).\n"
-    );
-    return;
-  }
-
-  const chronological = [...logs].reverse();
-  stdout.write(formatLogTable(chronological, false));
-
-  const hasMore = logs.length >= flags.limit;
-  const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
-  const tip = hasMore ? " Use --limit to show more." : "";
-  writeFooter(stdout, `${countText}${tip}`);
+      "Try 'sentry trace logs' for more options (e.g., --period 30d).\n",
+  });
 }
 
 export const listCommand = buildListCommand("log", {

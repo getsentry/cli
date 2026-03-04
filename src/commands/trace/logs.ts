@@ -10,11 +10,7 @@ import { validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
-import {
-  formatLogTable,
-  writeFooter,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { displayTraceLogs } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { validateTraceId } from "../../lib/trace-id.js";
@@ -205,27 +201,15 @@ export const logsCommand = buildCommand({
       query: flags.query,
     });
 
-    if (flags.json) {
-      writeJson(stdout, logs);
-      return;
-    }
-
-    if (logs.length === 0) {
-      stdout.write(
+    displayTraceLogs({
+      stdout,
+      logs,
+      traceId,
+      limit: flags.limit,
+      asJson: flags.json,
+      emptyMessage:
         `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
-          `Try a longer period: sentry trace logs --period 30d ${traceId}\n`
-      );
-      return;
-    }
-
-    // API returns newest-first; reverse for chronological display
-    const chronological = [...logs].reverse();
-
-    stdout.write(formatLogTable(chronological, false));
-
-    const hasMore = logs.length >= flags.limit;
-    const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
-    const tip = hasMore ? " Use --limit to show more." : "";
-    writeFooter(stdout, `${countText}${tip}`);
+        `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,
+    });
   },
 });
