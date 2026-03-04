@@ -236,7 +236,7 @@ class ClearAuthCommand implements AsyncCommand<DbModel, RealDb> {
   check = () => true;
 
   async run(model: DbModel, _real: RealDb): Promise<void> {
-    clearAuth();
+    await clearAuth();
 
     // Clear auth state
     model.auth.token = null;
@@ -760,8 +760,8 @@ const allCommands = [
 // Tests
 
 describe("model-based: database layer", () => {
-  test("random sequences of database operations maintain consistency", () => {
-    fcAssert(
+  test("random sequences of database operations maintain consistency", async () => {
+    await fcAssert(
       asyncProperty(commands(allCommands, { size: "+1" }), async (cmds) => {
         const cleanup = createIsolatedDbContext();
         // Save env vars so model commands that set them don't leak across runs
@@ -798,8 +798,8 @@ describe("model-based: database layer", () => {
     );
   });
 
-  test("clearAuth also clears org regions (key invariant)", () => {
-    fcAssert(
+  test("clearAuth also clears org regions (key invariant)", async () => {
+    await fcAssert(
       asyncProperty(
         array(tuple(slugArb, regionUrlArb), { minLength: 1, maxLength: 5 }),
         async (entries) => {
@@ -817,7 +817,7 @@ describe("model-based: database layer", () => {
             expect(regionsBefore.size).toBe(uniqueOrgSlugs.size);
 
             // Clear auth
-            clearAuth();
+            await clearAuth();
 
             // Verify regions were also cleared (this is the invariant!)
             const regionsAfter = await getAllOrgRegions();
@@ -831,8 +831,8 @@ describe("model-based: database layer", () => {
     );
   });
 
-  test("clearAuth also clears pagination cursors (key invariant)", () => {
-    fcAssert(
+  test("clearAuth also clears pagination cursors (key invariant)", async () => {
+    await fcAssert(
       asyncProperty(tuple(slugArb, slugArb), async ([commandKey, context]) => {
         const cleanup = createIsolatedDbContext();
         try {
@@ -850,7 +850,7 @@ describe("model-based: database layer", () => {
           expect(before).toBe("1735689600000:100:0");
 
           // Clear auth
-          clearAuth();
+          await clearAuth();
 
           // Verify pagination cursor was also cleared (this is the invariant!)
           const after = getPaginationCursor(commandKey, context);
@@ -863,8 +863,8 @@ describe("model-based: database layer", () => {
     );
   });
 
-  test("alias lookup is case-insensitive", () => {
-    fcAssert(
+  test("alias lookup is case-insensitive", async () => {
+    await fcAssert(
       asyncProperty(
         tuple(aliasArb, slugArb, slugArb),
         async ([alias, org, project]) => {
@@ -919,7 +919,7 @@ describe("model-based: database layer", () => {
     );
   });
 
-  test("fingerprint mismatch rejects alias lookup", () => {
+  test("fingerprint mismatch rejects alias lookup", async () => {
     // Combine all parameters into a single tuple to avoid parameter limit
     const paramsArb = tuple(
       aliasArb,
@@ -931,7 +931,7 @@ describe("model-based: database layer", () => {
       nat(1000)
     );
 
-    fcAssert(
+    await fcAssert(
       asyncProperty(paramsArb, async ([alias, org, project, a, b, c, d]) => {
         // Ensure fingerprints are different
         const fp1 = `${a}:${b}`;
@@ -961,13 +961,13 @@ describe("model-based: database layer", () => {
     );
   });
 
-  test("setProjectAliases replaces all existing aliases", () => {
+  test("setProjectAliases replaces all existing aliases", async () => {
     const aliasEntryArb = array(tuple(aliasArb, slugArb, slugArb), {
       minLength: 1,
       maxLength: 3,
     });
 
-    fcAssert(
+    await fcAssert(
       asyncProperty(
         tuple(aliasEntryArb, aliasEntryArb),
         async ([first, second]) => {

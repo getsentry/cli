@@ -192,8 +192,8 @@ const allCommands = [setCmdArb, getCmdArb, clearCmdArb];
 // Tests
 
 describe("model-based: pagination cursor storage", () => {
-  test("random sequences of pagination operations maintain consistency", () => {
-    fcAssert(
+  test("random sequences of pagination operations maintain consistency", async () => {
+    await fcAssert(
       asyncProperty(commands(allCommands, { size: "+1" }), async (cmds) => {
         const cleanup = createIsolatedDbContext();
         try {
