@@ -68,9 +68,11 @@ export const loginCommand = buildCommand({
     // Token-based authentication
     if (flags.token) {
       // Clear stale cached responses from a previous session
-      await clearResponseCache().catch(() => {
+      try {
+        await clearResponseCache();
+      } catch {
         // Non-fatal: cache directory may not exist
-      });
+      }
 
       // Save token first, then validate by fetching user regions
       await setAuthToken(flags.token);
@@ -111,9 +113,11 @@ export const loginCommand = buildCommand({
     }
 
     // Clear stale cached responses from a previous session
-    await clearResponseCache().catch(() => {
+    try {
+      await clearResponseCache();
+    } catch {
       // Non-fatal: cache directory may not exist
-    });
+    }
 
     // Device Flow OAuth
     const loginSuccess = await runInteractiveLogin(

@@ -13,7 +13,11 @@ import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity, writeJson } from "../../lib/formatters/index.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 
 type WhoamiFlags = {
   readonly json: boolean;
@@ -37,7 +41,7 @@ export const whoamiCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh" },
+    aliases: FRESH_ALIASES,
   },
   async func(this: SentryContext, flags: WhoamiFlags): Promise<void> {
     applyFreshFlag(flags);

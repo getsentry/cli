@@ -10,7 +10,11 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails, writeOutput } from "../../lib/formatters/index.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildOrgUrl } from "../../lib/sentry-urls.js";
 
@@ -55,7 +59,7 @@ export const viewCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh", w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web" },
   },
   async func(
     this: SentryContext,

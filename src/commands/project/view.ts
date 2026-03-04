@@ -22,6 +22,7 @@ import {
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
+  FRESH_ALIASES,
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
@@ -204,7 +205,7 @@ export const viewCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh", w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web" },
   },
   async func(
     this: SentryContext,

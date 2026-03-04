@@ -27,7 +27,11 @@ import {
   formatUserIdentity,
   maskToken,
 } from "../../lib/formatters/human.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
@@ -152,7 +156,7 @@ export const statusCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh" },
+    aliases: FRESH_ALIASES,
   },
   async func(this: SentryContext, flags: StatusFlags): Promise<void> {
     applyFreshFlag(flags);

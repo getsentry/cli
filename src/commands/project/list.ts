@@ -38,6 +38,7 @@ import {
   applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FRESH_ALIASES,
   FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_CURSOR_FLAG,
@@ -588,7 +589,7 @@ export const listCommand = buildListCommand("project", {
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { ...LIST_BASE_ALIASES, f: "fresh", p: "platform" },
+    aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES, p: "platform" },
   },
   async func(
     this: SentryContext,

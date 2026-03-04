@@ -12,7 +12,11 @@ import {
   formatRootCauseList,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
@@ -65,7 +69,7 @@ export const explainCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh" },
+    aliases: FRESH_ALIASES,
   },
   async func(
     this: SentryContext,

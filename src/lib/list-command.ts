@@ -90,12 +90,37 @@ export const LIST_JSON_FLAG = {
  *
  * Add to any command's `flags` object, then call `applyFreshFlag(flags)` at
  * the top of `func()` to activate cache bypass when the flag is set.
+ *
+ * @example
+ * ```ts
+ * import { applyFreshFlag, FRESH_ALIASES, FRESH_FLAG } from "../lib/list-command.js";
+ *
+ * // In parameters:
+ * flags: { ..., fresh: FRESH_FLAG },
+ * aliases: { ...FRESH_ALIASES },
+ *
+ * // In func():
+ * applyFreshFlag(flags);
+ * ```
  */
 export const FRESH_FLAG = {
   kind: "boolean" as const,
   brief: "Bypass cache and fetch fresh data",
   default: false,
 } as const;
+
+/**
+ * Alias map for the `--fresh` flag: `-f` → `--fresh`.
+ *
+ * Spread into a command's `aliases` alongside other aliases:
+ * ```ts
+ * aliases: { ...FRESH_ALIASES, w: "web" }
+ * ```
+ *
+ * **Note**: Commands that use `-f` for a different flag (e.g. `log list`
+ * uses `-f` for `--follow`) should NOT spread this constant.
+ */
+export const FRESH_ALIASES = { f: "fresh" } as const;
 
 /**
  * Apply the `--fresh` flag: disables the response cache for this invocation.
@@ -378,7 +403,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         cursor: LIST_CURSOR_FLAG,
         fresh: FRESH_FLAG,
       },
-      aliases: { ...LIST_BASE_ALIASES, f: "fresh" },
+      aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES },
     },
     async func(
       this: SentryContext,

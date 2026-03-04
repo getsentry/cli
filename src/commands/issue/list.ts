@@ -46,6 +46,7 @@ import {
   applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FRESH_ALIASES,
   FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
@@ -1200,7 +1201,7 @@ export const listCommand = buildListCommand("issue", {
     },
     aliases: {
       ...LIST_BASE_ALIASES,
-      f: "fresh",
+      ...FRESH_ALIASES,
       q: "query",
       s: "sort",
       t: "period",

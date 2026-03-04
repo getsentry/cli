@@ -15,7 +15,11 @@ import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import type { Writer } from "../../types/index.js";
 import {
   type AutofixState,
@@ -178,7 +182,7 @@ export const planCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh" },
+    aliases: FRESH_ALIASES,
   },
   async func(
     this: SentryContext,

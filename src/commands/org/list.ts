@@ -15,6 +15,7 @@ import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
   buildListLimitFlag,
+  FRESH_ALIASES,
   FRESH_FLAG,
   LIST_JSON_FLAG,
 } from "../../lib/list-command.js";
@@ -78,7 +79,7 @@ export const listCommand = buildCommand({
       fresh: FRESH_FLAG,
     },
     // Only -n for --limit; no -c since org list has no --cursor flag
-    aliases: { f: "fresh", n: "limit" },
+    aliases: { ...FRESH_ALIASES, n: "limit" },
   },
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
     applyFreshFlag(flags);

@@ -21,6 +21,7 @@ import {
 import {
   applyFreshFlag,
   buildListCommand,
+  FRESH_ALIASES,
   FRESH_FLAG,
   LIST_CURSOR_FLAG,
   TARGET_PATTERN_NOTE,
@@ -146,7 +147,13 @@ export const listCommand = buildListCommand("trace", {
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh", n: "limit", q: "query", s: "sort", c: "cursor" },
+    aliases: {
+      ...FRESH_ALIASES,
+      n: "limit",
+      q: "query",
+      s: "sort",
+      c: "cursor",
+    },
   },
   async func(
     this: SentryContext,

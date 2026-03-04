@@ -25,6 +25,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import CachePolicy from "http-cache-semantics";
+import pLimit from "p-limit";
 
 import { getConfigDir } from "./db/index.js";
 
@@ -44,33 +45,38 @@ type TtlTier = "immutable" | "stable" | "volatile" | "no-cache";
 
 /** Fallback TTL durations by tier (milliseconds). `no-cache` uses 0 as a sentinel. */
 const FALLBACK_TTL_MS: Record<TtlTier, number> = {
-  immutable: 60 * 60 * 1000, // 1 hour
+  immutable: 24 * 60 * 60 * 1000, // 24 hours — events and traces never change
   stable: 5 * 60 * 1000, // 5 minutes
   volatile: 60 * 1000, // 60 seconds
   "no-cache": 0,
 };
 
 /**
- * URL patterns → TTL tier (checked in order, first match wins).
- * Patterns match against the full URL string.
+ * URL patterns grouped by TTL tier.
+ *
+ * Checked in tier priority order (no-cache → immutable → volatile).
+ * "stable" has no patterns — it is the default fallback when nothing else matches.
  */
-const URL_TIER_PATTERNS: ReadonlyArray<{ pattern: RegExp; tier: TtlTier }> = [
-  // No-cache: polling endpoints where state changes rapidly
-  { pattern: /\/autofix\//, tier: "no-cache" },
-  { pattern: /\/root-cause\//, tier: "no-cache" },
+const URL_TIER_REGEXPS: Readonly<Record<TtlTier, readonly RegExp[]>> = {
+  // Polling endpoints where state changes rapidly
+  "no-cache": [/\/(?:autofix|root-cause)\//],
+  // Specific resources by ID (events, traces) — never change once created
+  immutable: [/\/events\/[^/?]+\/?(?:\?|$)/, /\/trace\/[0-9a-f]{32}\//],
+  // Issue endpoints (lists AND detail views), dataset queries, trace-logs
+  volatile: [
+    /\/issues\//,
+    /[?&]dataset=(?:logs|transactions)/,
+    /\/trace-logs\//,
+  ],
+  // Default fallback — no patterns needed
+  stable: [],
+};
 
-  // Immutable: specific resources by ID (events, traces)
-  { pattern: /\/events\/[^/?]+\/?(?:\?|$)/, tier: "immutable" },
-  { pattern: /\/trace\/[0-9a-f]{32}\//, tier: "immutable" },
-
-  // Volatile: issue endpoints (lists AND detail views — status/assignee change often)
-  { pattern: /\/issues\//, tier: "volatile" },
-  { pattern: /\/issues\/?$/, tier: "volatile" },
-  { pattern: /[?&]dataset=logs/, tier: "volatile" },
-  { pattern: /[?&]dataset=transactions/, tier: "volatile" },
-  { pattern: /\/trace-logs\//, tier: "volatile" },
-
-  // Everything else falls through to "stable" (default)
+/** Tier check order — stable is the default and has no patterns to check. */
+const TIER_CHECK_ORDER: readonly TtlTier[] = [
+  "no-cache",
+  "immutable",
+  "volatile",
 ];
 
 /**
@@ -81,9 +87,11 @@ const URL_TIER_PATTERNS: ReadonlyArray<{ pattern: RegExp; tier: TtlTier }> = [
  * @internal Exported for testing
  */
 export function classifyUrl(url: string): TtlTier {
-  for (const { pattern, tier } of URL_TIER_PATTERNS) {
-    if (pattern.test(url)) {
-      return tier;
+  for (const tier of TIER_CHECK_ORDER) {
+    for (const pattern of URL_TIER_REGEXPS[tier]) {
+      if (pattern.test(url)) {
+        return tier;
+      }
     }
   }
   return "stable";
@@ -117,19 +125,20 @@ export function buildCacheKey(method: string, url: string): string {
  * @internal Exported for testing
  */
 export function normalizeUrl(method: string, url: string): string {
-  try {
-    const parsed = new URL(url);
-    const sortedParams = new URLSearchParams(
-      [...parsed.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b))
-    );
-    parsed.search = sortedParams.toString()
-      ? `?${sortedParams.toString()}`
-      : "";
-    return `${method.toUpperCase()}|${parsed.toString()}`;
-  } catch {
-    // Malformed URL — use as-is
-    return `${method.toUpperCase()}|${url}`;
-  }
+  const parsed = new URL(url);
+  const sortedParams = new URLSearchParams(
+    [...parsed.searchParams.entries()].sort(([a], [b]) => {
+      if (a < b) {
+        return -1;
+      }
+      if (a > b) {
+        return 1;
+      }
+      return 0;
+    })
+  );
+  parsed.search = sortedParams.toString() ? `?${sortedParams.toString()}` : "";
+  return `${method.toUpperCase()}|${parsed.toString()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,13 +159,19 @@ type CacheEntry = {
   url: string;
   /** When this entry was created (epoch ms) */
   createdAt: number;
+  /**
+   * Pre-computed expiry timestamp (epoch ms).
+   * Allows cleanup to check freshness without deserializing CachePolicy.
+   * Optional for backwards compatibility with entries written before this field.
+   */
+  expiresAt?: number;
 };
 
 /** CachePolicy options for a single-user CLI cache */
 const POLICY_OPTIONS: CachePolicy.Options = {
   shared: false,
   cacheHeuristic: 0.1,
-  immutableMinTimeToLive: 3_600_000,
+  immutableMinTimeToLive: FALLBACK_TTL_MS.immutable,
 };
 
 /** Maximum number of cache files to retain */
@@ -208,11 +223,7 @@ function pickHeaders(headers: Headers): Record<string, string> {
 
 /** Convert Headers to a plain object for http-cache-semantics */
 function headersToObject(headers: Headers): Record<string, string> {
-  const obj: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    obj[key] = value;
-  });
-  return obj;
+  return Object.fromEntries(headers.entries());
 }
 
 /**
@@ -349,9 +360,9 @@ export async function getCachedResponse(
     });
   } catch {
     // Corrupted or version-incompatible policy object — treat as cache miss.
-    // Delete the broken entry so it doesn't keep failing on every request.
-    await unlink(cacheFilePath(key)).catch(() => {
-      // Best-effort cleanup
+    // Best-effort cleanup of the broken entry.
+    unlink(cacheFilePath(key)).catch(() => {
+      // Ignored — fire-and-forget
     });
     return;
   }
@@ -440,6 +451,12 @@ async function writeResponseToCache(
 
   const body: unknown = await response.json();
   const key = buildCacheKey(method, url);
+  const now = Date.now();
+
+  // Pre-compute expiry for cheap cleanup checks (avoids CachePolicy deserialization)
+  const serverTtl = policy.timeToLive();
+  const fallbackTtl = FALLBACK_TTL_MS[classifyUrl(url)];
+  const ttl = serverTtl > 0 ? serverTtl : fallbackTtl;
 
   const entry: CacheEntry = {
     policy: policy.toObject(),
@@ -447,7 +464,8 @@ async function writeResponseToCache(
     status: response.status,
     headers: pickHeaders(response.headers),
     url,
-    createdAt: Date.now(),
+    createdAt: now,
+    expiresAt: now + ttl,
   };
 
   await mkdir(getCacheDir(), { recursive: true, mode: 0o700 });
@@ -471,6 +489,25 @@ export async function clearResponseCache(): Promise<void> {
   } catch {
     // Ignore errors — directory may not exist
   }
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency helper
+// ---------------------------------------------------------------------------
+
+/** Concurrency limit for parallel cache file I/O operations */
+const CACHE_IO_CONCURRENCY = 8;
+
+/**
+ * Run an async function over items with bounded concurrency.
+ * Uses p-limit to prevent overwhelming the filesystem with simultaneous reads.
+ */
+async function parallel<T>(
+  items: readonly T[],
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const limit = pLimit(CACHE_IO_CONCURRENCY);
+  await Promise.all(items.map((item) => limit(() => fn(item))));
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +549,13 @@ async function cleanupCache(): Promise<void> {
 /** Metadata for a cache entry, used for cleanup decisions */
 type EntryMetadata = { file: string; createdAt: number; expired: boolean };
 
-/** Read all cache files and determine which are expired */
+/**
+ * Read all cache files and determine which are expired.
+ *
+ * Uses the pre-computed `expiresAt` field when available (cheap — no
+ * CachePolicy deserialization). Falls back to URL-based TTL classification
+ * for entries written before `expiresAt` was added.
+ */
 async function collectEntryMetadata(
   cacheDir: string,
   jsonFiles: string[]
@@ -520,36 +563,24 @@ async function collectEntryMetadata(
   const entries: EntryMetadata[] = [];
   const now = Date.now();
 
-  for (const file of jsonFiles) {
+  await parallel(jsonFiles, async (file) => {
     const filePath = join(cacheDir, file);
     try {
       const raw = await readFile(filePath, "utf-8");
       const entry = JSON.parse(raw) as CacheEntry;
-      const policy = CachePolicy.fromObject(entry.policy);
-
-      // timeToLive() returns 0 when the server sent no cache headers,
-      // positive when still fresh, negative when explicitly expired.
-      const serverTtl = policy.timeToLive();
-      let expired: boolean;
-      if (serverTtl > 0) {
-        expired = false;
-      } else if (serverTtl < 0) {
-        // Server-provided TTL has expired — don't override with fallback
-        expired = true;
-      } else {
-        // No server TTL (0) — use URL-based fallback tier
-        const tier = classifyUrl(entry.url ?? "");
-        expired = now - entry.createdAt > FALLBACK_TTL_MS[tier];
-      }
-
+      const expired =
+        entry.expiresAt !== undefined
+          ? now >= entry.expiresAt
+          : now - entry.createdAt >
+            FALLBACK_TTL_MS[classifyUrl(entry.url ?? "")];
       entries.push({ file, createdAt: entry.createdAt, expired });
     } catch {
       // Unparseable file — delete it
-      await unlink(filePath).catch(() => {
+      unlink(filePath).catch(() => {
         // Best-effort cleanup of corrupted file
       });
     }
-  }
+  });
 
   return entries;
 }
@@ -559,13 +590,12 @@ async function deleteExpiredEntries(
   cacheDir: string,
   entries: EntryMetadata[]
 ): Promise<void> {
-  for (const entry of entries) {
-    if (entry.expired) {
-      await unlink(join(cacheDir, entry.file)).catch(() => {
-        // Best-effort: file may have been deleted by another process
-      });
-    }
-  }
+  const expired = entries.filter((e) => e.expired);
+  await parallel(expired, async (entry) => {
+    await unlink(join(cacheDir, entry.file)).catch(() => {
+      // Best-effort: file may have been deleted by another process
+    });
+  });
 }
 
 /** Evict the oldest entries when over the max count */
@@ -580,9 +610,9 @@ async function evictExcessEntries(
 
   remaining.sort((a, b) => a.createdAt - b.createdAt);
   const toEvict = remaining.slice(0, remaining.length - MAX_CACHE_ENTRIES);
-  for (const entry of toEvict) {
+  await parallel(toEvict, async (entry) => {
     await unlink(join(cacheDir, entry.file)).catch(() => {
       // Best-effort eviction
     });
-  }
+  });
 }

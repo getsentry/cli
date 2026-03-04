@@ -11,7 +11,11 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { displayTraceLogs } from "../../lib/formatters/index.js";
-import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { validateTraceId } from "../../lib/trace-id.js";
@@ -167,7 +171,13 @@ export const logsCommand = buildCommand({
       },
       fresh: FRESH_FLAG,
     },
-    aliases: { f: "fresh", w: "web", t: "period", n: "limit", q: "query" },
+    aliases: {
+      ...FRESH_ALIASES,
+      w: "web",
+      t: "period",
+      n: "limit",
+      q: "query",
+    },
   },
   async func(
     this: SentryContext,
