@@ -1,0 +1,32 @@
+## Implementation Plan
+
+### Goal
+Report install script failures to Sentry so issues like the macOS digest
+extraction bug are detected automatically instead of via user reports.
+
+### Approach
+Use Sentry's envelope API directly via curl — the script already depends
+on curl and the CLI's DSN is a public write-only key.
+
+Three integration points:
+1. report_error() — builds a 3-line Sentry envelope, fires background curl
+2. die() — replaces all echo+exit patterns with error reporting
+3. ERR trap — catches set -e / pipefail exits (e.g., gunzip failure)
+
+### Design Constraints
+- Fire-and-forget: background subshell + 2s curl timeout
+- Never block or break installation on telemetry failure
+- Same opt-out as CLI binary: SENTRY_CLI_NO_TELEMETRY=1
+- No new secrets: reuses existing public DSN
+- Cross-platform UUID: /proc -> uuidgen -> awk fallback
+
+### Tags
+os, arch, channel, step (pinpoints failure location),
+install.version, bash version in runtime context
+
+### Verification
+- Syntax validated with bash -n
+- Envelope JSON validated with python3 json.tool
+- Sent test event to real Sentry ingest (HTTP 200, event accepted)
+- Tested opt-out (SENTRY_CLI_NO_TELEMETRY=1 skips reporting)
+- Tested ERR trap catches pipeline failures (simulated gunzip)
