@@ -53,6 +53,10 @@ sentry auth login
 
 # Using an API token
 sentry auth login --token YOUR_TOKEN
+
+SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
 #### `sentry auth logout`

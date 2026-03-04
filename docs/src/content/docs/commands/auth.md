@@ -34,6 +34,22 @@ sentry auth login --token YOUR_TOKEN
 5. Authorize the application
 6. The CLI automatically receives your token
 
+**Self-Hosted Sentry (26.1.0+):**
+
+For self-hosted instances, set `SENTRY_URL` and `SENTRY_CLIENT_ID` (from a public OAuth application you create on your instance):
+
+```bash
+SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+```
+
+On older versions or without an OAuth application, use an API token instead:
+
+```bash
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+```
+
+See [Self-Hosted Sentry](../self-hosted/) for full setup details.
+
 ### `sentry auth logout`
 
 Remove stored credentials.

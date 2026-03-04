@@ -88,9 +88,19 @@ To remove stored credentials:
 sentry auth logout
 ```
 
+## Self-Hosted Sentry
+
+Using a self-hosted Sentry instance? Set `SENTRY_URL` to point at it:
+
+```bash
+SENTRY_URL=https://sentry.example.com sentry auth login
+```
+
+See the [Self-Hosted](../self-hosted/) guide for full setup details.
+
 ## Configuration
 
-Credentials are stored in `~/.sentry/config.json` with restricted file permissions (mode 600) for security.
+Credentials are stored in a SQLite database at `~/.sentry/` with restricted file permissions (mode 600) for security. See [Configuration](../configuration/) for environment variables and customization options.
 
 ## Next Steps
 
