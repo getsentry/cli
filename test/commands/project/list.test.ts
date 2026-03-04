@@ -1077,7 +1077,7 @@ describe("fetchOrgProjectsSafe", () => {
 
   test("propagates AuthError when not authenticated", async () => {
     // Clear auth token so the API client throws AuthError before making any request
-    clearAuth();
+    await clearAuth();
 
     await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
   });
@@ -1359,7 +1359,7 @@ describe("handleAutoDetect", () => {
   test("fast path: AuthError still propagates", async () => {
     await setDefaults("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
-    clearAuth();
+    await clearAuth();
     const { writer } = createCapture();
 
     await expect(

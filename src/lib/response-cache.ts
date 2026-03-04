@@ -336,16 +336,25 @@ export async function getCachedResponse(
     return;
   }
 
-  const policy = CachePolicy.fromObject(entry.policy);
-  if (!isEntryFresh(policy, entry, requestHeaders, url)) {
+  try {
+    const policy = CachePolicy.fromObject(entry.policy);
+    if (!isEntryFresh(policy, entry, requestHeaders, url)) {
+      return;
+    }
+
+    const responseHeaders = buildResponseHeaders(policy, entry);
+    return new Response(JSON.stringify(entry.body), {
+      status: entry.status,
+      headers: responseHeaders,
+    });
+  } catch {
+    // Corrupted or version-incompatible policy object — treat as cache miss.
+    // Delete the broken entry so it doesn't keep failing on every request.
+    await unlink(cacheFilePath(key)).catch(() => {
+      // Best-effort cleanup
+    });
     return;
   }
-
-  const responseHeaders = buildResponseHeaders(policy, entry);
-  return new Response(JSON.stringify(entry.body), {
-    status: entry.status,
-    headers: responseHeaders,
-  });
 }
 
 /**
