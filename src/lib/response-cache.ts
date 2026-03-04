@@ -63,8 +63,8 @@ const URL_TIER_PATTERNS: ReadonlyArray<{ pattern: RegExp; tier: TtlTier }> = [
   { pattern: /\/events\/[^/?]+\/?(?:\?|$)/, tier: "immutable" },
   { pattern: /\/trace\/[0-9a-f]{32}\//, tier: "immutable" },
 
-  // Volatile: list endpoints with high churn
-  { pattern: /\/issues\/?\?/, tier: "volatile" },
+  // Volatile: issue endpoints (lists AND detail views — status/assignee change often)
+  { pattern: /\/issues\//, tier: "volatile" },
   { pattern: /\/issues\/?$/, tier: "volatile" },
   { pattern: /[?&]dataset=logs/, tier: "volatile" },
   { pattern: /[?&]dataset=transactions/, tier: "volatile" },

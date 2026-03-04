@@ -20,20 +20,23 @@ import {
   writeJson,
   writeOutput,
 } from "../../lib/formatters/index.js";
-import { REFRESH_FLAG, TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_FLAG,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import type { SentryProject } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /** Usage hint for ContextError messages */
@@ -199,18 +202,16 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { f: "fresh", w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     targetArg?: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(targetArg);

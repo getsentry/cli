@@ -27,13 +27,12 @@ import {
   formatUserIdentity,
   maskToken,
 } from "../../lib/formatters/human.js";
-import { REFRESH_FLAG } from "../../lib/list-command.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
+import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
 import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
   readonly "show-token": boolean;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -151,13 +150,12 @@ export const statusCommand = buildCommand({
         brief: "Show the stored token (masked by default)",
         default: false,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
+    aliases: { f: "fresh" },
   },
   async func(this: SentryContext, flags: StatusFlags): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, stderr } = this;
 
     const auth = await getAuthConfig();

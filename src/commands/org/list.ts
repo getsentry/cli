@@ -13,16 +13,16 @@ import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
+  applyFreshFlag,
   buildListLimitFlag,
+  FRESH_FLAG,
   LIST_JSON_FLAG,
-  REFRESH_FLAG,
 } from "../../lib/list-command.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -75,15 +75,13 @@ export const listCommand = buildCommand({
     flags: {
       limit: buildListLimitFlag("organizations"),
       json: LIST_JSON_FLAG,
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
     // Only -n for --limit; no -c since org list has no --cursor flag
-    aliases: { n: "limit" },
+    aliases: { f: "fresh", n: "limit" },
   },
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout } = this;
 
     const orgs = await listOrganizations();

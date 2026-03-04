@@ -23,13 +23,12 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
-import { REFRESH_FLAG } from "../../lib/list-command.js";
+import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import type { Writer } from "../../types/index.js";
 
@@ -37,7 +36,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly spans: number;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /** Usage hint for ContextError messages */
@@ -163,18 +162,16 @@ export const viewCommand = buildCommand({
         default: false,
       },
       ...spansFlag,
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { f: "fresh", w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     ...args: string[]
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
     const log = logger.withTag("trace.view");
 

@@ -35,13 +35,14 @@ import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
+  applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_CURSOR_FLAG,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
-  REFRESH_FLAG,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
@@ -52,7 +53,6 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
@@ -64,7 +64,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly platform?: string;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -586,18 +586,16 @@ export const listCommand = buildListCommand("project", {
         brief: "Filter by platform (e.g., javascript, python)",
         optional: true,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
-    aliases: { ...LIST_BASE_ALIASES, p: "platform" },
+    aliases: { ...LIST_BASE_ALIASES, f: "fresh", p: "platform" },
   },
   async func(
     this: SentryContext,
     flags: ListFlags,
     target?: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(target);

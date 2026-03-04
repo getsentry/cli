@@ -15,8 +15,7 @@ import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
-import { REFRESH_FLAG } from "../../lib/list-command.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
+import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
 import type { Writer } from "../../types/index.js";
 import {
   type AutofixState,
@@ -36,7 +35,7 @@ type PlanFlags = {
   readonly cause?: number;
   readonly json: boolean;
   readonly force: boolean;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -177,17 +176,16 @@ export const planCommand = buildCommand({
         brief: "Force new plan even if one exists",
         default: false,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
+    aliases: { f: "fresh" },
   },
   async func(
     this: SentryContext,
     flags: PlanFlags,
     issueArg: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages

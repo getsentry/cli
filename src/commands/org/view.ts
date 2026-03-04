@@ -10,15 +10,14 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails, writeOutput } from "../../lib/formatters/index.js";
-import { REFRESH_FLAG } from "../../lib/list-command.js";
+import { applyFreshFlag, FRESH_FLAG } from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { buildOrgUrl } from "../../lib/sentry-urls.js";
 
 type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 export const viewCommand = buildCommand({
@@ -54,18 +53,16 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { f: "fresh", w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     orgSlug?: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
     const resolved = await resolveOrg({ org: orgSlug, cwd });

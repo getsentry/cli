@@ -195,10 +195,13 @@ describe("property: classifyUrl", () => {
     expect(classifyUrl(url)).toBe("immutable");
   });
 
-  test("issue list URLs are volatile", () => {
+  test("issue URLs are volatile (lists and detail views)", () => {
     const urls = [
       "https://us.sentry.io/api/0/projects/org/proj/issues/",
       "https://us.sentry.io/api/0/projects/org/proj/issues/?query=is:unresolved",
+      "https://us.sentry.io/api/0/issues/12345/",
+      "https://sentry.io/api/0/issues/67890/?format=json",
+      "https://us.sentry.io/api/0/organizations/org/issues/12345/hashes/",
     ];
     for (const url of urls) {
       expect(classifyUrl(url)).toBe("volatile");

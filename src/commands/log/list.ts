@@ -26,15 +26,15 @@ import {
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
+  applyFreshFlag,
   buildListCommand,
-  REFRESH_FLAG,
+  FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import {
   resolveOrg,
   resolveOrgProjectFromArg,
 } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { validateTraceId } from "../../lib/trace-id.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { Writer } from "../../types/index.js";
@@ -45,8 +45,8 @@ type ListFlags = {
   readonly follow?: number;
   readonly json: boolean;
   readonly trace?: string;
-  readonly refresh: boolean;
-}
+  readonly fresh: boolean;
+};
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -442,7 +442,7 @@ export const listCommand = buildListCommand("log", {
         brief: "Output as JSON",
         default: false,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
     aliases: {
       n: "limit",
@@ -455,9 +455,7 @@ export const listCommand = buildListCommand("log", {
     flags: ListFlags,
     target?: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
     if (flags.trace) {

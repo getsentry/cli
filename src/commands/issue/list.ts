@@ -43,13 +43,14 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
   parseCursorFlag,
-  REFRESH_FLAG,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
@@ -64,7 +65,6 @@ import {
   resolveAllTargets,
   toNumericId,
 } from "../../lib/resolve-target.js";
-import { disableResponseCache } from "../../lib/response-cache.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type {
   ProjectAliasEntry,
@@ -82,7 +82,7 @@ type ListFlags = {
   readonly period: string;
   readonly json: boolean;
   readonly cursor?: string;
-  readonly refresh: boolean;
+  readonly fresh: boolean;
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -1196,18 +1196,22 @@ export const listCommand = buildListCommand("issue", {
           'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
       },
-      refresh: REFRESH_FLAG,
+      fresh: FRESH_FLAG,
     },
-    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort", t: "period" },
+    aliases: {
+      ...LIST_BASE_ALIASES,
+      f: "fresh",
+      q: "query",
+      s: "sort",
+      t: "period",
+    },
   },
   async func(
     this: SentryContext,
     flags: ListFlags,
     target?: string
   ): Promise<void> {
-    if (flags.refresh) {
-      disableResponseCache();
-    }
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);

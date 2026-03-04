@@ -85,14 +85,33 @@ export const LIST_JSON_FLAG = {
 } as const;
 
 /**
- * The `--refresh` flag shared by read-only commands.
+ * The `--fresh` / `-f` flag shared by read-only commands.
  * Bypasses the response cache and fetches fresh data from the API.
+ *
+ * Add to any command's `flags` object, then call `applyFreshFlag(flags)` at
+ * the top of `func()` to activate cache bypass when the flag is set.
  */
-export const REFRESH_FLAG = {
+export const FRESH_FLAG = {
   kind: "boolean" as const,
   brief: "Bypass cache and fetch fresh data",
   default: false,
 } as const;
+
+/**
+ * Apply the `--fresh` flag: disables the response cache for this invocation.
+ *
+ * Call at the top of a command's `func()` after defining the `fresh` flag:
+ * ```ts
+ * flags: { fresh: FRESH_FLAG },
+ * async func(this: SentryContext, flags) {
+ *   applyFreshFlag(flags);
+ * ```
+ */
+export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
+  if (flags.fresh) {
+    disableResponseCache();
+  }
+}
 
 /** Matches strings that are all digits — used to detect invalid cursor values */
 const ALL_DIGITS_RE = /^\d+$/;
@@ -357,9 +376,9 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         limit: buildListLimitFlag(config.entityPlural),
         json: LIST_JSON_FLAG,
         cursor: LIST_CURSOR_FLAG,
-        refresh: REFRESH_FLAG,
+        fresh: FRESH_FLAG,
       },
-      aliases: LIST_BASE_ALIASES,
+      aliases: { ...LIST_BASE_ALIASES, f: "fresh" },
     },
     async func(
       this: SentryContext,
@@ -367,13 +386,11 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly limit: number;
         readonly json: boolean;
         readonly cursor?: string;
-        readonly refresh: boolean;
+        readonly fresh: boolean;
       },
       target?: string
     ): Promise<void> {
-      if (flags.refresh) {
-        disableResponseCache();
-      }
+      applyFreshFlag(flags);
       const { stdout, cwd } = this;
       const parsed = parseOrgProjectArg(target);
       await dispatchOrgScopedList({ config, stdout, cwd, flags, parsed });
