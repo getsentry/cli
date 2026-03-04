@@ -6,7 +6,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getProject, getProjectKeys } from "../../lib/api-client.js";
+import { getProject, tryGetPrimaryDsn } from "../../lib/api-client.js";
 import {
   ProjectSpecificationType,
   parseOrgProjectArg,
@@ -27,7 +27,7 @@ import {
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { ProjectKey, SentryProject } from "../../types/index.js";
+import type { SentryProject } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -77,33 +77,6 @@ async function handleWebView(
   );
 }
 
-/**
- * Try to fetch project keys, returning null on any error.
- * Non-blocking - if keys fetch fails, we still display project info.
- */
-async function tryGetProjectKeys(
-  orgSlug: string,
-  projectSlug: string
-): Promise<ProjectKey[] | null> {
-  try {
-    return await getProjectKeys(orgSlug, projectSlug);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get the primary DSN from project keys.
- * Returns the first active key's public DSN, or null if none found.
- */
-function getPrimaryDsn(keys: ProjectKey[] | null): string | null {
-  if (!keys || keys.length === 0) {
-    return null;
-  }
-  const activeKey = keys.find((k) => k.isActive);
-  return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
-}
-
 /** Result of fetching a single project with its DSN */
 type ProjectWithDsn = {
   project: SentryProject;
@@ -119,12 +92,12 @@ async function fetchProjectDetails(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn | null> {
   try {
-    // Fetch project and keys in parallel
-    const [project, keys] = await Promise.all([
+    // Fetch project and DSN in parallel
+    const [project, dsn] = await Promise.all([
       getProject(target.org, target.project),
-      tryGetProjectKeys(target.org, target.project),
+      tryGetPrimaryDsn(target.org, target.project),
     ]);
-    return { project, dsn: getPrimaryDsn(keys) };
+    return { project, dsn };
   } catch (error) {
     // Rethrow auth errors - user needs to know they're not authenticated
     if (error instanceof AuthError) {

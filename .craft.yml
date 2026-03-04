@@ -17,6 +17,17 @@ targets:
   - name: npm
   - name: github
   - name: gh-pages
+  - name: registry
+    apps:
+      'app:sentry':
+        name: 'Sentry CLI'
+        packageUrl: 'https://www.npmjs.com/package/sentry'
+        mainDocsUrl: 'https://cli.sentry.dev'
+        urlTemplate: 'https://github.com/getsentry/cli/releases/download/{{version}}/{{file}}'
+        includeNames: '/^sentry-.*\.gz$/'
+        checksums:
+          - algorithm: sha256
+            format: hex
   - name: brew
     tap: getsentry/tools
     formula: sentry

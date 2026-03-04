@@ -21,12 +21,12 @@ import { stringifyUnknown, UpgradeError } from "./errors.js";
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
 /**
- * Build the download URL for a platform-specific binary from GitHub releases.
+ * Build the platform-specific binary base name.
  *
- * @param version - Version to download (without 'v' prefix)
- * @returns Download URL for the binary
+ * Matches the naming convention used by GitHub Releases and GHCR:
+ * `sentry-<os>-<arch>[.exe]` (e.g., `sentry-linux-x64`, `sentry-darwin-arm64`).
  */
-export function getBinaryDownloadUrl(version: string): string {
+export function getPlatformBinaryName(): string {
   let os: string;
   if (process.platform === "darwin") {
     os = "darwin";
@@ -35,11 +35,36 @@ export function getBinaryDownloadUrl(version: string): string {
   } else {
     os = "linux";
   }
-
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const suffix = process.platform === "win32" ? ".exe" : "";
+  return `sentry-${os}-${arch}${suffix}`;
+}
 
-  return `https://github.com/getsentry/cli/releases/download/${version}/sentry-${os}-${arch}${suffix}`;
+/**
+ * Build the download URL for a platform-specific binary from GitHub releases.
+ *
+ * @param version - Version to download (without 'v' prefix)
+ * @returns Download URL for the binary
+ */
+export function getBinaryDownloadUrl(version: string): string {
+  return `https://github.com/getsentry/cli/releases/download/${version}/${getPlatformBinaryName()}`;
+}
+
+/** GitHub API base URL for releases */
+export const GITHUB_RELEASES_URL =
+  "https://api.github.com/repos/getsentry/cli/releases";
+
+/**
+ * Detect whether a version string identifies a nightly build.
+ *
+ * Nightlies use the format `X.Y.Z-dev.<unix-seconds>` (the timestamp
+ * format the build system bakes in).
+ *
+ * @param version - Version string to check
+ * @returns true if the version is a nightly build
+ */
+export function isNightlyVersion(version: string): boolean {
+  return version.includes("-dev.");
 }
 
 /**

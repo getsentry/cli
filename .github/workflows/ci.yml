@@ -257,6 +257,13 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Download uncompressed artifacts (for patch generation)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sentry-*
+          path: binaries
+          merge-multiple: true
+
       - name: Install ORAS CLI
         run: |
           VERSION=1.2.3
@@ -265,6 +272,16 @@ jobs:
           curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
           echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
           tar -xz -C /usr/local/bin oras < "$TARBALL"
+          rm "$TARBALL"
+
+      - name: Install zig-bsdiff
+        run: |
+          VERSION=0.1.19
+          EXPECTED_SHA256="9f1ac75a133ee09883ad2096a86d57791513de5fc6f262dfadee8dcee94a71b9"
+          TARBALL="zig-bsdiff-linux-x64.tar.gz"
+          curl -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin < "$TARBALL"
           rm "$TARBALL"
 
       - name: Log in to GHCR
@@ -283,6 +300,93 @@ jobs:
             --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
             --annotation "version=${VERSION}" \
             *.gz
+
+      - name: Tag versioned nightly
+        # Create an immutable versioned tag via zero-copy oras tag.
+        # This enables patch chain resolution to find specific nightly versions.
+        run: |
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
+          oras tag ghcr.io/getsentry/cli:nightly "nightly-${VERSION}"
+
+      - name: Generate and push delta patches
+        # Download the previous nightly's binaries, generate TRDIFF10 patches,
+        # and push a :patch-<version> manifest with SHA-256 annotations.
+        # Failure here is non-fatal — delta upgrades are optional.
+        continue-on-error: true
+        run: |
+          VERSION="${{ needs.changes.outputs.nightly-version }}"
+          REPO="ghcr.io/getsentry/cli"
+
+          # Find the previous nightly by listing versioned tags and picking
+          # the one immediately before ours in version-sorted order.
+          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          PREV_TAG=""
+          for tag in $TAGS; do
+            if [ "$tag" = "nightly-${VERSION}" ]; then
+              break
+            fi
+            PREV_TAG="$tag"
+          done
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous versioned nightly found, skipping patches"
+            exit 0
+          fi
+
+          PREV_VERSION="${PREV_TAG#nightly-}"
+          echo "Generating patches: ${PREV_VERSION} → ${VERSION}"
+
+          # Download previous nightly binaries
+          mkdir -p prev-binaries
+          PREV_MANIFEST_JSON=$(oras manifest fetch "${REPO}:${PREV_TAG}")
+          # Extract .gz layer digests and download + decompress each
+          echo "$PREV_MANIFEST_JSON" | jq -r '.layers[] | select(.annotations["org.opencontainers.image.title"] | endswith(".gz")) | .annotations["org.opencontainers.image.title"] + " " + .digest' | while read -r filename digest; do
+            basename="${filename%.gz}"
+            echo "  Downloading previous ${basename}..."
+            oras blob fetch "${REPO}@${digest}" --output "prev-binaries/${filename}"
+            gunzip -f "prev-binaries/${filename}"
+          done
+
+          # Generate patches and compute SHA-256 hashes of NEW binaries
+          mkdir -p patches
+          ANNOTATIONS=""
+          PATCH_FILES=""
+
+          for new_binary in binaries/sentry-*; do
+            basename=$(basename "$new_binary")
+            # Skip .gz files
+            case "$basename" in *.gz) continue ;; esac
+
+            old_binary="prev-binaries/${basename}"
+            if [ ! -f "$old_binary" ]; then
+              echo "  No previous binary for ${basename}, skipping"
+              continue
+            fi
+
+            patch_file="patches/${basename}.patch"
+            echo "  Generating patch for ${basename}..."
+            bsdiff "$old_binary" "$new_binary" "$patch_file" --use-zstd
+
+            # Compute SHA-256 of the NEW (target) binary for verification
+            sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
+            ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename}=${sha256}"
+            PATCH_FILES="${PATCH_FILES} ${basename}.patch"
+          done
+
+          if [ -z "$PATCH_FILES" ]; then
+            echo "No patches generated"
+            exit 0
+          fi
+
+          # Push patch manifest with from-version and SHA-256 annotations
+          cd patches
+          eval oras push "${REPO}:patch-${VERSION}" \
+            --artifact-type application/vnd.sentry.cli.patch \
+            --annotation "from-version=${PREV_VERSION}" \
+            ${ANNOTATIONS} \
+            ${PATCH_FILES}
+
+          echo "Pushed patch manifest: patch-${VERSION} (from ${PREV_VERSION})"
 
   test-e2e:
     name: E2E Tests

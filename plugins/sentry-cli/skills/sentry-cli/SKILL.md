@@ -145,6 +145,14 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
+#### `sentry project create <name> <platform>`
+
+Create a new project
+
+**Flags:**
+- `-t, --team <value> - Team to create the project under`
+- `--json - Output as JSON`
+
 #### `sentry project list <org/project>`
 
 List projects
@@ -576,6 +584,7 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
 
 #### `sentry trace view <args...>`
@@ -706,6 +715,7 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
 
 ### Whoami

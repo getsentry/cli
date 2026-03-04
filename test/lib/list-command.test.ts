@@ -15,6 +15,7 @@ import {
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
   type OrgListCommandDocs,
+  parseCursorFlag,
 } from "../../src/lib/list-command.js";
 import type { OrgListConfig } from "../../src/lib/org-list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -43,10 +44,12 @@ describe("LIST_JSON_FLAG", () => {
 });
 
 describe("LIST_CURSOR_FLAG", () => {
-  test("is an optional parsed string flag", () => {
+  test("is an optional parsed flag with cursor validation", () => {
     expect(LIST_CURSOR_FLAG.kind).toBe("parsed");
     expect(LIST_CURSOR_FLAG.optional).toBe(true);
-    expect(LIST_CURSOR_FLAG.parse).toBe(String);
+    expect(LIST_CURSOR_FLAG.parse("last")).toBe("last");
+    expect(LIST_CURSOR_FLAG.parse("1735689600:0:0")).toBe("1735689600:0:0");
+    expect(() => LIST_CURSOR_FLAG.parse("12345")).toThrow("not a valid cursor");
     expect(LIST_CURSOR_FLAG.brief).toContain('"last"');
   });
 });
@@ -80,6 +83,32 @@ describe("LIST_BASE_ALIASES", () => {
     expect(extended.n).toBe("limit");
     expect(extended.c).toBe("cursor");
     expect(extended.p).toBe("platform");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseCursorFlag: shared cursor validation
+// ---------------------------------------------------------------------------
+
+describe("parseCursorFlag", () => {
+  test("passes through 'last' keyword", () => {
+    expect(parseCursorFlag("last")).toBe("last");
+  });
+
+  test("passes through valid cursor strings", () => {
+    expect(parseCursorFlag("1735689600:0:0")).toBe("1735689600:0:0");
+    expect(parseCursorFlag("abc:def:0")).toBe("abc:def:0");
+  });
+
+  test("rejects bare integer strings", () => {
+    expect(() => parseCursorFlag("12345")).toThrow("not a valid cursor");
+    expect(() => parseCursorFlag("0")).toThrow("not a valid cursor");
+    expect(() => parseCursorFlag("999999999")).toThrow("not a valid cursor");
+  });
+
+  test("accepts strings with digits and other characters", () => {
+    expect(parseCursorFlag("123abc")).toBe("123abc");
+    expect(parseCursorFlag("abc123")).toBe("abc123");
   });
 });
 

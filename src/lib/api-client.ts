@@ -10,6 +10,9 @@
 
 import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import {
+  addAnOrganizationMemberToATeam,
+  createANewProject,
+  createANewTeam,
   listAnOrganization_sIssues,
   listAnOrganization_sProjects,
   listAnOrganization_sRepositories,
@@ -28,6 +31,8 @@ import {
   resolveAnEventId as sdkResolveAnEventId,
   startSeerIssueFix,
 } from "@sentry/api";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
 import type { z } from "zod";
 
 import {
@@ -675,6 +680,104 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
   return data as unknown as SentryTeam[];
 }
 
+/** Request body for creating a new project */
+type CreateProjectBody = {
+  name: string;
+  platform?: string;
+  default_rules?: boolean;
+};
+
+/**
+ * Create a new project in an organization under a team.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug to create the project under
+ * @param body - Project creation parameters (name is required)
+ * @returns The created project
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export async function createProject(
+  orgSlug: string,
+  teamSlug: string,
+  body: CreateProjectBody
+): Promise<SentryProject> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await createANewProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      team_id_or_slug: teamSlug,
+    },
+    body,
+  });
+  const data = unwrapResult(result, "Failed to create project");
+  return data as unknown as SentryProject;
+}
+
+/**
+ * Create a new team in an organization and add the current user as a member.
+ *
+ * The Sentry API does not automatically add the creator to a new team,
+ * so we follow up with an `addMemberToTeam("me")` call. The member-add
+ * is best-effort — if it fails (e.g., permissions), the team is still
+ * returned successfully.
+ *
+ * @param orgSlug - The organization slug
+ * @param slug - Team slug (also used as display name)
+ * @returns The created team
+ */
+export async function createTeam(
+  orgSlug: string,
+  slug: string
+): Promise<SentryTeam> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await createANewTeam({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    body: { slug },
+  });
+  const data = unwrapResult(result, "Failed to create team");
+  const team = data as unknown as SentryTeam;
+
+  // Best-effort: add the current user to the team
+  try {
+    await addMemberToTeam(orgSlug, team.slug, "me");
+  } catch (error) {
+    Sentry.captureException(error, {
+      extra: { orgSlug, teamSlug: team.slug, context: "auto-add member" },
+    });
+    process.stderr.write(
+      `Warning: Team '${team.slug}' was created but you could not be added as a member.\n`
+    );
+  }
+
+  return team;
+}
+
+/**
+ * Add an organization member to a team.
+ *
+ * @param orgSlug - The organization slug
+ * @param teamSlug - The team slug
+ * @param memberId - The member ID (use "me" for the current user)
+ */
+export async function addMemberToTeam(
+  orgSlug: string,
+  teamSlug: string,
+  memberId: string
+): Promise<void> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await addAnOrganizationMemberToATeam({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      member_id: memberId,
+      team_id_or_slug: teamSlug,
+    },
+  });
+  unwrapResult(result, "Failed to add member to team");
+}
+
 /**
  * List teams in an organization with pagination control.
  * Returns a single page of results with cursor metadata.
@@ -982,6 +1085,30 @@ export async function getProjectKeys(
 }
 
 // Issue functions
+
+/**
+ * Fetch the primary DSN for a project.
+ * Returns the public DSN of the first active key, or null on any error.
+ *
+ * Best-effort: failures are silently swallowed so callers can treat
+ * DSN display as optional (e.g., after project creation or in views).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Public DSN string, or null if unavailable
+ */
+export async function tryGetPrimaryDsn(
+  orgSlug: string,
+  projectSlug: string
+): Promise<string | null> {
+  try {
+    const keys = await getProjectKeys(orgSlug, projectSlug);
+    const activeKey = keys.find((k) => k.isActive);
+    return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Sort options for issue listing, derived from the @sentry/api SDK types.
@@ -1385,6 +1512,8 @@ type ListTransactionsOptions = {
   sort?: "date" | "duration";
   /** Time period for transactions (e.g., "7d", "24h") */
   statsPeriod?: string;
+  /** Pagination cursor to resume from a previous page */
+  cursor?: string;
 };
 
 /**
@@ -1397,14 +1526,14 @@ type ListTransactionsOptions = {
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod)
- * @returns Array of transaction items
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with transaction items and optional next cursor
  */
 export async function listTransactions(
   orgSlug: string,
   projectSlug: string,
   options: ListTransactionsOptions = {}
-): Promise<TransactionListItem[]> {
+): Promise<PaginatedResponse<TransactionListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
@@ -1412,28 +1541,33 @@ export async function listTransactions(
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   // Use raw request: the SDK's dataset type doesn't include "transactions"
-  const { data: response } = await apiRequestToRegion<TransactionsResponse>(
-    regionUrl,
-    `/organizations/${orgSlug}/events/`,
-    {
-      params: {
-        dataset: "transactions",
-        field: TRANSACTION_FIELDS,
-        project: isNumericProject ? projectSlug : undefined,
-        // Convert empty string to undefined so ky omits the param entirely;
-        // sending `query=` causes the Sentry API to behave differently than
-        // omitting the parameter.
-        query: fullQuery || undefined,
-        per_page: options.limit || 10,
-        statsPeriod: options.statsPeriod ?? "7d",
-        sort:
-          options.sort === "duration" ? "-transaction.duration" : "-timestamp",
-      },
-      schema: TransactionsResponseSchema,
-    }
-  );
+  const { data: response, headers } =
+    await apiRequestToRegion<TransactionsResponse>(
+      regionUrl,
+      `/organizations/${orgSlug}/events/`,
+      {
+        params: {
+          dataset: "transactions",
+          field: TRANSACTION_FIELDS,
+          project: isNumericProject ? projectSlug : undefined,
+          // Convert empty string to undefined so ky omits the param entirely;
+          // sending `query=` causes the Sentry API to behave differently than
+          // omitting the parameter.
+          query: fullQuery || undefined,
+          per_page: options.limit || 10,
+          statsPeriod: options.statsPeriod ?? "7d",
+          sort:
+            options.sort === "duration"
+              ? "-transaction.duration"
+              : "-timestamp",
+          cursor: options.cursor,
+        },
+        schema: TransactionsResponseSchema,
+      }
+    );
 
-  return response.data;
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data: response.data, nextCursor };
 }
 
 // Issue update functions

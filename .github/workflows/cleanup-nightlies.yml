@@ -1,0 +1,64 @@
+name: Cleanup Nightly Tags
+
+on:
+  schedule:
+    # Every Sunday at 06:00 UTC
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  cleanup:
+    name: Prune Old Nightly Tags
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ORAS CLI
+        run: |
+          VERSION=1.2.3
+          EXPECTED_SHA256="b4efc97a91f471f323f193ea4b4d63d8ff443ca3aab514151a30751330852827"
+          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
+          curl -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
+          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xz -C /usr/local/bin oras < "$TARBALL"
+          rm "$TARBALL"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Prune old versioned nightly and patch tags
+        env:
+          KEEP_COUNT: "30"
+        run: |
+          REPO="ghcr.io/getsentry/cli"
+
+          # List all nightly-* tags sorted by version, oldest first
+          NIGHTLY_TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-' | sort -V || echo "")
+          if [ -z "$NIGHTLY_TAGS" ]; then
+            NIGHTLY_COUNT=0
+          else
+            NIGHTLY_COUNT=$(echo "$NIGHTLY_TAGS" | wc -l | tr -d ' ')
+          fi
+
+          if [ "$NIGHTLY_COUNT" -le "$KEEP_COUNT" ]; then
+            echo "Only ${NIGHTLY_COUNT} nightly tags found, keeping all (threshold: ${KEEP_COUNT})"
+            exit 0
+          fi
+
+          # Calculate how many to delete
+          DELETE_COUNT=$((NIGHTLY_COUNT - KEEP_COUNT))
+          echo "Pruning ${DELETE_COUNT} old nightly tags (keeping latest ${KEEP_COUNT} of ${NIGHTLY_COUNT})"
+
+          # Delete oldest nightly-* tags and their corresponding patch-* tags
+          echo "$NIGHTLY_TAGS" | head -n "$DELETE_COUNT" | while read -r tag; do
+            version="${tag#nightly-}"
+            echo "  Deleting ${tag}..."
+            oras manifest delete "${REPO}:${tag}" --force 2>/dev/null || true
+
+            patch_tag="patch-${version}"
+            echo "  Deleting ${patch_tag}..."
+            oras manifest delete "${REPO}:${patch_tag}" --force 2>/dev/null || true
+          done
+
+          echo "Cleanup complete"

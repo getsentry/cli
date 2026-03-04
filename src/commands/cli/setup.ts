@@ -6,13 +6,20 @@
  * and the upgrade command for curl-based installs).
  */
 
-import { unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
-import { determineInstallDir, installBinary } from "../../lib/binary.js";
+import {
+  determineInstallDir,
+  getBinaryFilename,
+  installBinary,
+} from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
-import { installCompletions } from "../../lib/completions.js";
+import {
+  type CompletionLocation,
+  installCompletions,
+} from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
@@ -57,15 +64,19 @@ type Logger = (msg: string) => void;
  * On Windows, the temp binary cannot be deleted while running. It will
  * be cleaned up by the OS when the temp directory is purged.
  *
- * @returns The absolute path of the installed binary and its directory
+ * @returns The installed binary path, its directory, and whether this
+ *   was a fresh install (`created`) or an upgrade of an existing binary
  */
 async function handleInstall(
   execPath: string,
   homeDir: string,
   env: NodeJS.ProcessEnv,
   log: Logger
-): Promise<{ binaryPath: string; binaryDir: string }> {
+): Promise<{ binaryPath: string; binaryDir: string; created: boolean }> {
   const installDir = determineInstallDir(homeDir, env);
+  const targetPath = join(installDir, getBinaryFilename());
+  const alreadyExists = existsSync(targetPath);
+
   const binaryPath = await installBinary(execPath, installDir);
   const binaryDir = dirname(binaryPath);
 
@@ -80,7 +91,7 @@ async function handleInstall(
     }
   }
 
-  return { binaryPath, binaryDir };
+  return { binaryPath, binaryDir, created: !alreadyExists };
 }
 
 /**
@@ -131,25 +142,21 @@ async function handlePathModification(
  * so this is a useful fallback when the user's shell isn't directly supported.
  *
  * @param pathEnv - The PATH to search for bash, forwarded from the process env.
+ * @returns The completion location if bash is available, null otherwise.
  */
 async function tryBashCompletionFallback(
   homeDir: string,
   xdgDataHome: string | undefined,
   pathEnv: string | undefined
-): Promise<string | null> {
+): Promise<CompletionLocation | null> {
   if (!isBashAvailable(pathEnv)) {
     return null;
   }
 
-  const fallback = await installCompletions("bash", homeDir, xdgDataHome);
-  if (!fallback) {
-    // Defensive: installCompletions returns null only if the shell type has no
-    // completion script or path configured. "bash" is always supported, but
-    // we guard here in case that changes in future.
-    return null;
-  }
-  const action = fallback.created ? "Installed" : "Updated";
-  return `      ${action} bash completions as a fallback: ${fallback.path}`;
+  // Defensive: installCompletions returns null only if the shell type has no
+  // completion script or path configured. "bash" is always supported, but
+  // we guard here in case that changes in future.
+  return await installCompletions("bash", homeDir, xdgDataHome);
 }
 
 /**
@@ -158,6 +165,10 @@ async function tryBashCompletionFallback(
  * For unsupported shells (xonsh, nushell, etc.), falls back to installing
  * bash completions if bash is available on the system. Uses the provided
  * PATH env to check for bash so the call is testable without side effects.
+ *
+ * Only produces output when completions are freshly created. Subsequent
+ * runs (e.g. after upgrade) silently update the file without printing,
+ * avoiding noisy repeated messages.
  */
 async function handleCompletions(
   shell: ShellInfo,
@@ -168,8 +179,12 @@ async function handleCompletions(
   const location = await installCompletions(shell.type, homeDir, xdgDataHome);
 
   if (location) {
-    const action = location.created ? "Installed to" : "Updated";
-    const lines = [`Completions: ${action} ${location.path}`];
+    // Silently updated — no need to tell the user on every upgrade
+    if (!location.created) {
+      return [];
+    }
+
+    const lines = [`Completions: Installed to ${location.path}`];
 
     // Zsh may need fpath hint
     if (shell.type === "zsh") {
@@ -186,20 +201,26 @@ async function handleCompletions(
     return [];
   }
 
-  const fallbackMsg = await tryBashCompletionFallback(
+  const fallback = await tryBashCompletionFallback(
     homeDir,
     xdgDataHome,
     pathEnv
   );
 
-  if (fallbackMsg) {
+  if (fallback) {
+    // Bash fallback was silently updated — nothing new to report
+    if (!fallback.created) {
+      return [];
+    }
+
     return [
       `Completions: Your shell (${shell.name}) is not directly supported`,
-      fallbackMsg,
+      `      Installed bash completions as a fallback: ${fallback.path}`,
     ];
   }
 
-  return [`Completions: Not supported for ${shell.name} shell`];
+  // No completions possible and nothing actionable — stay silent
+  return [];
 }
 
 /**
@@ -207,13 +228,15 @@ async function handleCompletions(
  *
  * Detects supported agents (currently Claude Code) and installs the
  * version-pinned skill file. Silent when no agent is detected.
+ *
+ * Only produces output when the skill file is freshly created. Subsequent
+ * runs (e.g. after upgrade) silently update without printing.
  */
 async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
   const location = await installAgentSkills(homeDir, CLI_VERSION);
 
-  if (location) {
-    const action = location.created ? "Installed to" : "Updated";
-    log(`Agent skills: ${action} ${location.path}`);
+  if (location?.created) {
+    log(`Agent skills: Installed to ${location.path}`);
   }
 }
 
@@ -433,6 +456,7 @@ export const setupCommand = buildCommand({
 
     let binaryPath = process.execPath;
     let binaryDir = dirname(binaryPath);
+    let freshInstall = false;
 
     // 0. Install binary from temp location (when --install is set)
     if (flags.install) {
@@ -444,6 +468,7 @@ export const setupCommand = buildCommand({
       );
       binaryPath = result.binaryPath;
       binaryDir = result.binaryDir;
+      freshInstall = result.created;
     }
 
     // 1–4. Run best-effort configuration steps
@@ -457,13 +482,10 @@ export const setupCommand = buildCommand({
       warn,
     });
 
-    // 5. Print welcome message (fresh install) or completion message
-    if (!flags.quiet) {
-      if (flags.install) {
-        printWelcomeMessage(log, CLI_VERSION, binaryPath);
-      } else {
-        stdout.write("\nSetup complete!\n");
-      }
+    // 5. Print welcome message only on fresh install — upgrades are silent
+    // since the upgrade command itself prints a success message.
+    if (!flags.quiet && freshInstall) {
+      printWelcomeMessage(log, CLI_VERSION, binaryPath);
     }
   },
 });
