@@ -14,6 +14,7 @@ import { AuthError } from "../../lib/errors.js";
 import { muted, success } from "../../lib/formatters/colors.js";
 import { formatUserIdentity } from "../../lib/formatters/human.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
+import { clearResponseCache } from "../../lib/response-cache.js";
 
 type LoginFlags = {
   readonly token?: string;
@@ -66,6 +67,11 @@ export const loginCommand = buildCommand({
 
     // Token-based authentication
     if (flags.token) {
+      // Clear stale cached responses from a previous session
+      await clearResponseCache().catch(() => {
+        // Non-fatal: cache directory may not exist
+      });
+
       // Save token first, then validate by fetching user regions
       await setAuthToken(flags.token);
 
@@ -103,6 +109,11 @@ export const loginCommand = buildCommand({
       stdout.write(`  Config saved to: ${getDbPath()}\n`);
       return;
     }
+
+    // Clear stale cached responses from a previous session
+    await clearResponseCache().catch(() => {
+      // Non-fatal: cache directory may not exist
+    });
 
     // Device Flow OAuth
     const loginSuccess = await runInteractiveLogin(

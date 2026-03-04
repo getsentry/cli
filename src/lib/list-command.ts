@@ -24,6 +24,7 @@ import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { warning } from "./formatters/colors.js";
 import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
+import { disableResponseCache } from "./response-cache.js";
 
 // ---------------------------------------------------------------------------
 // Level A: shared parameter / flag definitions
@@ -80,6 +81,16 @@ export function targetPatternExplanation(cursorNote?: string): string {
 export const LIST_JSON_FLAG = {
   kind: "boolean" as const,
   brief: "Output JSON",
+  default: false,
+} as const;
+
+/**
+ * The `--refresh` flag shared by read-only commands.
+ * Bypasses the response cache and fetches fresh data from the API.
+ */
+export const REFRESH_FLAG = {
+  kind: "boolean" as const,
+  brief: "Bypass cache and fetch fresh data",
   default: false,
 } as const;
 
@@ -346,6 +357,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         limit: buildListLimitFlag(config.entityPlural),
         json: LIST_JSON_FLAG,
         cursor: LIST_CURSOR_FLAG,
+        refresh: REFRESH_FLAG,
       },
       aliases: LIST_BASE_ALIASES,
     },
@@ -355,9 +367,13 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly limit: number;
         readonly json: boolean;
         readonly cursor?: string;
+        readonly refresh: boolean;
       },
       target?: string
     ): Promise<void> {
+      if (flags.refresh) {
+        disableResponseCache();
+      }
       const { stdout, cwd } = this;
       const parsed = parseOrgProjectArg(target);
       await dispatchOrgScopedList({ config, stdout, cwd, flags, parsed });

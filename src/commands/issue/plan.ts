@@ -15,6 +15,8 @@ import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
+import { REFRESH_FLAG } from "../../lib/list-command.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 import type { Writer } from "../../types/index.js";
 import {
   type AutofixState,
@@ -34,6 +36,7 @@ type PlanFlags = {
   readonly cause?: number;
   readonly json: boolean;
   readonly force: boolean;
+  readonly refresh: boolean;
 };
 
 /**
@@ -174,6 +177,7 @@ export const planCommand = buildCommand({
         brief: "Force new plan even if one exists",
         default: false,
       },
+      refresh: REFRESH_FLAG,
     },
   },
   async func(
@@ -181,6 +185,9 @@ export const planCommand = buildCommand({
     flags: PlanFlags,
     issueArg: string
   ): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout, stderr, cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages

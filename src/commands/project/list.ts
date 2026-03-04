@@ -41,6 +41,7 @@ import {
   LIST_CURSOR_FLAG,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
+  REFRESH_FLAG,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
 import {
@@ -51,6 +52,7 @@ import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
@@ -62,6 +64,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly platform?: string;
+  readonly refresh: boolean;
 };
 
 /**
@@ -583,6 +586,7 @@ export const listCommand = buildListCommand("project", {
         brief: "Filter by platform (e.g., javascript, python)",
         optional: true,
       },
+      refresh: REFRESH_FLAG,
     },
     aliases: { ...LIST_BASE_ALIASES, p: "platform" },
   },
@@ -591,6 +595,9 @@ export const listCommand = buildListCommand("project", {
     flags: ListFlags,
     target?: string
   ): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(target);

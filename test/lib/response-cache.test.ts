@@ -1,0 +1,338 @@
+/**
+ * Unit Tests for Response Cache
+ *
+ * Tests the cache lifecycle: store, retrieve, expire, clear, and bypass.
+ * Uses isolated temp directories per test to avoid interference.
+ */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  buildCacheKey,
+  clearResponseCache,
+  getCachedResponse,
+  storeCachedResponse,
+} from "../../src/lib/response-cache.js";
+import { useTestConfigDir } from "../helpers.js";
+
+const getConfigDir = useTestConfigDir("response-cache-");
+
+// Reset cache disabled state between tests
+let savedNoCache: string | undefined;
+
+beforeEach(() => {
+  savedNoCache = process.env.SENTRY_NO_CACHE;
+  delete process.env.SENTRY_NO_CACHE;
+});
+
+afterEach(() => {
+  if (savedNoCache !== undefined) {
+    process.env.SENTRY_NO_CACHE = savedNoCache;
+  } else {
+    delete process.env.SENTRY_NO_CACHE;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Create a mock Response with JSON body and optional headers */
+function mockResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {}
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+  });
+}
+
+const TEST_URL = "https://us.sentry.io/api/0/organizations/myorg/projects/";
+const TEST_METHOD = "GET";
+const TEST_BODY = { data: [{ id: 1, name: "test" }] };
+
+// ---------------------------------------------------------------------------
+// Store and Retrieve
+// ---------------------------------------------------------------------------
+
+describe("store and retrieve", () => {
+  test("round-trip: store then retrieve returns same body", async () => {
+    const response = mockResponse(TEST_BODY);
+    await storeCachedResponse(TEST_METHOD, TEST_URL, {}, response);
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeDefined();
+    expect(cached!.status).toBe(200);
+
+    const cachedBody = await cached!.json();
+    expect(cachedBody).toEqual(TEST_BODY);
+  });
+
+  test("preserves Link header for pagination", async () => {
+    const linkHeader =
+      '<https://us.sentry.io/api/0/.../?cursor=123:0:0>; rel="next"';
+    const response = mockResponse(TEST_BODY, 200, { link: linkHeader });
+    await storeCachedResponse(TEST_METHOD, TEST_URL, {}, response);
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeDefined();
+    expect(cached!.headers.get("link")).toBe(linkHeader);
+  });
+
+  test("cache miss returns undefined", async () => {
+    const cached = await getCachedResponse(
+      TEST_METHOD,
+      "https://us.sentry.io/api/0/organizations/nonexistent/projects/",
+      {}
+    );
+    expect(cached).toBeUndefined();
+  });
+
+  test("different URLs produce different cache entries", async () => {
+    const url1 = "https://us.sentry.io/api/0/organizations/org1/projects/";
+    const url2 = "https://us.sentry.io/api/0/organizations/org2/projects/";
+    const body1 = { data: "org1" };
+    const body2 = { data: "org2" };
+
+    await storeCachedResponse(TEST_METHOD, url1, {}, mockResponse(body1));
+    await storeCachedResponse(TEST_METHOD, url2, {}, mockResponse(body2));
+
+    const cached1 = await getCachedResponse(TEST_METHOD, url1, {});
+    const cached2 = await getCachedResponse(TEST_METHOD, url2, {});
+
+    expect(await cached1!.json()).toEqual(body1);
+    expect(await cached2!.json()).toEqual(body2);
+  });
+
+  test("query param order does not affect cache lookup", async () => {
+    const url1 = "https://us.sentry.io/api/0/orgs/?a=1&b=2";
+    const url2 = "https://us.sentry.io/api/0/orgs/?b=2&a=1";
+
+    await storeCachedResponse(TEST_METHOD, url1, {}, mockResponse(TEST_BODY));
+
+    const cached = await getCachedResponse(TEST_METHOD, url2, {});
+    expect(cached).toBeDefined();
+    expect(await cached!.json()).toEqual(TEST_BODY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Method isolation
+// ---------------------------------------------------------------------------
+
+describe("method isolation", () => {
+  test("only GET requests are cached", async () => {
+    await storeCachedResponse("POST", TEST_URL, {}, mockResponse(TEST_BODY));
+
+    const cached = await getCachedResponse("POST", TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+
+  test("GET lookup does not return POST-stored data", async () => {
+    // This is already guaranteed since POST doesn't store, but test explicitly
+    await storeCachedResponse("GET", TEST_URL, {}, mockResponse(TEST_BODY));
+
+    // GET should find it
+    const getResult = await getCachedResponse("GET", TEST_URL, {});
+    expect(getResult).toBeDefined();
+
+    // POST should not even look
+    const postResult = await getCachedResponse("POST", TEST_URL, {});
+    expect(postResult).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-2xx responses
+// ---------------------------------------------------------------------------
+
+describe("non-2xx responses", () => {
+  test("4xx responses are not cached", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse({ detail: "not found" }, 404)
+    );
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+
+  test("5xx responses are not cached", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse({ detail: "server error" }, 500)
+    );
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cache-Control: no-store
+// ---------------------------------------------------------------------------
+
+describe("Cache-Control: no-store", () => {
+  test("responses with no-store are not cached", async () => {
+    const response = mockResponse(TEST_BODY, 200, {
+      "cache-control": "no-store",
+    });
+    await storeCachedResponse(TEST_METHOD, TEST_URL, {}, response);
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clearResponseCache
+// ---------------------------------------------------------------------------
+
+describe("clearResponseCache", () => {
+  test("removes all cached entries", async () => {
+    const url1 = "https://us.sentry.io/api/0/orgs/a/projects/";
+    const url2 = "https://us.sentry.io/api/0/orgs/b/projects/";
+
+    await storeCachedResponse(TEST_METHOD, url1, {}, mockResponse({ a: 1 }));
+    await storeCachedResponse(TEST_METHOD, url2, {}, mockResponse({ b: 2 }));
+
+    // Verify entries exist
+    expect(await getCachedResponse(TEST_METHOD, url1, {})).toBeDefined();
+
+    await clearResponseCache();
+
+    // Verify all cleared
+    expect(await getCachedResponse(TEST_METHOD, url1, {})).toBeUndefined();
+    expect(await getCachedResponse(TEST_METHOD, url2, {})).toBeUndefined();
+  });
+
+  test("is idempotent — clearing empty cache does not throw", async () => {
+    await clearResponseCache();
+    await clearResponseCache();
+    // No error
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cache bypass
+// ---------------------------------------------------------------------------
+
+describe("cache bypass", () => {
+  test("SENTRY_NO_CACHE=1 bypasses cache reads", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(TEST_BODY)
+    );
+
+    process.env.SENTRY_NO_CACHE = "1";
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+
+  test("SENTRY_NO_CACHE=1 bypasses cache writes", async () => {
+    process.env.SENTRY_NO_CACHE = "1";
+
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(TEST_BODY)
+    );
+
+    // Remove the bypass to verify nothing was written
+    delete process.env.SENTRY_NO_CACHE;
+
+    const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+    expect(cached).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCacheKey
+// ---------------------------------------------------------------------------
+
+describe("buildCacheKey", () => {
+  test("produces a 64-char hex string", () => {
+    const key = buildCacheKey("GET", TEST_URL);
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("is deterministic", () => {
+    const key1 = buildCacheKey("GET", TEST_URL);
+    const key2 = buildCacheKey("GET", TEST_URL);
+    expect(key1).toBe(key2);
+  });
+
+  test("different methods produce different keys", () => {
+    const getKey = buildCacheKey("GET", TEST_URL);
+    const postKey = buildCacheKey("POST", TEST_URL);
+    expect(getKey).not.toBe(postKey);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// No-cache tier (polling endpoints)
+// ---------------------------------------------------------------------------
+
+describe("no-cache tier", () => {
+  test("autofix URLs are not cached", async () => {
+    const autofixUrl =
+      "https://us.sentry.io/api/0/organizations/myorg/issues/123/autofix/";
+    await storeCachedResponse(
+      TEST_METHOD,
+      autofixUrl,
+      {},
+      mockResponse({ autofix: { status: "PROCESSING" } })
+    );
+
+    const cached = await getCachedResponse(TEST_METHOD, autofixUrl, {});
+    expect(cached).toBeUndefined();
+  });
+
+  test("root-cause URLs are not cached", async () => {
+    const rootCauseUrl =
+      "https://us.sentry.io/api/0/organizations/myorg/issues/123/root-cause/";
+    await storeCachedResponse(
+      TEST_METHOD,
+      rootCauseUrl,
+      {},
+      mockResponse({ cause: "something" })
+    );
+
+    const cached = await getCachedResponse(TEST_METHOD, rootCauseUrl, {});
+    expect(cached).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File structure
+// ---------------------------------------------------------------------------
+
+describe("file structure", () => {
+  test("creates cache directory under config dir", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(TEST_BODY)
+    );
+
+    const cacheDir = join(getConfigDir(), "cache", "responses");
+    const files = await readdir(cacheDir);
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/^[0-9a-f]{64}\.json$/);
+  });
+});

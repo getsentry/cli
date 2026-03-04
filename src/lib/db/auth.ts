@@ -2,6 +2,7 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
@@ -161,6 +162,11 @@ export function clearAuth(): void {
     db.query("DELETE FROM user_info WHERE id = 1").run();
     db.query("DELETE FROM org_regions").run();
     db.query("DELETE FROM pagination_cursors").run();
+  });
+
+  // Clear cached API responses — they are tied to the current user's permissions
+  clearResponseCache().catch(() => {
+    // Non-fatal: cache directory may not exist yet
   });
 }
 

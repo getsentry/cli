@@ -16,6 +16,8 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { REFRESH_FLAG } from "../../lib/list-command.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
@@ -24,6 +26,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly spans: number;
+  readonly refresh: boolean;
 };
 
 /**
@@ -100,6 +103,7 @@ export const viewCommand = buildCommand({
         default: false,
       },
       ...spansFlag,
+      refresh: REFRESH_FLAG,
     },
     aliases: { w: "web" },
   },
@@ -108,6 +112,9 @@ export const viewCommand = buildCommand({
     flags: ViewFlags,
     issueArg: string
   ): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout, cwd, setContext } = this;
 
     // Resolve issue using shared resolution logic

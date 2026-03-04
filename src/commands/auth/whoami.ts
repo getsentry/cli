@@ -13,9 +13,12 @@ import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity, writeJson } from "../../lib/formatters/index.js";
+import { REFRESH_FLAG } from "../../lib/list-command.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 
 type WhoamiFlags = {
   readonly json: boolean;
+  readonly refresh: boolean;
 };
 
 export const whoamiCommand = buildCommand({
@@ -33,9 +36,13 @@ export const whoamiCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      refresh: REFRESH_FLAG,
     },
   },
   async func(this: SentryContext, flags: WhoamiFlags): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout } = this;
 
     if (!(await isAuthenticated())) {

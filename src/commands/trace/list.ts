@@ -21,9 +21,11 @@ import {
 import {
   buildListCommand,
   LIST_CURSOR_FLAG,
+  REFRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -31,6 +33,7 @@ type ListFlags = {
   readonly sort: "date" | "duration";
   readonly json: boolean;
   readonly cursor?: string;
+  readonly refresh: boolean;
 };
 
 type SortValue = "date" | "duration";
@@ -141,6 +144,7 @@ export const listCommand = buildListCommand("trace", {
         brief: "Output as JSON",
         default: false,
       },
+      refresh: REFRESH_FLAG,
     },
     aliases: { n: "limit", q: "query", s: "sort", c: "cursor" },
   },
@@ -149,6 +153,9 @@ export const listCommand = buildListCommand("trace", {
     flags: ListFlags,
     target?: string
   ): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout, cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection

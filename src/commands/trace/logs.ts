@@ -11,7 +11,9 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { displayTraceLogs } from "../../lib/formatters/index.js";
+import { REFRESH_FLAG } from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { disableResponseCache } from "../../lib/response-cache.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { validateTraceId } from "../../lib/trace-id.js";
 
@@ -21,6 +23,7 @@ type LogsFlags = {
   readonly period: string;
   readonly limit: number;
   readonly query?: string;
+  readonly refresh: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -163,6 +166,7 @@ export const logsCommand = buildCommand({
         brief: "Additional filter query (Sentry search syntax)",
         optional: true,
       },
+      refresh: REFRESH_FLAG,
     },
     aliases: { w: "web", t: "period", n: "limit", q: "query" },
   },
@@ -171,6 +175,9 @@ export const logsCommand = buildCommand({
     flags: LogsFlags,
     ...args: string[]
   ): Promise<void> {
+    if (flags.refresh) {
+      disableResponseCache();
+    }
     const { stdout, cwd, setContext } = this;
 
     const { traceId, orgArg } = parsePositionalArgs(args);
