@@ -20,7 +20,7 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 1. In your Sentry instance, go to **Settings → Developer Settings → Applications → Create New Application** (or visit `https://sentry.example.com/settings/account/api/applications/`)
 2. Select **Public** as the application type
 3. Fill in the required fields (name, redirect URL — can be any placeholder URL)
-4. Save the application and copy the **Client ID**
+3. Save the application and copy the **Client ID**
 
 #### 2. Log In
 
