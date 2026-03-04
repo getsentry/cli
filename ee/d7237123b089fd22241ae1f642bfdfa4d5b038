@@ -1,0 +1,33 @@
+## Implementation Plan
+
+### Problem
+Users need to filter logs by trace ID from the CLI via `sentry log list --trace <id>`.
+Currently navigating from a trace to its associated logs requires the UI or a separate command.
+
+### Approach
+The Explore/Events logs endpoint (`/events/?dataset=logs`) does not support filtering by
+trace ID in query syntax. The dedicated `/organizations/{org}/trace-logs/` endpoint does,
+but is org-scoped (no project needed). So when `--trace` is given, the command switches
+to the trace-logs API and only resolves org (not org/project).
+
+### Steps
+1. Extract shared `validateTraceId` + `TRACE_ID_RE` into `src/lib/trace-id.ts`
+2. Add `--trace` flag to `sentry log list` with shared validation
+3. When `--trace` is provided, use `resolveOrg()` instead of `resolveOrgProjectFromArg()`
+4. Add `executeTraceSingleFetch()` using `listTraceLogs()` for one-shot fetch
+5. Add `executeTraceFollowMode()` for streaming — polls trace-logs endpoint,
+   deduplicates via `timestamp_precise` filtering (endpoint lacks `afterTimestamp`)
+6. Refactor `writeLogs()` to accept `LogLike` (shared by SentryLog and TraceLog)
+   with `includeTrace` option (false in trace mode — all rows share one trace)
+7. Update `trace/logs.ts` to use shared `trace-id.ts` module (dedup)
+8. Add trace-logs mock route to test server
+9. Add unit tests: 27 for trace-id validation, 37 for log list command
+   (including follow/streaming mode), 5 E2E
+
+### Design Decisions
+- Flag name: `--trace` (canonical) — matches the `trace` field name in Sentry's data model
+- No short alias added — the full name is clear and avoids conflicts
+- Org-scoped resolution when `--trace` is given: positional target is org slug, not org/project
+- Uses `listTraceLogs` API (not query syntax on events endpoint) per API constraints
+- Shared trace-id validation eliminates duplication between trace/logs.ts and log/list.ts
+- Follow-mode tests use AuthError to break infinite loop — AuthError is explicitly rethrown
