@@ -1,0 +1,61 @@
+# Fix macOS SIGKILL During Delta Upgrade
+
+## Problem
+
+Running `sentry cli upgrade` on macOS with the delta upgrade system causes
+the process to be killed with SIGKILL. The shell reports `killed` with no
+error message. On Linux, the same operation works fine.
+
+## Root Cause
+
+The delta upgrade system in `src/lib/bspatch.ts` uses `Bun.mmap(oldPath)`
+to memory-map the currently running binary for reading during patch
+application. `Bun.mmap()` always requests `PROT_WRITE` in its C/zig
+implementation regardless of the `shared` flag.
+
+On macOS, the kernel's **AMFI** (Apple Mobile File Integrity) code signing
+enforcement sends an uncatchable `SIGKILL` for ANY writable mapping —
+both `MAP_SHARED` and `MAP_PRIVATE` — on code-signed Mach-O binaries.
+All Bun-compiled binaries have ad-hoc code signatures.
+
+An initial fix (PR #339) changed `Bun.mmap()` to use `{ shared: false }`
+(MAP_PRIVATE), but this was **insufficient** because MAP_PRIVATE with
+PROT_WRITE is also rejected by macOS AMFI.
+
+### Evidence from Sentry telemetry
+
+- **Zero** successful macOS upgrade traces from delta-enabled versions
+- **All 4** successful delta upgrade traces were from Ubuntu Linux
+- **26** successful macOS upgrade traces from pre-delta versions (full download)
+- The orphaned DB span at 18:34 UTC from the killed version confirms an
+  upgrade was attempted but the process was killed before telemetry flushed
+
+### Call chain
+
+```
+upgrade.ts       → attemptDeltaUpgrade(version, process.execPath, destPath)
+delta-upgrade.ts → applyPatchChain(chain, oldBinaryPath, destPath)
+bspatch.ts       → Bun.mmap(oldPath)  ← SIGKILL on macOS
+```
+
+## Fix
+
+### `src/lib/bspatch.ts` — platform-conditional old file loading
+
+```typescript
+const oldFile =
+  process.platform === "darwin"
+    ? new Uint8Array(await Bun.file(oldPath).arrayBuffer())
+    : Bun.mmap(oldPath);
+```
+
+- **macOS**: Read into memory via `arrayBuffer()` (~100 MB heap, freed after
+  patching). Avoids mmap entirely — no kernel code signing checks.
+- **Linux**: Keep zero-heap `Bun.mmap()` — ELF binaries have no such restriction.
+
+## Testing
+
+Existing tests pass since fixtures are plain binary files (not signed Mach-O).
+The SIGKILL is an OS-level kernel behavior only reproducible on macOS with a
+code-signed binary. No new tests needed — the fix is a platform check with
+well-understood semantics.
