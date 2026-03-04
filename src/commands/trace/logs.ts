@@ -9,14 +9,11 @@ import { listTraceLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
-import {
-  formatLogTable,
-  writeFooter,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { ContextError } from "../../lib/errors.js";
+import { displayTraceLogs } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
+import { validateTraceId } from "../../lib/trace-id.js";
 
 type LogsFlags = {
   readonly json: boolean;
@@ -45,28 +42,11 @@ const DEFAULT_PERIOD = "14d";
 /** Usage hint shown in error messages */
 const USAGE_HINT = "sentry trace logs [<org>] <trace-id>";
 
-/** Regex for a valid 32-character hexadecimal trace ID */
-const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
-
 /**
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
   return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
-}
-
-/**
- * Validate that a string looks like a 32-character hex trace ID.
- *
- * @throws {ValidationError} If the trace ID format is invalid
- */
-function validateTraceId(traceId: string): void {
-  if (!TRACE_ID_RE.test(traceId)) {
-    throw new ValidationError(
-      `Invalid trace ID "${traceId}". Expected a 32-character hexadecimal string.\n\n` +
-        "Example: sentry trace logs abc123def456abc123def456abc123de"
-    );
-  }
 }
 
 /**
@@ -221,27 +201,15 @@ export const logsCommand = buildCommand({
       query: flags.query,
     });
 
-    if (flags.json) {
-      writeJson(stdout, logs);
-      return;
-    }
-
-    if (logs.length === 0) {
-      stdout.write(
+    displayTraceLogs({
+      stdout,
+      logs,
+      traceId,
+      limit: flags.limit,
+      asJson: flags.json,
+      emptyMessage:
         `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
-          `Try a longer period: sentry trace logs --period 30d ${traceId}\n`
-      );
-      return;
-    }
-
-    // API returns newest-first; reverse for chronological display
-    const chronological = [...logs].reverse();
-
-    stdout.write(formatLogTable(chronological, false));
-
-    const hasMore = logs.length >= flags.limit;
-    const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
-    const tip = hasMore ? " Use --limit to show more." : "";
-    writeFooter(stdout, `${countText}${tip}`);
+        `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,
+    });
   },
 });

@@ -230,7 +230,8 @@ describe("logsCommand.func", () => {
       const parsed = JSON.parse(output);
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed).toHaveLength(3);
-      expect(parsed[0].id).toBe("log001");
+      // displayTraceLogs reverses to chronological order for JSON output
+      expect(parsed[0].id).toBe("log003");
     });
 
     test("outputs empty JSON array when no logs found with --json", async () => {

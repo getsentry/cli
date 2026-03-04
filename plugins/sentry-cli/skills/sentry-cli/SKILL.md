@@ -504,6 +504,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 **Examples:**
@@ -687,6 +688,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 ### Traces

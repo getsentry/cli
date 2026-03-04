@@ -628,30 +628,14 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
-<!-- lore:019c978a-18b5-7a0d-a55f-b72f7789bdac -->
-* **cli.sentry.dev is served from gh-pages branch via GitHub Pages**: \`cli.sentry.dev\` is served from gh-pages branch via GitHub Pages. Craft's gh-pages target runs \`git rm -r -f .\` before extracting docs — persist extra files via \`postReleaseCommand\` in \`.craft.yml\`. Install script supports \`--channel nightly\`, downloading from the \`nightly\` release tag directly. version.json is only used by upgrade/version-check flow.
-
-<!-- lore:2c3eb7ab-1341-4392-89fd-d81095cfe9c4 -->
-* **npm bundle requires Node.js >= 22 due to node:sqlite polyfill**: The npm package (dist/bin.cjs) requires Node.js >= 22 because the bun:sqlite polyfill uses \`node:sqlite\`. A runtime version guard in the esbuild banner catches this early. When writing esbuild banner strings in TS template literals, double-escape: \`\\\\\\\n\` in TS → \`\\\n\` in output → newline at runtime. Single \`\\\n\` produces a literal newline inside a JS string, causing SyntaxError.
-
-<!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
-* **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. The \`explicit-org-numeric\` case uses \`getIssueInOrg\`. \`resolveOrgAndIssueId\` no longer throws for bare numeric IDs when permalink contains the org slug.
-
-<!-- lore:019c972c-9f0d-7c8e-95b1-7beda99c36a8 -->
-* **parseSentryUrl does not handle subdomain-style SaaS URLs**: parseSentryUrl in src/lib/sentry-url-parser.ts handles both path-based (\`/organizations/{org}/...\`) and subdomain-style (\`https://{org}.sentry.io/issues/123/\`) URLs. \`matchSubdomainOrg()\` extracts org from hostname ending in \`.sentry.io\`. Region subdomains (\`us\`, \`de\`) filtered by requiring org slug length > 2. Supports \`/issues/{id}/\`, \`/issues/{id}/events/{eventId}/\`, and \`/traces/{traceId}/\` paths. Self-hosted uses path-based only.
-
-
-<!-- lore:019cb37e-dd69-744f-9939-cf997ddda8c9 -->
-* **Binary delta upgrades: bsdiff patches are 300-600x smaller than full downloads**: Bun-compiled CLI binaries are ~98% runtime, so consecutive release diffs are tiny. bsdiff patches between stable versions are ~50 KB vs ~29 MB gzip (500x+ savings). Even across Bun version bumps (stable→nightly), patches are ~521 KB (57x savings). Patches are already bzip2-compressed internally — gzip adds nothing. bspatch applies in 0.6s using ~207 MB RAM. Key design: generate N-1 patches only (previous→current), fall back to full download for older versions. Store patches alongside binaries (GH Releases for stable, GHCR for nightly). Always SHA-256 verify the patched result before atomic replace. CI cost: ~45s and ~890 MB RAM per platform, parallelizable.
-
 <!-- lore:019cafbb-24ad-75a3-b037-5efbe6a1e85d -->
 * **DSN org prefix normalization in arg-parsing.ts**: Sentry DSN hosts encode org IDs as \`oNNNNN\` (e.g., \`o1081365.ingest.us.sentry.io\`). The Sentry API rejects the \`o\`-prefixed form. \`stripDsnOrgPrefix()\` in \`src/lib/arg-parsing.ts\` uses \`/^o(\d+)$/\` to strip the prefix — safe for slugs like \`organic\`. Applied in \`parseOrgProjectArg()\` and \`parseWithSlash()\`, covering all API call paths consuming \`parsed.org\`.
 
 <!-- lore:019cb38b-e327-7ec5-8fb0-9e635b2bac48 -->
-* **GHCR versioned nightly tags for delta upgrade support**: Nightlies use three GHCR tag types: \`:nightly\` (rolling, overwritten each push), \`:nightly-\<version>\` (immutable, added via \`oras tag\` zero-copy), and \`:patch-\<version>\` (separate manifest with patch files + \`from-version\` annotation). Chain resolution walks backwards from target to current version using patch manifests. Tag listing via \`/v2/getsentry/cli/tags/list\` filtered by \`nightly-\*\` prefix. Retention: keep last 30 versioned tags, prune weekly via scheduled workflow. Storage is free for public GHCR packages.
+* **GHCR versioned nightly tags for delta upgrade support**: GHCR nightly distribution with binary delta upgrades. Three tag types: \`:nightly\` (rolling), \`:nightly-\<version>\` (immutable), \`:patch-\<version>\` (delta manifest). Delta patches use zig-bsdiff TRDIFF10 (zstd-compressed), ~50KB vs ~29MB full. Client bspatch via \`Bun.zstdDecompressSync()\`. N-1 patches only, full download fallback, SHA-256 verify, 60% size threshold. npm/Node excluded. 30 versioned tags retained, pruned weekly. Test mocks: (1) token exchange at \`ghcr.io/token\`, (2) manifest fetch with annotations, (3) blob download via \`Response.redirect()\`. Use \`mockGhcrNightlyVersion()\` helper.
 
 <!-- lore:a1f33ceb-6116-4d29-b6d0-0dc9678e4341 -->
-* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50 pages). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\` helper; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
+* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\`; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
 
 <!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
 * **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
@@ -659,45 +643,12 @@ mock.module("./some-module", () => ({
 <!-- lore:019ca9c3-98a2-7a81-9db7-d36c2e71237c -->
 * **Sentry trace-logs API is org-scoped, not project-scoped**: The Sentry trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped, so \`trace logs\` uses \`resolveOrg()\` not \`resolveOrgAndProject()\`. The endpoint is PRIVATE in Sentry source, excluded from the public OpenAPI schema — \`@sentry/api\` has no generated types. The hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` is required until Sentry makes it public.
 
-<!-- lore:019cb38b-e322-7ab2-9de2-f1bb89de5e5c -->
-* **TRDIFF10 patch format from zig-bsdiff for delta upgrades**: Delta upgrades use zig-bsdiff's TRDIFF10 format: 32-byte header (\`TRDIFF10\` magic + controlLen/diffLen/newSize as i64 LE) followed by 3 zstd-compressed blocks (control, diff, extra). Client-side bspatch is pure TypeScript using \`Bun.zstdDecompressSync()\` — no external dependencies. The \`offtin\` function reads signed 64-bit LE with sign in bit 7 of byte 7. CI generates patches using zig-bsdiff v0.1.19 (pinned + SHA-256 verified). npm/Node users are excluded — they upgrade via \`npm update\`, and \`Bun.zstdDecompressSync\` has no Node equivalent. The 60% threshold ensures patch chains never exceed 60% of full \`.gz\` download size before falling back. For ~100 MB binaries, the decompressed diff block is ~100 MB (one byte per matched byte, mostly 0x00). Use \`Bun.mmap()\` for old file (0 heap), \`DecompressionStream('zstd')\` for streaming diff/extra blocks (~few KB buffer), and \`Bun.file().writer()\` + \`Bun.CryptoHasher\` for streaming verified output.
 ### Decision
-
-<!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
-* **Raw markdown output for non-interactive terminals, rendered for TTY**: Output raw CommonMark when stdout is not a TTY; render through marked-terminal only for TTY. Detection: \`process.stdout.isTTY\`. Override precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > auto-detect. \`--json\` always outputs JSON. Streaming formatters (log/trace) use ANSI-colored text for TTY, markdown table rows for non-TTY.
-
-<!-- lore:00166785-609d-4ab5-911e-ee205d17b90c -->
-* **whoami should be separate from auth status command**: The \`sentry auth whoami\` command should be a dedicated command separate from \`sentry auth status\`. They serve different purposes: \`status\` shows everything about auth state (token, expiry, defaults, org verification), while \`whoami\` just shows user identity (name, email, username, ID) by fetching live from \`/auth/\` endpoint. \`sentry whoami\` should be a top-level alias (like \`sentry issues\` → \`sentry issue list\`). \`whoami\` should support \`--json\` for machine consumption and be lightweight — no credential verification, no defaults listing.
-
 
 <!-- lore:019c8f3b-84be-79be-9518-e5ecd2ea64b9 -->
 * **Use -t (not -p) as shortcut alias for --period flag**: The --period flag on issue list uses -t (for 'time period') as its short alias, not -p. The rationale: -p could be confused with --platform from other CLI tools/contexts. -t maps naturally to 'time period' and avoids collision. This was a deliberate choice after initial implementation used -p.
+
 ### Gotcha
-
-<!-- lore:019c8ab6-d119-7365-9359-98ecf464b704 -->
-* **@sentry/api SDK passes Request object to custom fetch — headers lost on Node.js**: @sentry/api SDK calls \`\_fetch(request)\` with no init object. In \`authenticatedFetch\`, \`init\` is undefined so \`prepareHeaders\` creates empty headers — on Node.js this strips Content-Type (HTTP 415). Fix: fall back to \`input.headers\` when \`init\` is undefined. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) to access the Response's Link header for pagination. \`per\_page\` is not in SDK types; cast query to pass it at runtime.
-
-<!-- lore:019c9e98-7af4-7e25-95f4-fc06f7abf564 -->
-* **Bun binary build requires SENTRY\_CLIENT\_ID env var**: The build script (\`script/bundle.ts\`) requires \`SENTRY\_CLIENT\_ID\` environment variable and exits with code 1 if missing. When building locally, use \`bun run --env-file=.env.local build\` or set the env var explicitly. The binary build (\`bun run build\`) also needs it. Without it you get: \`Error: SENTRY\_CLIENT\_ID environment variable is required.\`
-
-<!-- lore:019c94f0-2ab4-74b2-8bfa-d3ddfbb97d70 -->
-* **GitHub Actions: use deterministic timestamps across jobs, not Date.now()**: GitHub Actions gotchas: (1) Use deterministic timestamps — derive from \`github.event.head\_commit.timestamp\`, never \`Date.now()\` per job. (2) Skipped \`needs\` jobs produce empty string outputs — guard with \`if: needs.job.outputs.value != ''\`. (3) upload-artifact strips directory prefixes from glob paths; download-artifact flattens to \`artifacts/\` root.
-
-<!-- lore:019c9776-e3dd-7632-88b8-358a19506218 -->
-* **GitHub immutable releases prevent rolling nightly tag pattern**: getsentry/cli has immutable GitHub releases — assets can't be modified and tags can NEVER be reused. Nightly uses per-version tags (e.g., \`0.13.0-dev.1772062077\`) with API-based latest discovery; deletes all existing assets before uploading. Craft minVersion >= 2.21.0 with no \`preReleaseCommand\` silently skips \`bump-version.sh\` if the only target is \`github\`. Fix: explicitly set \`preReleaseCommand: bash scripts/bump-version.sh\`.
-
-<!-- lore:019c969a-1c90-7041-88a8-4e4d9a51ebed -->
-* **Multiple mockFetch calls replace each other — use unified mocks for multi-endpoint tests**: Bun test mocking gotchas: (1) \`mockFetch()\` replaces \`globalThis.fetch\` — calling it twice replaces the first mock. Use a single unified fetch mock dispatching by URL pattern. (2) \`mock.module()\` pollutes the module registry for ALL subsequent test files. Tests using it must live in \`test/isolated/\` and run via \`test:isolated\`. (3) For \`Bun.spawn\`, use direct property assignment in \`beforeEach\`/\`afterEach\`.
-
-<!-- lore:019cb3e6-da66-7534-a573-30d2ecadfd53 -->
-* **Returning bare promises loses async function from error stack traces**: When an \`async\` function returns another promise without \`await\`, the calling function disappears from error stack traces if the inner promise rejects. A function that drops \`async\` and does \`return someAsyncCall()\` loses its frame entirely. Fix: keep the function \`async\` and use \`return await someAsyncCall()\`. This matters for debugging — the intermediate function name in the stack trace helps locate which code path triggered the failure. ESLint rule \`no-return-await\` is outdated; modern engines optimize \`return await\` in async functions.
-
-<!-- lore:019c8a7a-5321-7a48-a86c-1340ee3e90db -->
-* **Several commands bypass telemetry by importing buildCommand from @stricli/core directly**: src/lib/command.ts wraps Stricli's buildCommand to auto-capture flag/arg telemetry via Sentry. But trace/list, trace/view, log/view, api.ts, and help.ts import buildCommand directly from @stricli/core, silently skipping telemetry. Fix: change their imports to use ../../lib/command.js. Consider adding a Biome lint rule (noRestrictedImports equivalent) to prevent future regressions.
-
-<!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
-* **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
-
 
 <!-- lore:019c9994-d161-783e-8b3e-79457cd62f42 -->
 * **Biome lint: Response.redirect() required, nested ternaries forbidden**: Biome lint rules that frequently trip up this codebase: (1) \`useResponseRedirect\`: use \`Response.redirect(url, status)\` not \`new Response\`. (2) \`noNestedTernary\`: use \`if/else\`. (3) \`noComputedPropertyAccess\`: use \`obj.property\` not \`obj\["property"]\`. (4) Max cognitive complexity 15 per function — extract helpers to stay under.
@@ -705,25 +656,10 @@ mock.module("./some-module", () => ({
 <!-- lore:019c8c31-f52f-7230-9252-cceb907f3e87 -->
 * **Bugbot flags defensive null-checks as dead code — keep them with JSDoc justification**: Cursor Bugbot and Sentry Seer repeatedly flag two false positives: (1) defensive null-checks as "dead code" — keep them with JSDoc explaining why the guard exists for future safety, especially when removing would require \`!\` assertions banned by \`noNonNullAssertion\`. (2) stderr spinner output during \`--json\` mode — always a false positive since progress goes to stderr, JSON to stdout. Reply explaining the rationale and resolve.
 
-<!-- lore:019c99c3-766b-7ae7-be1f-4d5e08da27d3 -->
-* **Cherry-picking GHCR tests requires updating mocks from version.json to GHCR manifest flow**: Nightly test mocks must use the 3-step GHCR flow: (1) token exchange at \`ghcr.io/token\`, (2) manifest fetch at \`/manifests/nightly\` returning JSON with \`annotations.version\` and \`layers\[].annotations\["org.opencontainers.image.title"]\`, (3) blob download returning \`Response.redirect()\` to Azure. The \`mockNightlyVersion()\` and \`mockGhcrNightlyVersion()\` helpers must handle all three URLs. Platform-specific filenames in manifest layers must use \`if/else\` blocks (Biome forbids nested ternaries).
-
 <!-- lore:019c9a88-bf99-7322-b192-aafe4636c600 -->
 * **getsentry/codecov-action enables JUnit XML test reporting by default**: The \`getsentry/codecov-action@main\` has \`enable-tests: true\` by default, which searches for JUnit XML files matching \`\*\*/\*.junit.xml\`. If the test framework doesn't produce JUnit XML, the action emits 3 warnings on every CI run: "No files found matching pattern", "No JUnit XML files found", and "Please ensure your test framework is generating JUnit XML output". Fix: either set \`enable-tests: false\` in the action inputs, or configure the test runner to output JUnit XML. For Bun, add \`\[test.reporter] junit = "test-results.junit.xml"\` to \`bunfig.toml\` and add \`\*.junit.xml\` to \`.gitignore\`.
+
 ### Pattern
-
-<!-- lore:019c9793-fb1c-7986-936e-57949e9a30d0 -->
-* **Markdown table structure for marked-terminal: blank header row + separator + data rows**: Markdown tables for marked-terminal: blank header row (\`| | |\`), separator (\`|---|---|\`), then data rows (\`| \*\*Label\*\* | value |\`). Data rows before separator produce malformed output. Escape user content via \`escapeMarkdownCell()\` in \`src/lib/formatters/markdown.ts\` — backslashes first, then pipes. CodeQL flags incomplete escaping as high severity.
-
-<!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
-* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
-
-<!-- lore:5ac4e219-ea1f-41cb-8e97-7e946f5848c0 -->
-* **PR workflow: wait for Seer and Cursor BugBot before resolving**: After pushing a PR in the getsentry/cli repo, the CI pipeline includes Seer Code Review and Cursor Bugbot as required or advisory checks. Both typically take 2-3 minutes. The workflow is: push → wait for all CI (including npm build jobs which test the actual bundle) → check for inline review comments from Seer/BugBot → fix if needed → repeat. Use \`gh pr checks \<PR> --watch\` to monitor. Review comments are fetched via \`gh api repos/OWNER/REPO/pulls/NUM/comments\` and \`gh api repos/OWNER/REPO/pulls/NUM/reviews\`.
-
-<!-- lore:019cb162-d3ad-7b05-ab4f-f87892d517a6 -->
-* **Shared pagination infrastructure: buildPaginationContextKey and parseCursorFlag**: List commands with cursor pagination use \`buildPaginationContextKey(type, identifier, flags)\` for composite context keys and \`parseCursorFlag(value)\` accepting \`"last"\` magic value. Critical: \`resolveCursor()\` must be called inside the \`org-all\` override closure, not before \`dispatchOrgScopedList\` — otherwise cursor validation errors fire before the correct mode-specific error.
-
 
 <!-- lore:dbd63348-2049-42b3-bb99-d6a3d64369c7 -->
 * **Branch naming and commit message conventions for Sentry CLI**: Branch naming: \`feat/\<short-description>\` or \`fix/\<issue-number>-\<short-description>\` (e.g., \`feat/ghcr-nightly-distribution\`, \`fix/268-limit-auto-pagination\`). Commit message format: \`type(scope): description (#issue)\` (e.g., \`fix(issue-list): auto-paginate --limit beyond 100 (#268)\`, \`feat(nightly): distribute via GHCR instead of GitHub Releases\`). Types seen: fix, refactor, meta, release, feat. PRs are created as drafts via \`gh pr create --draft\`. Implementation plans are attached to commits via \`git notes add\` rather than in PR body or commit message.
@@ -739,10 +675,11 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019c8a8a-64ee-703c-8c1e-ed32ae8a90a7 -->
 * **PR review workflow: reply, resolve, amend, force-push**: PR review workflow: (1) Read unresolved threads via GraphQL, (2) make code changes, (3) run lint+typecheck+tests, (4) create a SEPARATE commit per review round (not amend) for incremental review, (5) push normally, (6) reply to comments via REST API, (7) resolve threads via GraphQL \`resolveReviewThread\`. Only amend+force-push when user explicitly asks or pre-commit hook modified files.
-### Preference
 
-<!-- lore:019c9700-0fc3-730c-82c3-a290d5ecc2ea -->
-* **CI scripts: prefer jq/sed over node -e for JSON manipulation**: Reviewer (BYK) prefers using standard Unix tools (\`jq\`, \`sed\`, \`awk\`) over \`node -e\` for simple JSON manipulation in CI workflow scripts. For example, reading/modifying package.json version: \`jq -r .version package.json\` to read, \`jq --arg v "$NEW" '.version = $v' package.json > tmp && mv tmp package.json\` to write. This avoids requiring Node.js to be installed in CI steps that only need basic JSON operations, and is more readable for shell-centric workflows.
+<!-- lore:019cb858-e780-7945-a0ee-a01f85be5585 -->
+* **Testing infinite loops (while-true) in streaming functions via AuthError escape hatch**: Follow-mode streaming in \`sentry log list\` uses \`setTimeout\`-based recursive scheduling. \`scheduleNextPoll()\` sets a timer; SIGINT handler calls \`clearTimeout()\` + \`resolve()\`. No \`process.exit(0)\` needed — clearing the timer drains the event loop naturally. A \`stopped\` boolean guard prevents orphaned poll loops when SIGINT fires during an in-flight fetch. Both \`scheduleNextPoll()\` and \`poll()\` check \`stopped\` before doing work. \`Bun.sleep()\` cannot be cancelled (no AbortSignal support), so \`setTimeout\`/\`clearTimeout\` is required. The Promise constructor uses fire-and-forget \`.then()/.catch()\` for the initial fetch — cannot use async IIFE because \`resolve\` must remain callable by the SIGINT handler (\`stop\`) at any time; awaiting would block the executor. Tests use \`interceptSigint()\` helper that captures \`process.once('SIGINT', handler)\` via spy, then \`trigger()\` invokes it directly. \`executeFollowMode\<T>(config: FollowConfig\<T>)\` is generic — parameterized by a single \`fetch(statsPeriod, afterTimestamp?)\` callback plus \`extractNew\`.
+
+### Preference
 
 <!-- lore:019c91a8-879a-70cd-bfe4-4bb5bfb7b4d1 -->
 * **Use captureException (not captureMessage) for unexpected states, or Sentry logs**: When reporting unexpected/defensive-guard situations to Sentry (e.g., non-numeric input where a number was expected), the reviewer prefers \`Sentry.captureException(new Error(...))\` over \`Sentry.captureMessage(...)\`. \`captureMessage\` with 'warning' level was rejected in PR review. Alternatively, use the Sentry structured logger (\`Sentry.logger.warn(...)\`) for less severe diagnostic cases — this was accepted in the abbreviateCount NaN handler.
