@@ -228,6 +228,21 @@ function headersToObject(headers: Headers): Record<string, string> {
 }
 
 /**
+ * Check whether the server sent explicit cache-control directives.
+ *
+ * When `rescc` (response cache-control) is empty, the server sent no
+ * Cache-Control header. When it has keys, the server explicitly provided
+ * directives (e.g., `max-age=0`, `no-cache`, `max-age=300`).
+ *
+ * This distinction is critical: `timeToLive() === 0` is ambiguous — it can
+ * mean "no headers" (use fallback TTL) or "max-age=0" (don't cache).
+ */
+function hasServerCacheDirectives(policy: CachePolicy): boolean {
+  const { rescc } = policy.toObject();
+  return Object.keys(rescc).length > 0;
+}
+
+/**
  * Check whether a cache entry is still fresh.
  *
  * Uses the server-provided TTL (via CachePolicy) when available. Falls back
@@ -244,16 +259,13 @@ function isEntryFresh(
     return true;
   }
 
-  // CachePolicy says stale — check if we should override with fallback TTL.
-  // timeToLive() returns 0 when the server sent no cache headers, or a
-  // positive/negative value when it did (negative = already expired).
-  const serverTtl = policy.timeToLive();
-  if (serverTtl !== 0) {
-    // Server provided an explicit TTL — respect it (even if expired)
+  // If the server sent explicit cache directives (e.g., max-age=0), respect
+  // them — CachePolicy already said stale, so this entry is expired.
+  if (hasServerCacheDirectives(policy)) {
     return false;
   }
 
-  // No server TTL (0) — use our URL-based fallback tier
+  // No server cache headers — use our URL-based fallback tier
   const tier = classifyUrl(url);
   const fallbackTtl = FALLBACK_TTL_MS[tier];
   const age = Date.now() - entry.createdAt;
@@ -477,10 +489,13 @@ async function writeResponseToCache(
   const key = buildCacheKey(method, url);
   const now = Date.now();
 
-  // Pre-compute expiry for cheap cleanup checks (avoids CachePolicy deserialization)
+  // Pre-compute expiry for cheap cleanup checks (avoids CachePolicy deserialization).
+  // When the server sent explicit cache directives, use its TTL (even if 0).
+  // Only fall back to URL-based tier when no server cache headers were present.
   const serverTtl = policy.timeToLive();
-  const fallbackTtl = FALLBACK_TTL_MS[classifyUrl(url)];
-  const ttl = serverTtl > 0 ? serverTtl : fallbackTtl;
+  const ttl = hasServerCacheDirectives(policy)
+    ? serverTtl
+    : FALLBACK_TTL_MS[classifyUrl(url)];
 
   const entry: CacheEntry = {
     policy: policy.toObject(),
