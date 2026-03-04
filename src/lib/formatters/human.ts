@@ -1234,6 +1234,87 @@ export function formatProjectDetails(
   return renderMarkdown(lines.join("\n"));
 }
 
+// Project Creation Formatting
+
+/** Input for the project-created success formatter */
+export type ProjectCreatedResult = {
+  /** The created project */
+  project: SentryProject;
+  /** Organization slug the project was created in */
+  orgSlug: string;
+  /** Team slug the project was assigned to */
+  teamSlug: string;
+  /** How the team was resolved */
+  teamSource: "explicit" | "auto-selected" | "auto-created";
+  /** Primary DSN, if fetched successfully */
+  dsn: string | null;
+  /** Sentry web URL for the project settings page */
+  url: string;
+  /** Whether Sentry assigned a different slug than expected */
+  slugDiverged: boolean;
+  /** The slug the user expected (derived from the project name) */
+  expectedSlug: string;
+};
+
+/**
+ * Format a successful project creation as rendered markdown.
+ *
+ * Includes a heading, contextual notes (slug divergence, team auto-selection),
+ * a key-value detail table, and a tip footer.
+ *
+ * @param result - Project creation context
+ * @returns Rendered terminal string
+ */
+export function formatProjectCreated(result: ProjectCreatedResult): string {
+  const lines: string[] = [];
+
+  lines.push(
+    `## Created project '${escapeMarkdownInline(result.project.name)}' in ${escapeMarkdownInline(result.orgSlug)}`
+  );
+  lines.push("");
+
+  // Slug divergence note
+  if (result.slugDiverged) {
+    lines.push(
+      `> **Note:** Slug \`${result.project.slug}\` was assigned because \`${result.expectedSlug}\` is already taken.`
+    );
+    lines.push("");
+  }
+
+  // Team source notes
+  if (result.teamSource === "auto-created") {
+    lines.push(
+      `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
+    );
+    lines.push("");
+  } else if (result.teamSource === "auto-selected") {
+    lines.push(
+      `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+    );
+    lines.push("");
+  }
+
+  const kvRows: [string, string][] = [
+    ["Project", escapeMarkdownInline(result.project.name)],
+    ["Slug", safeCodeSpan(result.project.slug)],
+    ["Org", safeCodeSpan(result.orgSlug)],
+    ["Team", safeCodeSpan(result.teamSlug)],
+    ["Platform", result.project.platform || "unknown"],
+  ];
+  if (result.dsn) {
+    kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
+  }
+  kvRows.push(["URL", result.url]);
+
+  lines.push(mdKvTable(kvRows));
+  lines.push("");
+  lines.push(
+    `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
+  );
+
+  return renderMarkdown(lines.join("\n"));
+}
+
 // User Identity Formatting
 
 /**
