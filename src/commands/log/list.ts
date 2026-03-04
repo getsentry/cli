@@ -11,12 +11,7 @@ import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
 import { listLogs, listTraceLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
-import {
-  AuthError,
-  ContextError,
-  stringifyUnknown,
-  ValidationError,
-} from "../../lib/errors.js";
+import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
@@ -28,6 +23,7 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
+import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   buildListCommand,
   TARGET_PATTERN_NOTE,
@@ -36,6 +32,7 @@ import {
   resolveOrg,
   resolveOrgProjectFromArg,
 } from "../../lib/resolve-target.js";
+import { validateTraceId } from "../../lib/trace-id.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
 import type { Writer } from "../../types/index.js";
 
@@ -61,24 +58,6 @@ const DEFAULT_POLL_INTERVAL = 2;
 
 /** Command name used in resolver error messages */
 const COMMAND_NAME = "log list";
-
-/** Regex for a valid 32-character hexadecimal trace ID */
-const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
-
-/**
- * Validate that a string looks like a 32-character hex trace ID.
- *
- * @throws {ValidationError} If the trace ID format is invalid
- */
-function validateTraceId(traceId: string): string {
-  if (!TRACE_ID_RE.test(traceId)) {
-    throw new ValidationError(
-      `Invalid trace ID "${traceId}". Expected a 32-character hexadecimal string.\n\n` +
-        "Example: sentry log list --trace abc123def456abc123def456abc123de"
-    );
-  }
-  return traceId;
-}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -106,10 +85,12 @@ function parseFollow(value: string): number {
 
 /**
  * Shape shared by both SentryLog and TraceLog — the minimum fields
- * needed for table rendering.
+ * needed for table rendering and follow-mode dedup tracking.
  */
 type LogLike = {
   timestamp: string;
+  /** Nanosecond-precision timestamp used for dedup in follow mode */
+  timestamp_precise: number;
   severity?: string | null;
   message?: string | null;
   trace?: string | null;
@@ -119,7 +100,7 @@ type WriteLogsOptions = {
   stdout: Writer;
   logs: LogLike[];
   asJson: boolean;
-  table?: import("../../lib/formatters/text-table.js").StreamingTable;
+  table?: StreamingTable;
   /** Whether to append a short trace-ID suffix (default: true) */
   includeTrace?: boolean;
 };
@@ -189,32 +170,46 @@ async function executeSingleFetch(
   writeFooter(stdout, `${countText}${tip}`);
 }
 
-type FollowModeOptions = {
+/**
+ * Configuration for the unified follow-mode loop.
+ *
+ * Parameterized over the log type to handle both project-scoped
+ * (`SentryLog`) and trace-scoped (`TraceLog`) streaming.
+ */
+type FollowConfig<T extends LogLike> = {
   stdout: Writer;
   stderr: Writer;
-  org: string;
-  project: string;
   flags: ListFlags;
+  /** Text for the stderr banner (e.g., "Streaming logs…") */
+  bannerText: string;
+  /** Whether to show the trace-ID column in table output */
+  includeTrace: boolean;
+  /** Fetch the initial batch of logs */
+  fetchInitial: () => Promise<T[]>;
+  /** Fetch new logs after the given nanosecond timestamp */
+  fetchPoll: (lastTimestamp: number) => Promise<T[]>;
+  /** Extract only the genuinely new entries from a poll response */
+  extractNew: (logs: T[], lastTimestamp: number) => T[];
 };
 
 /**
  * Execute streaming mode (--follow flag).
  *
- * Uses timestamp-based filtering to efficiently fetch only new logs.
- * Each poll requests logs with timestamp_precise > last seen timestamp,
- * ensuring no duplicates and no missed logs.
+ * Uses `setTimeout`-based recursive scheduling so that SIGINT can
+ * cleanly cancel the pending timer and resolve the returned promise
+ * without `process.exit()`.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: streaming loop with error handling
-async function executeFollowMode(options: FollowModeOptions): Promise<void> {
-  const { stdout, stderr, org, project, flags } = options;
+function executeFollowMode<T extends LogLike>(
+  config: FollowConfig<T>
+): Promise<void> {
+  const { stdout, stderr, flags } = config;
   const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
   const pollIntervalMs = pollInterval * 1000;
 
   if (!flags.json) {
-    stderr.write(`Streaming logs... (poll interval: ${pollInterval}s)\n`);
+    stderr.write(`${config.bannerText} (poll interval: ${pollInterval}s)\n`);
     stderr.write("Press Ctrl+C to stop.\n");
 
-    // Show update notification before streaming (since we'll never reach the normal exit)
     const notification = getUpdateNotification();
     if (notification) {
       stderr.write(notification);
@@ -222,92 +217,103 @@ async function executeFollowMode(options: FollowModeOptions): Promise<void> {
     stderr.write("\n");
   }
 
-  // In TTY mode, use a bordered StreamingTable for aligned columns.
-  // In plain mode, use raw markdown rows for pipe-friendly output.
   const plain = flags.json || isPlainOutput();
   const table = plain ? undefined : createLogStreamingTable();
 
-  // Track if header has been printed (for human/plain mode)
   let headerPrinted = false;
+  let lastTimestamp = Date.now() * 1_000_000;
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
 
-  // Initial fetch: only last minute for follow mode (we want recent logs, not historical)
-  const initialLogs = await listLogs(org, project, {
-    query: flags.query,
-    limit: flags.limit,
-    statsPeriod: "1m",
-  });
+  return new Promise<void>((resolve, reject) => {
+    function stop() {
+      stopped = true;
+      if (pendingTimer !== null) {
+        clearTimeout(pendingTimer);
+        pendingTimer = null;
+      }
+      if (table) {
+        stdout.write(table.footer());
+      }
+      resolve();
+    }
 
-  // Print header before initial logs (human mode only)
-  if (!flags.json && initialLogs.length > 0) {
-    stdout.write(table ? table.header() : formatLogsHeader());
-    headerPrinted = true;
-  }
+    process.once("SIGINT", stop);
 
-  // Reverse for chronological order (API returns newest first, tail -f shows oldest first)
-  const chronologicalInitial = [...initialLogs].reverse();
-  writeLogs({ stdout, logs: chronologicalInitial, asJson: flags.json, table });
+    function scheduleNextPoll() {
+      if (stopped) {
+        return;
+      }
+      pendingTimer = setTimeout(poll, pollIntervalMs);
+    }
 
-  // Print bottom border on Ctrl+C so the table closes cleanly
-  if (table) {
-    process.once("SIGINT", () => {
-      stdout.write(table.footer());
-      process.exit(0);
-    });
-  }
-
-  // Track newest timestamp (logs are sorted -timestamp, so first is newest)
-  // Use current time as fallback to avoid fetching old logs when initial fetch is empty
-  // (timestamp_precise is in nanoseconds, Date.now() is milliseconds)
-  let lastTimestamp =
-    initialLogs[0]?.timestamp_precise ?? Date.now() * 1_000_000;
-
-  // Poll for new logs indefinitely
-  while (true) {
-    await Bun.sleep(pollIntervalMs);
-
-    try {
-      const newLogs = await listLogs(org, project, {
-        query: flags.query,
-        limit: flags.limit,
-        statsPeriod: "10m",
-        afterTimestamp: lastTimestamp,
-      });
-
+    function writeNewLogs(newLogs: T[]) {
       const newestLog = newLogs[0];
       if (newestLog) {
-        // Print header before first logs if not already printed
         if (!(flags.json || headerPrinted)) {
           stdout.write(table ? table.header() : formatLogsHeader());
           headerPrinted = true;
         }
-
-        // Reverse for chronological order (oldest first for tail -f style)
-        const chronologicalNew = [...newLogs].reverse();
+        const chronological = [...newLogs].reverse();
         writeLogs({
           stdout,
-          logs: chronologicalNew,
+          logs: chronological,
           asJson: flags.json,
           table,
+          includeTrace: config.includeTrace,
         });
-
-        // Update timestamp AFTER successful write to avoid losing logs on write failure
         lastTimestamp = newestLog.timestamp_precise;
       }
-    } catch (error) {
-      // Auth errors should propagate - user needs to re-authenticate
-      if (error instanceof AuthError) {
-        throw error;
-      }
-
-      // Report transient errors to Sentry for visibility
-      Sentry.captureException(error);
-
-      // Always write to stderr (doesn't interfere with JSON on stdout)
-      const message = stringifyUnknown(error);
-      stderr.write(`Error fetching logs: ${message}\n`);
-      // Continue polling on transient errors (network, etc.)
     }
-  }
+
+    async function poll() {
+      pendingTimer = null;
+      if (stopped) {
+        return;
+      }
+      try {
+        const rawLogs = await config.fetchPoll(lastTimestamp);
+        const newLogs = config.extractNew(rawLogs, lastTimestamp);
+        writeNewLogs(newLogs);
+        scheduleNextPoll();
+      } catch (error) {
+        if (error instanceof AuthError) {
+          process.removeListener("SIGINT", stop);
+          reject(error);
+          return;
+        }
+        Sentry.captureException(error);
+        const message = stringifyUnknown(error);
+        stderr.write(`Error fetching logs: ${message}\n`);
+        scheduleNextPoll();
+      }
+    }
+
+    config
+      .fetchInitial()
+      .then((initialLogs) => {
+        if (!flags.json && initialLogs.length > 0) {
+          stdout.write(table ? table.header() : formatLogsHeader());
+          headerPrinted = true;
+        }
+        const chronological = [...initialLogs].reverse();
+        writeLogs({
+          stdout,
+          logs: chronological,
+          asJson: flags.json,
+          table,
+          includeTrace: config.includeTrace,
+        });
+        if (initialLogs[0]) {
+          lastTimestamp = initialLogs[0].timestamp_precise;
+        }
+        scheduleNextPoll();
+      })
+      .catch((error: unknown) => {
+        process.removeListener("SIGINT", stop);
+        reject(error);
+      });
+  });
 }
 
 /** Default time period for trace-logs queries */
@@ -349,124 +355,6 @@ async function executeTraceSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
   writeFooter(stdout, `${countText}${tip}`);
-}
-
-type TraceFollowModeOptions = {
-  stdout: Writer;
-  stderr: Writer;
-  org: string;
-  traceId: string;
-  flags: ListFlags;
-};
-
-/**
- * Execute streaming mode for trace-filtered logs (--follow + --trace).
- * Uses the trace-logs endpoint and polls for new entries.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: streaming loop with error handling
-async function executeTraceFollowMode(
-  options: TraceFollowModeOptions
-): Promise<void> {
-  const { stdout, stderr, org, traceId, flags } = options;
-  const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
-  const pollIntervalMs = pollInterval * 1000;
-
-  if (!flags.json) {
-    stderr.write(
-      `Streaming logs for trace ${traceId}... (poll interval: ${pollInterval}s)\n`
-    );
-    stderr.write("Press Ctrl+C to stop.\n");
-
-    const notification = getUpdateNotification();
-    if (notification) {
-      stderr.write(notification);
-    }
-    stderr.write("\n");
-  }
-
-  const plain = flags.json || isPlainOutput();
-  const table = plain ? undefined : createLogStreamingTable();
-
-  let headerPrinted = false;
-
-  // Initial fetch
-  const initialLogs = await listTraceLogs(org, traceId, {
-    query: flags.query,
-    limit: flags.limit,
-    statsPeriod: "1m",
-  });
-
-  if (!flags.json && initialLogs.length > 0) {
-    stdout.write(table ? table.header() : formatLogsHeader());
-    headerPrinted = true;
-  }
-
-  const chronologicalInitial = [...initialLogs].reverse();
-  writeLogs({
-    stdout,
-    logs: chronologicalInitial,
-    asJson: flags.json,
-    table,
-    includeTrace: false,
-  });
-
-  if (table) {
-    process.once("SIGINT", () => {
-      stdout.write(table.footer());
-      process.exit(0);
-    });
-  }
-
-  let lastTimestamp =
-    initialLogs[0]?.timestamp_precise ?? Date.now() * 1_000_000;
-
-  while (true) {
-    await Bun.sleep(pollIntervalMs);
-
-    try {
-      // The trace-logs endpoint doesn't support afterTimestamp, so we
-      // fetch recent logs and deduplicate by checking timestamp_precise.
-      const newLogs = await listTraceLogs(org, traceId, {
-        query: flags.query,
-        limit: flags.limit,
-        statsPeriod: "10m",
-      });
-
-      // Filter to only logs newer than lastTimestamp
-      const freshLogs = newLogs.filter(
-        (log) => log.timestamp_precise > lastTimestamp
-      );
-
-      // newest-first from API, so first element is the newest
-      const newestFresh = freshLogs[0];
-      if (newestFresh) {
-        if (!(flags.json || headerPrinted)) {
-          stdout.write(table ? table.header() : formatLogsHeader());
-          headerPrinted = true;
-        }
-
-        const chronologicalNew = [...freshLogs].reverse();
-        writeLogs({
-          stdout,
-          logs: chronologicalNew,
-          asJson: flags.json,
-          table,
-          includeTrace: false,
-        });
-
-        lastTimestamp = newestFresh.timestamp_precise;
-      }
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-
-      Sentry.captureException(error);
-
-      const message = stringifyUnknown(error);
-      stderr.write(`Error fetching logs: ${message}\n`);
-    }
-  }
 }
 
 export const listCommand = buildListCommand("log", {
@@ -565,12 +453,27 @@ export const listCommand = buildListCommand("log", {
       setContext([org], []);
 
       if (flags.follow) {
-        await executeTraceFollowMode({
+        const traceId = flags.trace;
+        await executeFollowMode({
           stdout,
           stderr,
-          org,
-          traceId: flags.trace,
           flags,
+          bannerText: `Streaming logs for trace ${traceId}...`,
+          includeTrace: false,
+          fetchInitial: () =>
+            listTraceLogs(org, traceId, {
+              query: flags.query,
+              limit: flags.limit,
+              statsPeriod: "1m",
+            }),
+          fetchPoll: () =>
+            listTraceLogs(org, traceId, {
+              query: flags.query,
+              limit: flags.limit,
+              statsPeriod: "10m",
+            }),
+          extractNew: (logs, lastTs) =>
+            logs.filter((l) => l.timestamp_precise > lastTs),
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);
@@ -585,7 +488,27 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
-        await executeFollowMode({ stdout, stderr, org, project, flags });
+        await executeFollowMode({
+          stdout,
+          stderr,
+          flags,
+          bannerText: "Streaming logs...",
+          includeTrace: true,
+          fetchInitial: () =>
+            listLogs(org, project, {
+              query: flags.query,
+              limit: flags.limit,
+              statsPeriod: "1m",
+            }),
+          fetchPoll: (lastTs) =>
+            listLogs(org, project, {
+              query: flags.query,
+              limit: flags.limit,
+              statsPeriod: "10m",
+              afterTimestamp: lastTs,
+            }),
+          extractNew: (logs) => logs,
+        });
       } else {
         await executeSingleFetch(stdout, org, project, flags);
       }
