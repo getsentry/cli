@@ -243,8 +243,13 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // Memory-map old file: OS manages pages, 0 JS heap allocation
-  const oldFile = Bun.mmap(oldPath);
+  // Memory-map old file: OS manages pages, 0 JS heap allocation.
+  // MAP_PRIVATE (shared: false) is required on macOS: the kernel's code
+  // signing enforcement (AMFI) sends SIGKILL when a MAP_SHARED writable
+  // mapping is created on a code-signed Mach-O binary (which the running
+  // CLI is). Since we only read from the mapping, no COW pages are ever
+  // allocated — identical performance to MAP_SHARED.
+  const oldFile = Bun.mmap(oldPath, { shared: false });
 
   // Streaming output: write directly to disk, no output buffer in memory
   const writer = Bun.file(destPath).writer();
