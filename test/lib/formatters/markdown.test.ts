@@ -33,7 +33,12 @@ function stripAnsi(str: string): string {
 
 /** Save and restore env vars + isTTY around each test */
 function withEnv(
-  vars: Partial<Record<"SENTRY_PLAIN_OUTPUT" | "NO_COLOR", string | undefined>>,
+  vars: Partial<
+    Record<
+      "SENTRY_PLAIN_OUTPUT" | "NO_COLOR" | "FORCE_COLOR",
+      string | undefined
+    >
+  >,
   isTTY: boolean | undefined,
   fn: () => void
 ): void {
@@ -180,6 +185,50 @@ describe("isPlainOutput", () => {
       withEnv({ SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: "" }, false, () => {
         expect(isPlainOutput()).toBe(false);
       });
+    });
+  });
+
+  describe("FORCE_COLOR (after NO_COLOR, before isTTY)", () => {
+    test("=1 → rich output (forces color)", () => {
+      withEnv(
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: "1",
+        },
+        false,
+        () => {
+          expect(isPlainOutput()).toBe(false);
+        }
+      );
+    });
+
+    test("=0 → plain output (forces no color per chalk convention)", () => {
+      withEnv(
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: "0",
+        },
+        true,
+        () => {
+          expect(isPlainOutput()).toBe(true);
+        }
+      );
+    });
+
+    test("NO_COLOR wins over FORCE_COLOR=1", () => {
+      withEnv(
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: "1",
+          FORCE_COLOR: "1",
+        },
+        true,
+        () => {
+          expect(isPlainOutput()).toBe(true);
+        }
+      );
     });
   });
 
