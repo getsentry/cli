@@ -184,10 +184,13 @@ type FollowConfig<T extends LogLike> = {
   bannerText: string;
   /** Whether to show the trace-ID column in table output */
   includeTrace: boolean;
-  /** Fetch the initial batch of logs */
-  fetchInitial: () => Promise<T[]>;
-  /** Fetch new logs after the given nanosecond timestamp */
-  fetchPoll: (lastTimestamp: number) => Promise<T[]>;
+  /**
+   * Fetch logs with the given time window.
+   * @param statsPeriod - Time window (e.g., "1m" for initial, "10m" for polls)
+   * @param afterTimestamp - Only return logs newer than this (nanoseconds).
+   *   Standard mode passes this for server-side dedup; trace mode ignores it.
+   */
+  fetch: (statsPeriod: string, afterTimestamp?: number) => Promise<T[]>;
   /** Extract only the genuinely new entries from a poll response */
   extractNew: (logs: T[], lastTimestamp: number) => T[];
 };
@@ -221,6 +224,7 @@ function executeFollowMode<T extends LogLike>(
   const table = plain ? undefined : createLogStreamingTable();
 
   let headerPrinted = false;
+  // timestamp_precise is nanoseconds; Date.now() is milliseconds → convert
   let lastTimestamp = Date.now() * 1_000_000;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -272,7 +276,7 @@ function executeFollowMode<T extends LogLike>(
         return;
       }
       try {
-        const rawLogs = await config.fetchPoll(lastTimestamp);
+        const rawLogs = await config.fetch("10m", lastTimestamp);
         const newLogs = config.extractNew(rawLogs, lastTimestamp);
         writeNewLogs(newLogs);
         scheduleNextPoll();
@@ -289,9 +293,9 @@ function executeFollowMode<T extends LogLike>(
       }
     }
 
-    config
-      .fetchInitial()
-      .then((initialLogs) => {
+    (async () => {
+      try {
+        const initialLogs = await config.fetch("1m");
         if (!flags.json && initialLogs.length > 0) {
           stdout.write(table ? table.header() : formatLogsHeader());
           headerPrinted = true;
@@ -308,11 +312,11 @@ function executeFollowMode<T extends LogLike>(
           lastTimestamp = initialLogs[0].timestamp_precise;
         }
         scheduleNextPoll();
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         process.removeListener("SIGINT", stop);
         reject(error);
-      });
+      }
+    })();
   });
 }
 
@@ -460,17 +464,11 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: `Streaming logs for trace ${traceId}...`,
           includeTrace: false,
-          fetchInitial: () =>
+          fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
               query: flags.query,
               limit: flags.limit,
-              statsPeriod: "1m",
-            }),
-          fetchPoll: () =>
-            listTraceLogs(org, traceId, {
-              query: flags.query,
-              limit: flags.limit,
-              statsPeriod: "10m",
+              statsPeriod,
             }),
           extractNew: (logs, lastTs) =>
             logs.filter((l) => l.timestamp_precise > lastTs),
@@ -494,18 +492,12 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: "Streaming logs...",
           includeTrace: true,
-          fetchInitial: () =>
+          fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
               query: flags.query,
               limit: flags.limit,
-              statsPeriod: "1m",
-            }),
-          fetchPoll: (lastTs) =>
-            listLogs(org, project, {
-              query: flags.query,
-              limit: flags.limit,
-              statsPeriod: "10m",
-              afterTimestamp: lastTs,
+              statsPeriod,
+              afterTimestamp,
             }),
           extractNew: (logs) => logs,
         });
