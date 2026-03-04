@@ -12,6 +12,7 @@ import {
   buildCacheKey,
   clearResponseCache,
   getCachedResponse,
+  resetCacheState,
   storeCachedResponse,
 } from "../../src/lib/response-cache.js";
 import { useTestConfigDir } from "../helpers.js";
@@ -24,6 +25,7 @@ let savedNoCache: string | undefined;
 beforeEach(() => {
   savedNoCache = process.env.SENTRY_NO_CACHE;
   delete process.env.SENTRY_NO_CACHE;
+  resetCacheState();
 });
 
 afterEach(() => {
@@ -32,6 +34,7 @@ afterEach(() => {
   } else {
     delete process.env.SENTRY_NO_CACHE;
   }
+  resetCacheState();
 });
 
 // ---------------------------------------------------------------------------

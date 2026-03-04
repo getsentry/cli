@@ -297,10 +297,23 @@ let cacheDisabledFlag = false;
 
 /**
  * Disable the response cache for the current process.
- * Called when `--refresh` flag is passed to a command.
+ * Called when `--fresh` flag is passed to a command.
  */
 export function disableResponseCache(): void {
   cacheDisabledFlag = true;
+}
+
+/**
+ * Re-enable the response cache after `disableResponseCache()` was called.
+ *
+ * This is only needed in tests to prevent one test's `--fresh` flag from
+ * permanently disabling caching for subsequent tests in the same process.
+ * Production CLI invocations are single-process, so the flag resets naturally.
+ *
+ * @internal Exported for testing
+ */
+export function resetCacheState(): void {
+  cacheDisabledFlag = false;
 }
 
 /**
