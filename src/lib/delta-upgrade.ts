@@ -150,7 +150,8 @@ export function extractSha256(asset: GitHubAsset): string | null {
     return null;
   }
   const match = SHA256_DIGEST_PATTERN.exec(asset.digest);
-  return match ? (match[1] ?? null) : null;
+  // Normalize to lowercase — Bun.CryptoHasher.digest("hex") returns lowercase
+  return match ? (match[1]?.toLowerCase() ?? null) : null;
 }
 
 /**

@@ -151,9 +151,9 @@ describe("extractSha256", () => {
     expect(extractSha256(asset)).toBeNull();
   });
 
-  test("handles uppercase hex", () => {
+  test("normalizes uppercase hex to lowercase", () => {
     const asset = makeAsset({ digest: "sha256:ABCDEF0123456789" });
-    expect(extractSha256(asset)).toBe("ABCDEF0123456789");
+    expect(extractSha256(asset)).toBe("abcdef0123456789");
   });
 
   test("handles mixed case prefix", () => {
