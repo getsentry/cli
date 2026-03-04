@@ -17,6 +17,7 @@ import {
 import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
+import { slugify } from "../utils.js";
 import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   MAX_FILE_BYTES,
@@ -544,15 +545,6 @@ function applyPatchset(
   }
 
   return { ok: true, data: { applied } };
-}
-
-function slugify(name: string): string {
-  return name
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9_\s-]/g, "")
-    .replace(/[-\s]+/g, "-")
-    .replace(/^-|-$/g, "");
 }
 
 /**
