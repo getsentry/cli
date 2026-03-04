@@ -600,6 +600,13 @@ async function createSentryProject(
   options: WizardOptions
 ): Promise<LocalOpResult> {
   const { name, platform } = payload.params;
+  const slug = slugify(name);
+  if (!slug) {
+    return {
+      ok: false,
+      error: `Invalid project name: "${name}" produces an empty slug.`,
+    };
+  }
 
   try {
     // 1. Resolve org
@@ -611,7 +618,7 @@ async function createSentryProject(
 
     // 2. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
-      autoCreateSlug: slugify(name),
+      autoCreateSlug: slug,
       usageHint: "sentry init",
     });
 
