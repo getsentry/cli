@@ -1,0 +1,94 @@
+# Fix macOS SIGKILL During Delta Upgrade
+
+## Problem
+
+Running `sentry cli upgrade` on macOS with the delta upgrade system causes
+the process to be killed with SIGKILL. The shell reports `killed` with no
+error message. On Linux, the same operation works fine.
+
+## Root Cause
+
+The delta upgrade system in `src/lib/bspatch.ts` uses `Bun.mmap(oldPath)`
+at line 247 to memory-map the currently running binary (`process.execPath`)
+for reading during patch application. `Bun.mmap()` defaults to
+`{ shared: true }` which maps the file with `MAP_SHARED`.
+
+On macOS, the kernel's **code signing enforcement** (`AMFI` — Apple Mobile
+File Integrity) sends `SIGKILL` when a `MAP_SHARED` writable mapping is
+created on a code-signed Mach-O binary. All Bun-compiled binaries have
+ad-hoc code signatures. The `MAP_SHARED` mapping requests both `PROT_READ`
+and `PROT_WRITE` from the kernel, which macOS rejects for signed executables
+by killing the process.
+
+On Linux, there is no such restriction — `mmap(MAP_SHARED, PROT_READ|PROT_WRITE)`
+on a running ELF binary is perfectly legal.
+
+### Call chain
+
+```
+upgrade.ts:614  → attemptDeltaUpgrade(version, process.execPath, destPath)
+delta-upgrade.ts:614  → applyPatchChain(chain, oldBinaryPath, destPath)
+bspatch.ts:247  → Bun.mmap(oldPath)  ← SIGKILL on macOS
+```
+
+## Fix
+
+### Change 1: `src/lib/bspatch.ts` line 247
+
+Replace:
+
+```typescript
+  // Memory-map old file: OS manages pages, 0 JS heap allocation
+  const oldFile = Bun.mmap(oldPath);
+```
+
+With:
+
+```typescript
+  // Memory-map old file: OS manages pages, 0 JS heap allocation.
+  // MAP_PRIVATE (shared: false) is required on macOS: the kernel's code
+  // signing enforcement sends SIGKILL when a MAP_SHARED writable mapping
+  // is created on a code-signed Mach-O binary (which the running CLI is).
+  // MAP_PRIVATE is safe because we only read the data — any copy-on-write
+  // pages are never materialized.
+  const oldFile = Bun.mmap(oldPath, { shared: false });
+```
+
+**Why `{ shared: false }` works:**
+- `shared: false` → `MAP_PRIVATE` (copy-on-write mapping)
+- macOS allows `MAP_PRIVATE` on code-signed binaries because writes go to
+  private pages, not back to the file — the code signature is never violated
+- We only read from `oldFile` (never write), so no COW pages are ever
+  allocated — memory behavior is identical to the current code
+- Performance is unchanged: read-only access patterns on `MAP_PRIVATE` are
+  equivalent to `MAP_SHARED` reads
+
+### Why not other approaches
+
+| Alternative | Reason rejected |
+|-------------|----------------|
+| `Bun.file(oldPath).arrayBuffer()` | Reads entire ~100 MB binary into JS heap. Works but wasteful. |
+| Copy binary to temp, mmap the copy | Extra I/O + disk space for no benefit — the copy has the same code signature |
+| Platform check (`process.platform === "darwin"`) | Unnecessary — `MAP_PRIVATE` is correct on all platforms for read-only access |
+| Skip delta on macOS | Defeats the purpose of the delta upgrade system |
+
+## Testing
+
+The existing `test/lib/bspatch.test.ts` and `test/lib/bspatch.property.test.ts`
+tests should continue to pass since the fix only changes the mmap flags, not
+the patching logic. The test fixtures are plain binary files (not Mach-O
+signed binaries), so the tests wouldn't have caught this issue — and they
+still won't reproduce it on Linux CI. This is an OS-level kernel behavior
+that can only be verified manually on macOS.
+
+No new tests are needed. The fix is a one-line change with well-understood
+semantics.
+
+## Verification
+
+After the fix, test on macOS:
+```bash
+sentry cli upgrade
+```
+Should complete without SIGKILL, either applying a delta patch or falling
+back to full download.
