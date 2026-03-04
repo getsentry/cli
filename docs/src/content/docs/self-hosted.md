@@ -17,9 +17,9 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 
 #### 1. Create a Public OAuth Application
 
-1. In your Sentry instance, go to **Settings → Developer Settings → New Public Integration** (or visit `https://sentry.example.com/settings/sentry/developer-settings/new-public/`)
-2. Fill in the required fields (name, webhook URL — can be any placeholder URL)
-3. Under **Permissions**, grant at minimum: `org:read`, `project:read`, `event:read`, `member:read`, `team:read`
+1. In your Sentry instance, go to **Settings → Developer Settings → Applications → Create New Application** (or visit `https://sentry.example.com/settings/account/api/applications/`)
+2. Select **Public** as the application type
+3. Fill in the required fields (name, redirect URL — can be any placeholder URL)
 4. Save the application and copy the **Client ID**
 
 #### 2. Log In
@@ -43,8 +43,8 @@ export SENTRY_CLIENT_ID=your-client-id
 
 If your instance is on an older version or you prefer not to create an OAuth application, you can use an API token instead:
 
-1. Go to **Settings → API → Auth Tokens** in your Sentry instance (or visit `https://sentry.example.com/settings/account/api/auth-tokens/`)
-2. Create a new token with the scopes you need
+1. Go to **Settings → Developer Settings → Personal Tokens** in your Sentry instance (or visit `https://sentry.example.com/settings/account/api/auth-tokens/new-token/`)
+2. Create a new token with the following scopes: `project:read`, `project:write`, `org:read`, `event:read`, `event:write`, `member:read`, `team:read`
 3. Pass it to the CLI:
 
 ```bash
