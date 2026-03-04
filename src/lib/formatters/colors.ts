@@ -18,6 +18,10 @@ export const COLORS = {
   white: "#f9f8f9",
   cyan: "#79B8FF",
   muted: "#898294",
+  /** Background tint for inline code spans (dark teal, pairs with cyan text) */
+  codeBg: "#1a2f3a",
+  /** Foreground color for inline code spans */
+  codeFg: "#22d3ee",
 } as const;
 
 // Base Color Functions

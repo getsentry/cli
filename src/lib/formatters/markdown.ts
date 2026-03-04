@@ -26,6 +26,7 @@
 import chalk from "chalk";
 import { highlight as cliHighlight } from "cli-highlight";
 import { marked, type Token, type Tokens } from "marked";
+import stringWidth from "string-width";
 import { COLORS, muted, terminalLink } from "./colors.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
@@ -328,7 +329,9 @@ function renderOneInline(token: Token): string {
     case "em":
       return chalk.italic(renderInline((token as Tokens.Em).tokens));
     case "codespan":
-      return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
+      return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(
+        ` ${(token as Tokens.Codespan).text} `
+      );
     case "link": {
       const link = token as Tokens.Link;
       let linkText = renderInline(link.tokens);
@@ -440,12 +443,18 @@ function renderBlocks(tokens: Token[]): string {
       case "heading": {
         const t = token as Tokens.Heading;
         const text = renderInline(t.tokens);
-        // h1/h2 → bold cyan; h3+ → plain cyan (less prominent)
-        const styled =
-          t.depth <= 2
-            ? chalk.hex(COLORS.cyan).bold(text)
-            : chalk.hex(COLORS.cyan)(text);
-        parts.push(styled);
+        if (t.depth <= 2) {
+          // h1/h2 → bold cyan with colored divider bar for visual weight
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+          parts.push(
+            chalk.hex(COLORS.cyan)(
+              "\u2501".repeat(Math.min(stringWidth(text), 30))
+            )
+          );
+        } else {
+          // h3+ → bold cyan (less prominent, no divider)
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+        }
         parts.push("");
         break;
       }

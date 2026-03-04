@@ -318,12 +318,14 @@ describe("renderInlineMarkdown", () => {
     });
   });
 
-  test("rendered mode: renders code spans", () => {
+  test("rendered mode: renders code spans with padding", () => {
     withEnv({ SENTRY_PLAIN_OUTPUT: "0", NO_COLOR: undefined }, false, () => {
       const result = stripAnsi(renderInlineMarkdown("`trace-id`"));
       expect(result).toContain("trace-id");
       // Should not contain the backtick delimiters
       expect(result).not.toContain("`");
+      // Code spans have space padding for the "pill" look
+      expect(result).toBe(" trace-id ");
     });
   });
 
@@ -627,9 +629,33 @@ describe("renderMarkdown blocks (rendered mode)", () => {
     return result;
   }
 
-  test("renders headings", () => {
+  test("renders h1/h2 headings with divider bar", () => {
     const result = rendered("## My Heading");
-    expect(stripAnsi(result)).toContain("My Heading");
+    const plain = stripAnsi(result);
+    expect(plain).toContain("My Heading");
+    // h1/h2 have a colored divider bar (━) underneath
+    expect(plain).toContain("━");
+    // Divider length = min(stringWidth("My Heading"), 30) = 10
+    expect(plain).toContain("━".repeat(10));
+  });
+
+  test("renders h3+ headings as bold cyan without divider", () => {
+    const result = rendered("### Sub Heading");
+    const plain = stripAnsi(result);
+    expect(plain).toContain("Sub Heading");
+    // h3+ should NOT have a divider bar
+    expect(plain).not.toContain("━");
+  });
+
+  test("h1/h2 divider bar is clamped to 30 chars", () => {
+    const longHeading =
+      "## This Is A Very Long Heading That Exceeds Thirty Characters";
+    const result = rendered(longHeading);
+    const plain = stripAnsi(result);
+    // Divider should be exactly 30 chars (clamped)
+    const dividerLine = plain.split("\n").find((line) => line.includes("━"));
+    expect(dividerLine).toBeDefined();
+    expect(dividerLine!.length).toBe(30);
   });
 
   test("renders paragraphs", () => {

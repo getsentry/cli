@@ -50,34 +50,13 @@ if (background) {
       </div>
       <div class="line output dimmed small">Issues from 3 projects:</div>
       <div class="line spacer-sm"></div>
-      <div class="line output table-header">
-        <span class="col-shortid">SHORT ID</span>
-        <span class="col-alias">ALIAS</span>
-        <span class="col-title">TITLE</span>
-        <span class="col-count">COUNT</span>
-        <span class="col-fix">FIX</span>
-      </div>
-      <div class="line output table-row">
-        <span class="col-shortid dimmed">FRONTEND-79</span>
-        <span class="col-alias accent">f-79</span>
-        <span class="col-title">TypeError: Cannot read property 'map'...</span>
-        <span class="col-count">2.4k</span>
-        <span class="col-fix green-text">92%</span>
-      </div>
-      <div class="line output table-row">
-        <span class="col-shortid dimmed">API-2F</span>
-        <span class="col-alias accent">a-2f</span>
-        <span class="col-title">ReferenceError: user is not defined</span>
-        <span class="col-count">891</span>
-        <span class="col-fix yellow-text">67%</span>
-      </div>
-      <div class="line output table-row">
-        <span class="col-shortid dimmed">MOBILE-4D</span>
-        <span class="col-alias accent">m-4d</span>
-        <span class="col-title">NetworkError: Failed to fetch</span>
-        <span class="col-count">456</span>
-        <span class="col-fix red-text">23%</span>
-      </div>
+      <pre class="table-box"><span class="border">╭─────────┬───────┬───────────────┬────────┬──────┬────────────┬──────────────────────────────────────────╮</span>
+<span class="border">│</span> <span class="header-text">LEVEL</span>   <span class="border">│</span> <span class="header-text">ALIAS</span> <span class="border">│</span> <span class="header-text">SHORT ID</span>      <span class="border">│</span> <span class="header-text">COUNT</span>  <span class="border">│</span> <span class="header-text">SEEN</span> <span class="border">│</span> <span class="header-text">FIXABILITY</span> <span class="border">│</span> <span class="header-text">TITLE</span>                                    <span class="border">│</span>
+<span class="border">├─────────┼───────┼───────────────┼────────┼──────┼────────────┼──────────────────────────────────────────┤</span>
+<span class="border">│</span> <span class="red-text">ERROR</span>   <span class="border">│</span> <span class="accent">f-79</span>  <span class="border">│</span> <span class="alias-hl">F</span>RONTEND-<span class="alias-hl">79</span>   <span class="border">│</span>   2.4k <span class="border">│</span>   2h <span class="border">│</span>        <span class="green-text">92%</span> <span class="border">│</span> <span class="dimmed">TypeError: Cannot read property 'map'...</span> <span class="border">│</span>
+<span class="border">│</span> <span class="yellow-text">WARN</span>    <span class="border">│</span> <span class="accent">a-2f</span>  <span class="border">│</span> <span class="alias-hl">A</span>PI-<span class="alias-hl">2F</span>        <span class="border">│</span>    891 <span class="border">│</span>   1d <span class="border">│</span>        <span class="yellow-text">67%</span> <span class="border">│</span> <span class="dimmed">ReferenceError: user is not defined</span>      <span class="border">│</span>
+<span class="border">│</span> <span class="red-text">ERROR</span>   <span class="border">│</span> <span class="accent">m-4d</span>  <span class="border">│</span> <span class="alias-hl">M</span>OBILE-<span class="alias-hl">4D</span>     <span class="border">│</span>    456 <span class="border">│</span>   5d <span class="border">│</span>        <span class="red-text">23%</span> <span class="border">│</span> <span class="dimmed">NetworkError: Failed to fetch</span>            <span class="border">│</span>
+<span class="border">╰─────────┴───────┴───────────────┴────────┴──────┴────────────┴──────────────────────────────────────────╯</span></pre>
       
       <div class="line spacer"></div>
       
@@ -231,10 +210,6 @@ if (background) {
     color: #22d3ee;
   }
 
-  .accent {
-    color: #a78bfa;
-  }
-
   .dimmed {
     color: rgba(255, 255, 255, 0.4);
   }
@@ -269,45 +244,34 @@ if (background) {
     border-radius: 3px;
   }
 
-  .table-header {
+  .table-box {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    overflow-x: auto;
+  }
+
+  .table-box .border {
+    color: rgba(255, 255, 255, 0.15);
+  }
+
+  .table-box .header-text {
     color: rgba(255, 255, 255, 0.4);
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding-bottom: 0.25rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.7rem;
   }
 
-  .table-row {
-    font-size: 0.72rem;
+  .accent {
+    color: #a78bfa;
   }
 
-  .col-shortid {
-    min-width: 95px;
-  }
-
-  .col-alias {
-    min-width: 45px;
-  }
-
-  .col-title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .col-count {
-    min-width: 40px;
-    text-align: right;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .col-fix {
-    min-width: 35px;
-    text-align: right;
-    font-weight: 500;
+  .alias-hl {
+    font-weight: 700;
+    text-decoration: underline;
   }
 
   @media (max-width: 640px) {
@@ -320,14 +284,6 @@ if (background) {
     .terminal-body {
       padding: 0 1rem 1rem;
       font-size: 0.7rem;
-    }
-
-    .col-shortid {
-      display: none;
-    }
-
-    .col-alias {
-      min-width: 40px;
     }
   }
 </style>
