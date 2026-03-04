@@ -255,6 +255,48 @@ export const apiRoutes: MockRoute[] = [
       return { body: [] };
     },
   },
+
+  // Trace logs (org-scoped)
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/trace-logs/",
+    response: (req, params) => {
+      if (params.orgSlug !== TEST_ORG) {
+        return { status: 404, body: notFoundFixture };
+      }
+      const url = new URL(req.url);
+      const traceId = url.searchParams.get("traceId");
+      if (traceId === TEST_TRACE_ID) {
+        return {
+          body: {
+            data: [
+              {
+                id: "trace-log-001",
+                "project.id": 456_789,
+                trace: TEST_TRACE_ID,
+                severity_number: 9,
+                severity: "info",
+                timestamp: "2026-03-01T12:00:00Z",
+                timestamp_precise: 1_740_826_800_000_000_000,
+                message: "Trace log message 1",
+              },
+              {
+                id: "trace-log-002",
+                "project.id": 456_789,
+                trace: TEST_TRACE_ID,
+                severity_number: 13,
+                severity: "warning",
+                timestamp: "2026-03-01T11:59:00Z",
+                timestamp_precise: 1_740_826_740_000_000_000,
+                message: "Trace log message 2",
+              },
+            ],
+          },
+        };
+      }
+      return { body: { data: [] } };
+    },
+  },
 ];
 
 export function createSentryMockServer(): MockServer {

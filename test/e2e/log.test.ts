@@ -21,6 +21,7 @@ import {
   TEST_ORG,
   TEST_PROJECT,
   TEST_TOKEN,
+  TEST_TRACE_ID,
 } from "../mocks/routes.js";
 import type { MockServer } from "../mocks/server.js";
 
@@ -140,6 +141,83 @@ describe("sentry log list", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toMatch(/-f.*--follow/);
     expect(result.stdout).toMatch(/poll interval/i);
+  });
+});
+
+describe("sentry log list --trace", () => {
+  test("filters logs by trace ID", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "list",
+      TEST_ORG,
+      "--trace",
+      TEST_TRACE_ID,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    // Should show trace log messages (from mock)
+    expect(result.stdout).toContain("Trace log message");
+  });
+
+  test("supports --json with --trace", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "list",
+      TEST_ORG,
+      "--trace",
+      TEST_TRACE_ID,
+      "--json",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout);
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBe(2);
+  });
+
+  test("validates trace ID format", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "list",
+      TEST_ORG,
+      "--trace",
+      "not-a-valid-trace-id",
+    ]);
+
+    // Stricli uses exit code 252 for parse errors
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(
+      /invalid trace id|32-character hex/i
+    );
+  });
+
+  test("shows empty state for unknown trace", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "log",
+      "list",
+      TEST_ORG,
+      "--trace",
+      "00000000000000000000000000000000",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/no logs found/i);
+  });
+
+  test("shows --trace in help output", async () => {
+    const result = await ctx.run(["log", "list", "--help"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/--trace/);
+    expect(result.stdout).toMatch(/trace id/i);
   });
 });
 
