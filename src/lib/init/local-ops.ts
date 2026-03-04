@@ -578,7 +578,7 @@ async function resolveOrgSlug(
     };
   }
   if (orgs.length === 1) {
-    return orgs[0].slug;
+    return orgs[0]!.slug;
   }
 
   // Multiple orgs — interactive selection
