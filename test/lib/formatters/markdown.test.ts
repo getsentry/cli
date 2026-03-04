@@ -232,10 +232,14 @@ describe("isPlainOutput", () => {
     });
   });
 
-  describe("isTTY fallback (both env vars unset)", () => {
+  describe("isTTY fallback (all env vars unset)", () => {
     test("non-TTY → plain", () => {
       withEnv(
-        { SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: undefined },
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: undefined,
+        },
         false,
         () => {
           expect(isPlainOutput()).toBe(true);
@@ -245,7 +249,11 @@ describe("isPlainOutput", () => {
 
     test("TTY → rendered", () => {
       withEnv(
-        { SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: undefined },
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: undefined,
+        },
         true,
         () => {
           expect(isPlainOutput()).toBe(false);
@@ -255,7 +263,11 @@ describe("isPlainOutput", () => {
 
     test("isTTY=undefined → plain", () => {
       withEnv(
-        { SENTRY_PLAIN_OUTPUT: undefined, NO_COLOR: undefined },
+        {
+          SENTRY_PLAIN_OUTPUT: undefined,
+          NO_COLOR: undefined,
+          FORCE_COLOR: undefined,
+        },
         undefined,
         () => {
           expect(isPlainOutput()).toBe(true);
