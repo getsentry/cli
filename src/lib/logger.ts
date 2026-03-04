@@ -155,7 +155,6 @@ export function attachSentryReporter(): void {
   if (sentryReporterAttached) {
     return;
   }
-  sentryReporterAttached = true;
 
   try {
     // Dynamic import to avoid pulling in Sentry at module load time.
@@ -169,6 +168,7 @@ export function attachSentryReporter(): void {
 
     const sentryReporter = Sentry.createConsolaReporter();
     logger.addReporter(sentryReporter);
+    sentryReporterAttached = true;
   } catch {
     // Sentry not available (e.g., telemetry disabled) — continue without reporter
   }
