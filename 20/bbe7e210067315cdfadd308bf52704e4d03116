@@ -1,0 +1,30 @@
+## Implementation Plan
+
+### Problem
+Nightly install fails on macOS with `gunzip: (stdin): unexpected end of file`.
+The install script downloads a 2-byte empty JSON blob (`{}`) instead of the
+actual compressed binary because the OCI manifest digest extraction is broken.
+
+### Root Cause
+Step 4 of the nightly install flow uses `sed 's/},{/}\n{/g'` to split the OCI
+manifest JSON so each layer is on its own line, then awk finds the digest for
+the matching filename.
+
+Two bugs:
+1. **BSD sed (macOS)**: `\n` in the replacement string is literal, not a
+   newline. The manifest stays on one line, so awk always finds the config
+   digest (`sha256:44136fa...` — the 2-byte empty `{}`) first.
+2. **First-layer edge case**: Even with GNU sed, the first layer stays on
+   the same line as the config because layers start with `[{` not `},{`.
+
+### Fix
+Replace the sed+awk pipeline with a single awk pass that tracks the last-seen
+`"digest"` value and prints it when `"org.opencontainers.image.title"`
+matches the target filename. This works because `digest` always precedes
+`annotations` within each OCI layer object.
+
+### Verification
+- Tested extraction for all 5 platforms against python3 JSON parsing
+- Verified the downloaded blob is valid gzip (~23 MB, not 2 bytes)
+- Confirmed gunzip succeeds on the downloaded blob
+- No sed dependency — works identically on GNU and BSD awk
