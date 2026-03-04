@@ -5,7 +5,10 @@
 import type { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { logger } from "../logger.js";
 import { getConfigDir } from "./index.js";
+
+const log = logger.withTag("migration");
 
 const OLD_CONFIG_FILENAME = "config.json";
 const MIGRATION_COMPLETED_KEY = "json_migration_completed";
@@ -61,7 +64,7 @@ function deleteOldConfig(): boolean {
       return true;
     }
     // Other errors (permissions, locked file) - deletion failed
-    console.error("Warning: Could not delete old config.json:", error);
+    log.warn("Could not delete old config.json:", error);
     return false;
   }
 }
@@ -132,7 +135,7 @@ export function migrateFromJson(db: Database): void {
     return;
   }
 
-  console.error("Migrating config to SQLite...");
+  log.info("Migrating config to SQLite...");
 
   db.exec("BEGIN TRANSACTION");
 
@@ -268,10 +271,10 @@ export function migrateFromJson(db: Database): void {
     // Best-effort cleanup of old file - if it fails, we're still safe
     // because SQLite metadata is the authoritative source
     deleteOldConfig();
-    console.error("Migration complete.");
+    log.success("Migration complete.");
   } catch (error) {
     db.exec("ROLLBACK");
-    console.error("Migration failed, keeping config.json:", error);
+    log.error("Migration failed, keeping config.json:", error);
     throw error;
   }
 }

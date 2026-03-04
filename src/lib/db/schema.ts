@@ -13,6 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 import { stringifyUnknown } from "../errors.js";
+import { logger } from "../logger.js";
 
 export const CURRENT_SCHEMA_VERSION = 8;
 
@@ -611,7 +612,7 @@ export function tryRepairAndRetry<T>(
     const { fixed } = repairSchema(rawDb);
 
     if (fixed.length > 0) {
-      console.error(`Auto-repaired database: ${fixed.join(", ")}`);
+      logger.info(`Auto-repaired database: ${fixed.join(", ")}`);
       repairSucceeded = true;
     }
   } catch {

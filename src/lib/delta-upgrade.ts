@@ -33,6 +33,10 @@ import {
   listTags,
   type OciManifest,
 } from "./ghcr.js";
+import { logger } from "./logger.js";
+
+/** Scoped logger for delta upgrade operations */
+const log = logger.withTag("delta-upgrade");
 
 /**
  * Maximum number of patches to chain before falling back to full download.
@@ -66,6 +70,14 @@ export type PatchChain = {
   totalSize: number;
   /** Expected SHA-256 hex digest of the final output binary */
   expectedSha256: string;
+};
+
+/** Result of a successful delta upgrade */
+export type DeltaResult = {
+  /** SHA-256 hex digest of the output binary */
+  sha256: string;
+  /** Total bytes downloaded for the patch chain */
+  patchBytes: number;
 };
 
 /**
@@ -549,16 +561,18 @@ export async function resolveNightlyChain(
  * @param targetVersion - Version to upgrade to
  * @param oldBinaryPath - Path to the currently running binary (used as patch base)
  * @param destPath - Path to write the patched binary
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
     return null;
   }
+
+  log.debug(`Attempting delta upgrade from ${CLI_VERSION} to ${targetVersion}`);
 
   try {
     if (isNightlyVersion(targetVersion)) {
@@ -567,6 +581,7 @@ export async function attemptDeltaUpgrade(
     return await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
   } catch {
     // Any error during delta upgrade → fall back to full download
+    log.debug("Delta upgrade unavailable, falling back to full download");
     return null;
   }
 }
@@ -574,31 +589,37 @@ export async function attemptDeltaUpgrade(
 /**
  * Resolve and apply stable delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   const chain = await resolveStableChain(CLI_VERSION, targetVersion);
+  if (chain) {
+    log.debug(
+      `Resolved stable chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  return { sha256, patchBytes: chain.totalSize };
 }
 
 /**
  * Resolve and apply nightly delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   const token = await getAnonymousToken();
 
   // Get the .gz layer size from the target version's manifest for threshold.
@@ -621,11 +642,17 @@ export async function resolveNightlyDelta(
     targetVersion,
     gzLayer.size
   );
+  if (chain) {
+    log.debug(
+      `Resolved nightly chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  return { sha256, patchBytes: chain.totalSize };
 }
 
 /** Remove intermediate patching files, ignoring errors. */
@@ -662,6 +689,9 @@ export async function applyPatchChain(
   oldBinaryPath: string,
   destPath: string
 ): Promise<string> {
+  log.debug(
+    `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
+  );
   let currentOldPath = oldBinaryPath;
   let sha256 = "";
 

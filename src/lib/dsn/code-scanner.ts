@@ -21,9 +21,13 @@ import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
 import { DEFAULT_SENTRY_HOST } from "../constants.js";
 import { ConfigError } from "../errors.js";
+import { logger } from "../logger.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
+
+/** Scoped logger for DSN code scanning */
+const log = logger.withTag("dsn-scan");
 
 /**
  * Result of scanning code for DSNs, including mtimes for caching.
@@ -500,7 +504,7 @@ async function processFile(
 
     // Skip large files (Bun.file().size reads metadata, not content)
     if (file.size > MAX_FILE_SIZE) {
-      // TODO: Add debug log when logging infrastructure is available
+      log.debug(`Skipping large file: ${relativePath} (${file.size} bytes)`);
       return { dsns: [] };
     }
 
@@ -527,7 +531,7 @@ async function processFile(
       throw error;
     }
     // For file system errors (ENOENT, EACCES, EPERM, etc.), return empty result
-    // TODO: Add warning log for unreadable files when logging infrastructure is available
+    log.debug(`Cannot read file: ${relativePath}`);
     return { dsns: [] };
   }
 }

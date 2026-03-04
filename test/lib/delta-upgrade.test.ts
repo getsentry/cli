@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import {
   applyPatchChain,
+  attemptDeltaUpgrade,
   buildNightlyPatchGraph,
   canAttemptDelta,
   downloadStablePatch,
@@ -28,7 +29,9 @@ import {
   type PatchChain,
   type PatchGraphEntry,
   resolveNightlyChain,
+  resolveNightlyDelta,
   resolveStableChain,
+  resolveStableDelta,
   type WalkNightlyChainOpts,
   walkNightlyChain,
 } from "../../src/lib/delta-upgrade.js";
@@ -1448,5 +1451,59 @@ describe("applyPatchChain", () => {
         unlinkSync(destPath);
       }
     }
+  });
+});
+
+// resolveStableDelta (high-level orchestrator)
+// CLI_VERSION is "0.0.0-dev" in test mode, so chain resolution returns null.
+// This still exercises the function entry, chain check, and null-return path.
+
+describe("resolveStableDelta", () => {
+  test("returns null when current version is dev", async () => {
+    // Mock fetch to return releases (won't match "0.0.0-dev")
+    mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify([
+            makeRelease("0.14.0", [
+              makeAsset({ name: "sentry-linux-x64.patch" }),
+            ]),
+          ]),
+          { status: 200 }
+        )
+    );
+
+    const result = await resolveStableDelta(
+      "0.14.0",
+      "/tmp/fake-old",
+      "/tmp/fake-out"
+    );
+    expect(result).toBeNull();
+  });
+});
+
+// resolveNightlyDelta (high-level orchestrator)
+
+describe("resolveNightlyDelta", () => {
+  test("returns null when GHCR token fetch fails", async () => {
+    // Mock token endpoint to fail → resolveNightlyDelta throws → caught by caller
+    mockFetch(async () => new Response("Unauthorized", { status: 401 }));
+
+    await expect(
+      resolveNightlyDelta("0.14.0-dev.123", "/tmp/fake-old", "/tmp/fake-out")
+    ).rejects.toThrow();
+  });
+});
+
+// attemptDeltaUpgrade (top-level orchestrator)
+
+describe("attemptDeltaUpgrade", () => {
+  test("returns null when canAttemptDelta is false (dev version)", async () => {
+    const result = await attemptDeltaUpgrade(
+      "0.14.0",
+      "/tmp/fake-old",
+      "/tmp/fake-out"
+    );
+    expect(result).toBeNull();
   });
 });

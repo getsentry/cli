@@ -15,6 +15,7 @@ import * as Sentry from "@sentry/bun";
 import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { ApiError, AuthError } from "./errors.js";
+import { attachSentryReporter } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { getRealUsername } from "./utils.js";
 
@@ -304,6 +305,9 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
 
     // Tag whether targeting self-hosted Sentry (not SaaS)
     Sentry.setTag("is_self_hosted", !isSentrySaasUrl(getSentryBaseUrl()));
+
+    // Wire up consola → Sentry log forwarding now that the client is active
+    attachSentryReporter();
 
     // End healthy sessions and flush events when the event loop drains.
     // The SDK's processSessionIntegration starts a session during init and

@@ -27,7 +27,7 @@ import {
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
-import { attemptDeltaUpgrade } from "./delta-upgrade.js";
+import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
 import {
   downloadNightlyBlob,
@@ -36,6 +36,10 @@ import {
   getAnonymousToken,
   getNightlyVersion,
 } from "./ghcr.js";
+import { logger } from "./logger.js";
+
+/** Scoped logger for upgrade operations */
+const log = logger.withTag("upgrade");
 
 // Types
 
@@ -581,7 +585,11 @@ export async function downloadBinaryToTemp(
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
     const deltaResult = await tryDeltaUpgrade(version, tempPath);
-    if (!deltaResult) {
+    if (deltaResult) {
+      const kb = (deltaResult.patchBytes / 1024).toFixed(1);
+      log.info(`Applied delta patch (${kb} KB downloaded)`);
+    } else {
+      log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
     }
 
@@ -605,12 +613,12 @@ export async function downloadBinaryToTemp(
  *
  * @param version - Target version to upgrade to
  * @param destPath - Path to write the patched binary
- * @returns SHA-256 hex of the patched binary, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 async function tryDeltaUpgrade(
   version: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   return await attemptDeltaUpgrade(version, process.execPath, destPath);
 }
 
