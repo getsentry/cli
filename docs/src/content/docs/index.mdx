@@ -51,26 +51,13 @@ import sectionBg3 from '../../assets/section-bg-3.png';
         <div class="line"><span class="prompt">$</span> <span class="command">sentry issue list</span></div>
         <div class="line dimmed">Detected project: my-app (from .env)</div>
         <div class="spacer"></div>
-        <div class="line table-header">
-          <span class="col-id">SHORT ID</span>
-          <span class="col-title">TITLE</span>
-          <span class="col-count">COUNT</span>
-        </div>
-        <div class="line table-row">
-          <span class="col-id highlight">WQ</span>
-          <span class="col-title">TypeError: Cannot read property 'map'...</span>
-          <span class="col-count">142</span>
-        </div>
-        <div class="line table-row">
-          <span class="col-id highlight">X3</span>
-          <span class="col-title">Failed to fetch user data from API</span>
-          <span class="col-count">89</span>
-        </div>
-        <div class="line table-row">
-          <span class="col-id highlight">R7</span>
-          <span class="col-title">Connection timeout after 30s</span>
-          <span class="col-count">34</span>
-        </div>
+        <pre class="table-box"><span class="border">╭─────────┬────────────┬──────────────────────────────────────────┬───────╮</span>
+<span class="border">│</span> <span class="header-text">LEVEL</span>   <span class="border">│</span> <span class="header-text">SHORT ID</span>   <span class="border">│</span> <span class="header-text">TITLE</span>                                    <span class="border">│</span> <span class="header-text">COUNT</span> <span class="border">│</span>
+<span class="border">├─────────┼────────────┼──────────────────────────────────────────┼───────┤</span>
+<span class="border">│</span> <span class="red-text">ERROR</span>   <span class="border">│</span> MYAPP-WQ   <span class="border">│</span> <span class="dimmed">TypeError: Cannot read property 'map'...</span> <span class="border">│</span>   142 <span class="border">│</span>
+<span class="border">│</span> <span class="yellow-text">WARN</span>    <span class="border">│</span> MYAPP-X3   <span class="border">│</span> <span class="dimmed">Failed to fetch user data from API</span>       <span class="border">│</span>    89 <span class="border">│</span>
+<span class="border">│</span> <span class="red-text">ERROR</span>   <span class="border">│</span> MYAPP-R7   <span class="border">│</span> <span class="dimmed">Connection timeout after 30s</span>             <span class="border">│</span>    34 <span class="border">│</span>
+<span class="border">╰─────────┴────────────┴──────────────────────────────────────────┴───────╯</span></pre>
       </FeatureTerminal>
     </FeatureVisual>
   </div>

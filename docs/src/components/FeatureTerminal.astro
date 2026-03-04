@@ -106,33 +106,39 @@ const { title = "Terminal" } = Astro.props;
     height: 0.75rem;
   }
 
-  /* Table styles */
-  .feature-terminal-body :global(.table-header) {
+  /* Table box styles */
+  .feature-terminal-body :global(.table-box) {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    overflow-x: auto;
+  }
+
+  .feature-terminal-body :global(.table-box .border) {
+    color: rgba(255, 255, 255, 0.15);
+  }
+
+  .feature-terminal-body :global(.table-box .header-text) {
     color: rgba(255, 255, 255, 0.4);
     font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding-bottom: 0.25rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 
-  .feature-terminal-body :global(.table-row) {
-    font-size: 0.78rem;
+  .feature-terminal-body :global(.red-text) {
+    color: #ef4444;
   }
 
-  .feature-terminal-body :global(.col-id) {
-    min-width: 70px;
+  .feature-terminal-body :global(.yellow-text) {
+    color: #eab308;
   }
 
-  .feature-terminal-body :global(.col-title) {
-    flex: 1;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .feature-terminal-body :global(.col-count) {
-    min-width: 45px;
-    text-align: right;
-    color: rgba(255, 255, 255, 0.5);
+  .feature-terminal-body :global(.alias-hl) {
+    font-weight: 700;
+    text-decoration: underline;
   }
 
   @media (max-width: 640px) {
