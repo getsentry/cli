@@ -950,3 +950,22 @@ export function withFsSpan<T>(
 ): Promise<T> {
   return withTracing(operation, "file", fn);
 }
+
+/**
+ * Wrap a cache operation with a span for tracing.
+ *
+ * Creates a child span under the current active span to track
+ * response cache hit/miss/store operations.
+ *
+ * @param operation - Name of the operation (e.g., "cache.lookup", "cache.store")
+ * @param fn - The function that performs the cache operation
+ * @param attributes - Optional span attributes (e.g., url, cache.hit)
+ * @returns The result of the function
+ */
+export function withCacheSpan<T>(
+  operation: string,
+  fn: () => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return withTracing(operation, "cache", fn, attributes);
+}

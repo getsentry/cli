@@ -28,6 +28,7 @@ import CachePolicy from "http-cache-semantics";
 import pLimit from "p-limit";
 
 import { getConfigDir } from "./db/index.js";
+import { withCacheSpan } from "./telemetry.js";
 
 // ---------------------------------------------------------------------------
 // TTL tiers — used as fallback when the server sends no cache headers
@@ -341,31 +342,37 @@ export async function getCachedResponse(
     return;
   }
 
-  const key = buildCacheKey(method, url);
-  const entry = await readCacheEntry(key);
-  if (!entry) {
-    return;
-  }
+  return await withCacheSpan(
+    "cache.lookup",
+    async () => {
+      const key = buildCacheKey(method, url);
+      const entry = await readCacheEntry(key);
+      if (!entry) {
+        return;
+      }
 
-  try {
-    const policy = CachePolicy.fromObject(entry.policy);
-    if (!isEntryFresh(policy, entry, requestHeaders, url)) {
-      return;
-    }
+      try {
+        const policy = CachePolicy.fromObject(entry.policy);
+        if (!isEntryFresh(policy, entry, requestHeaders, url)) {
+          return;
+        }
 
-    const responseHeaders = buildResponseHeaders(policy, entry);
-    return new Response(JSON.stringify(entry.body), {
-      status: entry.status,
-      headers: responseHeaders,
-    });
-  } catch {
-    // Corrupted or version-incompatible policy object — treat as cache miss.
-    // Best-effort cleanup of the broken entry.
-    unlink(cacheFilePath(key)).catch(() => {
-      // Ignored — fire-and-forget
-    });
-    return;
-  }
+        const responseHeaders = buildResponseHeaders(policy, entry);
+        return new Response(JSON.stringify(entry.body), {
+          status: entry.status,
+          headers: responseHeaders,
+        });
+      } catch {
+        // Corrupted or version-incompatible policy object — treat as cache miss.
+        // Best-effort cleanup of the broken entry.
+        unlink(cacheFilePath(key)).catch(() => {
+          // Ignored — fire-and-forget
+        });
+        return;
+      }
+    },
+    { "cache.url": url }
+  );
 }
 
 /**
@@ -424,7 +431,11 @@ export async function storeCachedResponse(
   }
 
   try {
-    await writeResponseToCache(method, url, requestHeaders, response);
+    await withCacheSpan(
+      "cache.store",
+      () => writeResponseToCache(method, url, requestHeaders, response),
+      { "cache.url": url }
+    );
   } catch {
     // Cache write failures are non-fatal — silently ignore
   }
@@ -498,17 +509,8 @@ export async function clearResponseCache(): Promise<void> {
 /** Concurrency limit for parallel cache file I/O operations */
 const CACHE_IO_CONCURRENCY = 8;
 
-/**
- * Run an async function over items with bounded concurrency.
- * Uses p-limit to prevent overwhelming the filesystem with simultaneous reads.
- */
-async function parallel<T>(
-  items: readonly T[],
-  fn: (item: T) => Promise<void>
-): Promise<void> {
-  const limit = pLimit(CACHE_IO_CONCURRENCY);
-  await Promise.all(items.map((item) => limit(() => fn(item))));
-}
+/** Shared concurrency limiter for all cache I/O — created once, reused across calls */
+const cacheIO = pLimit(CACHE_IO_CONCURRENCY);
 
 // ---------------------------------------------------------------------------
 // Cache cleanup
@@ -539,11 +541,11 @@ async function cleanupCache(): Promise<void> {
 
   const entries = await collectEntryMetadata(cacheDir, jsonFiles);
 
-  // Delete expired entries
-  await deleteExpiredEntries(cacheDir, entries);
-
-  // Enforce max entry count — evict oldest first
-  await evictExcessEntries(cacheDir, entries);
+  // Both operations are best-effort — run them in parallel without blocking
+  await Promise.all([
+    deleteExpiredEntries(cacheDir, entries),
+    evictExcessEntries(cacheDir, entries),
+  ]);
 }
 
 /** Metadata for a cache entry, used for cleanup decisions */
@@ -563,7 +565,7 @@ async function collectEntryMetadata(
   const entries: EntryMetadata[] = [];
   const now = Date.now();
 
-  await parallel(jsonFiles, async (file) => {
+  await cacheIO.map(jsonFiles, async (file) => {
     const filePath = join(cacheDir, file);
     try {
       const raw = await readFile(filePath, "utf-8");
@@ -591,11 +593,11 @@ async function deleteExpiredEntries(
   entries: EntryMetadata[]
 ): Promise<void> {
   const expired = entries.filter((e) => e.expired);
-  await parallel(expired, async (entry) => {
-    await unlink(join(cacheDir, entry.file)).catch(() => {
+  await cacheIO.map(expired, (entry) =>
+    unlink(join(cacheDir, entry.file)).catch(() => {
       // Best-effort: file may have been deleted by another process
-    });
-  });
+    })
+  );
 }
 
 /** Evict the oldest entries when over the max count */
@@ -610,9 +612,9 @@ async function evictExcessEntries(
 
   remaining.sort((a, b) => a.createdAt - b.createdAt);
   const toEvict = remaining.slice(0, remaining.length - MAX_CACHE_ENTRIES);
-  await parallel(toEvict, async (entry) => {
-    await unlink(join(cacheDir, entry.file)).catch(() => {
+  await cacheIO.map(toEvict, (entry) =>
+    unlink(join(cacheDir, entry.file)).catch(() => {
       // Best-effort eviction
-    });
-  });
+    })
+  );
 }
