@@ -1,0 +1,45 @@
+## Migration Plan: `project create` → Markdown Rendering System
+
+### Problem
+
+The `project create` command used legacy ad-hoc formatting utilities
+(`writeKeyValue`, `writeFooter`, raw `stdout.write()` calls) instead of the
+markdown-first rendering pipeline used by all other detail/view commands
+(`issue view`, `project view`, `org view`, `event view`).
+
+**Old approach** (lines 399–446 of create.ts):
+- Multiple `stdout.write()` calls for header, notes, key-value pairs, footer
+- `writeKeyValue()` — padded-column text formatter (project create was its only consumer)
+- `writeFooter()` with `muted()` — bypasses markdown pipeline
+- Notes (slug divergence, auto-created team, auto-selected team) as raw strings
+
+**Target approach** (used by `formatProjectDetails`, `formatIssueDetails`, etc.):
+- Build CommonMark using `mdKvTable()`, `escapeMarkdownInline()`, `safeCodeSpan()`, `colorTag()`
+- Pass through `renderMarkdown()` for ANSI-styled TTY output or raw markdown for non-TTY
+- Single `stdout.write()` call for the rendered block
+
+### Steps Executed
+
+1. **Created `formatProjectCreated()` in `src/lib/formatters/human.ts`**
+   - New `ProjectCreatedResult` type with all context needed for rendering
+   - Markdown heading, blockquote notes, mdKvTable for details, italic tip footer
+   - Follows exact pattern of `formatProjectDetails()` and `formatIssueDetails()`
+
+2. **Refactored `create.ts` human output path**
+   - Replaced ~30 lines of ad-hoc stdout.write + writeKeyValue + writeFooter
+   - Single `formatProjectCreated()` call
+   - JSON path and error handling untouched
+
+3. **Removed `writeKeyValue()` from `output.ts`**
+   - Dead code after migration (project create was its only consumer)
+   - `writeOutput()` and `writeFooter()` retained (used elsewhere)
+
+4. **Updated tests in `test/commands/project/create.test.ts`**
+   - Slug divergence assertions: single quotes → backtick code spans
+   - All 32 tests pass without other changes (toContain is format-agnostic)
+
+### Risk Assessment
+
+Low risk — purely cosmetic output formatting change. Business logic, API calls,
+error handling, and JSON output are untouched. The markdown pipeline is
+battle-tested by formatProjectDetails, formatIssueDetails, and formatOrgDetails.
