@@ -14,16 +14,20 @@ import {
   acquireLock,
   cleanupOldBinary,
   fetchWithUpgradeError,
+  GITHUB_RELEASES_URL,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   getGitHubHeaders,
+  getPlatformBinaryName,
+  isNightlyVersion,
   KNOWN_CURL_DIRS,
   releaseLock,
 } from "./binary.js";
 import { CLI_VERSION } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
+import { attemptDeltaUpgrade } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
 import {
   downloadNightlyBlob,
@@ -49,24 +53,11 @@ type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
 
 // Constants
 
-/** GitHub API base URL for releases */
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/getsentry/cli/releases";
-
 /** The git tag used for the rolling nightly GitHub release (stable fallback only). */
 export const NIGHTLY_TAG = "nightly";
 
 /** npm registry base URL */
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
-
-/** Maps `process.platform` to the OS name used in binary filenames. */
-const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
-  darwin: "darwin",
-  win32: "windows",
-});
-
-/** Fallback OS name when `process.platform` is not in {@link PLATFORM_NAMES}. */
-const DEFAULT_PLATFORM = "linux";
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
@@ -366,19 +357,6 @@ export async function fetchLatestNightlyVersion(
 }
 
 /**
- * Detect if the given version string represents a nightly build.
- *
- * Nightly versions follow the pattern `X.Y.Z-dev.<timestamp>` (the same
- * format the build system bakes in via `sed "s/-dev\.[0-9]*$/-dev.${TS}/"`).
- *
- * @param version - Version string to check
- * @returns true if the version is a nightly build
- */
-export function isNightlyVersion(version: string): boolean {
-  return version.includes("-dev.");
-}
-
-/**
  * Fetch the latest available version based on installation method and channel.
  *
  * - nightly channel: fetches version from GHCR manifest annotation
@@ -478,10 +456,7 @@ async function streamDecompressToFile(
  * @returns Filename of the gzip-compressed binary for this platform
  */
 function getNightlyGzFilename(): string {
-  const os = PLATFORM_NAMES[process.platform] ?? DEFAULT_PLATFORM;
-  const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  return `sentry-${os}-${arch}${suffix}.gz`;
+  return `${getPlatformBinaryName()}.gz`;
 }
 
 /**
@@ -603,11 +578,11 @@ export async function downloadBinaryToTemp(
       // Ignore if doesn't exist
     }
 
-    if (isNightlyVersion(version)) {
-      // Nightly binaries are on GHCR — downloadTag is not used for nightly
-      await downloadNightlyToPath(tempPath);
-    } else {
-      await downloadStableToPath(downloadTag ?? version, tempPath);
+    // Try delta upgrade first — downloads tiny patches instead of full binary.
+    // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
+    const deltaResult = await tryDeltaUpgrade(version, tempPath);
+    if (!deltaResult) {
+      await downloadFullBinary(version, downloadTag, tempPath);
     }
 
     // Set executable permission (Unix only)
@@ -619,6 +594,42 @@ export async function downloadBinaryToTemp(
   } catch (error) {
     releaseLock(lockPath);
     throw error;
+  }
+}
+
+/**
+ * Attempt delta upgrade using binary patches.
+ *
+ * Uses the currently running binary as the base for patching.
+ * Returns null silently on any failure so the caller can fall back.
+ *
+ * @param version - Target version to upgrade to
+ * @param destPath - Path to write the patched binary
+ * @returns SHA-256 hex of the patched binary, or null if delta is unavailable
+ */
+async function tryDeltaUpgrade(
+  version: string,
+  destPath: string
+): Promise<string | null> {
+  return await attemptDeltaUpgrade(version, process.execPath, destPath);
+}
+
+/**
+ * Download the full binary (non-delta path).
+ *
+ * @param version - Target version
+ * @param downloadTag - Git tag override for the download URL
+ * @param destPath - Path to write the binary
+ */
+async function downloadFullBinary(
+  version: string,
+  downloadTag: string | undefined,
+  destPath: string
+): Promise<void> {
+  if (isNightlyVersion(version)) {
+    await downloadNightlyToPath(destPath);
+  } else {
+    await downloadStableToPath(downloadTag ?? version, destPath);
   }
 }
 

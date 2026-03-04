@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   acquireLock,
   getBinaryDownloadUrl,
+  isNightlyVersion,
   isProcessRunning,
   releaseLock,
 } from "../../src/lib/binary.js";
@@ -28,7 +29,6 @@ import {
   fetchLatestNightlyVersion,
   fetchLatestVersion,
   getCurlInstallPaths,
-  isNightlyVersion,
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,

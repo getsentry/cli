@@ -83,6 +83,34 @@ export const LIST_JSON_FLAG = {
   default: false,
 } as const;
 
+/** Matches strings that are all digits — used to detect invalid cursor values */
+const ALL_DIGITS_RE = /^\d+$/;
+
+/**
+ * Parse and validate a `--cursor` flag value.
+ *
+ * Accepts the magic `"last"` keyword (resume from stored cursor) and opaque
+ * Sentry cursor strings (e.g. `"1735689600:0:0"`). Rejects bare integers
+ * early — they are never valid cursors and would produce a cryptic 400 from
+ * the API.
+ *
+ * Shared by {@link LIST_CURSOR_FLAG} and commands that define their own
+ * cursor flag with a custom `brief`.
+ *
+ * @throws Error when value is a bare integer
+ */
+export function parseCursorFlag(value: string): string {
+  if (value === "last") {
+    return value;
+  }
+  if (ALL_DIGITS_RE.test(value)) {
+    throw new Error(
+      `'${value}' is not a valid cursor. Cursors look like "1735689600:0:0". Use "last" to continue from the previous page.`
+    );
+  }
+  return value;
+}
+
 /**
  * The `--cursor` / `-c` flag shared by all list commands.
  *
@@ -91,7 +119,7 @@ export const LIST_JSON_FLAG = {
  */
 export const LIST_CURSOR_FLAG = {
   kind: "parsed" as const,
-  parse: String,
+  parse: parseCursorFlag,
   brief: 'Pagination cursor (use "last" to continue from previous page)',
   optional: true as const,
 };
