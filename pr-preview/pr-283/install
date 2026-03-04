@@ -127,11 +127,18 @@ if [[ "$requested_version" == "nightly" ]]; then
 
   echo -e "${MUTED}Installing nightly sentry ${version}...${NC}"
 
-  # Step 4: Find the blob digest for this platform's .gz file
+  # Step 4: Find the blob digest for this platform's .gz file.
+  # Each OCI layer has "digest" before "org.opencontainers.image.title".
+  # Track the last-seen digest and print it when the target filename matches.
+  # This avoids sed newline replacement which differs between GNU and BSD.
   gz_filename="sentry-${os}-${arch}${suffix}.gz"
   digest=$(echo "$MANIFEST" \
-    | sed 's/},{/}\n{/g' \
-    | awk -F'"' "/\"${gz_filename//./\\.}"'/{for(i=1;i<=NF;i++) if($i=="digest"){print $(i+2);exit}}')
+    | awk -F'"' -v target="$gz_filename" '{
+        for(i=1;i<=NF;i++){
+          if($i=="digest") d=$(i+2)
+          if($i=="org.opencontainers.image.title"&&$(i+2)==target){print d;exit}
+        }
+      }')
   if [[ -z "$digest" ]]; then
     echo -e "${RED}No nightly build found for ${gz_filename}${NC}"
     exit 1
