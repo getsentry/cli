@@ -408,6 +408,7 @@ export const createCommand = buildCommand({
         orgSlug,
         teamSlug: team.slug,
         teamSource: team.source,
+        requestedPlatform: platform,
         dsn,
         url,
         slugDiverged: project.slug !== expectedSlug,

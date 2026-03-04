@@ -1246,6 +1246,8 @@ export type ProjectCreatedResult = {
   teamSlug: string;
   /** How the team was resolved */
   teamSource: "explicit" | "auto-selected" | "auto-created";
+  /** The platform the user requested via CLI argument (used as fallback display) */
+  requestedPlatform: string;
   /** Primary DSN, if fetched successfully */
   dsn: string | null;
   /** Sentry web URL for the project settings page */
@@ -1299,7 +1301,7 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
     ["Slug", safeCodeSpan(result.project.slug)],
     ["Org", safeCodeSpan(result.orgSlug)],
     ["Team", safeCodeSpan(result.teamSlug)],
-    ["Platform", result.project.platform || "unknown"],
+    ["Platform", result.project.platform || result.requestedPlatform],
   ];
   if (result.dsn) {
     kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
