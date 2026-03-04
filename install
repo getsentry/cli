@@ -63,7 +63,7 @@ report_error() {
 die() {
   echo -e "${RED}$1${NC}" >&2
   report_error "$1" "${2:-unknown}"
-  wait 2>/dev/null  # Let the background curl finish before exit
+  wait 2>/dev/null || true  # Let the background curl finish; ignore its exit status
   exit 1
 }
 
