@@ -293,9 +293,11 @@ function executeFollowMode<T extends LogLike>(
       }
     }
 
-    (async () => {
-      try {
-        const initialLogs = await config.fetch("1m");
+    // Fire-and-forget: we cannot `await` here because `resolve` must
+    // remain callable by the SIGINT handler (`stop`) at any time.
+    config
+      .fetch("1m")
+      .then((initialLogs) => {
         if (!flags.json && initialLogs.length > 0) {
           stdout.write(table ? table.header() : formatLogsHeader());
           headerPrinted = true;
@@ -312,11 +314,11 @@ function executeFollowMode<T extends LogLike>(
           lastTimestamp = initialLogs[0].timestamp_precise;
         }
         scheduleNextPoll();
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
         process.removeListener("SIGINT", stop);
         reject(error);
-      }
-    })();
+      });
   });
 }
 
