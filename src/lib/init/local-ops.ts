@@ -577,8 +577,8 @@ async function resolveOrgSlug(
       error: "Not authenticated. Run 'sentry login' first.",
     };
   }
-  if (orgs.length === 1) {
-    return orgs[0]!.slug;
+  if (orgs.length === 1 && orgs[0]) {
+    return orgs[0].slug;
   }
 
   // Multiple orgs — interactive selection
