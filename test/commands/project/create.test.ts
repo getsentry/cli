@@ -573,4 +573,51 @@ describe("project create", () => {
     // Should NOT say "Organization is required" — we don't know that
     expect(err.message).not.toContain("is required");
   });
+
+  test("auto-corrects dot-separated platform to hyphen-separated", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "javascript.nextjs");
+
+    // Should send corrected platform to API
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "javascript-nextjs",
+    });
+
+    // Should warn on stderr
+    const stderrOutput = (
+      context.stderr.write as ReturnType<typeof mock>
+    ).mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("");
+    expect(stderrOutput).toContain("warning:");
+    expect(stderrOutput).toContain("javascript.nextjs");
+    expect(stderrOutput).toContain("javascript-nextjs");
+  });
+
+  test("does not warn when platform has no dots", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "javascript-nextjs");
+
+    // No stderr warnings about platform normalization
+    const stderrOutput = (
+      context.stderr.write as ReturnType<typeof mock>
+    ).mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("");
+    expect(stderrOutput).not.toContain("warning:");
+  });
+
+  test("auto-corrects multiple dots in platform", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "python.django.rest");
+
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "python-django-rest",
+    });
+  });
 });

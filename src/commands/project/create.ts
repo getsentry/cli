@@ -42,7 +42,7 @@ import {
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject, SentryTeam } from "../../types/index.js";
+import type { SentryProject, SentryTeam, Writer } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -88,6 +88,28 @@ const PLATFORMS = [
   "rust",
   "elixir",
 ] as const;
+
+/**
+ * Normalize common platform format mistakes.
+ *
+ * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
+ * but platform identifiers use hyphens (`javascript-nextjs`). Users often
+ * copy the dot-notation directly. This auto-corrects dots to hyphens and
+ * warns on stderr, following the same pattern as `normalizeFields` in `api.ts`.
+ *
+ * Safe to auto-correct because the input is already invalid (dots are never
+ * valid in platform identifiers) and the correction is unambiguous.
+ */
+function normalizePlatform(platform: string, stderr: Writer): string {
+  if (!platform.includes(".")) {
+    return platform;
+  }
+  const corrected = platform.replace(/\./g, "-");
+  stderr.write(
+    `warning: platform '${platform}' uses '.' instead of '-' — interpreting as '${corrected}'\n`
+  );
+  return corrected;
+}
 
 /**
  * Convert a project name to its expected Sentry slug.
@@ -319,6 +341,8 @@ export const createCommand = buildCommand({
       throw new CliError(buildPlatformError(nameArg));
     }
 
+    const platform = normalizePlatform(platformArg, this.stderr);
+
     const parsed = parseOrgProjectArg(nameArg);
 
     let explicitOrg: string | undefined;
@@ -365,7 +389,7 @@ export const createCommand = buildCommand({
       orgSlug,
       teamSlug: team.slug,
       name,
-      platform: platformArg,
+      platform,
       detectedFrom: resolved.detectedFrom,
     });
 
@@ -385,7 +409,7 @@ export const createCommand = buildCommand({
       ["Slug", project.slug],
       ["Org", orgSlug],
       ["Team", team.slug],
-      ["Platform", project.platform || platformArg],
+      ["Platform", project.platform || platform],
     ];
     if (dsn) {
       fields.push(["DSN", dsn]);
