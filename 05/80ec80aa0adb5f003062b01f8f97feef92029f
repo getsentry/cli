@@ -1,0 +1,29 @@
+## Implementation Plan
+
+### Problem
+SENTRY_URL (needed for self-hosted Sentry) is undocumented. Users must
+read source code to discover it (reported in #335).
+
+### Approach
+Split into two new pages rather than burying env vars in existing docs:
+
+1. **Self-Hosted page** (self-hosted.md) — short, task-oriented guide:
+   - Set SENTRY_URL to point at instance
+   - Auth via OAuth (with optional SENTRY_CLIENT_ID) or API token
+   - After-login behavior (URL is remembered)
+   - Quick env var reference table
+
+2. **Configuration page** (configuration.md) — complete env var reference:
+   - SENTRY_URL, SENTRY_ORG, SENTRY_PROJECT, SENTRY_DSN
+   - SENTRY_CLIENT_ID, SENTRY_CONFIG_DIR
+   - SENTRY_PLAIN_OUTPUT, NO_COLOR
+   - SENTRY_CLI_NO_TELEMETRY, SENTRY_CLI_NO_UPDATE_CHECK
+   - Credential storage details
+
+3. **Cross-links** from existing pages:
+   - getting-started.mdx: brief self-hosted section → Self-Hosted page
+   - auth.md: self-hosted subsection under login → Self-Hosted page
+   - Sidebar: both new pages under Getting Started
+
+### Verification
+- Docs build passes (20 pages, clean)
