@@ -1,0 +1,34 @@
+## Implementation Plan
+
+### Problem
+SENTRY_URL (needed for self-hosted Sentry) is undocumented. Users must
+read source code to discover it (reported in #335).
+
+### Approach
+Split into two new pages rather than burying env vars in existing docs:
+
+1. **Self-Hosted page** (self-hosted.md) — focused guide:
+   - Set SENTRY_URL to point at instance
+   - OAuth device flow requires Sentry 26.1.0+ (found via CHANGES file:
+     #105675 added the flow, #106169 added public client support, both in 26.1.0)
+   - Step-by-step: create public OAuth application, copy Client ID, pass as SENTRY_CLIENT_ID
+   - API token fallback for older versions
+   - After-login behavior (URL is remembered)
+   - Quick env var reference table
+
+2. **Configuration page** (configuration.md) — complete env var reference:
+   - SENTRY_URL, SENTRY_ORG, SENTRY_PROJECT, SENTRY_DSN
+   - SENTRY_CLIENT_ID (with link to self-hosted guide for app creation)
+   - SENTRY_CONFIG_DIR, SENTRY_PLAIN_OUTPUT, NO_COLOR
+   - SENTRY_CLI_NO_TELEMETRY, SENTRY_CLI_NO_UPDATE_CHECK
+   - Credential storage details
+
+3. **Cross-links** from existing pages:
+   - getting-started.mdx: brief self-hosted section → Self-Hosted page
+   - auth.md: self-hosted subsection with version note → Self-Hosted page
+   - Sidebar: both new pages under Getting Started
+
+### Verification
+- Docs build passes (20 pages, clean)
+- Version 26.1.0 confirmed from getsentry/sentry CHANGES file and
+  getsentry/self-hosted release tags
