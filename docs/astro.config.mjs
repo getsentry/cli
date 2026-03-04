@@ -185,6 +185,8 @@ export default defineConfig({
           items: [
             { label: "Introduction", slug: "" },
             { label: "Installation", slug: "getting-started" },
+            { label: "Self-Hosted", slug: "self-hosted" },
+            { label: "Configuration", slug: "configuration" },
           ],
         },
         {
