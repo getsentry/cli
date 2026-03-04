@@ -643,6 +643,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019c972c-9f0d-7c8e-95b1-7beda99c36a8 -->
 * **parseSentryUrl does not handle subdomain-style SaaS URLs**: parseSentryUrl in src/lib/sentry-url-parser.ts handles both path-based (\`/organizations/{org}/...\`) and subdomain-style (\`https://{org}.sentry.io/issues/123/\`) URLs. \`matchSubdomainOrg()\` extracts org from hostname ending in \`.sentry.io\`. Region subdomains (\`us\`, \`de\`) filtered by requiring org slug length > 2. Supports \`/issues/{id}/\`, \`/issues/{id}/events/{eventId}/\`, and \`/traces/{traceId}/\` paths. Self-hosted uses path-based only.
 
+<!-- lore:019cc000-0000-0000-0000-consola00001 -->
+* **Consola chosen as CLI logger with Sentry createConsolaReporter integration**: The CLI uses \`consola\` (v3.x, ~33KB) for structured logging. Two reporters: (1) built-in FancyReporter writes to stderr with color/icons, (2) \`Sentry.createConsolaReporter()\` from \`@sentry/bun\` auto-forwards all logs to Sentry structured logs (requires \`enableLogs: true\` in Sentry.init, already set). Consola respects \`NO_COLOR\` env var natively. Level controlled by \`SENTRY_LOG_LEVEL\` env var mapped to consola numeric levels: error=0, warn=1, info=3 (default), debug=4, trace=5. Use \`consola.withTag('upgrade')\` for domain-scoped logging. User-facing messages use \`logger.info()\`/\`logger.success()\`; diagnostics use \`logger.debug()\`/\`logger.trace()\`. Global \`--verbose\`/\`--log-level\` flags pre-parsed from argv before Stricli, then set \`logger.level\` directly.
+
 ### Decision
 
 <!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->

@@ -5,6 +5,7 @@ import { buildContext } from "./context.js";
 import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
+import { extractLogLevelFromArgs, setLogLevel } from "./lib/logger.js";
 import { withTelemetry } from "./lib/telemetry.js";
 import { startCleanupOldBinary } from "./lib/upgrade.js";
 import {
@@ -88,6 +89,14 @@ async function main(): Promise<void> {
   startCleanupOldBinary();
 
   const args = process.argv.slice(2);
+
+  // Extract global --verbose / --log-level flags before Stricli parses args.
+  // These are consumed (removed) from args so Stricli doesn't reject them.
+  const logLevel = extractLogLevelFromArgs(args);
+  if (logLevel !== null) {
+    setLogLevel(logLevel);
+  }
+
   const suppressNotification = shouldSuppressNotification(args);
 
   // Start background update check (non-blocking)

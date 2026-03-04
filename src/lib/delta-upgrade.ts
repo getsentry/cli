@@ -33,6 +33,10 @@ import {
   listTags,
   type OciManifest,
 } from "./ghcr.js";
+import { logger } from "./logger.js";
+
+/** Scoped logger for delta upgrade operations */
+const log = logger.withTag("delta-upgrade");
 
 /**
  * Maximum number of patches to chain before falling back to full download.
@@ -560,6 +564,8 @@ export async function attemptDeltaUpgrade(
     return null;
   }
 
+  log.debug(`Attempting delta upgrade from ${CLI_VERSION} to ${targetVersion}`);
+
   try {
     if (isNightlyVersion(targetVersion)) {
       return await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath);
@@ -567,6 +573,7 @@ export async function attemptDeltaUpgrade(
     return await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
   } catch {
     // Any error during delta upgrade → fall back to full download
+    log.debug("Delta upgrade unavailable, falling back to full download");
     return null;
   }
 }
@@ -582,6 +589,11 @@ export async function resolveStableDelta(
   destPath: string
 ): Promise<string | null> {
   const chain = await resolveStableChain(CLI_VERSION, targetVersion);
+  if (chain) {
+    log.debug(
+      `Resolved stable chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
@@ -621,6 +633,11 @@ export async function resolveNightlyDelta(
     targetVersion,
     gzLayer.size
   );
+  if (chain) {
+    log.debug(
+      `Resolved nightly chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
@@ -662,6 +679,9 @@ export async function applyPatchChain(
   oldBinaryPath: string,
   destPath: string
 ): Promise<string> {
+  log.debug(
+    `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
+  );
   let currentOldPath = oldBinaryPath;
   let sha256 = "";
 

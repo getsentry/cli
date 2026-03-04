@@ -36,6 +36,10 @@ import {
   getAnonymousToken,
   getNightlyVersion,
 } from "./ghcr.js";
+import { logger } from "./logger.js";
+
+/** Scoped logger for upgrade operations */
+const log = logger.withTag("upgrade");
 
 // Types
 
@@ -581,7 +585,10 @@ export async function downloadBinaryToTemp(
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
     const deltaResult = await tryDeltaUpgrade(version, tempPath);
-    if (!deltaResult) {
+    if (deltaResult) {
+      log.info("Applied delta patch — skipped full download");
+    } else {
+      log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
     }
 
