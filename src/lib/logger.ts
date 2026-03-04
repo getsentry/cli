@@ -16,9 +16,10 @@
  * |-------|---------|-------|
  * | error | 0       | fatal, error |
  * | warn  | 1       | + warn |
- * | info  | 3       | + info, success, start, ready, log (default) |
+ * | log   | 2       | + log |
+ * | info  | 3       | + info, success, start, ready, fail (default) |
  * | debug | 4       | + debug |
- * | trace | 5       | + trace |
+ * | trace | 5       | + trace, verbose |
  *
  * ## Usage
  *
@@ -59,16 +60,18 @@ export const LOG_LEVEL_ENV_VAR = "SENTRY_LOG_LEVEL";
 /**
  * Valid log level names accepted by `SENTRY_LOG_LEVEL` and `--log-level`.
  *
- * Maps to consola numeric levels:
- * - error → 0
- * - warn → 1
- * - info → 3 (default)
- * - debug → 4
- * - trace → 5
+ * Array index IS the consola numeric level:
+ * - 0 = error (includes fatal)
+ * - 1 = warn
+ * - 2 = log
+ * - 3 = info (default — also shows success, start, ready, fail)
+ * - 4 = debug
+ * - 5 = trace (includes verbose)
  */
 export const LOG_LEVEL_NAMES = [
   "error",
   "warn",
+  "log",
   "info",
   "debug",
   "trace",
@@ -76,15 +79,6 @@ export const LOG_LEVEL_NAMES = [
 
 /** A valid log level name string */
 export type LogLevelName = (typeof LOG_LEVEL_NAMES)[number];
-
-/** Maps level names to consola numeric levels */
-const LOG_LEVEL_MAP: Record<LogLevelName, number> = {
-  error: 0,
-  warn: 1,
-  info: 3,
-  debug: 4,
-  trace: 5,
-};
 
 /**
  * Default log level when nothing is configured.
@@ -102,11 +96,10 @@ const DEFAULT_LOG_LEVEL = 3;
  * @returns consola numeric level
  */
 export function parseLogLevel(name: string): number {
-  const normalized = name.toLowerCase().trim();
-  if (normalized in LOG_LEVEL_MAP) {
-    return LOG_LEVEL_MAP[normalized as LogLevelName];
-  }
-  return DEFAULT_LOG_LEVEL;
+  const idx = LOG_LEVEL_NAMES.indexOf(
+    name.toLowerCase().trim() as LogLevelName
+  );
+  return idx === -1 ? DEFAULT_LOG_LEVEL : idx;
 }
 
 /**
@@ -213,10 +206,12 @@ export function setLogLevel(level: number): void {
 export function extractLogLevelFromArgs(argv: string[]): number | null {
   let resolvedLevel: number | null = null;
 
+  const debugLevel = LOG_LEVEL_NAMES.indexOf("debug");
+
   // Check --verbose but leave it in argv — commands like `api` have their own --verbose flag
   const verboseIdx = argv.indexOf("--verbose");
   if (verboseIdx !== -1) {
-    resolvedLevel = LOG_LEVEL_MAP.debug;
+    resolvedLevel = debugLevel;
   }
 
   // Process --log-level <level> (overrides --verbose, consumed from argv)
@@ -228,7 +223,7 @@ export function extractLogLevelFromArgs(argv: string[]): number | null {
       argv.splice(logLevelIdx, 2);
     } else {
       // --log-level without value — remove just the flag, use debug as sensible default
-      resolvedLevel = LOG_LEVEL_MAP.debug;
+      resolvedLevel = debugLevel;
       argv.splice(logLevelIdx, 1);
     }
   }

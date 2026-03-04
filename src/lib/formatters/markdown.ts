@@ -54,7 +54,9 @@ function isTruthyEnv(val: string): boolean {
  *    semantics: `"0"` / `"false"` / `""` force color on)
  * 2. `NO_COLOR` — follows the no-color.org spec: any **non-empty** value
  *    disables color, regardless of its content (including `"0"` / `"false"`)
- * 3. `process.stdout.isTTY` — auto-detect interactive terminal
+ * 3. `FORCE_COLOR` — any **non-empty** value forces color on (renders
+ *    rich output even in non-TTY). Same convention as chalk, consola, etc.
+ * 4. `process.stdout.isTTY` — auto-detect interactive terminal
  */
 export function isPlainOutput(): boolean {
   const plain = process.env.SENTRY_PLAIN_OUTPUT;
@@ -67,6 +69,14 @@ export function isPlainOutput(): boolean {
   const noColor = process.env.NO_COLOR;
   if (noColor !== undefined) {
     return noColor !== "";
+  }
+
+  // FORCE_COLOR: any non-empty value forces rich output (same convention
+  // as chalk, supports-color, consola). Checked after NO_COLOR so that
+  // NO_COLOR always wins if both are set.
+  const forceColor = process.env.FORCE_COLOR;
+  if (forceColor !== undefined && forceColor !== "") {
+    return false;
   }
 
   return !process.stdout.isTTY;

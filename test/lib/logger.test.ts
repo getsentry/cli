@@ -20,6 +20,7 @@ describe("parseLogLevel", () => {
   test("maps known level names to correct numeric values", () => {
     expect(parseLogLevel("error")).toBe(0);
     expect(parseLogLevel("warn")).toBe(1);
+    expect(parseLogLevel("log")).toBe(2);
     expect(parseLogLevel("info")).toBe(3);
     expect(parseLogLevel("debug")).toBe(4);
     expect(parseLogLevel("trace")).toBe(5);
@@ -46,13 +47,14 @@ describe("parseLogLevel", () => {
 });
 
 describe("LOG_LEVEL_NAMES", () => {
-  test("contains all expected level names", () => {
+  test("contains all expected level names with index = consola numeric level", () => {
     expect(LOG_LEVEL_NAMES).toEqual([
-      "error",
-      "warn",
-      "info",
-      "debug",
-      "trace",
+      "error", // 0
+      "warn", // 1
+      "log", // 2
+      "info", // 3
+      "debug", // 4
+      "trace", // 5
     ]);
   });
 

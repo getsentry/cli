@@ -72,6 +72,14 @@ export type PatchChain = {
   expectedSha256: string;
 };
 
+/** Result of a successful delta upgrade */
+export type DeltaResult = {
+  /** SHA-256 hex digest of the output binary */
+  sha256: string;
+  /** Total bytes downloaded for the patch chain */
+  patchBytes: number;
+};
+
 /**
  * Check whether delta upgrade can be attempted.
  *
@@ -553,13 +561,13 @@ export async function resolveNightlyChain(
  * @param targetVersion - Version to upgrade to
  * @param oldBinaryPath - Path to the currently running binary (used as patch base)
  * @param destPath - Path to write the patched binary
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
     return null;
   }
@@ -581,13 +589,13 @@ export async function attemptDeltaUpgrade(
 /**
  * Resolve and apply stable delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   const chain = await resolveStableChain(CLI_VERSION, targetVersion);
   if (chain) {
     log.debug(
@@ -598,19 +606,20 @@ export async function resolveStableDelta(
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  return { sha256, patchBytes: chain.totalSize };
 }
 
 /**
  * Resolve and apply nightly delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   const token = await getAnonymousToken();
 
   // Get the .gz layer size from the target version's manifest for threshold.
@@ -642,7 +651,8 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  return { sha256, patchBytes: chain.totalSize };
 }
 
 /** Remove intermediate patching files, ignoring errors. */
