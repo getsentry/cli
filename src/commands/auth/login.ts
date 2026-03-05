@@ -3,6 +3,8 @@ import { getCurrentUser, getUserRegions } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import {
   clearAuth,
+  ENV_SOURCE_PREFIX,
+  getAuthConfig,
   isAuthenticated,
   isEnvTokenActive,
   setAuthToken,
@@ -50,9 +52,13 @@ export const loginCommand = buildCommand({
     // Check if already authenticated
     if (await isAuthenticated()) {
       if (isEnvTokenActive()) {
+        const config = getAuthConfig();
+        const envVar = config?.source.startsWith(ENV_SOURCE_PREFIX)
+          ? config.source.slice(ENV_SOURCE_PREFIX.length)
+          : "SENTRY_AUTH_TOKEN";
         stdout.write(
-          "Authentication is provided via environment variable. " +
-            "Remove the env var to use OAuth-based login instead.\n"
+          `Authentication is provided via ${envVar} environment variable. ` +
+            `Unset ${envVar} to use OAuth-based login instead.\n`
         );
       } else {
         stdout.write(

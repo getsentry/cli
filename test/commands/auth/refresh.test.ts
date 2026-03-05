@@ -62,8 +62,12 @@ describe("refreshCommand.func", () => {
     refreshTokenSpy.mockRestore();
   });
 
-  test("env token active: throws AuthError with descriptive message", async () => {
+  test("env token (SENTRY_AUTH_TOKEN): throws AuthError with specific env var name", async () => {
     isEnvTokenActiveSpy.mockReturnValue(true);
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_env_123",
+      source: "env:SENTRY_AUTH_TOKEN",
+    });
 
     const { context } = createContext();
 
@@ -75,6 +79,29 @@ describe("refreshCommand.func", () => {
       expect((err as AuthError).message).toContain(
         "Cannot refresh an environment variable token"
       );
+      expect((err as AuthError).message).toContain("Update SENTRY_AUTH_TOKEN");
+    }
+
+    expect(refreshTokenSpy).not.toHaveBeenCalled();
+  });
+
+  test("env token (SENTRY_TOKEN): throws AuthError with SENTRY_TOKEN in message", async () => {
+    isEnvTokenActiveSpy.mockReturnValue(true);
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_token_456",
+      source: "env:SENTRY_TOKEN",
+    });
+
+    const { context } = createContext();
+
+    try {
+      await func.call(context, { json: false, force: false });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthError);
+      expect((err as AuthError).message).toContain("Update SENTRY_TOKEN");
+      // Should NOT say SENTRY_AUTH_TOKEN
+      expect((err as AuthError).message).not.toContain("SENTRY_AUTH_TOKEN");
     }
 
     expect(refreshTokenSpy).not.toHaveBeenCalled();

@@ -107,16 +107,41 @@ describe("loginCommand.func --token path", () => {
     expect(getCurrentUserSpy).not.toHaveBeenCalled();
   });
 
-  test("already authenticated (env token): tells user to remove env var", async () => {
+  test("already authenticated (env token SENTRY_AUTH_TOKEN): tells user to unset specific var", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
+    // Need to also spy on getAuthConfig for the specific env var name
+    const getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_env_123",
+      source: "env:SENTRY_AUTH_TOKEN",
+    });
 
     const { context, getStdout } = createContext();
     await func.call(context, { timeout: 900 });
 
+    expect(getStdout()).toContain("SENTRY_AUTH_TOKEN");
     expect(getStdout()).toContain("environment variable");
-    expect(getStdout()).toContain("Remove the env var");
+    expect(getStdout()).toContain("Unset SENTRY_AUTH_TOKEN");
     expect(getStdout()).not.toContain("already authenticated");
+    getAuthConfigSpy.mockRestore();
+  });
+
+  test("already authenticated (env token SENTRY_TOKEN): shows specific var name", async () => {
+    isAuthenticatedSpy.mockResolvedValue(true);
+    isEnvTokenActiveSpy.mockReturnValue(true);
+    const getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
+    getAuthConfigSpy.mockReturnValue({
+      token: "sntrys_token_456",
+      source: "env:SENTRY_TOKEN",
+    });
+
+    const { context, getStdout } = createContext();
+    await func.call(context, { timeout: 900 });
+
+    expect(getStdout()).toContain("SENTRY_TOKEN");
+    expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+    getAuthConfigSpy.mockRestore();
   });
 
   test("--token: stores token, fetches user, writes success", async () => {
