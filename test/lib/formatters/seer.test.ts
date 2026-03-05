@@ -293,7 +293,7 @@ describe("SeerError formatting", () => {
     const error = new SeerError("not_enabled", "my-org");
     const formatted = error.format();
     expect(formatted).toContain("Seer is not enabled");
-    expect(formatted).toContain("https://sentry.io/settings/my-org/seer/");
+    expect(formatted).toContain("https://my-org.sentry.io/settings/seer/");
   });
 
   test("format() includes message and billing URL for no_budget", () => {
@@ -301,7 +301,7 @@ describe("SeerError formatting", () => {
     const formatted = error.format();
     expect(formatted).toContain("Seer requires a paid plan");
     expect(formatted).toContain(
-      "https://sentry.io/settings/my-org/billing/overview/?product=seer"
+      "https://my-org.sentry.io/settings/billing/overview/?product=seer"
     );
   });
 
@@ -310,7 +310,7 @@ describe("SeerError formatting", () => {
     const formatted = error.format();
     expect(formatted).toContain("AI features are disabled");
     expect(formatted).toContain(
-      "https://sentry.io/settings/my-org/#hideAiFeatures"
+      "https://my-org.sentry.io/settings/#hideAiFeatures"
     );
   });
 

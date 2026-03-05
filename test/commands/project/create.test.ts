@@ -459,7 +459,7 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("/settings/acme-corp/projects/my-app/");
+    expect(output).toContain("acme-corp.sentry.io/settings/projects/my-app/");
   });
 
   test("shows slug divergence note when Sentry adjusts the slug", async () => {
