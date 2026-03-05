@@ -75,6 +75,7 @@ type FlagDef = {
   optional?: boolean;
   variadic?: boolean;
   placeholder?: string;
+  hidden?: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -376,6 +377,7 @@ async function loadCommandExamples(
  * Load supplementary content from commands/index.md
  */
 async function loadCommandsOverview(): Promise<{
+  globalOptions: string;
   jsonOutput: string;
   webFlag: string;
 } | null> {
@@ -385,10 +387,12 @@ async function loadCommandsOverview(): Promise<{
     return null;
   }
 
+  const globalSection = extractSection(content, "Global Options");
   const jsonSection = extractSection(content, "JSON Output");
   const webSection = extractSection(content, "Opening in Browser");
 
   return {
+    globalOptions: globalSection || "",
     jsonOutput: jsonSection || "",
     webFlag: webSection || "",
   };
@@ -423,6 +427,7 @@ type FlagInfo = {
   default?: unknown;
   optional: boolean;
   variadic: boolean;
+  hidden: boolean;
 };
 
 type RouteInfo = {
@@ -468,6 +473,7 @@ function extractFlags(flags: Record<string, FlagDef> | undefined): FlagInfo[] {
     default: def.default,
     optional: def.optional ?? def.kind === "boolean",
     variadic: def.variadic ?? false,
+    hidden: def.hidden ?? false,
   }));
 }
 
@@ -616,9 +622,9 @@ function generateCommandDoc(cmd: CommandInfo): string {
   lines.push("");
   lines.push(cmd.brief);
 
-  // Flags section
+  // Flags section — exclude help flags and hidden global flags (e.g. --log-level, --verbose)
   const visibleFlags = cmd.flags.filter(
-    (f) => f.name !== "help" && f.name !== "helpAll"
+    (f) => !f.hidden && f.name !== "help" && f.name !== "helpAll"
   );
 
   if (visibleFlags.length > 0) {
@@ -707,12 +713,22 @@ function generateCommandsSection(routeInfos: RouteInfo[]): string {
 }
 
 /**
- * Generate the Output Formats section from docs
+ * Generate supplementary sections (Global Options, Output Formats) from docs
  */
-async function generateOutputFormatsSection(): Promise<string> {
+async function generateSupplementarySections(): Promise<string> {
   const overview = await loadCommandsOverview();
 
   const lines: string[] = [];
+
+  // Global Options section
+  if (overview?.globalOptions) {
+    lines.push("## Global Options");
+    lines.push("");
+    lines.push(overview.globalOptions);
+    lines.push("");
+  }
+
+  // Output Formats section
   lines.push("## Output Formats");
   lines.push("");
 
@@ -747,7 +763,7 @@ async function generateOutputFormatsSection(): Promise<string> {
 async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
   const routeInfos = await extractRoutes(routeMap);
   const prerequisites = await loadPrerequisites();
-  const outputFormats = await generateOutputFormatsSection();
+  const supplementary = await generateSupplementarySections();
 
   const sections = [
     generateFrontMatter(),
@@ -759,7 +775,7 @@ async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
     prerequisites,
     "",
     generateCommandsSection(routeInfos),
-    outputFormats,
+    supplementary,
     "",
   ];
 

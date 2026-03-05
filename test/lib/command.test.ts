@@ -15,7 +15,14 @@ import {
   type CommandContext,
   run,
 } from "@stricli/core";
-import { buildCommand, numberParser } from "../../src/lib/command.js";
+import {
+  applyLoggingFlags,
+  buildCommand,
+  LOG_LEVEL_FLAG,
+  numberParser,
+  VERBOSE_FLAG,
+} from "../../src/lib/command.js";
+import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
 type TestContext = CommandContext & {
@@ -252,5 +259,347 @@ describe("buildCommand telemetry integration", () => {
 
     expect(executed).toBe(true);
     expect(setTagSpy).toHaveBeenCalledWith("flag.delay", "1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global logging flag definitions
+// ---------------------------------------------------------------------------
+
+describe("LOG_LEVEL_FLAG", () => {
+  test("is an enum flag with all log level names", () => {
+    expect(LOG_LEVEL_FLAG.kind).toBe("enum");
+    expect(LOG_LEVEL_FLAG.values).toEqual([...LOG_LEVEL_NAMES]);
+  });
+
+  test("is optional and hidden", () => {
+    expect(LOG_LEVEL_FLAG.optional).toBe(true);
+    expect(LOG_LEVEL_FLAG.hidden).toBe(true);
+  });
+});
+
+describe("VERBOSE_FLAG", () => {
+  test("is a boolean flag defaulting to false", () => {
+    expect(VERBOSE_FLAG.kind).toBe("boolean");
+    expect(VERBOSE_FLAG.default).toBe(false);
+  });
+
+  test("is hidden", () => {
+    expect(VERBOSE_FLAG.hidden).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyLoggingFlags
+// ---------------------------------------------------------------------------
+
+describe("applyLoggingFlags", () => {
+  let originalLevel: number;
+
+  beforeEach(() => {
+    originalLevel = logger.level;
+  });
+
+  afterEach(() => {
+    setLogLevel(originalLevel);
+  });
+
+  test("sets level from logLevel flag", () => {
+    applyLoggingFlags("debug", false);
+    expect(logger.level).toBe(4);
+  });
+
+  test("sets level from verbose flag", () => {
+    applyLoggingFlags(undefined, true);
+    expect(logger.level).toBe(4); // debug
+  });
+
+  test("logLevel takes priority over verbose", () => {
+    applyLoggingFlags("error", true);
+    expect(logger.level).toBe(0); // error, not debug
+  });
+
+  test("does nothing when both are unset/false", () => {
+    const before = logger.level;
+    applyLoggingFlags(undefined, false);
+    expect(logger.level).toBe(before);
+  });
+
+  test("accepts all valid level names", () => {
+    for (const name of LOG_LEVEL_NAMES) {
+      applyLoggingFlags(name, false);
+      expect(logger.level).toBe(LOG_LEVEL_NAMES.indexOf(name));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCommand
+// ---------------------------------------------------------------------------
+
+describe("buildCommand", () => {
+  test("builds a valid command object", () => {
+    const command = buildCommand({
+      docs: { brief: "Test command" },
+      parameters: {
+        flags: {
+          json: { kind: "boolean", brief: "JSON output", default: false },
+        },
+      },
+      func(_flags: { json: boolean }) {
+        // no-op
+      },
+    });
+    expect(command).toBeDefined();
+  });
+
+  test("accepts --verbose and --log-level flags without error", async () => {
+    let calledFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<{ json: boolean }, [], TestContext>({
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          json: { kind: "boolean", brief: "JSON output", default: false },
+        },
+      },
+      func(this: TestContext, flags: { json: boolean }) {
+        calledFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    // Should NOT throw "No flag registered for --verbose"
+    await run(app, ["test", "--verbose", "--json"], {
+      process,
+    } as TestContext);
+
+    // Original func receives json flag but NOT verbose/log-level
+    expect(calledFlags).toBeDefined();
+    expect(calledFlags!.json).toBe(true);
+    expect(calledFlags!.verbose).toBeUndefined();
+    expect(calledFlags!["log-level"]).toBeUndefined();
+  });
+
+  test("--verbose sets logger to debug level", async () => {
+    const originalLevel = logger.level;
+    try {
+      const command = buildCommand<Record<string, never>, [], TestContext>({
+        docs: { brief: "Test" },
+        parameters: {},
+        func() {
+          // no-op
+        },
+      });
+
+      const routeMap = buildRouteMap({
+        routes: { test: command },
+        docs: { brief: "Test app" },
+      });
+      const app = buildApplication(routeMap, { name: "test" });
+      const { process } = createTestProcess();
+
+      await run(app, ["test", "--verbose"], { process } as TestContext);
+
+      expect(logger.level).toBe(4); // debug
+    } finally {
+      setLogLevel(originalLevel);
+    }
+  });
+
+  test("--log-level sets logger to specified level", async () => {
+    const originalLevel = logger.level;
+    try {
+      const command = buildCommand<Record<string, never>, [], TestContext>({
+        docs: { brief: "Test" },
+        parameters: {},
+        func() {
+          // no-op
+        },
+      });
+
+      const routeMap = buildRouteMap({
+        routes: { test: command },
+        docs: { brief: "Test app" },
+      });
+      const app = buildApplication(routeMap, { name: "test" });
+      const { process } = createTestProcess();
+
+      await run(app, ["test", "--log-level", "trace"], {
+        process,
+      } as TestContext);
+
+      expect(logger.level).toBe(5); // trace
+    } finally {
+      setLogLevel(originalLevel);
+    }
+  });
+
+  test("--log-level=value (equals form) works", async () => {
+    const originalLevel = logger.level;
+    try {
+      const command = buildCommand<Record<string, never>, [], TestContext>({
+        docs: { brief: "Test" },
+        parameters: {},
+        func() {
+          // no-op
+        },
+      });
+
+      const routeMap = buildRouteMap({
+        routes: { test: command },
+        docs: { brief: "Test app" },
+      });
+      const app = buildApplication(routeMap, { name: "test" });
+      const { process } = createTestProcess();
+
+      await run(app, ["test", "--log-level=error"], {
+        process,
+      } as TestContext);
+
+      expect(logger.level).toBe(0); // error
+    } finally {
+      setLogLevel(originalLevel);
+    }
+  });
+
+  test("strips logging flags from func's flags parameter", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<{ limit: number }, [], TestContext>({
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      func(this: TestContext, flags: { limit: number }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(
+      app,
+      ["test", "--verbose", "--log-level", "debug", "--limit", "50"],
+      { process } as TestContext
+    );
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.limit).toBe(50);
+    // Logging flags must be stripped
+    expect(receivedFlags!.verbose).toBeUndefined();
+    expect(receivedFlags!["log-level"]).toBeUndefined();
+  });
+
+  test("preserves command's own --verbose flag when already defined", async () => {
+    const originalLevel = logger.level;
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    try {
+      // Simulates the api command: defines its own --verbose with HTTP semantics
+      const command = buildCommand<
+        { verbose: boolean; silent: boolean },
+        [],
+        TestContext
+      >({
+        docs: { brief: "Test" },
+        parameters: {
+          flags: {
+            verbose: {
+              kind: "boolean",
+              brief: "Show HTTP details",
+              default: false,
+            },
+            silent: {
+              kind: "boolean",
+              brief: "Suppress output",
+              default: false,
+            },
+          },
+        },
+        func(this: TestContext, flags: { verbose: boolean; silent: boolean }) {
+          receivedFlags = flags as unknown as Record<string, unknown>;
+        },
+      });
+
+      const routeMap = buildRouteMap({
+        routes: { test: command },
+        docs: { brief: "Test app" },
+      });
+      const app = buildApplication(routeMap, { name: "test" });
+      const { process } = createTestProcess();
+
+      await run(app, ["test", "--verbose", "--log-level", "trace"], {
+        process,
+      } as TestContext);
+
+      // Command's own --verbose is passed through (not stripped)
+      expect(receivedFlags).toBeDefined();
+      expect(receivedFlags!.verbose).toBe(true);
+      expect(receivedFlags!.silent).toBe(false);
+      // --log-level is always stripped (it's ours)
+      expect(receivedFlags!["log-level"]).toBeUndefined();
+      // --verbose also sets debug-level logging as a side-effect
+      // but --log-level=trace takes priority
+      expect(logger.level).toBe(5); // trace
+    } finally {
+      setLogLevel(originalLevel);
+    }
+  });
+
+  test("command's own --verbose sets debug log level as side-effect", async () => {
+    const originalLevel = logger.level;
+
+    try {
+      const command = buildCommand<{ verbose: boolean }, [], TestContext>({
+        docs: { brief: "Test" },
+        parameters: {
+          flags: {
+            verbose: {
+              kind: "boolean",
+              brief: "Show HTTP details",
+              default: false,
+            },
+          },
+        },
+        func() {
+          // no-op
+        },
+      });
+
+      const routeMap = buildRouteMap({
+        routes: { test: command },
+        docs: { brief: "Test app" },
+      });
+      const app = buildApplication(routeMap, { name: "test" });
+      const { process } = createTestProcess();
+
+      await run(app, ["test", "--verbose"], {
+        process,
+      } as TestContext);
+
+      // Even though verbose is command-owned, it triggers debug-level logging
+      expect(logger.level).toBe(4); // debug
+    } finally {
+      setLogLevel(originalLevel);
+    }
   });
 });

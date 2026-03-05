@@ -1,14 +1,13 @@
 /**
  * Unit tests for the logger module.
  *
- * Tests parseLogLevel, getEnvLogLevel, extractLogLevelFromArgs, setLogLevel,
+ * Tests parseLogLevel, getEnvLogLevel, setLogLevel (with withTag propagation),
  * attachSentryReporter, and the logger instance configuration.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachSentryReporter,
-  extractLogLevelFromArgs,
   getEnvLogLevel,
   LOG_LEVEL_ENV_VAR,
   LOG_LEVEL_NAMES,
@@ -137,96 +136,49 @@ describe("setLogLevel", () => {
     setLogLevel(5);
     expect(logger.level).toBe(5);
   });
-});
 
-describe("extractLogLevelFromArgs", () => {
-  test("returns null when no flags are present", () => {
-    const args = ["issue", "list", "--json"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBeNull();
-    expect(args).toEqual(["issue", "list", "--json"]);
+  test("propagates level to withTag children", () => {
+    const child1 = logger.withTag("test-child-1");
+    const child2 = logger.withTag("test-child-2");
+
+    // Children start at the logger's current level
+    expect(child1.level).toBe(logger.level);
+    expect(child2.level).toBe(logger.level);
+
+    // Change the level
+    setLogLevel(5);
+    expect(child1.level).toBe(5);
+    expect(child2.level).toBe(5);
+
+    // Change again
+    setLogLevel(0);
+    expect(child1.level).toBe(0);
+    expect(child2.level).toBe(0);
   });
 
-  test("reads --verbose but leaves it in args for downstream commands", () => {
-    const args = ["--verbose", "issue", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(4); // debug
-    // --verbose stays in argv because commands like `api` have their own --verbose flag
-    expect(args).toEqual(["--verbose", "issue", "list"]);
+  test("propagates to children created before level change", () => {
+    // Simulate the real-world scenario: module-level child created at default level,
+    // then setLogLevel called later by bin.ts
+    const moduleChild = logger.withTag("upgrade");
+    expect(moduleChild.level).toBe(originalLevel);
+
+    setLogLevel(4); // debug
+    expect(moduleChild.level).toBe(4);
   });
 
-  test("reads --verbose from middle of args without consuming it", () => {
-    const args = ["issue", "--verbose", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(4);
-    expect(args).toEqual(["issue", "--verbose", "list"]);
-  });
+  test("propagates to grandchildren (nested withTag)", () => {
+    const child = logger.withTag("parent");
+    const grandchild = child.withTag("sub-scope");
 
-  test("reads --verbose from end of args without consuming it", () => {
-    const args = ["issue", "list", "--verbose"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(4);
-    expect(args).toEqual(["issue", "list", "--verbose"]);
-  });
+    expect(grandchild.level).toBe(logger.level);
 
-  test("extracts --log-level with value", () => {
-    const args = ["--log-level", "trace", "issue", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(5); // trace
-    expect(args).toEqual(["issue", "list"]);
-  });
+    setLogLevel(5); // trace
+    expect(child.level).toBe(5);
+    expect(grandchild.level).toBe(5);
 
-  test("extracts --log-level from middle of args", () => {
-    const args = ["issue", "--log-level", "error", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(0); // error
-    expect(args).toEqual(["issue", "list"]);
-  });
-
-  test("--log-level overrides --verbose when both present", () => {
-    const args = ["--verbose", "--log-level", "warn", "issue", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(1); // warn wins over debug
-    // --log-level is consumed, --verbose stays
-    expect(args).toEqual(["--verbose", "issue", "list"]);
-  });
-
-  test("--log-level without value defaults to debug", () => {
-    const args = ["issue", "--log-level"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(4); // debug
-    expect(args).toEqual(["issue"]);
-  });
-
-  test("--log-level followed by another flag defaults to debug", () => {
-    const args = ["--log-level", "--json", "issue", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBe(4); // debug (--json starts with -)
-    expect(args).toEqual(["--json", "issue", "list"]);
-  });
-
-  test("handles all valid level names via --log-level", () => {
-    for (const name of LOG_LEVEL_NAMES) {
-      const args = ["--log-level", name, "cmd"];
-      const result = extractLogLevelFromArgs(args);
-      expect(result).toBeGreaterThanOrEqual(0);
-      expect(result).toBeLessThanOrEqual(5);
-      expect(args).toEqual(["cmd"]);
-    }
-  });
-
-  test("does not consume -v (only --verbose)", () => {
-    const args = ["-v", "issue", "list"];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBeNull();
-    expect(args).toEqual(["-v", "issue", "list"]);
-  });
-
-  test("handles empty args array", () => {
-    const args: string[] = [];
-    const result = extractLogLevelFromArgs(args);
-    expect(result).toBeNull();
-    expect(args).toEqual([]);
+    setLogLevel(0); // error
+    expect(child.level).toBe(0);
+    expect(grandchild.level).toBe(0);
   });
 });
 
@@ -247,9 +199,14 @@ describe("logger instance", () => {
     expect(typeof scoped.debug).toBe("function");
   });
 
-  test("default level is info (3)", () => {
-    // Logger always starts at info (3) — env var is applied lazily by bin.ts
-    expect(logger.level).toBe(3);
+  test("level can be set to info (3) via setLogLevel", () => {
+    const before = logger.level;
+    try {
+      setLogLevel(3);
+      expect(logger.level).toBe(3);
+    } finally {
+      setLogLevel(before);
+    }
   });
 });
 

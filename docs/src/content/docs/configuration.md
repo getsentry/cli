@@ -89,6 +89,18 @@ Disable CLI telemetry (error tracking for the CLI itself). The CLI sends anonymi
 export SENTRY_CLI_NO_TELEMETRY=1
 ```
 
+### `SENTRY_LOG_LEVEL`
+
+Controls the verbosity of diagnostic output. Defaults to `info`.
+
+Valid values: `error`, `warn`, `log`, `info`, `debug`, `trace`
+
+```bash
+export SENTRY_LOG_LEVEL=debug
+```
+
+Equivalent to passing `--log-level debug` on the command line. CLI flags take precedence over the environment variable.
+
 ### `SENTRY_CLI_NO_UPDATE_CHECK`
 
 Disable the automatic update check that runs periodically in the background.
@@ -96,6 +108,33 @@ Disable the automatic update check that runs periodically in the background.
 ```bash
 export SENTRY_CLI_NO_UPDATE_CHECK=1
 ```
+
+## Global Options
+
+These flags are accepted by every command. They are not shown in individual command `--help` output, but are always available.
+
+### `--log-level <level>`
+
+Set the log verbosity level. Accepts: `error`, `warn`, `log`, `info`, `debug`, `trace`.
+
+```bash
+sentry issue list --log-level debug
+sentry --log-level=trace cli upgrade
+```
+
+Overrides `SENTRY_LOG_LEVEL` when both are set.
+
+### `--verbose`
+
+Shorthand for `--log-level debug`. Enables debug-level diagnostic output.
+
+```bash
+sentry issue list --verbose
+```
+
+:::note
+The `sentry api` command also uses `--verbose` to show full HTTP request/response details. When used with `sentry api`, it serves both purposes (debug logging + HTTP output).
+:::
 
 ## Credential Storage
 

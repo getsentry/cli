@@ -5,11 +5,7 @@ import { buildContext } from "./context.js";
 import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
-import {
-  extractLogLevelFromArgs,
-  getEnvLogLevel,
-  setLogLevel,
-} from "./lib/logger.js";
+import { getEnvLogLevel, setLogLevel } from "./lib/logger.js";
 import { withTelemetry } from "./lib/telemetry.js";
 import { startCleanupOldBinary } from "./lib/upgrade.js";
 import {
@@ -94,20 +90,12 @@ async function main(): Promise<void> {
 
   const args = process.argv.slice(2);
 
-  // Apply SENTRY_LOG_LEVEL env var first (lazy read, not at module load time).
-  // CLI flags below override this if present.
+  // Apply SENTRY_LOG_LEVEL env var early (lazy read, not at module load time).
+  // CLI flags (--log-level, --verbose) are handled by Stricli via
+  // buildCommand and take priority when present.
   const envLogLevel = getEnvLogLevel();
   if (envLogLevel !== null) {
     setLogLevel(envLogLevel);
-  }
-
-  // Extract global log-level flags before Stricli parses args.
-  // --log-level is consumed (removed); --verbose is read but left in place
-  // because some commands (e.g., `api`) define their own --verbose flag.
-  // CLI flags take priority over SENTRY_LOG_LEVEL env var.
-  const logLevel = extractLogLevelFromArgs(args);
-  if (logLevel !== null) {
-    setLogLevel(logLevel);
   }
 
   const suppressNotification = shouldSuppressNotification(args);
