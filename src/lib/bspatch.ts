@@ -5,12 +5,15 @@
  * TRDIFF10 format (produced by zig-bsdiff with `--use-zstd`). Designed for
  * minimal memory usage during CLI self-upgrades:
  *
- * - Old binary: `Bun.mmap()` on Linux (0 JS heap), `arrayBuffer()` on macOS
+ * - Old binary: loaded via `Bun.file().arrayBuffer()` (~100 MB heap)
  * - Diff/extra blocks: streamed via `DecompressionStream('zstd')`
  * - Output: written incrementally to disk via `Bun.file().writer()`
  * - Integrity: SHA-256 computed inline via `Bun.CryptoHasher`
  *
- * Total heap usage: ~1-2 MB on Linux, ~100 MB on macOS (old file in memory).
+ * Total heap usage: ~100 MB for old file + ~1-2 MB for streaming buffers.
+ * `Bun.mmap()` is NOT usable here because the old file is the running binary:
+ * - macOS: AMFI sends uncatchable SIGKILL (PROT_WRITE on signed Mach-O)
+ * - Linux: ETXTBSY from `open()` with write flags on a running executable
  *
  * TRDIFF10 format (from zig-bsdiff):
  * ```
@@ -210,9 +213,9 @@ function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
 /**
  * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
  *
- * Uses `Bun.mmap()` (Linux) or `arrayBuffer()` (macOS) for the old file, `DecompressionStream('zstd')`
- * for streaming diff/extra blocks (~16 KB buffers), `Bun.file().writer()`
- * for disk output, and `Bun.CryptoHasher` for inline SHA-256 verification.
+ * Reads the old file into memory via `Bun.file().arrayBuffer()`, then streams
+ * diff/extra blocks (~16 KB buffers) via `DecompressionStream('zstd')`,
+ * writes output via `Bun.file().writer()`, and computes SHA-256 inline.
  *
  * @param oldPath - Path to the existing (old) binary file
  * @param patchData - Complete TRDIFF10 patch file contents
@@ -243,16 +246,12 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // On macOS, Bun.mmap() triggers an uncatchable SIGKILL from AMFI code
-  // signing enforcement — it always requests PROT_WRITE, and macOS rejects
-  // ANY writable mapping (MAP_SHARED or MAP_PRIVATE) on signed Mach-O
-  // binaries. Fall back to reading into memory (~100 MB heap, freed after
-  // patching). On Linux, mmap with MAP_PRIVATE is safe and avoids heap
-  // allocation entirely (shared: false avoids ETXTBSY on the running binary).
-  const oldFile =
-    process.platform === "darwin"
-      ? new Uint8Array(await Bun.file(oldPath).arrayBuffer())
-      : Bun.mmap(oldPath, { shared: false });
+  // Bun.mmap() is NOT usable for the old file during self-upgrades because
+  // it always opens with PROT_WRITE, and the old file is the running binary:
+  // - macOS: AMFI sends uncatchable SIGKILL on writable mapping of signed Mach-O
+  // - Linux: open() returns ETXTBSY when opening a running executable for write
+  // Reading into memory costs ~100 MB heap but avoids both platform restrictions.
+  const oldFile = new Uint8Array(await Bun.file(oldPath).arrayBuffer());
 
   // Streaming output: write directly to disk, no output buffer in memory
   const writer = Bun.file(destPath).writer();
