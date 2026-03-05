@@ -1,0 +1,53 @@
+## Implementation Plan
+
+### Problem
+PR #338 added consola-based logging with --verbose, --log-level flags
+and SENTRY_LOG_LEVEL env var. All three had bugs:
+
+1. --verbose was pre-parsed from argv but left in place for the api command.
+   Stricli is strict — it rejects any unknown flag. Every command except api
+   (which defines its own --verbose) errored.
+
+2. --log-level=value (equals form) was not handled by extractLogLevelFromArgs
+   which only checked argv.indexOf("--log-level") (exact match).
+
+3. SENTRY_LOG_LEVEL env var worked (getEnvLogLevel returned correct level)
+   but had no visible effect because all debug logging uses scoped loggers
+   created by logger.withTag() at module load time. Consola withTag() creates
+   completely independent instances that snapshot the parent level at creation
+   time — they never see later setLogLevel() calls.
+
+### Approach: Stricli-native flags, not argv pre-parsing
+
+Stricli does not support global flags (bloomberg/stricli#106, closed as
+not planned). The alternative used in this codebase (e.g. LIST_JSON_FLAG,
+LIST_CURSOR_FLAG) is shared flag constant objects spread into each command.
+
+buildSentryCommand() in src/lib/command.ts wraps Stricli buildCommand to:
+1. Merge hidden --log-level (enum) and --verbose (boolean) into parameters
+2. Wrap func to intercept, apply via setLogLevel(), and strip before calling
+   the original function
+3. Delegate to buildCommand for telemetry wrapping
+
+The api command uses buildCommand directly (not buildSentryCommand) because
+it has its own --verbose with HTTP semantics. It adds LOG_LEVEL_FLAG
+manually and calls applyLoggingFlags() in its func.
+
+### withTag() level propagation fix
+
+Wrapped logger.withTag() to register all child loggers in a scopedLoggers
+array. setLogLevel() iterates the array and updates each child level.
+
+### Files changed (32)
+- src/lib/command.ts — buildSentryCommand, applyLoggingFlags, LOG_LEVEL_FLAG, VERBOSE_FLAG
+- src/lib/logger.ts — withTag registry + propagation, removed extractLogLevelFromArgs
+- src/lib/list-command.ts — uses buildSentryCommand
+- src/bin.ts — removed extractLogLevelFromArgs, env-var-only setup
+- src/commands/api.ts — added log-level flag + applyLoggingFlags call
+- src/commands/help.ts — switched to buildSentryCommand
+- 21 command files — buildCommand → buildSentryCommand
+- docs/configuration.md — SENTRY_LOG_LEVEL + Global Options section
+- test/lib/command.test.ts — tests for buildSentryCommand wrapper
+- test/lib/logger.test.ts — updated for withTag propagation
+- test/lib/logger.property.test.ts — updated for removed function
+- AGENTS.md — added lore entry for buildSentryCommand pattern
