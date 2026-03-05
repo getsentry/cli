@@ -293,19 +293,6 @@ describe("handleMultiSelect", () => {
 });
 
 describe("handleConfirm", () => {
-  test("auto-confirms with addExample when prompt contains 'example' and --yes", async () => {
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Add an example error trigger?",
-        kind: "confirm",
-      },
-      makeOptions({ yes: true })
-    );
-
-    expect(result).toEqual({ addExample: true });
-  });
-
   test("auto-confirms with action: continue for non-example prompts with --yes", async () => {
     const result = await handleInteractive(
       {
@@ -317,21 +304,6 @@ describe("handleConfirm", () => {
     );
 
     expect(result).toEqual({ action: "continue" });
-  });
-
-  test("returns addExample based on user choice for example prompts", async () => {
-    confirmSpy.mockImplementation(() => Promise.resolve(false) as any);
-
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Add an example error trigger?",
-        kind: "confirm",
-      },
-      makeOptions({ yes: false })
-    );
-
-    expect(result).toEqual({ addExample: false });
   });
 
   test("throws WizardCancelledError when user cancels confirm", async () => {
@@ -349,49 +321,6 @@ describe("handleConfirm", () => {
         makeOptions({ yes: false })
       )
     ).rejects.toThrow("Setup cancelled");
-  });
-
-  test("returns addExample: true via purpose field with --yes", async () => {
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Would you like to add a trigger?",
-        kind: "confirm",
-        purpose: "add-example",
-      },
-      makeOptions({ yes: true })
-    );
-
-    expect(result).toEqual({ addExample: true });
-  });
-
-  test("returns addExample via purpose field in interactive mode", async () => {
-    confirmSpy.mockImplementation(() => Promise.resolve(false) as any);
-
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Would you like to add a trigger?",
-        kind: "confirm",
-        purpose: "add-example",
-      },
-      makeOptions({ yes: false })
-    );
-
-    expect(result).toEqual({ addExample: false });
-  });
-
-  test("falls back to prompt string match when no purpose field", async () => {
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Add an example error trigger?",
-        kind: "confirm",
-      },
-      makeOptions({ yes: true })
-    );
-
-    expect(result).toEqual({ addExample: true });
   });
 
   test("returns action: stop when user declines non-example prompt", async () => {

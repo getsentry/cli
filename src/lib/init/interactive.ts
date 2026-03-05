@@ -130,14 +130,7 @@ async function handleConfirm(
   payload: ConfirmPayload,
   options: WizardOptions
 ): Promise<Record<string, unknown>> {
-  const isExample =
-    payload.purpose === "add-example" || payload.prompt.includes("example");
-
   if (options.yes) {
-    if (isExample) {
-      log.info("Auto-confirmed: adding example trigger");
-      return { addExample: true };
-    }
     log.info("Auto-confirmed: continuing");
     return { action: "continue" };
   }
@@ -148,9 +141,5 @@ async function handleConfirm(
   });
 
   const value = abortIfCancelled(confirmed);
-
-  if (isExample) {
-    return { addExample: value };
-  }
   return { action: value ? "continue" : "stop" };
 }

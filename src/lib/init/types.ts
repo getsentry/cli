@@ -134,7 +134,6 @@ export type ConfirmPayload = {
   type: "interactive";
   kind: "confirm";
   prompt: string;
-  purpose?: string;
 };
 
 // Combined suspend payload — either a local-op or an interactive prompt
