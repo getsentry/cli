@@ -63,6 +63,7 @@ function createContext() {
 
 describe("loginCommand.func --token path", () => {
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
   let setAuthTokenSpy: ReturnType<typeof spyOn>;
   let getUserRegionsSpy: ReturnType<typeof spyOn>;
   let clearAuthSpy: ReturnType<typeof spyOn>;
@@ -73,17 +74,20 @@ describe("loginCommand.func --token path", () => {
 
   beforeEach(async () => {
     isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
     setAuthTokenSpy = spyOn(dbAuth, "setAuthToken");
     getUserRegionsSpy = spyOn(apiClient, "getUserRegions");
     clearAuthSpy = spyOn(dbAuth, "clearAuth");
     getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
     setUserInfoSpy = spyOn(dbUser, "setUserInfo");
     runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
+    isEnvTokenActiveSpy.mockReturnValue(false);
     func = (await loginCommand.loader()) as unknown as LoginFunc;
   });
 
   afterEach(() => {
     isAuthenticatedSpy.mockRestore();
+    isEnvTokenActiveSpy.mockRestore();
     setAuthTokenSpy.mockRestore();
     getUserRegionsSpy.mockRestore();
     clearAuthSpy.mockRestore();
@@ -92,7 +96,7 @@ describe("loginCommand.func --token path", () => {
     runInteractiveLoginSpy.mockRestore();
   });
 
-  test("already authenticated: prints message and returns early", async () => {
+  test("already authenticated (OAuth): prints re-auth message", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
 
     const { context, getStdout } = createContext();
@@ -101,6 +105,18 @@ describe("loginCommand.func --token path", () => {
     expect(getStdout()).toContain("already authenticated");
     expect(setAuthTokenSpy).not.toHaveBeenCalled();
     expect(getCurrentUserSpy).not.toHaveBeenCalled();
+  });
+
+  test("already authenticated (env token): tells user to remove env var", async () => {
+    isAuthenticatedSpy.mockResolvedValue(true);
+    isEnvTokenActiveSpy.mockReturnValue(true);
+
+    const { context, getStdout } = createContext();
+    await func.call(context, { timeout: 900 });
+
+    expect(getStdout()).toContain("environment variable");
+    expect(getStdout()).toContain("Remove the env var");
+    expect(getStdout()).not.toContain("already authenticated");
   });
 
   test("--token: stores token, fetches user, writes success", async () => {
