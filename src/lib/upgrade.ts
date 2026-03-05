@@ -31,6 +31,7 @@ import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
 import {
   downloadNightlyBlob,
+  fetchManifest,
   fetchNightlyManifest,
   findLayerByFilename,
   getAnonymousToken,
@@ -385,8 +386,40 @@ export function fetchLatestVersion(
 }
 
 /**
+ * Check if a versioned nightly tag exists in GHCR.
+ *
+ * Nightly builds are published to GHCR with tags like `nightly-0.14.0-dev.1772661724`.
+ * This performs an anonymous token exchange + manifest fetch (2 HTTP requests).
+ * Returns false only for 404/403 (tag not found); network errors propagate as
+ * UpgradeError to match stable version check behavior.
+ *
+ * @param version - Nightly version string (e.g., "0.14.0-dev.1772661724")
+ * @returns true if the nightly tag exists in GHCR, false if not found
+ * @throws {UpgradeError} On network failure or GHCR unavailability
+ */
+async function nightlyVersionExists(version: string): Promise<boolean> {
+  const token = await getAnonymousToken();
+  try {
+    await fetchManifest(token, `nightly-${version}`);
+    return true;
+  } catch (error) {
+    // 404 = tag doesn't exist; 403 = token lacks access to non-existent tag
+    if (
+      error instanceof UpgradeError &&
+      (error.message.includes("HTTP 404") || error.message.includes("HTTP 403"))
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * Check if a specific version exists in the appropriate registry.
- * curl installations check GitHub releases; package managers check npm.
+ *
+ * Nightly versions are checked against GHCR (where they are published as
+ * versioned tags like `nightly-0.14.0-dev.1772661724`). Stable versions
+ * are checked against GitHub Releases (curl/brew) or npm (package managers).
  *
  * @param method - How the CLI was installed
  * @param version - Version to check (without 'v' prefix)
@@ -397,6 +430,11 @@ export async function versionExists(
   method: InstallationMethod,
   version: string
 ): Promise<boolean> {
+  // Nightly versions are published to GHCR, not GitHub Releases or npm
+  if (isNightlyVersion(version)) {
+    return nightlyVersionExists(version);
+  }
+
   if (method === "curl" || method === "brew") {
     const response = await fetchWithUpgradeError(
       `${GITHUB_RELEASES_URL}/tags/${version}`,
@@ -470,12 +508,21 @@ function getNightlyGzFilename(): string {
  * matching this platform's `.gz` filename, then downloads and decompresses
  * the blob in-stream.
  *
+ * When `version` is provided, fetches the pinned versioned tag
+ * (`nightly-{version}`). Otherwise fetches the rolling `:nightly` tag.
+ *
  * @param destPath - File path to write the decompressed binary
+ * @param version - Specific nightly version to download (omit for latest)
  * @throws {UpgradeError} When GHCR fetch or blob download fails
  */
-async function downloadNightlyToPath(destPath: string): Promise<void> {
+async function downloadNightlyToPath(
+  destPath: string,
+  version?: string
+): Promise<void> {
   const token = await getAnonymousToken();
-  const manifest = await fetchNightlyManifest(token);
+  const manifest = version
+    ? await fetchManifest(token, `nightly-${version}`)
+    : await fetchNightlyManifest(token);
   const filename = getNightlyGzFilename();
   const layer = findLayerByFilename(manifest, filename);
   const response = await downloadNightlyBlob(token, layer.digest);
@@ -635,7 +682,7 @@ async function downloadFullBinary(
   destPath: string
 ): Promise<void> {
   if (isNightlyVersion(version)) {
-    await downloadNightlyToPath(destPath);
+    await downloadNightlyToPath(destPath, version);
   } else {
     await downloadStableToPath(downloadTag ?? version, destPath);
   }

@@ -510,6 +510,79 @@ describe("versionExists", () => {
       "Failed to connect to npm registry"
     );
   });
+
+  test("checks GHCR for nightly version - version exists", async () => {
+    const manifest = { schemaVersion: 2, layers: [], annotations: {} };
+    mockFetch(async (url) => {
+      const u = String(url);
+      if (u.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (u.includes("/manifests/nightly-")) {
+        return new Response(JSON.stringify(manifest), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    const exists = await versionExists("curl", "0.14.0-dev.1772661724");
+    expect(exists).toBe(true);
+  });
+
+  test("checks GHCR for nightly version - version does not exist", async () => {
+    mockFetch(async (url) => {
+      const u = String(url);
+      if (u.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (u.includes("/manifests/nightly-")) {
+        return new Response(null, { status: 404 });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    const exists = await versionExists("curl", "0.14.0-dev.9999999999");
+    expect(exists).toBe(false);
+  });
+
+  test("checks GHCR for nightly version regardless of install method", async () => {
+    const manifest = { schemaVersion: 2, layers: [], annotations: {} };
+    mockFetch(async (url) => {
+      const u = String(url);
+      if (u.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (u.includes("/manifests/nightly-")) {
+        return new Response(JSON.stringify(manifest), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    const exists = await versionExists("npm", "0.14.0-dev.1772661724");
+    expect(exists).toBe(true);
+  });
+
+  test("throws on network failure for nightly version", async () => {
+    mockFetch(async () => {
+      throw new TypeError("fetch failed");
+    });
+    await expect(
+      versionExists("curl", "0.14.0-dev.1772661724")
+    ).rejects.toThrow(UpgradeError);
+  });
+
+  test("throws on GHCR server error for nightly version", async () => {
+    mockFetch(async (url) => {
+      const u = String(url);
+      if (u.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      // Manifest returns 500 (server error, not 404)
+      return new Response(null, { status: 500 });
+    });
+    await expect(
+      versionExists("curl", "0.14.0-dev.1772661724")
+    ).rejects.toThrow(UpgradeError);
+  });
 });
 
 describe("executeUpgrade", () => {
