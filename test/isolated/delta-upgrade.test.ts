@@ -222,6 +222,10 @@ describe("resolveNightlyDelta", () => {
           { status: 200 }
         );
       }
+      // listTags runs in parallel with fetchManifest — must not 404
+      if (urlStr.includes("/tags/list")) {
+        return new Response(JSON.stringify({ tags: [] }), { status: 200 });
+      }
       return new Response("Not Found", { status: 404 });
     });
 

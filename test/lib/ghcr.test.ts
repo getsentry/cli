@@ -169,7 +169,7 @@ describe("fetchNightlyManifest", () => {
 
     await expect(fetchNightlyManifest("token")).rejects.toThrow(UpgradeError);
     await expect(fetchNightlyManifest("token")).rejects.toThrow(
-      "Failed to connect to GHCR: fetch failed"
+      'Failed to fetch manifest for tag "nightly": fetch failed'
     );
   });
 });
@@ -404,7 +404,7 @@ describe("fetchManifest", () => {
       UpgradeError
     );
     await expect(fetchManifest("token", "some-tag")).rejects.toThrow(
-      "Failed to connect to GHCR: fetch failed"
+      'Failed to fetch manifest for tag "some-tag": fetch failed'
     );
   });
 });

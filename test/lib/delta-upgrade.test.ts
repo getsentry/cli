@@ -14,26 +14,23 @@ import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import {
   applyPatchChain,
   attemptDeltaUpgrade,
-  buildNightlyPatchGraph,
   canAttemptDelta,
   downloadStablePatch,
   type ExtractStableChainOpts,
   extractSha256,
   extractStableChain,
   fetchRecentReleases,
+  filterAndSortChainTags,
   type GitHubAsset,
   type GitHubRelease,
   getPatchFromVersion,
   getPatchTargetSha256,
   getStableTargetSha256,
   type PatchChain,
-  type PatchGraphEntry,
   resolveNightlyChain,
   resolveNightlyDelta,
   resolveStableChain,
   resolveStableDelta,
-  type WalkNightlyChainOpts,
-  walkNightlyChain,
 } from "../../src/lib/delta-upgrade.js";
 import type { OciManifest } from "../../src/lib/ghcr.js";
 
@@ -265,6 +262,9 @@ describe("extractStableChain", () => {
     expect(result?.patchUrls).toHaveLength(1);
     expect(result?.patchUrls[0]).toBe("https://example.com/0.13.0.patch");
     expect(result?.expectedSha256).toBe(versionToHex("0.13.0"));
+    expect(result?.steps).toEqual([
+      { fromVersion: "0.12.0", toVersion: "0.13.0" },
+    ]);
   });
 
   test("resolves multi-hop chain (0.12→0.13→0.14)", () => {
@@ -280,6 +280,10 @@ describe("extractStableChain", () => {
     expect(result?.patchUrls[0]).toBe("https://example.com/0.13.0.patch");
     expect(result?.patchUrls[1]).toBe("https://example.com/0.14.0.patch");
     expect(result?.expectedSha256).toBe(versionToHex("0.14.0"));
+    expect(result?.steps).toEqual([
+      { fromVersion: "0.12.0", toVersion: "0.13.0" },
+      { fromVersion: "0.13.0", toVersion: "0.14.0" },
+    ]);
   });
 
   test("returns null when target version not in release list", () => {
@@ -539,266 +543,122 @@ describe("getPatchTargetSha256", () => {
   });
 });
 
-// walkNightlyChain
+// filterAndSortChainTags
 
-describe("walkNightlyChain", () => {
-  const BINARY_NAME = "sentry-linux-x64";
-  const PATCH_LAYER = `${BINARY_NAME}.patch`;
+describe("filterAndSortChainTags", () => {
+  test("returns empty array when no tags match the range", () => {
+    const tags = ["patch-0.0.0-dev.90", "patch-0.0.0-dev.95"];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.105"
+    );
+    expect(result).toEqual([]);
+  });
 
-  /** Create a patch graph entry with proper layer metadata */
-  function makeGraphEntry(
-    version: string,
-    fromVersion: string,
-    patchSize: number,
-    sha256Map: Record<string, string> = {}
-  ): [string, PatchGraphEntry] {
-    return [
-      fromVersion,
-      {
-        version,
-        manifest: makePatchManifest(fromVersion, sha256Map, [
-          {
-            digest: `sha256:layer-${version}`,
-            mediaType: "application/octet-stream",
-            size: patchSize,
-            annotations: {
-              "org.opencontainers.image.title": PATCH_LAYER,
-            },
-          },
-        ]),
-      },
+  test("returns empty array when tags list is empty", () => {
+    const result = filterAndSortChainTags([], "0.0.0-dev.100", "0.0.0-dev.105");
+    expect(result).toEqual([]);
+  });
+
+  test("filters to tags strictly between current and target (inclusive of target)", () => {
+    const tags = [
+      "patch-0.0.0-dev.100",
+      "patch-0.0.0-dev.101",
+      "patch-0.0.0-dev.102",
+      "patch-0.0.0-dev.103",
     ];
-  }
-
-  function makeOpts(
-    overrides: Partial<WalkNightlyChainOpts> = {}
-  ): WalkNightlyChainOpts {
-    return {
-      graph: new Map(),
-      currentVersion: "0.0.0-dev.100",
-      targetVersion: "0.0.0-dev.103",
-      patchLayerName: PATCH_LAYER,
-      binaryName: BINARY_NAME,
-      fullGzSize: 100_000,
-      ...overrides,
-    };
-  }
-
-  test("resolves single-hop chain", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 1000, {
-        [BINARY_NAME]: "sha256-of-101",
-      }),
-    ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.101",
-      })
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.102"
     );
-
-    expect(result).not.toBeNull();
-    expect(result?.layerDigests).toEqual(["sha256:layer-0.0.0-dev.101"]);
-    expect(result?.expectedSha256).toBe("sha256-of-101");
+    // currentVersion (100) excluded, target (102) included
+    expect(result).toEqual(["patch-0.0.0-dev.101", "patch-0.0.0-dev.102"]);
   });
 
-  test("resolves multi-hop chain", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 1000),
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 1000),
-      makeGraphEntry("0.0.0-dev.103", "0.0.0-dev.102", 1000, {
-        [BINARY_NAME]: "sha256-of-103",
-      }),
-    ]);
-
-    const result = walkNightlyChain(makeOpts({ graph }));
-
-    expect(result).not.toBeNull();
-    expect(result?.layerDigests).toHaveLength(3);
-    expect(result?.layerDigests).toEqual([
-      "sha256:layer-0.0.0-dev.101",
-      "sha256:layer-0.0.0-dev.102",
-      "sha256:layer-0.0.0-dev.103",
-    ]);
-    expect(result?.expectedSha256).toBe("sha256-of-103");
-  });
-
-  test("returns null when chain is broken (missing intermediate)", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 1000),
-      makeGraphEntry("0.0.0-dev.103", "0.0.0-dev.102", 1000, {
-        [BINARY_NAME]: "sha256-of-103",
-      }),
-    ]);
-
-    const result = walkNightlyChain(makeOpts({ graph }));
-    expect(result).toBeNull();
-  });
-
-  test("returns null when current version not in graph", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 1000, {
-        [BINARY_NAME]: "sha256-of-102",
-      }),
-    ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.102",
-      })
+  test("excludes tags outside the range", () => {
+    const tags = [
+      "patch-0.0.0-dev.98",
+      "patch-0.0.0-dev.101",
+      "patch-0.0.0-dev.105",
+    ];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.103"
     );
-    expect(result).toBeNull();
+    expect(result).toEqual(["patch-0.0.0-dev.101"]);
   });
 
-  test("returns null when exceeding size threshold", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 40_000),
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 40_000, {
-        [BINARY_NAME]: "sha256-of-102",
-      }),
+  test("sorts tags by version in ascending order", () => {
+    // Tags arrive in arbitrary order from registry
+    const tags = [
+      "patch-0.0.0-dev.103",
+      "patch-0.0.0-dev.101",
+      "patch-0.0.0-dev.102",
+    ];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.103"
+    );
+    expect(result).toEqual([
+      "patch-0.0.0-dev.101",
+      "patch-0.0.0-dev.102",
+      "patch-0.0.0-dev.103",
     ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.102",
-      })
-    );
-    expect(result).toBeNull();
   });
 
-  test("returns null when target has no SHA-256 annotation", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 1000),
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 1000, {}),
+  test("includes target version tag", () => {
+    const tags = ["patch-0.0.0-dev.101"];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.101"
+    );
+    expect(result).toEqual(["patch-0.0.0-dev.101"]);
+  });
+
+  test("excludes current version tag", () => {
+    const tags = ["patch-0.0.0-dev.100", "patch-0.0.0-dev.101"];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.100",
+      "0.0.0-dev.101"
+    );
+    expect(result).toEqual(["patch-0.0.0-dev.101"]);
+  });
+
+  test("handles real-world version strings with timestamps", () => {
+    const tags = [
+      "patch-0.14.0-dev.1772661724",
+      "patch-0.14.0-dev.1772732047",
+      "patch-0.14.0-dev.1772800000",
+    ];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.14.0-dev.1772661724",
+      "0.14.0-dev.1772800000"
+    );
+    expect(result).toEqual([
+      "patch-0.14.0-dev.1772732047",
+      "patch-0.14.0-dev.1772800000",
     ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.102",
-      })
-    );
-    expect(result).toBeNull();
   });
 
-  test("returns null when patch layer not found for platform", () => {
-    const fromVersion = "0.0.0-dev.100";
-    const version = "0.0.0-dev.101";
-    const graph = new Map<string, PatchGraphEntry>([
-      [
-        fromVersion,
-        {
-          version,
-          manifest: makePatchManifest(
-            fromVersion,
-            { [BINARY_NAME]: "sha256-target" },
-            [
-              {
-                digest: "sha256:layer-wrong",
-                mediaType: "application/octet-stream",
-                size: 1000,
-                annotations: {
-                  "org.opencontainers.image.title": "sentry-darwin-arm64.patch",
-                },
-              },
-            ]
-          ),
-        },
-      ],
-    ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.101",
-      })
+  test("returns single tag for single-hop upgrade", () => {
+    const tags = [
+      "patch-0.0.0-dev.100",
+      "patch-0.0.0-dev.101",
+      "patch-0.0.0-dev.102",
+    ];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.0.0-dev.101",
+      "0.0.0-dev.102"
     );
-    expect(result).toBeNull();
-  });
-
-  test("returns null when chain exceeds MAX_CHAIN_DEPTH (10)", () => {
-    const entries: [string, PatchGraphEntry][] = [];
-    for (let i = 0; i < 11; i++) {
-      const from = `0.0.0-dev.${100 + i}`;
-      const to = `0.0.0-dev.${101 + i}`;
-      const sha256: Record<string, string> =
-        i === 10 ? { "sentry-linux-x64": "sha256-final" } : {};
-      entries.push(makeGraphEntry(to, from, 100, sha256));
-    }
-    const graph = new Map(entries);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.111",
-      })
-    );
-    expect(result).toBeNull();
-  });
-
-  test("handles exactly MAX_CHAIN_DEPTH (10) hops", () => {
-    const entries: [string, PatchGraphEntry][] = [];
-    for (let i = 0; i < 10; i++) {
-      const from = `0.0.0-dev.${100 + i}`;
-      const to = `0.0.0-dev.${101 + i}`;
-      const sha256: Record<string, string> =
-        i === 9 ? { "sentry-linux-x64": "sha256-final" } : {};
-      entries.push(makeGraphEntry(to, from, 100, sha256));
-    }
-    const graph = new Map(entries);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.110",
-      })
-    );
-    expect(result).not.toBeNull();
-    expect(result?.layerDigests).toHaveLength(10);
-    expect(result?.expectedSha256).toBe("sha256-final");
-  });
-
-  test("digests are returned in apply order (oldest first)", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 1000),
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 1000),
-      makeGraphEntry("0.0.0-dev.103", "0.0.0-dev.102", 1000, {
-        [BINARY_NAME]: "sha256-of-103",
-      }),
-    ]);
-
-    const result = walkNightlyChain(makeOpts({ graph }));
-    expect(result).not.toBeNull();
-    expect(result?.layerDigests[0]).toBe("sha256:layer-0.0.0-dev.101");
-    expect(result?.layerDigests[2]).toBe("sha256:layer-0.0.0-dev.103");
-  });
-
-  test("size threshold is checked cumulatively", () => {
-    const graph = new Map([
-      makeGraphEntry("0.0.0-dev.101", "0.0.0-dev.100", 50_000),
-      makeGraphEntry("0.0.0-dev.102", "0.0.0-dev.101", 15_000, {
-        [BINARY_NAME]: "sha256-of-102",
-      }),
-    ]);
-
-    const result = walkNightlyChain(
-      makeOpts({
-        graph,
-        currentVersion: "0.0.0-dev.100",
-        targetVersion: "0.0.0-dev.102",
-      })
-    );
-    expect(result).toBeNull();
+    expect(result).toEqual(["patch-0.0.0-dev.102"]);
   });
 });
 
@@ -959,6 +819,9 @@ describe("resolveStableChain", () => {
     expect(chain?.patches).toHaveLength(1);
     expect(chain?.patches[0]?.data).toEqual(patchBytes);
     expect(chain?.expectedSha256).toBe(versionHex("0.14.0"));
+    expect(chain?.steps).toEqual([
+      { fromVersion: "0.13.0", toVersion: "0.14.0" },
+    ]);
   });
 
   test("resolves multi-hop chain with parallel downloads", async () => {
@@ -1010,6 +873,10 @@ describe("resolveStableChain", () => {
     // Oldest patch first (apply order)
     expect(chain?.patches[0]?.data).toEqual(patchA);
     expect(chain?.patches[1]?.data).toEqual(patchB);
+    expect(chain?.steps).toEqual([
+      { fromVersion: "0.13.0", toVersion: "0.14.0" },
+      { fromVersion: "0.14.0", toVersion: "0.15.0" },
+    ]);
   });
 
   test("returns null when target not in releases", async () => {
@@ -1052,121 +919,6 @@ describe("resolveStableChain", () => {
 
     const chain = await resolveStableChain("0.13.0", "0.14.0");
     expect(chain).toBeNull();
-  });
-});
-
-// buildNightlyPatchGraph
-
-describe("buildNightlyPatchGraph", () => {
-  /** Create a GHCR mock that handles token exchange + tag listing + manifest fetches */
-  function setupGhcrMocks(
-    tags: string[],
-    manifests: Map<string, OciManifest>
-  ): void {
-    mockFetch(async (url) => {
-      const urlStr = String(url);
-
-      // Token exchange
-      if (urlStr.includes("ghcr.io/token")) {
-        return new Response(JSON.stringify({ token: "test-token" }), {
-          status: 200,
-        });
-      }
-
-      // Tag listing
-      if (urlStr.includes("/tags/list")) {
-        return new Response(JSON.stringify({ tags }), {
-          status: 200,
-        });
-      }
-
-      // Manifest fetch — extract tag from URL
-      const manifestMatch = urlStr.match(/\/manifests\/(.+)$/);
-      if (manifestMatch) {
-        const tag = manifestMatch[1];
-        const manifest = manifests.get(tag ?? "");
-        if (manifest) {
-          return new Response(JSON.stringify(manifest), {
-            status: 200,
-          });
-        }
-        return new Response("Not Found", { status: 404 });
-      }
-
-      return new Response("Not Found", { status: 404 });
-    });
-  }
-
-  test("builds graph from patch tags", async () => {
-    const manifest1 = makePatchManifest("0.0.0-dev.100", {}, [
-      {
-        digest: "sha256:layer1",
-        mediaType: "application/octet-stream",
-        size: 1000,
-        annotations: {
-          "org.opencontainers.image.title": "sentry-linux-x64.patch",
-        },
-      },
-    ]);
-    const manifest2 = makePatchManifest("0.0.0-dev.101", {}, [
-      {
-        digest: "sha256:layer2",
-        mediaType: "application/octet-stream",
-        size: 1000,
-        annotations: {
-          "org.opencontainers.image.title": "sentry-linux-x64.patch",
-        },
-      },
-    ]);
-
-    setupGhcrMocks(
-      ["patch-0.0.0-dev.101", "patch-0.0.0-dev.102"],
-      new Map([
-        ["patch-0.0.0-dev.101", manifest1],
-        ["patch-0.0.0-dev.102", manifest2],
-      ])
-    );
-
-    const graph = await buildNightlyPatchGraph("test-token");
-    expect(graph.size).toBe(2);
-    expect(graph.get("0.0.0-dev.100")?.version).toBe("0.0.0-dev.101");
-    expect(graph.get("0.0.0-dev.101")?.version).toBe("0.0.0-dev.102");
-  });
-
-  test("skips patches without from-version annotation", async () => {
-    const noAnnotation: OciManifest = {
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.manifest.v1+json",
-      config: {
-        digest: "sha256:config",
-        mediaType: "application/vnd.oci.empty.v1+json",
-        size: 2,
-      },
-      layers: [],
-      annotations: {},
-    };
-
-    setupGhcrMocks(
-      ["patch-0.0.0-dev.101"],
-      new Map([["patch-0.0.0-dev.101", noAnnotation]])
-    );
-
-    const graph = await buildNightlyPatchGraph("test-token");
-    expect(graph.size).toBe(0);
-  });
-
-  test("skips patches with failed manifest fetch", async () => {
-    setupGhcrMocks(["patch-0.0.0-dev.101"], new Map());
-
-    const graph = await buildNightlyPatchGraph("test-token");
-    expect(graph.size).toBe(0);
-  });
-
-  test("returns empty graph when no patch tags", async () => {
-    setupGhcrMocks(["nightly", "nightly-0.0.0-dev.100"], new Map());
-
-    const graph = await buildNightlyPatchGraph("test-token");
-    expect(graph.size).toBe(0);
   });
 });
 
@@ -1261,27 +1013,30 @@ describe("resolveNightlyChain", () => {
       new Map([[patchDigest, patchData]])
     );
 
-    const chain = await resolveNightlyChain(
-      "test-token",
-      "0.0.0-dev.100",
-      "0.0.0-dev.101",
-      100_000
-    );
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
+      fullGzSize: 100_000,
+    });
 
     expect(chain).not.toBeNull();
     expect(chain?.patches).toHaveLength(1);
     expect(chain?.expectedSha256).toBe("aabb1122");
+    expect(chain?.steps).toEqual([
+      { fromVersion: "0.0.0-dev.100", toVersion: "0.0.0-dev.101" },
+    ]);
   });
 
   test("returns null when no matching patches in graph", async () => {
     setupNightlyMocks([], new Map(), new Map());
 
-    const chain = await resolveNightlyChain(
-      "test-token",
-      "0.0.0-dev.100",
-      "0.0.0-dev.102",
-      100_000
-    );
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.102",
+      fullGzSize: 100_000,
+    });
 
     expect(chain).toBeNull();
   });
