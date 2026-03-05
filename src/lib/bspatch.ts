@@ -6,8 +6,7 @@
  * minimal memory usage during CLI self-upgrades:
  *
  * - Old binary: copy-then-mmap for 0 JS heap (CoW on btrfs/xfs/APFS),
- *   with child-process probe for mmap safety (macOS AMFI sends uncatchable
- *   SIGKILL on signed Mach-O), falling back to `arrayBuffer()` if unsafe
+ *   falling back to `arrayBuffer()` if copy/mmap fails
  * - Diff/extra blocks: streamed via `DecompressionStream('zstd')`
  * - Output: written incrementally to disk via `Bun.file().writer()`
  * - Integrity: SHA-256 computed inline via `Bun.CryptoHasher`
@@ -31,7 +30,8 @@
  * ```
  */
 
-import { copyFileSync, unlinkSync } from "node:fs";
+import { constants, copyFileSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -225,96 +225,49 @@ type OldFileHandle = {
   /** Memory-mapped or in-memory view of the old binary */
   data: Uint8Array;
   /** Cleanup function to call after patching (removes temp copy, if any) */
-  cleanup: () => void;
+  cleanup: () => void | Promise<void>;
 };
-
-/**
- * Probe whether `Bun.mmap()` works on a file by spawning a child process.
- *
- * macOS AMFI sends uncatchable SIGKILL when a process creates a writable
- * memory mapping of a code-signed Mach-O binary — even a copy. Since
- * SIGKILL terminates the process inside the syscall (before any catch
- * block runs), we cannot detect the failure in-process.
- *
- * This probe spawns a minimal child that attempts `Bun.mmap()` on the
- * target file. If the child exits 0, mmap is safe. If it's killed
- * (SIGKILL) or exits non-zero, we fall back to `arrayBuffer()`.
- *
- * @param filePath - Path to the file to probe (should be the temp copy)
- * @returns true if mmap is safe on this file, false otherwise
- */
-async function probeMmapSafe(filePath: string): Promise<boolean> {
-  try {
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        "-e",
-        `Bun.mmap(${JSON.stringify(filePath)}, { shared: false })`,
-      ],
-      { stdout: "ignore", stderr: "ignore" }
-    );
-    const exitCode = await child.exited;
-    return exitCode === 0;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Load the old binary for read access during patching.
  *
- * Strategy: copy to temp file, probe mmap safety via child process,
- * then mmap the copy if safe. This avoids `Bun.mmap()` on files that
- * would trigger uncatchable SIGKILL (macOS AMFI on signed Mach-O) while
- * keeping zero JS heap on platforms where mmap works. On CoW filesystems
- * (btrfs, xfs, APFS) the copy is a metadata-only reflink (near-instant).
+ * Strategy: copy to temp file, then try mmap on the copy. The copy is a
+ * regular file (no running process), so `Bun.mmap()` succeeds on both
+ * Linux and macOS — ETXTBSY (Linux) and AMFI SIGKILL (macOS) only affect
+ * the running binary's inode, not a copy. On CoW filesystems (btrfs, xfs,
+ * APFS) the copy is a metadata-only reflink (near-instant).
  *
- * Falls back to `Bun.file().arrayBuffer()` (~100 MB heap) if the probe
- * fails or if copy/mmap errors for any reason.
+ * Falls back to `Bun.file().arrayBuffer()` (~100 MB heap) if copy or
+ * mmap fails for any reason.
  */
+let loadCounter = 0;
+
 async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
-  const tempCopy = join(tmpdir(), `sentry-patch-old-${process.pid}`);
+  loadCounter += 1;
+  const tempCopy = join(
+    tmpdir(),
+    `sentry-patch-old-${process.pid}-${loadCounter}`
+  );
   try {
-    copyFileSync(oldPath, tempCopy);
+    // COPYFILE_FICLONE: attempt CoW reflink first (near-instant on btrfs/xfs/APFS),
+    // silently falls back to regular copy on filesystems that don't support it.
+    copyFileSync(oldPath, tempCopy, constants.COPYFILE_FICLONE);
 
-    // Probe mmap safety in a child process — macOS AMFI sends uncatchable
-    // SIGKILL on writable mappings of signed Mach-O, even for copies.
-    const mmapSafe = await probeMmapSafe(tempCopy);
-
-    if (mmapSafe) {
-      const data = Bun.mmap(tempCopy, { shared: false });
-      return {
-        data,
-        cleanup: () => {
-          try {
-            unlinkSync(tempCopy);
-          } catch {
-            // Best-effort cleanup — OS will reclaim on reboot
-          }
-        },
-      };
-    }
-
-    // mmap probe failed — read copy into JS heap, then clean up temp file
-    const data = new Uint8Array(await Bun.file(tempCopy).arrayBuffer());
-    try {
-      unlinkSync(tempCopy);
-    } catch {
-      // Best-effort cleanup
-    }
+    // mmap the copy — safe because it's a separate inode, not the running
+    // binary. MAP_PRIVATE avoids write-back to disk.
+    const data = Bun.mmap(tempCopy, { shared: false });
     return {
       data,
-      cleanup: () => {
-        // Data is in JS heap — no temp file to clean up
-      },
+      cleanup: () =>
+        unlink(tempCopy).catch(() => {
+          /* Best-effort cleanup — OS will reclaim on reboot */
+        }),
     };
   } catch {
-    // Copy failed — fall back to reading original directly into JS heap
-    try {
-      unlinkSync(tempCopy);
-    } catch {
-      // May not exist if copyFileSync failed
-    }
+    // Copy or mmap failed — fall back to reading into JS heap
+    await unlink(tempCopy).catch(() => {
+      /* May not exist if copyFileSync failed */
+    });
     return {
       data: new Uint8Array(await Bun.file(oldPath).arrayBuffer()),
       cleanup: () => {
@@ -416,7 +369,7 @@ export async function applyPatch(
     try {
       await writer.end();
     } finally {
-      cleanupOldFile();
+      await cleanupOldFile();
     }
   }
 
