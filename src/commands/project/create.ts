@@ -26,9 +26,9 @@ import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   ApiError,
-  AuthError,
   CliError,
   ContextError,
+  withAuthGuard,
 } from "../../lib/errors.js";
 import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -38,7 +38,7 @@ import {
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import type { SentryProject, SentryTeam, Writer } from "../../types/index.js";
+import type { SentryProject, Writer } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -173,17 +173,15 @@ async function handleCreateProject404(opts: {
   detectedFrom?: string;
 }): Promise<never> {
   const { orgSlug, teamSlug, name, platform, detectedFrom } = opts;
-  let teams: SentryTeam[] | null = null;
   let listTeamsError: unknown = null;
 
-  try {
-    teams = await listTeams(orgSlug);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
+  const teams = await withAuthGuard(
+    () => listTeams(orgSlug),
+    null,
+    (error) => {
+      listTeamsError = error;
     }
-    listTeamsError = error;
-  }
+  );
 
   // listTeams succeeded → org is valid, diagnose the team
   if (teams !== null) {

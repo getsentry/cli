@@ -634,13 +634,68 @@ mock.module("./some-module", () => ({
 <!-- lore:019cbaa2-e4a2-76c0-8f64-917a97ae20c5 -->
 * **Consola chosen as CLI logger with Sentry createConsolaReporter integration**: Consola chosen as CLI logger with Sentry createConsolaReporter integration. Two reporters: FancyReporter (stderr) and Sentry reporter for structured logs. Level controlled by \`SENTRY\_LOG\_LEVEL\` env var mapped to consola numeric levels: error=0, warn=1, info=3 (default), debug=4, trace=5. \`buildCommand\` in \`src/lib/command.ts\` wraps Stricli's \`buildCommand\` to inject hidden \`--log-level\` and \`--verbose\` flags, intercepts them before calling original func via \`setLogLevel()\`, then strips them. When a command already defines \`--verbose\` (e.g. \`api\`), the injected one is skipped. \`withTag()\` creates independent instances; \`setLogLevel()\` propagates to all children via a registry. Respects \`NO\_COLOR\` natively.
 
+<!-- lore:019cafbb-24ad-75a3-b037-5efbe6a1e85d -->
+* **DSN org prefix normalization in arg-parsing.ts**: Sentry DSN hosts encode org IDs as \`oNNNNN\` (e.g., \`o1081365.ingest.us.sentry.io\`). The Sentry API rejects the \`o\`-prefixed form. \`stripDsnOrgPrefix()\` in \`src/lib/arg-parsing.ts\` uses \`/^o(\d+)$/\` to strip the prefix — safe for slugs like \`organic\`. Applied in \`parseOrgProjectArg()\` and \`parseWithSlash()\`, covering all API call paths consuming \`parsed.org\`.
+
+<!-- lore:019cb38b-e327-7ec5-8fb0-9e635b2bac48 -->
+* **GHCR versioned nightly tags for delta upgrade support**: GHCR nightly distribution with binary delta upgrades. Three tag types: \`:nightly\` (rolling), \`:nightly-\<version>\` (immutable), \`:patch-\<version>\` (delta manifest). Delta patches use zig-bsdiff TRDIFF10 (zstd-compressed), ~50KB vs ~29MB full. Client bspatch via \`Bun.zstdDecompressSync()\`. N-1 patches only, full download fallback, SHA-256 verify, 60% size threshold. npm/Node excluded. 30 versioned tags retained, pruned weekly. Test mocks: (1) token exchange at \`ghcr.io/token\`, (2) manifest fetch with annotations, (3) blob download via \`Response.redirect()\`. Use \`mockGhcrNightlyVersion()\` helper.
+
+<!-- lore:a1f33ceb-6116-4d29-b6d0-0dc9678e4341 -->
+* **Issue list auto-pagination beyond API's 100-item cap**: Sentry API silently caps \`limit\` at 100 per request. \`listIssuesAllPages()\` auto-paginates using Link headers, bounded by MAX\_PAGINATION\_PAGES (50). \`API\_MAX\_PER\_PAGE\` constant is shared across all paginated consumers. \`--limit\` means total results everywhere (max 1000, default 25). Org-all mode uses \`fetchOrgAllIssues()\`; explicit \`--cursor\` does single-page fetch to preserve cursor chain.
+
+<!-- lore:019cb950-9b7b-731a-9832-b7f6cfb6a6a2 -->
+* **Self-hosted OAuth device flow requires Sentry 26.1.0+ and SENTRY\_CLIENT\_ID**: Self-hosted OAuth device flow requires Sentry 26.1.0+ and both \`SENTRY\_URL\` and \`SENTRY\_CLIENT\_ID\` env vars. Users must create a public OAuth app in Settings → Developer Settings. The client ID is NOT optional for self-hosted. Fallback for older instances: \`sentry auth login --token\`. \`getSentryUrl()\` and \`getClientId()\` in \`src/lib/oauth.ts\` read lazily (not at module load) so URL parsing from arguments can set \`SENTRY\_URL\` after import.
+
+<!-- lore:019ca9c3-989c-7c8d-bcd0-9f308fd2c3d7 -->
+* **Sentry CLI markdown-first formatting pipeline replaces ad-hoc ANSI**: Formatters build CommonMark strings; \`renderMarkdown()\` renders to ANSI for TTY or raw markdown for non-TTY. Key helpers: \`colorTag()\`, \`mdKvTable()\`, \`mdRow()\`, \`mdTableHeader()\` (\`:\` suffix = right-aligned), \`renderTextTable()\`. \`isPlainOutput()\` checks \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`!isTTY\`. Batch path: \`formatXxxTable()\`. Streaming path: \`StreamingTable\` (TTY) or raw markdown rows (plain). Both share \`buildXxxRowCells()\`.
+
+<!-- lore:019ca9c3-98a2-7a81-9db7-d36c2e71237c -->
+* **Sentry trace-logs API is org-scoped, not project-scoped**: The Sentry trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped, so \`trace logs\` uses \`resolveOrg()\` not \`resolveOrgAndProject()\`. The endpoint is PRIVATE in Sentry source, excluded from the public OpenAPI schema — \`@sentry/api\` has no generated types. The hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` is required until Sentry makes it public.
+
+### Decision
+
+<!-- lore:019c8f3b-84be-79be-9518-e5ecd2ea64b9 -->
+* **Use -t (not -p) as shortcut alias for --period flag**: The --period flag on issue list uses -t (for 'time period') as its short alias, not -p. The rationale: -p could be confused with --platform from other CLI tools/contexts. -t maps naturally to 'time period' and avoids collision. This was a deliberate choice after initial implementation used -p.
+
 ### Gotcha
 
 <!-- lore:019cbe0d-d03e-716c-b372-b09998c07ed6 -->
 * **Stricli rejects unknown flags — pre-parsed global flags must be consumed from argv**: Stricli's arg parser is strict: any \`--flag\` not registered on a command throws \`No flag registered for --flag\`. Global flags (parsed before Stricli in bin.ts) MUST be spliced out of argv. \`--log-level\` was correctly consumed but \`--verbose\` was intentionally left in (for the \`api\` command's own \`--verbose\`). This breaks every other command. Also, \`argv.indexOf('--flag')\` doesn't match \`--flag=value\` form — must check both space-separated and equals-sign forms when pre-parsing. A Biome \`noRestrictedImports\` lint rule in \`biome.jsonc\` now blocks \`import { buildCommand } from "@stricli/core"\` at error level — only \`src/lib/command.ts\` is exempted. Other \`@stricli/core\` exports (\`buildRouteMap\`, \`run\`, etc.) are allowed.
 
+<!-- lore:019c9994-d161-783e-8b3e-79457cd62f42 -->
+* **Biome lint: Response.redirect() required, nested ternaries forbidden**: Biome lint rules that frequently trip up this codebase: (1) \`useResponseRedirect\`: use \`Response.redirect(url, status)\` not \`new Response\`. (2) \`noNestedTernary\`: use \`if/else\`. (3) \`noComputedPropertyAccess\`: use \`obj.property\` not \`obj\["property"]\`. (4) Max cognitive complexity 15 per function — extract helpers to stay under.
+
+<!-- lore:019c8c31-f52f-7230-9252-cceb907f3e87 -->
+* **Bugbot flags defensive null-checks as dead code — keep them with JSDoc justification**: Cursor Bugbot and Sentry Seer repeatedly flag two false positives: (1) defensive null-checks as "dead code" — keep them with JSDoc explaining why the guard exists for future safety, especially when removing would require \`!\` assertions banned by \`noNonNullAssertion\`. (2) stderr spinner output during \`--json\` mode — always a false positive since progress goes to stderr, JSON to stdout. Reply explaining the rationale and resolve.
+
+<!-- lore:019c9a88-bf99-7322-b192-aafe4636c600 -->
+* **getsentry/codecov-action enables JUnit XML test reporting by default**: The \`getsentry/codecov-action@main\` has \`enable-tests: true\` by default, which searches for JUnit XML files matching \`\*\*/\*.junit.xml\`. If the test framework doesn't produce JUnit XML, the action emits 3 warnings on every CI run: "No files found matching pattern", "No JUnit XML files found", and "Please ensure your test framework is generating JUnit XML output". Fix: either set \`enable-tests: false\` in the action inputs, or configure the test runner to output JUnit XML. For Bun, add \`\[test.reporter] junit = "test-results.junit.xml"\` to \`bunfig.toml\` and add \`\*.junit.xml\` to \`.gitignore\`.
+
 ### Pattern
 
 <!-- lore:019cbe44-7687-7288-81a2-662feefc28ea -->
 * **SKILL.md generator must filter hidden Stricli flags**: \`script/generate-skill.ts\` introspects Stricli's route tree to auto-generate \`plugins/sentry-cli/skills/sentry-cli/SKILL.md\`. The \`FlagDef\` type must include \`hidden?: boolean\` and \`extractFlags\` must propagate it to \`FlagInfo\`. The filter in \`generateCommandDoc\` must exclude \`f.hidden\` alongside \`help\`/\`helpAll\`. Without this, hidden flags injected by \`buildCommand\` (like \`--log-level\`, \`--verbose\`) appear on every command in the AI agent skill file. Global flags should instead be documented once in \`docs/src/content/docs/commands/index.md\` Global Options section, which the generator pulls into SKILL.md via \`loadCommandsOverview\`.
+
+<!-- lore:dbd63348-2049-42b3-bb99-d6a3d64369c7 -->
+* **Branch naming and commit message conventions for Sentry CLI**: Branch naming: \`feat/\<short-description>\` or \`fix/\<issue-number>-\<short-description>\` (e.g., \`feat/ghcr-nightly-distribution\`, \`fix/268-limit-auto-pagination\`). Commit message format: \`type(scope): description (#issue)\` (e.g., \`fix(issue-list): auto-paginate --limit beyond 100 (#268)\`, \`feat(nightly): distribute via GHCR instead of GitHub Releases\`). Types seen: fix, refactor, meta, release, feat. PRs are created as drafts via \`gh pr create --draft\`. Implementation plans are attached to commits via \`git notes add\` rather than in PR body or commit message.
+
+<!-- lore:019c8c17-f5de-71f2-93b5-c78231e29519 -->
+* **Make Bun.which testable by accepting optional PATH parameter**: When wrapping \`Bun.which()\` in a helper function, accept an optional \`pathEnv?: string\` parameter and pass it as \`{ PATH: pathEnv }\` to \`Bun.which\`. This makes the function deterministically testable without mocking — tests can pass a controlled PATH (e.g., \`/nonexistent\` for false, \`dirname(Bun.which('bash'))\` for true). Pattern: \`const opts = pathEnv !== undefined ? { PATH: pathEnv } : undefined; return Bun.which(name, opts) !== null;\`
+
+<!-- lore:019c90f5-9140-75d0-a59d-05b70b085561 -->
+* **Multi-target concurrent progress needs per-target delta tracking**: When multiple targets fetch concurrently and each reports cumulative progress, maintain a \`prevFetched\` array and \`totalFetched\` running sum. Each callback computes \`delta = fetched - prevFetched\[i]\`, adds to total. This prevents display jumps and double-counting. Use \`totalFetched += delta\` (O(1)), not \`reduce()\` on every callback.
+
+<!-- lore:019c90f5-913b-7995-8bac-84289cf5d6d9 -->
+* **Pagination contextKey must include all query-varying parameters with escaping**: Pagination \`contextKey\` must encode every query-varying parameter (sort, query, period) with \`escapeContextKeyValue()\` (replaces \`|\` with \`%7C\`). Always provide a fallback before escaping since \`flags.period\` may be \`undefined\` in tests despite having a default: \`flags.period ? escapeContextKeyValue(flags.period) : "90d"\`.
+
+<!-- lore:019c8a8a-64ee-703c-8c1e-ed32ae8a90a7 -->
+* **PR review workflow: reply, resolve, amend, force-push**: PR review workflow: (1) Read unresolved threads via GraphQL, (2) make code changes, (3) run lint+typecheck+tests, (4) create a SEPARATE commit per review round (not amend) for incremental review, (5) push normally, (6) reply to comments via REST API, (7) resolve threads via GraphQL \`resolveReviewThread\`. Only amend+force-push when user explicitly asks or pre-commit hook modified files.
+
+<!-- lore:019cb858-e780-7945-a0ee-a01f85be5585 -->
+* **Testing infinite loops (while-true) in streaming functions via AuthError escape hatch**: Follow-mode streaming uses \`setTimeout\`-based recursive scheduling. \`scheduleNextPoll()\` sets a timer; SIGINT handler calls \`clearTimeout()\` + \`resolve()\` — clearing the timer drains the event loop naturally (no \`process.exit(0)\`). A \`stopped\` boolean guard prevents orphaned polls when SIGINT fires mid-fetch. \`Bun.sleep()\` cannot be cancelled (no AbortSignal), so \`setTimeout\`/\`clearTimeout\` is required. Tests use \`interceptSigint()\` helper that captures \`process.once('SIGINT', handler)\` via spy, then \`trigger()\` invokes directly. \`executeFollowMode\<T>(config: FollowConfig\<T>)\` is generic.
+
+### Preference
+
+<!-- lore:019c91a8-879a-70cd-bfe4-4bb5bfb7b4d1 -->
+* **Use captureException (not captureMessage) for unexpected states, or Sentry logs**: When reporting unexpected/defensive-guard situations to Sentry (e.g., non-numeric input where a number was expected), the reviewer prefers \`Sentry.captureException(new Error(...))\` over \`Sentry.captureMessage(...)\`. \`captureMessage\` with 'warning' level was rejected in PR review. Alternatively, use the Sentry structured logger (\`Sentry.logger.warn(...)\`) for less severe diagnostic cases — this was accepted in the abbreviateCount NaN handler.
 <!-- End lore-managed section -->

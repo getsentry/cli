@@ -446,3 +446,36 @@ export function getExitCode(error: unknown): number {
   }
   return 1;
 }
+
+/**
+ * Execute an async operation, rethrowing {@link AuthError} while returning a
+ * fallback value for all other failures.
+ *
+ * This is the standard "safe fetch" pattern used throughout the CLI:
+ * auth errors must propagate so the auto-login flow in bin.ts can
+ * trigger, but transient failures (network, 404, permissions) should
+ * degrade gracefully to a fallback value.
+ *
+ * @param fn - Async operation that may throw
+ * @param fallback - Value to return when a non-auth error occurs
+ * @param onError - Optional callback invoked with the caught non-auth error
+ *                  before returning the fallback. Use for logging, capturing
+ *                  to Sentry, or conditional re-throws (e.g., 404 → ResolutionError).
+ *                  If onError itself throws, that error propagates to the caller.
+ * @returns The result of `fn()`, or `fallback` if a non-auth error was caught
+ */
+export async function withAuthGuard<T>(
+  fn: () => Promise<T>,
+  fallback: T,
+  onError?: (error: unknown) => void
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    onError?.(error);
+    return fallback;
+  }
+}

@@ -37,7 +37,7 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "./db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "./errors.js";
+import { ContextError, ValidationError, withAuthGuard } from "./errors.js";
 import { writeFooter, writeJson } from "./formatters/index.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
@@ -206,19 +206,14 @@ export function isOrgListConfig<TEntity, TWithOrg>(
  * Fetch entities for a single org, returning empty array on non-auth errors.
  * Auth errors propagate so the user sees "please log in".
  */
-export async function fetchOrgSafe<TEntity, TWithOrg>(
+export function fetchOrgSafe<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   orgSlug: string
 ): Promise<TWithOrg[]> {
-  try {
+  return withAuthGuard(async () => {
     const items = await config.listForOrg(orgSlug);
     return items.map((item) => config.withOrg(item, orgSlug));
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
+  }, []);
 }
 
 /**
@@ -561,17 +556,12 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     const listForProject = config.listForProject;
     // Fetch entities scoped to each matched project in parallel
     const results = await Promise.all(
-      matches.map(async (m) => {
-        try {
+      matches.map((m) =>
+        withAuthGuard(async () => {
           const raw = await listForProject(m.orgSlug, m.slug);
           return raw.map((entity) => config.withOrg(entity, m.orgSlug));
-        } catch (error) {
-          if (error instanceof AuthError) {
-            throw error;
-          }
-          return [] as TWithOrg[];
-        }
-      })
+        }, [] as TWithOrg[])
+      )
     );
     allItems = results.flat();
   } else {

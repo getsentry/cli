@@ -30,7 +30,7 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { AuthError, ContextError, withAuthGuard } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
@@ -86,17 +86,10 @@ export async function fetchOrgProjects(
  * Fetch projects for a single org, returning empty array on non-auth errors.
  * Auth errors propagate so user sees "please log in" message.
  */
-export async function fetchOrgProjectsSafe(
+export function fetchOrgProjectsSafe(
   orgSlug: string
 ): Promise<ProjectWithOrg[]> {
-  try {
-    return await fetchOrgProjects(orgSlug);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
+  return withAuthGuard(() => fetchOrgProjects(orgSlug), []);
 }
 
 /**
@@ -110,15 +103,11 @@ export async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
   const results: ProjectWithOrg[] = [];
 
   for (const org of orgs) {
-    try {
-      const projects = await fetchOrgProjects(org.slug);
-      results.push(...projects);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      // User may lack access to some orgs
-    }
+    const projects = await withAuthGuard(
+      () => fetchOrgProjects(org.slug),
+      [] as ProjectWithOrg[]
+    );
+    results.push(...projects);
   }
 
   return results;
@@ -206,21 +195,14 @@ async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
   }
 
   // 2. Auto-detect from DSNs (may find multiple in monorepos)
-  try {
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      cwd,
-    });
-
+  const result = await withAuthGuard(() => resolveAllTargets({ cwd }), null);
+  if (result) {
+    const { targets, footer, skippedSelfHosted } = result;
     if (targets.length > 0) {
       const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
       return { orgs: uniqueOrgs, footer, skippedSelfHosted };
     }
-
     return { orgs: [], skippedSelfHosted };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
   }
 
   return { orgs: [] };
@@ -247,22 +229,22 @@ export function displayProjectTable(
  * that mirrors `fetchOrgProjectsSafe` — re-throws auth errors but
  * silently returns empty for other failures (403, network errors).
  */
-async function fetchPaginatedSafe(
+type PaginatedResult = { projects: ProjectWithOrg[]; nextCursor?: string };
+
+function fetchPaginatedSafe(
   org: string,
   limit: number
-): Promise<{ projects: ProjectWithOrg[]; nextCursor?: string }> {
-  try {
-    const response = await listProjectsPaginated(org, { perPage: limit });
-    return {
-      projects: response.data.map((p) => ({ ...p, orgSlug: org })),
-      nextCursor: response.nextCursor,
-    };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return { projects: [] };
-  }
+): Promise<PaginatedResult> {
+  return withAuthGuard<PaginatedResult>(
+    async () => {
+      const response = await listProjectsPaginated(org, { perPage: limit });
+      return {
+        projects: response.data.map((p) => ({ ...p, orgSlug: org })),
+        nextCursor: response.nextCursor,
+      };
+    },
+    { projects: [] }
+  );
 }
 
 /**
