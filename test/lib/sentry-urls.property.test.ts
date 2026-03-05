@@ -23,6 +23,7 @@ import {
   buildProjectUrl,
   buildSeerSettingsUrl,
   buildTraceUrl,
+  getOrgBaseUrl,
   getSentryBaseUrl,
   isSentrySaasUrl,
 } from "../../src/lib/sentry-urls.js";
@@ -185,11 +186,11 @@ describe("isSentrySaasUrl properties", () => {
 });
 
 describe("buildOrgUrl properties", () => {
-  test("output always starts with base URL", async () => {
+  test("output always starts with org base URL", async () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildOrgUrl(orgSlug);
-        expect(result.startsWith(getSentryBaseUrl())).toBe(true);
+        expect(result.startsWith(getOrgBaseUrl(orgSlug))).toBe(true);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -209,7 +210,7 @@ describe("buildOrgUrl properties", () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildOrgUrl(orgSlug);
-        expect(result).toBe(`${getSentryBaseUrl()}/organizations/${orgSlug}/`);
+        expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -243,7 +244,7 @@ describe("buildProjectUrl properties", () => {
       property(tuple(slugArb, slugArb), ([orgSlug, projectSlug]) => {
         const result = buildProjectUrl(orgSlug, projectSlug);
         expect(result).toBe(
-          `${getSentryBaseUrl()}/settings/${orgSlug}/projects/${projectSlug}/`
+          `${getOrgBaseUrl(orgSlug)}/settings/projects/${projectSlug}/`
         );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -331,7 +332,7 @@ describe("buildSeerSettingsUrl properties", () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildSeerSettingsUrl(orgSlug);
-        expect(result).toContain(`/settings/${orgSlug}/`);
+        expect(result).toContain("/settings/seer/");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -448,7 +449,7 @@ describe("buildTraceUrl properties", () => {
       property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
         const result = buildTraceUrl(orgSlug, traceId);
         expect(result).toBe(
-          `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`
+          `${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`
         );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
