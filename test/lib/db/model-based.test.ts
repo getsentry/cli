@@ -35,6 +35,7 @@ import {
   getAuthConfig,
   getAuthToken,
   isAuthenticated,
+  isEnvTokenActive,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
 import {
@@ -74,6 +75,10 @@ type DbModel = {
     expiresAt: number | null;
     issuedAt: number | null;
   };
+  /** Simulated SENTRY_AUTH_TOKEN env var (null = unset) */
+  envAuthToken: string | null;
+  /** Simulated SENTRY_TOKEN env var (null = unset) */
+  envSentryToken: string | null;
   regions: Map<string, string>;
   aliases: {
     entries: Map<string, { orgSlug: string; projectSlug: string }>;
@@ -97,6 +102,8 @@ function createEmptyModel(): DbModel {
       expiresAt: null,
       issuedAt: null,
     },
+    envAuthToken: null,
+    envSentryToken: null,
     regions: new Map(),
     aliases: {
       entries: new Map(),
@@ -159,6 +166,13 @@ class GetAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
   async run(model: DbModel, _real: RealDb): Promise<void> {
     const realToken = getAuthToken();
 
+    // Env vars take priority: SENTRY_AUTH_TOKEN > SENTRY_TOKEN > stored token
+    const envToken = model.envAuthToken ?? model.envSentryToken;
+    if (envToken) {
+      expect(realToken).toBe(envToken);
+      return;
+    }
+
     // Token should be undefined if:
     // 1. No token set
     // 2. Token is expired (expiresAt < now)
@@ -181,11 +195,30 @@ class GetAuthConfigCommand implements AsyncCommand<DbModel, RealDb> {
   async run(model: DbModel, _real: RealDb): Promise<void> {
     const realConfig = getAuthConfig();
 
+    // Env vars take priority
+    if (model.envAuthToken) {
+      expect(realConfig).toBeDefined();
+      expect(realConfig?.token).toBe(model.envAuthToken);
+      expect(realConfig?.source).toBe("env:SENTRY_AUTH_TOKEN");
+      expect(realConfig?.refreshToken).toBeUndefined();
+      expect(realConfig?.expiresAt).toBeUndefined();
+      return;
+    }
+    if (model.envSentryToken) {
+      expect(realConfig).toBeDefined();
+      expect(realConfig?.token).toBe(model.envSentryToken);
+      expect(realConfig?.source).toBe("env:SENTRY_TOKEN");
+      expect(realConfig?.refreshToken).toBeUndefined();
+      expect(realConfig?.expiresAt).toBeUndefined();
+      return;
+    }
+
     if (model.auth.token === null) {
       expect(realConfig).toBeUndefined();
     } else {
       expect(realConfig).toBeDefined();
       expect(realConfig?.token).toBe(model.auth.token);
+      expect(realConfig?.source).toBe("oauth");
       expect(realConfig?.refreshToken).toBe(
         model.auth.refreshToken ?? undefined
       );
@@ -225,6 +258,13 @@ class IsAuthenticatedCommand implements AsyncCommand<DbModel, RealDb> {
   async run(model: DbModel, _real: RealDb): Promise<void> {
     const realResult = await isAuthenticated();
 
+    // Env vars take priority
+    const envToken = model.envAuthToken ?? model.envSentryToken;
+    if (envToken) {
+      expect(realResult).toBe(true);
+      return;
+    }
+
     // Should be authenticated if we have a valid, non-expired token
     const now = Date.now();
     const expectedResult =
@@ -235,6 +275,81 @@ class IsAuthenticatedCommand implements AsyncCommand<DbModel, RealDb> {
   }
 
   toString = () => "isAuthenticated()";
+}
+
+// Env Var Commands — simulate setting/clearing SENTRY_AUTH_TOKEN and SENTRY_TOKEN
+
+class SetEnvAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
+  readonly token: string;
+
+  constructor(token: string) {
+    this.token = token;
+  }
+
+  check = () => true;
+
+  async run(model: DbModel, _real: RealDb): Promise<void> {
+    process.env.SENTRY_AUTH_TOKEN = this.token;
+    // Model stores trimmed value — matches real getEnvToken() which trims
+    const trimmed = this.token.trim();
+    model.envAuthToken = trimmed || null;
+  }
+
+  toString = () => `setEnv(SENTRY_AUTH_TOKEN, "${this.token}")`;
+}
+
+class ClearEnvAuthTokenCommand implements AsyncCommand<DbModel, RealDb> {
+  check = () => true;
+
+  async run(model: DbModel, _real: RealDb): Promise<void> {
+    delete process.env.SENTRY_AUTH_TOKEN;
+    model.envAuthToken = null;
+  }
+
+  toString = () => "clearEnv(SENTRY_AUTH_TOKEN)";
+}
+
+class SetEnvSentryTokenCommand implements AsyncCommand<DbModel, RealDb> {
+  readonly token: string;
+
+  constructor(token: string) {
+    this.token = token;
+  }
+
+  check = () => true;
+
+  async run(model: DbModel, _real: RealDb): Promise<void> {
+    process.env.SENTRY_TOKEN = this.token;
+    // Model stores trimmed value — matches real getEnvToken() which trims
+    const trimmed = this.token.trim();
+    model.envSentryToken = trimmed || null;
+  }
+
+  toString = () => `setEnv(SENTRY_TOKEN, "${this.token}")`;
+}
+
+class ClearEnvSentryTokenCommand implements AsyncCommand<DbModel, RealDb> {
+  check = () => true;
+
+  async run(model: DbModel, _real: RealDb): Promise<void> {
+    delete process.env.SENTRY_TOKEN;
+    model.envSentryToken = null;
+  }
+
+  toString = () => "clearEnv(SENTRY_TOKEN)";
+}
+
+class IsEnvTokenActiveCommand implements AsyncCommand<DbModel, RealDb> {
+  check = () => true;
+
+  async run(model: DbModel, _real: RealDb): Promise<void> {
+    const realResult = isEnvTokenActive();
+    const expectedResult =
+      model.envAuthToken !== null || model.envSentryToken !== null;
+    expect(realResult).toBe(expectedResult);
+  }
+
+  toString = () => "isEnvTokenActive()";
 }
 
 // Region Commands
@@ -561,6 +676,16 @@ const clearAuthCmdArb = constant(new ClearAuthCommand());
 
 const isAuthenticatedCmdArb = constant(new IsAuthenticatedCommand());
 
+const setEnvAuthTokenCmdArb = tokenArb.map(
+  (t) => new SetEnvAuthTokenCommand(t)
+);
+const clearEnvAuthTokenCmdArb = constant(new ClearEnvAuthTokenCommand());
+const setEnvSentryTokenCmdArb = tokenArb.map(
+  (t) => new SetEnvSentryTokenCommand(t)
+);
+const clearEnvSentryTokenCmdArb = constant(new ClearEnvSentryTokenCommand());
+const isEnvTokenActiveCmdArb = constant(new IsEnvTokenActiveCommand());
+
 const setOrgRegionCmdArb = tuple(slugArb, regionUrlArb).map(
   ([org, url]) => new SetOrgRegionCommand(org, url)
 );
@@ -610,6 +735,12 @@ const allCommands = [
   getAuthConfigCmdArb,
   clearAuthCmdArb,
   isAuthenticatedCmdArb,
+  // Env var auth commands
+  setEnvAuthTokenCmdArb,
+  clearEnvAuthTokenCmdArb,
+  setEnvSentryTokenCmdArb,
+  clearEnvSentryTokenCmdArb,
+  isEnvTokenActiveCmdArb,
   // Region commands
   setOrgRegionCmdArb,
   getOrgRegionCmdArb,
@@ -633,6 +764,11 @@ describe("model-based: database layer", () => {
     fcAssert(
       asyncProperty(commands(allCommands, { size: "+1" }), async (cmds) => {
         const cleanup = createIsolatedDbContext();
+        // Save env vars so model commands that set them don't leak across runs
+        const savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+        const savedSentryToken = process.env.SENTRY_TOKEN;
+        delete process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_TOKEN;
         try {
           const setup = () => ({
             model: createEmptyModel(),
@@ -641,6 +777,17 @@ describe("model-based: database layer", () => {
 
           await asyncModelRun(setup, cmds);
         } finally {
+          // Restore env vars before DB cleanup
+          if (savedAuthToken !== undefined) {
+            process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+          } else {
+            delete process.env.SENTRY_AUTH_TOKEN;
+          }
+          if (savedSentryToken !== undefined) {
+            process.env.SENTRY_TOKEN = savedSentryToken;
+          } else {
+            delete process.env.SENTRY_TOKEN;
+          }
           cleanup();
         }
       }),

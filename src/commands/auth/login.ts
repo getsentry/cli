@@ -1,7 +1,12 @@
 import type { SentryContext } from "../../context.js";
 import { getCurrentUser, getUserRegions } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { clearAuth, isAuthenticated, setAuthToken } from "../../lib/db/auth.js";
+import {
+  clearAuth,
+  isAuthenticated,
+  isEnvTokenActive,
+  setAuthToken,
+} from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
@@ -44,9 +49,16 @@ export const loginCommand = buildCommand({
 
     // Check if already authenticated
     if (await isAuthenticated()) {
-      stdout.write(
-        "You are already authenticated. Use 'sentry auth logout' first to re-authenticate.\n"
-      );
+      if (isEnvTokenActive()) {
+        stdout.write(
+          "Authentication is provided via environment variable. " +
+            "Remove the env var to use OAuth-based login instead.\n"
+        );
+      } else {
+        stdout.write(
+          "You are already authenticated. Use 'sentry auth logout' first to re-authenticate.\n"
+        );
+      }
       return;
     }
 

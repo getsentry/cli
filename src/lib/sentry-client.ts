@@ -9,7 +9,7 @@
  */
 
 import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
-import { refreshToken } from "./db/auth.js";
+import { isEnvTokenActive, refreshToken } from "./db/auth.js";
 import { withHttpSpan } from "./telemetry.js";
 
 /** Request timeout in milliseconds */
@@ -84,6 +84,10 @@ function prepareHeaders(
  */
 async function handleUnauthorized(headers: Headers): Promise<boolean> {
   if (headers.get(RETRY_MARKER_HEADER)) {
+    return false;
+  }
+  // Env var tokens can't be refreshed — let the 401 propagate
+  if (isEnvTokenActive()) {
     return false;
   }
   try {

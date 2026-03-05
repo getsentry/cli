@@ -20,14 +20,48 @@ type AuthRow = {
   updated_at: number;
 };
 
+/** Where the auth token originated */
+export type AuthSource = "env:SENTRY_AUTH_TOKEN" | "env:SENTRY_TOKEN" | "oauth";
+
 export type AuthConfig = {
   token?: string;
   refreshToken?: string;
   expiresAt?: number;
   issuedAt?: number;
+  source: AuthSource;
 };
 
+/**
+ * Read token from environment variables.
+ * `SENTRY_AUTH_TOKEN` takes priority over `SENTRY_TOKEN` (matches legacy sentry-cli).
+ * Empty or whitespace-only values are treated as unset.
+ */
+function getEnvToken(): { token: string; source: AuthSource } | undefined {
+  const authToken = process.env.SENTRY_AUTH_TOKEN?.trim();
+  if (authToken) {
+    return { token: authToken, source: "env:SENTRY_AUTH_TOKEN" };
+  }
+  const sentryToken = process.env.SENTRY_TOKEN?.trim();
+  if (sentryToken) {
+    return { token: sentryToken, source: "env:SENTRY_TOKEN" };
+  }
+  return;
+}
+
+/**
+ * Check if authentication is coming from an environment variable.
+ * Use this to skip refresh/OAuth logic that doesn't apply to env tokens.
+ */
+export function isEnvTokenActive(): boolean {
+  return getEnvToken() !== undefined;
+}
+
 export function getAuthConfig(): AuthConfig | undefined {
+  const envToken = getEnvToken();
+  if (envToken) {
+    return { token: envToken.token, source: envToken.source };
+  }
+
   return withDbSpan("getAuthConfig", () => {
     const db = getDatabase();
     const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
@@ -43,12 +77,18 @@ export function getAuthConfig(): AuthConfig | undefined {
       refreshToken: row.refresh_token ?? undefined,
       expiresAt: row.expires_at ?? undefined,
       issuedAt: row.issued_at ?? undefined,
+      source: "oauth" as const,
     };
   });
 }
 
-/** Get the stored token, or undefined if expired. Use refreshToken() for auto-refresh. */
+/** Get the active auth token. Checks env vars first, then falls back to SQLite. */
 export function getAuthToken(): string | undefined {
+  const envToken = getEnvToken();
+  if (envToken) {
+    return envToken.token;
+  }
+
   return withDbSpan("getAuthToken", () => {
     const db = getDatabase();
     const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
@@ -160,6 +200,12 @@ async function performTokenRefresh(
 export async function refreshToken(
   options: RefreshTokenOptions = {}
 ): Promise<RefreshTokenResult> {
+  // Env var tokens are assumed valid — no refresh, no expiry check
+  const envToken = getEnvToken();
+  if (envToken) {
+    return { token: envToken.token, refreshed: false };
+  }
+
   const { force = false } = options;
   const { AuthError } = await import("../errors.js");
 
