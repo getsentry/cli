@@ -274,7 +274,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    spin.stop("Cancelled", 1);
+    spin.stop("Error", 1);
     log.error(errorMessage(err));
     cancel("Setup failed");
     process.exitCode = 1;
