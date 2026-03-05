@@ -12,6 +12,7 @@ dist-bin
 
 # code coverage
 coverage
+coverage-isolated
 *.lcov
 
 # test artifacts
