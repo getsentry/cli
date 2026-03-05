@@ -44,8 +44,6 @@ Authenticate with Sentry
 **Flags:**
 - `--token <value> - Authenticate using an API token instead of OAuth`
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -65,10 +63,6 @@ SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 Log out of Sentry
 
-**Flags:**
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
-
 **Examples:**
 
 ```bash
@@ -82,8 +76,6 @@ Refresh your authentication token
 **Flags:**
 - `--json - Output result as JSON`
 - `--force - Force refresh even if token is still valid`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -97,8 +89,6 @@ View authentication status
 
 **Flags:**
 - `--show-token - Show the stored token (masked by default)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -110,18 +100,12 @@ sentry auth status
 
 Print the stored authentication token
 
-**Flags:**
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
-
 #### `sentry auth whoami`
 
 Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Org
 
@@ -134,8 +118,6 @@ List organizations
 **Flags:**
 - `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -152,8 +134,6 @@ View details of an organization
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -176,8 +156,6 @@ Create a new project
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 #### `sentry project list <org/project>`
 
@@ -188,8 +166,6 @@ List projects
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -211,8 +187,6 @@ View details of a project
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -246,8 +220,6 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -292,8 +264,6 @@ Analyze an issue's root cause using Seer AI
 **Flags:**
 - `--json - Output as JSON`
 - `--force - Force new analysis even if one exists`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -321,8 +291,6 @@ Generate a solution plan using Seer AI
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
 - `--force - Force new plan even if one exists`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -350,8 +318,6 @@ View details of a specific issue
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -379,8 +345,6 @@ View details of a specific event
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -410,7 +374,6 @@ Make an authenticated API request
 - `-i, --include - Include HTTP response status line and headers in the output`
 - `--silent - Do not print the response body`
 - `--verbose - Include full HTTP request and response in the output`
-- `--log-level - Set log verbosity level`
 
 **Examples:**
 
@@ -463,18 +426,12 @@ CLI-related commands
 
 Send feedback about the CLI
 
-**Flags:**
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
-
 #### `sentry cli fix`
 
 Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 #### `sentry cli setup`
 
@@ -488,8 +445,6 @@ Configure shell integration
 - `--no-completions - Skip shell completion installation`
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 #### `sentry cli upgrade <version>`
 
@@ -499,8 +454,6 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Repo
 
@@ -514,8 +467,6 @@ List repositories
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Team
 
@@ -529,8 +480,6 @@ List teams
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -561,8 +510,6 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -608,8 +555,6 @@ View details of a specific log entry
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 **Examples:**
 
@@ -646,8 +591,6 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 #### `sentry trace view <args...>`
 
@@ -657,8 +600,6 @@ View details of a specific trace
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 #### `sentry trace logs <args...>`
 
@@ -670,8 +611,6 @@ View logs associated with a trace
 - `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Additional filter query (Sentry search syntax)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Issues
 
@@ -688,8 +627,6 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Orgs
 
@@ -702,8 +639,6 @@ List organizations
 **Flags:**
 - `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Projects
 
@@ -718,8 +653,6 @@ List projects
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Repos
 
@@ -733,8 +666,6 @@ List repositories
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Teams
 
@@ -748,8 +679,6 @@ List teams
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Logs
 
@@ -765,8 +694,6 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Traces
 
@@ -782,8 +709,6 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ### Whoami
 
@@ -795,8 +720,6 @@ Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
-- `--log-level - Set log verbosity level`
-- `--verbose - Enable verbose (debug-level) logging output`
 
 ## Output Formats
 
