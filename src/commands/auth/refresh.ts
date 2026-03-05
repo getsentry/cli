@@ -7,7 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import {
-  ENV_SOURCE_PREFIX,
+  getActiveEnvVarName,
   getAuthConfig,
   isEnvTokenActive,
   refreshToken,
@@ -69,10 +69,7 @@ Examples:
 
     // Env var tokens can't be refreshed
     if (isEnvTokenActive()) {
-      const config = getAuthConfig();
-      const envVar = config?.source.startsWith(ENV_SOURCE_PREFIX)
-        ? config.source.slice(ENV_SOURCE_PREFIX.length)
-        : "SENTRY_AUTH_TOKEN";
+      const envVar = getActiveEnvVarName();
       throw new AuthError(
         "invalid",
         "Cannot refresh an environment variable token.\n" +

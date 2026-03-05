@@ -59,6 +59,22 @@ export function isEnvTokenActive(): boolean {
   return getEnvToken() !== undefined;
 }
 
+/**
+ * Get the name of the active env var providing authentication.
+ * Returns the specific variable name (e.g. "SENTRY_AUTH_TOKEN" or "SENTRY_TOKEN").
+ *
+ * **Important**: Call only after checking {@link isEnvTokenActive} returns true.
+ * Falls back to "SENTRY_AUTH_TOKEN" if no env source is active, which is a safe
+ * default for error messages but may be misleading if used unconditionally.
+ */
+export function getActiveEnvVarName(): string {
+  const env = getEnvToken();
+  if (env) {
+    return env.source.slice(ENV_SOURCE_PREFIX.length);
+  }
+  return "SENTRY_AUTH_TOKEN";
+}
+
 export function getAuthConfig(): AuthConfig | undefined {
   const envToken = getEnvToken();
   if (envToken) {

@@ -130,18 +130,17 @@ describe("loginCommand.func --token path", () => {
   test("already authenticated (env token SENTRY_TOKEN): shows specific var name", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
-    const getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
-    getAuthConfigSpy.mockReturnValue({
-      token: "sntrys_token_456",
-      source: "env:SENTRY_TOKEN",
-    });
+    // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
+    process.env.SENTRY_TOKEN = "sntrys_token_456";
 
     const { context, getStdout } = createContext();
-    await func.call(context, { timeout: 900 });
-
-    expect(getStdout()).toContain("SENTRY_TOKEN");
-    expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
-    getAuthConfigSpy.mockRestore();
+    try {
+      await func.call(context, { timeout: 900 });
+      expect(getStdout()).toContain("SENTRY_TOKEN");
+      expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+    } finally {
+      delete process.env.SENTRY_TOKEN;
+    }
   });
 
   test("--token: stores token, fetches user, writes success", async () => {

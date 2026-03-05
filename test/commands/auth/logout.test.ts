@@ -117,17 +117,18 @@ describe("logoutCommand.func", () => {
   test("env token (SENTRY_TOKEN): shows correct env var name", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
-    getAuthConfigSpy.mockReturnValue({
-      token: "sntrys_token_456",
-      source: "env:SENTRY_TOKEN",
-    });
+    // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
+    process.env.SENTRY_TOKEN = "sntrys_token_456";
 
     const { context, getStdout } = createContext();
-    await func.call(context, {});
-
-    expect(clearAuthSpy).not.toHaveBeenCalled();
-    expect(getStdout()).toContain("SENTRY_TOKEN");
-    expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+    try {
+      await func.call(context, {});
+      expect(clearAuthSpy).not.toHaveBeenCalled();
+      expect(getStdout()).toContain("SENTRY_TOKEN");
+      expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+    } finally {
+      delete process.env.SENTRY_TOKEN;
+    }
   });
 
   test("env token: falls back to SENTRY_AUTH_TOKEN if source is unexpected", async () => {

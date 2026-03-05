@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   type AuthSource,
+  getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
   isAuthenticated,
@@ -152,6 +153,28 @@ describe("env var auth: isEnvTokenActive", () => {
   test("returns false for empty env var", () => {
     process.env.SENTRY_AUTH_TOKEN = "";
     expect(isEnvTokenActive()).toBe(false);
+  });
+});
+
+describe("env var auth: getActiveEnvVarName", () => {
+  test("returns SENTRY_AUTH_TOKEN when that var is set", () => {
+    process.env.SENTRY_AUTH_TOKEN = "test_token";
+    expect(getActiveEnvVarName()).toBe("SENTRY_AUTH_TOKEN");
+  });
+
+  test("returns SENTRY_TOKEN when only that var is set", () => {
+    process.env.SENTRY_TOKEN = "test_token";
+    expect(getActiveEnvVarName()).toBe("SENTRY_TOKEN");
+  });
+
+  test("prefers SENTRY_AUTH_TOKEN when both are set", () => {
+    process.env.SENTRY_AUTH_TOKEN = "primary";
+    process.env.SENTRY_TOKEN = "secondary";
+    expect(getActiveEnvVarName()).toBe("SENTRY_AUTH_TOKEN");
+  });
+
+  test("falls back to SENTRY_AUTH_TOKEN when no env var is set", () => {
+    expect(getActiveEnvVarName()).toBe("SENTRY_AUTH_TOKEN");
   });
 });
 
