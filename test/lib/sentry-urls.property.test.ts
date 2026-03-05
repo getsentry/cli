@@ -454,6 +454,94 @@ describe("buildTraceUrl properties", () => {
   });
 });
 
+describe("self-hosted URLs", () => {
+  const SELF_HOSTED_URL = "https://sentry.company.com";
+
+  beforeEach(() => {
+    process.env.SENTRY_URL = SELF_HOSTED_URL;
+  });
+
+  test("getOrgBaseUrl returns base URL without subdomain", () => {
+    expect(getOrgBaseUrl("my-org")).toBe(SELF_HOSTED_URL);
+  });
+
+  test("buildOrgUrl uses path-based pattern", () => {
+    expect(buildOrgUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/`
+    );
+  });
+
+  test("buildEventSearchUrl uses path-based pattern", () => {
+    expect(
+      buildEventSearchUrl("my-org", "abc123def456abc123def456abc123de")
+    ).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/issues/?query=event.id:abc123def456abc123def456abc123de`
+    );
+  });
+
+  test("buildLogsUrl uses path-based pattern", () => {
+    expect(buildLogsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/explore/logs/`
+    );
+  });
+
+  test("buildTraceUrl uses path-based pattern", () => {
+    expect(buildTraceUrl("my-org", "abc123def456abc123def456abc123de")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/traces/abc123def456abc123def456abc123de/`
+    );
+  });
+
+  test("buildProjectUrl uses path-based pattern", () => {
+    expect(buildProjectUrl("my-org", "my-project")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/projects/my-project/`
+    );
+  });
+
+  test("buildOrgSettingsUrl uses path-based pattern", () => {
+    expect(buildOrgSettingsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/`
+    );
+  });
+
+  test("buildSeerSettingsUrl uses path-based pattern", () => {
+    expect(buildSeerSettingsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/seer/`
+    );
+  });
+
+  test("buildBillingUrl uses path-based pattern", () => {
+    expect(buildBillingUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/billing/overview/`
+    );
+  });
+
+  test("no URL builder prepends org as subdomain", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, eventIdArb),
+        ([orgSlug, projectSlug, eventId]) => {
+          const urls = [
+            buildOrgUrl(orgSlug),
+            buildProjectUrl(orgSlug, projectSlug),
+            buildEventSearchUrl(orgSlug, eventId),
+            buildOrgSettingsUrl(orgSlug),
+            buildSeerSettingsUrl(orgSlug),
+            buildBillingUrl(orgSlug),
+            buildLogsUrl(orgSlug),
+            buildTraceUrl(orgSlug, eventId),
+          ];
+
+          for (const url of urls) {
+            const parsed = new URL(url);
+            expect(parsed.hostname).toBe("sentry.company.com");
+          }
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("URL building cross-function properties", () => {
   test("all URL builders produce valid URLs", async () => {
     await fcAssert(

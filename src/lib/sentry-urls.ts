@@ -24,9 +24,16 @@ export function getSentryBaseUrl(): string {
  */
 export function getOrgBaseUrl(orgSlug: string): string {
   const base = getSentryBaseUrl();
+  if (!isSentrySaasUrl(base)) {
+    return base;
+  }
   const parsed = new URL(base);
   parsed.hostname = `${orgSlug}.${parsed.hostname}`;
   return parsed.origin;
+}
+
+function isSaaS(): boolean {
+  return isSentrySaasUrl(getSentryBaseUrl());
 }
 
 /**
@@ -57,7 +64,10 @@ export function isSentrySaasUrl(url: string): boolean {
  * @returns Full URL to the organization page
  */
 export function buildOrgUrl(orgSlug: string): string {
-  return `${getOrgBaseUrl(orgSlug)}/`;
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/`;
 }
 
 /**
@@ -68,7 +78,10 @@ export function buildOrgUrl(orgSlug: string): string {
  * @returns Full URL to the project settings page
  */
 export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
-  return `${getOrgBaseUrl(orgSlug)}/settings/projects/${projectSlug}/`;
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/settings/projects/${projectSlug}/`;
+  }
+  return `${getSentryBaseUrl()}/settings/${orgSlug}/projects/${projectSlug}/`;
 }
 
 /**
@@ -80,7 +93,10 @@ export function buildProjectUrl(orgSlug: string, projectSlug: string): string {
  * @returns Full URL to search results showing the event
  */
 export function buildEventSearchUrl(orgSlug: string, eventId: string): string {
-  return `${getOrgBaseUrl(orgSlug)}/issues/?query=event.id:${eventId}`;
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/issues/?query=event.id:${eventId}`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/issues/?query=event.id:${eventId}`;
 }
 
 // Settings URLs
@@ -93,7 +109,9 @@ export function buildEventSearchUrl(orgSlug: string, eventId: string): string {
  * @returns Full URL to the organization settings page
  */
 export function buildOrgSettingsUrl(orgSlug: string, hash?: string): string {
-  const url = `${getOrgBaseUrl(orgSlug)}/settings/`;
+  const url = isSaaS()
+    ? `${getOrgBaseUrl(orgSlug)}/settings/`
+    : `${getSentryBaseUrl()}/settings/${orgSlug}/`;
   return hash ? `${url}#${hash}` : url;
 }
 
@@ -104,7 +122,10 @@ export function buildOrgSettingsUrl(orgSlug: string, hash?: string): string {
  * @returns Full URL to the Seer settings page
  */
 export function buildSeerSettingsUrl(orgSlug: string): string {
-  return `${getOrgBaseUrl(orgSlug)}/settings/seer/`;
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/settings/seer/`;
+  }
+  return `${getSentryBaseUrl()}/settings/${orgSlug}/seer/`;
 }
 
 /**
@@ -115,7 +136,9 @@ export function buildSeerSettingsUrl(orgSlug: string): string {
  * @returns Full URL to the billing overview page
  */
 export function buildBillingUrl(orgSlug: string, product?: string): string {
-  const base = `${getOrgBaseUrl(orgSlug)}/settings/billing/overview/`;
+  const base = isSaaS()
+    ? `${getOrgBaseUrl(orgSlug)}/settings/billing/overview/`
+    : `${getSentryBaseUrl()}/settings/${orgSlug}/billing/overview/`;
   return product ? `${base}?product=${product}` : base;
 }
 
@@ -129,7 +152,9 @@ export function buildBillingUrl(orgSlug: string, product?: string): string {
  * @returns Full URL to the Logs explorer
  */
 export function buildLogsUrl(orgSlug: string, logId?: string): string {
-  const base = `${getOrgBaseUrl(orgSlug)}/explore/logs/`;
+  const base = isSaaS()
+    ? `${getOrgBaseUrl(orgSlug)}/explore/logs/`
+    : `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/logs/`;
   return logId ? `${base}?query=sentry.item_id:${logId}` : base;
 }
 
@@ -141,5 +166,8 @@ export function buildLogsUrl(orgSlug: string, logId?: string): string {
  * @returns Full URL to the trace view
  */
 export function buildTraceUrl(orgSlug: string, traceId: string): string {
-  return `${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`;
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
 }
