@@ -25,6 +25,7 @@ import * as Sentry from "@sentry/bun";
 import {
   GITHUB_RELEASES_URL,
   getPlatformBinaryName,
+  isDowngrade,
   isNightlyVersion,
 } from "./binary.js";
 import { applyPatch } from "./bspatch.js";
@@ -105,6 +106,11 @@ export function canAttemptDelta(targetVersion: string): boolean {
 
   // Cross-channel upgrades are rare one-off operations; skip delta
   if (isNightlyVersion(CLI_VERSION) !== isNightlyVersion(targetVersion)) {
+    return false;
+  }
+
+  // Downgrades have no forward patch path — skip immediately
+  if (isDowngrade(CLI_VERSION, targetVersion)) {
     return false;
   }
 

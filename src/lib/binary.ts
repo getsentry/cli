@@ -68,6 +68,28 @@ export function isNightlyVersion(version: string): boolean {
 }
 
 /**
+ * Compare two version strings and return their ordering.
+ *
+ * Uses `Bun.semver.order` which handles both stable (`X.Y.Z`) and
+ * nightly (`X.Y.Z-dev.<unix-seconds>`) versions correctly — the numeric
+ * pre-release identifier is compared numerically per SemVer spec.
+ *
+ * @returns 1 if a > b, -1 if a < b, 0 if equal
+ */
+export function compareVersions(a: string, b: string): -1 | 0 | 1 {
+  return Bun.semver.order(a, b);
+}
+
+/**
+ * Check whether moving from `current` to `target` is a downgrade.
+ *
+ * @returns true if target is older than current
+ */
+export function isDowngrade(current: string, target: string): boolean {
+  return compareVersions(current, target) === 1;
+}
+
+/**
  * Get the binary filename for the current platform.
  *
  * @returns "sentry.exe" on Windows, "sentry" elsewhere
