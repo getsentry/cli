@@ -6,8 +6,9 @@
  * - `sentry help <command>`: Shows Stricli's detailed help (--helpAll) for that command
  */
 
-import { buildCommand, run } from "@stricli/core";
+import { run } from "@stricli/core";
 import type { SentryContext } from "../context.js";
+import { buildCommand } from "../lib/command.js";
 import { printCustomHelp } from "../lib/help.js";
 
 export const helpCommand = buildCommand({

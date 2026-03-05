@@ -7,6 +7,23 @@
   "javascript": {
     "globals": ["Bun"]
   },
+  "linter": {
+    "rules": {
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@stricli/core": {
+                "importNames": ["buildCommand"],
+                "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "overrides": [
     {
       "includes": ["test/**/*.ts"],
@@ -44,6 +61,17 @@
         "rules": {
           "performance": {
             "noBarrelFile": "off"
+          }
+        }
+      }
+    },
+    {
+      // command.ts is the canonical wrapper — it must import buildCommand from @stricli/core
+      "includes": ["src/lib/command.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
           }
         }
       }

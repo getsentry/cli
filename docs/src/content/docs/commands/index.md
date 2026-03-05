@@ -25,6 +25,8 @@ All commands support the following global options:
 
 - `--help` - Show help for the command
 - `--version` - Show CLI version
+- `--log-level <level>` - Set log verbosity (`error`, `warn`, `log`, `info`, `debug`, `trace`). Overrides `SENTRY_LOG_LEVEL`
+- `--verbose` - Shorthand for `--log-level debug`
 
 ## JSON Output
 

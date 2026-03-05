@@ -44,9 +44,19 @@
  * - `NO_COLOR` — Disables color output (respected by consola natively)
  * - `FORCE_COLOR` — Forces color output even in non-TTY
  *
+ * ## withTag level propagation
+ *
+ * Consola's `withTag()` creates an independent instance that snapshots the
+ * parent's level at creation time. Scoped loggers created at module load
+ * time (e.g. `const log = logger.withTag("upgrade")`) would miss later
+ * `setLogLevel()` calls. To fix this, the logger's `withTag` method is
+ * wrapped to register all children in a registry, and `setLogLevel()`
+ * propagates the level to every registered child.
+ *
  * @module
  */
 
+import type { ConsolaInstance } from "consola";
 import { createConsola } from "consola";
 
 /**
@@ -119,6 +129,16 @@ export function getEnvLogLevel(): number | null {
 }
 
 /**
+ * Registry of all scoped loggers created via `logger.withTag()` at any depth.
+ *
+ * When `setLogLevel()` is called, every registered descendant is updated so that
+ * module-level scoped loggers (created at import time, before the CLI parses
+ * `--log-level` or `SENTRY_LOG_LEVEL`) see the new level. Grandchildren and
+ * deeper descendants are tracked via recursive `patchWithTag()`.
+ */
+const scopedLoggers: ConsolaInstance[] = [];
+
+/**
  * Global CLI logger instance.
  *
  * Use `logger.info()`, `logger.success()`, `logger.start()` for user-facing messages.
@@ -140,6 +160,27 @@ export const logger = createConsola({
   // FancyReporter is included by default for TTY, BasicReporter for CI/non-TTY.
   // Sentry reporter is added after Sentry.init() via attachSentryReporter().
 });
+
+/**
+ * Patch a consola instance's `withTag` so every child (and grandchild)
+ * is registered in {@link scopedLoggers} for {@link setLogLevel} propagation.
+ */
+function patchWithTag(instance: ConsolaInstance): void {
+  const original = instance.withTag.bind(instance);
+  instance.withTag = (tag: string): ConsolaInstance => {
+    const child = original(tag);
+    scopedLoggers.push(child);
+    patchWithTag(child);
+    return child;
+  };
+}
+
+// Patch the root logger so all descendants are tracked.
+// Consola's withTag() creates a completely independent instance that
+// snapshots the level at creation time — children never see later
+// setLogLevel() calls. By registering them here, setLogLevel() can
+// propagate the new level to all descendants.
+patchWithTag(logger);
 
 /** Whether the Sentry reporter has already been attached */
 let sentryReporterAttached = false;
@@ -182,58 +223,22 @@ export function attachSentryReporter(): void {
 }
 
 /**
- * Set the logger level at runtime.
+ * Set the logger level at runtime and propagate to all scoped children.
  *
- * Called from the global `--verbose` / `--log-level` flag handler in bin.ts
- * after pre-parsing argv.
+ * Called from:
+ * - bin.ts to apply `SENTRY_LOG_LEVEL` env var early
+ * - `buildCommand` wrapper when `--log-level` or `--verbose` flags are parsed
+ *
+ * Propagation is necessary because consola's `withTag()` creates independent
+ * instances that snapshot the parent's level at creation time. Module-level
+ * scoped loggers (e.g. `const log = logger.withTag("upgrade")`) would never
+ * see a later level change without this.
  *
  * @param level - consola numeric level (0-5)
  */
 export function setLogLevel(level: number): void {
   logger.level = level;
-}
-
-/**
- * Parse `--verbose` and `--log-level <level>` from raw argv.
- *
- * These are "global" flags that must be processed before Stricli sees the args,
- * because Stricli has no concept of global flags.
- *
- * `--log-level` is consumed (removed from argv) because it's exclusively a
- * logger flag — no command defines it. `--verbose` is NOT consumed because
- * some commands (e.g., `api`) define their own `--verbose` flag with
- * command-specific semantics.
- *
- * Priority: `--log-level` wins over `--verbose` if both are specified.
- * `--verbose` is equivalent to `--log-level debug`.
- *
- * @param argv - Raw process.argv.slice(2), mutated in place
- * @returns The resolved log level, or null if no flag was specified
- */
-export function extractLogLevelFromArgs(argv: string[]): number | null {
-  let resolvedLevel: number | null = null;
-
-  const debugLevel = LOG_LEVEL_NAMES.indexOf("debug");
-
-  // Check --verbose but leave it in argv — commands like `api` have their own --verbose flag
-  const verboseIdx = argv.indexOf("--verbose");
-  if (verboseIdx !== -1) {
-    resolvedLevel = debugLevel;
+  for (const child of scopedLoggers) {
+    child.level = level;
   }
-
-  // Process --log-level <level> (overrides --verbose, consumed from argv)
-  const logLevelIdx = argv.indexOf("--log-level");
-  if (logLevelIdx !== -1) {
-    const levelValue = argv[logLevelIdx + 1];
-    if (levelValue && !levelValue.startsWith("-")) {
-      resolvedLevel = parseLogLevel(levelValue);
-      argv.splice(logLevelIdx, 2);
-    } else {
-      // --log-level without value — remove just the flag, use debug as sensible default
-      resolvedLevel = debugLevel;
-      argv.splice(logLevelIdx, 1);
-    }
-  }
-
-  return resolvedLevel;
 }
