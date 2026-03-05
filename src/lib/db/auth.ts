@@ -20,6 +20,9 @@ type AuthRow = {
   updated_at: number;
 };
 
+/** Prefix for environment variable auth sources in {@link AuthSource} */
+export const ENV_SOURCE_PREFIX = "env:";
+
 /** Where the auth token originated */
 export type AuthSource = "env:SENTRY_AUTH_TOKEN" | "env:SENTRY_TOKEN" | "oauth";
 

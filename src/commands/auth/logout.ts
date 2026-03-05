@@ -8,6 +8,7 @@ import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   clearAuth,
+  ENV_SOURCE_PREFIX,
   getAuthConfig,
   isAuthenticated,
   isEnvTokenActive,
@@ -34,15 +35,12 @@ export const logoutCommand = buildCommand({
 
     if (isEnvTokenActive()) {
       const config = getAuthConfig();
-      const envVar = config?.source.startsWith("env:")
-        ? config.source.slice(4)
+      const envVar = config?.source.startsWith(ENV_SOURCE_PREFIX)
+        ? config.source.slice(ENV_SOURCE_PREFIX.length)
         : "SENTRY_AUTH_TOKEN";
-      // Still clear stored auth so if env var is removed later, user is cleanly logged out
-      await clearAuth();
       stdout.write(
         `Authentication is provided via ${envVar} environment variable.\n` +
-          "Stored credentials have been cleared, but the env var will continue to provide authentication.\n" +
-          `Unset ${envVar} to fully log out.\n`
+          `Unset ${envVar} to log out.\n`
       );
       return;
     }

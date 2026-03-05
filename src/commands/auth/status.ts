@@ -10,6 +10,7 @@ import { buildCommand } from "../../lib/command.js";
 import {
   type AuthConfig,
   type AuthSource,
+  ENV_SOURCE_PREFIX,
   getAuthConfig,
   isAuthenticated,
 } from "../../lib/db/auth.js";
@@ -45,12 +46,12 @@ function writeUserInfo(stdout: Writer): void {
 
 /** Check if the auth source is an environment variable */
 function isEnvSource(source: AuthSource): boolean {
-  return source.startsWith("env:");
+  return source.startsWith(ENV_SOURCE_PREFIX);
 }
 
 /** Extract the env var name from an env-based AuthSource (e.g. "env:SENTRY_AUTH_TOKEN" → "SENTRY_AUTH_TOKEN") */
 function envVarName(source: AuthSource): string {
-  return source.slice(4);
+  return source.slice(ENV_SOURCE_PREFIX.length);
 }
 
 /**

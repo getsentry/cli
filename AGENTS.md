@@ -628,68 +628,19 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
-<!-- lore:019cb8ea-c6f0-75d8-bda7-e32b4e217f92 -->
-* **CLI telemetry DSN is public write-only — safe to embed in install script**: The CLI's Sentry DSN (\`SENTRY\_CLI\_DSN\` in \`src/lib/constants.ts\`) is a public write-only ingest key already baked into every binary. Safe to hardcode in install scripts. Opt-out: \`SENTRY\_CLI\_NO\_TELEMETRY=1\`.
+<!-- lore:019cbeba-e4d3-748c-ad50-fe3c3d5c0a0d -->
+* **Auth token env var override pattern: SENTRY\_AUTH\_TOKEN > SENTRY\_TOKEN > SQLite**: Authentication in \`src/lib/db/auth.ts\` follows a layered precedence: \`SENTRY\_AUTH\_TOKEN\` env var > \`SENTRY\_TOKEN\` env var > SQLite-stored OAuth token. The \`getEnvToken()\` helper reads env vars with \`.trim()\` (empty/whitespace treated as unset). \`AuthSource\` type tracks provenance: \`"env:SENTRY\_AUTH\_TOKEN"\` | \`"env:SENTRY\_TOKEN"\` | \`"oauth"\`. Env tokens bypass all refresh/expiry logic — \`refreshToken()\` returns immediately, \`handleUnauthorized()\` in sentry-client.ts skips 401 retry. \`isEnvTokenActive()\` is the guard used by auth commands (login, logout, refresh, status) to branch behavior. \`AuthConfig.source\` is always populated so callers can distinguish env vs stored tokens without re-checking env vars.
 
-<!-- lore:019c978a-18b5-7a0d-a55f-b72f7789bdac -->
-* **cli.sentry.dev is served from gh-pages branch via GitHub Pages**: \`cli.sentry.dev\` is served from gh-pages branch via GitHub Pages. Craft's gh-pages target runs \`git rm -r -f .\` before extracting docs — persist extra files via \`postReleaseCommand\` in \`.craft.yml\`. Install script supports \`--channel nightly\`, downloading from the \`nightly\` release tag directly. version.json is only used by upgrade/version-check flow.
-
-<!-- lore:2c3eb7ab-1341-4392-89fd-d81095cfe9c4 -->
-* **npm bundle requires Node.js >= 22 due to node:sqlite polyfill**: The npm package (dist/bin.cjs) requires Node.js >= 22 because the bun:sqlite polyfill uses \`node:sqlite\`. A runtime version guard in the esbuild banner catches this early. When writing esbuild banner strings in TS template literals, double-escape: \`\\\\\\\n\` in TS → \`\\\n\` in output → newline at runtime. Single \`\\\n\` produces a literal newline inside a JS string, causing SyntaxError.
-
-<!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
-* **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. The \`explicit-org-numeric\` case uses \`getIssueInOrg\`. \`resolveOrgAndIssueId\` no longer throws for bare numeric IDs when permalink contains the org slug.
-
-<!-- lore:019c972c-9f0d-7c8e-95b1-7beda99c36a8 -->
-* **parseSentryUrl does not handle subdomain-style SaaS URLs**: parseSentryUrl in src/lib/sentry-url-parser.ts handles both path-based (\`/organizations/{org}/...\`) and subdomain-style (\`https://{org}.sentry.io/issues/123/\`) URLs. \`matchSubdomainOrg()\` extracts org from hostname ending in \`.sentry.io\`. Region subdomains (\`us\`, \`de\`) filtered by requiring org slug length > 2. Supports \`/issues/{id}/\`, \`/issues/{id}/events/{eventId}/\`, and \`/traces/{traceId}/\` paths. Self-hosted uses path-based only.
-
-### Decision
-
-<!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
-* **Raw markdown output for non-interactive terminals, rendered for TTY**: Markdown-first output pipeline: custom renderer in \`src/lib/formatters/markdown.ts\` walks \`marked\` tokens to produce ANSI-styled output. Commands build CommonMark using helpers (\`mdKvTable()\`, \`mdRow()\`, \`colorTag()\`, \`escapeMarkdownCell()\`, \`safeCodeSpan()\`) and pass through \`renderMarkdown()\`. \`isPlainOutput()\` precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`FORCE\_COLOR\` > \`!isTTY\`. \`--json\` always outputs JSON. Terminal styling: code spans render as cyan (\`codeFg: #22d3ee\`) on dark teal background (\`codeBg: #1a2f3a\`) with space padding for pill look. h1/h2 headings are bold cyan with a \`━\` divider bar underneath (clamped to 30 chars via \`stringWidth\`). h3+ are bold cyan without divider. Colors defined in \`COLORS\` object in \`colors.ts\`. Tests run non-TTY so assertions match raw CommonMark; use \`stripAnsi()\` helper for rendered-mode content assertions.
-
-<!-- lore:00166785-609d-4ab5-911e-ee205d17b90c -->
-* **whoami should be separate from auth status command**: The \`sentry auth whoami\` command should be a dedicated command separate from \`sentry auth status\`. They serve different purposes: \`status\` shows everything about auth state (token, expiry, defaults, org verification), while \`whoami\` just shows user identity (name, email, username, ID) by fetching live from \`/auth/\` endpoint. \`sentry whoami\` should be a top-level alias (like \`sentry issues\` → \`sentry issue list\`). \`whoami\` should support \`--json\` for machine consumption and be lightweight — no credential verification, no defaults listing.
+<!-- lore:019cbaa2-e4a2-76c0-8f64-917a97ae20c5 -->
+* **Consola chosen as CLI logger with Sentry createConsolaReporter integration**: Consola chosen as CLI logger with Sentry createConsolaReporter integration. Two reporters: FancyReporter (stderr) and Sentry reporter for structured logs. Level controlled by \`SENTRY\_LOG\_LEVEL\` env var mapped to consola numeric levels: error=0, warn=1, info=3 (default), debug=4, trace=5. \`buildCommand\` in \`src/lib/command.ts\` wraps Stricli's \`buildCommand\` to inject hidden \`--log-level\` and \`--verbose\` flags, intercepts them before calling original func via \`setLogLevel()\`, then strips them. When a command already defines \`--verbose\` (e.g. \`api\`), the injected one is skipped. \`withTag()\` creates independent instances; \`setLogLevel()\` propagates to all children via a registry. Respects \`NO\_COLOR\` natively.
 
 ### Gotcha
 
-<!-- lore:019c8ab6-d119-7365-9359-98ecf464b704 -->
-* **@sentry/api SDK passes Request object to custom fetch — headers lost on Node.js**: @sentry/api SDK calls \`\_fetch(request)\` with no init object. In \`authenticatedFetch\`, \`init\` is undefined so \`prepareHeaders\` creates empty headers — on Node.js this strips Content-Type (HTTP 415). Fix: fall back to \`input.headers\` when \`init\` is undefined. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) to access the Response's Link header for pagination. \`per\_page\` is not in SDK types; cast query to pass it at runtime.
-
-<!-- lore:019c9e98-7af4-7e25-95f4-fc06f7abf564 -->
-* **Bun binary build requires SENTRY\_CLIENT\_ID env var**: The build script (\`script/bundle.ts\`) requires \`SENTRY\_CLIENT\_ID\` environment variable and exits with code 1 if missing. When building locally, use \`bun run --env-file=.env.local build\` or set the env var explicitly. The binary build (\`bun run build\`) also needs it. Without it you get: \`Error: SENTRY\_CLIENT\_ID environment variable is required.\`
-
-<!-- lore:019c9776-e3dd-7632-88b8-358a19506218 -->
-* **GitHub immutable releases prevent rolling nightly tag pattern**: getsentry/cli has immutable GitHub releases — assets can't be modified and tags can NEVER be reused. Nightly builds are published to GHCR with versioned tags like \`nightly-0.14.0-dev.1772661724\`, NOT to GitHub Releases or npm. \`versionExists()\` routes nightly versions to GHCR manifest checks. \`downloadNightlyToPath()\` accepts optional \`version\` param for pinned versioned tags vs rolling \`:nightly\`. \`fetchManifest()\` throws \`UpgradeError("network\_error")\` for both network failures and non-200 — callers must check message for HTTP 404/403 to distinguish "not found" from real errors. Craft with no \`preReleaseCommand\` silently skips \`bump-version.sh\` if only target is \`github\` — must explicitly set it.
-
-<!-- lore:019cb8c2-d7b5-780c-8a9f-d20001bc198f -->
-* **Install script: BSD sed and awk JSON parsing breaks OCI digest extraction**: The install script parses OCI manifests with awk (no jq). Key trap: BSD sed \`\n\` is literal, not newline. Fix: single awk pass tracking last-seen \`"digest"\`, printing when \`"org.opencontainers.image.title"\` matches target. The config digest (\`sha256:44136fa...\`) is a 2-byte \`{}\` blob — downloading it instead of the real binary causes \`gunzip: unexpected end of file\`.
-
-<!-- lore:019cb963-cb63-722d-9365-b34336f4766d -->
-* **macOS SIGKILL on MAP\_SHARED mmap of signed Mach-O binaries**: \`Bun.mmap()\` always opens files with \`PROT\_WRITE\`/\`O\_RDWR\` regardless of the \`shared\` flag. This fails on the running binary: macOS sends uncatchable SIGKILL (AMFI rejects writable mappings on signed Mach-O), Linux returns ETXTBSY (kernel blocks opening running executables for write). The platform-conditional fix (PR #340: darwin→arrayBuffer, else→mmap) was insufficient — mmap fails on BOTH platforms. Fixed by using \`new Uint8Array(await Bun.file(oldPath).arrayBuffer())\` unconditionally in bspatch.ts. Costs ~100 MB heap for the old binary but is the only approach that works cross-platform.
-
-<!-- lore:019c969a-1c90-7041-88a8-4e4d9a51ebed -->
-* **Multiple mockFetch calls replace each other — use unified mocks for multi-endpoint tests**: Bun test mocking gotchas: (1) \`mockFetch()\` replaces \`globalThis.fetch\` — calling it twice replaces the first mock. Use a single unified fetch mock dispatching by URL pattern. (2) \`mock.module()\` pollutes the module registry for ALL subsequent test files. Tests using it must live in \`test/isolated/\` and run via \`test:isolated\`. (3) For \`Bun.spawn\`, use direct property assignment in \`beforeEach\`/\`afterEach\`.
-
-<!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
-* **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
+<!-- lore:019cbe0d-d03e-716c-b372-b09998c07ed6 -->
+* **Stricli rejects unknown flags — pre-parsed global flags must be consumed from argv**: Stricli's arg parser is strict: any \`--flag\` not registered on a command throws \`No flag registered for --flag\`. Global flags (parsed before Stricli in bin.ts) MUST be spliced out of argv. \`--log-level\` was correctly consumed but \`--verbose\` was intentionally left in (for the \`api\` command's own \`--verbose\`). This breaks every other command. Also, \`argv.indexOf('--flag')\` doesn't match \`--flag=value\` form — must check both space-separated and equals-sign forms when pre-parsing. A Biome \`noRestrictedImports\` lint rule in \`biome.jsonc\` now blocks \`import { buildCommand } from "@stricli/core"\` at error level — only \`src/lib/command.ts\` is exempted. Other \`@stricli/core\` exports (\`buildRouteMap\`, \`run\`, etc.) are allowed.
 
 ### Pattern
 
-<!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
-* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
-
-<!-- lore:5ac4e219-ea1f-41cb-8e97-7e946f5848c0 -->
-* **PR workflow: wait for Seer and Cursor BugBot before resolving**: After pushing a PR in the getsentry/cli repo, the CI pipeline includes Seer Code Review and Cursor Bugbot as required or advisory checks. Both typically take 2-3 minutes. The workflow is: push → wait for all CI (including npm build jobs which test the actual bundle) → check for inline review comments from Seer/BugBot → fix if needed → repeat. Use \`gh pr checks \<PR> --watch\` to monitor. Review comments are fetched via \`gh api repos/OWNER/REPO/pulls/NUM/comments\` and \`gh api repos/OWNER/REPO/pulls/NUM/reviews\`.
-
-<!-- lore:019cb162-d3ad-7b05-ab4f-f87892d517a6 -->
-* **Shared pagination infrastructure: buildPaginationContextKey and parseCursorFlag**: List commands with cursor pagination use \`buildPaginationContextKey(type, identifier, flags)\` for composite context keys and \`parseCursorFlag(value)\` accepting \`"last"\` magic value. Critical: \`resolveCursor()\` must be called inside the \`org-all\` override closure, not before \`dispatchOrgScopedList\` — otherwise cursor validation errors fire before the correct mode-specific error.
-
-<!-- lore:019cbd5f-ec35-7e2d-8386-6d3a67adf0cf -->
-* **Telemetry instrumentation pattern: withTracingSpan + captureException for handled errors**: For graceful-fallback operations, use \`withTracingSpan\` from \`src/lib/telemetry.ts\` for child spans and \`captureException\` from \`@sentry/bun\` (named import — Biome forbids namespace imports) with \`level: 'warning'\` for non-fatal errors. \`withTracingSpan\` uses \`onlyIfParent: true\` so it's a no-op without active transaction. When returning \`withTracingSpan(...)\` directly, drop \`async\` and use \`Promise.resolve(null)\` for early returns. User-visible fallbacks should use \`log.warn()\` not \`log.debug()\` — debug is invisible at default level. Also: several commands bypass telemetry by importing \`buildCommand\` from \`@stricli/core\` directly instead of \`../../lib/command.js\`. Affected: trace/list, trace/view, log/view, api.ts, help.ts.
-
-### Preference
-
-<!-- lore:019c9700-0fc3-730c-82c3-a290d5ecc2ea -->
-* **CI scripts: prefer jq/sed over node -e for JSON manipulation**: Prefer \`jq\`/\`sed\`/\`awk\` over \`node -e\` for JSON manipulation in CI scripts. Example: \`jq -r .version package.json\` to read, \`jq --arg v "$NEW" '.version = $v' package.json > tmp && mv tmp package.json\` to write.
+<!-- lore:019cbe44-7687-7288-81a2-662feefc28ea -->
+* **SKILL.md generator must filter hidden Stricli flags**: \`script/generate-skill.ts\` introspects Stricli's route tree to auto-generate \`plugins/sentry-cli/skills/sentry-cli/SKILL.md\`. The \`FlagDef\` type must include \`hidden?: boolean\` and \`extractFlags\` must propagate it to \`FlagInfo\`. The filter in \`generateCommandDoc\` must exclude \`f.hidden\` alongside \`help\`/\`helpAll\`. Without this, hidden flags injected by \`buildCommand\` (like \`--log-level\`, \`--verbose\`) appear on every command in the AI agent skill file. Global flags should instead be documented once in \`docs/src/content/docs/commands/index.md\` Global Options section, which the generator pulls into SKILL.md via \`loadCommandsOverview\`.
 <!-- End lore-managed section -->
