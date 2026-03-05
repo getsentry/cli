@@ -5,15 +5,21 @@
  * TRDIFF10 format (produced by zig-bsdiff with `--use-zstd`). Designed for
  * minimal memory usage during CLI self-upgrades:
  *
- * - Old binary: loaded via `Bun.file().arrayBuffer()` (~100 MB heap)
+ * - Old binary: copy-then-mmap for 0 JS heap (CoW on btrfs/xfs/APFS),
+ *   with child-process probe for mmap safety (macOS AMFI sends uncatchable
+ *   SIGKILL on signed Mach-O), falling back to `arrayBuffer()` if unsafe
  * - Diff/extra blocks: streamed via `DecompressionStream('zstd')`
  * - Output: written incrementally to disk via `Bun.file().writer()`
  * - Integrity: SHA-256 computed inline via `Bun.CryptoHasher`
  *
- * Total heap usage: ~100 MB for old file + ~1-2 MB for streaming buffers.
- * `Bun.mmap()` is NOT usable here because the old file is the running binary:
- * - macOS: AMFI sends uncatchable SIGKILL (PROT_WRITE on signed Mach-O)
- * - Linux: ETXTBSY from `open()` with write flags on a running executable
+ * `Bun.mmap()` cannot target the running binary directly because it opens
+ * with PROT_WRITE/O_RDWR:
+ * - macOS: AMFI sends uncatchable SIGKILL (writable mapping on signed Mach-O)
+ * - Linux: ETXTBSY from `open()` (kernel blocks write-open on running ELF)
+ *
+ * The copy-then-mmap strategy sidesteps both: the copy is a regular file
+ * with no running process, so mmap succeeds. On CoW-capable filesystems
+ * (btrfs, xfs, APFS) the copy is near-instant with zero extra disk I/O.
  *
  * TRDIFF10 format (from zig-bsdiff):
  * ```
@@ -24,6 +30,10 @@
  * [32..]   zstd(control) | zstd(diff) | zstd(extra)
  * ```
  */
+
+import { copyFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** TRDIFF10 header magic bytes */
 const TRDIFF10_MAGIC = "TRDIFF10";
@@ -210,12 +220,117 @@ function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
   );
 }
 
+/** Result of loading the old binary for patching */
+type OldFileHandle = {
+  /** Memory-mapped or in-memory view of the old binary */
+  data: Uint8Array;
+  /** Cleanup function to call after patching (removes temp copy, if any) */
+  cleanup: () => void;
+};
+
+/**
+ * Probe whether `Bun.mmap()` works on a file by spawning a child process.
+ *
+ * macOS AMFI sends uncatchable SIGKILL when a process creates a writable
+ * memory mapping of a code-signed Mach-O binary — even a copy. Since
+ * SIGKILL terminates the process inside the syscall (before any catch
+ * block runs), we cannot detect the failure in-process.
+ *
+ * This probe spawns a minimal child that attempts `Bun.mmap()` on the
+ * target file. If the child exits 0, mmap is safe. If it's killed
+ * (SIGKILL) or exits non-zero, we fall back to `arrayBuffer()`.
+ *
+ * @param filePath - Path to the file to probe (should be the temp copy)
+ * @returns true if mmap is safe on this file, false otherwise
+ */
+async function probeMmapSafe(filePath: string): Promise<boolean> {
+  try {
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `Bun.mmap(${JSON.stringify(filePath)}, { shared: false })`,
+      ],
+      { stdout: "ignore", stderr: "ignore" }
+    );
+    const exitCode = await child.exited;
+    return exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Load the old binary for read access during patching.
+ *
+ * Strategy: copy to temp file, probe mmap safety via child process,
+ * then mmap the copy if safe. This avoids `Bun.mmap()` on files that
+ * would trigger uncatchable SIGKILL (macOS AMFI on signed Mach-O) while
+ * keeping zero JS heap on platforms where mmap works. On CoW filesystems
+ * (btrfs, xfs, APFS) the copy is a metadata-only reflink (near-instant).
+ *
+ * Falls back to `Bun.file().arrayBuffer()` (~100 MB heap) if the probe
+ * fails or if copy/mmap errors for any reason.
+ */
+async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
+  const tempCopy = join(tmpdir(), `sentry-patch-old-${process.pid}`);
+  try {
+    copyFileSync(oldPath, tempCopy);
+
+    // Probe mmap safety in a child process — macOS AMFI sends uncatchable
+    // SIGKILL on writable mappings of signed Mach-O, even for copies.
+    const mmapSafe = await probeMmapSafe(tempCopy);
+
+    if (mmapSafe) {
+      const data = Bun.mmap(tempCopy, { shared: false });
+      return {
+        data,
+        cleanup: () => {
+          try {
+            unlinkSync(tempCopy);
+          } catch {
+            // Best-effort cleanup — OS will reclaim on reboot
+          }
+        },
+      };
+    }
+
+    // mmap probe failed — read copy into JS heap, then clean up temp file
+    const data = new Uint8Array(await Bun.file(tempCopy).arrayBuffer());
+    try {
+      unlinkSync(tempCopy);
+    } catch {
+      // Best-effort cleanup
+    }
+    return {
+      data,
+      cleanup: () => {
+        // Data is in JS heap — no temp file to clean up
+      },
+    };
+  } catch {
+    // Copy failed — fall back to reading original directly into JS heap
+    try {
+      unlinkSync(tempCopy);
+    } catch {
+      // May not exist if copyFileSync failed
+    }
+    return {
+      data: new Uint8Array(await Bun.file(oldPath).arrayBuffer()),
+      cleanup: () => {
+        // Data is in JS heap — no temp file to clean up
+      },
+    };
+  }
+}
+
 /**
  * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
  *
- * Reads the old file into memory via `Bun.file().arrayBuffer()`, then streams
- * diff/extra blocks (~16 KB buffers) via `DecompressionStream('zstd')`,
- * writes output via `Bun.file().writer()`, and computes SHA-256 inline.
+ * Copies the old file to a temp path and mmaps the copy (0 JS heap), falling
+ * back to `arrayBuffer()` if mmap fails. Streams diff/extra blocks via
+ * `DecompressionStream('zstd')`, writes output via `Bun.file().writer()`,
+ * and computes SHA-256 inline.
  *
  * @param oldPath - Path to the existing (old) binary file
  * @param patchData - Complete TRDIFF10 patch file contents
@@ -246,12 +361,10 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // Bun.mmap() is NOT usable for the old file during self-upgrades because
-  // it always opens with PROT_WRITE, and the old file is the running binary:
-  // - macOS: AMFI sends uncatchable SIGKILL on writable mapping of signed Mach-O
-  // - Linux: open() returns ETXTBSY when opening a running executable for write
-  // Reading into memory costs ~100 MB heap but avoids both platform restrictions.
-  const oldFile = new Uint8Array(await Bun.file(oldPath).arrayBuffer());
+  // Load old binary via copy-then-mmap (0 JS heap) or arrayBuffer fallback.
+  // See loadOldBinary() for why direct mmap of the running binary is impossible.
+  const { data: oldFile, cleanup: cleanupOldFile } =
+    await loadOldBinary(oldPath);
 
   // Streaming output: write directly to disk, no output buffer in memory
   const writer = Bun.file(destPath).writer();
@@ -300,7 +413,11 @@ export async function applyPatch(
       oldpos += seekBy;
     }
   } finally {
-    await writer.end();
+    try {
+      await writer.end();
+    } finally {
+      cleanupOldFile();
+    }
   }
 
   // Validate output size matches header

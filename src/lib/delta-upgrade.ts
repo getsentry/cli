@@ -19,6 +19,9 @@
 
 import { unlinkSync } from "node:fs";
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
+
 import {
   GITHUB_RELEASES_URL,
   getPlatformBinaryName,
@@ -34,6 +37,7 @@ import {
   type OciManifest,
 } from "./ghcr.js";
 import { logger } from "./logger.js";
+import { withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
 const log = logger.withTag("delta-upgrade");
@@ -78,6 +82,8 @@ export type DeltaResult = {
   sha256: string;
   /** Total bytes downloaded for the patch chain */
   patchBytes: number;
+  /** Number of patches in the chain (1 = direct, >1 = multi-hop) */
+  chainLength: number;
 };
 
 /**
@@ -563,29 +569,92 @@ export async function resolveNightlyChain(
  * @param destPath - Path to write the patched binary
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
-export async function attemptDeltaUpgrade(
+export function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
 ): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
-    return null;
+    return Promise.resolve(null);
   }
 
-  log.debug(`Attempting delta upgrade from ${CLI_VERSION} to ${targetVersion}`);
+  const channel = isNightlyVersion(targetVersion) ? "nightly" : "stable";
 
-  try {
-    if (isNightlyVersion(targetVersion)) {
-      return await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath);
-    }
-    return await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
-  } catch (error) {
-    // Any error during delta upgrade → fall back to full download.
-    // Log at debug so --verbose reveals the root cause (ETXTBSY, network, etc.)
-    const msg = error instanceof Error ? error.message : String(error);
-    log.debug(`Delta upgrade failed (${msg}), falling back to full download`);
-    return null;
-  }
+  return withTracingSpan(
+    "delta-upgrade",
+    "upgrade.delta",
+    async (span) => {
+      span.setAttribute("delta.from_version", CLI_VERSION);
+      span.setAttribute("delta.to_version", targetVersion);
+
+      log.debug(
+        `Attempting delta upgrade from ${CLI_VERSION} to ${targetVersion}`
+      );
+
+      try {
+        const result =
+          channel === "nightly"
+            ? await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath)
+            : await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
+
+        if (result) {
+          span.setAttribute("delta.patch_bytes", result.patchBytes);
+          span.setAttribute("delta.chain_length", result.chainLength);
+          span.setAttribute("delta.sha256", result.sha256.slice(0, 12));
+          span.setStatus({ code: 1 }); // OK
+
+          Sentry.metrics.distribution(
+            "upgrade.delta.patch_bytes",
+            result.patchBytes,
+            {
+              attributes: { channel },
+            }
+          );
+          Sentry.metrics.distribution(
+            "upgrade.delta.chain_length",
+            result.chainLength,
+            {
+              attributes: { channel },
+            }
+          );
+        } else {
+          // No patch available — not an error, just unavailable
+          span.setAttribute("delta.result", "unavailable");
+          span.setStatus({ code: 1 }); // OK — graceful fallback
+        }
+        return result;
+      } catch (error) {
+        // Record the error in Sentry so we can see delta failures in telemetry.
+        // Marked non-fatal: the upgrade continues via full download.
+        Sentry.captureException(error, {
+          level: "warning",
+          tags: {
+            "delta.from_version": CLI_VERSION,
+            "delta.to_version": targetVersion,
+            "delta.channel": channel,
+          },
+          contexts: {
+            delta_upgrade: {
+              from_version: CLI_VERSION,
+              to_version: targetVersion,
+              channel,
+              old_binary_path: oldBinaryPath,
+            },
+          },
+        });
+
+        const msg = error instanceof Error ? error.message : String(error);
+        log.warn(
+          `Delta upgrade failed (${msg}), falling back to full download`
+        );
+        span.setStatus({ code: 2 }); // Error
+        span.setAttribute("delta.result", "error");
+        span.setAttribute("delta.error", msg);
+        return null;
+      }
+    },
+    { "delta.channel": channel }
+  );
 }
 
 /**
@@ -609,7 +678,11 @@ export async function resolveStableDelta(
   }
 
   const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
-  return { sha256, patchBytes: chain.totalSize };
+  return {
+    sha256,
+    patchBytes: chain.totalSize,
+    chainLength: chain.patches.length,
+  };
 }
 
 /**
@@ -654,7 +727,11 @@ export async function resolveNightlyDelta(
   }
 
   const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
-  return { sha256, patchBytes: chain.totalSize };
+  return {
+    sha256,
+    patchBytes: chain.totalSize,
+    chainLength: chain.patches.length,
+  };
 }
 
 /** Remove intermediate patching files, ignoring errors. */
