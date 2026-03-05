@@ -1,0 +1,234 @@
+# Plan: Evolve `withAuthGuard` to return errors + convert remaining patterns + expand auto-login to `expired`
+
+## Goal
+
+1. Change `withAuthGuard` to return the caught error instead of using an `onError` callback
+2. Convert the remaining manual `if (error instanceof AuthError) { throw error; }` catch patterns
+3. Expand the auto-login flow to also handle `AuthError("expired")`
+
+## Context
+
+`withAuthGuard()` exists in `src/lib/errors.ts` with 15 call sites in `src/`. It has an `onError` callback parameter used by only **2 call sites**:
+- `create.ts` L182 — captures error into a mutable variable (exactly the anti-pattern)
+- `resolve-target.ts` L557 — conditionally throws `ResolutionError` for 404s
+
+Additionally, 7 manual `instanceof AuthError` rethrow patterns remain unconverted.
+
+## Changes
+
+### 1. Change `withAuthGuard` return type to include the error (`src/lib/errors.ts`)
+
+Remove the `onError` callback. Instead, return a discriminated union that gives callers access to the caught error:
+
+```typescript
+/** Result when the guarded operation succeeded */
+type AuthGuardSuccess<T> = { ok: true; value: T };
+
+/** Result when a non-auth error was caught */
+type AuthGuardFailure = { ok: false; error: unknown };
+
+type AuthGuardResult<T> = AuthGuardSuccess<T> | AuthGuardFailure;
+
+/**
+ * Execute an async operation, propagating AuthError but capturing all others.
+ * Returns a discriminated result so callers can inspect the caught error.
+ */
+export async function withAuthGuard<T>(
+  fn: () => Promise<T>
+): Promise<AuthGuardResult<T>> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return { ok: false, error };
+  }
+}
+```
+
+This is a **breaking change** to `withAuthGuard` — the `fallback` and `onError` params are removed, and the return type changes. All 15 existing call sites + 2 `onError` sites need updating.
+
+**Migration pattern for the simple cases** (13 of 15 — currently just return fallback):
+```typescript
+// Before:
+const orgs = await withAuthGuard(() => listOrganizations(), []);
+
+// After:
+const result = await withAuthGuard(() => listOrganizations());
+const orgs = result.ok ? result.value : [];
+```
+
+This is slightly more verbose but explicit, and callers that need the error now get it for free.
+
+**Migration for `onError` sites** (2 of 15):
+
+`create.ts` — no more mutable variable:
+```typescript
+// Before:
+let listTeamsError: unknown = null;
+const teams = await withAuthGuard(
+  () => listTeams(orgSlug), null,
+  (error) => { listTeamsError = error; }
+);
+
+// After:
+const teamsResult = await withAuthGuard(() => listTeams(orgSlug));
+const teams = teamsResult.ok ? teamsResult.value : null;
+const listTeamsError = teamsResult.ok ? null : teamsResult.error;
+```
+
+`resolve-target.ts` L557 — conditional rethrow moves inline:
+```typescript
+// Before:
+const projectInfo = await withAuthGuard(
+  () => getProject(org, project), undefined,
+  (error) => {
+    if (error instanceof ApiError && error.status === 404) {
+      throw new ResolutionError(...);
+    }
+  }
+);
+
+// After:
+const projectResult = await withAuthGuard(() => getProject(org, project));
+if (!projectResult.ok) {
+  if (projectResult.error instanceof ApiError && projectResult.error.status === 404) {
+    throw new ResolutionError(...);
+  }
+  return undefined;
+}
+const projectInfo = projectResult.value;
+```
+
+### 2. Convert `src/lib/region.ts` — `resolveOrgRegion`
+
+Wrap the entire function body. The key insight: throw `result.error` and let `withAuthGuard` catch it:
+
+```typescript
+const result = await withAuthGuard(async () => {
+  const result = await retrieveAnOrganization({...});
+  if (result.error !== undefined) {
+    throw result.error;  // AuthError propagates, others → { ok: false }
+  }
+  const regionUrl = result.data?.links?.regionUrl ?? baseUrl;
+  await setOrgRegion(orgSlug, regionUrl);
+  return regionUrl;
+});
+return result.ok ? result.value : getSentryBaseUrl();
+```
+
+Eliminates both `instanceof AuthError` checks (L47 and L61).
+
+### 3. Convert `src/commands/project/list.ts` — `handleExplicit`
+
+```typescript
+const result = await withAuthGuard(() => getProject(org, projectSlug));
+if (!result.ok) {
+  if (flags.json) { writeJson(stdout, []); return; }
+  stdout.write(`No project '${projectSlug}' found...`);
+  writeFooter(stdout, ...);
+  return;
+}
+const project: ProjectWithOrg = { ...result.value, orgSlug: org };
+```
+
+### 4. Convert `src/commands/issue/list.ts` — `fetchIssuesForTarget`
+
+```typescript
+const result = await withAuthGuard(async () => {
+  const { issues, nextCursor } = await listIssuesAllPages(...);
+  return { target, issues, hasMore: !!nextCursor, nextCursor };
+});
+
+if (!result.ok) {
+  const error = result.error instanceof Error ? result.error : new Error(String(result.error));
+  return { success: false, error };
+}
+return { success: true, data: result.value };
+```
+
+### 5. Expand auto-login to `AuthError("expired")`
+
+**`src/app.ts`** — expand the re-throw:
+```typescript
+if (exc instanceof AuthError && (exc.reason === "not_authenticated" || exc.reason === "expired")) {
+  throw exc;
+}
+```
+
+**`src/bin.ts`** — expand the catch + context-aware message:
+```typescript
+if (
+  err instanceof AuthError &&
+  (err.reason === "not_authenticated" || err.reason === "expired") &&
+  !err.skipAutoAuth &&
+  isatty(0)
+) {
+  const message = err.reason === "expired"
+    ? "Session expired. Starting login flow...\n\n"
+    : "Authentication required. Starting login flow...\n\n";
+  process.stderr.write(message);
+  // ...rest of login flow unchanged...
+}
+```
+
+**`src/lib/telemetry.ts`** — expand the expected-error check:
+```typescript
+const isExpectedAuth = (e: unknown) =>
+  e instanceof AuthError && (e.reason === "not_authenticated" || e.reason === "expired");
+```
+
+## Files to modify
+
+| File | Change |
+|------|--------|
+| `src/lib/errors.ts` | Change `withAuthGuard` signature: remove `fallback`+`onError`, return `AuthGuardResult<T>` |
+| `src/lib/api-client.ts` | Update 4 call sites to destructure result |
+| `src/lib/resolve-target.ts` | Update 4 call sites (including the `onError` 404 case) |
+| `src/lib/org-list.ts` | Update 2 call sites |
+| `src/lib/region.ts` | Convert `resolveOrgRegion` — eliminates 2 manual `instanceof AuthError` checks |
+| `src/commands/project/list.ts` | Update 4 call sites + convert `handleExplicit` |
+| `src/commands/project/view.ts` | Update 1 call site |
+| `src/commands/project/create.ts` | Update 1 `onError` call site — eliminates mutable variable |
+| `src/commands/issue/list.ts` | Convert `fetchIssuesForTarget` |
+| `src/app.ts` | Expand re-throw to include `"expired"` |
+| `src/bin.ts` | Expand auto-login to include `"expired"`, context-aware message |
+| `src/lib/telemetry.ts` | Expand expected-auth check to include `"expired"` |
+| `test/lib/errors.test.ts` | Update existing `withAuthGuard` tests for new return type |
+| `test/lib/errors.property.test.ts` | Update property tests for new return type |
+
+## Complete `instanceof AuthError` audit (via ast-grep)
+
+All 12 occurrences in `src/` (excluding `errors.ts` itself) are accounted for:
+
+| # | Location | Action |
+|---|----------|--------|
+| 1 | `bin.ts:59` | Infrastructure — modified for `expired` |
+| 2 | `app.ts:120` | Infrastructure — modified for `expired` |
+| 3 | `telemetry.ts:123` | Infrastructure — modified for `expired` |
+| 4 | `db/auth.ts:152` | Not modified — clears auth then rethrows, different semantic |
+| 5 | `region.ts:47` | **Converted** to `withAuthGuard` |
+| 6 | `region.ts:61` | **Converted** to `withAuthGuard` (same function as #5) |
+| 7 | `project/list.ts:361` | **Converted** to `withAuthGuard` |
+| 8 | `issue/list.ts:425` | **Converted** to `withAuthGuard` |
+| 9 | `resolve-team.ts:171` | Not modified — rethrows then throws a different CliError, not a swallow pattern |
+| 10 | `log/list.ts:285` | Not modified — streaming reject + SIGINT cleanup, too specialized |
+| 11 | `api-client.ts:139` | Not modified — combined AuthError+ApiError guard in `unwrapResult` |
+| 12 | `api-client.ts:1437` | Not modified — allSettled iteration in `findEventAcrossOrgs` |
+
+## Impact summary
+
+- **`onError` callback**: Removed entirely (was used by only 2 call sites)
+- **Existing 13 simple call sites**: Small refactor — add `.ok` check, extract `.value`
+- **New conversions**: 4 manual `instanceof AuthError` patterns eliminated (region.ts ×2, project/list.ts handleExplicit, issue/list.ts fetchIssuesForTarget)
+- **Auto-login scope**: Now also covers `AuthError("expired")`
+- **Net manual `instanceof AuthError` remaining**: 8 (3 infrastructure modified for `expired`, 5 intentionally kept)
+
+## Verification
+
+1. `bun run typecheck` — ensure no type errors
+2. `bun run lint` — ensure biome is happy
+3. `bun test` — all existing tests pass
+4. `bun test test/lib/errors.test.ts` — updated tests pass
+5. `bun test test/lib/errors.property.test.ts` — updated property tests pass
