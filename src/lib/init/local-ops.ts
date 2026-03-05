@@ -538,6 +538,7 @@ function applyPatchset(
           return {
             ok: false,
             error: `Cannot modify "${patch.path}": file does not exist`,
+            data: { applied },
           };
         }
         fs.writeFileSync(absPath, patch.patch, "utf-8");
@@ -555,6 +556,7 @@ function applyPatchset(
         return {
           ok: false,
           error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
+          data: { applied },
         };
     }
   }
