@@ -169,10 +169,13 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Unit Tests
         run: bun run test:unit
+      - name: Isolated Tests
+        run: bun run test:isolated --coverage --coverage-reporter=lcov --coverage-dir=coverage-isolated
       - name: Upload Coverage
         uses: getsentry/codecov-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          files: ./coverage/lcov.info,./coverage-isolated/lcov.info
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
