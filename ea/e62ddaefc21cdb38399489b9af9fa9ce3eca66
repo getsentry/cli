@@ -1,0 +1,68 @@
+# Plan: Support SENTRY_AUTH_TOKEN and SENTRY_TOKEN env vars
+
+**Issue:** https://github.com/getsentry/cli/issues/348
+
+## Summary
+
+Add support for `SENTRY_AUTH_TOKEN` and `SENTRY_TOKEN` environment variables for headless/agent authentication. Env var tokens take precedence over stored OAuth tokens, bypass all refresh/expiry logic, and work transparently with all commands.
+
+## Design Decisions
+
+1. **Priority:** `SENTRY_AUTH_TOKEN` > `SENTRY_TOKEN` > stored OAuth token. `SENTRY_AUTH_TOKEN` matches the legacy sentry-cli and Sentry SDK convention.
+2. **No refresh for env tokens:** Env var tokens are assumed valid. `refreshToken()` short-circuits and returns the env token directly. `handleUnauthorized()` in sentry-client.ts also short-circuits — 401s propagate as-is.
+3. **AuthSource type:** `"env:SENTRY_AUTH_TOKEN" | "env:SENTRY_TOKEN" | "oauth"` — encodes both the source kind and the specific env var name in a single string literal union.
+4. **Empty/whitespace values ignored:** `"  "` and `""` are treated as unset (trimmed).
+
+## Files Modified (7)
+
+### `src/lib/db/auth.ts` — Core auth layer
+- Add `AuthSource` type (`"env:SENTRY_AUTH_TOKEN" | "env:SENTRY_TOKEN" | "oauth"`)
+- Add `source` field to `AuthConfig` (required, always present)
+- Add private `getEnvToken()` helper — checks both env vars in priority order
+- Add exported `isEnvTokenActive()` — boolean check for commands
+- Modify `getAuthToken()` — check env first, then SQLite
+- Modify `getAuthConfig()` — return env-based config (no refreshToken/expiresAt) when env var is set
+- Modify `refreshToken()` — short-circuit with `{ token, refreshed: false }` for env tokens
+
+### `src/lib/sentry-client.ts` — HTTP fetch layer
+- Import `isEnvTokenActive` from auth.ts
+- `handleUnauthorized()` returns `false` immediately when env token is active (no refresh attempt)
+
+### `src/commands/auth/status.ts` — Status display
+- Show `"Authenticated via SENTRY_AUTH_TOKEN environment variable ✓"` for env tokens
+- Skip config path, expiry, and auto-refresh display for env tokens
+- Add helper functions `isEnvSource()` and `envVarName()` for clean source rendering
+
+### `src/commands/auth/refresh.ts` — Token refresh
+- Throw `AuthError("invalid")` with clear message when env token is active
+
+### `src/commands/auth/login.ts` — Login flow
+- When env token is active, tell user to remove the env var instead of re-authenticating
+
+### `src/commands/auth/logout.ts` — Logout flow
+- Still clear stored auth (so removing env var later leaves clean state)
+- Warn that env var will continue providing authentication
+- Tell user which env var to unset
+
+### `test/preload.ts` — Test isolation
+- Add `delete process.env.SENTRY_TOKEN` alongside existing `SENTRY_AUTH_TOKEN` cleanup
+
+## Files Created (2)
+
+### `test/lib/db/auth.test.ts` — Unit tests
+- 22 tests covering: env var priority, source tracking, trimming, empty values, refresh bypass, isEnvTokenActive, getAuthConfig source field
+
+### `test/lib/db/auth.property.test.ts` — Property-based tests
+- 9 property-based tests with fast-check verifying invariants hold for any valid token strings (env priority, source correctness, trim semantics, etc.)
+
+### `test/lib/db/model-based.test.ts` — Extended
+- 5 new command classes for env var operations (SetEnvAuthToken, SetEnvToken, ClearEnvAuthToken, ClearEnvToken, GetAuthSource)
+- Updated GetAuthToken, GetAuthConfig, IsAuthenticated commands to model env var priority in their assertions
+
+## Verification
+
+```bash
+bun run typecheck     # ✅ passes
+bun run lint          # ✅ 298 files, no issues
+bun run test:unit     # ✅ 2718 tests pass (45,353 assertions)
+```
