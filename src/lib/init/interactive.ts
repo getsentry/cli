@@ -1,0 +1,145 @@
+/**
+ * Interactive Dispatcher
+ *
+ * Handles interactive prompts from the remote workflow.
+ * Supports select, multi-select, and confirm prompts.
+ * Respects --yes flag for non-interactive mode.
+ */
+
+import { confirm, log, multiselect, select } from "@clack/prompts";
+import chalk from "chalk";
+import { abortIfCancelled, featureHint, featureLabel } from "./clack-utils.js";
+import { REQUIRED_FEATURE } from "./constants.js";
+import type {
+  ConfirmPayload,
+  InteractivePayload,
+  MultiSelectPayload,
+  SelectPayload,
+  WizardOptions,
+} from "./types.js";
+
+export async function handleInteractive(
+  payload: InteractivePayload,
+  options: WizardOptions
+): Promise<Record<string, unknown>> {
+  switch (payload.kind) {
+    case "select":
+      return await handleSelect(payload, options);
+    case "multi-select":
+      return await handleMultiSelect(payload, options);
+    case "confirm":
+      return await handleConfirm(payload, options);
+    default:
+      return { cancelled: true };
+  }
+}
+
+async function handleSelect(
+  payload: SelectPayload,
+  options: WizardOptions
+): Promise<Record<string, unknown>> {
+  const apps = payload.apps ?? [];
+  const items = payload.options ?? apps.map((a) => a.name);
+
+  if (items.length === 0) {
+    return { cancelled: true };
+  }
+
+  if (options.yes) {
+    if (items.length === 1) {
+      log.info(`Auto-selected: ${items[0]}`);
+      return { selectedApp: items[0] };
+    }
+    log.error(
+      `--yes requires exactly one option for selection, but found ${items.length}. Run interactively to choose.`
+    );
+    return { cancelled: true };
+  }
+
+  const selected = await select({
+    message: payload.prompt,
+    options: items.map((item, i) => {
+      const app = apps[i];
+      return {
+        value: item,
+        label: item,
+        hint: app?.framework ?? undefined,
+      };
+    }),
+  });
+
+  return { selectedApp: abortIfCancelled(selected) };
+}
+
+async function handleMultiSelect(
+  payload: MultiSelectPayload,
+  options: WizardOptions
+): Promise<Record<string, unknown>> {
+  const available = payload.availableFeatures ?? payload.options ?? [];
+
+  if (available.length === 0) {
+    return { features: [] };
+  }
+
+  const hasRequired = available.includes(REQUIRED_FEATURE);
+
+  if (options.yes) {
+    log.info(
+      `Auto-selected all features: ${available.map(featureLabel).join(", ")}`
+    );
+    return { features: available };
+  }
+
+  const optional = available.filter((f) => f !== REQUIRED_FEATURE);
+
+  if (optional.length === 0) {
+    if (hasRequired) {
+      log.info(`${featureLabel(REQUIRED_FEATURE)} is always included.`);
+    }
+    return { features: hasRequired ? [REQUIRED_FEATURE] : [] };
+  }
+
+  const hints: string[] = [];
+  if (hasRequired) {
+    hints.push(
+      chalk.dim(`  ${featureLabel(REQUIRED_FEATURE)} is always included`)
+    );
+  }
+  hints.push(chalk.dim("  space=toggle, a=all, enter=confirm"));
+
+  const selected = await multiselect({
+    message: `${payload.prompt}\n${hints.join("\n")}`,
+    options: optional.map((feature) => ({
+      value: feature,
+      label: featureLabel(feature),
+      hint: featureHint(feature),
+    })),
+    initialValues: optional,
+    required: false,
+  });
+
+  const chosen = abortIfCancelled(selected);
+  if (hasRequired && !chosen.includes(REQUIRED_FEATURE)) {
+    chosen.unshift(REQUIRED_FEATURE);
+  }
+
+  return { features: chosen };
+}
+
+async function handleConfirm(
+  payload: ConfirmPayload,
+  options: WizardOptions
+): Promise<Record<string, unknown>> {
+  if (options.yes) {
+    log.info("Auto-confirmed: continuing");
+    return { action: "continue" };
+  }
+
+  const confirmed = await confirm({
+    message: payload.prompt,
+    initialValue: true,
+  });
+
+  const value = abortIfCancelled(confirmed);
+  return { action: value ? "continue" : "stop" };
+}

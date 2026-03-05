@@ -21,6 +21,25 @@ export function isAllDigits(str: string): boolean {
 }
 
 /**
+ * Convert a project name to its expected Sentry slug.
+ * Aligned with Sentry's canonical implementation:
+ * https://github.com/getsentry/sentry/blob/master/static/app/utils/slugify.tsx
+ *
+ * @example slugify("My Cool App") // "my-cool-app"
+ * @example slugify("my-app")      // "my-app"
+ * @example slugify("Café Project") // "cafe-project"
+ * @example slugify("my_app")      // "my_app"
+ */
+export function slugify(name: string): string {
+  return name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9_\s-]/g, "")
+    .replace(/[-\s]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
  * Determine the real (non-root) username of the invoking user.
  *
  * When running under `sudo`, `SUDO_USER` holds the original user's login name.

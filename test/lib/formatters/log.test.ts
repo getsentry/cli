@@ -349,7 +349,7 @@ describe("formatLogDetails", () => {
     expect(result).toContain("Span ID");
     expect(result).toContain("span-abc-123");
     expect(result).toContain("Link");
-    expect(result).toContain("my-org/traces/trace123abc456def789");
+    expect(result).toContain("my-org.sentry.io/traces/trace123abc456def789");
   });
 
   test("shows Source Location when code.function present", () => {
