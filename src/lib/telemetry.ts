@@ -120,7 +120,8 @@ export async function withTelemetry<T>(
     );
   } catch (e) {
     const isExpectedAuthState =
-      e instanceof AuthError && e.reason === "not_authenticated";
+      e instanceof AuthError &&
+      (e.reason === "not_authenticated" || e.reason === "expired");
     // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
     // They're recorded as span attributes above for volume-spike detection.
     if (!(isExpectedAuthState || isClientApiError(e))) {

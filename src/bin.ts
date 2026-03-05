@@ -53,12 +53,14 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
     // Errors can opt-out via skipAutoAuth (e.g., auth status command)
     if (
       err instanceof AuthError &&
-      err.reason === "not_authenticated" &&
+      (err.reason === "not_authenticated" || err.reason === "expired") &&
       !err.skipAutoAuth &&
       isatty(0)
     ) {
       process.stderr.write(
-        "Authentication required. Starting login flow...\n\n"
+        err.reason === "expired"
+          ? "Authentication expired. Starting login flow...\n\n"
+          : "Authentication required. Starting login flow...\n\n"
       );
 
       const loginSuccess = await runInteractiveLogin(

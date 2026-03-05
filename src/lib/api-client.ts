@@ -61,7 +61,13 @@ import {
 } from "../types/index.js";
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { ApiError, AuthError, stringifyUnknown } from "./errors.js";
+import {
+  ApiError,
+  AuthError,
+  type AuthGuardSuccess,
+  stringifyUnknown,
+  withAuthGuard,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import { resolveOrgRegion } from "./region.js";
 import {
@@ -500,16 +506,9 @@ export async function listOrganizationsInRegion(
 export async function listOrganizations(): Promise<SentryOrganization[]> {
   const { setOrgRegions } = await import("./db/regions.js");
 
-  let regions: Region[];
-  try {
-    regions = await getUserRegions();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Self-hosted instances may not have the regions endpoint (404)
-    regions = [];
-  }
+  // Self-hosted instances may not have the regions endpoint (404)
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default API for self-hosted instances
@@ -888,8 +887,8 @@ export async function findProjectsBySlug(
 
   // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
-    orgs.map(async (org) => {
-      try {
+    orgs.map((org) =>
+      withAuthGuard(async () => {
         const project = await getProject(org.slug, projectSlug);
         // The API accepts project_id_or_slug, so a numeric input could
         // resolve by ID instead of slug. When the input is all digits,
@@ -902,17 +901,14 @@ export async function findProjectsBySlug(
           return null;
         }
         return { ...project, orgSlug: org.slug };
-      } catch (error) {
-        if (error instanceof AuthError) {
-          throw error;
-        }
-        // 404 or permission errors — project doesn't exist in this org
-        return null;
-      }
-    })
+      })
+    )
   );
 
-  return searchResults.filter((r): r is ProjectWithOrg => r !== null);
+  return searchResults
+    .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
+    .map((r) => r.value)
+    .filter((v): v is ProjectWithOrg => v !== null);
 }
 
 /**
@@ -965,22 +961,19 @@ export async function findProjectsByPattern(
   const orgs = await listOrganizations();
 
   const searchResults = await Promise.all(
-    orgs.map(async (org) => {
-      try {
+    orgs.map((org) =>
+      withAuthGuard(async () => {
         const projects = await listProjects(org.slug);
         return projects
           .filter((p) => matchesWordBoundary(pattern, p.slug))
           .map((p) => ({ ...p, orgSlug: org.slug }));
-      } catch (error) {
-        if (error instanceof AuthError) {
-          throw error;
-        }
-        return [];
-      }
-    })
+      })
+    )
   );
 
-  return searchResults.flat();
+  return searchResults
+    .filter((r): r is AuthGuardSuccess<ProjectWithOrg[]> => r.ok)
+    .flatMap((r) => r.value);
 }
 
 /**
@@ -996,15 +989,8 @@ export async function findProjectsByPattern(
 export async function findProjectByDsnKey(
   publicKey: string
 ): Promise<SentryProject | null> {
-  let regions: Region[];
-  try {
-    regions = await getUserRegions();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    regions = [];
-  }
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default region for self-hosted

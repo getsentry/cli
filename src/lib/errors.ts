@@ -446,3 +446,39 @@ export function getExitCode(error: unknown): number {
   }
   return 1;
 }
+
+/** Result when the guarded operation succeeded */
+export type AuthGuardSuccess<T> = { ok: true; value: T };
+
+/** Result when a non-auth error was caught */
+export type AuthGuardFailure = { ok: false; error: unknown };
+
+/** Discriminated union returned by {@link withAuthGuard} */
+export type AuthGuardResult<T> = AuthGuardSuccess<T> | AuthGuardFailure;
+
+/**
+ * Execute an async operation, rethrowing {@link AuthError} while capturing
+ * all other failures in a discriminated result.
+ *
+ * This is the standard "safe fetch" pattern used throughout the CLI:
+ * auth errors must propagate so the auto-login flow in bin.ts can
+ * trigger, but transient failures (network, 404, permissions) should
+ * degrade gracefully. Callers inspect `result.ok` to decide what to do
+ * and have access to the caught error via `result.error` when needed.
+ *
+ * @param fn - Async operation that may throw
+ * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on non-auth failure
+ * @throws {AuthError} Always re-thrown so the auto-login flow can trigger
+ */
+export async function withAuthGuard<T>(
+  fn: () => Promise<T>
+): Promise<AuthGuardResult<T>> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    return { ok: false, error };
+  }
+}

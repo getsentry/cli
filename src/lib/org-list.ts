@@ -37,7 +37,12 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "./db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "./errors.js";
+import {
+  type AuthGuardSuccess,
+  ContextError,
+  ValidationError,
+  withAuthGuard,
+} from "./errors.js";
 import { writeFooter, writeJson } from "./formatters/index.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
@@ -210,15 +215,11 @@ export async function fetchOrgSafe<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   orgSlug: string
 ): Promise<TWithOrg[]> {
-  try {
+  const result = await withAuthGuard(async () => {
     const items = await config.listForOrg(orgSlug);
     return items.map((item) => config.withOrg(item, orgSlug));
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
+  });
+  return result.ok ? result.value : [];
 }
 
 /**
@@ -561,19 +562,16 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     const listForProject = config.listForProject;
     // Fetch entities scoped to each matched project in parallel
     const results = await Promise.all(
-      matches.map(async (m) => {
-        try {
+      matches.map((m) =>
+        withAuthGuard(async () => {
           const raw = await listForProject(m.orgSlug, m.slug);
           return raw.map((entity) => config.withOrg(entity, m.orgSlug));
-        } catch (error) {
-          if (error instanceof AuthError) {
-            throw error;
-          }
-          return [] as TWithOrg[];
-        }
-      })
+        })
+      )
     );
-    allItems = results.flat();
+    allItems = results
+      .filter((r): r is AuthGuardSuccess<TWithOrg[]> => r.ok)
+      .flatMap((r) => r.value);
   } else {
     // Entity is org-scoped — fetch from each unique parent org
     const uniqueOrgs = [...new Set(matches.map((m) => m.orgSlug))];

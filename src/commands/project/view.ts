@@ -13,7 +13,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import {
   divider,
   formatProjectDetails,
@@ -91,21 +91,15 @@ type ProjectWithDsn = {
 async function fetchProjectDetails(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn | null> {
-  try {
+  const result = await withAuthGuard(async () => {
     // Fetch project and DSN in parallel
     const [project, dsn] = await Promise.all([
       getProject(target.org, target.project),
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
-  } catch (error) {
-    // Rethrow auth errors - user needs to know they're not authenticated
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Silently skip other errors (e.g., no access to specific project)
-    return null;
-  }
+  });
+  return result.ok ? result.value : null;
 }
 
 /** Result of fetching project details for multiple targets */

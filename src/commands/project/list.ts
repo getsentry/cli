@@ -30,7 +30,7 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
@@ -47,7 +47,10 @@ import {
   dispatchOrgScopedList,
   type ListCommandMeta,
 } from "../../lib/org-list.js";
-import { resolveAllTargets } from "../../lib/resolve-target.js";
+import {
+  type ResolvedTarget,
+  resolveAllTargets,
+} from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
 import type { SentryProject, Writer } from "../../types/index.js";
 
@@ -89,14 +92,8 @@ export async function fetchOrgProjects(
 export async function fetchOrgProjectsSafe(
   orgSlug: string
 ): Promise<ProjectWithOrg[]> {
-  try {
-    return await fetchOrgProjects(orgSlug);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
+  const result = await withAuthGuard(() => fetchOrgProjects(orgSlug));
+  return result.ok ? result.value : [];
 }
 
 /**
@@ -110,14 +107,11 @@ export async function fetchAllOrgProjects(): Promise<ProjectWithOrg[]> {
   const results: ProjectWithOrg[] = [];
 
   for (const org of orgs) {
-    try {
-      const projects = await fetchOrgProjects(org.slug);
-      results.push(...projects);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      // User may lack access to some orgs
+    const projectsResult = await withAuthGuard(() =>
+      fetchOrgProjects(org.slug)
+    );
+    if (projectsResult.ok) {
+      results.push(...projectsResult.value);
     }
   }
 
@@ -206,21 +200,16 @@ async function resolveOrgsForAutoDetect(cwd: string): Promise<OrgResolution> {
   }
 
   // 2. Auto-detect from DSNs (may find multiple in monorepos)
-  try {
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      cwd,
-    });
-
+  const targetsResult = await withAuthGuard(() => resolveAllTargets({ cwd }));
+  if (targetsResult.ok) {
+    const { targets, footer, skippedSelfHosted } = targetsResult.value;
     if (targets.length > 0) {
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      const uniqueOrgs = [
+        ...new Set(targets.map((t: ResolvedTarget) => t.org)),
+      ];
       return { orgs: uniqueOrgs, footer, skippedSelfHosted };
     }
-
     return { orgs: [], skippedSelfHosted };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
   }
 
   return { orgs: [] };
@@ -247,22 +236,20 @@ export function displayProjectTable(
  * that mirrors `fetchOrgProjectsSafe` — re-throws auth errors but
  * silently returns empty for other failures (403, network errors).
  */
+type PaginatedResult = { projects: ProjectWithOrg[]; nextCursor?: string };
+
 async function fetchPaginatedSafe(
   org: string,
   limit: number
-): Promise<{ projects: ProjectWithOrg[]; nextCursor?: string }> {
-  try {
+): Promise<PaginatedResult> {
+  const result = await withAuthGuard(async () => {
     const response = await listProjectsPaginated(org, { perPage: limit });
     return {
       projects: response.data.map((p) => ({ ...p, orgSlug: org })),
       nextCursor: response.nextCursor,
     };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return { projects: [] };
-  }
+  });
+  return result.ok ? result.value : { projects: [] };
 }
 
 /**
@@ -371,14 +358,8 @@ export async function handleExplicit(
   projectSlug: string,
   flags: ListFlags
 ): Promise<void> {
-  let project: ProjectWithOrg;
-  try {
-    const result = await getProject(org, projectSlug);
-    project = { ...result, orgSlug: org };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
+  const projectResult = await withAuthGuard(() => getProject(org, projectSlug));
+  if (!projectResult.ok) {
     if (flags.json) {
       writeJson(stdout, []);
       return;
@@ -392,6 +373,7 @@ export async function handleExplicit(
     );
     return;
   }
+  const project: ProjectWithOrg = { ...projectResult.value, orgSlug: org };
 
   const filtered = filterByPlatform([project], flags.platform);
 

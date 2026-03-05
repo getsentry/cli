@@ -39,10 +39,10 @@ import {
 } from "./dsn/index.js";
 import {
   ApiError,
-  AuthError,
   ContextError,
   ResolutionError,
   ValidationError,
+  withAuthGuard,
 } from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { resolveEffectiveOrg } from "./region.js";
@@ -257,7 +257,7 @@ async function resolveDsnByPublicKey(
   }
 
   // Cache miss — search for project by DSN public key
-  try {
+  const result = await withAuthGuard(async () => {
     const projectInfo = await findProjectByDsnKey(dsn.publicKey);
 
     if (!projectInfo) {
@@ -286,12 +286,8 @@ async function resolveDsnByPublicKey(
 
     // Project found but no org info - unusual but handle gracefully
     return null;
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return null;
-  }
+  });
+  return result.ok ? result.value : null;
 }
 
 /**
@@ -314,10 +310,13 @@ async function resolveDsnToTarget(
     return resolveDsnByPublicKey(dsn);
   }
 
+  // Capture narrowed values before the closure (TS loses narrowing across closures)
+  const orgId = dsn.orgId;
+  const { projectId: dsnProjectId, packagePath } = dsn;
   const detectedFrom = getDsnSourceDescription(dsn);
 
   // Check cache first
-  const cached = await getCachedProject(dsn.orgId, dsn.projectId);
+  const cached = await getCachedProject(orgId, dsnProjectId);
   if (cached) {
     return {
       org: cached.orgSlug,
@@ -326,16 +325,16 @@ async function resolveDsnToTarget(
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
-      packagePath: dsn.packagePath,
+      packagePath,
     };
   }
 
   // Cache miss — fetch project details and cache them
-  try {
-    const projectInfo = await getProject(dsn.orgId, dsn.projectId);
+  const result = await withAuthGuard(async () => {
+    const projectInfo = await getProject(orgId, dsnProjectId);
 
     if (projectInfo.organization) {
-      await setCachedProject(dsn.orgId, dsn.projectId, {
+      await setCachedProject(orgId, dsnProjectId, {
         orgSlug: projectInfo.organization.slug,
         orgName: projectInfo.organization.name,
         projectSlug: projectInfo.slug,
@@ -350,28 +349,22 @@ async function resolveDsnToTarget(
         orgDisplay: projectInfo.organization.name,
         projectDisplay: projectInfo.name,
         detectedFrom,
-        packagePath: dsn.packagePath,
+        packagePath,
       };
     }
 
     // Fallback to numeric IDs if org info missing
     return {
-      org: dsn.orgId,
-      project: dsn.projectId,
+      org: orgId,
+      project: dsnProjectId,
       projectId: toNumericId(projectInfo.id),
-      orgDisplay: dsn.orgId,
+      orgDisplay: orgId,
       projectDisplay: projectInfo.name,
       detectedFrom,
-      packagePath: dsn.packagePath,
+      packagePath,
     };
-  } catch (error) {
-    // Auth errors should propagate - user needs to log in
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Other errors (API, network) - skip this DSN silently
-    return null;
-  }
+  });
+  return result.ok ? result.value : null;
 }
 
 /** Minimum directory name length for inference (avoids matching too broadly) */
@@ -563,14 +556,12 @@ export async function fetchProjectId(
   org: string,
   project: string
 ): Promise<number | undefined> {
-  try {
-    const projectInfo = await getProject(org, project);
-    return toNumericId(projectInfo.id);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    if (error instanceof ApiError && error.status === 404) {
+  const projectResult = await withAuthGuard(() => getProject(org, project));
+  if (!projectResult.ok) {
+    if (
+      projectResult.error instanceof ApiError &&
+      projectResult.error.status === 404
+    ) {
       throw new ResolutionError(
         `Project '${project}'`,
         `not found in organization '${org}'`,
@@ -582,6 +573,7 @@ export async function fetchProjectId(
     }
     return;
   }
+  return toNumericId(projectResult.value.id);
 }
 
 /**
@@ -944,21 +936,16 @@ export async function resolveOrgsForListing(
     return { orgs: [defaultOrg] };
   }
 
-  try {
-    const { targets, footer, skippedSelfHosted } = await resolveAllTargets({
-      cwd,
-    });
-
+  const targetsResult = await withAuthGuard(() => resolveAllTargets({ cwd }));
+  if (targetsResult.ok) {
+    const { targets, footer, skippedSelfHosted } = targetsResult.value;
     if (targets.length > 0) {
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      const uniqueOrgs = [
+        ...new Set(targets.map((t: ResolvedTarget) => t.org)),
+      ];
       return { orgs: uniqueOrgs, footer, skippedSelfHosted };
     }
-
     return { orgs: [], skippedSelfHosted };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
   }
 
   return { orgs: [] };
