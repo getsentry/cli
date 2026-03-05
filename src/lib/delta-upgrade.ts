@@ -37,7 +37,7 @@ import {
   type OciManifest,
 } from "./ghcr.js";
 import { logger } from "./logger.js";
-import { withTracingSpan } from "./telemetry.js";
+import { withTracing, withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
 const log = logger.withTag("delta-upgrade");
@@ -303,7 +303,9 @@ export async function resolveStableChain(
   targetVersion: string
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
-  const releases = await fetchRecentReleases();
+  const releases = await withTracing("fetch-releases", "http.client", () =>
+    fetchRecentReleases()
+  );
 
   // Get .gz size from the target release for threshold calculation
   const targetRelease = releases.find((r) => r.tag_name === targetVersion);
@@ -329,8 +331,11 @@ export async function resolveStableChain(
   }
 
   // Parallel patch download
-  const downloadResults = await Promise.all(
-    chainInfo.patchUrls.map((url) => downloadStablePatch(url))
+  const downloadResults = await withTracing(
+    "download-patches",
+    "http.client",
+    () =>
+      Promise.all(chainInfo.patchUrls.map((url) => downloadStablePatch(url)))
   );
 
   const patches: PatchLink[] = [];
@@ -395,35 +400,43 @@ export type PatchGraphEntry = {
  * @param token - GHCR anonymous bearer token
  * @returns Map from fromVersion → { version, manifest }
  */
-export async function buildNightlyPatchGraph(
+export function buildNightlyPatchGraph(
   token: string
 ): Promise<Map<string, PatchGraphEntry>> {
-  const tags = await listTags(token, PATCH_TAG_PREFIX);
-  const graph = new Map<string, PatchGraphEntry>();
+  return withTracingSpan(
+    "build-patch-graph",
+    "upgrade.delta.resolve",
+    async (span) => {
+      const tags = await listTags(token, PATCH_TAG_PREFIX);
+      span.setAttribute("graph.tag_count", tags.length);
 
-  const entries = await Promise.all(
-    tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
-      const version = tag.slice(PATCH_TAG_PREFIX.length);
-      try {
-        const manifest = await fetchManifest(token, tag);
-        const fromVersion = getPatchFromVersion(manifest);
-        if (!fromVersion) {
-          return null;
+      const entries = await Promise.all(
+        tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
+          const version = tag.slice(PATCH_TAG_PREFIX.length);
+          try {
+            const manifest = await fetchManifest(token, tag);
+            const fromVersion = getPatchFromVersion(manifest);
+            if (!fromVersion) {
+              return null;
+            }
+            return [fromVersion, { version, manifest }];
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const graph = new Map<string, PatchGraphEntry>();
+      for (const entry of entries) {
+        if (entry) {
+          graph.set(entry[0], entry[1]);
         }
-        return [fromVersion, { version, manifest }];
-      } catch {
-        return null;
       }
-    })
-  );
 
-  for (const entry of entries) {
-    if (entry) {
-      graph.set(entry[0], entry[1]);
+      span.setAttribute("graph.entry_count", graph.size);
+      return graph;
     }
-  }
-
-  return graph;
+  );
 }
 
 /** Options for walking the nightly patch chain through the graph */
@@ -541,10 +554,15 @@ export async function resolveNightlyChain(
   }
 
   // Parallel blob download
-  const downloadResults = await Promise.all(
-    chainInfo.layerDigests.map((digest) =>
-      downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
-    )
+  const downloadResults = await withTracing(
+    "download-patches",
+    "http.client",
+    () =>
+      Promise.all(
+        chainInfo.layerDigests.map((digest) =>
+          downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
+        )
+      )
   );
 
   const patches: PatchLink[] = [];
@@ -667,7 +685,11 @@ export async function resolveStableDelta(
   oldBinaryPath: string,
   destPath: string
 ): Promise<DeltaResult | null> {
-  const chain = await resolveStableChain(CLI_VERSION, targetVersion);
+  const chain = await withTracing(
+    "resolve-stable-chain",
+    "upgrade.delta.resolve",
+    () => resolveStableChain(CLI_VERSION, targetVersion)
+  );
   if (chain) {
     log.debug(
       `Resolved stable chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
@@ -677,7 +699,11 @@ export async function resolveStableDelta(
     return null;
   }
 
-  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await withTracing(
+    "apply-patch-chain",
+    "upgrade.delta.apply",
+    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  );
   return {
     sha256,
     patchBytes: chain.totalSize,
@@ -695,14 +721,20 @@ export async function resolveNightlyDelta(
   oldBinaryPath: string,
   destPath: string
 ): Promise<DeltaResult | null> {
-  const token = await getAnonymousToken();
+  const token = await withTracing("ghcr-token", "http.client", () =>
+    getAnonymousToken()
+  );
 
   // Get the .gz layer size from the target version's manifest for threshold.
   // Use the versioned tag (nightly-<version>) so the threshold reflects the
   // actual binary being upgraded to, not the latest rolling nightly.
   const binaryName = getPlatformBinaryName();
   const targetTag = `nightly-${targetVersion}`;
-  const nightlyManifest = await fetchManifest(token, targetTag);
+  const nightlyManifest = await withTracing(
+    "fetch-target-manifest",
+    "http.client",
+    () => fetchManifest(token, targetTag)
+  );
   const gzLayer = nightlyManifest.layers.find((l) => {
     const title = l.annotations?.["org.opencontainers.image.title"];
     return title === `${binaryName}.gz`;
@@ -711,11 +743,10 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  const chain = await resolveNightlyChain(
-    token,
-    CLI_VERSION,
-    targetVersion,
-    gzLayer.size
+  const chain = await withTracing(
+    "resolve-nightly-chain",
+    "upgrade.delta.resolve",
+    () => resolveNightlyChain(token, CLI_VERSION, targetVersion, gzLayer.size)
   );
   if (chain) {
     log.debug(
@@ -726,7 +757,11 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  const sha256 = await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await withTracing(
+    "apply-patch-chain",
+    "upgrade.delta.apply",
+    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  );
   return {
     sha256,
     patchBytes: chain.totalSize,
@@ -743,6 +778,57 @@ function cleanupIntermediates(destPath: string): void {
       // Ignore cleanup errors
     }
   }
+}
+
+/**
+ * Apply patches sequentially, alternating between two intermediate files.
+ *
+ * Extracted to keep cognitive complexity manageable when the caller wraps
+ * this in a tracing span.
+ *
+ * @returns SHA-256 hex of the final output
+ */
+async function applyPatchesSequentially(
+  chain: PatchChain,
+  oldBinaryPath: string,
+  destPath: string
+): Promise<string> {
+  let currentOldPath = oldBinaryPath;
+  let sha256 = "";
+
+  // Alternate between two intermediate paths to avoid reading and writing
+  // the same file (mmap'd read + writer truncation = corruption).
+  const intermediateA = `${destPath}.patching.a`;
+  const intermediateB = `${destPath}.patching.b`;
+
+  try {
+    for (let i = 0; i < chain.patches.length; i++) {
+      const patch = chain.patches[i];
+      if (!patch) {
+        throw new Error(`Missing patch at index ${i}`);
+      }
+      const isLast = i === chain.patches.length - 1;
+      const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
+      const outputPath = isLast ? destPath : intermediate;
+
+      sha256 = await withTracing(
+        `apply-patch-${i}`,
+        "upgrade.delta.apply",
+        () => applyPatch(currentOldPath, patch.data, outputPath)
+      );
+
+      if (!isLast) {
+        currentOldPath = outputPath;
+      }
+    }
+  } finally {
+    // Always clean up intermediate files, even on failure
+    if (chain.patches.length > 1) {
+      cleanupIntermediates(destPath);
+    }
+  }
+
+  return sha256;
 }
 
 /**
@@ -763,51 +849,39 @@ function cleanupIntermediates(destPath: string): void {
  * @returns SHA-256 hex of the final output
  * @throws {Error} When SHA-256 verification fails
  */
-export async function applyPatchChain(
+export function applyPatchChain(
   chain: PatchChain,
   oldBinaryPath: string,
   destPath: string
 ): Promise<string> {
-  log.debug(
-    `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
+  return withTracingSpan(
+    "apply-patches",
+    "upgrade.delta.apply",
+    async (span) => {
+      span.setAttribute("patches.count", chain.patches.length);
+      span.setAttribute(
+        "patches.total_bytes",
+        chain.patches.reduce((sum, p) => sum + p.size, 0)
+      );
+
+      log.debug(
+        `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
+      );
+
+      const sha256 = await applyPatchesSequentially(
+        chain,
+        oldBinaryPath,
+        destPath
+      );
+
+      // Verify the final SHA-256 matches
+      if (sha256 !== chain.expectedSha256) {
+        throw new Error(
+          `SHA-256 mismatch after patching: got ${sha256}, expected ${chain.expectedSha256}`
+        );
+      }
+
+      return sha256;
+    }
   );
-  let currentOldPath = oldBinaryPath;
-  let sha256 = "";
-
-  // Alternate between two intermediate paths to avoid reading and writing
-  // the same file (mmap'd read + writer truncation = corruption).
-  const intermediateA = `${destPath}.patching.a`;
-  const intermediateB = `${destPath}.patching.b`;
-
-  try {
-    for (let i = 0; i < chain.patches.length; i++) {
-      const patch = chain.patches[i];
-      if (!patch) {
-        throw new Error(`Missing patch at index ${i}`);
-      }
-      const isLast = i === chain.patches.length - 1;
-      const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
-      const outputPath = isLast ? destPath : intermediate;
-
-      sha256 = await applyPatch(currentOldPath, patch.data, outputPath);
-
-      if (!isLast) {
-        currentOldPath = outputPath;
-      }
-    }
-  } finally {
-    // Always clean up intermediate files, even on failure
-    if (chain.patches.length > 1) {
-      cleanupIntermediates(destPath);
-    }
-  }
-
-  // Verify the final SHA-256 matches
-  if (sha256 !== chain.expectedSha256) {
-    throw new Error(
-      `SHA-256 mismatch after patching: got ${sha256}, expected ${chain.expectedSha256}`
-    );
-  }
-
-  return sha256;
 }
