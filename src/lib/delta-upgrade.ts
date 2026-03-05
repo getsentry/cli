@@ -579,9 +579,11 @@ export async function attemptDeltaUpgrade(
       return await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath);
     }
     return await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
-  } catch {
-    // Any error during delta upgrade → fall back to full download
-    log.debug("Delta upgrade unavailable, falling back to full download");
+  } catch (error) {
+    // Any error during delta upgrade → fall back to full download.
+    // Log at debug so --verbose reveals the root cause (ETXTBSY, network, etc.)
+    const msg = error instanceof Error ? error.message : String(error);
+    log.debug(`Delta upgrade failed (${msg}), falling back to full download`);
     return null;
   }
 }
@@ -671,8 +673,8 @@ function cleanupIntermediates(destPath: string): void {
  *
  * For single-patch chains, applies directly from old binary to dest.
  * For multi-patch chains, alternates between two intermediate files
- * so that read (mmap) and write never target the same path — writing
- * to the mmap source would truncate it and corrupt the output.
+ * so that read and write never target the same path — writing to the
+ * source would truncate it and corrupt the output.
  *
  * Does **not** set executable permissions — the caller
  * (`downloadBinaryToTemp`) handles that uniformly for both delta
