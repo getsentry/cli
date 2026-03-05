@@ -116,10 +116,10 @@ const customText: ApplicationText = {
   exceptionWhileRunningCommand: (exc: unknown, ansiColor: boolean): string => {
     // Re-throw AuthError for auto-login flow in bin.ts
     // Don't capture to Sentry - it's an expected state (user not logged in or token expired), not an error
+    // Note: skipAutoAuth is checked in bin.ts, not here — all auth errors must escape Sentry capture
     if (
       exc instanceof AuthError &&
-      (exc.reason === "not_authenticated" || exc.reason === "expired") &&
-      !exc.skipAutoAuth
+      (exc.reason === "not_authenticated" || exc.reason === "expired")
     ) {
       throw exc;
     }
