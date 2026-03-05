@@ -508,9 +508,15 @@ function applyPatchset(
 
   const { cwd, params } = payload;
 
-  // Phase 1: Validate all paths before writing anything
+  // Phase 1: Validate all paths and actions before writing anything
   for (const patch of params.patches) {
     safePath(cwd, patch.path);
+    if (!["create", "modify", "delete"].includes(patch.action)) {
+      return {
+        ok: false,
+        error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
+      };
+    }
   }
 
   // Phase 2: Apply patches
@@ -614,6 +620,20 @@ async function createSentryProject(
     return {
       ok: false,
       error: `Invalid project name: "${name}" produces an empty slug.`,
+    };
+  }
+
+  // In dry-run mode, skip all API calls and return placeholder data
+  if (options.dryRun) {
+    return {
+      ok: true,
+      data: {
+        orgSlug: "(dry-run)",
+        projectSlug: slug,
+        projectId: "(dry-run)",
+        dsn: "(dry-run)",
+        url: "(dry-run)",
+      },
     };
   }
 
