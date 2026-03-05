@@ -1,0 +1,71 @@
+# Fix CLI-B5: UpgradeError for nightly version validation
+
+## Problem
+
+When a user runs `sentry cli upgrade 0.14.0-dev.1772661724` (a specific nightly version),
+the `versionExists()` function checks **GitHub Releases** tags, but nightly builds are only
+published to **GHCR** (GitHub Container Registry) with tags like `nightly-0.14.0-dev.1772661724`.
+
+The GitHub Releases check returns 404, causing an incorrect `UpgradeError: Version X not found`.
+
+## Root Cause
+
+In `src/commands/cli/upgrade.ts` lines 119-128, the version validation for pinned nightly
+versions uses `versionExists(lookupMethod, target)` where `lookupMethod = "curl"`. This routes
+to `GITHUB_RELEASES_URL/tags/<version>` which only has stable releases, not nightlies.
+
+## Fix
+
+### 1. Add nightly version check in `src/lib/upgrade.ts`
+
+Add a new function `nightlyVersionExists()` that checks GHCR for the versioned nightly tag:
+
+```typescript
+async function nightlyVersionExists(version: string): Promise<boolean> {
+  try {
+    const token = await getAnonymousToken();
+    await fetchManifest(token, `nightly-${version}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+```
+
+### 2. Update `versionExists()` in `src/lib/upgrade.ts`
+
+Add a nightly version check that routes to GHCR instead of GitHub Releases:
+
+```typescript
+export async function versionExists(
+  method: InstallationMethod,
+  version: string
+): Promise<boolean> {
+  // Nightly versions are published to GHCR, not GitHub Releases or npm
+  if (isNightlyVersion(version)) {
+    return nightlyVersionExists(version);
+  }
+
+  if (method === "curl" || method === "brew") {
+    // ... existing GitHub Releases check
+  }
+  // ... existing npm check
+}
+```
+
+### 3. Add import
+
+Add `fetchManifest` to the imports from `./ghcr.js` in `src/lib/upgrade.ts`.
+
+### 4. Tests
+
+Add a test in `test/lib/upgrade.test.ts` (or create one) verifying that:
+- `versionExists` routes nightly versions to GHCR check
+- `versionExists` routes stable versions to GitHub/npm check
+- `nightlyVersionExists` returns true when GHCR manifest succeeds
+- `nightlyVersionExists` returns false when GHCR manifest fails
+
+## Impact
+
+- Fixes: Users can now `sentry cli upgrade <specific-nightly-version>` without a false 404
+- Risk: Low — only changes the validation path for nightly versions, which were previously always broken
