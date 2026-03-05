@@ -53,6 +53,10 @@ sentry auth login
 
 # Using an API token
 sentry auth login --token YOUR_TOKEN
+
+SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
 #### `sentry auth logout`
@@ -145,6 +149,14 @@ sentry org view my-org -w
 
 Work with Sentry projects
 
+#### `sentry project create <name> <platform>`
+
+Create a new project
+
+**Flags:**
+- `-t, --team <value> - Team to create the project under`
+- `--json - Output as JSON`
+
 #### `sentry project list <org/project>`
 
 List projects
@@ -207,7 +219,7 @@ List issues in a project
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
-- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
+- `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 
 **Examples:**
 
@@ -354,6 +366,7 @@ Make an authenticated API request
 
 **Flags:**
 - `-X, --method <value> - The HTTP method for the request - (default: "GET")`
+- `-d, --data <value> - Inline JSON body for the request (like curl -d)`
 - `-F, --field <value>... - Add a typed parameter (key=value, key[sub]=value, key[]=value)`
 - `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
 - `-H, --header <value>... - Add a HTTP request header in key:value format`
@@ -495,6 +508,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 **Examples:**
@@ -575,6 +589,7 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
 
 #### `sentry trace view <args...>`
@@ -585,6 +600,17 @@ View details of a specific trace
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+
+#### `sentry trace logs <args...>`
+
+View logs associated with a trace
+
+**Flags:**
+- `--json - Output as JSON`
+- `-w, --web - Open trace in browser`
+- `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
+- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-q, --query <value> - Additional filter query (Sentry search syntax)`
 
 ### Issues
 
@@ -600,7 +626,7 @@ List issues in a project
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
-- `-c, --cursor <value> - Pagination cursor — only for <org>/ mode (use "last" to continue)`
+- `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 
 ### Orgs
 
@@ -666,6 +692,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 ### Traces
@@ -680,6 +707,7 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
 
 ### Whoami
@@ -692,6 +720,15 @@ Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
+
+## Global Options
+
+All commands support the following global options:
+
+- `--help` - Show help for the command
+- `--version` - Show CLI version
+- `--log-level <level>` - Set log verbosity (`error`, `warn`, `log`, `info`, `debug`, `trace`). Overrides `SENTRY_LOG_LEVEL`
+- `--verbose` - Shorthand for `--log-level debug`
 
 ## Output Formats
 
