@@ -486,6 +486,12 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
 
   for (const patch of params.patches) {
     safePath(cwd, patch.path);
+    if (!["create", "modify", "delete"].includes(patch.action)) {
+      return {
+        ok: false,
+        error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
+      };
+    }
     applied.push({ path: patch.path, action: patch.action });
   }
 
@@ -540,7 +546,10 @@ function applyPatchset(
         break;
       }
       default:
-        break;
+        return {
+          ok: false,
+          error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
+        };
     }
   }
 
