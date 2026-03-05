@@ -31,10 +31,13 @@ import type {
 
 type Spinner = ReturnType<typeof spinner>;
 
+type SpinState = { running: boolean };
+
 type StepContext = {
   payload: SuspendPayload;
   stepId: string;
   spin: Spinner;
+  spinState: SpinState;
   options: WizardOptions;
 };
 
@@ -53,7 +56,7 @@ async function handleSuspendedStep(
   stepPhases: Map<string, number>,
   stepHistory: Map<string, Record<string, unknown>[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, options } = ctx;
+  const { payload, stepId, spin, spinState, options } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "local-op") {
@@ -84,10 +87,12 @@ async function handleSuspendedStep(
     }
 
     spin.stop(label);
+    spinState.running = false;
 
     const interactiveResult = await handleInteractive(payload, options);
 
     spin.start("Processing...");
+    spinState.running = true;
 
     return {
       ...interactiveResult,
@@ -98,6 +103,7 @@ async function handleSuspendedStep(
   // Unreachable: assertSuspendPayload validates the type before we get here.
   // Kept as a defensive fallback.
   spin.stop("Error", 1);
+  spinState.running = false;
   log.error(
     `Unknown suspend payload type "${(payload as { type: string }).type}"`
   );
@@ -207,13 +213,15 @@ export async function runWizard(options: WizardOptions): Promise<void> {
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
   const spin = spinner();
+  const spinState: SpinState = { running: false };
 
   spin.start("Scanning project...");
-  const dirListing = precomputeDirListing(directory);
+  spinState.running = true;
 
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
+    const dirListing = precomputeDirListing(directory);
     spin.message("Connecting to wizard...");
     run = await workflow.createRun();
     result = assertWorkflowResult(
@@ -228,6 +236,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     );
   } catch (err) {
     spin.stop("Connection failed", 1);
+    spinState.running = false;
     log.error(errorMessage(err));
     cancel("Setup failed");
     process.exitCode = 1;
@@ -245,6 +254,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       const extracted = extractSuspendPayload(result, stepId);
       if (!extracted) {
         spin.stop("Error", 1);
+        spinState.running = false;
         log.error(`No suspend payload found for step "${stepId}"`);
         cancel("Setup failed");
         process.exitCode = 1;
@@ -252,7 +262,13 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       }
 
       const resumeData = await handleSuspendedStep(
-        { payload: extracted.payload, stepId: extracted.stepId, spin, options },
+        {
+          payload: extracted.payload,
+          stepId: extracted.stepId,
+          spin,
+          spinState,
+          options,
+        },
         stepPhases,
         stepHistory
       );
@@ -274,25 +290,38 @@ export async function runWizard(options: WizardOptions): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    spin.stop("Error", 1);
+    if (spinState.running) {
+      spin.stop("Error", 1);
+      spinState.running = false;
+    }
     log.error(errorMessage(err));
     cancel("Setup failed");
     process.exitCode = 1;
     return;
   }
 
-  handleFinalResult(result, spin);
+  handleFinalResult(result, spin, spinState);
 }
 
-function handleFinalResult(result: WorkflowRunResult, spin: Spinner): void {
+function handleFinalResult(
+  result: WorkflowRunResult,
+  spin: Spinner,
+  spinState: SpinState
+): void {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
   if (hasError) {
-    spin.stop("Failed", 1);
+    if (spinState.running) {
+      spin.stop("Failed", 1);
+      spinState.running = false;
+    }
     formatError(result);
     process.exitCode = 1;
   } else {
-    spin.stop("Done");
+    if (spinState.running) {
+      spin.stop("Done");
+      spinState.running = false;
+    }
     formatResult(result);
   }
 }
