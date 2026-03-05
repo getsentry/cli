@@ -23,7 +23,7 @@ import {
   buildProjectUrl,
   buildSeerSettingsUrl,
   buildTraceUrl,
-  getSentryBaseUrl,
+  getOrgBaseUrl,
   isSentrySaasUrl,
 } from "../../src/lib/sentry-urls.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
@@ -185,11 +185,11 @@ describe("isSentrySaasUrl properties", () => {
 });
 
 describe("buildOrgUrl properties", () => {
-  test("output always starts with base URL", async () => {
+  test("output always starts with org base URL", async () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildOrgUrl(orgSlug);
-        expect(result.startsWith(getSentryBaseUrl())).toBe(true);
+        expect(result.startsWith(getOrgBaseUrl(orgSlug))).toBe(true);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -209,7 +209,7 @@ describe("buildOrgUrl properties", () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildOrgUrl(orgSlug);
-        expect(result).toBe(`${getSentryBaseUrl()}/organizations/${orgSlug}/`);
+        expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -243,7 +243,7 @@ describe("buildProjectUrl properties", () => {
       property(tuple(slugArb, slugArb), ([orgSlug, projectSlug]) => {
         const result = buildProjectUrl(orgSlug, projectSlug);
         expect(result).toBe(
-          `${getSentryBaseUrl()}/settings/${orgSlug}/projects/${projectSlug}/`
+          `${getOrgBaseUrl(orgSlug)}/settings/projects/${projectSlug}/`
         );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -331,7 +331,7 @@ describe("buildSeerSettingsUrl properties", () => {
     await fcAssert(
       property(slugArb, (orgSlug) => {
         const result = buildSeerSettingsUrl(orgSlug);
-        expect(result).toContain(`/settings/${orgSlug}/`);
+        expect(result).toContain("/settings/seer/");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -447,10 +447,96 @@ describe("buildTraceUrl properties", () => {
     await fcAssert(
       property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
         const result = buildTraceUrl(orgSlug, traceId);
-        expect(result).toBe(
-          `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`
-        );
+        expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`);
       }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("self-hosted URLs", () => {
+  const SELF_HOSTED_URL = "https://sentry.company.com";
+
+  beforeEach(() => {
+    process.env.SENTRY_URL = SELF_HOSTED_URL;
+  });
+
+  test("getOrgBaseUrl returns base URL without subdomain", () => {
+    expect(getOrgBaseUrl("my-org")).toBe(SELF_HOSTED_URL);
+  });
+
+  test("buildOrgUrl uses path-based pattern", () => {
+    expect(buildOrgUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/`
+    );
+  });
+
+  test("buildEventSearchUrl uses path-based pattern", () => {
+    expect(
+      buildEventSearchUrl("my-org", "abc123def456abc123def456abc123de")
+    ).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/issues/?query=event.id:abc123def456abc123def456abc123de`
+    );
+  });
+
+  test("buildLogsUrl uses path-based pattern", () => {
+    expect(buildLogsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/explore/logs/`
+    );
+  });
+
+  test("buildTraceUrl uses path-based pattern", () => {
+    expect(buildTraceUrl("my-org", "abc123def456abc123def456abc123de")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/traces/abc123def456abc123def456abc123de/`
+    );
+  });
+
+  test("buildProjectUrl uses path-based pattern", () => {
+    expect(buildProjectUrl("my-org", "my-project")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/projects/my-project/`
+    );
+  });
+
+  test("buildOrgSettingsUrl uses path-based pattern", () => {
+    expect(buildOrgSettingsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/`
+    );
+  });
+
+  test("buildSeerSettingsUrl uses path-based pattern", () => {
+    expect(buildSeerSettingsUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/seer/`
+    );
+  });
+
+  test("buildBillingUrl uses path-based pattern", () => {
+    expect(buildBillingUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/settings/my-org/billing/overview/`
+    );
+  });
+
+  test("no URL builder prepends org as subdomain", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, slugArb, eventIdArb),
+        ([orgSlug, projectSlug, eventId]) => {
+          const urls = [
+            buildOrgUrl(orgSlug),
+            buildProjectUrl(orgSlug, projectSlug),
+            buildEventSearchUrl(orgSlug, eventId),
+            buildOrgSettingsUrl(orgSlug),
+            buildSeerSettingsUrl(orgSlug),
+            buildBillingUrl(orgSlug),
+            buildLogsUrl(orgSlug),
+            buildTraceUrl(orgSlug, eventId),
+          ];
+
+          for (const url of urls) {
+            const parsed = new URL(url);
+            expect(parsed.hostname).toBe("sentry.company.com");
+          }
+        }
+      ),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
