@@ -68,6 +68,5 @@ export const STEP_LABELS: Record<string, string> = {
   "plan-codemods": "Planning code modifications",
   "apply-codemods": "Applying code modifications",
   "verify-changes": "Verifying changes",
-  "add-example-trigger": "Example error trigger",
   "open-sentry-ui": "Finishing up",
 };
