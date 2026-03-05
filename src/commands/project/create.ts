@@ -30,11 +30,7 @@ import {
   CliError,
   ContextError,
 } from "../../lib/errors.js";
-import {
-  writeFooter,
-  writeJson,
-  writeKeyValue,
-} from "../../lib/formatters/index.js";
+import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
@@ -43,7 +39,7 @@ import {
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import { slugify } from "../../lib/utils.js";
-import type { SentryProject, SentryTeam } from "../../types/index.js";
+import type { SentryProject, SentryTeam, Writer } from "../../types/index.js";
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -89,6 +85,28 @@ const PLATFORMS = [
   "rust",
   "elixir",
 ] as const;
+
+/**
+ * Normalize common platform format mistakes.
+ *
+ * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
+ * but platform identifiers use hyphens (`javascript-nextjs`). Users often
+ * copy the dot-notation directly. This auto-corrects dots to hyphens and
+ * warns on stderr, following the same pattern as `normalizeFields` in `api.ts`.
+ *
+ * Safe to auto-correct because the input is already invalid (dots are never
+ * valid in platform identifiers) and the correction is unambiguous.
+ */
+function normalizePlatform(platform: string, stderr: Writer): string {
+  if (!platform.includes(".")) {
+    return platform;
+  }
+  const corrected = platform.replace(/\./g, "-");
+  stderr.write(
+    `warning: platform '${platform}' uses '.' instead of '-' — interpreting as '${corrected}'\n`
+  );
+  return corrected;
+}
 
 /**
  * Check whether an API error is about an invalid platform value.
@@ -301,6 +319,8 @@ export const createCommand = buildCommand({
       throw new CliError(buildPlatformError(nameArg));
     }
 
+    const platform = normalizePlatform(platformArg, this.stderr);
+
     const parsed = parseOrgProjectArg(nameArg);
 
     let explicitOrg: string | undefined;
@@ -347,7 +367,7 @@ export const createCommand = buildCommand({
       orgSlug,
       teamSlug: team.slug,
       name,
-      platform: platformArg,
+      platform,
       detectedFrom: resolved.detectedFrom,
     });
 
@@ -362,44 +382,20 @@ export const createCommand = buildCommand({
 
     // Human-readable output
     const url = buildProjectUrl(orgSlug, project.slug);
-    const fields: [string, string][] = [
-      ["Project", project.name],
-      ["Slug", project.slug],
-      ["Org", orgSlug],
-      ["Team", team.slug],
-      ["Platform", project.platform || platformArg],
-    ];
-    if (dsn) {
-      fields.push(["DSN", dsn]);
-    }
-    fields.push(["URL", url]);
-
-    stdout.write(`\nCreated project '${project.name}' in ${orgSlug}\n`);
-
-    // Sentry may adjust the slug to avoid collisions (e.g., "my-app" → "my-app-0g")
     const expectedSlug = slugify(name);
-    if (project.slug !== expectedSlug) {
-      stdout.write(
-        `Note: Slug '${project.slug}' was assigned because '${expectedSlug}' is already taken.\n`
-      );
-    }
 
-    // Inform user which team was used when not explicitly specified
-    if (team.source === "auto-created") {
-      stdout.write(`Note: Created team '${team.slug}' (org had no teams).\n`);
-    } else if (team.source === "auto-selected") {
-      stdout.write(
-        `Note: Using team '${team.slug}'. ` +
-          "See all teams: sentry team list\n"
-      );
-    }
-
-    stdout.write("\n");
-    writeKeyValue(stdout, fields);
-
-    writeFooter(
-      stdout,
-      `Tip: Use 'sentry project view ${orgSlug}/${project.slug}' for details`
+    stdout.write(
+      `${formatProjectCreated({
+        project,
+        orgSlug,
+        teamSlug: team.slug,
+        teamSource: team.source,
+        requestedPlatform: platform,
+        dsn,
+        url,
+        slugDiverged: project.slug !== expectedSlug,
+        expectedSlug,
+      })}\n`
     );
   },
 });

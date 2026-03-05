@@ -26,6 +26,7 @@
 import chalk from "chalk";
 import { highlight as cliHighlight } from "cli-highlight";
 import { marked, type Token, type Tokens } from "marked";
+import stringWidth from "string-width";
 import { COLORS, muted, terminalLink } from "./colors.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
@@ -54,7 +55,9 @@ function isTruthyEnv(val: string): boolean {
  *    semantics: `"0"` / `"false"` / `""` force color on)
  * 2. `NO_COLOR` — follows the no-color.org spec: any **non-empty** value
  *    disables color, regardless of its content (including `"0"` / `"false"`)
- * 3. `process.stdout.isTTY` — auto-detect interactive terminal
+ * 3. `FORCE_COLOR` — follows chalk/supports-color convention: `"0"` forces
+ *    color off (plain), any other non-empty value (e.g. `"1"`) forces color on.
+ * 4. `process.stdout.isTTY` — auto-detect interactive terminal
  */
 export function isPlainOutput(): boolean {
   const plain = process.env.SENTRY_PLAIN_OUTPUT;
@@ -67,6 +70,15 @@ export function isPlainOutput(): boolean {
   const noColor = process.env.NO_COLOR;
   if (noColor !== undefined) {
     return noColor !== "";
+  }
+
+  // FORCE_COLOR follows the chalk/supports-color convention:
+  //   "0" → force disable color (plain output)
+  //   "1"/"2"/"3" or any other non-empty, non-"0" → force enable color
+  // Checked after NO_COLOR so that NO_COLOR always wins if both are set.
+  const forceColor = process.env.FORCE_COLOR;
+  if (forceColor !== undefined && forceColor !== "") {
+    return forceColor === "0";
   }
 
   return !process.stdout.isTTY;
@@ -317,7 +329,9 @@ function renderOneInline(token: Token): string {
     case "em":
       return chalk.italic(renderInline((token as Tokens.Em).tokens));
     case "codespan":
-      return chalk.hex(COLORS.yellow)((token as Tokens.Codespan).text);
+      return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(
+        ` ${(token as Tokens.Codespan).text} `
+      );
     case "link": {
       const link = token as Tokens.Link;
       let linkText = renderInline(link.tokens);
@@ -429,12 +443,18 @@ function renderBlocks(tokens: Token[]): string {
       case "heading": {
         const t = token as Tokens.Heading;
         const text = renderInline(t.tokens);
-        // h1/h2 → bold cyan; h3+ → plain cyan (less prominent)
-        const styled =
-          t.depth <= 2
-            ? chalk.hex(COLORS.cyan).bold(text)
-            : chalk.hex(COLORS.cyan)(text);
-        parts.push(styled);
+        if (t.depth <= 2) {
+          // h1/h2 → bold cyan with colored divider bar for visual weight
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+          parts.push(
+            chalk.hex(COLORS.cyan)(
+              "\u2501".repeat(Math.min(stringWidth(text), 30))
+            )
+          );
+        } else {
+          // h3+ → bold cyan (less prominent, no divider)
+          parts.push(chalk.hex(COLORS.cyan).bold(text));
+        }
         parts.push("");
         break;
       }

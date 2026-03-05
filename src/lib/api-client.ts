@@ -62,6 +62,7 @@ import {
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import { ApiError, AuthError, stringifyUnknown } from "./errors.js";
+import { logger } from "./logger.js";
 import { resolveOrgRegion } from "./region.js";
 import {
   getApiBaseUrl,
@@ -598,8 +599,8 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
     cursor = nextCursor;
 
     if (page === MAX_PAGINATION_PAGES - 1) {
-      console.error(
-        `Warning: Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
+      logger.warn(
+        `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
           "Results may be incomplete for this organization."
       );
     }
@@ -746,8 +747,8 @@ export async function createTeam(
     Sentry.captureException(error, {
       extra: { orgSlug, teamSlug: team.slug, context: "auto-add member" },
     });
-    process.stderr.write(
-      `Warning: Team '${team.slug}' was created but you could not be added as a member.\n`
+    logger.warn(
+      `Team '${team.slug}' was created but you could not be added as a member.`
     );
   }
 

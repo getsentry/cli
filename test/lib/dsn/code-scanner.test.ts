@@ -385,5 +385,33 @@ describe("Code Scanner", () => {
       expect(result.dsns).toEqual([]);
       expect(result.sourceMtimes).toEqual({});
     });
+
+    test("skips files larger than 256 KB", async () => {
+      // Create a file that exceeds MAX_FILE_SIZE (256 * 1024 bytes)
+      const largePadding = "x".repeat(256 * 1024 + 1);
+      const content = `const DSN = "https://abc@o123.ingest.sentry.io/456";\n${largePadding}`;
+      writeFileSync(join(testDir, "large.ts"), content);
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toEqual([]);
+    });
+
+    test("gracefully handles unreadable files", async () => {
+      const { chmodSync } = require("node:fs") as typeof import("node:fs");
+      const filePath = join(testDir, "secret.ts");
+      writeFileSync(
+        filePath,
+        'const DSN = "https://abc@o123.ingest.sentry.io/456";'
+      );
+      chmodSync(filePath, 0o000);
+
+      try {
+        const result = await scanCodeForDsns(testDir);
+        expect(result.dsns).toEqual([]);
+      } finally {
+        // Restore permissions so afterEach cleanup can delete
+        chmodSync(filePath, 0o644);
+      }
+    });
   });
 });

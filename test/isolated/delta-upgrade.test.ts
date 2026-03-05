@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -394,6 +394,93 @@ describe("attemptDeltaUpgrade", () => {
         destPath
       );
       expect(result).toBeNull();
+    } finally {
+      if (existsSync(oldBinaryPath)) unlinkSync(oldBinaryPath);
+      if (existsSync(destPath)) unlinkSync(destPath);
+    }
+  });
+
+  test("returns DeltaResult with telemetry on successful stable patch", async () => {
+    // Use real TRDIFF10 fixture for end-to-end success
+    const fixturesDir = join(import.meta.dir, "../fixtures/patches");
+    const oldBinaryPath = tempFile("old-success.bin");
+    const destPath = tempFile("dest-success.bin");
+
+    // Copy the real fixture "old" binary — loadOldBinary will copy+mmap this
+    copyFileSync(join(fixturesDir, "small-old.bin"), oldBinaryPath);
+
+    // SHA-256 of the expected output (small-new.bin)
+    const expectedSha256 =
+      "54d0dcd74478bc154b5b24393fdc6129518271baa36f446384d60e84021bb724";
+
+    // Read the real TRDIFF10 patch
+    const patchData = await Bun.file(
+      join(fixturesDir, "small.trdiff10")
+    ).arrayBuffer();
+
+    const patchUrl = "https://example.com/small.patch";
+    const releases = [
+      {
+        tag_name: "0.14.0",
+        assets: [
+          {
+            name: BINARY_NAME,
+            size: 54,
+            digest: `sha256:${expectedSha256}`,
+            browser_download_url: `https://example.com/${BINARY_NAME}`,
+          },
+          {
+            name: `${BINARY_NAME}.patch`,
+            size: 89,
+            browser_download_url: patchUrl,
+          },
+          {
+            name: `${BINARY_NAME}.gz`,
+            size: 100_000,
+            browser_download_url: `https://example.com/${BINARY_NAME}.gz`,
+          },
+        ],
+      },
+      {
+        tag_name: "0.13.0",
+        assets: [
+          {
+            name: BINARY_NAME,
+            size: 54,
+            browser_download_url: `https://example.com/${BINARY_NAME}`,
+          },
+        ],
+      },
+    ];
+
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+      if (urlStr.startsWith("https://api.github.com/")) {
+        return new Response(JSON.stringify(releases), { status: 200 });
+      }
+      if (urlStr === patchUrl) {
+        return new Response(patchData, { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    try {
+      const result = await attemptDeltaUpgrade(
+        "0.14.0",
+        oldBinaryPath,
+        destPath
+      );
+      expect(result).not.toBeNull();
+      expect(result!.sha256).toBe(expectedSha256);
+      expect(result!.patchBytes).toBe(89);
+      expect(result!.chainLength).toBe(1);
+
+      // Verify patched output matches expected file
+      const actual = await Bun.file(destPath).arrayBuffer();
+      const expected = await Bun.file(
+        join(fixturesDir, "small-new.bin")
+      ).arrayBuffer();
+      expect(new Uint8Array(actual)).toEqual(new Uint8Array(expected));
     } finally {
       if (existsSync(oldBinaryPath)) unlinkSync(oldBinaryPath);
       if (existsSync(destPath)) unlinkSync(destPath);

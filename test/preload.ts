@@ -55,6 +55,7 @@ process.env.SENTRY_CONFIG_DIR = testDir;
 // (but preserve SENTRY_TEST_* vars for E2E tests)
 delete process.env.SENTRY_DSN;
 delete process.env.SENTRY_AUTH_TOKEN;
+delete process.env.SENTRY_TOKEN;
 delete process.env.SENTRY_CLIENT_ID;
 delete process.env.SENTRY_URL;
 delete process.env.SENTRY_ORG;

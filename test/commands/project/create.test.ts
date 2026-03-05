@@ -475,8 +475,8 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Slug 'my-app-0g' was assigned");
-    expect(output).toContain("'my-app' is already taken");
+    expect(output).toContain("Slug `my-app-0g` was assigned");
+    expect(output).toContain("`my-app` is already taken");
   });
 
   test("does not show slug note when slug matches name", async () => {
@@ -572,5 +572,52 @@ describe("project create", () => {
     expect(err.message).toContain("may not exist, or you may lack access");
     // Should NOT say "Organization is required" — we don't know that
     expect(err.message).not.toContain("is required");
+  });
+
+  test("auto-corrects dot-separated platform to hyphen-separated", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "javascript.nextjs");
+
+    // Should send corrected platform to API
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "javascript-nextjs",
+    });
+
+    // Should warn on stderr
+    const stderrOutput = (
+      context.stderr.write as ReturnType<typeof mock>
+    ).mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("");
+    expect(stderrOutput).toContain("warning:");
+    expect(stderrOutput).toContain("javascript.nextjs");
+    expect(stderrOutput).toContain("javascript-nextjs");
+  });
+
+  test("does not warn when platform has no dots", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "javascript-nextjs");
+
+    // No stderr warnings about platform normalization
+    const stderrOutput = (
+      context.stderr.write as ReturnType<typeof mock>
+    ).mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("");
+    expect(stderrOutput).not.toContain("warning:");
+  });
+
+  test("auto-corrects multiple dots in platform", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "python.django.rest");
+
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "python-django-rest",
+    });
   });
 });

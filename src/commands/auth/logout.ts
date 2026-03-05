@@ -6,7 +6,12 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { clearAuth, isAuthenticated } from "../../lib/db/auth.js";
+import {
+  clearAuth,
+  getActiveEnvVarName,
+  isAuthenticated,
+  isEnvTokenActive,
+} from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { success } from "../../lib/formatters/colors.js";
 
@@ -24,6 +29,15 @@ export const logoutCommand = buildCommand({
 
     if (!(await isAuthenticated())) {
       stdout.write("Not currently authenticated.\n");
+      return;
+    }
+
+    if (isEnvTokenActive()) {
+      const envVar = getActiveEnvVarName();
+      stdout.write(
+        `Authentication is provided via ${envVar} environment variable.\n` +
+          `Unset ${envVar} to log out.\n`
+      );
       return;
     }
 

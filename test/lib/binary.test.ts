@@ -16,12 +16,14 @@ import {
 import { join } from "node:path";
 import {
   acquireLock,
+  compareVersions,
   determineInstallDir,
   fetchWithUpgradeError,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   installBinary,
+  isDowngrade,
   releaseLock,
   replaceBinarySync,
 } from "../../src/lib/binary.js";
@@ -457,5 +459,67 @@ describe("acquireLock", () => {
     expect(content).toBe(String(process.pid));
 
     releaseLock(lockPath);
+  });
+});
+
+describe("compareVersions", () => {
+  test("stable: newer > older", () => {
+    expect(compareVersions("0.15.0", "0.14.0")).toBe(1);
+  });
+
+  test("stable: older < newer", () => {
+    expect(compareVersions("0.14.0", "0.15.0")).toBe(-1);
+  });
+
+  test("stable: equal", () => {
+    expect(compareVersions("0.14.0", "0.14.0")).toBe(0);
+  });
+
+  test("nightly: later timestamp > earlier timestamp", () => {
+    expect(
+      compareVersions("0.14.0-dev.1772732047", "0.14.0-dev.1772724107")
+    ).toBe(1);
+  });
+
+  test("nightly: earlier timestamp < later timestamp", () => {
+    expect(
+      compareVersions("0.14.0-dev.1772724107", "0.14.0-dev.1772732047")
+    ).toBe(-1);
+  });
+
+  test("nightly: equal", () => {
+    expect(
+      compareVersions("0.14.0-dev.1772724107", "0.14.0-dev.1772724107")
+    ).toBe(0);
+  });
+
+  test("stable > nightly with same base (semver: release > pre-release)", () => {
+    expect(compareVersions("0.14.0", "0.14.0-dev.1772732047")).toBe(1);
+  });
+});
+
+describe("isDowngrade", () => {
+  test("returns true when target is older stable version", () => {
+    expect(isDowngrade("0.15.0", "0.14.0")).toBe(true);
+  });
+
+  test("returns false when target is newer stable version", () => {
+    expect(isDowngrade("0.14.0", "0.15.0")).toBe(false);
+  });
+
+  test("returns false when versions are equal", () => {
+    expect(isDowngrade("0.14.0", "0.14.0")).toBe(false);
+  });
+
+  test("returns true when target is older nightly (earlier timestamp)", () => {
+    expect(isDowngrade("0.14.0-dev.1772732047", "0.14.0-dev.1772724107")).toBe(
+      true
+    );
+  });
+
+  test("returns false when target is newer nightly (later timestamp)", () => {
+    expect(isDowngrade("0.14.0-dev.1772724107", "0.14.0-dev.1772732047")).toBe(
+      false
+    );
   });
 });

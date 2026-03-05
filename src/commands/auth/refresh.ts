@@ -6,7 +6,12 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { getAuthConfig, refreshToken } from "../../lib/db/auth.js";
+import {
+  getActiveEnvVarName,
+  getAuthConfig,
+  isEnvTokenActive,
+  refreshToken,
+} from "../../lib/db/auth.js";
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
@@ -61,6 +66,17 @@ Examples:
   },
   async func(this: SentryContext, flags: RefreshFlags): Promise<void> {
     const { stdout } = this;
+
+    // Env var tokens can't be refreshed
+    if (isEnvTokenActive()) {
+      const envVar = getActiveEnvVarName();
+      throw new AuthError(
+        "invalid",
+        "Cannot refresh an environment variable token.\n" +
+          "Token refresh is only available for OAuth sessions.\n" +
+          `Update ${envVar} to change your token.`
+      );
+    }
 
     // Pre-check for refresh token availability (better error message)
     const auth = await getAuthConfig();

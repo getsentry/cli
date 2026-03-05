@@ -19,9 +19,13 @@
 
 import { unlinkSync } from "node:fs";
 
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/bun";
+
 import {
   GITHUB_RELEASES_URL,
   getPlatformBinaryName,
+  isDowngrade,
   isNightlyVersion,
 } from "./binary.js";
 import { applyPatch } from "./bspatch.js";
@@ -33,6 +37,11 @@ import {
   listTags,
   type OciManifest,
 } from "./ghcr.js";
+import { logger } from "./logger.js";
+import { withTracing, withTracingSpan } from "./telemetry.js";
+
+/** Scoped logger for delta upgrade operations */
+const log = logger.withTag("delta-upgrade");
 
 /**
  * Maximum number of patches to chain before falling back to full download.
@@ -68,6 +77,16 @@ export type PatchChain = {
   expectedSha256: string;
 };
 
+/** Result of a successful delta upgrade */
+export type DeltaResult = {
+  /** SHA-256 hex digest of the output binary */
+  sha256: string;
+  /** Total bytes downloaded for the patch chain */
+  patchBytes: number;
+  /** Number of patches in the chain (1 = direct, >1 = multi-hop) */
+  chainLength: number;
+};
+
 /**
  * Check whether delta upgrade can be attempted.
  *
@@ -87,6 +106,11 @@ export function canAttemptDelta(targetVersion: string): boolean {
 
   // Cross-channel upgrades are rare one-off operations; skip delta
   if (isNightlyVersion(CLI_VERSION) !== isNightlyVersion(targetVersion)) {
+    return false;
+  }
+
+  // Downgrades have no forward patch path — skip immediately
+  if (isDowngrade(CLI_VERSION, targetVersion)) {
     return false;
   }
 
@@ -285,7 +309,9 @@ export async function resolveStableChain(
   targetVersion: string
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
-  const releases = await fetchRecentReleases();
+  const releases = await withTracing("fetch-releases", "http.client", () =>
+    fetchRecentReleases()
+  );
 
   // Get .gz size from the target release for threshold calculation
   const targetRelease = releases.find((r) => r.tag_name === targetVersion);
@@ -311,8 +337,11 @@ export async function resolveStableChain(
   }
 
   // Parallel patch download
-  const downloadResults = await Promise.all(
-    chainInfo.patchUrls.map((url) => downloadStablePatch(url))
+  const downloadResults = await withTracing(
+    "download-patches",
+    "http.client",
+    () =>
+      Promise.all(chainInfo.patchUrls.map((url) => downloadStablePatch(url)))
   );
 
   const patches: PatchLink[] = [];
@@ -377,35 +406,43 @@ export type PatchGraphEntry = {
  * @param token - GHCR anonymous bearer token
  * @returns Map from fromVersion → { version, manifest }
  */
-export async function buildNightlyPatchGraph(
+export function buildNightlyPatchGraph(
   token: string
 ): Promise<Map<string, PatchGraphEntry>> {
-  const tags = await listTags(token, PATCH_TAG_PREFIX);
-  const graph = new Map<string, PatchGraphEntry>();
+  return withTracingSpan(
+    "build-patch-graph",
+    "upgrade.delta.resolve",
+    async (span) => {
+      const tags = await listTags(token, PATCH_TAG_PREFIX);
+      span.setAttribute("graph.tag_count", tags.length);
 
-  const entries = await Promise.all(
-    tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
-      const version = tag.slice(PATCH_TAG_PREFIX.length);
-      try {
-        const manifest = await fetchManifest(token, tag);
-        const fromVersion = getPatchFromVersion(manifest);
-        if (!fromVersion) {
-          return null;
+      const entries = await Promise.all(
+        tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
+          const version = tag.slice(PATCH_TAG_PREFIX.length);
+          try {
+            const manifest = await fetchManifest(token, tag);
+            const fromVersion = getPatchFromVersion(manifest);
+            if (!fromVersion) {
+              return null;
+            }
+            return [fromVersion, { version, manifest }];
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const graph = new Map<string, PatchGraphEntry>();
+      for (const entry of entries) {
+        if (entry) {
+          graph.set(entry[0], entry[1]);
         }
-        return [fromVersion, { version, manifest }];
-      } catch {
-        return null;
       }
-    })
-  );
 
-  for (const entry of entries) {
-    if (entry) {
-      graph.set(entry[0], entry[1]);
+      span.setAttribute("graph.entry_count", graph.size);
+      return graph;
     }
-  }
-
-  return graph;
+  );
 }
 
 /** Options for walking the nightly patch chain through the graph */
@@ -523,10 +560,15 @@ export async function resolveNightlyChain(
   }
 
   // Parallel blob download
-  const downloadResults = await Promise.all(
-    chainInfo.layerDigests.map((digest) =>
-      downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
-    )
+  const downloadResults = await withTracing(
+    "download-patches",
+    "http.client",
+    () =>
+      Promise.all(
+        chainInfo.layerDigests.map((digest) =>
+          downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
+        )
+      )
   );
 
   const patches: PatchLink[] = [];
@@ -549,64 +591,156 @@ export async function resolveNightlyChain(
  * @param targetVersion - Version to upgrade to
  * @param oldBinaryPath - Path to the currently running binary (used as patch base)
  * @param destPath - Path to write the patched binary
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
-export async function attemptDeltaUpgrade(
+export function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
+): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
-    return null;
+    return Promise.resolve(null);
   }
 
-  try {
-    if (isNightlyVersion(targetVersion)) {
-      return await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath);
-    }
-    return await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
-  } catch {
-    // Any error during delta upgrade → fall back to full download
-    return null;
-  }
+  const channel = isNightlyVersion(targetVersion) ? "nightly" : "stable";
+
+  return withTracingSpan(
+    "delta-upgrade",
+    "upgrade.delta",
+    async (span) => {
+      span.setAttribute("delta.from_version", CLI_VERSION);
+      span.setAttribute("delta.to_version", targetVersion);
+
+      log.debug(
+        `Attempting delta upgrade from ${CLI_VERSION} to ${targetVersion}`
+      );
+
+      try {
+        const result =
+          channel === "nightly"
+            ? await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath)
+            : await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
+
+        if (result) {
+          span.setAttribute("delta.patch_bytes", result.patchBytes);
+          span.setAttribute("delta.chain_length", result.chainLength);
+          span.setAttribute("delta.sha256", result.sha256.slice(0, 12));
+          span.setStatus({ code: 1 }); // OK
+
+          Sentry.metrics.distribution(
+            "upgrade.delta.patch_bytes",
+            result.patchBytes,
+            {
+              attributes: { channel },
+            }
+          );
+          Sentry.metrics.distribution(
+            "upgrade.delta.chain_length",
+            result.chainLength,
+            {
+              attributes: { channel },
+            }
+          );
+        } else {
+          // No patch available — not an error, just unavailable
+          span.setAttribute("delta.result", "unavailable");
+          span.setStatus({ code: 1 }); // OK — graceful fallback
+        }
+        return result;
+      } catch (error) {
+        // Record the error in Sentry so we can see delta failures in telemetry.
+        // Marked non-fatal: the upgrade continues via full download.
+        Sentry.captureException(error, {
+          level: "warning",
+          tags: {
+            "delta.from_version": CLI_VERSION,
+            "delta.to_version": targetVersion,
+            "delta.channel": channel,
+          },
+          contexts: {
+            delta_upgrade: {
+              from_version: CLI_VERSION,
+              to_version: targetVersion,
+              channel,
+              old_binary_path: oldBinaryPath,
+            },
+          },
+        });
+
+        const msg = error instanceof Error ? error.message : String(error);
+        log.warn(
+          `Delta upgrade failed (${msg}), falling back to full download`
+        );
+        span.setStatus({ code: 2 }); // Error
+        span.setAttribute("delta.result", "error");
+        span.setAttribute("delta.error", msg);
+        return null;
+      }
+    },
+    { "delta.channel": channel }
+  );
 }
 
 /**
  * Resolve and apply stable delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
-  const chain = await resolveStableChain(CLI_VERSION, targetVersion);
+): Promise<DeltaResult | null> {
+  const chain = await withTracing(
+    "resolve-stable-chain",
+    "upgrade.delta.resolve",
+    () => resolveStableChain(CLI_VERSION, targetVersion)
+  );
+  if (chain) {
+    log.debug(
+      `Resolved stable chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await withTracing(
+    "apply-patch-chain",
+    "upgrade.delta.apply",
+    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  );
+  return {
+    sha256,
+    patchBytes: chain.totalSize,
+    chainLength: chain.patches.length,
+  };
 }
 
 /**
  * Resolve and apply nightly delta patches.
  *
- * @returns SHA-256 hex of the output, or null if delta is unavailable
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
 export async function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
-): Promise<string | null> {
-  const token = await getAnonymousToken();
+): Promise<DeltaResult | null> {
+  const token = await withTracing("ghcr-token", "http.client", () =>
+    getAnonymousToken()
+  );
 
   // Get the .gz layer size from the target version's manifest for threshold.
   // Use the versioned tag (nightly-<version>) so the threshold reflects the
   // actual binary being upgraded to, not the latest rolling nightly.
   const binaryName = getPlatformBinaryName();
   const targetTag = `nightly-${targetVersion}`;
-  const nightlyManifest = await fetchManifest(token, targetTag);
+  const nightlyManifest = await withTracing(
+    "fetch-target-manifest",
+    "http.client",
+    () => fetchManifest(token, targetTag)
+  );
   const gzLayer = nightlyManifest.layers.find((l) => {
     const title = l.annotations?.["org.opencontainers.image.title"];
     return title === `${binaryName}.gz`;
@@ -615,17 +749,30 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  const chain = await resolveNightlyChain(
-    token,
-    CLI_VERSION,
-    targetVersion,
-    gzLayer.size
+  const chain = await withTracing(
+    "resolve-nightly-chain",
+    "upgrade.delta.resolve",
+    () => resolveNightlyChain(token, CLI_VERSION, targetVersion, gzLayer.size)
   );
+  if (chain) {
+    log.debug(
+      `Resolved nightly chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
   if (!chain) {
     return null;
   }
 
-  return await applyPatchChain(chain, oldBinaryPath, destPath);
+  const sha256 = await withTracing(
+    "apply-patch-chain",
+    "upgrade.delta.apply",
+    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  );
+  return {
+    sha256,
+    patchBytes: chain.totalSize,
+    chainLength: chain.patches.length,
+  };
 }
 
 /** Remove intermediate patching files, ignoring errors. */
@@ -640,24 +787,14 @@ function cleanupIntermediates(destPath: string): void {
 }
 
 /**
- * Apply a resolved patch chain sequentially and verify the result.
+ * Apply patches sequentially, alternating between two intermediate files.
  *
- * For single-patch chains, applies directly from old binary to dest.
- * For multi-patch chains, alternates between two intermediate files
- * so that read (mmap) and write never target the same path — writing
- * to the mmap source would truncate it and corrupt the output.
+ * Extracted to keep cognitive complexity manageable when the caller wraps
+ * this in a tracing span.
  *
- * Does **not** set executable permissions — the caller
- * (`downloadBinaryToTemp`) handles that uniformly for both delta
- * and full-download paths.
- *
- * @param chain - Resolved patch chain with patches and expected hash
- * @param oldBinaryPath - Path to the original binary
- * @param destPath - Final output path
  * @returns SHA-256 hex of the final output
- * @throws {Error} When SHA-256 verification fails
  */
-export async function applyPatchChain(
+async function applyPatchesSequentially(
   chain: PatchChain,
   oldBinaryPath: string,
   destPath: string
@@ -680,7 +817,11 @@ export async function applyPatchChain(
       const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
       const outputPath = isLast ? destPath : intermediate;
 
-      sha256 = await applyPatch(currentOldPath, patch.data, outputPath);
+      sha256 = await withTracing(
+        `apply-patch-${i}`,
+        "upgrade.delta.apply",
+        () => applyPatch(currentOldPath, patch.data, outputPath)
+      );
 
       if (!isLast) {
         currentOldPath = outputPath;
@@ -693,12 +834,60 @@ export async function applyPatchChain(
     }
   }
 
-  // Verify the final SHA-256 matches
-  if (sha256 !== chain.expectedSha256) {
-    throw new Error(
-      `SHA-256 mismatch after patching: got ${sha256}, expected ${chain.expectedSha256}`
-    );
-  }
-
   return sha256;
+}
+
+/**
+ * Apply a resolved patch chain sequentially and verify the result.
+ *
+ * For single-patch chains, applies directly from old binary to dest.
+ * For multi-patch chains, alternates between two intermediate files
+ * so that read and write never target the same path — writing to the
+ * source would truncate it and corrupt the output.
+ *
+ * Does **not** set executable permissions — the caller
+ * (`downloadBinaryToTemp`) handles that uniformly for both delta
+ * and full-download paths.
+ *
+ * @param chain - Resolved patch chain with patches and expected hash
+ * @param oldBinaryPath - Path to the original binary
+ * @param destPath - Final output path
+ * @returns SHA-256 hex of the final output
+ * @throws {Error} When SHA-256 verification fails
+ */
+export function applyPatchChain(
+  chain: PatchChain,
+  oldBinaryPath: string,
+  destPath: string
+): Promise<string> {
+  return withTracingSpan(
+    "apply-patches",
+    "upgrade.delta.apply",
+    async (span) => {
+      span.setAttribute("patches.count", chain.patches.length);
+      span.setAttribute(
+        "patches.total_bytes",
+        chain.patches.reduce((sum, p) => sum + p.size, 0)
+      );
+
+      log.debug(
+        `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
+      );
+
+      const sha256 = await applyPatchesSequentially(
+        chain,
+        oldBinaryPath,
+        destPath
+      );
+
+      // Verify the final SHA-256 matches
+      if (sha256 !== chain.expectedSha256) {
+        throw new Error(
+          `SHA-256 mismatch after patching: got ${sha256}, expected ${chain.expectedSha256}`
+        );
+      }
+
+      return sha256;
+    }
+  );
 }

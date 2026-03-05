@@ -5,12 +5,20 @@
  * TRDIFF10 format (produced by zig-bsdiff with `--use-zstd`). Designed for
  * minimal memory usage during CLI self-upgrades:
  *
- * - Old binary: memory-mapped via `Bun.mmap()` (0 JS heap)
+ * - Old binary: copy-then-mmap for 0 JS heap (CoW on btrfs/xfs/APFS),
+ *   falling back to `arrayBuffer()` if copy/mmap fails
  * - Diff/extra blocks: streamed via `DecompressionStream('zstd')`
  * - Output: written incrementally to disk via `Bun.file().writer()`
  * - Integrity: SHA-256 computed inline via `Bun.CryptoHasher`
  *
- * Total heap usage: ~1-2 MB regardless of binary size.
+ * `Bun.mmap()` cannot target the running binary directly because it opens
+ * with PROT_WRITE/O_RDWR:
+ * - macOS: AMFI sends uncatchable SIGKILL (writable mapping on signed Mach-O)
+ * - Linux: ETXTBSY from `open()` (kernel blocks write-open on running ELF)
+ *
+ * The copy-then-mmap strategy sidesteps both: the copy is a regular file
+ * with no running process, so mmap succeeds. On CoW-capable filesystems
+ * (btrfs, xfs, APFS) the copy is near-instant with zero extra disk I/O.
  *
  * TRDIFF10 format (from zig-bsdiff):
  * ```
@@ -21,6 +29,11 @@
  * [32..]   zstd(control) | zstd(diff) | zstd(extra)
  * ```
  */
+
+import { constants, copyFileSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** TRDIFF10 header magic bytes */
 const TRDIFF10_MAGIC = "TRDIFF10";
@@ -207,12 +220,70 @@ function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
   );
 }
 
+/** Result of loading the old binary for patching */
+type OldFileHandle = {
+  /** Memory-mapped or in-memory view of the old binary */
+  data: Uint8Array;
+  /** Cleanup function to call after patching (removes temp copy, if any) */
+  cleanup: () => void | Promise<void>;
+};
+
+/**
+ * Load the old binary for read access during patching.
+ *
+ * Strategy: copy to temp file, then try mmap on the copy. The copy is a
+ * regular file (no running process), so `Bun.mmap()` succeeds on both
+ * Linux and macOS — ETXTBSY (Linux) and AMFI SIGKILL (macOS) only affect
+ * the running binary's inode, not a copy. On CoW filesystems (btrfs, xfs,
+ * APFS) the copy is a metadata-only reflink (near-instant).
+ *
+ * Falls back to `Bun.file().arrayBuffer()` (~100 MB heap) if copy or
+ * mmap fails for any reason.
+ */
+let loadCounter = 0;
+
+async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
+  loadCounter += 1;
+  const tempCopy = join(
+    tmpdir(),
+    `sentry-patch-old-${process.pid}-${loadCounter}`
+  );
+  try {
+    // COPYFILE_FICLONE: attempt CoW reflink first (near-instant on btrfs/xfs/APFS),
+    // silently falls back to regular copy on filesystems that don't support it.
+    copyFileSync(oldPath, tempCopy, constants.COPYFILE_FICLONE);
+
+    // mmap the copy — safe because it's a separate inode, not the running
+    // binary. MAP_PRIVATE avoids write-back to disk.
+    const data = Bun.mmap(tempCopy, { shared: false });
+    return {
+      data,
+      cleanup: () =>
+        unlink(tempCopy).catch(() => {
+          /* Best-effort cleanup — OS will reclaim on reboot */
+        }),
+    };
+  } catch {
+    // Copy or mmap failed — fall back to reading into JS heap
+    await unlink(tempCopy).catch(() => {
+      /* May not exist if copyFileSync failed */
+    });
+    return {
+      data: new Uint8Array(await Bun.file(oldPath).arrayBuffer()),
+      cleanup: () => {
+        // Data is in JS heap — no temp file to clean up
+      },
+    };
+  }
+}
+
 /**
  * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
  *
- * Uses `Bun.mmap()` for the old file (0 heap), `DecompressionStream('zstd')`
- * for streaming diff/extra blocks (~16 KB buffers), `Bun.file().writer()`
- * for disk output, and `Bun.CryptoHasher` for inline SHA-256 verification.
+ * Copies the old file to a temp path and mmaps the copy (0 JS heap), falling
+ * back to `arrayBuffer()` if mmap fails. Streams diff/extra blocks via
+ * `DecompressionStream('zstd')`, writes output via `Bun.file().writer()`,
+ * and computes SHA-256 inline.
  *
  * @param oldPath - Path to the existing (old) binary file
  * @param patchData - Complete TRDIFF10 patch file contents
@@ -243,8 +314,10 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // Memory-map old file: OS manages pages, 0 JS heap allocation
-  const oldFile = Bun.mmap(oldPath);
+  // Load old binary via copy-then-mmap (0 JS heap) or arrayBuffer fallback.
+  // See loadOldBinary() for why direct mmap of the running binary is impossible.
+  const { data: oldFile, cleanup: cleanupOldFile } =
+    await loadOldBinary(oldPath);
 
   // Streaming output: write directly to disk, no output buffer in memory
   const writer = Bun.file(destPath).writer();
@@ -293,7 +366,11 @@ export async function applyPatch(
       oldpos += seekBy;
     }
   } finally {
-    await writer.end();
+    try {
+      await writer.end();
+    } finally {
+      await cleanupOldFile();
+    }
   }
 
   // Validate output size matches header

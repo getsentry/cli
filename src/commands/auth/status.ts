@@ -9,6 +9,8 @@ import { listOrganizations } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   type AuthConfig,
+  type AuthSource,
+  ENV_SOURCE_PREFIX,
   getAuthConfig,
   isAuthenticated,
 } from "../../lib/db/auth.js";
@@ -42,6 +44,16 @@ function writeUserInfo(stdout: Writer): void {
   stdout.write(`User: ${muted(formatUserIdentity(user))}\n`);
 }
 
+/** Check if the auth source is an environment variable */
+function isEnvSource(source: AuthSource): boolean {
+  return source.startsWith(ENV_SOURCE_PREFIX);
+}
+
+/** Extract the env var name from an env-based AuthSource (e.g. "env:SENTRY_AUTH_TOKEN" → "SENTRY_AUTH_TOKEN") */
+function envVarName(source: AuthSource): string {
+  return source.slice(ENV_SOURCE_PREFIX.length);
+}
+
 /**
  * Write token information
  */
@@ -56,6 +68,11 @@ function writeTokenInfo(
 
   const tokenDisplay = showToken ? auth.token : maskToken(auth.token);
   stdout.write(`Token: ${tokenDisplay}\n`);
+
+  // Env var tokens have no expiry or refresh — skip those sections
+  if (isEnvSource(auth.source)) {
+    return;
+  }
 
   if (auth.expiresAt) {
     stdout.write(`Expires: ${formatExpiration(auth.expiresAt)}\n`);
@@ -138,8 +155,12 @@ export const statusCommand = buildCommand({
 
     const auth = await getAuthConfig();
     const authenticated = await isAuthenticated();
+    const fromEnv = auth && isEnvSource(auth.source);
 
-    stdout.write(`Config: ${getDbPath()}\n`);
+    // Show config path only for stored (OAuth) tokens — irrelevant for env vars
+    if (!fromEnv) {
+      stdout.write(`Config: ${getDbPath()}\n`);
+    }
 
     if (!authenticated) {
       // Skip auto-login - user explicitly ran status to check auth state
@@ -148,7 +169,13 @@ export const statusCommand = buildCommand({
       });
     }
 
-    stdout.write(`Status: Authenticated ${success("✓")}\n`);
+    if (fromEnv) {
+      stdout.write(
+        `Status: Authenticated via ${envVarName(auth.source)} environment variable ${success("✓")}\n`
+      );
+    } else {
+      stdout.write(`Status: Authenticated ${success("✓")}\n`);
+    }
     writeUserInfo(stdout);
     stdout.write("\n");
 

@@ -53,6 +53,10 @@ sentry auth login
 
 # Using an API token
 sentry auth login --token YOUR_TOKEN
+
+SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+
+SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
 #### `sentry auth logout`
@@ -504,6 +508,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 **Examples:**
@@ -701,6 +706,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
+- `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
 
 ### Traces
@@ -728,6 +734,15 @@ Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
+
+## Global Options
+
+All commands support the following global options:
+
+- `--help` - Show help for the command
+- `--version` - Show CLI version
+- `--log-level <level>` - Set log verbosity (`error`, `warn`, `log`, `info`, `debug`, `trace`). Overrides `SENTRY_LOG_LEVEL`
+- `--verbose` - Shorthand for `--log-level debug`
 
 ## Output Formats
 

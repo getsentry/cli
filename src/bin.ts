@@ -5,6 +5,7 @@ import { buildContext } from "./context.js";
 import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
+import { getEnvLogLevel, setLogLevel } from "./lib/logger.js";
 import { withTelemetry } from "./lib/telemetry.js";
 import { startCleanupOldBinary } from "./lib/upgrade.js";
 import {
@@ -88,6 +89,15 @@ async function main(): Promise<void> {
   startCleanupOldBinary();
 
   const args = process.argv.slice(2);
+
+  // Apply SENTRY_LOG_LEVEL env var early (lazy read, not at module load time).
+  // CLI flags (--log-level, --verbose) are handled by Stricli via
+  // buildCommand and take priority when present.
+  const envLogLevel = getEnvLogLevel();
+  if (envLogLevel !== null) {
+    setLogLevel(envLogLevel);
+  }
+
   const suppressNotification = shouldSuppressNotification(args);
 
   // Start background update check (non-blocking)

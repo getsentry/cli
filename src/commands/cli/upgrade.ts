@@ -17,7 +17,11 @@
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { SentryContext } from "../../context.js";
-import { determineInstallDir, releaseLock } from "../../lib/binary.js";
+import {
+  determineInstallDir,
+  isDowngrade,
+  releaseLock,
+} from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
 import {
@@ -210,6 +214,58 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
 }
 
 /**
+ * Execute the standard upgrade path: download via curl or package manager,
+ * then run setup on the new binary.
+ */
+async function executeStandardUpgrade(opts: {
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  versionArg: string | undefined;
+  target: string;
+  execPath: string;
+}): Promise<void> {
+  const { method, channel, versionArg, target, execPath } = opts;
+
+  // Use the rolling "nightly" tag only when upgrading to latest nightly
+  // (no specific version was requested). A specific version arg always
+  // uses its own tag so the correct release is downloaded.
+  const downloadTag =
+    channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
+  const downloadResult = await executeUpgrade(method, target, downloadTag);
+
+  // Run setup on the new binary to update completions, agent skills,
+  // and record installation metadata.
+  if (downloadResult) {
+    // Curl: new binary is at temp path, setup --install will place it.
+    // Pin the install directory via SENTRY_INSTALL_DIR so the child's
+    // determineInstallDir() doesn't relocate to a different directory.
+    // Release the download lock after the child exits — if the child used
+    // the same lock path (ppid takeover), this is a harmless no-op.
+    const currentInstallDir = dirname(getCurlInstallPaths().installPath);
+    try {
+      await runSetupOnNewBinary({
+        binaryPath: downloadResult.tempBinaryPath,
+        method,
+        channel,
+        install: true,
+        installDir: currentInstallDir,
+      });
+    } finally {
+      releaseLock(downloadResult.lockPath);
+    }
+  } else if (method !== "brew") {
+    // Package manager: binary already in place, just run setup.
+    // Skip brew — Homebrew's post_install hook already runs setup.
+    await runSetupOnNewBinary({
+      binaryPath: execPath,
+      method,
+      channel,
+      install: false,
+    });
+  }
+}
+
+/**
  * Migrate from a package-manager or Homebrew install to a standalone binary
  * when the user switches to the nightly channel.
  *
@@ -382,7 +438,10 @@ export const upgradeCommand = buildCommand({
       return;
     }
 
-    stdout.write(`\nUpgrading to ${target}...\n`);
+    const downgrade = isDowngrade(CLI_VERSION, target);
+    stdout.write(
+      `\n${downgrade ? "Downgrading" : "Upgrading"} to ${target}...\n`
+    );
 
     // Nightly is GitHub-only. If the current install method is not curl,
     // migrate to a standalone binary first then return — the migration
@@ -393,45 +452,16 @@ export const upgradeCommand = buildCommand({
       return;
     }
 
-    // Standard upgrade path: download (curl) or package manager.
-    // Use the rolling "nightly" tag only when upgrading to latest nightly
-    // (no specific version was requested). A specific version arg always
-    // uses its own tag so the correct release is downloaded.
-    const downloadTag =
-      channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
-    const downloadResult = await executeUpgrade(method, target, downloadTag);
+    await executeStandardUpgrade({
+      method,
+      channel,
+      versionArg,
+      target,
+      execPath: this.process.execPath,
+    });
 
-    // Run setup on the new binary to update completions, agent skills,
-    // and record installation metadata.
-    if (downloadResult) {
-      // Curl: new binary is at temp path, setup --install will place it.
-      // Pin the install directory via SENTRY_INSTALL_DIR so the child's
-      // determineInstallDir() doesn't relocate to a different directory.
-      // Release the download lock after the child exits — if the child used
-      // the same lock path (ppid takeover), this is a harmless no-op.
-      const currentInstallDir = dirname(getCurlInstallPaths().installPath);
-      try {
-        await runSetupOnNewBinary({
-          binaryPath: downloadResult.tempBinaryPath,
-          method,
-          channel,
-          install: true,
-          installDir: currentInstallDir,
-        });
-      } finally {
-        releaseLock(downloadResult.lockPath);
-      }
-    } else if (method !== "brew") {
-      // Package manager: binary already in place, just run setup.
-      // Skip brew — Homebrew's post_install hook already runs setup.
-      await runSetupOnNewBinary({
-        binaryPath: this.process.execPath,
-        method,
-        channel,
-        install: false,
-      });
-    }
-
-    stdout.write(`\nSuccessfully upgraded to ${target}.\n`);
+    stdout.write(
+      `\nSuccessfully ${downgrade ? "downgraded" : "upgraded"} to ${target}.\n`
+    );
   },
 });

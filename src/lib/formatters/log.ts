@@ -4,8 +4,13 @@
  * Provides formatting utilities for displaying Sentry logs in the CLI.
  */
 
-import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
+import type {
+  DetailedSentryLog,
+  SentryLog,
+  Writer,
+} from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
+import { writeJson } from "./json.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -18,6 +23,7 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
+import { writeFooter } from "./output.js";
 import {
   renderTextTable,
   StreamingTable,
@@ -316,4 +322,50 @@ export function formatLogDetails(
   }
 
   return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Options for {@link displayTraceLogs}.
+ */
+type DisplayTraceLogsOptions = {
+  /** Writer for output */
+  stdout: Writer;
+  /** Already-fetched logs (API order: newest-first) */
+  logs: LogLike[];
+  /** The trace ID being queried */
+  traceId: string;
+  /** The --limit value (used for "has more" hint) */
+  limit: number;
+  /** Output as JSON instead of human-readable table */
+  asJson: boolean;
+  /** Message to show when no logs are found */
+  emptyMessage: string;
+};
+
+/**
+ * Shared display logic for trace-filtered log results.
+ *
+ * Handles JSON output, empty state, and human-readable table formatting.
+ * Used by both `sentry log list --trace` and `sentry trace logs`.
+ */
+export function displayTraceLogs(options: DisplayTraceLogsOptions): void {
+  const { stdout, logs, traceId, limit, asJson, emptyMessage } = options;
+
+  if (asJson) {
+    writeJson(stdout, [...logs].reverse());
+    return;
+  }
+
+  if (logs.length === 0) {
+    stdout.write(emptyMessage);
+    return;
+  }
+
+  const chronological = [...logs].reverse();
+  stdout.write(formatLogTable(chronological, false));
+
+  const hasMore = logs.length >= limit;
+  const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
+  const tip = hasMore ? " Use --limit to show more." : "";
+  writeFooter(stdout, `${countText}${tip}`);
 }
