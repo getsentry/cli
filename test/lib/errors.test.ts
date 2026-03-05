@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   ApiError,
   AuthError,
@@ -426,109 +426,55 @@ describe("getExitCode", () => {
 });
 
 describe("withAuthGuard", () => {
-  test("returns the async result on success", async () => {
-    const result = await withAuthGuard(
-      () => Promise.resolve("hello"),
-      "fallback"
-    );
-    expect(result).toBe("hello");
+  test("returns ok result on success", async () => {
+    const result = await withAuthGuard(() => Promise.resolve("hello"));
+    expect(result).toEqual({ ok: true, value: "hello" });
   });
 
   test("rethrows AuthError('not_authenticated')", async () => {
     await expect(
-      withAuthGuard(
-        () => Promise.reject(new AuthError("not_authenticated")),
-        "fallback"
-      )
+      withAuthGuard(() => Promise.reject(new AuthError("not_authenticated")))
     ).rejects.toBeInstanceOf(AuthError);
   });
 
   test("rethrows AuthError('expired')", async () => {
     await expect(
-      withAuthGuard(() => Promise.reject(new AuthError("expired")), "fallback")
+      withAuthGuard(() => Promise.reject(new AuthError("expired")))
     ).rejects.toBeInstanceOf(AuthError);
   });
 
   test("rethrows AuthError('invalid')", async () => {
     await expect(
-      withAuthGuard(() => Promise.reject(new AuthError("invalid")), "fallback")
+      withAuthGuard(() => Promise.reject(new AuthError("invalid")))
     ).rejects.toBeInstanceOf(AuthError);
   });
 
-  test("returns fallback on non-AuthError", async () => {
-    const result = await withAuthGuard(
-      () => Promise.reject(new Error("network error")),
-      "fallback"
-    );
-    expect(result).toBe("fallback");
+  test("returns failure result with error on non-AuthError", async () => {
+    const thrownError = new Error("network error");
+    const result = await withAuthGuard(() => Promise.reject(thrownError));
+    expect(result).toEqual({ ok: false, error: thrownError });
   });
 
-  test("returns fallback on ApiError", async () => {
-    const result = await withAuthGuard(
-      () => Promise.reject(new ApiError("Not found", 404)),
-      null
-    );
-    expect(result).toBeNull();
+  test("returns failure result on ApiError", async () => {
+    const apiError = new ApiError("Not found", 404);
+    const result = await withAuthGuard(() => Promise.reject(apiError));
+    expect(result).toEqual({ ok: false, error: apiError });
   });
 
-  test("calls onError callback with the caught error", async () => {
-    const onError = mock((_e: unknown) => {
-      /* no-op */
-    });
+  test("preserves the original error object in failure result", async () => {
     const thrownError = new Error("boom");
-
-    await withAuthGuard(() => Promise.reject(thrownError), "fallback", onError);
-
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith(thrownError);
+    const result = await withAuthGuard(() => Promise.reject(thrownError));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(thrownError);
+    }
   });
 
-  test("does not call onError for AuthError", async () => {
-    const onError = mock((_e: unknown) => {
-      /* no-op */
-    });
-
-    await expect(
-      withAuthGuard(
-        () => Promise.reject(new AuthError("not_authenticated")),
-        "fallback",
-        onError
-      )
-    ).rejects.toBeInstanceOf(AuthError);
-
-    expect(onError).not.toHaveBeenCalled();
-  });
-
-  test("propagates throws from onError callback", async () => {
-    const resolutionError = new ResolutionError(
-      "Project 'foo'",
-      "not found",
-      "sentry issue list org/foo"
-    );
-
-    await expect(
-      withAuthGuard(
-        () => Promise.reject(new ApiError("Not found", 404)),
-        undefined,
-        () => {
-          throw resolutionError;
-        }
-      )
-    ).rejects.toBe(resolutionError);
-  });
-
-  test("returns fallback when onError does not throw", async () => {
-    const onError = mock((_e: unknown) => {
-      /* no-op */
-    });
-
-    const result = await withAuthGuard(
-      () => Promise.reject(new Error("oops")),
-      [],
-      onError
-    );
-
-    expect(result).toEqual([]);
-    expect(onError).toHaveBeenCalledTimes(1);
+  test("handles non-Error thrown values", async () => {
+    const result = await withAuthGuard(() => Promise.reject("string error"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("string error");
+    }
   });
 });

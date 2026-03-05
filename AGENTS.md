@@ -652,6 +652,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019ca9c3-98a2-7a81-9db7-d36c2e71237c -->
 * **Sentry trace-logs API is org-scoped, not project-scoped**: The Sentry trace-logs endpoint (\`/organizations/{org}/trace-logs/\`) is org-scoped, so \`trace logs\` uses \`resolveOrg()\` not \`resolveOrgAndProject()\`. The endpoint is PRIVATE in Sentry source, excluded from the public OpenAPI schema — \`@sentry/api\` has no generated types. The hand-written \`TraceLogSchema\` in \`src/types/sentry.ts\` is required until Sentry makes it public.
 
+<!-- lore:019cbf3f-6dc2-727d-8dca-228555e9603f -->
+* **withAuthGuard returns discriminated Result type, not fallback+onError**: The \`withAuthGuard\<T>(fn)\` helper in \`src/lib/errors.ts\` wraps async operations with a Result-type return: \`{ ok: true, value: T } | { ok: false, error: unknown }\`. AuthErrors always re-throw (so bin.ts auto-login flow triggers), all other errors are captured in the result. This replaced an earlier design with \`fallback\` value + \`onError\` callback parameters. Callers inspect \`result.ok\` to degrade gracefully. Types exported: \`AuthGuardSuccess\<T>\`, \`AuthGuardFailure\`, \`AuthGuardResult\<T>\`. Used across 12+ files including resolve-target.ts, api-client.ts, region.ts, org-list.ts, and multiple command files. The refactor was net -45 lines across the codebase.
+
 ### Decision
 
 <!-- lore:019c8f3b-84be-79be-9518-e5ecd2ea64b9 -->
@@ -681,9 +684,6 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019c8c17-f5de-71f2-93b5-c78231e29519 -->
 * **Make Bun.which testable by accepting optional PATH parameter**: When wrapping \`Bun.which()\` in a helper function, accept an optional \`pathEnv?: string\` parameter and pass it as \`{ PATH: pathEnv }\` to \`Bun.which\`. This makes the function deterministically testable without mocking — tests can pass a controlled PATH (e.g., \`/nonexistent\` for false, \`dirname(Bun.which('bash'))\` for true). Pattern: \`const opts = pathEnv !== undefined ? { PATH: pathEnv } : undefined; return Bun.which(name, opts) !== null;\`
-
-<!-- lore:019c90f5-9140-75d0-a59d-05b70b085561 -->
-* **Multi-target concurrent progress needs per-target delta tracking**: When multiple targets fetch concurrently and each reports cumulative progress, maintain a \`prevFetched\` array and \`totalFetched\` running sum. Each callback computes \`delta = fetched - prevFetched\[i]\`, adds to total. This prevents display jumps and double-counting. Use \`totalFetched += delta\` (O(1)), not \`reduce()\` on every callback.
 
 <!-- lore:019c90f5-913b-7995-8bac-84289cf5d6d9 -->
 * **Pagination contextKey must include all query-varying parameters with escaping**: Pagination \`contextKey\` must encode every query-varying parameter (sort, query, period) with \`escapeContextKeyValue()\` (replaces \`|\` with \`%7C\`). Always provide a fallback before escaping since \`flags.period\` may be \`undefined\` in tests despite having a default: \`flags.period ? escapeContextKeyValue(flags.period) : "90d"\`.

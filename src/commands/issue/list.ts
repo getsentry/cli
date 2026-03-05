@@ -31,10 +31,10 @@ import {
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import {
   ApiError,
-  AuthError,
   ContextError,
   ResolutionError,
   ValidationError,
+  withAuthGuard,
 } from "../../lib/errors.js";
 import {
   type IssueTableRow,
@@ -410,27 +410,23 @@ async function fetchIssuesForTarget(
     onPage?: (fetched: number, limit: number) => void;
   }
 ): Promise<FetchResult> {
-  try {
+  const result = await withAuthGuard(async () => {
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
       { ...options, projectId: target.projectId }
     );
-    return {
-      success: true,
-      data: { target, issues, hasMore: !!nextCursor, nextCursor },
-    };
-  } catch (error) {
-    // Auth errors should propagate - user needs to authenticate
-    if (error instanceof AuthError) {
-      throw error;
-    }
+    return { target, issues, hasMore: !!nextCursor, nextCursor };
+  });
 
-    return {
-      success: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
+  if (!result.ok) {
+    const error =
+      result.error instanceof Error
+        ? result.error
+        : new Error(String(result.error));
+    return { success: false, error };
   }
+  return { success: true, data: result.value };
 }
 
 /**

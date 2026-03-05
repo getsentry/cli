@@ -257,7 +257,7 @@ async function resolveDsnByPublicKey(
   }
 
   // Cache miss — search for project by DSN public key
-  return withAuthGuard(async () => {
+  const result = await withAuthGuard(async () => {
     const projectInfo = await findProjectByDsnKey(dsn.publicKey);
 
     if (!projectInfo) {
@@ -286,7 +286,8 @@ async function resolveDsnByPublicKey(
 
     // Project found but no org info - unusual but handle gracefully
     return null;
-  }, null);
+  });
+  return result.ok ? result.value : null;
 }
 
 /**
@@ -329,7 +330,7 @@ async function resolveDsnToTarget(
   }
 
   // Cache miss — fetch project details and cache them
-  return withAuthGuard(async () => {
+  const result = await withAuthGuard(async () => {
     const projectInfo = await getProject(orgId, dsnProjectId);
 
     if (projectInfo.organization) {
@@ -362,7 +363,8 @@ async function resolveDsnToTarget(
       detectedFrom,
       packagePath,
     };
-  }, null);
+  });
+  return result.ok ? result.value : null;
 }
 
 /** Minimum directory name length for inference (avoids matching too broadly) */
@@ -554,23 +556,24 @@ export async function fetchProjectId(
   org: string,
   project: string
 ): Promise<number | undefined> {
-  const projectInfo = await withAuthGuard(
-    () => getProject(org, project),
-    undefined,
-    (error) => {
-      if (error instanceof ApiError && error.status === 404) {
-        throw new ResolutionError(
-          `Project '${project}'`,
-          `not found in organization '${org}'`,
-          `sentry issue list ${org}/<project>`,
-          [
-            `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
-          ]
-        );
-      }
+  const projectResult = await withAuthGuard(() => getProject(org, project));
+  if (!projectResult.ok) {
+    if (
+      projectResult.error instanceof ApiError &&
+      projectResult.error.status === 404
+    ) {
+      throw new ResolutionError(
+        `Project '${project}'`,
+        `not found in organization '${org}'`,
+        `sentry issue list ${org}/<project>`,
+        [
+          `Check the project slug at https://sentry.io/organizations/${org}/projects/`,
+        ]
+      );
     }
-  );
-  return projectInfo ? toNumericId(projectInfo.id) : undefined;
+    return;
+  }
+  return toNumericId(projectResult.value.id);
 }
 
 /**
@@ -933,11 +936,13 @@ export async function resolveOrgsForListing(
     return { orgs: [defaultOrg] };
   }
 
-  const result = await withAuthGuard(() => resolveAllTargets({ cwd }), null);
-  if (result) {
-    const { targets, footer, skippedSelfHosted } = result;
+  const targetsResult = await withAuthGuard(() => resolveAllTargets({ cwd }));
+  if (targetsResult.ok) {
+    const { targets, footer, skippedSelfHosted } = targetsResult.value;
     if (targets.length > 0) {
-      const uniqueOrgs = [...new Set(targets.map((t) => t.org))];
+      const uniqueOrgs = [
+        ...new Set(targets.map((t: ResolvedTarget) => t.org)),
+      ];
       return { orgs: uniqueOrgs, footer, skippedSelfHosted };
     }
     return { orgs: [], skippedSelfHosted };

@@ -173,15 +173,10 @@ async function handleCreateProject404(opts: {
   detectedFrom?: string;
 }): Promise<never> {
   const { orgSlug, teamSlug, name, platform, detectedFrom } = opts;
-  let listTeamsError: unknown = null;
 
-  const teams = await withAuthGuard(
-    () => listTeams(orgSlug),
-    null,
-    (error) => {
-      listTeamsError = error;
-    }
-  );
+  const teamsResult = await withAuthGuard(() => listTeams(orgSlug));
+  const teams = teamsResult.ok ? teamsResult.value : null;
+  const listTeamsError = teamsResult.ok ? null : teamsResult.error;
 
   // listTeams succeeded → org is valid, diagnose the team
   if (teams !== null) {

@@ -64,6 +64,7 @@ import type { AutofixResponse, AutofixState } from "../types/seer.js";
 import {
   ApiError,
   AuthError,
+  type AuthGuardSuccess,
   stringifyUnknown,
   withAuthGuard,
 } from "./errors.js";
@@ -506,7 +507,8 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
   const { setOrgRegions } = await import("./db/regions.js");
 
   // Self-hosted instances may not have the regions endpoint (404)
-  const regions = await withAuthGuard(() => getUserRegions(), [] as Region[]);
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default API for self-hosted instances
@@ -899,11 +901,14 @@ export async function findProjectsBySlug(
           return null;
         }
         return { ...project, orgSlug: org.slug };
-      }, null)
+      })
     )
   );
 
-  return searchResults.filter((r): r is ProjectWithOrg => r !== null);
+  return searchResults
+    .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
+    .map((r) => r.value)
+    .filter((v): v is ProjectWithOrg => v !== null);
 }
 
 /**
@@ -962,11 +967,13 @@ export async function findProjectsByPattern(
         return projects
           .filter((p) => matchesWordBoundary(pattern, p.slug))
           .map((p) => ({ ...p, orgSlug: org.slug }));
-      }, [] as ProjectWithOrg[])
+      })
     )
   );
 
-  return searchResults.flat();
+  return searchResults
+    .filter((r): r is AuthGuardSuccess<ProjectWithOrg[]> => r.ok)
+    .flatMap((r) => r.value);
 }
 
 /**
@@ -982,7 +989,8 @@ export async function findProjectsByPattern(
 export async function findProjectByDsnKey(
   publicKey: string
 ): Promise<SentryProject | null> {
-  const regions = await withAuthGuard(() => getUserRegions(), [] as Region[]);
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default region for self-hosted

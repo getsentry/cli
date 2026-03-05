@@ -88,17 +88,18 @@ type ProjectWithDsn = {
  * Returns null on non-auth errors (e.g., no access to project).
  * Rethrows auth errors so they propagate to the user.
  */
-function fetchProjectDetails(
+async function fetchProjectDetails(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn | null> {
-  return withAuthGuard(async () => {
+  const result = await withAuthGuard(async () => {
     // Fetch project and DSN in parallel
     const [project, dsn] = await Promise.all([
       getProject(target.org, target.project),
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
-  }, null);
+  });
+  return result.ok ? result.value : null;
 }
 
 /** Result of fetching project details for multiple targets */

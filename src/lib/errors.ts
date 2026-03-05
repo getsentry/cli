@@ -447,35 +447,38 @@ export function getExitCode(error: unknown): number {
   return 1;
 }
 
+/** Result when the guarded operation succeeded */
+export type AuthGuardSuccess<T> = { ok: true; value: T };
+
+/** Result when a non-auth error was caught */
+export type AuthGuardFailure = { ok: false; error: unknown };
+
+/** Discriminated union returned by {@link withAuthGuard} */
+export type AuthGuardResult<T> = AuthGuardSuccess<T> | AuthGuardFailure;
+
 /**
- * Execute an async operation, rethrowing {@link AuthError} while returning a
- * fallback value for all other failures.
+ * Execute an async operation, rethrowing {@link AuthError} while capturing
+ * all other failures in a discriminated result.
  *
  * This is the standard "safe fetch" pattern used throughout the CLI:
  * auth errors must propagate so the auto-login flow in bin.ts can
  * trigger, but transient failures (network, 404, permissions) should
- * degrade gracefully to a fallback value.
+ * degrade gracefully. Callers inspect `result.ok` to decide what to do
+ * and have access to the caught error via `result.error` when needed.
  *
  * @param fn - Async operation that may throw
- * @param fallback - Value to return when a non-auth error occurs
- * @param onError - Optional callback invoked with the caught non-auth error
- *                  before returning the fallback. Use for logging, capturing
- *                  to Sentry, or conditional re-throws (e.g., 404 → ResolutionError).
- *                  If onError itself throws, that error propagates to the caller.
- * @returns The result of `fn()`, or `fallback` if a non-auth error was caught
+ * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on non-auth failure
+ * @throws {AuthError} Always re-thrown so the auto-login flow can trigger
  */
 export async function withAuthGuard<T>(
-  fn: () => Promise<T>,
-  fallback: T,
-  onError?: (error: unknown) => void
-): Promise<T> {
+  fn: () => Promise<T>
+): Promise<AuthGuardResult<T>> {
   try {
-    return await fn();
+    return { ok: true, value: await fn() };
   } catch (error) {
     if (error instanceof AuthError) {
       throw error;
     }
-    onError?.(error);
-    return fallback;
+    return { ok: false, error };
   }
 }
