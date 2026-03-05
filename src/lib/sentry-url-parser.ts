@@ -124,11 +124,7 @@ function matchSubdomainOrg(
   }
 
   // /settings/projects/{project}/ (org-scoped subdomain settings URL)
-  if (
-    segments[0] === "settings" &&
-    segments[1] === "projects" &&
-    segments[2]
-  ) {
+  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
     return { baseUrl, org, project: segments[2] };
   }
 

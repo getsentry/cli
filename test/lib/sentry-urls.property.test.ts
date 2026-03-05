@@ -24,7 +24,6 @@ import {
   buildSeerSettingsUrl,
   buildTraceUrl,
   getOrgBaseUrl,
-  getSentryBaseUrl,
   isSentrySaasUrl,
 } from "../../src/lib/sentry-urls.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
@@ -448,9 +447,7 @@ describe("buildTraceUrl properties", () => {
     await fcAssert(
       property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
         const result = buildTraceUrl(orgSlug, traceId);
-        expect(result).toBe(
-          `${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`
-        );
+        expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
