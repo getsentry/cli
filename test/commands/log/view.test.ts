@@ -193,10 +193,9 @@ describe("parsePositionalArgs", () => {
     });
   });
 
-  describe("swap detection and suggestions", () => {
+  describe("suggestions and error handling", () => {
     test("swapped args (hex ID first, org/project second) throws ValidationError", () => {
-      // With hex validation, the second arg ("my-org/my-project") fails
-      // validateHexId before swap detection can trigger.
+      // Non-hex second arg fails validateHexId — user gets a clear error.
       expect(() =>
         parsePositionalArgs([
           "968c763c740cfda8b6728f27fb9e9b01",

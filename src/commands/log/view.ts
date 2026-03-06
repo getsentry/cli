@@ -9,7 +9,6 @@ import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { getLogs } from "../../lib/api-client.js";
 import {
-  detectSwappedViewArgs,
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
@@ -75,8 +74,6 @@ function splitLogIds(arg: string): string[] {
 export function parsePositionalArgs(args: string[]): {
   logIds: string[];
   targetArg: string | undefined;
-  /** Warning message if arguments appear to be in the wrong order */
-  warning?: string;
   /** Suggestion when first arg looks like an issue short ID */
   suggestion?: string;
 } {
@@ -111,17 +108,15 @@ export function parsePositionalArgs(args: string[]): {
   if (logIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT);
   }
-  // With exactly 2 args, detect swapped args or issue short IDs.
-  const warning =
-    args.length === 2 && args[1]
-      ? (detectSwappedViewArgs(first, args[1]) ?? undefined)
-      : undefined;
-  const suggestion =
-    !warning && looksLikeIssueShortId(first)
-      ? `Did you mean: sentry issue view ${first}`
-      : undefined;
+  // Swap detection is not useful here: validateHexId above rejects non-hex
+  // log IDs (which include any containing "/"), so detectSwappedViewArgs
+  // (which checks for "/" in the second arg) can never trigger.
+  // We still check for issue short IDs in the first (target) position.
+  const suggestion = looksLikeIssueShortId(first)
+    ? `Did you mean: sentry issue view ${first}`
+    : undefined;
 
-  return { logIds, targetArg: first, warning, suggestion };
+  return { logIds, targetArg: first, suggestion };
 }
 
 /**
@@ -350,11 +345,7 @@ export const viewCommand = buildCommand({
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
-    const { logIds, targetArg, warning, suggestion } =
-      parsePositionalArgs(args);
-    if (warning) {
-      cmdLog.warn(warning);
-    }
+    const { logIds, targetArg, suggestion } = parsePositionalArgs(args);
     if (suggestion) {
       cmdLog.warn(suggestion);
     }
