@@ -56,17 +56,6 @@ type CreateFlags = {
   readonly json: boolean;
 };
 
-/**
- * Normalize common platform format mistakes.
- *
- * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
- * but platform identifiers use hyphens (`javascript-nextjs`). Users often
- * copy the dot-notation directly. This auto-corrects dots to hyphens and
- * warns on stderr, following the same pattern as `normalizeFields` in `api.ts`.
- *
- * Safe to auto-correct because the input is already invalid (dots are never
- * valid in platform identifiers) and the correction is unambiguous.
- */
 /** Build a 3-column grid string from a flat list of platforms. */
 function platformGrid(items: readonly string[]): string {
   const COLS = 3;
@@ -90,11 +79,23 @@ function platformGrid(items: readonly string[]): string {
     return buildMarkdownTable(rows, columns);
   }
 
-  return renderTextTable(new Array(COLS).fill(""), rows, {
+  const [first, ...rest] = rows;
+  return renderTextTable(first ?? [], rest, {
     headerSeparator: false,
   });
 }
 
+/**
+ * Normalize common platform format mistakes.
+ *
+ * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
+ * but platform identifiers use hyphens (`javascript-nextjs`). Users often
+ * copy the dot-notation directly. This auto-corrects dots to hyphens and
+ * warns on stderr, following the same pattern as `normalizeFields` in `api.ts`.
+ *
+ * Safe to auto-correct because the input is already invalid (dots are never
+ * valid in platform identifiers) and the correction is unambiguous.
+ */
 function normalizePlatform(platform: string, stderr: Writer): string {
   if (!platform.includes(".")) {
     return platform;
