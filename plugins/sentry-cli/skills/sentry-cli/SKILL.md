@@ -550,7 +550,7 @@ sentry log list my-org/backend -f -q 'level:error'
 
 #### `sentry log view <args...>`
 
-View details of a specific log entry
+View details of one or more log entries
 
 **Flags:**
 - `--json - Output as JSON`
