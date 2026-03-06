@@ -1,6 +1,5 @@
 [test]
 preload = ["./test/preload.ts"]
-timeout = 30000
 
 [test.reporter]
 junit = "test-results.junit.xml"
