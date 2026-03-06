@@ -212,7 +212,9 @@ async function handleWebOpen(
       type: "confirm",
       initial: false,
     });
-    if (!confirmed) {
+    // consola prompt returns Symbol(clack:cancel) on Ctrl+C — a truthy value.
+    // Strictly check for `true` to avoid opening tabs on cancel.
+    if (confirmed !== true) {
       return;
     }
   }

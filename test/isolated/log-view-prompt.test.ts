@@ -156,4 +156,25 @@ describe("log view --web interactive prompt", () => {
     expect(mockPrompt).toHaveBeenCalled();
     expect(openInBrowserSpy).not.toHaveBeenCalled();
   });
+
+  test("aborts when user cancels prompt with Ctrl+C (truthy Symbol)", async () => {
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not `true`.
+    // Cast needed because the mock is typed as boolean but consola actually
+    // returns a Symbol on cancel.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel") as unknown as boolean);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      ID1,
+      ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
+  });
 });
