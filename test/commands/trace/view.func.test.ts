@@ -359,4 +359,27 @@ describe("viewCommand.func", () => {
     // and sets normalized=true, triggering the log.warn (line 173)
     expect(getDetailedTraceSpy).toHaveBeenCalled();
   });
+
+  test("logs suggestion when first arg looks like issue short ID", async () => {
+    // "CAM-82X" as first arg matches issue short ID pattern.
+    // parseOrgProjectArg("CAM-82X") → project-search, so we mock findProjectsBySlug.
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "cam-82x", orgSlug: "cam-org", id: "1", name: "Cam" }],
+      orgs: [],
+    });
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+    await setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 100 },
+      "CAM-82X",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    // The suggestion path fires (looksLikeIssueShortId("CAM-82X") → true)
+    expect(getDetailedTraceSpy).toHaveBeenCalled();
+  });
 });

@@ -33,44 +33,77 @@ import {
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/index.js";
 
+/** A valid 32-char hex log ID for tests */
+const ID1 = "968c763c740cfda8b6728f27fb9e9b01";
+const ID2 = "aaaa1111bbbb2222cccc3333dddd4444";
+const ID3 = "1234567890abcdef1234567890abcdef";
+
 describe("parsePositionalArgs", () => {
   describe("single argument (log ID only)", () => {
-    test("parses single arg as log ID", () => {
-      const result = parsePositionalArgs(["abc123def456"]);
-      expect(result.logId).toBe("abc123def456");
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("parses 32-char hex log ID", () => {
-      const result = parsePositionalArgs(["968c763c740cfda8b6728f27fb9e9b01"]);
-      expect(result.logId).toBe("968c763c740cfda8b6728f27fb9e9b01");
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("parses short log ID", () => {
-      const result = parsePositionalArgs(["abc"]);
-      expect(result.logId).toBe("abc");
+    test("parses single 32-char hex log ID", () => {
+      const result = parsePositionalArgs([ID1]);
+      expect(result.logIds).toEqual([ID1]);
       expect(result.targetArg).toBeUndefined();
     });
   });
 
   describe("two arguments (target + log ID)", () => {
     test("parses org/project target and log ID", () => {
-      const result = parsePositionalArgs(["my-org/frontend", "abc123def456"]);
+      const result = parsePositionalArgs(["my-org/frontend", ID1]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logId).toBe("abc123def456");
+      expect(result.logIds).toEqual([ID1]);
     });
 
     test("parses project-only target and log ID", () => {
-      const result = parsePositionalArgs(["frontend", "abc123def456"]);
+      const result = parsePositionalArgs(["frontend", ID1]);
       expect(result.targetArg).toBe("frontend");
-      expect(result.logId).toBe("abc123def456");
+      expect(result.logIds).toEqual([ID1]);
     });
 
     test("parses org/ target (all projects) and log ID", () => {
-      const result = parsePositionalArgs(["my-org/", "abc123def456"]);
+      const result = parsePositionalArgs(["my-org/", ID1]);
       expect(result.targetArg).toBe("my-org/");
-      expect(result.logId).toBe("abc123def456");
+      expect(result.logIds).toEqual([ID1]);
+    });
+  });
+
+  describe("multiple log IDs", () => {
+    test("parses multiple space-separated log IDs", () => {
+      const result = parsePositionalArgs(["my-org/frontend", ID1, ID2, ID3]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.logIds).toEqual([ID1, ID2, ID3]);
+    });
+
+    test("splits newline-separated IDs in a single argument", () => {
+      const combined = `${ID1}\n${ID2}\n${ID3}`;
+      const result = parsePositionalArgs(["my-org/frontend", combined]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.logIds).toEqual([ID1, ID2, ID3]);
+    });
+
+    test("splits newline-separated IDs in single-arg mode", () => {
+      const combined = `${ID1}\n${ID2}`;
+      const result = parsePositionalArgs([combined]);
+      expect(result.logIds).toEqual([ID1, ID2]);
+      expect(result.targetArg).toBeUndefined();
+    });
+
+    test("trims whitespace around newline-separated IDs", () => {
+      const combined = `  ${ID1}  \n  ${ID2}  `;
+      const result = parsePositionalArgs(["my-org/frontend", combined]);
+      expect(result.logIds).toEqual([ID1, ID2]);
+    });
+
+    test("ignores empty lines in newline-separated IDs", () => {
+      const combined = `${ID1}\n\n${ID2}\n`;
+      const result = parsePositionalArgs(["my-org/frontend", combined]);
+      expect(result.logIds).toEqual([ID1, ID2]);
+    });
+
+    test("handles mix of space-separated and newline-separated args", () => {
+      const combined = `${ID2}\n${ID3}`;
+      const result = parsePositionalArgs(["my-org/frontend", ID1, combined]);
+      expect(result.logIds).toEqual([ID1, ID2, ID3]);
     });
   });
 
@@ -88,23 +121,57 @@ describe("parsePositionalArgs", () => {
         expect((error as ContextError).message).toContain("Log ID");
       }
     });
+
+    test("throws ValidationError for non-hex log ID", () => {
+      expect(() => parsePositionalArgs(["not-a-hex-id"])).toThrow(
+        ValidationError
+      );
+    });
+
+    test("throws ValidationError for short log ID", () => {
+      expect(() => parsePositionalArgs(["abc123"])).toThrow(ValidationError);
+    });
+
+    test("throws ValidationError for log ID with invalid chars", () => {
+      expect(() =>
+        parsePositionalArgs(["gggg1111bbbb2222cccc3333dddd4444"])
+      ).toThrow(ValidationError);
+    });
+
+    test("ValidationError includes 'log ID' in message", () => {
+      try {
+        parsePositionalArgs(["bad"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        expect((error as ValidationError).message).toContain("log ID");
+      }
+    });
+
+    test("throws ValidationError when one of multiple IDs is invalid", () => {
+      expect(() =>
+        parsePositionalArgs(["my-org/frontend", ID1, "not-valid"])
+      ).toThrow(ValidationError);
+    });
+
+    test("throws ContextError for empty log ID after target", () => {
+      expect(() => parsePositionalArgs(["my-org/frontend", ""])).toThrow(
+        ContextError
+      );
+    });
   });
 
   describe("slash-separated org/project/logId (single arg)", () => {
     test("parses org/project/logId as target + log ID", () => {
-      const result = parsePositionalArgs([
-        "sentry/cli/968c763c740cfda8b6728f27fb9e9b01",
-      ]);
+      const result = parsePositionalArgs([`sentry/cli/${ID1}`]);
       expect(result.targetArg).toBe("sentry/cli");
-      expect(result.logId).toBe("968c763c740cfda8b6728f27fb9e9b01");
+      expect(result.logIds).toEqual([ID1]);
     });
 
     test("handles hyphenated org and project slugs", () => {
-      const result = parsePositionalArgs([
-        "my-org/my-project/deadbeef12345678",
-      ]);
+      const result = parsePositionalArgs([`my-org/my-project/${ID1}`]);
       expect(result.targetArg).toBe("my-org/my-project");
-      expect(result.logId).toBe("deadbeef12345678");
+      expect(result.logIds).toEqual([ID1]);
     });
 
     test("one slash (org/project, missing log ID) throws ContextError", () => {
@@ -126,27 +193,52 @@ describe("parsePositionalArgs", () => {
     });
   });
 
-  describe("edge cases", () => {
-    test("handles more than two args (ignores extras)", () => {
-      const result = parsePositionalArgs([
-        "my-org/frontend",
-        "abc123",
-        "extra-arg",
-      ]);
-      expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logId).toBe("abc123");
+  describe("swap detection and suggestions", () => {
+    test("swapped args (hex ID first, org/project second) throws ValidationError", () => {
+      // With hex validation, the second arg ("my-org/my-project") fails
+      // validateHexId before swap detection can trigger.
+      expect(() =>
+        parsePositionalArgs([
+          "968c763c740cfda8b6728f27fb9e9b01",
+          "my-org/my-project",
+        ])
+      ).toThrow(ValidationError);
     });
 
-    test("handles empty string log ID in two-arg case", () => {
-      const result = parsePositionalArgs(["my-org/frontend", ""]);
-      expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.logId).toBe("");
+    test("returns suggestion when first arg looks like issue short ID", () => {
+      const result = parsePositionalArgs([
+        "CAM-82X",
+        "968c763c740cfda8b6728f27fb9e9b01",
+      ]);
+      expect(result.suggestion).toBe("Did you mean: sentry issue view CAM-82X");
+    });
+
+    test("no suggestion for normal target + logId", () => {
+      const result = parsePositionalArgs([
+        "my-org",
+        "968c763c740cfda8b6728f27fb9e9b01",
+      ]);
+      expect(result.suggestion).toBeUndefined();
+    });
+  });
+
+  describe("the exact CLI-BC scenario", () => {
+    test("newline-delimited log IDs as a single arg with target", () => {
+      const ids = [
+        "019c6d2ca9ec7cc5bd02f9190d77debe",
+        "019c71e55b817bccb2a842fe6252caed",
+        "019c71e92c887cdfb4367790907032f7",
+      ];
+      const combined = ids.join("\n");
+      const result = parsePositionalArgs(["brandai/brandai", combined]);
+      expect(result.targetArg).toBe("brandai/brandai");
+      expect(result.logIds).toEqual(ids);
     });
   });
 });
 
 describe("resolveProjectBySlug", () => {
-  const HINT = "sentry log view <org>/<project> <log-id>";
+  const HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -312,7 +404,7 @@ describe("resolveProjectBySlug", () => {
 // ============================================================================
 
 describe("viewCommand.func", () => {
-  let getLogSpy: ReturnType<typeof spyOn>;
+  let getLogsSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
@@ -343,36 +435,35 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(async () => {
-    getLogSpy = spyOn(apiClient, "getLog");
+    getLogsSpy = spyOn(apiClient, "getLogs");
     findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
     openInBrowserSpy = spyOn(browser, "openInBrowser");
     await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
-    getLogSpy.mockRestore();
+    getLogsSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
     openInBrowserSpy.mockRestore();
   });
 
-  test("logs warning when args appear swapped", async () => {
-    getLogSpy.mockResolvedValue(sampleLog);
-
+  test("swapped args throw ValidationError since non-hex ID fails validation", async () => {
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    // "968c763c740cfda8b6728f27fb9e9b01" has no slash, "test-org/test-proj" has slash → swap detected
-    await func.call(
-      context,
-      { json: true, web: false },
-      "968c763c740cfda8b6728f27fb9e9b01",
-      "test-org/test-proj"
-    );
-
-    expect(getLogSpy).toHaveBeenCalled();
+    // With hex validation, "test-org/test-proj" in log ID position throws
+    // ValidationError before swap detection runs.
+    await expect(
+      func.call(
+        context,
+        { json: true, web: false },
+        "968c763c740cfda8b6728f27fb9e9b01",
+        "test-org/test-proj"
+      )
+    ).rejects.toThrow(ValidationError);
   });
 
   test("logs normalized slug warning when underscores present", async () => {
-    getLogSpy.mockResolvedValue(sampleLog);
+    getLogsSpy.mockResolvedValue([sampleLog]);
     await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
@@ -385,7 +476,7 @@ describe("viewCommand.func", () => {
       "968c763c740cfda8b6728f27fb9e9b01"
     );
 
-    expect(getLogSpy).toHaveBeenCalled();
+    expect(getLogsSpy).toHaveBeenCalled();
   });
 
   test("resolves project-search target via resolveProjectBySlug", async () => {
@@ -395,7 +486,7 @@ describe("viewCommand.func", () => {
       ],
       orgs: [],
     });
-    getLogSpy.mockResolvedValue(sampleLog);
+    getLogsSpy.mockResolvedValue([sampleLog]);
     await setOrgRegion("acme", DEFAULT_SENTRY_URL);
 
     const { context } = createMockContext();
@@ -409,6 +500,31 @@ describe("viewCommand.func", () => {
     );
 
     expect(findProjectsBySlugSpy).toHaveBeenCalledWith("frontend");
-    expect(getLogSpy).toHaveBeenCalled();
+    expect(getLogsSpy).toHaveBeenCalled();
+  });
+
+  test("logs suggestion when first arg looks like issue short ID", async () => {
+    // "CAM-82X" as first arg matches issue short ID pattern.
+    // parseOrgProjectArg("CAM-82X") → project-search, so we mock findProjectsBySlug.
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "cam-82x", orgSlug: "cam-org", id: "1", name: "Cam" }],
+      orgs: [],
+    });
+    getLogsSpy.mockResolvedValue([sampleLog]);
+    await setOrgRegion("cam-org", DEFAULT_SENTRY_URL);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false },
+      "CAM-82X",
+      "968c763c740cfda8b6728f27fb9e9b01"
+    );
+
+    // The suggestion path fires (looksLikeIssueShortId("CAM-82X") → true)
+    // normalized slug → findProjectsBySlug("cam-82x")
+    expect(findProjectsBySlugSpy).toHaveBeenCalledWith("CAM-82X");
+    expect(getLogsSpy).toHaveBeenCalled();
   });
 });

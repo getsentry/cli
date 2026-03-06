@@ -1793,21 +1793,16 @@ const DETAILED_LOG_FIELDS = [
 ];
 
 /**
- * Get a single log entry by its item ID.
- * Uses the Explore/Events API with dataset=logs and a filter query.
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug for filtering
- * @param logId - The sentry.item_id of the log entry
- * @returns The detailed log entry, or null if not found
+ * Fetch a single batch of log entries by their item IDs.
+ * Batch size must not exceed {@link API_MAX_PER_PAGE}.
  */
-export async function getLog(
+async function getLogsBatch(
   orgSlug: string,
   projectSlug: string,
-  logId: string
-): Promise<DetailedSentryLog | null> {
-  const query = `project:${projectSlug} sentry.item_id:${logId}`;
-  const config = await getOrgSdkConfig(orgSlug);
+  batchIds: string[],
+  config: Awaited<ReturnType<typeof getOrgSdkConfig>>
+): Promise<DetailedSentryLog[]> {
+  const query = `project:${projectSlug} sentry.item_id:[${batchIds.join(",")}]`;
 
   const result = await queryExploreEventsInTableFormat({
     ...config,
@@ -1816,14 +1811,52 @@ export async function getLog(
       dataset: "logs",
       field: DETAILED_LOG_FIELDS,
       query,
-      per_page: 1,
+      per_page: batchIds.length,
       statsPeriod: "90d",
     },
   });
 
   const data = unwrapResult(result, "Failed to get log");
   const logsResponse = DetailedLogsResponseSchema.parse(data);
-  return logsResponse.data[0] ?? null;
+  return logsResponse.data;
+}
+
+/**
+ * Get one or more log entries by their item IDs.
+ * Uses the Explore/Events API with dataset=logs and a filter query.
+ * Bracket syntax (`sentry.item_id:[id1,id2,...]`) works for any count including one.
+ *
+ * When more than {@link API_MAX_PER_PAGE} IDs are requested, the fetch is
+ * split into batches to avoid silent API truncation.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug for filtering
+ * @param logIds - One or more sentry.item_id values to fetch
+ * @returns Array of matching detailed log entries (may be shorter than logIds if some weren't found)
+ */
+export async function getLogs(
+  orgSlug: string,
+  projectSlug: string,
+  logIds: string[]
+): Promise<DetailedSentryLog[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  // Single batch — no splitting needed
+  if (logIds.length <= API_MAX_PER_PAGE) {
+    return getLogsBatch(orgSlug, projectSlug, logIds, config);
+  }
+
+  // Split into batches of API_MAX_PER_PAGE and fetch in parallel
+  const batches: string[][] = [];
+  for (let i = 0; i < logIds.length; i += API_MAX_PER_PAGE) {
+    batches.push(logIds.slice(i, i + API_MAX_PER_PAGE));
+  }
+
+  const results = await Promise.all(
+    batches.map((batch) => getLogsBatch(orgSlug, projectSlug, batch, config))
+  );
+
+  return results.flat();
 }
 
 // Trace-log functions

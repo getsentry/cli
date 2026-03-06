@@ -54,9 +54,9 @@ describe("validateTraceId", () => {
     expect(validateTraceId(VALID_TRACE_ID)).toBe(VALID_TRACE_ID);
   });
 
-  test("returns the same string (no normalization)", () => {
+  test("normalizes to lowercase", () => {
     const mixedCase = "AAAA1111bbbb2222CCCC3333dddd4444";
-    expect(validateTraceId(mixedCase)).toBe(mixedCase);
+    expect(validateTraceId(mixedCase)).toBe("aaaa1111bbbb2222cccc3333dddd4444");
   });
 
   test("throws ValidationError for empty string", () => {
@@ -116,10 +116,10 @@ describe("validateTraceId", () => {
 });
 
 describe("property: validateTraceId", () => {
-  test("accepts any 32-char hex string", () => {
+  test("accepts any 32-char hex string and normalizes to lowercase", () => {
     fcAssert(
       property(validTraceIdArb, (id) => {
-        expect(validateTraceId(id)).toBe(id);
+        expect(validateTraceId(id)).toBe(id.toLowerCase());
       }),
       { numRuns: 100 }
     );

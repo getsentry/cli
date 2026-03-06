@@ -8,6 +8,7 @@ import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
+  looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
   spansFlag,
@@ -52,6 +53,8 @@ export function parsePositionalArgs(args: string[]): {
   targetArg: string | undefined;
   /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
+  /** Suggestion when first arg looks like an issue short ID */
+  suggestion?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID", USAGE_HINT);
@@ -82,8 +85,13 @@ export function parsePositionalArgs(args: string[]): {
     return { traceId: first, targetArg: second, warning: swapWarning };
   }
 
+  // Detect issue short ID passed as first arg (e.g., "CAM-82X some-trace-id")
+  const suggestion = looksLikeIssueShortId(first)
+    ? `Did you mean: sentry issue view ${first}`
+    : undefined;
+
   // Two or more args - first is target, second is trace ID
-  return { traceId: second, targetArg: first };
+  return { traceId: second, targetArg: first, suggestion };
 }
 
 /**
@@ -164,9 +172,13 @@ export const viewCommand = buildCommand({
     const log = logger.withTag("trace.view");
 
     // Parse positional args
-    const { traceId, targetArg, warning } = parsePositionalArgs(args);
+    const { traceId, targetArg, warning, suggestion } =
+      parsePositionalArgs(args);
     if (warning) {
       log.warn(warning);
+    }
+    if (suggestion) {
+      log.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
     if (parsed.type !== "auto-detect" && parsed.normalized) {

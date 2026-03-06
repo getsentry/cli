@@ -1,13 +1,16 @@
 /**
  * sentry log view
  *
- * View detailed information about a Sentry log entry.
+ * View detailed information about one or more Sentry log entries.
  */
 
+import { isatty } from "node:tty";
+
 import type { SentryContext } from "../../context.js";
-import { getLog } from "../../lib/api-client.js";
+import { getLogs } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
+  looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
 } from "../../lib/arg-parsing.js";
@@ -15,13 +18,16 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
+import { validateHexId } from "../../lib/hex-id.js";
 import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
-import type { DetailedSentryLog, Writer } from "../../types/index.js";
+import type { DetailedSentryLog } from "../../types/index.js";
+
+const log = logger.withTag("log-view");
 
 type ViewFlags = {
   readonly json: boolean;
@@ -29,21 +35,50 @@ type ViewFlags = {
 };
 
 /** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry log view <org>/<project> <log-id>";
+const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
+
+/** Matches a string of all digits (numeric project ID) */
+const ALL_DIGITS_RE = /^\d+$/;
+
+/**
+ * Split a raw argument into individual log IDs.
+ * Handles newline-separated IDs within a single argument (common when
+ * piping or pasting from other tools).
+ *
+ * @param arg - Raw positional argument
+ * @returns Array of non-empty trimmed strings
+ */
+function splitLogIds(arg: string): string[] {
+  return arg
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 /**
  * Parse positional arguments for log view.
- * Handles: `<log-id>` or `<target> <log-id>`
+ * Handles:
+ * - `<log-id>` — single log ID (auto-detect org/project)
+ * - `<target> <log-id> [<log-id>...]` — explicit target + one or more log IDs
+ * - `<org>/<project>/<log-id>` — single slash-separated arg
+ *
+ * When two or more args are provided, the first is always treated as the
+ * target (org/project specifier) and the rest as log IDs.
+ *
+ * Arguments containing newlines are split into multiple IDs.
  *
  * @param args - Positional arguments from CLI
- * @returns Parsed log ID and optional target arg
+ * @returns Parsed log IDs and optional target arg
  * @throws {ContextError} If no arguments provided
+ * @throws {ValidationError} If any log ID has an invalid format
  */
 export function parsePositionalArgs(args: string[]): {
-  logId: string;
+  logIds: string[];
   targetArg: string | undefined;
   /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
+  /** Suggestion when first arg looks like an issue short ID */
+  suggestion?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT);
@@ -55,27 +90,38 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    const { id: logId, targetArg } = parseSlashSeparatedArg(
+    // Single arg — could be slash-separated org/project/logId or a plain ID
+    // (possibly containing newlines)
+    const { id, targetArg } = parseSlashSeparatedArg(
       first,
       "Log ID",
       USAGE_HINT
     );
-    return { logId, targetArg };
+    const logIds = splitLogIds(id).map((v) => validateHexId(v, "log ID"));
+    if (logIds.length === 0) {
+      throw new ContextError("Log ID", USAGE_HINT);
+    }
+    return { logIds, targetArg };
   }
 
-  const second = args[1];
-  if (second === undefined) {
-    return { logId: first, targetArg: undefined };
+  // Two or more args — first is target, rest are log IDs.
+  // Each arg may contain newlines (split them).
+  const rawIds = args.slice(1).flatMap(splitLogIds);
+  const logIds = rawIds.map((v) => validateHexId(v, "log ID"));
+  if (logIds.length === 0) {
+    throw new ContextError("Log ID", USAGE_HINT);
   }
+  // With exactly 2 args, detect swapped args or issue short IDs.
+  const warning =
+    args.length === 2 && args[1]
+      ? (detectSwappedViewArgs(first, args[1]) ?? undefined)
+      : undefined;
+  const suggestion =
+    !warning && looksLikeIssueShortId(first)
+      ? `Did you mean: sentry issue view ${first}`
+      : undefined;
 
-  // Detect swapped args: user put ID first and target second
-  const swapWarning = detectSwappedViewArgs(first, second);
-  if (swapWarning) {
-    return { logId: first, targetArg: second, warning: swapWarning };
-  }
-
-  // Two or more args - first is target, second is log ID
-  return { logId: second, targetArg: first };
+  return { logIds, targetArg: first, warning, suggestion };
 }
 
 /**
@@ -89,20 +135,169 @@ export type ResolvedLogTarget = {
 };
 
 /**
- * Write human-readable log output to stdout.
+ * Resolve the target org/project from the parsed arg.
+ *
+ * @param parsed - Result of `parseOrgProjectArg`
+ * @param logIds - Parsed log IDs (used for usage hints)
+ * @param cwd - Current working directory
+ * @returns Resolved target, or null if resolution produced nothing
+ * @throws {ContextError} If org-all mode is used (requires specific project)
+ */
+async function resolveTarget(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  logIds: string[],
+  cwd: string
+): Promise<ResolvedLogTarget | null> {
+  switch (parsed.type) {
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
+
+    case "project-search": {
+      const result = await resolveProjectBySlug(
+        parsed.projectSlug,
+        USAGE_HINT,
+        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`
+      );
+      if (
+        ALL_DIGITS_RE.test(parsed.projectSlug) &&
+        result.project !== parsed.projectSlug
+      ) {
+        log.info(
+          `Tip: Resolved project ID ${parsed.projectSlug} to ${result.org}/${result.project}. ` +
+            "Use the slug form for faster lookups."
+        );
+      }
+      return result;
+    }
+
+    case "org-all":
+      throw new ContextError("Specific project", USAGE_HINT);
+
+    case "auto-detect":
+      return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+
+    default: {
+      const _exhaustiveCheck: never = parsed;
+      throw new ValidationError(
+        `Invalid target specification: ${_exhaustiveCheck}`
+      );
+    }
+  }
+}
+
+/**
+ * Format a list of log IDs as a markdown bullet list.
+ *
+ * @param ids - Log IDs to format
+ * @returns Markdown list string with each ID on its own line
+ */
+function formatIdList(ids: string[]): string {
+  return ids.map((id) => ` - \`${id}\``).join("\n");
+}
+
+/**
+ * Warn about IDs that weren't found in the API response.
+ * Uses the consola logger for structured output to stderr.
+ *
+ * @param logIds - All requested IDs
+ * @param logs - Logs actually returned by the API
+ */
+function warnMissingIds(logIds: string[], logs: DetailedSentryLog[]): void {
+  if (logs.length >= logIds.length) {
+    return;
+  }
+  const foundIds = new Set(logs.map((l) => l["sentry.item_id"]));
+  const missing = logIds.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) {
+    log.warn(
+      `${missing.length} of ${logIds.length} log(s) not found:\n${formatIdList(missing)}`
+    );
+  }
+}
+
+/**
+ * Handle --web flag: open log URLs in the browser.
+ * Prompts for confirmation in interactive mode when multiple IDs are given.
+ * Aborts in non-interactive mode with a warning.
+ *
+ * @param stdout - Output stream for openInBrowser
+ * @param orgSlug - Organization slug for URL building
+ * @param logIds - Log IDs to open
+ * @returns true if handled (caller should return), false if not --web
+ */
+async function handleWebOpen(
+  stdout: { write(s: string): void },
+  orgSlug: string,
+  logIds: string[]
+): Promise<void> {
+  if (logIds.length > 1) {
+    if (!isatty(0)) {
+      log.warn(
+        `Refusing to open ${logIds.length} browser tabs in non-interactive mode. ` +
+          "Pass a single log ID or run interactively."
+      );
+      return;
+    }
+    const confirmed = await log.prompt(`Open ${logIds.length} browser tabs?`, {
+      type: "confirm",
+      initial: false,
+    });
+    // consola prompt returns Symbol(clack:cancel) on Ctrl+C — a truthy value.
+    // Strictly check for `true` to avoid opening tabs on cancel.
+    if (confirmed !== true) {
+      return;
+    }
+  }
+  for (const id of logIds) {
+    await openInBrowser(stdout, buildLogsUrl(orgSlug, id), "log");
+  }
+}
+
+/**
+ * Throw a descriptive error when no logs were found.
+ *
+ * @param logIds - Requested IDs
+ * @param org - Organization slug
+ * @param project - Project slug
+ * @throws {ValidationError} Always
+ */
+function throwNotFoundError(
+  logIds: string[],
+  org: string,
+  project: string
+): never {
+  const idList = formatIdList(logIds);
+  throw new ValidationError(
+    logIds.length === 1
+      ? `No log found with ID "${logIds[0]}" in ${org}/${project}.\n\n` +
+          "Make sure the log ID is correct and the log was sent within the last 90 days."
+      : `No logs found with any of the following IDs in ${org}/${project}:\n${idList}\n\n` +
+          "Make sure the log IDs are correct and the logs were sent within the last 90 days."
+  );
+}
+
+/**
+ * Write human-readable output for one or more logs to stdout.
  *
  * @param stdout - Output stream
- * @param log - The log entry to display
+ * @param logs - Log entries to display
  * @param orgSlug - Organization slug for trace URLs
  * @param detectedFrom - Optional context detection source to display
  */
 function writeHumanOutput(
-  stdout: Writer,
-  log: DetailedSentryLog,
+  stdout: { write(s: string): void },
+  logs: DetailedSentryLog[],
   orgSlug: string,
   detectedFrom?: string
 ): void {
-  stdout.write(`${formatLogDetails(log, orgSlug)}\n`);
+  let first = true;
+  for (const entry of logs) {
+    if (!first) {
+      stdout.write("\n---\n\n");
+    }
+    stdout.write(`${formatLogDetails(entry, orgSlug)}\n`);
+    first = false;
+  }
 
   if (detectedFrom) {
     stdout.write(`\nDetected from ${detectedFrom}\n`);
@@ -111,13 +306,15 @@ function writeHumanOutput(
 
 export const viewCommand = buildCommand({
   docs: {
-    brief: "View details of a specific log entry",
+    brief: "View details of one or more log entries",
     fullDescription:
-      "View detailed information about a Sentry log entry by its ID.\n\n" +
+      "View detailed information about Sentry log entries by their IDs.\n\n" +
       "Target specification:\n" +
-      "  sentry log view <log-id>              # auto-detect from DSN or config\n" +
-      "  sentry log view <org>/<proj> <log-id> # explicit org and project\n" +
-      "  sentry log view <project> <log-id>    # find project across all orgs\n\n" +
+      "  sentry log view <log-id>                          # auto-detect from DSN or config\n" +
+      "  sentry log view <org>/<proj> <log-id> [<id>...]   # explicit org and project\n" +
+      "  sentry log view <project> <log-id> [<id>...]      # find project across all orgs\n\n" +
+      "Multiple log IDs can be passed as separate arguments or newline-separated\n" +
+      "within a single argument (handy when piping from other commands).\n\n" +
       "The log ID is the 32-character hexadecimal identifier shown in log listings.",
   },
   parameters: {
@@ -126,7 +323,7 @@ export const viewCommand = buildCommand({
       parameter: {
         placeholder: "args",
         brief:
-          "[<org>/<project>] <log-id> - Target (optional) and log ID (required)",
+          "[<org>/<project>] <log-id> [<log-id>...] - Target (optional) and one or more log IDs",
         parse: String,
       },
     },
@@ -153,48 +350,20 @@ export const viewCommand = buildCommand({
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
-    const { logId, targetArg, warning } = parsePositionalArgs(args);
+    const { logIds, targetArg, warning, suggestion } =
+      parsePositionalArgs(args);
     if (warning) {
       cmdLog.warn(warning);
+    }
+    if (suggestion) {
+      cmdLog.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
     if (parsed.type !== "auto-detect" && parsed.normalized) {
       cmdLog.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
     }
 
-    let target: ResolvedLogTarget | null = null;
-
-    switch (parsed.type) {
-      case "explicit":
-        target = {
-          org: parsed.org,
-          project: parsed.project,
-        };
-        break;
-
-      case "project-search":
-        target = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry log view <org>/${parsed.projectSlug} ${logId}`
-        );
-        break;
-
-      case "org-all":
-        throw new ContextError("Specific project", USAGE_HINT);
-
-      case "auto-detect":
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        break;
-
-      default: {
-        // Exhaustive check - should never reach here
-        const _exhaustiveCheck: never = parsed;
-        throw new ValidationError(
-          `Invalid target specification: ${_exhaustiveCheck}`
-        );
-      }
-    }
+    const target = await resolveTarget(parsed, logIds, cwd);
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -204,25 +373,30 @@ export const viewCommand = buildCommand({
     setContext([target.org], [target.project]);
 
     if (flags.web) {
-      await openInBrowser(stdout, buildLogsUrl(target.org, logId), "log");
+      await handleWebOpen(stdout, target.org, logIds);
       return;
     }
 
-    // Fetch the log entry
-    const log = await getLog(target.org, target.project, logId);
+    // Fetch all requested log entries
+    const logs = await getLogs(target.org, target.project, logIds);
 
-    if (!log) {
-      throw new ValidationError(
-        `No log found with ID "${logId}" in ${target.org}/${target.project}.\n\n` +
-          "Make sure the log ID is correct and the log was sent within the last 90 days."
-      );
+    if (logs.length === 0) {
+      throwNotFoundError(logIds, target.org, target.project);
     }
+
+    warnMissingIds(logIds, logs);
 
     if (flags.json) {
-      writeJson(stdout, log);
+      // Single ID: output single object for backward compatibility
+      // Multiple IDs: output array
+      if (logIds.length === 1 && logs.length === 1) {
+        writeJson(stdout, logs[0]);
+      } else {
+        writeJson(stdout, logs);
+      }
       return;
     }
 
-    writeHumanOutput(stdout, log, target.org, target.detectedFrom);
+    writeHumanOutput(stdout, logs, target.org, target.detectedFrom);
   },
 });
