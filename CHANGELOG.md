@@ -1,6 +1,23 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.15.0
+
+### New Features ✨
+
+- (project) Display platform suggestions in multi-column tables by @betegon in [#365](https://github.com/getsentry/cli/pull/365)
+
+### Bug Fixes 🐛
+
+- (log-view) Support multiple log IDs and validate hex format by @BYK in [#362](https://github.com/getsentry/cli/pull/362)
+- (logs) Harden log schemas against API response format variations by @BYK in [#361](https://github.com/getsentry/cli/pull/361)
+- Improve argument parsing for common user mistakes by @BYK in [#363](https://github.com/getsentry/cli/pull/363)
+
+### Internal Changes 🔧
+
+- (delta-upgrade) Lazy chain walk, GHCR retry, parallel I/O, offline cache by @BYK in [#360](https://github.com/getsentry/cli/pull/360)
+- Use --timeout CLI flag for model-based test timeouts by @BYK in [#367](https://github.com/getsentry/cli/pull/367)
+
 ## 0.14.0
 
 ### New Features ✨
