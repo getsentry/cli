@@ -1574,4 +1574,79 @@ describe("listTraceLogs", () => {
     const url = new URL(capturedUrl);
     expect(url.searchParams.get("statsPeriod")).toBe("14d");
   });
+
+  test("coerces string numeric fields to numbers (API resilience)", async () => {
+    const stringFieldsData = {
+      data: [
+        {
+          id: "log001",
+          "project.id": "123",
+          trace: "aaaa1111bbbb2222cccc3333dddd4444",
+          severity_number: "9",
+          severity: "info",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          timestamp_precise: "1738247535000000000",
+          message: "Request received",
+        },
+      ],
+      meta: { fields: { id: "string" } },
+    };
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        return new Response(JSON.stringify(stringFieldsData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTraceLogs(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(result).toHaveLength(1);
+    expect(typeof result[0]["project.id"]).toBe("number");
+    expect(result[0]["project.id"]).toBe(123);
+    expect(typeof result[0].severity_number).toBe("number");
+    expect(result[0].severity_number).toBe(9);
+    expect(typeof result[0].timestamp_precise).toBe("number");
+  });
+
+  test("accepts responses with missing optional fields", async () => {
+    const minimalData = {
+      data: [
+        {
+          id: "log001",
+          "project.id": 123,
+          trace: "aaaa1111bbbb2222cccc3333dddd4444",
+          severity: "info",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          message: "Test",
+        },
+      ],
+    };
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        return new Response(JSON.stringify(minimalData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTraceLogs(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].severity_number).toBeUndefined();
+    expect(result[0].timestamp_precise).toBeUndefined();
+    expect(result[0].severity).toBe("info");
+  });
 });
