@@ -14,6 +14,7 @@ import {
   listOrganizations,
   tryGetPrimaryDsn,
 } from "../api-client.js";
+import { ApiError } from "../errors.js";
 import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
@@ -676,7 +677,14 @@ async function createSentryProject(
       },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    let message: string;
+    if (error instanceof ApiError) {
+      message = error.format();
+    } else if (error instanceof Error) {
+      message = error.message;
+    } else {
+      message = String(error);
+    }
     return { ok: false, error: message };
   }
 }
