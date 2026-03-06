@@ -156,14 +156,6 @@ export function isValidPlatform(platform: string): boolean {
   return VALID_PLATFORM_SET.has(platform);
 }
 
-/**
- * Normalize dots to hyphens in a platform string.
- * Returns the normalized string (no side effects).
- */
-export function normalizePlatform(platform: string): string {
-  return platform.replace(/\./g, "-");
-}
-
 function addUnique(arr: string[], value: string): void {
   if (!arr.includes(value)) {
     arr.push(value);

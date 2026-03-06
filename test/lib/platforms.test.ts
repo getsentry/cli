@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
-  normalizePlatform,
   suggestPlatform,
   VALID_PLATFORM_SET,
   VALID_PLATFORMS,
@@ -22,18 +21,6 @@ describe("isValidPlatform", () => {
     expect(isValidPlatform("foo")).toBe(false);
     expect(isValidPlatform("sentry.javascript.node")).toBe(false);
     expect(isValidPlatform("")).toBe(false);
-  });
-});
-
-describe("normalizePlatform", () => {
-  test("converts dots to hyphens", () => {
-    expect(normalizePlatform("javascript.nextjs")).toBe("javascript-nextjs");
-    expect(normalizePlatform("python.django.rest")).toBe("python-django-rest");
-  });
-
-  test("returns unchanged string when no dots", () => {
-    expect(normalizePlatform("node")).toBe("node");
-    expect(normalizePlatform("javascript-nextjs")).toBe("javascript-nextjs");
   });
 });
 
