@@ -1,14 +1,17 @@
 /**
- * Shared Trace ID Validation
+ * Trace ID Validation
  *
- * Provides trace ID regex and validation used by both `trace logs` and
- * `log list --trace` commands.
+ * Re-exports shared hex ID validation specialized for trace IDs.
+ * Used by `trace logs` and `log list --trace` commands.
  */
 
-import { ValidationError } from "./errors.js";
+import { HEX_ID_RE, validateHexId } from "./hex-id.js";
 
-/** Regex for a valid 32-character hexadecimal trace ID */
-export const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
+/**
+ * Regex for a valid 32-character hexadecimal trace ID.
+ * Alias for `HEX_ID_RE` — both trace IDs and log IDs share the same format.
+ */
+export const TRACE_ID_RE = HEX_ID_RE;
 
 /**
  * Validate that a string looks like a 32-character hex trace ID.
@@ -17,15 +20,9 @@ export const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
  * function directly.
  *
  * @param traceId - The trace ID string to validate
- * @returns The validated trace ID (unchanged)
+ * @returns The validated trace ID (trimmed)
  * @throws {ValidationError} If the trace ID format is invalid
  */
 export function validateTraceId(traceId: string): string {
-  if (!TRACE_ID_RE.test(traceId)) {
-    throw new ValidationError(
-      `Invalid trace ID "${traceId}". Expected a 32-character hexadecimal string.\n\n` +
-        "Example: abc123def456abc123def456abc123de"
-    );
-  }
-  return traceId;
+  return validateHexId(traceId, "trace ID");
 }

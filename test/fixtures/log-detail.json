@@ -1,7 +1,7 @@
 {
   "data": [
     {
-      "sentry.item_id": "log-detail-001",
+      "sentry.item_id": "a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5",
       "timestamp": "2025-01-30T14:32:15+00:00",
       "timestamp_precise": 1770060419044800300,
       "message": "Detailed test log message",

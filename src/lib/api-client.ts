@@ -1778,8 +1778,47 @@ const DETAILED_LOG_FIELDS = [
 ];
 
 /**
- * Get a single log entry by its item ID.
+ * Get one or more log entries by their item IDs.
  * Uses the Explore/Events API with dataset=logs and a filter query.
+ * For multiple IDs, uses bracket syntax: `sentry.item_id:[id1,id2,...]`.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug for filtering
+ * @param logIds - One or more sentry.item_id values to fetch
+ * @returns Array of matching detailed log entries (may be shorter than logIds if some weren't found)
+ */
+export async function getLogs(
+  orgSlug: string,
+  projectSlug: string,
+  logIds: string[]
+): Promise<DetailedSentryLog[]> {
+  const idFilter =
+    logIds.length === 1
+      ? `sentry.item_id:${logIds[0]}`
+      : `sentry.item_id:[${logIds.join(",")}]`;
+  const query = `project:${projectSlug} ${idFilter}`;
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await queryExploreEventsInTableFormat({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      dataset: "logs",
+      field: DETAILED_LOG_FIELDS,
+      query,
+      per_page: logIds.length,
+      statsPeriod: "90d",
+    },
+  });
+
+  const data = unwrapResult(result, "Failed to get log");
+  const logsResponse = DetailedLogsResponseSchema.parse(data);
+  return logsResponse.data;
+}
+
+/**
+ * Get a single log entry by its item ID.
+ * Convenience wrapper around {@link getLogs} for single-ID lookups.
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug for filtering
@@ -1791,24 +1830,8 @@ export async function getLog(
   projectSlug: string,
   logId: string
 ): Promise<DetailedSentryLog | null> {
-  const query = `project:${projectSlug} sentry.item_id:${logId}`;
-  const config = await getOrgSdkConfig(orgSlug);
-
-  const result = await queryExploreEventsInTableFormat({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-    query: {
-      dataset: "logs",
-      field: DETAILED_LOG_FIELDS,
-      query,
-      per_page: 1,
-      statsPeriod: "90d",
-    },
-  });
-
-  const data = unwrapResult(result, "Failed to get log");
-  const logsResponse = DetailedLogsResponseSchema.parse(data);
-  return logsResponse.data[0] ?? null;
+  const logs = await getLogs(orgSlug, projectSlug, [logId]);
+  return logs[0] ?? null;
 }
 
 // Trace-log functions

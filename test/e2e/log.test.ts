@@ -277,11 +277,12 @@ describe("sentry log view", () => {
   test("handles non-existent log", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
+    // Valid hex format but doesn't exist in the mock server
     const result = await ctx.run([
       "log",
       "view",
       `${TEST_ORG}/${TEST_PROJECT}`,
-      "nonexistent-log-id-12345",
+      "deadbeefdeadbeefdeadbeefdeadbeef",
     ]);
 
     expect(result.exitCode).toBe(1);

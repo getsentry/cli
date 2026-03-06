@@ -9,9 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   array,
   assert as fcAssert,
-  pre,
   property,
-  string,
   stringMatching,
   tuple,
 } from "fast-check";
@@ -25,31 +23,25 @@ const logIdArb = stringMatching(/^[a-f0-9]{32}$/);
 /** Valid org/project slugs */
 const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
 
-/** Non-empty strings for general args */
-const nonEmptyStringArb = string({ minLength: 1, maxLength: 50 });
-
-/** Non-empty strings without slashes (valid plain IDs) */
-const plainIdArb = nonEmptyStringArb.filter((s) => !s.includes("/"));
-
 describe("parsePositionalArgs properties", () => {
-  test("single arg without slashes: returns it as logId with undefined targetArg", async () => {
+  test("single valid log ID: returns it in logIds with undefined targetArg", async () => {
     await fcAssert(
-      property(plainIdArb, (input) => {
+      property(logIdArb, (input) => {
         const result = parsePositionalArgs([input]);
-        expect(result.logId).toBe(input);
+        expect(result.logIds).toEqual([input]);
         expect(result.targetArg).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("single arg org/project/logId: splits into target and logId", async () => {
+  test("single arg org/project/logId: splits into target and logIds", async () => {
     await fcAssert(
       property(tuple(slugArb, slugArb, logIdArb), ([org, project, logId]) => {
         const combined = `${org}/${project}/${logId}`;
         const result = parsePositionalArgs([combined]);
         expect(result.targetArg).toBe(`${org}/${project}`);
-        expect(result.logId).toBe(logId);
+        expect(result.logIds).toEqual([logId]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -66,47 +58,56 @@ describe("parsePositionalArgs properties", () => {
     );
   });
 
-  test("two args: first is always targetArg, second is always logId", async () => {
+  test("two args (target + logId): first is targetArg, second is in logIds", async () => {
     await fcAssert(
-      property(
-        tuple(nonEmptyStringArb, nonEmptyStringArb),
-        ([first, second]) => {
-          const result = parsePositionalArgs([first, second]);
-          expect(result.targetArg).toBe(first);
-          expect(result.logId).toBe(second);
-        }
-      ),
+      property(tuple(slugArb, logIdArb), ([slug, logId]) => {
+        const result = parsePositionalArgs([slug, logId]);
+        expect(result.targetArg).toBe(slug);
+        expect(result.logIds).toEqual([logId]);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("org/project target format: correctly splits target and logId", async () => {
+  test("org/project target + logId: correctly splits target and logIds", async () => {
     await fcAssert(
       property(tuple(slugArb, slugArb, logIdArb), ([org, project, logId]) => {
         const target = `${org}/${project}`;
         const result = parsePositionalArgs([target, logId]);
 
         expect(result.targetArg).toBe(target);
-        expect(result.logId).toBe(logId);
+        expect(result.logIds).toEqual([logId]);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("extra args are ignored: only first two matter", async () => {
+  test("multiple log IDs: all IDs present in result", async () => {
     await fcAssert(
       property(
-        tuple(
-          nonEmptyStringArb,
-          nonEmptyStringArb,
-          array(nonEmptyStringArb, { minLength: 1, maxLength: 5 })
-        ),
-        ([first, second, extras]) => {
-          const args = [first, second, ...extras];
+        tuple(slugArb, array(logIdArb, { minLength: 1, maxLength: 5 })),
+        ([slug, ids]) => {
+          const args = [slug, ...ids];
           const result = parsePositionalArgs(args);
 
-          expect(result.targetArg).toBe(first);
-          expect(result.logId).toBe(second);
+          expect(result.targetArg).toBe(slug);
+          expect(result.logIds).toEqual(ids);
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("newline-joined IDs in single arg: split correctly", async () => {
+    await fcAssert(
+      property(
+        tuple(slugArb, array(logIdArb, { minLength: 2, maxLength: 5 })),
+        ([slug, ids]) => {
+          const combined = ids.join("\n");
+          const result = parsePositionalArgs([slug, combined]);
+
+          expect(result.targetArg).toBe(slug);
+          expect(result.logIds).toEqual(ids);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -115,17 +116,11 @@ describe("parsePositionalArgs properties", () => {
 
   test("parsing is deterministic: same input always produces same output", async () => {
     await fcAssert(
-      property(
-        array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
-        (args) => {
-          // Skip single-arg with slashes — those throw ContextError (tested separately)
-          pre(args.length > 1 || !args[0]?.includes("/"));
-
-          const result1 = parsePositionalArgs(args);
-          const result2 = parsePositionalArgs(args);
-          expect(result1).toEqual(result2);
-        }
-      ),
+      property(tuple(slugArb, logIdArb), ([slug, logId]) => {
+        const result1 = parsePositionalArgs([slug, logId]);
+        const result2 = parsePositionalArgs([slug, logId]);
+        expect(result1).toEqual(result2);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
@@ -134,27 +129,23 @@ describe("parsePositionalArgs properties", () => {
     expect(() => parsePositionalArgs([])).toThrow(ContextError);
   });
 
-  test("result always has logId property defined", async () => {
+  test("result always has non-empty logIds array", async () => {
     await fcAssert(
-      property(
-        array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
-        (args) => {
-          // Skip single-arg with slashes — those throw ContextError (tested separately)
-          pre(args.length > 1 || !args[0]?.includes("/"));
-
-          const result = parsePositionalArgs(args);
-          expect(result.logId).toBeDefined();
-          expect(typeof result.logId).toBe("string");
+      property(tuple(slugArb, logIdArb), ([slug, logId]) => {
+        const result = parsePositionalArgs([slug, logId]);
+        expect(result.logIds.length).toBeGreaterThan(0);
+        for (const id of result.logIds) {
+          expect(typeof id).toBe("string");
         }
-      ),
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("result targetArg is undefined for single slash-free arg, defined for multiple", async () => {
-    // Single arg case (without slashes)
+  test("result targetArg is undefined for single ID, defined for target + ID", async () => {
+    // Single arg case
     await fcAssert(
-      property(plainIdArb, (input) => {
+      property(logIdArb, (input) => {
         const result = parsePositionalArgs([input]);
         expect(result.targetArg).toBeUndefined();
       }),
@@ -163,14 +154,11 @@ describe("parsePositionalArgs properties", () => {
 
     // Two+ args case
     await fcAssert(
-      property(
-        array(nonEmptyStringArb, { minLength: 2, maxLength: 4 }),
-        (args) => {
-          const result = parsePositionalArgs(args);
-          expect(result.targetArg).toBeDefined();
-          expect(typeof result.targetArg).toBe("string");
-        }
-      ),
+      property(tuple(slugArb, logIdArb), ([slug, logId]) => {
+        const result = parsePositionalArgs([slug, logId]);
+        expect(result.targetArg).toBeDefined();
+        expect(typeof result.targetArg).toBe("string");
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
