@@ -12,6 +12,7 @@ import { MastraClient } from "@mastra/client-js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
+import { logger } from "../logger.js";
 import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
@@ -170,6 +171,19 @@ function withTimeout<T>(
   });
 }
 
+function logSuspendPayload(extracted: {
+  payload: SuspendPayload;
+  stepId: string;
+}): void {
+  const { payload, stepId } = extracted;
+  const detail =
+    payload.type === "local-op"
+      ? `, op=${payload.operation}, params=${JSON.stringify((payload as Record<string, unknown>).params)}`
+      : "";
+  logger.debug(`[init] Suspend: step=${stepId}, type=${payload.type}${detail}`);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: debug logging adds branches but logic is straightforward
 export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, force, yes, dryRun, features } = options;
 
@@ -234,6 +248,9 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         "Workflow start"
       )
     );
+    logger.debug(
+      `[init] Workflow started — status: ${result.status}, steps: [${Object.keys(result.steps ?? {}).join(", ")}]`
+    );
   } catch (err) {
     spin.stop("Connection failed", 1);
     spinState.running = false;
@@ -260,6 +277,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         process.exitCode = 1;
         return;
       }
+      logSuspendPayload(extracted);
 
       const resumeData = await handleSuspendedStep(
         {
@@ -271,6 +289,9 @@ export async function runWizard(options: WizardOptions): Promise<void> {
         },
         stepPhases,
         stepHistory
+      );
+      logger.debug(
+        `[init] Resume: step=${extracted.stepId}, data=${JSON.stringify(resumeData)}`
       );
 
       result = assertWorkflowResult(
@@ -284,6 +305,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
           "Workflow resume"
         )
       );
+      logger.debug(`[init] Workflow resumed — status: ${result.status}`);
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {

@@ -15,6 +15,7 @@ import {
   tryGetPrimaryDsn,
 } from "../api-client.js";
 import { ApiError } from "../errors.js";
+import { logger } from "../logger.js";
 import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
@@ -250,6 +251,10 @@ export async function handleLocalOp(
         error: `Blocked: cwd "${payload.cwd}" is outside project directory "${options.directory}"`,
       };
     }
+
+    logger.debug(
+      `[init] handleLocalOp: op=${payload.operation}, cwd=${payload.cwd}`
+    );
 
     switch (payload.operation) {
       case "list-dir":
@@ -618,6 +623,9 @@ async function createSentryProject(
   options: WizardOptions
 ): Promise<LocalOpResult> {
   const { name, platform } = payload.params;
+  logger.debug(
+    `[init] createSentryProject: name=${name}, platform=${platform}`
+  );
   const slug = slugify(name);
   if (!slug) {
     return {
@@ -655,6 +663,9 @@ async function createSentryProject(
     });
 
     // 3. Create project
+    logger.debug(
+      `[init] Creating project: org=${orgSlug}, team=${team.slug}, name=${name}, platform=${platform}`
+    );
     const project = await createProject(orgSlug, team.slug, {
       name,
       platform,
@@ -665,6 +676,10 @@ async function createSentryProject(
 
     // 5. Build URL
     const url = buildProjectUrl(orgSlug, project.slug);
+
+    logger.debug(
+      `[init] Project created: slug=${project.slug}, id=${project.id}, dsn=${dsn ?? "(none)"}`
+    );
 
     return {
       ok: true,
@@ -685,6 +700,7 @@ async function createSentryProject(
     } else {
       message = String(error);
     }
+    logger.debug("[init] Project creation failed:", error);
     return { ok: false, error: message };
   }
 }
