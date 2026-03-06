@@ -333,5 +333,45 @@ describe("viewCommand.func", () => {
         ["test-proj"]
       );
     });
+
+    test("auto-detect resolves org/project and fetches logs", async () => {
+      resolveOrgAndProjectSpy.mockResolvedValue({
+        org: "detected-org",
+        project: "detected-proj",
+        detectedFrom: ".env file",
+      });
+      getLogsSpy.mockResolvedValue([makeSampleLog(ID1)]);
+
+      const { context, stdoutWrite } = createMockContext();
+      const func = await viewCommand.loader();
+      // No target arg — triggers auto-detect
+      await func.call(context, { json: false, web: false }, ID1);
+
+      expect(resolveOrgAndProjectSpy).toHaveBeenCalled();
+      expect(getLogsSpy).toHaveBeenCalledWith("detected-org", "detected-proj", [
+        ID1,
+      ]);
+
+      // Human output should include the detected-from hint
+      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      expect(output).toContain("Detected from .env file");
+    });
+
+    test("throws ContextError when auto-detect returns null", async () => {
+      resolveOrgAndProjectSpy.mockResolvedValue(null);
+
+      const { context } = createMockContext();
+      const func = await viewCommand.loader();
+
+      try {
+        await func.call(context, { json: false, web: false }, ID1);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain(
+          "Organization and project"
+        );
+      }
+    });
   });
 });
