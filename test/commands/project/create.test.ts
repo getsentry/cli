@@ -372,7 +372,24 @@ describe("project create", () => {
     expect(err.message).not.toContain("not found");
   });
 
-  test("handles 400 invalid platform with platform list", async () => {
+  test("rejects invalid platform client-side without API call", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, "my-app", "javascript-node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform 'javascript-node'");
+    expect(err.message).toContain("Did you mean?");
+    expect(err.message).toContain("node");
+    expect(err.message).toContain("Common platforms:");
+
+    // Should NOT have called the API
+    expect(createProjectSpy).not.toHaveBeenCalled();
+  });
+
+  test("handles 400 invalid platform from API as safety net", async () => {
     createProjectSpy.mockRejectedValue(
       new ApiError(
         "API request failed: 400 Bad Request",
@@ -384,13 +401,13 @@ describe("project create", () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
+    // Use a valid platform so client-side check passes, but API rejects
     const err = await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Invalid platform 'node'");
-    expect(err.message).toContain("Available platforms:");
-    expect(err.message).toContain("javascript-nextjs");
+    expect(err.message).toContain("Common platforms:");
   });
 
   test("wraps other API errors with context", async () => {
@@ -509,7 +526,7 @@ describe("project create", () => {
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Platform is required");
-    expect(err.message).toContain("Available platforms:");
+    expect(err.message).toContain("Common platforms:");
     expect(err.message).toContain("javascript-nextjs");
     expect(err.message).toContain("python");
   });
@@ -610,14 +627,24 @@ describe("project create", () => {
     expect(stderrOutput).not.toContain("warning:");
   });
 
-  test("auto-corrects multiple dots in platform", async () => {
+  test("auto-corrects multiple dots in platform then validates", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
-    await func.call(context, { json: false }, "my-app", "python.django.rest");
 
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "python-django-rest",
-    });
+    // python.django.rest → python-django-rest (not a valid platform)
+    const err = await func
+      .call(context, { json: false }, "my-app", "python.django.rest")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform 'python-django-rest'");
+
+    // Should warn about dot normalization on stderr before the error
+    const stderrOutput = (
+      context.stderr.write as ReturnType<typeof mock>
+    ).mock.calls
+      .map((c: unknown[]) => c[0])
+      .join("");
+    expect(stderrOutput).toContain("warning:");
+    expect(stderrOutput).toContain("python.django.rest");
   });
 });

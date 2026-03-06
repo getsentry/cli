@@ -31,6 +31,12 @@ import {
   withAuthGuard,
 } from "../../lib/errors.js";
 import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
+import { renderTextTable } from "../../lib/formatters/text-table.js";
+import {
+  COMMON_PLATFORMS,
+  isValidPlatform,
+  suggestPlatform,
+} from "../../lib/platforms.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
@@ -49,43 +55,6 @@ type CreateFlags = {
 };
 
 /**
- * Common Sentry platform identifiers shown when platform arg is missing or invalid.
- *
- * These use hyphen-separated format matching Sentry's internal platform registry
- * (see sentry/src/sentry/utils/platform_categories.py). This is a curated subset
- * of the ~120 supported values — the full list is available via the API endpoint
- * referenced in `buildPlatformError`.
- */
-const PLATFORMS = [
-  "javascript",
-  "javascript-react",
-  "javascript-nextjs",
-  "javascript-vue",
-  "javascript-angular",
-  "javascript-svelte",
-  "javascript-remix",
-  "javascript-astro",
-  "node",
-  "node-express",
-  "python",
-  "python-django",
-  "python-flask",
-  "python-fastapi",
-  "go",
-  "ruby",
-  "ruby-rails",
-  "php",
-  "php-laravel",
-  "java",
-  "android",
-  "dotnet",
-  "react-native",
-  "apple-ios",
-  "rust",
-  "elixir",
-] as const;
-
-/**
  * Normalize common platform format mistakes.
  *
  * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
@@ -96,6 +65,19 @@ const PLATFORMS = [
  * Safe to auto-correct because the input is already invalid (dots are never
  * valid in platform identifiers) and the correction is unambiguous.
  */
+/** Reshape a flat list into rows of `cols` columns, padding the last row. */
+function toColumnRows(items: string[], cols: number): string[][] {
+  const rows: string[][] = [];
+  for (let i = 0; i < items.length; i += cols) {
+    const row = items.slice(i, i + cols);
+    while (row.length < cols) {
+      row.push("");
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 function normalizePlatform(platform: string, stderr: Writer): string {
   if (!platform.includes(".")) {
     return platform;
@@ -142,16 +124,37 @@ function isPlatformError(error: ApiError): boolean {
  * @param platform - The invalid platform string, if provided
  */
 function buildPlatformError(nameArg: string, platform?: string): string {
-  const list = PLATFORMS.map((p) => `  ${p}`).join("\n");
   const heading = platform
     ? `Invalid platform '${platform}'.`
     : "Platform is required.";
 
+  let didYouMean = "";
+  if (platform) {
+    const suggestions = suggestPlatform(platform);
+    if (suggestions.length > 0) {
+      const rows = toColumnRows(suggestions, 3);
+      const table = renderTextTable(rows[0] ?? [], rows.slice(1), {
+        headerSeparator: false,
+      });
+      didYouMean = `\nDid you mean?\n${table}`;
+    }
+  }
+
+  const platformRows = toColumnRows([...COMMON_PLATFORMS], 3);
+  const platformTable = renderTextTable(
+    platformRows[0] ?? [],
+    platformRows.slice(1),
+    {
+      headerSeparator: false,
+    }
+  );
+
   return (
-    `${heading}\n\n` +
-    "Usage:\n" +
+    `${heading}\n` +
+    didYouMean +
+    "\nUsage:\n" +
     `  sentry project create ${nameArg} <platform>\n\n` +
-    `Available platforms:\n\n${list}\n\n` +
+    `Common platforms:\n\n${platformTable}\n` +
     "Run 'sentry project create <name> <platform>' with any valid Sentry platform identifier."
   );
 }
@@ -331,6 +334,10 @@ export const createCommand = buildCommand({
     }
 
     const platform = normalizePlatform(platformArg, this.stderr);
+
+    if (!isValidPlatform(platform)) {
+      throw new CliError(buildPlatformError(nameArg, platform));
+    }
 
     const parsed = parseOrgProjectArg(nameArg);
 
