@@ -1,0 +1,122 @@
+# Fix CLI-BC: Support multiple log IDs in `sentry log view`
+
+## Problem
+
+An AI agent called `sentry log view brandai/brandai "<7 log IDs joined by newlines>"`. The newline-delimited blob was treated as a single log ID, interpolated into the API query `sentry.item_id:${logId}`, and the Sentry API rejected it with 400 Bad Request.
+
+## Approach: Support Multiple Log IDs
+
+Instead of just validating and rejecting, **accept multiple log IDs**. The Sentry Explore API already supports bracket syntax (`sentry.item_id:[id1, id2, id3]`), the Stricli positional is already `kind: "array"`, and this serves the actual user intent.
+
+Handle both input styles:
+- Space-separated: `sentry log view org/proj id1 id2 id3`
+- Newline-in-arg: `sentry log view org/proj "id1\nid2\nid3"` (split on newlines)
+
+## Changes
+
+### 1. Create shared hex ID validator: `src/lib/hex-id.ts`
+
+Generalize from `src/lib/trace-id.ts`. Both trace IDs and log IDs are 32-char hex.
+
+```typescript
+export const HEX_ID_RE = /^[0-9a-f]{32}$/i;
+
+export function validateHexId(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!HEX_ID_RE.test(trimmed)) {
+    throw new ValidationError(
+      `Invalid ${label} "${trimmed.length > 40 ? `${trimmed.slice(0, 37)}...` : trimmed}". ` +
+      `Expected a 32-character hexadecimal string.\n\nExample: abc123def456abc123def456abc123de`
+    );
+  }
+  return trimmed;
+}
+```
+
+### 2. Update `src/lib/trace-id.ts` → re-export shim
+
+```typescript
+export { HEX_ID_RE as TRACE_ID_RE } from "./hex-id.js";
+export function validateTraceId(traceId: string): string {
+  return validateHexId(traceId, "trace ID");
+}
+```
+
+All existing imports (`trace logs`, `log list --trace`, tests) continue to work.
+
+### 3. Modify `src/commands/log/view.ts` — accept multiple log IDs
+
+**`parsePositionalArgs()`** returns `logIds: string[]` instead of `logId: string`:
+
+- Split any arg containing `\n` into multiple IDs (covers the pipe/paste case)
+- First arg is target if it doesn't look like a hex ID or contains `/`; otherwise all args are IDs
+- With 2+ args: first is target, rest are log IDs
+- Validate each ID with `validateHexId(id, "log ID")`
+- Require at least one log ID
+
+**Command `func()`**:
+- Single ID → current behavior (fetch one, detailed view)
+- Multiple IDs → fetch all, display each with separator (human) or as array (JSON)
+
+### 4. Create `getLogs()` in `src/lib/api-client.ts`
+
+Add a multi-ID variant alongside `getLog()`:
+
+```typescript
+export async function getLogs(
+  orgSlug: string,
+  projectSlug: string,
+  logIds: string[]
+): Promise<DetailedSentryLog[]> {
+  const idFilter = logIds.length === 1
+    ? `sentry.item_id:${logIds[0]}`
+    : `sentry.item_id:[${logIds.join(",")}]`;
+  const query = `project:${projectSlug} ${idFilter}`;
+  // ... same queryExploreEventsInTableFormat call but with per_page: logIds.length
+}
+```
+
+Keep existing `getLog()` as a convenience wrapper calling `getLogs()` and returning `[0] ?? null`.
+
+### 5. Update output in `src/commands/log/view.ts`
+
+- **JSON**: `writeJson(stdout, logs)` — outputs array when multiple, single object when one (or always array for consistency — TBD based on backward compat preference)
+- **Human**: Loop `formatLogDetails()` with `\n---\n` separator between entries
+- **Web**: Open first log (or error if multiple — browser can only open one meaningfully)
+- Report missing IDs: if some IDs weren't found, warn to stderr
+
+### 6. Tests
+
+**`test/lib/hex-id.test.ts`** (new):
+- Valid/invalid hex IDs, whitespace trimming, long ID truncation in error
+
+**`test/commands/log/view.test.ts`** (update):
+- `parsePositionalArgs` returns `logIds[]` array
+- Newline-containing arg is split into multiple IDs
+- Invalid hex IDs throw `ValidationError`
+- Mixed valid/invalid IDs: error on first invalid
+
+**`test/commands/log/view.property.test.ts`** (update):
+- Adjust to `logIds` return type (array containing the same values)
+
+## Files to Modify
+
+| File | Action |
+|------|--------|
+| `src/lib/hex-id.ts` | **Create** — shared 32-char hex ID validator |
+| `src/lib/trace-id.ts` | **Modify** — delegate to `hex-id.ts` |
+| `src/commands/log/view.ts` | **Modify** — multi-ID parsing + display |
+| `src/lib/api-client.ts` | **Modify** — add `getLogs()`, refactor `getLog()` |
+| `test/lib/hex-id.test.ts` | **Create** — validator tests |
+| `test/commands/log/view.test.ts` | **Modify** — multi-ID tests |
+| `test/commands/log/view.property.test.ts` | **Modify** — adapt to `logIds[]` |
+
+## Verification
+
+1. `bun run typecheck` — no type errors
+2. `bun run lint` — no lint errors
+3. `bun test test/lib/hex-id.test.ts` — new validator tests pass
+4. `bun test test/lib/trace-id.test.ts` — existing trace ID tests still pass
+5. `bun test test/commands/log/view.test.ts` — updated tests pass
+6. `bun test test/commands/log/view.property.test.ts` — property tests pass
+7. `bun test` — full suite passes
