@@ -133,9 +133,12 @@ describe("resolveOrgProjectFromArg", () => {
   });
 
   test("resolves single project match", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "frontend", orgSlug: "acme", id: "1", name: "Frontend" },
-    ] as ProjectWithOrg[]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { slug: "frontend", orgSlug: "acme", id: "1", name: "Frontend" },
+      ] as ProjectWithOrg[],
+      orgs: [],
+    });
 
     const result = await resolveTarget.resolveOrgProjectFromArg(
       "frontend",
@@ -146,7 +149,7 @@ describe("resolveOrgProjectFromArg", () => {
   });
 
   test("throws when no project found", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
     await expect(
       resolveTarget.resolveOrgProjectFromArg(
@@ -158,10 +161,13 @@ describe("resolveOrgProjectFromArg", () => {
   });
 
   test("throws when multiple projects found", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "frontend", orgSlug: "org-a", id: "1", name: "Frontend" },
-      { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
-    ] as ProjectWithOrg[]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { slug: "frontend", orgSlug: "org-a", id: "1", name: "Frontend" },
+        { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
+      ] as ProjectWithOrg[],
+      orgs: [],
+    });
 
     try {
       await resolveTarget.resolveOrgProjectFromArg(

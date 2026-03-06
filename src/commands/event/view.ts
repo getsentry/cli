@@ -12,6 +12,8 @@ import {
   resolveEventInOrg,
 } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
+  looksLikeIssueShortId,
   ProjectSpecificationType,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
@@ -21,6 +23,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
+import { logger } from "../../lib/logger.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import {
   resolveOrgAndProject,
@@ -88,6 +91,10 @@ const USAGE_HINT = "sentry event view <org>/<project> <event-id>";
 export function parsePositionalArgs(args: string[]): {
   eventId: string;
   targetArg: string | undefined;
+  /** Warning message if arguments appear to be in the wrong order */
+  warning?: string;
+  /** Suggestion when the user likely meant a different command */
+  suggestion?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Event ID", USAGE_HINT);
@@ -130,8 +137,19 @@ export function parsePositionalArgs(args: string[]): {
     return { eventId: first, targetArg: undefined };
   }
 
+  // Detect swapped args: user put ID first and target second
+  const swapWarning = detectSwappedViewArgs(first, second);
+  if (swapWarning) {
+    return { eventId: first, targetArg: second, warning: swapWarning };
+  }
+
+  // Detect issue short ID passed as first arg (e.g., "CAM-82X 95fd7f5a")
+  const suggestion = looksLikeIssueShortId(first)
+    ? `Did you mean: sentry issue view ${first}`
+    : undefined;
+
   // Two or more args - first is target, second is event ID
-  return { eventId: second, targetArg: first };
+  return { eventId: second, targetArg: first, suggestion };
 }
 
 /**
@@ -153,7 +171,6 @@ type ResolveTargetOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   eventId: string;
   cwd: string;
-  stderr: { write(s: string): void };
 };
 
 /**
@@ -166,7 +183,7 @@ type ResolveTargetOptions = {
 export async function resolveEventTarget(
   options: ResolveTargetOptions
 ): Promise<ResolvedEventTarget | null> {
-  const { parsed, eventId, cwd, stderr } = options;
+  const { parsed, eventId, cwd } = options;
 
   switch (parsed.type) {
     case ProjectSpecificationType.Explicit: {
@@ -183,8 +200,7 @@ export async function resolveEventTarget(
       const resolved = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry event view <org>/${parsed.projectSlug} ${eventId}`,
-        stderr
+        `sentry event view <org>/${parsed.projectSlug} ${eventId}`
       );
       return {
         ...resolved,
@@ -199,7 +215,7 @@ export async function resolveEventTarget(
     }
 
     case ProjectSpecificationType.AutoDetect:
-      return resolveAutoDetectTarget(eventId, cwd, stderr);
+      return resolveAutoDetectTarget(eventId, cwd);
 
     default:
       return null;
@@ -244,8 +260,7 @@ export async function resolveOrgAllTarget(
 /** @internal Exported for testing */
 export async function resolveAutoDetectTarget(
   eventId: string,
-  cwd: string,
-  stderr: { write(s: string): void }
+  cwd: string
 ): Promise<ResolvedEventTarget | null> {
   const autoTarget = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
   if (autoTarget) {
@@ -254,10 +269,12 @@ export async function resolveAutoDetectTarget(
 
   const resolved = await findEventAcrossOrgs(eventId);
   if (resolved) {
-    stderr.write(
-      `Tip: Found event in ${resolved.org}/${resolved.project}. ` +
-        `Use: sentry event view ${resolved.org}/${resolved.project} ${eventId}\n`
-    );
+    logger
+      .withTag("event.view")
+      .warn(
+        `Found event in ${resolved.org}/${resolved.project}. ` +
+          `Use: sentry event view ${resolved.org}/${resolved.project} ${eventId}`
+      );
     return {
       org: resolved.org,
       project: resolved.project,
@@ -311,15 +328,26 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     const { stdout, cwd } = this;
 
+    const log = logger.withTag("event.view");
+
     // Parse positional args
-    const { eventId, targetArg } = parsePositionalArgs(args);
+    const { eventId, targetArg, warning, suggestion } =
+      parsePositionalArgs(args);
+    if (warning) {
+      log.warn(warning);
+    }
+    if (suggestion) {
+      log.warn(suggestion);
+    }
     const parsed = parseOrgProjectArg(targetArg);
+    if (parsed.type !== "auto-detect" && parsed.normalized) {
+      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
+    }
 
     const target = await resolveEventTarget({
       parsed,
       eventId,
       cwd,
-      stderr: this.stderr,
     });
 
     if (!target) {

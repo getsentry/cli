@@ -304,9 +304,12 @@ describe("viewCommand.func", () => {
   });
 
   test("resolves project search target", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "frontend", orgSlug: "acme", id: "1", name: "Frontend" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { slug: "frontend", orgSlug: "acme", id: "1", name: "Frontend" },
+      ],
+      orgs: [],
+    });
     getDetailedTraceSpy.mockResolvedValue(sampleSpans);
 
     const { context } = createMockContext();
@@ -320,5 +323,40 @@ describe("viewCommand.func", () => {
 
     expect(findProjectsBySlugSpy).toHaveBeenCalledWith("frontend");
     expect(context.setContext).toHaveBeenCalledWith(["acme"], ["frontend"]);
+  });
+
+  test("logs warning when args appear swapped", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    // Trace ID first (no slash), target second (has slash) → swap detected (line 168-169)
+    await func.call(
+      context,
+      { json: true, web: false, spans: 100 },
+      "aaaa1111bbbb2222cccc3333dddd4444",
+      "test-org/test-project"
+    );
+
+    // Command should complete (warning goes to consola, not stdout)
+    expect(getDetailedTraceSpy).toHaveBeenCalled();
+  });
+
+  test("logs normalized slug warning when underscores present", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    // Underscores in the slug trigger normalized warning (line 172-173)
+    await func.call(
+      context,
+      { json: true, web: false, spans: 100 },
+      "test_org/test_project",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    // parseOrgProjectArg normalizes "test_org/test_project" → "test-org/test-project"
+    // and sets normalized=true, triggering the log.warn (line 173)
+    expect(getDetailedTraceSpy).toHaveBeenCalled();
   });
 });

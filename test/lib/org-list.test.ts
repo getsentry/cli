@@ -519,26 +519,24 @@ describe("handleProjectSearch", () => {
   });
 
   test("throws ContextError when no project found", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
     const config = makeConfig();
     const { writer } = createStdout();
 
     await expect(
       handleProjectSearch(config, writer, "no-such-project", {
-        limit: 10,
-        json: false,
+        flags: { limit: 10, json: false },
       })
     ).rejects.toThrow(ContextError);
   });
 
   test("returns empty JSON array when no project found with --json", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
     const config = makeConfig();
     const { writer, write } = createStdout();
 
     await handleProjectSearch(config, writer, "no-such-project", {
-      limit: 10,
-      json: true,
+      flags: { limit: 10, json: true },
     });
 
     const output = write.mock.calls.map((c) => c[0]).join("");
@@ -546,9 +544,12 @@ describe("handleProjectSearch", () => {
   });
 
   test("with listForProject: fetches project-scoped entities", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+      ],
+      orgs: [],
+    });
     const listForProject = mock(() =>
       Promise.resolve([{ id: "1", name: "Team A" }])
     );
@@ -556,8 +557,7 @@ describe("handleProjectSearch", () => {
     const { writer, write } = createStdout();
 
     await handleProjectSearch(config, writer, "my-proj", {
-      limit: 10,
-      json: true,
+      flags: { limit: 10, json: true },
     });
 
     expect(listForProject).toHaveBeenCalledWith("org-a", "my-proj");
@@ -567,9 +567,12 @@ describe("handleProjectSearch", () => {
   });
 
   test("without listForProject: fetches from parent org (entity is org-scoped)", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+      ],
+      orgs: [],
+    });
     const listForOrg = mock(() =>
       Promise.resolve([{ id: "1", name: "Repo A" }])
     );
@@ -577,8 +580,7 @@ describe("handleProjectSearch", () => {
     const { writer, write } = createStdout();
 
     await handleProjectSearch(config, writer, "my-proj", {
-      limit: 10,
-      json: true,
+      flags: { limit: 10, json: true },
     });
 
     expect(listForOrg).toHaveBeenCalledWith("org-a");
@@ -588,10 +590,13 @@ describe("handleProjectSearch", () => {
   });
 
   test("deduplicates orgs when multiple projects share one org", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "org-a", slug: "proj-1", id: "1", name: "Proj 1" },
-      { orgSlug: "org-a", slug: "proj-2", id: "2", name: "Proj 2" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-a", slug: "proj-1", id: "1", name: "Proj 1" },
+        { orgSlug: "org-a", slug: "proj-2", id: "2", name: "Proj 2" },
+      ],
+      orgs: [],
+    });
     const listForOrg = mock(() =>
       Promise.resolve([{ id: "1", name: "Repo A" }])
     );
@@ -599,27 +604,60 @@ describe("handleProjectSearch", () => {
     const { writer } = createStdout();
 
     await handleProjectSearch(config, writer, "proj", {
-      limit: 10,
-      json: true,
+      flags: { limit: 10, json: true },
     });
 
     // org-a should only be fetched once
     expect(listForOrg).toHaveBeenCalledTimes(1);
   });
 
+  test("calls orgAllFallback when slug matches an org and fallback provided", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
+    });
+    const config = makeConfig();
+    const { writer } = createStdout();
+    const fallback = mock(() => Promise.resolve());
+
+    await handleProjectSearch(config, writer, "acme-corp", {
+      flags: { limit: 10, json: false },
+      orgAllFallback: fallback,
+    });
+
+    expect(fallback).toHaveBeenCalledWith("acme-corp");
+  });
+
+  test("throws ContextError when slug matches an org but no fallback", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
+    });
+    const config = makeConfig();
+    const { writer } = createStdout();
+
+    await expect(
+      handleProjectSearch(config, writer, "acme-corp", {
+        flags: { limit: 10, json: false },
+      })
+    ).rejects.toThrow(ContextError);
+  });
+
   test("shows multi-org note when project found in multiple orgs", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
-      { orgSlug: "org-b", slug: "my-proj", id: "2", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+        { orgSlug: "org-b", slug: "my-proj", id: "2", name: "My Project" },
+      ],
+      orgs: [],
+    });
     const config = makeConfig({
       listForOrg: mock(() => Promise.resolve([{ id: "1", name: "Widget" }])),
     });
     const { writer, write } = createStdout();
 
     await handleProjectSearch(config, writer, "my-proj", {
-      limit: 10,
-      json: false,
+      flags: { limit: 10, json: false },
     });
 
     const output = write.mock.calls.map((c) => c[0]).join("");
@@ -834,5 +872,51 @@ describe("dispatchOrgScopedList", () => {
         },
       })
     ).rejects.toThrow("No handler for 'auto-detect' mode");
+  });
+
+  test("project-search invokes runOrgAll when slug matches an org", async () => {
+    // When dispatchOrgScopedList uses the default project-search handler with a
+    // full OrgListConfig, and the slug matches an org (no projects found), the
+    // handler calls runOrgAll as the orgAllFallback (lines 269-284).
+    const findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+    const localSetPaginationSpy = spyOn(paginationDb, "setPaginationCursor");
+    const localClearPaginationSpy = spyOn(
+      paginationDb,
+      "clearPaginationCursor"
+    );
+    localSetPaginationSpy.mockReturnValue(undefined);
+    localClearPaginationSpy.mockReturnValue(undefined);
+
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ id: "1", slug: "acme-corp", name: "Acme Corp" }],
+    });
+
+    const items: FakeEntity[] = [{ id: "1", name: "Widget A" }];
+    const config = makeConfig({
+      listPaginated: mock(() =>
+        Promise.resolve({ data: items, nextCursor: undefined })
+      ),
+    });
+    const { writer, write } = createStdout();
+
+    await dispatchOrgScopedList({
+      config,
+      stdout: writer,
+      cwd: "/tmp",
+      flags: { limit: 10, json: true },
+      parsed: { type: "project-search", projectSlug: "acme-corp" },
+    });
+
+    // runOrgAll should have called handleOrgAll → listPaginated
+    expect(config.listPaginated).toHaveBeenCalled();
+    const output = write.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].name).toBe("Widget A");
+
+    findProjectsBySlugSpy.mockRestore();
+    localSetPaginationSpy.mockRestore();
+    localClearPaginationSpy.mockRestore();
   });
 });

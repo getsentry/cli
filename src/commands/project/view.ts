@@ -230,8 +230,7 @@ export const viewCommand = buildCommand({
         const resolved = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry project view <org>/${parsed.projectSlug}`,
-          this.stderr
+          `sentry project view <org>/${parsed.projectSlug}`
         );
         resolvedTargets = [
           {

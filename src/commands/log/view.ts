@@ -7,6 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { getLog } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
 } from "../../lib/arg-parsing.js";
@@ -14,6 +15,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
+import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
@@ -40,6 +42,8 @@ const USAGE_HINT = "sentry log view <org>/<project> <log-id>";
 export function parsePositionalArgs(args: string[]): {
   logId: string;
   targetArg: string | undefined;
+  /** Warning message if arguments appear to be in the wrong order */
+  warning?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT);
@@ -62,6 +66,12 @@ export function parsePositionalArgs(args: string[]): {
   const second = args[1];
   if (second === undefined) {
     return { logId: first, targetArg: undefined };
+  }
+
+  // Detect swapped args: user put ID first and target second
+  const swapWarning = detectSwappedViewArgs(first, second);
+  if (swapWarning) {
+    return { logId: first, targetArg: second, warning: swapWarning };
   }
 
   // Two or more args - first is target, second is log ID
@@ -140,10 +150,17 @@ export const viewCommand = buildCommand({
     ...args: string[]
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
+    const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
-    const { logId, targetArg } = parsePositionalArgs(args);
+    const { logId, targetArg, warning } = parsePositionalArgs(args);
+    if (warning) {
+      cmdLog.warn(warning);
+    }
     const parsed = parseOrgProjectArg(targetArg);
+    if (parsed.type !== "auto-detect" && parsed.normalized) {
+      cmdLog.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
+    }
 
     let target: ResolvedLogTarget | null = null;
 
@@ -159,8 +176,7 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry log view <org>/${parsed.projectSlug} ${logId}`,
-          this.stderr
+          `sentry log view <org>/${parsed.projectSlug} ${logId}`
         );
         break;
 

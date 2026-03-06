@@ -354,9 +354,29 @@ async function resolveTargetsFromParsedArg(
 
     case "project-search": {
       // Find project across all orgs
-      const matches = await findProjectsBySlug(parsed.projectSlug);
+      const { projects: matches, orgs } = await findProjectsBySlug(
+        parsed.projectSlug
+      );
 
       if (matches.length === 0) {
+        // Check if the slug matches an organization — common mistake.
+        // Unlike simpler list commands that auto-redirect via orgAllFallback,
+        // issue list has custom per-project query logic (query rewriting,
+        // budget redistribution) that doesn't support org-all mode here.
+        // Throwing with actionable hints is the correct behavior.
+        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
+        if (isOrg) {
+          throw new ResolutionError(
+            `'${parsed.projectSlug}'`,
+            "is an organization, not a project",
+            `sentry issue list ${parsed.projectSlug}/`,
+            [
+              `List projects: sentry project list ${parsed.projectSlug}/`,
+              `Specify a project: sentry issue list ${parsed.projectSlug}/<project>`,
+            ]
+          );
+        }
+
         throw new ResolutionError(
           `Project '${parsed.projectSlug}'`,
           "not found",

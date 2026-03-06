@@ -629,13 +629,14 @@ describe("findProjectsBySlug", () => {
       });
     };
 
-    const results = await findProjectsBySlug("frontend");
+    const { projects, orgs } = await findProjectsBySlug("frontend");
 
-    expect(results).toHaveLength(2);
-    expect(results[0].slug).toBe("frontend");
-    expect(results[0].orgSlug).toBe("acme");
-    expect(results[1].slug).toBe("frontend");
-    expect(results[1].orgSlug).toBe("beta");
+    expect(projects).toHaveLength(2);
+    expect(projects[0].slug).toBe("frontend");
+    expect(projects[0].orgSlug).toBe("acme");
+    expect(projects[1].slug).toBe("frontend");
+    expect(projects[1].orgSlug).toBe("beta");
+    expect(orgs).toHaveLength(2);
   });
 
   test("returns empty array when no projects match", async () => {
@@ -670,9 +671,9 @@ describe("findProjectsBySlug", () => {
       });
     };
 
-    const results = await findProjectsBySlug("nonexistent");
+    const { projects } = await findProjectsBySlug("nonexistent");
 
-    expect(results).toHaveLength(0);
+    expect(projects).toHaveLength(0);
   });
 
   test("skips orgs where user lacks access (403)", async () => {
@@ -726,10 +727,10 @@ describe("findProjectsBySlug", () => {
     };
 
     // Should not throw, should just skip the restricted org
-    const results = await findProjectsBySlug("frontend");
+    const { projects } = await findProjectsBySlug("frontend");
 
-    expect(results).toHaveLength(1);
-    expect(results[0].orgSlug).toBe("acme");
+    expect(projects).toHaveLength(1);
+    expect(projects[0].orgSlug).toBe("acme");
   });
 
   test("resolves numeric project ID when slug differs", async () => {
@@ -777,10 +778,10 @@ describe("findProjectsBySlug", () => {
     };
 
     // Numeric ID should resolve even though returned slug differs
-    const results = await findProjectsBySlug("7275560680");
-    expect(results).toHaveLength(1);
-    expect(results[0].slug).toBe("frontend");
-    expect(results[0].orgSlug).toBe("acme");
+    const { projects } = await findProjectsBySlug("7275560680");
+    expect(projects).toHaveLength(1);
+    expect(projects[0].slug).toBe("frontend");
+    expect(projects[0].orgSlug).toBe("acme");
   });
 
   test("rejects non-numeric input when returned slug differs", async () => {
@@ -821,8 +822,8 @@ describe("findProjectsBySlug", () => {
     };
 
     // Non-numeric input with slug mismatch should be rejected
-    const results = await findProjectsBySlug("wrong-slug");
-    expect(results).toHaveLength(0);
+    const { projects } = await findProjectsBySlug("wrong-slug");
+    expect(projects).toHaveLength(0);
   });
 });
 

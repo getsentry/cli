@@ -11,6 +11,111 @@ import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
 
+// ---------------------------------------------------------------------------
+// Slug normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a Sentry slug by replacing underscores with dashes.
+ *
+ * Sentry enforces that organization and project slugs use dashes, never
+ * underscores. Users frequently type underscores by mistake (e.g.,
+ * `selfbase_admin_backend` instead of `selfbase-admin-backend`).
+ *
+ * @param slug - Raw slug string from CLI input
+ * @returns Normalized slug and whether normalization was applied
+ *
+ * @example
+ * normalizeSlug("selfbase_admin_backend")  // { slug: "selfbase-admin-backend", normalized: true }
+ * normalizeSlug("my-project")              // { slug: "my-project", normalized: false }
+ */
+export function normalizeSlug(slug: string): {
+  slug: string;
+  normalized: boolean;
+} {
+  if (slug.includes("_")) {
+    return { slug: slug.replace(/_/g, "-"), normalized: true };
+  }
+  return { slug, normalized: false };
+}
+
+// ---------------------------------------------------------------------------
+// Issue short ID detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Pattern for issue short IDs: one or more segments of letters/digits
+ * separated by dashes, where the last segment is the alphanumeric suffix.
+ *
+ * Examples that match: `CAM-82X`, `CLI-G`, `SPOTLIGHT-ELECTRON-4Y`
+ * Examples that don't: `my-project` (suffix is all lowercase),
+ * `a9b4ad2c` (no dash), `org/project` (has slash)
+ *
+ * The key distinguishing feature vs. a project slug: the suffix after the
+ * last dash contains at least one uppercase letter or digit that looks like
+ * a base-36 short ID, and the prefix is all-uppercase.
+ */
+const ISSUE_SHORT_ID_PATTERN = /^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[A-Z0-9]+$/;
+
+/**
+ * Check if a string looks like a Sentry issue short ID.
+ *
+ * Used to detect when a user passes an issue short ID where a target
+ * (org/project) is expected — e.g., `sentry event view CAM-82X 95fd7f5a`.
+ *
+ * @param str - String to check
+ * @returns true if the string matches the issue short ID pattern
+ *
+ * @example
+ * looksLikeIssueShortId("CAM-82X")              // true
+ * looksLikeIssueShortId("CLI-G")                // true
+ * looksLikeIssueShortId("SPOTLIGHT-ELECTRON-4Y") // true
+ * looksLikeIssueShortId("my-project")            // false (lowercase)
+ * looksLikeIssueShortId("a9b4ad2c")             // false (no dash)
+ */
+export function looksLikeIssueShortId(str: string): boolean {
+  return ISSUE_SHORT_ID_PATTERN.test(str);
+}
+
+// ---------------------------------------------------------------------------
+// Argument swap detection for view commands
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect when two positional args to a `* view` command appear to be in
+ * the wrong order.
+ *
+ * View commands expect `<target> <id>` where:
+ * - `target` is an `org/project` specifier (contains `/`) or a bare project slug
+ * - `id` is a hex string (event ID, trace ID, log ID)
+ *
+ * Returns a warning message if args appear swapped, or `null` if order
+ * looks correct.
+ *
+ * **Heuristic**: If `second` contains `/` but `first` does not, the user
+ * likely passed `<id> <target>` instead of `<target> <id>`.
+ *
+ * @param first - First positional argument
+ * @param second - Second positional argument
+ * @returns Warning message string if swapped, `null` otherwise
+ *
+ * @example
+ * detectSwappedViewArgs("a9b4ad2c", "mv-software/mvsoftware")
+ * // → "Arguments appear reversed. Interpreting as: mv-software/mvsoftware a9b4ad2c"
+ *
+ * detectSwappedViewArgs("mv-software/mvsoftware", "a9b4ad2c")
+ * // → null (correct order)
+ */
+export function detectSwappedViewArgs(
+  first: string,
+  second: string
+): string | null {
+  if (second.includes("/") && !first.includes("/")) {
+    return `Arguments appear reversed. Interpreting as: ${second} ${first}`;
+  }
+  return null;
+}
+
 /**
  * Validate that a CLI --limit flag value is within an allowed range.
  *
@@ -113,15 +218,30 @@ export const ProjectSpecificationType = {
 /**
  * Parsed result from an org/project positional argument.
  * Discriminated union based on the `type` field.
+ *
+ * When `normalized` is true, the slug contained underscores that were
+ * auto-corrected to dashes. Callers should emit a warning via `log.warn()`.
  */
 export type ParsedOrgProject =
   | {
       type: typeof ProjectSpecificationType.Explicit;
       org: string;
       project: string;
+      /** True if any slug was normalized (underscores → dashes) */
+      normalized?: boolean;
     }
-  | { type: typeof ProjectSpecificationType.OrgAll; org: string }
-  | { type: typeof ProjectSpecificationType.ProjectSearch; projectSlug: string }
+  | {
+      type: typeof ProjectSpecificationType.OrgAll;
+      org: string;
+      /** True if org slug was normalized (underscores → dashes) */
+      normalized?: boolean;
+    }
+  | {
+      type: typeof ProjectSpecificationType.ProjectSearch;
+      projectSlug: string;
+      /** True if project slug was normalized (underscores → dashes) */
+      normalized?: boolean;
+    }
   | { type: typeof ProjectSpecificationType.AutoDetect };
 
 /**
@@ -173,6 +293,52 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
 }
 
 /**
+ * Parse a slash-delimited `org/project` string into a {@link ParsedOrgProject}.
+ * Applies {@link normalizeSlug} to both components.
+ */
+function parseSlashOrgProject(input: string): ParsedOrgProject {
+  const slashIndex = input.indexOf("/");
+  const rawOrg = input.slice(0, slashIndex);
+  const rawProject = input.slice(slashIndex + 1);
+
+  if (!rawOrg) {
+    // "/cli" → search for project across all orgs
+    if (!rawProject) {
+      throw new Error(
+        'Invalid format: "/" requires a project slug (e.g., "/cli")'
+      );
+    }
+    const np = normalizeSlug(rawProject);
+    return {
+      type: "project-search",
+      projectSlug: np.slug,
+      ...(np.normalized && { normalized: true }),
+    };
+  }
+
+  const no = normalizeSlug(rawOrg);
+
+  if (!rawProject) {
+    // "sentry/" → list all projects in org
+    return {
+      type: "org-all",
+      org: no.slug,
+      ...(no.normalized && { normalized: true }),
+    };
+  }
+
+  // "sentry/cli" → explicit org and project
+  const np = normalizeSlug(rawProject);
+  const normalized = no.normalized || np.normalized;
+  return {
+    type: "explicit",
+    org: no.slug,
+    project: np.slug,
+    ...(normalized && { normalized: true }),
+  };
+}
+
+/**
  * Parse an org/project positional argument string.
  *
  * Supports the following patterns:
@@ -208,31 +374,16 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   }
 
   if (trimmed.includes("/")) {
-    const slashIndex = trimmed.indexOf("/");
-    const org = trimmed.slice(0, slashIndex);
-    const project = trimmed.slice(slashIndex + 1);
-
-    if (!org) {
-      // "/cli" → search for project across all orgs
-      if (!project) {
-        throw new Error(
-          'Invalid format: "/" requires a project slug (e.g., "/cli")'
-        );
-      }
-      return { type: "project-search", projectSlug: project };
-    }
-
-    if (!project) {
-      // "sentry/" → list all projects in org
-      return { type: "org-all", org };
-    }
-
-    // "sentry/cli" → explicit org and project
-    return { type: "explicit", org, project };
+    return parseSlashOrgProject(trimmed);
   }
 
   // No slash → search for project across all orgs
-  return { type: "project-search", projectSlug: trimmed };
+  const np = normalizeSlug(trimmed);
+  return {
+    type: "project-search",
+    projectSlug: np.slug,
+    ...(np.normalized && { normalized: true }),
+  };
 }
 
 /**
@@ -281,9 +432,45 @@ export type ParsedIssueArg =
  * parseIssueArg("G")                  // { type: "suffix-only", suffix: "G" }
  */
 /**
- * Parse the part after slash in "org/..." format.
- * Returns the appropriate ParsedIssueArg based on the content.
+ * Handle multi-slash issue args like "org/project/suffix" or "org/project/123".
+ *
+ * Splits `rest` on its first `/` to extract the project slug and a remainder
+ * that is treated as the issue reference (suffix, numeric ID, or short ID).
  */
+function parseMultiSlashIssueArg(
+  arg: string,
+  org: string,
+  rest: string
+): ParsedIssueArg {
+  const slashIdx = rest.indexOf("/");
+  const project = rest.slice(0, slashIdx);
+  const remainder = rest.slice(slashIdx + 1);
+
+  if (!(project && remainder)) {
+    throw new Error(
+      `Invalid issue format: "${arg}". Missing project or issue ID segment.`
+    );
+  }
+
+  // Remainder with dash: "org/project/PROJ-G" — split remainder on last dash
+  if (remainder.includes("-")) {
+    const lastDash = remainder.lastIndexOf("-");
+    const subProject = remainder.slice(0, lastDash);
+    const suffix = remainder.slice(lastDash + 1).toUpperCase();
+    if (subProject && suffix) {
+      return {
+        type: "explicit",
+        org,
+        project,
+        suffix: `${subProject}-${suffix}`.toUpperCase(),
+      };
+    }
+  }
+
+  // "org/project/101149101" or "org/project/G" — treat remainder as suffix
+  return { type: "explicit", org, project, suffix: remainder.toUpperCase() };
+}
+
 function parseAfterSlash(
   arg: string,
   org: string,
@@ -292,6 +479,11 @@ function parseAfterSlash(
   if (isAllDigits(rest)) {
     // "my-org/123456789" → explicit org + numeric ID
     return { type: "explicit-org-numeric", org, numericId: rest };
+  }
+
+  // Multi-slash: "org/project/suffix" or "org/project/123"
+  if (rest.includes("/")) {
+    return parseMultiSlashIssueArg(arg, org, rest);
   }
 
   // Check if rest contains a dash (project-suffix pattern)

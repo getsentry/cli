@@ -7,6 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
   spansFlag,
@@ -21,6 +22,7 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
@@ -48,6 +50,8 @@ const USAGE_HINT = "sentry trace view <org>/<project> <trace-id>";
 export function parsePositionalArgs(args: string[]): {
   traceId: string;
   targetArg: string | undefined;
+  /** Warning message if arguments appear to be in the wrong order */
+  warning?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID", USAGE_HINT);
@@ -70,6 +74,12 @@ export function parsePositionalArgs(args: string[]): {
   const second = args[1];
   if (second === undefined) {
     return { traceId: first, targetArg: undefined };
+  }
+
+  // Detect swapped args: user put ID first and target second
+  const swapWarning = detectSwappedViewArgs(first, second);
+  if (swapWarning) {
+    return { traceId: first, targetArg: second, warning: swapWarning };
   }
 
   // Two or more args - first is target, second is trace ID
@@ -151,10 +161,17 @@ export const viewCommand = buildCommand({
     ...args: string[]
   ): Promise<void> {
     const { stdout, cwd, setContext } = this;
+    const log = logger.withTag("trace.view");
 
     // Parse positional args
-    const { traceId, targetArg } = parsePositionalArgs(args);
+    const { traceId, targetArg, warning } = parsePositionalArgs(args);
+    if (warning) {
+      log.warn(warning);
+    }
     const parsed = parseOrgProjectArg(targetArg);
+    if (parsed.type !== "auto-detect" && parsed.normalized) {
+      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
+    }
 
     let target: ResolvedTraceTarget | null = null;
 
@@ -170,8 +187,7 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`,
-          this.stderr
+          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`
         );
         break;
 

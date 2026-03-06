@@ -44,9 +44,11 @@ import {
   ValidationError,
   withAuthGuard,
 } from "./errors.js";
-import { warning } from "./formatters/colors.js";
+import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { isAllDigits } from "./utils.js";
+
+const log = logger.withTag("resolve-target");
 
 /**
  * Convert a string or numeric ID to a positive integer, or `undefined` if the
@@ -850,11 +852,24 @@ export async function resolveOrg(
 export async function resolveProjectBySlug(
   projectSlug: string,
   usageHint: string,
-  disambiguationExample?: string,
-  stderr?: { write(s: string): void }
+  disambiguationExample?: string
 ): Promise<{ org: string; project: string }> {
-  const found = await findProjectsBySlug(projectSlug);
-  if (found.length === 0) {
+  const { projects, orgs } = await findProjectsBySlug(projectSlug);
+  if (projects.length === 0) {
+    // Check if the slug matches an organization — common mistake
+    const isOrg = orgs.some((o) => o.slug === projectSlug);
+    if (isOrg) {
+      throw new ResolutionError(
+        `'${projectSlug}'`,
+        "is an organization, not a project",
+        usageHint.replace("<org>/<project>", `${projectSlug}/<project>`),
+        [
+          `List projects: sentry project list ${projectSlug}/`,
+          `Specify a project: ${projectSlug}/<project>`,
+        ]
+      );
+    }
+
     throw new ResolutionError(
       `Project "${projectSlug}"`,
       "not found",
@@ -866,8 +881,8 @@ export async function resolveProjectBySlug(
       ]
     );
   }
-  if (found.length > 1) {
-    const orgList = found.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
+  if (projects.length > 1) {
+    const orgList = projects.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
     const example = disambiguationExample
       ? `\n\nExample: ${disambiguationExample}`
       : "";
@@ -876,15 +891,13 @@ export async function resolveProjectBySlug(
         `Specify the organization:\n${orgList}${example}`
     );
   }
-  const foundProject = found[0] as (typeof found)[0];
+  const foundProject = projects[0] as (typeof projects)[0];
 
   // When a numeric project ID resolved successfully, hint about using the slug
-  if (stderr && isAllDigits(projectSlug) && foundProject.slug !== projectSlug) {
-    stderr.write(
-      warning(
-        `Tip: Resolved project ID ${projectSlug} to ${foundProject.orgSlug}/${foundProject.slug}. ` +
-          "Use the slug form for faster lookups.\n"
-      )
+  if (isAllDigits(projectSlug) && foundProject.slug !== projectSlug) {
+    log.warn(
+      `Tip: Resolved project ID ${projectSlug} to ${foundProject.orgSlug}/${foundProject.slug}. ` +
+        "Use the slug form for faster lookups."
     );
   }
 
@@ -996,9 +1009,20 @@ export async function resolveOrgProjectTarget(
       );
 
     case "project-search": {
-      const matches = await findProjectsBySlug(parsed.projectSlug);
+      const { projects, orgs } = await findProjectsBySlug(parsed.projectSlug);
 
-      if (matches.length === 0) {
+      if (projects.length === 0) {
+        // Check if the slug matches an organization — common mistake
+        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
+        if (isOrg) {
+          throw new ResolutionError(
+            `'${parsed.projectSlug}'`,
+            "is an organization, not a project",
+            `sentry ${commandName} ${parsed.projectSlug}/<project>`,
+            [`List projects: sentry project list ${parsed.projectSlug}/`]
+          );
+        }
+
         throw new ResolutionError(
           `Project '${parsed.projectSlug}'`,
           "not found",
@@ -1007,19 +1031,21 @@ export async function resolveOrgProjectTarget(
         );
       }
 
-      if (matches.length > 1) {
-        const options = matches
+      if (projects.length > 1) {
+        const options = projects
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
         throw new ResolutionError(
           `Project '${parsed.projectSlug}'`,
           "is ambiguous",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
-          [`Found in ${matches.length} organizations. Specify one:\n${options}`]
+          [
+            `Found in ${projects.length} organizations. Specify one:\n${options}`,
+          ]
         );
       }
 
-      const match = matches[0] as (typeof matches)[number];
+      const match = projects[0] as (typeof projects)[number];
       return { org: match.orgSlug, project: match.slug };
     }
 

@@ -8,6 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  detectSwappedViewArgs,
+  looksLikeIssueShortId,
+  normalizeSlug,
   parseIssueArg,
   parseOrgProjectArg,
 } from "../../src/lib/arg-parsing.js";
@@ -368,6 +371,48 @@ describe("parseIssueArg", () => {
     });
   });
 
+  // Multi-slash issue args (org/project/suffix)
+  describe("multi-slash issue args", () => {
+    test("org/project/suffix returns explicit with project and suffix", () => {
+      expect(parseIssueArg("org/project/101149101")).toEqual({
+        type: "explicit",
+        org: "org",
+        project: "project",
+        suffix: "101149101",
+      });
+    });
+
+    test("org/project/numeric returns explicit with numeric suffix", () => {
+      expect(parseIssueArg("org/project/123456")).toEqual({
+        type: "explicit",
+        org: "org",
+        project: "project",
+        suffix: "123456",
+      });
+    });
+
+    test("org/project/PROJ-G returns explicit with combined suffix", () => {
+      expect(parseIssueArg("org/project/PROJ-G")).toEqual({
+        type: "explicit",
+        org: "org",
+        project: "project",
+        suffix: "PROJ-G",
+      });
+    });
+
+    test("org/project/ (trailing slash, empty suffix) throws error", () => {
+      expect(() => parseIssueArg("org/project/")).toThrow(
+        "Missing project or issue ID segment"
+      );
+    });
+
+    test("org//suffix (empty project) throws error", () => {
+      expect(() => parseIssueArg("org//suffix")).toThrow(
+        "Missing project or issue ID segment"
+      );
+    });
+  });
+
   // Edge cases - document tricky behaviors
   describe("edge cases", () => {
     test("/suffix returns suffix-only", () => {
@@ -394,6 +439,188 @@ describe("parseIssueArg", () => {
         projectSlug: "spotlight-electron",
         suffix: "4Y",
       });
+    });
+  });
+});
+
+describe("normalizeSlug", () => {
+  test("replaces underscores with dashes", () => {
+    expect(normalizeSlug("selfbase_admin_backend")).toEqual({
+      slug: "selfbase-admin-backend",
+      normalized: true,
+    });
+  });
+
+  test("preserves normal slugs (no underscores)", () => {
+    expect(normalizeSlug("my-project")).toEqual({
+      slug: "my-project",
+      normalized: false,
+    });
+  });
+
+  test("handles multiple underscores", () => {
+    expect(normalizeSlug("a_b_c_d")).toEqual({
+      slug: "a-b-c-d",
+      normalized: true,
+    });
+  });
+
+  test("handles leading underscore", () => {
+    expect(normalizeSlug("_leading")).toEqual({
+      slug: "-leading",
+      normalized: true,
+    });
+  });
+
+  test("handles trailing underscore", () => {
+    expect(normalizeSlug("trailing_")).toEqual({
+      slug: "trailing-",
+      normalized: true,
+    });
+  });
+
+  test("handles empty string", () => {
+    expect(normalizeSlug("")).toEqual({
+      slug: "",
+      normalized: false,
+    });
+  });
+});
+
+describe("looksLikeIssueShortId", () => {
+  describe("matches valid issue short IDs", () => {
+    test("CAM-82X", () => {
+      expect(looksLikeIssueShortId("CAM-82X")).toBe(true);
+    });
+
+    test("CLI-G", () => {
+      expect(looksLikeIssueShortId("CLI-G")).toBe(true);
+    });
+
+    test("SPOTLIGHT-ELECTRON-4Y", () => {
+      expect(looksLikeIssueShortId("SPOTLIGHT-ELECTRON-4Y")).toBe(true);
+    });
+
+    test("A-1", () => {
+      expect(looksLikeIssueShortId("A-1")).toBe(true);
+    });
+
+    test("CLI-123", () => {
+      expect(looksLikeIssueShortId("CLI-123")).toBe(true);
+    });
+  });
+
+  describe("rejects non-issue strings", () => {
+    test("my-project (lowercase)", () => {
+      expect(looksLikeIssueShortId("my-project")).toBe(false);
+    });
+
+    test("a9b4ad2c (no dash)", () => {
+      expect(looksLikeIssueShortId("a9b4ad2c")).toBe(false);
+    });
+
+    test("org/project (has slash)", () => {
+      expect(looksLikeIssueShortId("org/project")).toBe(false);
+    });
+
+    test("CAM- (trailing dash, empty suffix)", () => {
+      expect(looksLikeIssueShortId("CAM-")).toBe(false);
+    });
+
+    test("-82X (leading dash)", () => {
+      expect(looksLikeIssueShortId("-82X")).toBe(false);
+    });
+
+    test("G (single char, no dash)", () => {
+      expect(looksLikeIssueShortId("G")).toBe(false);
+    });
+
+    test("cam-82x (all lowercase)", () => {
+      expect(looksLikeIssueShortId("cam-82x")).toBe(false);
+    });
+
+    test("123 (pure numeric)", () => {
+      expect(looksLikeIssueShortId("123")).toBe(false);
+    });
+  });
+});
+
+describe("detectSwappedViewArgs", () => {
+  test("returns warning when second has slash but first does not (swapped)", () => {
+    const result = detectSwappedViewArgs("a9b4ad2c", "mv-software/mvsoftware");
+    expect(result).not.toBeNull();
+    expect(result).toContain("mv-software/mvsoftware");
+    expect(result).toContain("a9b4ad2c");
+  });
+
+  test("returns null when first has slash (correct order)", () => {
+    expect(
+      detectSwappedViewArgs("mv-software/mvsoftware", "a9b4ad2c")
+    ).toBeNull();
+  });
+
+  test("returns null when neither has slash", () => {
+    expect(detectSwappedViewArgs("a9b4ad2c", "deadbeef")).toBeNull();
+  });
+
+  test("returns null when both have slashes", () => {
+    expect(detectSwappedViewArgs("org/project", "other/thing")).toBeNull();
+  });
+});
+
+describe("parseOrgProjectArg underscore normalization", () => {
+  test("normalizes org slug underscores in explicit mode", () => {
+    expect(parseOrgProjectArg("org_name/project")).toEqual({
+      type: "explicit",
+      org: "org-name",
+      project: "project",
+      normalized: true,
+    });
+  });
+
+  test("normalizes project slug underscores in explicit mode", () => {
+    expect(parseOrgProjectArg("org/project_name")).toEqual({
+      type: "explicit",
+      org: "org",
+      project: "project-name",
+      normalized: true,
+    });
+  });
+
+  test("normalizes both org and project underscores", () => {
+    expect(parseOrgProjectArg("org_name/project_name")).toEqual({
+      type: "explicit",
+      org: "org-name",
+      project: "project-name",
+      normalized: true,
+    });
+  });
+
+  test("normalizes project-search underscores", () => {
+    expect(parseOrgProjectArg("selfbase_admin_backend")).toEqual({
+      type: "project-search",
+      projectSlug: "selfbase-admin-backend",
+      normalized: true,
+    });
+  });
+
+  test("normalized is absent for normal slugs (explicit)", () => {
+    const result = parseOrgProjectArg("sentry/cli");
+    expect(result.type).toBe("explicit");
+    expect(result).not.toHaveProperty("normalized");
+  });
+
+  test("normalized is absent for normal slugs (project-search)", () => {
+    const result = parseOrgProjectArg("my-project");
+    expect(result.type).toBe("project-search");
+    expect(result).not.toHaveProperty("normalized");
+  });
+
+  test("normalizes org slug underscores in org-all mode", () => {
+    expect(parseOrgProjectArg("org_name/")).toEqual({
+      type: "org-all",
+      org: "org-name",
+      normalized: true,
     });
   });
 });

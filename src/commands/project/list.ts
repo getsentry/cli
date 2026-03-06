@@ -485,7 +485,7 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags
 ): Promise<void> {
-  const projects: ProjectWithOrg[] = await findProjectsBySlug(projectSlug);
+  const { projects } = await findProjectsBySlug(projectSlug);
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (filtered.length === 0) {

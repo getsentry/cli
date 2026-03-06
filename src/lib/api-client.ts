@@ -875,18 +875,30 @@ export async function listRepositoriesPaginated(
   );
 }
 
+/** Result of searching for projects by slug across all organizations. */
+export type ProjectSearchResult = {
+  /** Matching projects with their org context */
+  projects: ProjectWithOrg[];
+  /** All organizations fetched during the search — reuse for fallback checks */
+  orgs: SentryOrganization[];
+};
+
 /**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
  * Searches all orgs the user has access to and returns matches.
  *
+ * Returns both the matching projects and the full org list that was fetched,
+ * so callers can check whether a slug matches an organization without an
+ * additional API call (useful for "did you mean org/?" fallbacks).
+ *
  * @param projectSlug - Project slug to search for (exact match)
- * @returns Array of matching projects with their org context
+ * @returns Matching projects and the org list used during search
  */
 export async function findProjectsBySlug(
   projectSlug: string
-): Promise<ProjectWithOrg[]> {
+): Promise<ProjectSearchResult> {
   const orgs = await listOrganizations();
   const isNumericId = isAllDigits(projectSlug);
 
@@ -910,10 +922,13 @@ export async function findProjectsBySlug(
     )
   );
 
-  return searchResults
-    .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
-    .map((r) => r.value)
-    .filter((v): v is ProjectWithOrg => v !== null);
+  return {
+    projects: searchResults
+      .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
+      .map((r) => r.value)
+      .filter((v): v is ProjectWithOrg => v !== null),
+    orgs,
+  };
 }
 
 /**

@@ -15,6 +15,9 @@ import {
   tuple,
 } from "fast-check";
 import {
+  detectSwappedViewArgs,
+  looksLikeIssueShortId,
+  normalizeSlug,
   parseIssueArg,
   parseOrgProjectArg,
 } from "../../src/lib/arg-parsing.js";
@@ -356,6 +359,129 @@ describe("parseIssueArg and parseOrgProjectArg consistency", () => {
           }
         }
       ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+// Arbitrary for strings that may contain underscores (slug-like with underscores)
+const slugLikeWithUnderscoresArb = stringMatching(
+  /^[a-z][a-z0-9_-]{0,20}[a-z0-9]$/
+);
+
+/** Generates all-lowercase slug-like strings with at least one dash */
+const lowercaseSlugWithDashArb = stringMatching(
+  /^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)+$/
+);
+
+/** Generates alphanumeric strings without dashes */
+const noDashAlphanumArb = stringMatching(/^[a-zA-Z0-9]{1,20}$/);
+
+/** Generates strings that contain at least one slash */
+const withSlashArb = stringMatching(/^[a-zA-Z0-9]+\/[a-zA-Z0-9]+$/);
+
+/** Generates strings without slashes */
+const noSlashArb = stringMatching(/^[a-zA-Z0-9-]{1,20}$/);
+
+describe("normalizeSlug properties", () => {
+  test("idempotent: normalizing twice yields same slug as normalizing once", async () => {
+    await fcAssert(
+      property(slugLikeWithUnderscoresArb, (input) => {
+        const first = normalizeSlug(input);
+        const second = normalizeSlug(first.slug);
+        expect(second.slug).toBe(first.slug);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("normalized is true iff input contained underscores", async () => {
+    await fcAssert(
+      property(slugLikeWithUnderscoresArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.normalized).toBe(input.includes("_"));
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("result slug never contains underscores", async () => {
+    await fcAssert(
+      property(slugLikeWithUnderscoresArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.slug.includes("_")).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("length is preserved (underscore and dash are both 1 char)", async () => {
+    await fcAssert(
+      property(slugLikeWithUnderscoresArb, (input) => {
+        const result = normalizeSlug(input);
+        expect(result.slug.length).toBe(input.length);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("looksLikeIssueShortId properties", () => {
+  test("all-lowercase slugs with dashes never match", async () => {
+    await fcAssert(
+      property(lowercaseSlugWithDashArb, (input) => {
+        expect(looksLikeIssueShortId(input)).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("strings without dashes never match", async () => {
+    await fcAssert(
+      property(noDashAlphanumArb, (input) => {
+        expect(looksLikeIssueShortId(input)).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("strings with slashes never match", async () => {
+    await fcAssert(
+      property(withSlashArb, (input) => {
+        expect(looksLikeIssueShortId(input)).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("detectSwappedViewArgs properties", () => {
+  test("symmetric inverse: if swap(a,b) is non-null then swap(b,a) is null when exactly one has slash", async () => {
+    await fcAssert(
+      property(tuple(noSlashArb, withSlashArb), ([noSlash, withSlash]) => {
+        // noSlash first, withSlash second → swapped → non-null
+        expect(detectSwappedViewArgs(noSlash, withSlash)).not.toBeNull();
+        // withSlash first, noSlash second → correct → null
+        expect(detectSwappedViewArgs(withSlash, noSlash)).toBeNull();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("both without slashes always returns null", async () => {
+    await fcAssert(
+      property(tuple(noSlashArb, noSlashArb), ([a, b]) => {
+        expect(detectSwappedViewArgs(a, b)).toBeNull();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("both with slashes always returns null", async () => {
+    await fcAssert(
+      property(tuple(withSlashArb, withSlashArb), ([a, b]) => {
+        expect(detectSwappedViewArgs(a, b)).toBeNull();
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
