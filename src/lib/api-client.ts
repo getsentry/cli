@@ -359,9 +359,14 @@ export async function apiRequestToRegion<T>(
   if (schema) {
     const result = schema.safeParse(data);
     if (!result.success) {
-      // Treat schema validation failures as API errors so they surface cleanly
-      // through the central error handler rather than showing a raw ZodError
-      // stack trace. This guards against unexpected API response format changes.
+      // Attach structured Zod issues to the Sentry event so we can diagnose
+      // exactly which field(s) failed validation — the ApiError.detail string
+      // alone may not be visible in the Sentry issue overview.
+      Sentry.setContext("zod_validation", {
+        endpoint,
+        status: response.status,
+        issues: result.error.issues.slice(0, 10),
+      });
       throw new ApiError(
         `Unexpected response format from ${endpoint}`,
         response.status,

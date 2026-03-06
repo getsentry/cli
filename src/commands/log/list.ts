@@ -90,8 +90,9 @@ function parseFollow(value: string): number {
  */
 type LogLike = {
   timestamp: string;
-  /** Nanosecond-precision timestamp used for dedup in follow mode */
-  timestamp_precise: number;
+  /** Nanosecond-precision timestamp used for dedup in follow mode.
+   * Optional because TraceLog may omit it when the API response doesn't include it. */
+  timestamp_precise?: number;
   severity?: string | null;
   message?: string | null;
   trace?: string | null;
@@ -267,7 +268,7 @@ function executeFollowMode<T extends LogLike>(
           table,
           includeTrace: config.includeTrace,
         });
-        lastTimestamp = newestLog.timestamp_precise;
+        lastTimestamp = newestLog.timestamp_precise ?? lastTimestamp;
       }
     }
 
@@ -312,7 +313,7 @@ function executeFollowMode<T extends LogLike>(
           includeTrace: config.includeTrace,
         });
         if (initialLogs[0]) {
-          lastTimestamp = initialLogs[0].timestamp_precise;
+          lastTimestamp = initialLogs[0].timestamp_precise ?? lastTimestamp;
         }
         scheduleNextPoll();
       })
@@ -464,7 +465,7 @@ export const listCommand = buildListCommand("log", {
               statsPeriod,
             }),
           extractNew: (logs, lastTs) =>
-            logs.filter((l) => l.timestamp_precise > lastTs),
+            logs.filter((l) => (l.timestamp_precise ?? 0) > lastTs),
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);
