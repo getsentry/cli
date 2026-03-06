@@ -367,36 +367,48 @@ export async function getCachedResponse(
     return;
   }
 
+  const key = buildCacheKey(method, url);
+
   return await withCacheSpan(
-    "cache.lookup",
-    async () => {
-      const key = buildCacheKey(method, url);
+    url,
+    "cache.get",
+    async (span) => {
       const entry = await readCacheEntry(key);
       if (!entry) {
+        span.setAttribute("cache.hit", false);
         return;
       }
 
       try {
         const policy = CachePolicy.fromObject(entry.policy);
         if (!isEntryFresh(policy, entry, requestHeaders, url)) {
+          span.setAttribute("cache.hit", false);
           return;
         }
 
+        const body = JSON.stringify(entry.body);
+        span.setAttribute("cache.hit", true);
+        span.setAttribute("cache.item_size", body.length);
+
         const responseHeaders = buildResponseHeaders(policy, entry);
-        return new Response(JSON.stringify(entry.body), {
+        return new Response(body, {
           status: entry.status,
           headers: responseHeaders,
         });
       } catch {
         // Corrupted or version-incompatible policy object — treat as cache miss.
         // Best-effort cleanup of the broken entry.
+        span.setAttribute("cache.hit", false);
         unlink(cacheFilePath(key)).catch(() => {
           // Ignored — fire-and-forget
         });
         return;
       }
     },
-    { "cache.url": url }
+    {
+      "cache.key": [key],
+      "network.peer.address": getCacheDir(),
+    }
   );
 }
 
@@ -455,38 +467,60 @@ export async function storeCachedResponse(
     return;
   }
 
+  const key = buildCacheKey(method, url);
+
   try {
     await withCacheSpan(
-      "cache.store",
-      () => writeResponseToCache(method, url, requestHeaders, response),
-      { "cache.url": url }
+      url,
+      "cache.put",
+      async (span) => {
+        const size = await writeResponseToCache(
+          key,
+          url,
+          requestHeaders,
+          response
+        );
+        if (size > 0) {
+          span.setAttribute("cache.item_size", size);
+        }
+      },
+      {
+        "cache.key": [key],
+        "network.peer.address": getCacheDir(),
+      }
     );
   } catch {
     // Cache write failures are non-fatal — silently ignore
   }
 }
 
-/** Core cache write logic, separated for complexity management */
+/**
+ * Core cache write logic, separated for complexity management.
+ *
+ * Always called for GET requests (caller checks method), so "GET" is hardcoded
+ * for the CachePolicy constructor.
+ *
+ * @returns The serialized body size in bytes (0 if not storable).
+ */
 async function writeResponseToCache(
-  method: string,
+  key: string,
   url: string,
   requestHeaders: Record<string, string>,
   response: Response
-): Promise<void> {
+): Promise<number> {
   const responseHeadersObj = headersToObject(response.headers);
 
   const policy = new CachePolicy(
-    { url, method, headers: requestHeaders },
+    { url, method: "GET", headers: requestHeaders },
     { status: response.status, headers: responseHeadersObj },
     POLICY_OPTIONS
   );
 
   if (!policy.storable()) {
-    return;
+    return 0;
   }
 
   const body: unknown = await response.json();
-  const key = buildCacheKey(method, url);
   const now = Date.now();
 
   // Pre-compute expiry for cheap cleanup checks (avoids CachePolicy deserialization).
@@ -507,8 +541,9 @@ async function writeResponseToCache(
     expiresAt: now + ttl,
   };
 
+  const serialized = JSON.stringify(entry);
   await mkdir(getCacheDir(), { recursive: true, mode: 0o700 });
-  await writeFile(cacheFilePath(key), JSON.stringify(entry), "utf-8");
+  await writeFile(cacheFilePath(key), serialized, "utf-8");
 
   // Probabilistic cleanup to avoid unbounded cache growth
   if (Math.random() < CLEANUP_PROBABILITY) {
@@ -516,6 +551,8 @@ async function writeResponseToCache(
       // Non-fatal: cleanup failure doesn't affect cache correctness
     });
   }
+
+  return serialized.length;
 }
 
 /**

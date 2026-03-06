@@ -952,20 +952,35 @@ export function withFsSpan<T>(
 }
 
 /**
- * Wrap a cache operation with a span for tracing.
+ * Wrap a cache operation with a Sentry Cache Module span.
  *
- * Creates a child span under the current active span to track
- * response cache hit/miss/store operations.
+ * Implements the [Sentry Cache Module spec](https://develop.sentry.dev/sdk/performance/modules/caches/)
+ * for the Caches Insights dashboard. The span is passed to the callback so
+ * callers can set `cache.hit`, `cache.item_size`, etc. after the lookup.
  *
- * @param operation - Name of the operation (e.g., "cache.lookup", "cache.store")
- * @param fn - The function that performs the cache operation
- * @param attributes - Optional span attributes (e.g., url, cache.hit)
+ * @param name - Span name (typically the cache key or a descriptive label)
+ * @param op - Cache operation: `"cache.get"` for reads, `"cache.put"` for writes
+ * @param fn - Function to execute, receives the span for dynamic attribute setting
+ * @param attributes - Initial span attributes (e.g., `cache.key`, `network.peer.address`)
  * @returns The result of the function
  */
 export function withCacheSpan<T>(
-  operation: string,
-  fn: () => T | Promise<T>,
-  attributes?: Record<string, string | number | boolean>
+  name: string,
+  op: "cache.get" | "cache.put",
+  fn: (span: Span) => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean | string[]>
 ): Promise<T> {
-  return withTracing(operation, "cache", fn, attributes);
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      try {
+        const result = await fn(span);
+        span.setStatus({ code: 1 }); // OK
+        return result;
+      } catch (error) {
+        span.setStatus({ code: 2 }); // Error
+        throw error;
+      }
+    }
+  );
 }
