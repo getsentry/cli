@@ -52,9 +52,11 @@ function splitLogIds(arg: string): string[] {
  * Parse positional arguments for log view.
  * Handles:
  * - `<log-id>` — single log ID (auto-detect org/project)
- * - `<log-id1> <log-id2> ...` — multiple log IDs (auto-detect)
  * - `<target> <log-id> [<log-id>...]` — explicit target + one or more log IDs
  * - `<org>/<project>/<log-id>` — single slash-separated arg
+ *
+ * When two or more args are provided, the first is always treated as the
+ * target (org/project specifier) and the rest as log IDs.
  *
  * Arguments containing newlines are split into multiple IDs.
  *

@@ -1802,8 +1802,8 @@ export async function getLogs(
       dataset: "logs",
       field: DETAILED_LOG_FIELDS,
       query,
-      // per_page must match the number of IDs so the API returns all matches
-      per_page: logIds.length,
+      // Cap at API_MAX_PER_PAGE — the API silently truncates larger values
+      per_page: Math.min(logIds.length, API_MAX_PER_PAGE),
       statsPeriod: "90d",
     },
   });

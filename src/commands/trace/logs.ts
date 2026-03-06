@@ -89,13 +89,11 @@ export function parsePositionalArgs(args: string[]): {
         throw new ContextError("Trace ID", USAGE_HINT);
       }
 
-      validateTraceId(traceId);
-      return { traceId, orgArg };
+      return { traceId: validateTraceId(traceId), orgArg };
     }
 
     // Plain trace ID — org will be auto-detected
-    validateTraceId(first);
-    return { traceId: first, orgArg: undefined };
+    return { traceId: validateTraceId(first), orgArg: undefined };
   }
 
   // Two or more args — first is org, second is trace ID
@@ -106,8 +104,7 @@ export function parsePositionalArgs(args: string[]): {
     throw new ContextError("Trace ID", USAGE_HINT);
   }
 
-  validateTraceId(traceId);
-  return { traceId, orgArg };
+  return { traceId: validateTraceId(traceId), orgArg };
 }
 
 export const logsCommand = buildCommand({
