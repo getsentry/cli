@@ -4,6 +4,8 @@
  * View detailed information about one or more Sentry log entries.
  */
 
+import { isatty } from "node:tty";
+
 import type { SentryContext } from "../../context.js";
 import { getLogs } from "../../lib/api-client.js";
 import {
@@ -21,7 +23,7 @@ import {
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
-import type { DetailedSentryLog, Writer } from "../../types/index.js";
+import type { DetailedSentryLog } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
 
@@ -119,15 +121,13 @@ export type ResolvedLogTarget = {
  * @param parsed - Result of `parseOrgProjectArg`
  * @param logIds - Parsed log IDs (used for usage hints)
  * @param cwd - Current working directory
- * @param stderr - Stderr stream for diagnostics
  * @returns Resolved target, or null if resolution produced nothing
  * @throws {ContextError} If org-all mode is used (requires specific project)
  */
 function resolveTarget(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   logIds: string[],
-  cwd: string,
-  stderr: Writer
+  cwd: string
 ): Promise<ResolvedLogTarget | null> | ResolvedLogTarget {
   switch (parsed.type) {
     case "explicit":
@@ -137,8 +137,7 @@ function resolveTarget(
       return resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`,
-        stderr
+        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`
       );
 
     case "org-all":
@@ -187,6 +186,65 @@ function warnMissingIds(logIds: string[], logs: DetailedSentryLog[]): void {
 }
 
 /**
+ * Handle --web flag: open log URLs in the browser.
+ * Prompts for confirmation in interactive mode when multiple IDs are given.
+ * Aborts in non-interactive mode with a warning.
+ *
+ * @param stdout - Output stream for openInBrowser
+ * @param orgSlug - Organization slug for URL building
+ * @param logIds - Log IDs to open
+ * @returns true if handled (caller should return), false if not --web
+ */
+async function handleWebOpen(
+  stdout: { write(s: string): void },
+  orgSlug: string,
+  logIds: string[]
+): Promise<void> {
+  if (logIds.length > 1) {
+    if (!isatty(0)) {
+      log.warn(
+        `Refusing to open ${logIds.length} browser tabs in non-interactive mode. ` +
+          "Pass a single log ID or run interactively."
+      );
+      return;
+    }
+    const confirmed = await log.prompt(`Open ${logIds.length} browser tabs?`, {
+      type: "confirm",
+      initial: false,
+    });
+    if (!confirmed) {
+      return;
+    }
+  }
+  for (const id of logIds) {
+    await openInBrowser(stdout, buildLogsUrl(orgSlug, id), "log");
+  }
+}
+
+/**
+ * Throw a descriptive error when no logs were found.
+ *
+ * @param logIds - Requested IDs
+ * @param org - Organization slug
+ * @param project - Project slug
+ * @throws {ValidationError} Always
+ */
+function throwNotFoundError(
+  logIds: string[],
+  org: string,
+  project: string
+): never {
+  const idList = formatIdList(logIds);
+  throw new ValidationError(
+    logIds.length === 1
+      ? `No log found with ID "${logIds[0]}" in ${org}/${project}.\n\n` +
+          "Make sure the log ID is correct and the log was sent within the last 90 days."
+      : `No logs found with any of the following IDs in ${org}/${project}:\n${idList}\n\n` +
+          "Make sure the log IDs are correct and the logs were sent within the last 90 days."
+  );
+}
+
+/**
  * Write human-readable output for one or more logs to stdout.
  *
  * @param stdout - Output stream
@@ -195,7 +253,7 @@ function warnMissingIds(logIds: string[], logs: DetailedSentryLog[]): void {
  * @param detectedFrom - Optional context detection source to display
  */
 function writeHumanOutput(
-  stdout: Writer,
+  stdout: { write(s: string): void },
   logs: DetailedSentryLog[],
   orgSlug: string,
   detectedFrom?: string
@@ -262,7 +320,7 @@ export const viewCommand = buildCommand({
     const { logIds, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
 
-    const target = await resolveTarget(parsed, logIds, cwd, this.stderr);
+    const target = await resolveTarget(parsed, logIds, cwd);
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -272,12 +330,7 @@ export const viewCommand = buildCommand({
     setContext([target.org], [target.project]);
 
     if (flags.web) {
-      if (logIds.length > 1) {
-        log.warn(`Opening ${logIds.length} browser tabs…`);
-      }
-      for (const id of logIds) {
-        await openInBrowser(stdout, buildLogsUrl(target.org, id), "log");
-      }
+      await handleWebOpen(stdout, target.org, logIds);
       return;
     }
 
@@ -285,14 +338,7 @@ export const viewCommand = buildCommand({
     const logs = await getLogs(target.org, target.project, logIds);
 
     if (logs.length === 0) {
-      const idList = formatIdList(logIds);
-      throw new ValidationError(
-        logIds.length === 1
-          ? `No log found with ID "${logIds[0]}" in ${target.org}/${target.project}.\n\n` +
-              "Make sure the log ID is correct and the log was sent within the last 90 days."
-          : `No logs found with any of the following IDs in ${target.org}/${target.project}:\n${idList}\n\n` +
-              "Make sure the log IDs are correct and the logs were sent within the last 90 days."
-      );
+      throwNotFoundError(logIds, target.org, target.project);
     }
 
     warnMissingIds(logIds, logs);

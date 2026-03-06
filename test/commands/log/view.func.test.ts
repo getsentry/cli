@@ -267,7 +267,7 @@ describe("viewCommand.func", () => {
       expect(getLogsSpy).not.toHaveBeenCalled();
     });
 
-    test("opens browser for all IDs when multiple given", async () => {
+    test("refuses to open multiple tabs in non-interactive mode", async () => {
       openInBrowserSpy.mockResolvedValue(undefined);
 
       const { context } = createMockContext();
@@ -280,11 +280,8 @@ describe("viewCommand.func", () => {
         ID2
       );
 
-      expect(openInBrowserSpy).toHaveBeenCalledTimes(2);
-      const url1 = openInBrowserSpy.mock.calls[0][1] as string;
-      const url2 = openInBrowserSpy.mock.calls[1][1] as string;
-      expect(url1).toContain(ID1);
-      expect(url2).toContain(ID2);
+      // Non-interactive (no TTY in tests) — should warn and not open any tabs
+      expect(openInBrowserSpy).not.toHaveBeenCalled();
     });
   });
 
