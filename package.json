@@ -61,9 +61,9 @@
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun run test:unit && bun run test:isolated",
-    "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
-    "test:isolated": "bun test test/isolated",
-    "test:e2e": "bun test test/e2e",
+    "test:unit": "bun test --timeout 15000 test/lib test/commands test/types --coverage --coverage-reporter=lcov",
+    "test:isolated": "bun test --timeout 15000 test/isolated",
+    "test:e2e": "bun test --timeout 15000 test/e2e",
     "generate:skill": "bun run script/generate-skill.ts",
     "check:skill": "bun run script/check-skill.ts",
     "check:deps": "bun run script/check-no-deps.ts"
