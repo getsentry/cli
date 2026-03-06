@@ -35,6 +35,9 @@ type ViewFlags = {
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
 
+/** Matches a string of all digits (numeric project ID) */
+const ALL_DIGITS_RE = /^\d+$/;
+
 /**
  * Split a raw argument into individual log IDs.
  * Handles newline-separated IDs within a single argument (common when
@@ -124,21 +127,32 @@ export type ResolvedLogTarget = {
  * @returns Resolved target, or null if resolution produced nothing
  * @throws {ContextError} If org-all mode is used (requires specific project)
  */
-function resolveTarget(
+async function resolveTarget(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   logIds: string[],
   cwd: string
-): Promise<ResolvedLogTarget | null> | ResolvedLogTarget {
+): Promise<ResolvedLogTarget | null> {
   switch (parsed.type) {
     case "explicit":
       return { org: parsed.org, project: parsed.project };
 
-    case "project-search":
-      return resolveProjectBySlug(
+    case "project-search": {
+      const result = await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
         `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`
       );
+      if (
+        ALL_DIGITS_RE.test(parsed.projectSlug) &&
+        result.project !== parsed.projectSlug
+      ) {
+        log.info(
+          `Tip: Resolved project ID ${parsed.projectSlug} to ${result.org}/${result.project}. ` +
+            "Use the slug form for faster lookups."
+        );
+      }
+      return result;
+    }
 
     case "org-all":
       throw new ContextError("Specific project", USAGE_HINT);
