@@ -195,6 +195,11 @@ type FollowConfig<T extends LogLike> = {
   fetch: (statsPeriod: string, afterTimestamp?: number) => Promise<T[]>;
   /** Extract only the genuinely new entries from a poll response */
   extractNew: (logs: T[], lastTimestamp: number) => T[];
+  /**
+   * Called with the initial batch of logs before polling begins.
+   * Use this to seed dedup state (e.g., tracking seen log IDs).
+   */
+  onInitialLogs?: (logs: T[]) => void;
 };
 
 /**
@@ -315,6 +320,7 @@ function executeFollowMode<T extends LogLike>(
         if (initialLogs[0]) {
           lastTimestamp = initialLogs[0].timestamp_precise ?? lastTimestamp;
         }
+        config.onInitialLogs?.(initialLogs);
         scheduleNextPoll();
       })
       .catch((error: unknown) => {
@@ -479,6 +485,13 @@ export const listCommand = buildListCommand("log", {
               seenWithoutTs.add(l.id);
               return true;
             }),
+          onInitialLogs: (logs) => {
+            for (const l of logs) {
+              if (l.timestamp_precise === undefined) {
+                seenWithoutTs.add(l.id);
+              }
+            }
+          },
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);

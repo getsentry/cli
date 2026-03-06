@@ -8,12 +8,14 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  constant,
   assert as fcAssert,
   nat,
   oneof,
   option,
   property,
   string,
+  tuple,
 } from "fast-check";
 import {
   DetailedSentryLogSchema,
@@ -33,33 +35,30 @@ function numberOrString(arb = nat()) {
 }
 
 /**
- * Pick a random representation for a numeric field:
- * number, string, or undefined (omitted).
+ * Arbitrary that produces a number as either the number itself, its
+ * string representation, or undefined — simulating optional numeric
+ * fields that the API may omit or serialize as strings.
  */
-function randomNumericField(value: number): number | string | undefined {
-  const r = Math.random();
-  if (r < 0.3) return;
-  if (r < 0.65) return value;
-  return String(value);
+function optionalNumberOrString(arb = nat()) {
+  return oneof(arb, arb.map(String), constant(undefined));
 }
 
 /** Arbitrary for a valid trace-log entry with mixed number/string numeric fields */
-const traceLogEntryArb = nat().chain((projectId) =>
-  nat().chain((sevNum) =>
-    nat().chain((tsPrecise) =>
-      option(string(), { nil: undefined }).map((msg) => ({
-        id: "test-log-id",
-        "project.id": Math.random() > 0.5 ? projectId : String(projectId),
-        trace: "aaaa1111bbbb2222cccc3333dddd4444",
-        severity_number: randomNumericField(sevNum),
-        severity: "info",
-        timestamp: "2025-01-30T14:32:15+00:00",
-        timestamp_precise: randomNumericField(tsPrecise),
-        message: msg ?? null,
-      }))
-    )
-  )
-);
+const traceLogEntryArb = tuple(
+  numberOrString(),
+  optionalNumberOrString(),
+  optionalNumberOrString(),
+  option(string(), { nil: undefined })
+).map(([projectId, sevNum, tsPrecise, msg]) => ({
+  id: "test-log-id",
+  "project.id": projectId,
+  trace: "aaaa1111bbbb2222cccc3333dddd4444",
+  severity_number: sevNum,
+  severity: "info",
+  timestamp: "2025-01-30T14:32:15+00:00",
+  timestamp_precise: tsPrecise,
+  message: msg ?? null,
+}));
 
 describe("property: TraceLogSchema coercion", () => {
   test("always parses successfully with number or string numeric fields", () => {
