@@ -15,18 +15,21 @@ const MAX_DISPLAY_LENGTH = 40;
 
 /**
  * Validate that a string is a 32-character hexadecimal ID.
- * Trims whitespace before validation.
+ * Trims whitespace and normalizes to lowercase before validation.
  *
- * Returns the trimmed, validated ID so it can be used as a Stricli `parse`
- * function directly.
+ * Normalization to lowercase ensures consistent comparison with API responses,
+ * which return lowercase hex IDs regardless of input casing.
+ *
+ * Returns the trimmed, lowercased, validated ID so it can be used as a Stricli
+ * `parse` function directly.
  *
  * @param value - The string to validate
  * @param label - Human-readable name for error messages (e.g., "log ID", "trace ID")
- * @returns The trimmed, validated ID
+ * @returns The trimmed, lowercased, validated ID
  * @throws {ValidationError} If the format is invalid
  */
 export function validateHexId(value: string, label: string): string {
-  const trimmed = value.trim();
+  const trimmed = value.trim().toLowerCase();
 
   if (!HEX_ID_RE.test(trimmed)) {
     const display =

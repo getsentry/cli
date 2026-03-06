@@ -72,9 +72,11 @@ describe("validateHexId", () => {
     expect(validateHexId(`${VALID_ID}\n`, "test ID")).toBe(VALID_ID);
   });
 
-  test("returns the same string (no case normalization)", () => {
+  test("normalizes to lowercase", () => {
     const mixedCase = "AAAA1111bbbb2222CCCC3333dddd4444";
-    expect(validateHexId(mixedCase, "test ID")).toBe(mixedCase);
+    expect(validateHexId(mixedCase, "test ID")).toBe(
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
   });
 
   test("throws ValidationError for empty string", () => {
@@ -150,10 +152,10 @@ describe("validateHexId", () => {
 });
 
 describe("property: validateHexId", () => {
-  test("accepts any 32-char hex string", () => {
+  test("accepts any 32-char hex string and normalizes to lowercase", () => {
     fcAssert(
       property(validIdArb, (id) => {
-        expect(validateHexId(id, "test ID")).toBe(id);
+        expect(validateHexId(id, "test ID")).toBe(id.toLowerCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -173,8 +175,9 @@ describe("property: validateHexId", () => {
   test("accepts whitespace-padded valid IDs after trim", () => {
     fcAssert(
       property(validIdArb, (id) => {
-        expect(validateHexId(`  ${id}  `, "test ID")).toBe(id);
-        expect(validateHexId(`\t${id}\n`, "test ID")).toBe(id);
+        const expected = id.toLowerCase();
+        expect(validateHexId(`  ${id}  `, "test ID")).toBe(expected);
+        expect(validateHexId(`\t${id}\n`, "test ID")).toBe(expected);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

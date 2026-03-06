@@ -15,12 +15,15 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
 import { validateHexId } from "../../lib/hex-id.js";
+import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import type { DetailedSentryLog, Writer } from "../../types/index.js";
+
+const log = logger.withTag("log-view");
 
 type ViewFlags = {
   readonly json: boolean;
@@ -109,6 +112,79 @@ export type ResolvedLogTarget = {
 };
 
 /**
+ * Resolve the target org/project from the parsed arg.
+ *
+ * @param parsed - Result of `parseOrgProjectArg`
+ * @param logIds - Parsed log IDs (used for usage hints)
+ * @param cwd - Current working directory
+ * @param stderr - Stderr stream for diagnostics
+ * @returns Resolved target, or null if resolution produced nothing
+ * @throws {ContextError} If org-all mode is used (requires specific project)
+ */
+function resolveTarget(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  logIds: string[],
+  cwd: string,
+  stderr: Writer
+): Promise<ResolvedLogTarget | null> | ResolvedLogTarget {
+  switch (parsed.type) {
+    case "explicit":
+      return { org: parsed.org, project: parsed.project };
+
+    case "project-search":
+      return resolveProjectBySlug(
+        parsed.projectSlug,
+        USAGE_HINT,
+        `sentry log view <org>/${parsed.projectSlug} ${logIds.join(" ")}`,
+        stderr
+      );
+
+    case "org-all":
+      throw new ContextError("Specific project", USAGE_HINT);
+
+    case "auto-detect":
+      return resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
+
+    default: {
+      const _exhaustiveCheck: never = parsed;
+      throw new ValidationError(
+        `Invalid target specification: ${_exhaustiveCheck}`
+      );
+    }
+  }
+}
+
+/**
+ * Format a list of log IDs as a markdown bullet list.
+ *
+ * @param ids - Log IDs to format
+ * @returns Markdown list string with each ID on its own line
+ */
+function formatIdList(ids: string[]): string {
+  return ids.map((id) => ` - \`${id}\``).join("\n");
+}
+
+/**
+ * Warn about IDs that weren't found in the API response.
+ * Uses the consola logger for structured output to stderr.
+ *
+ * @param logIds - All requested IDs
+ * @param logs - Logs actually returned by the API
+ */
+function warnMissingIds(logIds: string[], logs: DetailedSentryLog[]): void {
+  if (logs.length >= logIds.length) {
+    return;
+  }
+  const foundIds = new Set(logs.map((l) => l["sentry.item_id"]));
+  const missing = logIds.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) {
+    log.warn(
+      `${missing.length} of ${logIds.length} log(s) not found:\n${formatIdList(missing)}`
+    );
+  }
+}
+
+/**
  * Write human-readable output for one or more logs to stdout.
  *
  * @param stdout - Output stream
@@ -123,11 +199,11 @@ function writeHumanOutput(
   detectedFrom?: string
 ): void {
   let first = true;
-  for (const log of logs) {
+  for (const entry of logs) {
     if (!first) {
       stdout.write("\n---\n\n");
     }
-    stdout.write(`${formatLogDetails(log, orgSlug)}\n`);
+    stdout.write(`${formatLogDetails(entry, orgSlug)}\n`);
     first = false;
   }
 
@@ -184,40 +260,7 @@ export const viewCommand = buildCommand({
     const { logIds, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
 
-    let target: ResolvedLogTarget | null = null;
-
-    switch (parsed.type) {
-      case "explicit":
-        target = {
-          org: parsed.org,
-          project: parsed.project,
-        };
-        break;
-
-      case "project-search":
-        target = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry log view <org>/${parsed.projectSlug} ${logIds[0]}`,
-          this.stderr
-        );
-        break;
-
-      case "org-all":
-        throw new ContextError("Specific project", USAGE_HINT);
-
-      case "auto-detect":
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        break;
-
-      default: {
-        // Exhaustive check - should never reach here
-        const _exhaustiveCheck: never = parsed;
-        throw new ValidationError(
-          `Invalid target specification: ${_exhaustiveCheck}`
-        );
-      }
-    }
+    const target = await resolveTarget(parsed, logIds, cwd, this.stderr);
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);
@@ -227,8 +270,12 @@ export const viewCommand = buildCommand({
     setContext([target.org], [target.project]);
 
     if (flags.web) {
-      // --web only opens the first log (browser can only open one meaningfully)
-      await openInBrowser(stdout, buildLogsUrl(target.org, logIds[0]), "log");
+      if (logIds.length > 1) {
+        log.warn(`Opening ${logIds.length} browser tabs…`);
+      }
+      for (const id of logIds) {
+        await openInBrowser(stdout, buildLogsUrl(target.org, id), "log");
+      }
       return;
     }
 
@@ -236,27 +283,17 @@ export const viewCommand = buildCommand({
     const logs = await getLogs(target.org, target.project, logIds);
 
     if (logs.length === 0) {
-      const idDisplay =
-        logIds.length === 1
-          ? `ID "${logIds[0]}"`
-          : `IDs ${logIds.map((id) => `"${id}"`).join(", ")}`;
+      const idList = formatIdList(logIds);
       throw new ValidationError(
-        `No logs found with ${idDisplay} in ${target.org}/${target.project}.\n\n` +
-          "Make sure the log IDs are correct and the logs were sent within the last 90 days."
+        logIds.length === 1
+          ? `No log found with ID "${logIds[0]}" in ${target.org}/${target.project}.\n\n` +
+              "Make sure the log ID is correct and the log was sent within the last 90 days."
+          : `No logs found with any of the following IDs in ${target.org}/${target.project}:\n${idList}\n\n` +
+              "Make sure the log IDs are correct and the logs were sent within the last 90 days."
       );
     }
 
-    // Warn about any IDs that weren't found
-    if (logs.length < logIds.length) {
-      const foundIds = new Set(logs.map((l) => l["sentry.item_id"]));
-      const missing = logIds.filter((id) => !foundIds.has(id));
-      if (missing.length > 0) {
-        const stderr = this.stderr;
-        stderr.write(
-          `Warning: ${missing.length} of ${logIds.length} log(s) not found: ${missing.join(", ")}\n`
-        );
-      }
-    }
+    warnMissingIds(logIds, logs);
 
     if (flags.json) {
       // Single ID: output single object for backward compatibility

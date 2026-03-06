@@ -1780,7 +1780,7 @@ const DETAILED_LOG_FIELDS = [
 /**
  * Get one or more log entries by their item IDs.
  * Uses the Explore/Events API with dataset=logs and a filter query.
- * For multiple IDs, uses bracket syntax: `sentry.item_id:[id1,id2,...]`.
+ * Bracket syntax (`sentry.item_id:[id1,id2,...]`) works for any count including one.
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug for filtering
@@ -1792,11 +1792,7 @@ export async function getLogs(
   projectSlug: string,
   logIds: string[]
 ): Promise<DetailedSentryLog[]> {
-  const idFilter =
-    logIds.length === 1
-      ? `sentry.item_id:${logIds[0]}`
-      : `sentry.item_id:[${logIds.join(",")}]`;
-  const query = `project:${projectSlug} ${idFilter}`;
+  const query = `project:${projectSlug} sentry.item_id:[${logIds.join(",")}]`;
   const config = await getOrgSdkConfig(orgSlug);
 
   const result = await queryExploreEventsInTableFormat({
@@ -1806,6 +1802,7 @@ export async function getLogs(
       dataset: "logs",
       field: DETAILED_LOG_FIELDS,
       query,
+      // per_page must match the number of IDs so the API returns all matches
       per_page: logIds.length,
       statsPeriod: "90d",
     },
@@ -1814,24 +1811,6 @@ export async function getLogs(
   const data = unwrapResult(result, "Failed to get log");
   const logsResponse = DetailedLogsResponseSchema.parse(data);
   return logsResponse.data;
-}
-
-/**
- * Get a single log entry by its item ID.
- * Convenience wrapper around {@link getLogs} for single-ID lookups.
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug for filtering
- * @param logId - The sentry.item_id of the log entry
- * @returns The detailed log entry, or null if not found
- */
-export async function getLog(
-  orgSlug: string,
-  projectSlug: string,
-  logId: string
-): Promise<DetailedSentryLog | null> {
-  const logs = await getLogs(orgSlug, projectSlug, [logId]);
-  return logs[0] ?? null;
 }
 
 // Trace-log functions

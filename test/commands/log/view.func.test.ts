@@ -54,18 +54,16 @@ function makeSampleLog(id: string, message = "Test log"): DetailedSentryLog {
 
 function createMockContext() {
   const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: stderrWrite },
+      stderr: { write: mock(() => true) },
       cwd: "/tmp",
       setContext: mock(() => {
         // no-op for test
       }),
     },
     stdoutWrite,
-    stderrWrite,
   };
 }
 
@@ -134,7 +132,7 @@ describe("viewCommand.func", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ValidationError);
         expect((error as ValidationError).message).toContain(ID1);
-        expect((error as ValidationError).message).toContain("No logs found");
+        expect((error as ValidationError).message).toContain("No log found");
       }
     });
   });
@@ -204,11 +202,11 @@ describe("viewCommand.func", () => {
       expect(parsed).toHaveLength(2);
     });
 
-    test("warns to stderr when some IDs are not found", async () => {
-      // Only ID1 found, ID2 and ID3 missing
+    test("still outputs found logs when some IDs are missing", async () => {
+      // Only ID1 found, ID2 and ID3 missing — warning goes through consola
       getLogsSpy.mockResolvedValue([makeSampleLog(ID1)]);
 
-      const { context, stderrWrite, stdoutWrite } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await viewCommand.loader();
       await func.call(
         context,
@@ -219,17 +217,13 @@ describe("viewCommand.func", () => {
         ID3
       );
 
-      const stderrOutput = stderrWrite.mock.calls.map((c) => c[0]).join("");
-      expect(stderrOutput).toContain("Warning");
-      expect(stderrOutput).toContain("2 of 3");
-      expect(stderrOutput).toContain(ID2);
-      expect(stderrOutput).toContain(ID3);
-
-      // Should still output the found log
+      // Should still output the found log as JSON
       const stdoutOutput = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(stdoutOutput);
       // Multiple IDs requested → array output even if only one found
       expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]["sentry.item_id"]).toBe(ID1);
     });
 
     test("throws ValidationError when no logs found for multiple IDs", async () => {
@@ -251,8 +245,9 @@ describe("viewCommand.func", () => {
         expect(error).toBeInstanceOf(ValidationError);
         const msg = (error as ValidationError).message;
         expect(msg).toContain("No logs found");
-        expect(msg).toContain(ID1);
-        expect(msg).toContain(ID2);
+        // Each ID should appear in a markdown list item
+        expect(msg).toContain(` - \`${ID1}\``);
+        expect(msg).toContain(` - \`${ID2}\``);
       }
     });
   });
@@ -272,7 +267,7 @@ describe("viewCommand.func", () => {
       expect(getLogsSpy).not.toHaveBeenCalled();
     });
 
-    test("opens browser for first log when multiple IDs given", async () => {
+    test("opens browser for all IDs when multiple given", async () => {
       openInBrowserSpy.mockResolvedValue(undefined);
 
       const { context } = createMockContext();
@@ -285,9 +280,11 @@ describe("viewCommand.func", () => {
         ID2
       );
 
-      expect(openInBrowserSpy).toHaveBeenCalled();
-      const url = openInBrowserSpy.mock.calls[0][1] as string;
-      expect(url).toContain(ID1);
+      expect(openInBrowserSpy).toHaveBeenCalledTimes(2);
+      const url1 = openInBrowserSpy.mock.calls[0][1] as string;
+      const url2 = openInBrowserSpy.mock.calls[1][1] as string;
+      expect(url1).toContain(ID1);
+      expect(url2).toContain(ID2);
     });
   });
 
