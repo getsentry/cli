@@ -452,6 +452,9 @@ export const listCommand = buildListCommand("log", {
 
       if (flags.follow) {
         const traceId = flags.trace;
+        // Track IDs of logs seen without timestamp_precise so they are
+        // shown once but not duplicated on subsequent polls.
+        const seenWithoutTs = new Set<string>();
         await executeFollowMode({
           stdout,
           stderr,
@@ -465,11 +468,17 @@ export const listCommand = buildListCommand("log", {
               statsPeriod,
             }),
           extractNew: (logs, lastTs) =>
-            logs.filter(
-              (l) =>
-                l.timestamp_precise === undefined ||
-                l.timestamp_precise > lastTs
-            ),
+            logs.filter((l) => {
+              if (l.timestamp_precise !== undefined) {
+                return l.timestamp_precise > lastTs;
+              }
+              // No precise timestamp — deduplicate by id
+              if (seenWithoutTs.has(l.id)) {
+                return false;
+              }
+              seenWithoutTs.add(l.id);
+              return true;
+            }),
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);
