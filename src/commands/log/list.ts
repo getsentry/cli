@@ -258,23 +258,38 @@ function executeFollowMode<T extends LogLike>(
       pendingTimer = setTimeout(poll, pollIntervalMs);
     }
 
-    function writeNewLogs(newLogs: T[]) {
-      const newestLog = newLogs[0];
-      if (newestLog) {
-        if (!(flags.json || headerPrinted)) {
-          stdout.write(table ? table.header() : formatLogsHeader());
-          headerPrinted = true;
+    /** Find the highest timestamp_precise in a batch, or undefined if none have it. */
+    function maxTimestamp(logs: T[]): number | undefined {
+      let max: number | undefined;
+      for (const l of logs) {
+        if (l.timestamp_precise !== undefined) {
+          max =
+            max === undefined
+              ? l.timestamp_precise
+              : Math.max(max, l.timestamp_precise);
         }
-        const chronological = [...newLogs].reverse();
-        writeLogs({
-          stdout,
-          logs: chronological,
-          asJson: flags.json,
-          table,
-          includeTrace: config.includeTrace,
-        });
-        lastTimestamp = newestLog.timestamp_precise ?? lastTimestamp;
       }
+      return max;
+    }
+
+    function writeNewLogs(newLogs: T[]) {
+      if (newLogs.length === 0) {
+        return;
+      }
+
+      if (!(flags.json || headerPrinted)) {
+        stdout.write(table ? table.header() : formatLogsHeader());
+        headerPrinted = true;
+      }
+      const chronological = [...newLogs].reverse();
+      writeLogs({
+        stdout,
+        logs: chronological,
+        asJson: flags.json,
+        table,
+        includeTrace: config.includeTrace,
+      });
+      lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
     }
 
     async function poll() {
@@ -317,9 +332,7 @@ function executeFollowMode<T extends LogLike>(
           table,
           includeTrace: config.includeTrace,
         });
-        if (initialLogs[0]) {
-          lastTimestamp = initialLogs[0].timestamp_precise ?? lastTimestamp;
-        }
+        lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
         config.onInitialLogs?.(initialLogs);
         scheduleNextPoll();
       })
