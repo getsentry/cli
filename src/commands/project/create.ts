@@ -31,7 +31,9 @@ import {
   withAuthGuard,
 } from "../../lib/errors.js";
 import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
+import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
+import { renderTextTable } from "../../lib/formatters/text-table.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -76,11 +78,21 @@ function platformGrid(items: readonly string[]): string {
     }
     rows.push(row);
   }
-  const columns: Column<string[]>[] = Array.from({ length: COLS }, (_, ci) => ({
-    header: " ",
-    value: (row: string[]) => row[ci] ?? "",
-  }));
-  return buildMarkdownTable(rows, columns);
+
+  if (isPlainOutput()) {
+    const columns: Column<string[]>[] = Array.from(
+      { length: COLS },
+      (_, ci) => ({
+        header: " ",
+        value: (row: string[]) => row[ci] ?? "",
+      })
+    );
+    return buildMarkdownTable(rows, columns);
+  }
+
+  return renderTextTable(new Array(COLS).fill(""), rows, {
+    headerSeparator: false,
+  });
 }
 
 function normalizePlatform(platform: string, stderr: Writer): string {
