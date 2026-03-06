@@ -31,7 +31,7 @@ import {
   withAuthGuard,
 } from "../../lib/errors.js";
 import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
-import { renderTextTable } from "../../lib/formatters/text-table.js";
+import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -65,17 +65,22 @@ type CreateFlags = {
  * Safe to auto-correct because the input is already invalid (dots are never
  * valid in platform identifiers) and the correction is unambiguous.
  */
-/** Reshape a flat list into rows of `cols` columns, padding the last row. */
-function toColumnRows(items: string[], cols: number): string[][] {
+/** Build a 3-column grid string from a flat list of platforms. */
+function platformGrid(items: readonly string[]): string {
+  const COLS = 3;
   const rows: string[][] = [];
-  for (let i = 0; i < items.length; i += cols) {
-    const row = items.slice(i, i + cols);
-    while (row.length < cols) {
+  for (let i = 0; i < items.length; i += COLS) {
+    const row = items.slice(i, i + COLS);
+    while (row.length < COLS) {
       row.push("");
     }
     rows.push(row);
   }
-  return rows;
+  const columns: Column<string[]>[] = Array.from({ length: COLS }, (_, ci) => ({
+    header: " ",
+    value: (row: string[]) => row[ci] ?? "",
+  }));
+  return buildMarkdownTable(rows, columns);
 }
 
 function normalizePlatform(platform: string, stderr: Writer): string {
@@ -132,22 +137,11 @@ function buildPlatformError(nameArg: string, platform?: string): string {
   if (platform) {
     const suggestions = suggestPlatform(platform);
     if (suggestions.length > 0) {
-      const rows = toColumnRows(suggestions, 3);
-      const table = renderTextTable(rows[0] ?? [], rows.slice(1), {
-        headerSeparator: false,
-      });
-      didYouMean = `\nDid you mean?\n${table}`;
+      didYouMean = `\nDid you mean?\n${platformGrid(suggestions)}`;
     }
   }
 
-  const platformRows = toColumnRows([...COMMON_PLATFORMS], 3);
-  const platformTable = renderTextTable(
-    platformRows[0] ?? [],
-    platformRows.slice(1),
-    {
-      headerSeparator: false,
-    }
-  );
+  const platformTable = platformGrid([...COMMON_PLATFORMS]);
 
   return (
     `${heading}\n` +
