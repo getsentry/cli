@@ -31,6 +31,7 @@ import {
   ContextError,
 } from "../../lib/errors.js";
 import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
+import { PLATFORMS } from "../../lib/platforms.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
@@ -48,43 +49,6 @@ type CreateFlags = {
   readonly team?: string;
   readonly json: boolean;
 };
-
-/**
- * Common Sentry platform identifiers shown when platform arg is missing or invalid.
- *
- * These use hyphen-separated format matching Sentry's internal platform registry
- * (see sentry/src/sentry/utils/platform_categories.py). This is a curated subset
- * of the ~120 supported values — the full list is available via the API endpoint
- * referenced in `buildPlatformError`.
- */
-const PLATFORMS = [
-  "javascript",
-  "javascript-react",
-  "javascript-nextjs",
-  "javascript-vue",
-  "javascript-angular",
-  "javascript-svelte",
-  "javascript-remix",
-  "javascript-astro",
-  "node",
-  "node-express",
-  "python",
-  "python-django",
-  "python-flask",
-  "python-fastapi",
-  "go",
-  "ruby",
-  "ruby-rails",
-  "php",
-  "php-laravel",
-  "java",
-  "android",
-  "dotnet",
-  "react-native",
-  "apple-ios",
-  "rust",
-  "elixir",
-] as const;
 
 /**
  * Normalize common platform format mistakes.

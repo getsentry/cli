@@ -16,6 +16,7 @@ import {
 } from "../api-client.js";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
+import { normalizePlatform } from "../platforms.js";
 import { resolveOrg } from "../resolve-target.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { buildProjectUrl } from "../sentry-urls.js";
@@ -622,7 +623,13 @@ async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
 ): Promise<LocalOpResult> {
-  const { name, platform } = payload.params;
+  const { name, platform: rawPlatform } = payload.params;
+  const platform = normalizePlatform(rawPlatform);
+  if (platform !== rawPlatform) {
+    logger.debug(
+      `[init] Platform normalized: "${rawPlatform}" → "${platform}"`
+    );
+  }
   logger.debug(
     `[init] createSentryProject: name=${name}, platform=${platform}`
   );
