@@ -1,0 +1,202 @@
+# Fix ResolutionError UX: Argument Swapping + Smarter Fallbacks
+
+Addresses: CLI-BG, CLI-BB, CLI-BA, CLI-B9, CLI-B8
+
+## Problem Summary
+
+Users hit `ResolutionError`s because the CLI misinterprets their input:
+
+| Issue | User Input | Root Cause |
+|-------|-----------|------------|
+| CLI-BG | `sentry log view a9b4ad2c mv-software/mvsoftware` | Args reversed (ID first, target second) |
+| CLI-B8 | `sentry event view CAM-82X 95fd7f5a` | First arg is issue short ID, not a target |
+| CLI-BB | `sentry issue view org/project/101149101` | Multi-slash parsed as org + broken suffix with `/` |
+| CLI-BA | `sentry issues techdoctor-inc/selfbase_admin_backend` | Underscores in project slug (Sentry uses dashes) |
+| CLI-B9 | `sentry issue list kaiko-systems-gmbh` | Bare org slug misinterpreted as project-search |
+
+## Design Decisions
+
+- All view commands already use `<target> <id>` ordering. No reordering needed — just add auto-correction when users get it wrong.
+- **Use Consola (`log.warn()`) instead of threading `stderr`**. The project has migrated to Consola for all user-facing warnings/hints. Functions like `resolveProjectBySlug` currently accept an optional `stderr` param — remove it and use `log.warn()` from the logger module instead. This simplifies signatures and ensures consistent formatting + Sentry log forwarding.
+
+## Changes
+
+### 1. Argument Swap Detection in View Commands (CLI-BG)
+
+**Files:** `src/lib/arg-parsing.ts`, `src/commands/{event,log,trace}/view.ts`
+
+Event/log/trace view all have identical `parsePositionalArgs` with a 2-arg branch: `first=target, second=id`. Add swap detection when args appear reversed.
+
+**Heuristic**: When `second` contains `/` but `first` does not → the user put ID first and target second. Swap them.
+
+**Implementation**: Add a shared `detectSwappedViewArgs(first: string, second: string): string | null` helper in `arg-parsing.ts` that returns a warning message if args appear swapped, or `null` if order looks correct. Each command's `parsePositionalArgs` adds `warning?: string` to its return type. The command `func` emits via `log.warn()` from the Consola logger.
+
+### 2. Issue Short ID Detection in Event/Log/Trace View (CLI-B8)
+
+**File:** `src/lib/arg-parsing.ts`, `src/commands/event/view.ts`
+
+When 2 args are given and `first` matches the issue short ID pattern (e.g., `CAM-82X`), the user likely confused `event view` with `issue view`.
+
+**Implementation**: Add `looksLikeIssueShortId(str: string): boolean` helper — matches pattern like `LETTERS-ALPHANUMERIC` (e.g., `CAM-82X`, `CLI-G`, `SPOTLIGHT-ELECTRON-4Y`). In each view command's `parsePositionalArgs`, when 2 args given and first looks like an issue short ID, return a `suggestion?: string` field: `"Did you mean: sentry issue view CAM-82X?"`. The command func can include this in error output.
+
+### 3. Multi-Slash Issue Arg Handling (CLI-BB)
+
+**File:** `src/lib/arg-parsing.ts` → `parseAfterSlash` function
+
+Currently `parseAfterSlash("...", "org", "project/101149101")` doesn't handle `/` in `rest`, producing a broken suffix `"PROJECT/101149101"`.
+
+**Fix**: At the top of `parseAfterSlash`, when `rest` contains `/`, split on the **first** `/` in `rest`:
+- `project = rest.slice(0, slashIdx)`, `remainder = rest.slice(slashIdx + 1)`
+- If `remainder` contains `-`: call existing dash-splitting logic on remainder to get sub-project + suffix, then combine: `{ type: "explicit", org, project: project, suffix }` where the full short ID will be `PROJECT-SUFFIX`
+- If `remainder` is pure digits or alphanumeric: `{ type: "explicit", org, project, suffix: remainder.toUpperCase() }` — resolution tries short ID `ZEITERFASSUNG-101149101`
+- Edge case: if remainder itself contains `/`, recursively handle or reject
+
+### 4. Underscore-to-Dash Normalization (CLI-BA)
+
+**File:** `src/lib/arg-parsing.ts`
+
+Sentry slugs never contain underscores. Normalize `_` → `-` at the parsing layer.
+
+**Implementation**: Add `normalizeSlug(slug: string): { slug: string; normalized: boolean }`. Call it in:
+- `parseOrgProjectArg` — for both `project` (explicit) and `projectSlug` (project-search) outputs, and for `org` in all modes
+- `parseAfterSlash` / `parseWithDash` — for project components in issue arg parsing
+
+Add `normalized?: boolean` as an optional field on all `ParsedOrgProject` variants and `ParsedIssueArg` variants. Callers emit via `log.warn()`: `"Normalized 'selfbase_admin_backend' → 'selfbase-admin-backend' (Sentry slugs use dashes, not underscores)"`
+
+### 5. Org-as-Project Auto-Redirect (CLI-B9)
+
+**Files:** `src/lib/api-client.ts`, `src/lib/org-list.ts`, `src/lib/resolve-target.ts`
+
+When `findProjectsBySlug(slug)` returns 0 matches, check if `slug` is a known org. For list commands, auto-redirect to org-all mode with a stderr warning. For view commands, give an improved error message.
+
+#### 5a. Refactor `findProjectsBySlug` to expose org list
+
+`findProjectsBySlug` already calls `listOrganizations()` internally. To avoid a redundant API call in the fallback path, refactor it to return the org list alongside project matches:
+
+```typescript
+// New return type
+type ProjectSearchResult = {
+  projects: ProjectWithOrg[];
+  /** The org list fetched during search — reuse for fallback checks */
+  orgs: SentryOrganization[];
+};
+
+export async function findProjectsBySlug(slug: string): Promise<ProjectSearchResult>
+```
+
+Update all callers (`resolveProjectBySlug`, `handleProjectSearch`, `issue list`'s project-search case) to destructure `{ projects, orgs }`.
+
+#### 5b. Auto-redirect in `handleProjectSearch` (list commands)
+
+Expand `handleProjectSearch` to accept an `orgAllFallback` callback:
+
+```typescript
+export async function handleProjectSearch<TEntity, TWithOrg>(
+  config: OrgListConfig<TEntity, TWithOrg>,
+  stdout: Writer,
+  projectSlug: string,
+  flags: BaseListFlags,
+  orgAllFallback?: (org: string) => Promise<void>
+): Promise<void>
+```
+
+When `findProjectsBySlug` returns 0 projects but `orgs` contains a match for `projectSlug`, and `orgAllFallback` is provided:
+1. Emit via `log.warn()`: `"'kaiko-systems-gmbh' is an organization, not a project. Listing all issues in 'kaiko-systems-gmbh'..."`
+2. Call `orgAllFallback(projectSlug)` which delegates to the org-all handler
+
+**In `buildDefaultHandlers`**: Wire the org-all handler as the fallback for project-search. Since handlers are built as an object, the project-search handler can reference the org-all handler directly.
+
+**For commands with custom overrides** (e.g., `issue list`): Their `project-search` override already has access to its own org-all handler. They call the new `findProjectsBySlug` directly and handle the org fallback themselves.
+
+#### 5c. Improved error in `resolveProjectBySlug` (view commands)
+
+For view commands (which don't redirect), improve the error when slug matches an org:
+
+```typescript
+// In resolveProjectBySlug, when found.projects.length === 0:
+const isOrg = found.orgs.some(o => o.slug === projectSlug);
+if (isOrg) {
+  throw new ResolutionError(
+    `'${projectSlug}'`,
+    "is an organization, not a project",
+    `sentry ${command} ${projectSlug}/<project> <id>`,
+    [`List projects: sentry project list ${projectSlug}/`]
+  );
+}
+// ... existing generic error
+```
+
+Since `findProjectsBySlug` already calls `listOrganizations()` internally, the refactored return type (`{ projects, orgs }`) gives us the org list for free — no extra API call.
+
+Also: **remove the `stderr` parameter from `resolveProjectBySlug`**. The numeric-ID-to-slug hint it currently writes to stderr should use `log.warn()` instead. This simplifies the signature and all callers.
+
+## Implementation Steps
+
+### Step 1: Add shared helpers to `src/lib/arg-parsing.ts`
+- `normalizeSlug(slug)` → `{ slug, normalized }`
+- `looksLikeIssueShortId(str)` → `boolean`
+- `detectSwappedViewArgs(first, second)` → `string | null` (warning message or null)
+
+### Step 2: Update `parseOrgProjectArg` and issue arg parsing
+- Apply `normalizeSlug` to all slug components
+- Add `normalized?: boolean` to union variants
+- Handle multi-slash in `parseAfterSlash`
+
+### Step 3: Refactor `findProjectsBySlug` return type
+- Return `{ projects, orgs }` instead of just `ProjectWithOrg[]`
+- Update all callers: `resolveProjectBySlug`, `handleProjectSearch`, `issue list` project-search case
+
+### Step 4: Org-as-project fallback in `handleProjectSearch`
+- Add `orgAllFallback` callback parameter to signature
+- When 0 projects found and slug matches an org: `log.warn()`, call fallback
+- Wire up in `buildDefaultHandlers` to pass org-all handler as fallback
+
+### Step 5: Org-as-project hint in `resolveProjectBySlug`
+- Remove `stderr` parameter — switch the numeric-ID-to-slug hint to `log.warn()`
+- Use `orgs` from refactored `findProjectsBySlug` to detect org matches
+- Throw specific `ResolutionError` with org-aware suggestions
+- Update all 4 callers (event/log/trace/project view) to drop the `stderr` arg
+
+### Step 6: Update `parsePositionalArgs` in event/log/trace view
+- Add swap detection using `detectSwappedViewArgs`
+- Add issue-short-ID detection using `looksLikeIssueShortId` (event view primarily)
+- Add `warning?: string` and `suggestion?: string` to return types
+- Command funcs emit warnings via `log.warn()` from Consola logger
+
+### Step 7: Tests
+- Property tests for `normalizeSlug`, `looksLikeIssueShortId`, `detectSwappedViewArgs`
+- Unit tests for `parseAfterSlash` multi-slash handling
+- Unit tests for `parseOrgProjectArg` underscore normalization
+- Unit tests for swap detection in each view command's `parsePositionalArgs`
+- Unit tests for `handleProjectSearch` org-fallback behavior
+- Unit tests for `resolveProjectBySlug` org-aware error messages
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/lib/arg-parsing.ts` | Add `normalizeSlug`, `looksLikeIssueShortId`, `detectSwappedViewArgs`; update `parseOrgProjectArg`, `parseAfterSlash`, `parseWithDash` for normalization + multi-slash |
+| `src/lib/api-client.ts` | Refactor `findProjectsBySlug` to return `{ projects, orgs }` |
+| `src/lib/resolve-target.ts` | Remove `stderr` param from `resolveProjectBySlug`, switch to `log.warn()`; add org-aware error messages using `orgs` from refactored `findProjectsBySlug` |
+| `src/lib/org-list.ts` | Update `handleProjectSearch` with `orgAllFallback` callback + `log.warn()` for org redirect; update `buildDefaultHandlers` |
+| `src/commands/event/view.ts` | Swap detection + issue-short-ID suggestion; `log.warn()` for warnings; drop `stderr` arg from `resolveProjectBySlug` call |
+| `src/commands/log/view.ts` | Swap detection; `log.warn()` for warnings; drop `stderr` arg |
+| `src/commands/trace/view.ts` | Swap detection; `log.warn()` for warnings; drop `stderr` arg |
+| `src/commands/project/view.ts` | Drop `stderr` arg from `resolveProjectBySlug` call |
+| `src/commands/issue/list.ts` | Update `project-search` case for new `findProjectsBySlug` return type + org fallback |
+| `test/lib/arg-parsing.test.ts` | Tests for new helpers and updated parsing |
+| `test/lib/arg-parsing.property.test.ts` | Property tests for `normalizeSlug`, `looksLikeIssueShortId` |
+| `test/commands/event/view.test.ts` | Swap detection + issue-hint tests |
+| `test/commands/log/view.test.ts` | Swap detection tests |
+| `test/commands/trace/view.test.ts` | Swap detection tests |
+
+## Verification
+
+1. `bun test test/lib/arg-parsing` — new helpers + updated parsing
+2. `bun test test/commands/event` — event view changes
+3. `bun test test/commands/log` — log view changes
+4. `bun test test/commands/trace` — trace view changes
+5. `bun test test/commands/issue` — issue list org-fallback
+6. `bun run typecheck` — no type errors
+7. `bun run lint:fix` then `bun run lint` — passes
+8. `bun test` — full test suite
