@@ -1,0 +1,42 @@
+# CLI-BH Investigation: Already Fixed
+
+## Issue Summary
+**CLI-BH**: `ApiError: Unexpected response format from /organizations/mv-software/trace-logs/`
+
+- **2 occurrences**, 1 user, org `mv-software`
+- Triggered by both `sentry trace logs` and `sentry log list --trace` commands
+- Both call `listTraceLogs()` → `apiRequestToRegion()` with `TraceLogsResponseSchema` Zod validation
+- The HTTP request succeeded (200), but the response body failed Zod schema validation
+
+## Root Cause
+The `TraceLogSchema` had strict `z.number()` validators for fields that the API may return as strings or omit entirely:
+
+1. **`timestamp_precise`** — Nanosecond timestamps (~1.7e18 in 2026) exceed `Number.MAX_SAFE_INTEGER`. The API may return these as strings.
+2. **`project.id`** — Some API responses return numeric IDs as strings
+3. **`severity_number`** — May be omitted from certain log entries
+
+## Fix Already Applied
+Commit `58658b9` ("fix(CLI-BH): harden log schemas against API response format variations") addresses all these:
+
+### Schema changes (`src/types/sentry.ts`)
+- `timestamp_precise`: `z.number()` → `z.coerce.number()` (on all 3 log schemas)
+- `project.id`: `z.number()` → `z.coerce.number()`
+- `severity_number`: `z.number()` → `z.coerce.number().optional()`
+- `timestamp_precise` on TraceLogSchema: also made `.optional()`
+
+### Follow-mode fallbacks (`src/commands/log/list.ts`)
+- `LogLike.timestamp_precise` made optional
+- Added `?? lastTimestamp` / `?? 0` fallbacks in dedup filtering
+
+### Better diagnostics (`src/lib/api-client.ts`)
+- Added `Sentry.setContext("zod_validation", ...)` before throwing `ApiError` on schema validation failures, so Zod issue details appear in future Sentry events
+
+### Tests
+- Unit tests for string coercion and missing optional fields
+- Property-based tests for schema coercion invariants
+
+## Verification
+- ✅ Tests pass (64 tests, 557 assertions)
+- ✅ Typecheck passes
+- ✅ Lint passes
+- ✅ No further action needed — fix is complete
