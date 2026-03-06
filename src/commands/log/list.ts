@@ -465,7 +465,11 @@ export const listCommand = buildListCommand("log", {
               statsPeriod,
             }),
           extractNew: (logs, lastTs) =>
-            logs.filter((l) => (l.timestamp_precise ?? 0) > lastTs),
+            logs.filter(
+              (l) =>
+                l.timestamp_precise === undefined ||
+                l.timestamp_precise > lastTs
+            ),
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);
