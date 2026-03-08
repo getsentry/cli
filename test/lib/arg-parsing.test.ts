@@ -624,3 +624,80 @@ describe("parseOrgProjectArg underscore normalization", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Input hardening against agent hallucinations (#350)
+// ---------------------------------------------------------------------------
+
+describe("parseOrgProjectArg: injection hardening", () => {
+  test("rejects query injection in org slug", () => {
+    expect(() => parseOrgProjectArg("my-org?query=foo/cli")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects query injection in project slug", () => {
+    expect(() => parseOrgProjectArg("sentry/cli?extra=1")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects fragment injection in org slug", () => {
+    expect(() => parseOrgProjectArg("my-org#anchor/cli")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects fragment injection in project slug", () => {
+    expect(() => parseOrgProjectArg("sentry/my-project#anchor")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects pre-encoded space in project slug", () => {
+    expect(() => parseOrgProjectArg("sentry/my%20project")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("rejects space in bare project slug", () => {
+    expect(() => parseOrgProjectArg("my project")).toThrow(ValidationError);
+  });
+
+  test("rejects tab character in org slug", () => {
+    expect(() => parseOrgProjectArg("my-org\t/cli")).toThrow(ValidationError);
+  });
+
+  test("rejects null byte in project slug", () => {
+    expect(() => parseOrgProjectArg("sentry/cli\x00extra")).toThrow(
+      ValidationError
+    );
+  });
+});
+
+describe("parseIssueArg: injection hardening", () => {
+  test("rejects query injection in issue arg", () => {
+    expect(() => parseIssueArg("CLI-G?query=foo")).toThrow(ValidationError);
+  });
+
+  test("rejects fragment injection in issue arg", () => {
+    expect(() => parseIssueArg("CLI-G#anchor")).toThrow(ValidationError);
+  });
+
+  test("rejects pre-encoded space in issue arg", () => {
+    expect(() => parseIssueArg("CLI-G%20extra")).toThrow(ValidationError);
+  });
+
+  test("rejects control characters in issue arg", () => {
+    expect(() => parseIssueArg("CLI-G\x00")).toThrow(ValidationError);
+    expect(() => parseIssueArg("CLI-G\t")).toThrow(ValidationError);
+  });
+
+  test("rejects space in numeric ID", () => {
+    expect(() => parseIssueArg("12345 6789")).toThrow(ValidationError);
+  });
+
+  test("rejects query string in org/issue format", () => {
+    expect(() => parseIssueArg("sentry/CLI-G?extra")).toThrow(ValidationError);
+  });
+});

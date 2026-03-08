@@ -7,6 +7,7 @@
  */
 
 import { ContextError, ValidationError } from "./errors.js";
+import { validateResourceId } from "./input-validation.js";
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -294,7 +295,8 @@ function issueArgFromUrl(parsed: ParsedSentryUrl): ParsedIssueArg | null {
 
 /**
  * Parse a slash-delimited `org/project` string into a {@link ParsedOrgProject}.
- * Applies {@link normalizeSlug} to both components.
+ * Applies {@link normalizeSlug} to both components and validates against
+ * URL injection characters.
  */
 function parseSlashOrgProject(input: string): ParsedOrgProject {
   const slashIndex = input.indexOf("/");
@@ -308,6 +310,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
         'Invalid format: "/" requires a project slug (e.g., "/cli")'
       );
     }
+    validateResourceId(rawProject, "project slug");
     const np = normalizeSlug(rawProject);
     return {
       type: "project-search",
@@ -316,6 +319,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
     };
   }
 
+  validateResourceId(rawOrg, "organization slug");
   const no = normalizeSlug(rawOrg);
 
   if (!rawProject) {
@@ -328,6 +332,7 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
   }
 
   // "sentry/cli" → explicit org and project
+  validateResourceId(rawProject, "project slug");
   const np = normalizeSlug(rawProject);
   const normalized = no.normalized || np.normalized;
   return {
@@ -378,6 +383,7 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
   }
 
   // No slash → search for project across all orgs
+  validateResourceId(trimmed, "project slug");
   const np = normalizeSlug(trimmed);
   return {
     type: "project-search",
@@ -587,7 +593,10 @@ export function parseSlashSeparatedArg(
   const slashIdx = arg.indexOf("/");
 
   if (slashIdx === -1) {
-    // No slashes — plain ID
+    // No slashes — plain ID. Skip validation here because callers may
+    // do further processing (e.g., splitting newline-separated IDs).
+    // Downstream validators like validateHexId or validateTraceId provide
+    // format-specific validation.
     return { id: arg, targetArg: undefined };
   }
 
@@ -608,6 +617,10 @@ export function parseSlashSeparatedArg(
     throw new ContextError(idLabel, usageHint);
   }
 
+  // Validate the extracted ID against injection characters.
+  // The targetArg flows through parseOrgProjectArg which has its own validation.
+  validateResourceId(id, idLabel);
+
   return { id, targetArg };
 }
 
@@ -626,6 +639,11 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
         "  https://sentry.io/organizations/{org}/issues/{id}/"
     );
   }
+
+  // Validate raw input against injection characters before parsing.
+  // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
+  // and control characters are never valid in issue identifiers.
+  validateResourceId(arg.replace(/\//g, ""), "issue identifier");
 
   // 1. Pure numeric → direct fetch by ID
   if (isAllDigits(arg)) {
