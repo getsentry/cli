@@ -1,0 +1,33 @@
+## Implementation Plan: --fields flag (#347)
+
+### Problem
+All `--json` commands dump the full data object. Agents pay per token and lose reasoning capacity with every irrelevant field.
+
+### Solution
+Add `--fields` flag to all 14 commands with `--json` output.
+
+### Design
+- `filterFields(data, fields)` — dot-notation traversal, handles arrays, nested objects, primitives passthrough
+- `parseFieldsList(input)` — comma-separated parsing with trim/dedup
+- `writeJson(stream, data, fields?)` — optional filtering before serialization
+- `FIELDS_FLAG` — shared Stricli flag definition in list-command.ts
+
+### Commands updated (14)
+auth/whoami, event/view, issue/explain, issue/list, issue/plan, issue/view,
+log/list, log/view, org/list, project/create, project/list, project/view,
+trace/list, trace/view
+
+### Special cases
+- issue/list: threaded through OrgAllIssuesOptions / ResolvedTargetsOptions
+- issue/plan: threaded through OutputSolutionOptions
+- log/list: refactored to options objects (avoid 5-param lint)
+- project/list: each handler computes parsedFields independently
+
+### Known limitation
+Dot-notation is ambiguous for keys containing literal dots (e.g. `{"a":{".":false}}`).
+This is documented in AGENTS.md and property tests use restricted key charset.
+
+### Testing
+- Property-based: 7 tests in json.property.test.ts (identity, subset, array length, dot-notation, no extra keys, parseFieldsList properties)
+- Unit: 20+ tests in json.test.ts (top-level, nesting, missing fields, null/undefined/primitives, arrays, writeJson integration)
+- 48 new tests, 885 new expect() calls
