@@ -20,6 +20,7 @@ import {
   normalizeSlug,
   parseIssueArg,
   parseOrgProjectArg,
+  parseSelector,
 } from "../../src/lib/arg-parsing.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -154,7 +155,7 @@ describe("parseIssueArg properties", () => {
     );
   });
 
-  test("result type is always one of the 6 valid types", async () => {
+  test("result type is always one of the 7 valid types", async () => {
     const validTypes = [
       "numeric",
       "explicit",
@@ -162,6 +163,7 @@ describe("parseIssueArg properties", () => {
       "explicit-org-numeric",
       "project-search",
       "suffix-only",
+      "selector",
     ];
 
     // Generate various valid inputs
@@ -449,6 +451,80 @@ describe("looksLikeIssueShortId properties", () => {
     await fcAssert(
       property(withSlashArb, (input) => {
         expect(looksLikeIssueShortId(input)).toBe(false);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("parseSelector properties", () => {
+  /** All recognized selector spellings (case-insensitive) */
+  const selectorVariantArb = constantFrom(
+    "@latest",
+    "@Latest",
+    "@LATEST",
+    "@most_frequent",
+    "@Most_Frequent",
+    "@MOST_FREQUENT",
+    "@mostfrequent",
+    "@most-frequent"
+  );
+
+  test("recognized selectors always return a canonical value", async () => {
+    await fcAssert(
+      property(selectorVariantArb, (input) => {
+        const result = parseSelector(input);
+        expect(result).toBeDefined();
+        expect(["@latest", "@most_frequent"]).toContain(result!);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("non-@ strings never match", async () => {
+    await fcAssert(
+      property(orgSlugArb, (input) => {
+        expect(parseSelector(input)).toBeUndefined();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("bare @selector parses to type 'selector'", async () => {
+    await fcAssert(
+      property(selectorVariantArb, (input) => {
+        const result = parseIssueArg(input);
+        expect(result.type).toBe("selector");
+        if (result.type === "selector") {
+          expect(["@latest", "@most_frequent"]).toContain(result.selector);
+          expect(result.org).toBeUndefined();
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("org/@selector parses to type 'selector' with org", async () => {
+    await fcAssert(
+      property(tuple(orgSlugArb, selectorVariantArb), ([org, sel]) => {
+        const input = `${org}/${sel}`;
+        const result = parseIssueArg(input);
+        expect(result.type).toBe("selector");
+        if (result.type === "selector") {
+          expect(["@latest", "@most_frequent"]).toContain(result.selector);
+          expect(result.org).toBe(org);
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("canonical form is stable regardless of casing", async () => {
+    await fcAssert(
+      property(selectorVariantArb, (input) => {
+        const direct = parseSelector(input);
+        const lower = parseSelector(input.toLowerCase());
+        expect(direct).toBe(lower);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

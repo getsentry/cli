@@ -403,13 +403,46 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
  * - `project-search`: Project slug + suffix (e.g., "cli-G")
  * - `suffix-only`: Just suffix (e.g., "G")
  */
+/**
+ * Magic `@` selectors that resolve to issues dynamically.
+ *
+ * `@latest` resolves to the issue with the most recent event (`lastSeen`).
+ * `@most_frequent` resolves to the issue with the highest event frequency.
+ *
+ * Can be combined with an explicit org: `sentry/@latest`.
+ */
+export type IssueSelector = "@latest" | "@most_frequent";
+
+/**
+ * Set of recognized magic selectors (lowercase for case-insensitive matching).
+ * Maps normalized selector names to their canonical form.
+ */
+const SELECTOR_MAP = new Map<string, IssueSelector>([
+  ["@latest", "@latest"],
+  ["@most_frequent", "@most_frequent"],
+  ["@mostfrequent", "@most_frequent"],
+  ["@most-frequent", "@most_frequent"],
+]);
+
+/**
+ * Check if a string is a recognized magic selector.
+ * Case-insensitive and accepts common variations (e.g., `@mostFrequent`).
+ *
+ * @param value - String to check (without org/ prefix)
+ * @returns The canonical selector or undefined if not a selector
+ */
+export function parseSelector(value: string): IssueSelector | undefined {
+  return SELECTOR_MAP.get(value.toLowerCase());
+}
+
 export type ParsedIssueArg =
   | { type: "numeric"; id: string }
   | { type: "explicit"; org: string; project: string; suffix: string }
   | { type: "explicit-org-suffix"; org: string; suffix: string }
   | { type: "explicit-org-numeric"; org: string; numericId: string }
   | { type: "project-search"; projectSlug: string; suffix: string }
-  | { type: "suffix-only"; suffix: string };
+  | { type: "suffix-only"; suffix: string }
+  | { type: "selector"; selector: IssueSelector; org?: string };
 
 /**
  * Parse a CLI issue argument into its component parts.
@@ -640,27 +673,45 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     );
   }
 
+  // 1. Magic @ selectors — detect before any other parsing.
+  // Supports bare `@latest` and org-prefixed `sentry/@latest`.
+  if (arg.includes("@")) {
+    const slashIdx = arg.indexOf("/");
+    const selectorPart = slashIdx === -1 ? arg : arg.slice(slashIdx + 1);
+    const selector = parseSelector(selectorPart);
+    if (selector) {
+      if (slashIdx !== -1) {
+        const org = normalizeSlug(arg.slice(0, slashIdx)).slug;
+        validateResourceId(org, "organization slug");
+        return { type: "selector", selector, org };
+      }
+      return { type: "selector", selector };
+    }
+    // Not a recognized selector — fall through to normal parsing.
+    // The @ character will be caught by validateResourceId below.
+  }
+
   // Validate raw input against injection characters before parsing.
   // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
   // and control characters are never valid in issue identifiers.
   validateResourceId(arg.replace(/\//g, ""), "issue identifier");
 
-  // 1. Pure numeric → direct fetch by ID
+  // 2. Pure numeric → direct fetch by ID
   if (isAllDigits(arg)) {
     return { type: "numeric", id: arg };
   }
 
-  // 2. Has slash → check slash FIRST (takes precedence over dashes)
+  // 3. Has slash → check slash FIRST (takes precedence over dashes)
   // This ensures "my-org/123" parses as org="my-org", not project="my"
   if (arg.includes("/")) {
     return parseWithSlash(arg);
   }
 
-  // 3. Has dash but no slash → split on last "-" for project-suffix
+  // 4. Has dash but no slash → split on last "-" for project-suffix
   if (arg.includes("-")) {
     return parseWithDash(arg);
   }
 
-  // 4. No dash, no slash → suffix only (needs DSN context)
+  // 5. No dash, no slash → suffix only (needs DSN context)
   return { type: "suffix-only", suffix: arg.toUpperCase() };
 }
