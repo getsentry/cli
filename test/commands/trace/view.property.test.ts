@@ -9,14 +9,13 @@ import { describe, expect, test } from "bun:test";
 import {
   array,
   assert as fcAssert,
-  pre,
   property,
   string,
   stringMatching,
   tuple,
 } from "fast-check";
 import { parsePositionalArgs } from "../../../src/commands/trace/view.js";
-import { ContextError } from "../../../src/lib/errors.js";
+import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
 /** Valid trace IDs (32-char hex) */
@@ -28,16 +27,21 @@ const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
 /** Non-empty strings for general args */
 const nonEmptyStringArb = string({ minLength: 1, maxLength: 50 });
 
-/** Non-empty strings without slashes (valid plain IDs) */
-const plainIdArb = nonEmptyStringArb.filter((s) => !s.includes("/"));
+/**
+ * Insert dashes at UUID positions (8-4-4-4-12) into a 32-char hex string.
+ */
+function toUuidFormat(hex: string): string {
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 describe("parsePositionalArgs properties", () => {
-  test("single arg without slashes: returns it as traceId with undefined targetArg", async () => {
+  test("single valid trace ID: returns it as traceId with undefined targetArg", async () => {
     await fcAssert(
-      property(plainIdArb, (input) => {
+      property(traceIdArb, (input) => {
         const result = parsePositionalArgs([input]);
         expect(result.traceId).toBe(input);
         expect(result.targetArg).toBeUndefined();
+        expect(result.warning).toBeUndefined();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -69,18 +73,13 @@ describe("parsePositionalArgs properties", () => {
     );
   });
 
-  test("two args: first is always targetArg, second is always traceId", async () => {
+  test("two args with valid trace ID: first is targetArg, second is traceId", async () => {
     await fcAssert(
-      property(
-        tuple(nonEmptyStringArb, nonEmptyStringArb),
-        ([first, second]) => {
-          // Skip swap-detection cases (second has / but first doesn't)
-          pre(first.includes("/") || !second.includes("/"));
-          const result = parsePositionalArgs([first, second]);
-          expect(result.targetArg).toBe(first);
-          expect(result.traceId).toBe(second);
-        }
-      ),
+      property(tuple(nonEmptyStringArb, traceIdArb), ([first, traceId]) => {
+        const result = parsePositionalArgs([first, traceId]);
+        expect(result.targetArg).toBe(first);
+        expect(result.traceId).toBe(traceId);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
@@ -106,17 +105,15 @@ describe("parsePositionalArgs properties", () => {
       property(
         tuple(
           nonEmptyStringArb,
-          nonEmptyStringArb,
+          traceIdArb,
           array(nonEmptyStringArb, { minLength: 1, maxLength: 5 })
         ),
-        ([first, second, extras]) => {
-          // Skip swap-detection cases (second has / but first doesn't)
-          pre(first.includes("/") || !second.includes("/"));
-          const args = [first, second, ...extras];
+        ([first, traceId, extras]) => {
+          const args = [first, traceId, ...extras];
           const result = parsePositionalArgs(args);
 
           expect(result.targetArg).toBe(first);
-          expect(result.traceId).toBe(second);
+          expect(result.traceId).toBe(traceId);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -125,17 +122,12 @@ describe("parsePositionalArgs properties", () => {
 
   test("parsing is deterministic: same input always produces same output", async () => {
     await fcAssert(
-      property(
-        array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
-        (args) => {
-          // Skip single-arg with slashes — those throw ContextError (tested separately)
-          pre(args.length > 1 || !args[0]?.includes("/"));
-
-          const result1 = parsePositionalArgs(args);
-          const result2 = parsePositionalArgs(args);
-          expect(result1).toEqual(result2);
-        }
-      ),
+      property(tuple(slugArb, traceIdArb), ([target, traceId]) => {
+        const args = [target, traceId];
+        const result1 = parsePositionalArgs(args);
+        const result2 = parsePositionalArgs(args);
+        expect(result1).toEqual(result2);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
@@ -144,19 +136,48 @@ describe("parsePositionalArgs properties", () => {
     expect(() => parsePositionalArgs([])).toThrow(ContextError);
   });
 
-  test("result always has traceId property defined", async () => {
+  test("result always has traceId property defined (valid inputs)", async () => {
     await fcAssert(
-      property(
-        array(nonEmptyStringArb, { minLength: 1, maxLength: 3 }),
-        (args) => {
-          // Skip single-arg with slashes — those throw ContextError (tested separately)
-          pre(args.length > 1 || !args[0]?.includes("/"));
+      property(traceIdArb, (traceId) => {
+        const result = parsePositionalArgs([traceId]);
+        expect(result.traceId).toBeDefined();
+        expect(typeof result.traceId).toBe("string");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
 
-          const result = parsePositionalArgs(args);
-          expect(result.traceId).toBeDefined();
-          expect(typeof result.traceId).toBe("string");
-        }
-      ),
+  test("UUID-format trace IDs are accepted and produce 32-char hex", async () => {
+    await fcAssert(
+      property(traceIdArb, (hex) => {
+        const uuid = toUuidFormat(hex);
+        const result = parsePositionalArgs([uuid]);
+        expect(result.traceId).toBe(hex);
+        expect(result.warning).toContain("Auto-corrected");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("UUID-format trace IDs work in two-arg case", async () => {
+    await fcAssert(
+      property(tuple(slugArb, traceIdArb), ([target, hex]) => {
+        const uuid = toUuidFormat(hex);
+        const result = parsePositionalArgs([target, uuid]);
+        expect(result.traceId).toBe(hex);
+        expect(result.targetArg).toBe(target);
+        expect(result.warning).toContain("Auto-corrected");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("invalid trace IDs always throw ValidationError", async () => {
+    const invalidIdArb = stringMatching(/^[g-z]{10,20}$/);
+    await fcAssert(
+      property(invalidIdArb, (badId) => {
+        expect(() => parsePositionalArgs([badId])).toThrow(ValidationError);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });

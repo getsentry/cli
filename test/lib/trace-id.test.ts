@@ -113,6 +113,18 @@ describe("validateTraceId", () => {
       expect(msg).not.toContain("sentry log list");
     }
   });
+
+  test("strips dashes from UUID-format trace ID (real user input from CLI-7Z)", () => {
+    expect(validateTraceId("ed29abc8-71c4-475b-9675-4655ef1a02d0")).toBe(
+      "ed29abc871c4475b96754655ef1a02d0"
+    );
+  });
+
+  test("strips dashes from uppercase UUID trace ID", () => {
+    expect(validateTraceId("AAAA1111-BBBB-2222-CCCC-3333DDDD4444")).toBe(
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+  });
 });
 
 describe("property: validateTraceId", () => {
@@ -166,6 +178,24 @@ describe("property: validateTraceId", () => {
     fcAssert(
       property(mixedCharsArb, (id) => {
         expect(() => validateTraceId(id)).toThrow(ValidationError);
+      }),
+      { numRuns: 100 }
+    );
+  });
+
+  /**
+   * Insert dashes at UUID positions (8-4-4-4-12) into a 32-char hex string.
+   */
+  function toUuidFormat(hex: string): string {
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  test("UUID-format trace IDs produce valid 32-char hex", () => {
+    fcAssert(
+      property(validTraceIdArb, (id) => {
+        const uuid = toUuidFormat(id);
+        const result = validateTraceId(uuid);
+        expect(result).toBe(id.toLowerCase());
       }),
       { numRuns: 100 }
     );

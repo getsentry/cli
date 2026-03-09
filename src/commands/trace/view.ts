@@ -34,6 +34,7 @@ import {
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
+import { validateTraceId } from "../../lib/trace-id.js";
 import type { Writer } from "../../types/index.js";
 
 type ViewFlags = {
@@ -47,17 +48,50 @@ type ViewFlags = {
 const USAGE_HINT = "sentry trace view <org>/<project> <trace-id>";
 
 /**
+ * Validate a trace ID and detect UUID auto-correction.
+ *
+ * Returns the validated trace ID and an optional warning when dashes were
+ * stripped from a UUID-format input (e.g., `ed29abc8-71c4-475b-...`).
+ */
+function validateAndWarn(raw: string): {
+  traceId: string;
+  uuidWarning?: string;
+} {
+  const traceId = validateTraceId(raw);
+  const trimmedRaw = raw.trim().toLowerCase();
+  const uuidWarning =
+    trimmedRaw.includes("-") && trimmedRaw !== traceId
+      ? `Auto-corrected trace ID: stripped dashes → ${traceId}`
+      : undefined;
+  return { traceId, uuidWarning };
+}
+
+/**
+ * Merge multiple optional warning strings into a single warning, or undefined.
+ */
+function mergeWarnings(
+  ...warnings: (string | undefined)[]
+): string | undefined {
+  const filtered = warnings.filter(Boolean);
+  return filtered.length > 0 ? filtered.join("\n") : undefined;
+}
+
+/**
  * Parse positional arguments for trace view.
  * Handles: `<trace-id>` or `<target> <trace-id>`
+ *
+ * Validates the trace ID format (32-character hex) and auto-corrects
+ * UUID-format inputs by stripping dashes.
  *
  * @param args - Positional arguments from CLI
  * @returns Parsed trace ID and optional target arg
  * @throws {ContextError} If no arguments provided
+ * @throws {ValidationError} If the trace ID format is invalid
  */
 export function parsePositionalArgs(args: string[]): {
   traceId: string;
   targetArg: string | undefined;
-  /** Warning message if arguments appear to be in the wrong order */
+  /** Warning message if arguments appear to be in the wrong order or UUID was auto-corrected */
   warning?: string;
   /** Suggestion when first arg looks like an issue short ID */
   suggestion?: string;
@@ -72,23 +106,38 @@ export function parsePositionalArgs(args: string[]): {
   }
 
   if (args.length === 1) {
-    const { id: traceId, targetArg } = parseSlashSeparatedArg(
+    const { id, targetArg } = parseSlashSeparatedArg(
       first,
       "Trace ID",
       USAGE_HINT
     );
-    return { traceId, targetArg };
+    const validated = validateAndWarn(id);
+    return {
+      traceId: validated.traceId,
+      targetArg,
+      warning: validated.uuidWarning,
+    };
   }
 
   const second = args[1];
   if (second === undefined) {
-    return { traceId: first, targetArg: undefined };
+    const validated = validateAndWarn(first);
+    return {
+      traceId: validated.traceId,
+      targetArg: undefined,
+      warning: validated.uuidWarning,
+    };
   }
 
   // Detect swapped args: user put ID first and target second
   const swapWarning = detectSwappedViewArgs(first, second);
   if (swapWarning) {
-    return { traceId: first, targetArg: second, warning: swapWarning };
+    const validated = validateAndWarn(first);
+    return {
+      traceId: validated.traceId,
+      targetArg: second,
+      warning: mergeWarnings(swapWarning, validated.uuidWarning),
+    };
   }
 
   // Detect issue short ID passed as first arg (e.g., "CAM-82X some-trace-id")
@@ -97,7 +146,13 @@ export function parsePositionalArgs(args: string[]): {
     : undefined;
 
   // Two or more args - first is target, second is trace ID
-  return { traceId: second, targetArg: first, suggestion };
+  const validated = validateAndWarn(second);
+  return {
+    traceId: validated.traceId,
+    targetArg: first,
+    warning: validated.uuidWarning,
+    suggestion,
+  };
 }
 
 /**
