@@ -17,11 +17,13 @@ import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import {
   divider,
   formatProjectDetails,
+  parseFieldsList,
   writeJson,
   writeOutput,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
@@ -38,6 +40,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 /** Usage hint for ContextError messages */
@@ -204,6 +207,7 @@ export const viewCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
@@ -214,6 +218,7 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     const parsed = parseOrgProjectArg(targetArg);
 
@@ -296,7 +301,8 @@ export const viewCommand = buildCommand({
       }));
       writeJson(
         stdout,
-        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn
+        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn,
+        fields
       );
       return;
     }

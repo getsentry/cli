@@ -10,13 +10,14 @@ import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
-import { writeJson } from "../../lib/formatters/index.js";
+import { parseFieldsList, writeJson } from "../../lib/formatters/index.js";
 import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -40,6 +41,7 @@ type PlanFlags = {
   readonly json: boolean;
   readonly force: boolean;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 /**
@@ -113,20 +115,25 @@ type OutputSolutionOptions = {
   solution: SolutionArtifact | null;
   state: AutofixState;
   json: boolean;
+  fields?: string[];
 };
 
 /**
  * Output a solution artifact to stdout.
  */
 function outputSolution(options: OutputSolutionOptions): void {
-  const { stdout, stderr, solution, state, json } = options;
+  const { stdout, stderr, solution, state, json, fields } = options;
 
   if (json) {
-    writeJson(stdout, {
-      run_id: state.run_id,
-      status: state.status,
-      solution: solution?.data ?? null,
-    });
+    writeJson(
+      stdout,
+      {
+        run_id: state.run_id,
+        status: state.status,
+        solution: solution?.data ?? null,
+      },
+      fields
+    );
     return;
   }
 
@@ -185,6 +192,7 @@ export const planCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: FRESH_ALIASES,
   },
@@ -195,6 +203,7 @@ export const planCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -233,6 +242,7 @@ export const planCommand = buildCommand({
             solution: existingSolution,
             state,
             json: flags.json,
+            fields,
           });
           return;
         }
@@ -277,6 +287,7 @@ export const planCommand = buildCommand({
         solution,
         state: finalState,
         json: flags.json,
+        fields,
       });
     } catch (error) {
       // Handle API errors with friendly messages

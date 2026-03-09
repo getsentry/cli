@@ -15,12 +15,14 @@ import {
 } from "../../lib/db/pagination.js";
 import {
   formatTraceTable,
+  parseFieldsList,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   buildListCommand,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
   LIST_CURSOR_FLAG,
@@ -35,6 +37,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 type SortValue = "date" | "duration";
@@ -146,6 +149,7 @@ export const listCommand = buildListCommand("trace", {
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: {
       ...FRESH_ALIASES,
@@ -162,6 +166,7 @@ export const listCommand = buildListCommand("trace", {
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -198,7 +203,7 @@ export const listCommand = buildListCommand("trace", {
       const output = hasMore
         ? { data: traces, nextCursor, hasMore: true }
         : { data: traces, hasMore: false };
-      writeJson(stdout, output);
+      writeJson(stdout, output, fields);
       return;
     }
 

@@ -22,9 +22,14 @@ import {
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
-import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatEventDetails,
+  parseFieldsList,
+  writeJson,
+} from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -47,6 +52,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 type HumanOutputOptions = {
@@ -325,6 +331,7 @@ export const viewCommand = buildCommand({
       },
       ...spansFlag,
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
@@ -335,6 +342,7 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     const log = logger.withTag("event.view");
 
@@ -388,7 +396,7 @@ export const viewCommand = buildCommand({
       const trace = spanTreeResult?.success
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
-      writeJson(stdout, { event, trace });
+      writeJson(stdout, { event, trace }, fields);
       return;
     }
 

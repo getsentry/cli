@@ -20,6 +20,7 @@ import {
   formatLogsHeader,
   formatLogTable,
   isPlainOutput,
+  parseFieldsList,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -28,6 +29,7 @@ import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   applyFreshFlag,
   buildListCommand,
+  FIELDS_FLAG,
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
@@ -46,6 +48,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly trace?: string;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -108,6 +111,8 @@ type WriteLogsOptions = {
   table?: StreamingTable;
   /** Whether to append a short trace-ID suffix (default: true) */
   includeTrace?: boolean;
+  /** Optional field paths to include in JSON output */
+  fields?: string[];
 };
 
 /**
@@ -117,10 +122,10 @@ type WriteLogsOptions = {
  * bordered table. Otherwise falls back to plain markdown rows.
  */
 function writeLogs(options: WriteLogsOptions): void {
-  const { stdout, logs, asJson, table, includeTrace = true } = options;
+  const { stdout, logs, asJson, table, includeTrace = true, fields } = options;
   if (asJson) {
     for (const log of logs) {
-      writeJson(stdout, log);
+      writeJson(stdout, log, fields);
     }
   } else if (table) {
     for (const log of logs) {
@@ -140,12 +145,16 @@ function writeLogs(options: WriteLogsOptions): void {
 /**
  * Execute a single fetch of logs (non-streaming mode).
  */
-async function executeSingleFetch(
-  stdout: Writer,
-  org: string,
-  project: string,
-  flags: ListFlags
-): Promise<void> {
+type SingleFetchOptions = {
+  stdout: Writer;
+  org: string;
+  project: string;
+  flags: ListFlags;
+  fields?: string[];
+};
+
+async function executeSingleFetch(options: SingleFetchOptions): Promise<void> {
+  const { stdout, org, project, flags, fields } = options;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
@@ -154,7 +163,7 @@ async function executeSingleFetch(
 
   if (flags.json) {
     // Reverse for chronological order (API returns newest first)
-    writeJson(stdout, [...logs].reverse());
+    writeJson(stdout, [...logs].reverse(), fields);
     return;
   }
 
@@ -189,6 +198,8 @@ type FollowConfig<T extends LogLike> = {
   bannerText: string;
   /** Whether to show the trace-ID column in table output */
   includeTrace: boolean;
+  /** Optional field paths to include in JSON output */
+  fields?: string[];
   /**
    * Fetch logs with the given time window.
    * @param statsPeriod - Time window (e.g., "1m" for initial, "10m" for polls)
@@ -291,6 +302,7 @@ function executeFollowMode<T extends LogLike>(
         asJson: flags.json,
         table,
         includeTrace: config.includeTrace,
+        fields: config.fields,
       });
       lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
     }
@@ -334,6 +346,7 @@ function executeFollowMode<T extends LogLike>(
           asJson: flags.json,
           table,
           includeTrace: config.includeTrace,
+          fields: config.fields,
         });
         lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
         config.onInitialLogs?.(initialLogs);
@@ -353,12 +366,18 @@ const DEFAULT_TRACE_PERIOD = "14d";
  * Execute a single fetch of trace-filtered logs (non-streaming, --trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
  */
+type TraceSingleFetchOptions = {
+  stdout: Writer;
+  org: string;
+  traceId: string;
+  flags: ListFlags;
+  fields?: string[];
+};
+
 async function executeTraceSingleFetch(
-  stdout: Writer,
-  org: string,
-  traceId: string,
-  flags: ListFlags
+  options: TraceSingleFetchOptions
 ): Promise<void> {
+  const { stdout, org, traceId, flags, fields } = options;
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
@@ -371,6 +390,7 @@ async function executeTraceSingleFetch(
     traceId,
     limit: flags.limit,
     asJson: flags.json,
+    fields,
     emptyMessage:
       `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
       "Try 'sentry trace logs' for more options (e.g., --period 30d).\n",
@@ -443,6 +463,7 @@ export const listCommand = buildListCommand("log", {
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: {
       n: "limit",
@@ -457,6 +478,7 @@ export const listCommand = buildListCommand("log", {
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     if (flags.trace) {
       // Trace mode: use the org-scoped trace-logs endpoint.
@@ -485,6 +507,7 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: `Streaming logs for trace ${traceId}...`,
           includeTrace: false,
+          fields,
           fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
               query: flags.query,
@@ -512,7 +535,13 @@ export const listCommand = buildListCommand("log", {
           },
         });
       } else {
-        await executeTraceSingleFetch(stdout, org, flags.trace, flags);
+        await executeTraceSingleFetch({
+          stdout,
+          org,
+          traceId: flags.trace,
+          flags,
+          fields,
+        });
       }
     } else {
       // Standard project-scoped mode
@@ -530,6 +559,7 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: "Streaming logs...",
           includeTrace: true,
+          fields,
           fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
               query: flags.query,
@@ -540,7 +570,7 @@ export const listCommand = buildListCommand("log", {
           extractNew: (logs) => logs,
         });
       } else {
-        await executeSingleFetch(stdout, org, project, flags);
+        await executeSingleFetch({ stdout, org, project, flags, fields });
       }
     }
   },

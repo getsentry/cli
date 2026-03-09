@@ -39,6 +39,7 @@ import {
 import {
   type IssueTableRow,
   muted,
+  parseFieldsList,
   writeIssueTable,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -46,6 +47,7 @@ import {
   applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
   LIST_BASE_ALIASES,
@@ -85,6 +87,7 @@ type ListFlags = {
   readonly cursor?: string;
   readonly fresh: boolean;
   readonly compact: boolean;
+  readonly fields?: string;
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -760,6 +763,7 @@ type OrgAllIssuesOptions = {
   org: string;
   flags: ListFlags;
   setContext: (orgs: string[], projects: string[]) => void;
+  fields?: string[];
 };
 
 /**
@@ -769,7 +773,7 @@ type OrgAllIssuesOptions = {
  * never accidentally reused.
  */
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
-  const { stdout, stderr, org, flags, setContext } = options;
+  const { stdout, stderr, org, flags, setContext, fields } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
@@ -802,7 +806,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
     const output = hasMore
       ? { data: issues, nextCursor, hasMore: true }
       : { data: issues, hasMore: false };
-    writeJson(stdout, output);
+    writeJson(stdout, output, fields);
     return;
   }
 
@@ -847,6 +851,7 @@ type ResolvedTargetsOptions = {
   flags: ListFlags;
   cwd: string;
   setContext: (orgs: string[], projects: string[]) => void;
+  fields?: string[];
 };
 
 /**
@@ -861,7 +866,7 @@ type ResolvedTargetsOptions = {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<void> {
-  const { stdout, stderr, parsed, flags, cwd, setContext } = options;
+  const { stdout, stderr, parsed, flags, cwd, setContext, fields } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -1062,7 +1067,7 @@ async function handleResolvedTargets(
           : { project: `${t.org}/${t.project}`, message: e.message }
       );
     }
-    writeJson(stdout, output);
+    writeJson(stdout, output, fields);
     return;
   }
 
@@ -1206,6 +1211,7 @@ export const listCommand = buildListCommand("issue", {
         brief: "Single-line rows for compact output",
         default: false,
       },
+      fields: FIELDS_FLAG,
     },
     aliases: {
       ...LIST_BASE_ALIASES,
@@ -1222,6 +1228,7 @@ export const listCommand = buildListCommand("issue", {
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1241,7 +1248,7 @@ export const listCommand = buildListCommand("issue", {
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
-      handleResolvedTargets({ ...ctx, flags, stderr, setContext });
+      handleResolvedTargets({ ...ctx, flags, stderr, setContext, fields });
 
     await dispatchOrgScopedList({
       config: issueListMeta,
@@ -1263,6 +1270,7 @@ export const listCommand = buildListCommand("issue", {
             org: ctx.parsed.org,
             flags,
             setContext,
+            fields,
           }),
       },
     });

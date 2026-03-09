@@ -30,10 +30,15 @@ import {
   ContextError,
   withAuthGuard,
 } from "../../lib/errors.js";
-import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatProjectCreated,
+  parseFieldsList,
+  writeJson,
+} from "../../lib/formatters/index.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
+import { FIELDS_FLAG } from "../../lib/list-command.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -55,6 +60,7 @@ const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 type CreateFlags = {
   readonly team?: string;
   readonly json: boolean;
+  readonly fields?: string;
 };
 
 /** Build a 3-column grid string from a flat list of platforms. */
@@ -296,6 +302,7 @@ export const createCommand = buildCommand({
         brief: "Output as JSON",
         default: false,
       },
+      fields: FIELDS_FLAG,
     },
     aliases: { t: "team" },
   },
@@ -306,6 +313,7 @@ export const createCommand = buildCommand({
     platformArg?: string
   ): Promise<void> {
     const { stdout, cwd } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     if (!nameArg) {
       throw new ContextError(
@@ -383,7 +391,7 @@ export const createCommand = buildCommand({
 
     // JSON output
     if (flags.json) {
-      writeJson(stdout, { ...project, dsn, teamSlug: team.slug });
+      writeJson(stdout, { ...project, dsn, teamSlug: team.slug }, fields);
       return;
     }
 

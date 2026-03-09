@@ -12,9 +12,14 @@ import { buildCommand } from "../../lib/command.js";
 import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { formatUserIdentity, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatUserIdentity,
+  parseFieldsList,
+  writeJson,
+} from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -22,6 +27,7 @@ import {
 type WhoamiFlags = {
   readonly json: boolean;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 export const whoamiCommand = buildCommand({
@@ -40,12 +46,14 @@ export const whoamiCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: FRESH_ALIASES,
   },
   async func(this: SentryContext, flags: WhoamiFlags): Promise<void> {
     applyFreshFlag(flags);
     const { stdout } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     if (!(await isAuthenticated())) {
       throw new AuthError("not_authenticated");
@@ -67,12 +75,16 @@ export const whoamiCommand = buildCommand({
     }
 
     if (flags.json) {
-      writeJson(stdout, {
-        id: user.id,
-        name: user.name ?? null,
-        username: user.username ?? null,
-        email: user.email ?? null,
-      });
+      writeJson(
+        stdout,
+        {
+          id: user.id,
+          name: user.name ?? null,
+          username: user.username ?? null,
+          email: user.email ?? null,
+        },
+        fields
+      );
       return;
     }
 

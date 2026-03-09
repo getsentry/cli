@@ -16,10 +16,15 @@ import {
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
-import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatLogDetails,
+  parseFieldsList,
+  writeJson,
+} from "../../lib/formatters/index.js";
 import { validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
+  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -37,6 +42,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly fields?: string;
 };
 
 /** Usage hint for ContextError messages */
@@ -340,6 +346,7 @@ export const viewCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
+      fields: FIELDS_FLAG,
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
@@ -350,6 +357,7 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
+    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
@@ -389,9 +397,9 @@ export const viewCommand = buildCommand({
       // Single ID: output single object for backward compatibility
       // Multiple IDs: output array
       if (logIds.length === 1 && logs.length === 1) {
-        writeJson(stdout, logs[0]);
+        writeJson(stdout, logs[0], fields);
       } else {
-        writeJson(stdout, logs);
+        writeJson(stdout, logs, fields);
       }
       return;
     }

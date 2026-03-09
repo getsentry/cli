@@ -85,6 +85,35 @@ export const LIST_JSON_FLAG = {
 } as const;
 
 /**
+ * The `--fields` flag shared by all commands that support `--json`.
+ *
+ * Accepts a comma-separated list of field paths (dot-notation supported)
+ * to include in JSON output. Reduces token consumption for agent workflows.
+ *
+ * Only meaningful when `--json` is also set — silently ignored otherwise.
+ *
+ * @example
+ * ```ts
+ * import { FIELDS_FLAG } from "../lib/list-command.js";
+ * import { parseFieldsList, writeJson } from "../lib/formatters/index.js";
+ *
+ * // In parameters:
+ * flags: { json: LIST_JSON_FLAG, fields: FIELDS_FLAG },
+ *
+ * // In func:
+ * const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
+ * writeJson(stdout, data, fields);
+ * ```
+ */
+export const FIELDS_FLAG = {
+  kind: "parsed" as const,
+  parse: String,
+  brief:
+    "Comma-separated fields to include in JSON output (dot.notation supported)",
+  optional: true as const,
+} as const;
+
+/**
  * The `--fresh` / `-f` flag shared by read-only commands.
  * Bypasses the response cache and fetches fresh data from the API.
  *
