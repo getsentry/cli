@@ -1,0 +1,50 @@
+## Implementation Plan: Input Hardening Against Agent Hallucinations (#350)
+
+### Why This Issue?
+
+This is the highest-impact foundational issue because:
+
+1. **Security & defense-in-depth** — Org slugs, project slugs, and issue IDs are
+   interpolated directly into API URLs (e.g., `/organizations/${orgSlug}/trace/${traceId}/`)
+   with zero validation for injection characters.
+2. **Agent-first CLI** — This CLI is designed for AI agents which hallucinate differently
+   than humans (embed query params in IDs, double-encode URLs, inject path traversals).
+3. **Foundation for other issues** — Issues #349 (--dry-run), #364 (platform validation),
+   #347 (--fields) all benefit from a validated input layer.
+4. **Clearly scoped** — 4 validators, 3 integration points, well-defined acceptance criteria.
+
+### Phase 1: Core Validators (src/lib/input-validation.ts)
+
+| Validator               | Purpose                     | Rejects                                        |
+|-------------------------|-----------------------------|-------------------------------------------------|
+| rejectControlChars      | Block invisible characters  | ASCII < 0x20                                    |
+| validateResourceId      | Validate slugs and IDs      | ?, #, %, whitespace, control chars              |
+| rejectPreEncoded        | Block double-encoding       | %XX hex patterns                                |
+| validateEndpoint        | Block path traversal        | .. path segments in API endpoints               |
+
+### Phase 2: Integration Points
+
+1. **src/lib/arg-parsing.ts** — Applied validateResourceId in parseSlashOrgProject()
+   (on org and project segments), parseOrgProjectArg() (bare slug case), and
+   parseIssueArg() (raw input with slashes stripped). These are the single chokepoints
+   for all commands.
+
+2. **src/commands/api.ts** — Applied validateEndpoint in normalizeEndpoint() to reject
+   path traversal before sending to the API.
+
+3. **parseSlashSeparatedArg** — Validates extracted ID components after slash-splitting,
+   but NOT plain IDs (no-slash case) because callers may do further processing
+   (e.g., newline-splitting for log view batch IDs).
+
+### Phase 3: Tests
+
+- 19 property-based tests (input-validation.property.test.ts) using fast-check
+- 14 unit tests for parseOrgProjectArg/parseIssueArg injection hardening
+- 7 unit tests for normalizeEndpoint path traversal hardening
+- All 3021 existing tests pass with zero regressions
+
+### Design Decision: resolve-target.ts validation was skipped
+
+All user inputs flow through parseOrgProjectArg/parseIssueArg which now validate.
+Values from env vars and DB cache are trusted internal sources. Adding validation
+in resolve-target.ts would be redundant.
