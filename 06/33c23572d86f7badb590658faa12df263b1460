@@ -1,0 +1,45 @@
+# Fix CLI-7Z & CLI-4X: Trace ID Validation + UUID Dash-Stripping
+
+## Status: ✅ Already Implemented
+
+The fix has already been committed as `639261f9` on branch `feat/response-cache`.
+
+## Issue Summary
+
+**CLI-7Z** (7 occurrences, 5 users) and **CLI-4X** (71 occurrences, 22 users) both report:
+```
+ValidationError: No trace found with ID "..."
+```
+from `sentry trace view` command. Two root causes:
+
+1. **Missing validation**: `trace view` never called `validateTraceId()`, sending raw user input directly to the API. Invalid formats produced confusing "No trace found" errors instead of clear validation messages.
+2. **UUID dash format**: Users copy-paste trace IDs in UUID format (e.g., `ed29abc8-71c4-475b-9675-4655ef1a02d0`). The CLI didn't strip dashes, so valid hex content in UUID format failed silently.
+
+## Changes Made
+
+### `src/lib/hex-id.ts`
+- Added `UUID_DASH_RE` regex for 8-4-4-4-12 UUID format
+- `validateHexId()` now auto-strips dashes from UUID-formatted inputs before hex validation
+
+### `src/commands/trace/view.ts`
+- Added `validateAndWarn()` helper that validates trace ID and detects UUID auto-correction
+- Added `mergeWarnings()` helper for combining multiple warnings
+- All 4 return paths in `parsePositionalArgs()` now validate via `validateAndWarn()`
+- UUID auto-correction produces a warning logged to stderr via consola
+
+### Tests (5 files, 123 tests pass)
+- `test/lib/hex-id.test.ts` — UUID unit + property tests
+- `test/lib/trace-id.test.ts` — UUID unit + property tests
+- `test/commands/trace/view.test.ts` — UUID auto-correction + validation error tests
+- `test/commands/trace/view.property.test.ts` — Updated with valid hex/UUID arbitraries
+- `test/commands/trace/view.func.test.ts` — Fixed test values to 32-char hex
+
+## Verification
+
+```bash
+bun test test/lib/hex-id.test.ts test/lib/trace-id.test.ts test/commands/trace/view.test.ts test/commands/trace/view.property.test.ts test/commands/trace/view.func.test.ts
+# → 123 pass, 0 fail
+
+bun run typecheck
+# → clean
+```
