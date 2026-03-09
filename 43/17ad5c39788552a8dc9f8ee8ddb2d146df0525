@@ -1,0 +1,46 @@
+## Implementation Plan
+
+### Goal
+Redesign `sentry issue list` table to match the Sentry web UI issue stream,
+adding sparkline trend graphs, composite triage scoring, and 2-line row layout.
+
+### Column Layout
+SHORT ID | ISSUE | SEEN | AGE | TREND | EVENTS | USERS | TRIAGE
+
+### Steps
+
+1. **Sparkline module** (`src/lib/formatters/sparkline.ts`)
+   - 8-level Unicode block characters (▁–█)
+   - Bucket-averaging downsample for arbitrary-length → fixed-width
+   - Property-based tests for invariants (length, charset, monotonicity)
+
+2. **Issue table redesign** (`src/lib/formatters/human.ts`)
+   - Replace flat single-line rows with 2-line layout:
+     - ISSUE: bold title + muted subtitle (metadata value/type)
+     - TREND: sparkline + substatus label (New/Ongoing/Regressed/Escalating)
+     - SHORT ID: linked ID + alias (multi-project mode)
+   - TRIAGE column: composite score blending priority (impact×0.6) and
+     Seer fixability (×0.4). Priority weights: Critical=1.0, High=0.75,
+     Medium=0.5, Low=0.25
+   - Row separators (dimmed horizontal lines) between data rows
+   - TREND column auto-hidden on terminals < 100 cols wide
+
+3. **--compact flag** (`src/commands/issue/list.ts`)
+   - Boolean flag, default false
+   - Single-line rows: title only, sparkline+substatus joined, alias as suffix
+   - Truncation enabled in compact mode
+
+4. **API changes** (`src/lib/api-client.ts`)
+   - Pass `groupStatsPeriod: "auto"` to issue list endpoints for sparkline data
+
+5. **Text table fixes** (`src/lib/formatters/text-table.ts`)
+   - Row separator rendering with dimmed border characters
+   - Multi-line cell width fix: `cellVisualWidth()` splits on newlines and
+     takes max line width (string-width sums across newlines otherwise)
+
+### Decisions
+- FREQ column rejected (count IS period-scoped, not lifetime)
+- RELEASE column rejected (not available from list endpoint)
+- ASSIGNEE column removed (mostly empty, wastes space)
+- ALIAS merged into SHORT ID (not a separate column)
+- Sparkline width: 8 chars (was 14, narrowed after feedback)
