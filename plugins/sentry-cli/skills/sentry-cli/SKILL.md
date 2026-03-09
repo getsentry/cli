@@ -630,6 +630,20 @@ View logs associated with a trace
 - `-q, --query <value> - Additional filter query (Sentry search syntax)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
 
+### Init
+
+Initialize Sentry in your project
+
+#### `sentry init <directory>`
+
+Initialize Sentry in your project
+
+**Flags:**
+- `--force - Continue even if Sentry is already installed`
+- `-y, --yes - Non-interactive mode (accept defaults)`
+- `--dry-run - Preview changes without applying them`
+- `--features <value> - Comma-separated features: errors,tracing,logs,replay,metrics`
+
 ### Issues
 
 List issues in a project

@@ -123,6 +123,11 @@ function matchSubdomainOrg(
     return { baseUrl, org, traceId: segments[1] };
   }
 
+  // /settings/projects/{project}/ (org-scoped subdomain settings URL)
+  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
+    return { baseUrl, org, project: segments[2] };
+  }
+
   // Bare org subdomain URL
   if (segments.length === 0) {
     return { baseUrl, org };
