@@ -71,6 +71,46 @@ describe("normalizeEndpoint edge cases", () => {
   });
 });
 
+describe("normalizeEndpoint: path traversal hardening (#350)", () => {
+  test("rejects bare .. traversal", () => {
+    expect(() => normalizeEndpoint("..")).toThrow(/path traversal/);
+  });
+
+  test("rejects leading ../ traversal", () => {
+    expect(() => normalizeEndpoint("../../admin/settings/")).toThrow(
+      /path traversal/
+    );
+  });
+
+  test("rejects mid-path traversal", () => {
+    expect(() => normalizeEndpoint("organizations/my-org/../admin/")).toThrow(
+      /path traversal/
+    );
+  });
+
+  test("rejects traversal with leading slash", () => {
+    expect(() => normalizeEndpoint("/../../admin/")).toThrow(/path traversal/);
+  });
+
+  test("allows single dots in paths", () => {
+    expect(normalizeEndpoint("organizations/.well-known/")).toBe(
+      "organizations/.well-known/"
+    );
+  });
+
+  test("allows double dots inside segment names", () => {
+    expect(normalizeEndpoint("organizations/my..org/")).toBe(
+      "organizations/my..org/"
+    );
+  });
+
+  test("rejects control characters in endpoint", () => {
+    expect(() => normalizeEndpoint("organizations/\x00admin/")).toThrow(
+      /Invalid/
+    );
+  });
+});
+
 describe("parseFieldKey error cases", () => {
   test("throws for invalid format with unmatched brackets", () => {
     expect(() => parseFieldKey("user[name")).toThrow(

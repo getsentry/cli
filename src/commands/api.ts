@@ -9,6 +9,7 @@ import type { SentryContext } from "../context.js";
 import { rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
+import { validateEndpoint } from "../lib/input-validation.js";
 import type { Writer } from "../types/index.js";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -74,6 +75,9 @@ export function parseMethod(value: string): HttpMethod {
  * @internal Exported for testing
  */
 export function normalizeEndpoint(endpoint: string): string {
+  // Reject path traversal and control characters before processing
+  validateEndpoint(endpoint);
+
   // Remove leading slash if present (rawApiRequest handles the base URL)
   const trimmed = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
 
