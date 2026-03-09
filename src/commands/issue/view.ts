@@ -13,13 +13,11 @@ import {
   formatEventDetails,
   formatIssueDetails,
   muted,
-  parseFieldsList,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -32,7 +30,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /**
@@ -98,14 +96,10 @@ export const viewCommand = buildCommand({
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
+  output: "json",
   parameters: {
     positional: issueIdPositional,
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -113,7 +107,6 @@ export const viewCommand = buildCommand({
       },
       ...spansFlag,
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
@@ -124,7 +117,6 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     // Resolve issue using shared resolution logic
     const { org: orgSlug, issue } = await resolveIssue({
@@ -163,7 +155,7 @@ export const viewCommand = buildCommand({
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
       const output = event ? { issue, event, trace } : { issue, trace };
-      writeJson(stdout, output, fields);
+      writeJson(stdout, output, flags.fields);
       return;
     }
 

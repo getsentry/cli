@@ -32,9 +32,9 @@ import {
 } from "../../lib/db/pagination.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import {
-  parseFieldsList,
   writeFooter,
   writeJson,
+  writeJsonList,
 } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
@@ -42,12 +42,10 @@ import {
   applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_CURSOR_FLAG,
-  LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
@@ -71,7 +69,7 @@ type ListFlags = {
   readonly cursor?: string;
   readonly platform?: string;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /**
@@ -299,7 +297,7 @@ export async function handleAutoDetect(
   cwd: string,
   flags: ListFlags
 ): Promise<void> {
-  const parsedFields = flags.fields ? parseFieldsList(flags.fields) : undefined;
+  const parsedFields = flags.fields;
   const {
     orgs: orgsToFetch,
     footer,
@@ -319,11 +317,13 @@ export async function handleAutoDetect(
   const hasMore = filtered.length > limited.length || !!nextCursor;
 
   if (flags.json) {
-    const output: Record<string, unknown> = { data: limited, hasMore };
-    if (hasMore) {
-      output.hint = autoDetectPaginationHint(orgsToFetch);
-    }
-    writeJson(stdout, output, parsedFields);
+    writeJsonList(stdout, limited, {
+      hasMore,
+      fields: parsedFields,
+      extra: hasMore
+        ? { hint: autoDetectPaginationHint(orgsToFetch) }
+        : undefined,
+    });
     return;
   }
 
@@ -369,7 +369,7 @@ export async function handleExplicit(
   projectSlug: string,
   flags: ListFlags
 ): Promise<void> {
-  const parsedFields = flags.fields ? parseFieldsList(flags.fields) : undefined;
+  const parsedFields = flags.fields;
   const projectResult = await withAuthGuard(() => getProject(org, projectSlug));
   if (!projectResult.ok) {
     if (flags.json) {
@@ -428,7 +428,7 @@ function nextPageHint(org: string, platform?: string): string {
  */
 export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   const { stdout, org, flags, contextKey, cursor } = options;
-  const parsedFields = flags.fields ? parseFieldsList(flags.fields) : undefined;
+  const parsedFields = flags.fields;
   const response: PaginatedResponse<SentryProject[]> =
     await listProjectsPaginated(org, {
       cursor,
@@ -452,10 +452,11 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
   }
 
   if (flags.json) {
-    const output = hasMore
-      ? { data: filtered, nextCursor: response.nextCursor, hasMore: true }
-      : { data: filtered, hasMore: false };
-    writeJson(stdout, output, parsedFields);
+    writeJsonList(stdout, filtered, {
+      hasMore,
+      nextCursor: response.nextCursor,
+      fields: parsedFields,
+    });
     return;
   }
 
@@ -498,7 +499,7 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags
 ): Promise<void> {
-  const parsedFields = flags.fields ? parseFieldsList(flags.fields) : undefined;
+  const parsedFields = flags.fields;
   const { projects } = await findProjectsBySlug(projectSlug);
   const filtered = filterByPlatform(projects, flags.platform);
 
@@ -585,11 +586,11 @@ export const listCommand = buildListCommand("project", {
       "  sentry project list --limit 50              # show more results\n" +
       "  sentry project list --json                  # output as JSON",
   },
+  output: "json",
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
     flags: {
       limit: buildListLimitFlag("projects"),
-      json: LIST_JSON_FLAG,
       cursor: LIST_CURSOR_FLAG,
       platform: {
         kind: "parsed",
@@ -598,7 +599,6 @@ export const listCommand = buildListCommand("project", {
         optional: true,
       },
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES, p: "platform" },
   },

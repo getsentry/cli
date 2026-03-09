@@ -157,3 +157,59 @@ export function writeJson<T>(stream: Writer, data: T, fields?: string[]): void {
     fields && fields.length > 0 ? filterFields(data, fields) : data;
   stream.write(`${formatJson(output)}\n`);
 }
+
+/**
+ * Output a paginated list as JSON with metadata wrapper.
+ *
+ * Wraps an array of items in a `{ data, hasMore, nextCursor? }` envelope.
+ * When `fields` is provided, filtering is applied to each **array element**
+ * inside `data`, not to the wrapper itself. This ensures that
+ * `--fields id,title` filters each item, while metadata keys (`hasMore`,
+ * `nextCursor`) are always preserved.
+ *
+ * @param stream - Output writer (typically stdout)
+ * @param items - Array of items to wrap in `data`
+ * @param options - Pagination metadata and optional field filtering
+ *
+ * @example
+ * ```ts
+ * // Without fields: full output
+ * writeJsonList(stdout, issues, { hasMore: true, nextCursor: "abc" });
+ * // → { "data": [...], "nextCursor": "abc", "hasMore": true }
+ *
+ * // With fields: each item filtered, wrapper preserved
+ * writeJsonList(stdout, issues, { hasMore: true, fields: ["id", "title"] });
+ * // → { "data": [{ "id": "1", "title": "Bug" }, ...], "hasMore": true }
+ * ```
+ */
+export function writeJsonList<T>(
+  stream: Writer,
+  items: T[],
+  options: {
+    hasMore: boolean;
+    nextCursor?: string | null;
+    errors?: unknown[];
+    fields?: string[];
+    /** Arbitrary extra metadata to include in the wrapper (e.g. `{ hint }`) */
+    extra?: Record<string, unknown>;
+  }
+): void {
+  const { hasMore, nextCursor, errors, fields, extra } = options;
+  const filtered =
+    fields && fields.length > 0
+      ? items.map((item) => filterFields(item, fields))
+      : items;
+
+  const output: Record<string, unknown> = { data: filtered, hasMore };
+  if (nextCursor !== null && nextCursor !== undefined && nextCursor !== "") {
+    output.nextCursor = nextCursor;
+  }
+  if (errors && errors.length > 0) {
+    output.errors = errors;
+  }
+  if (extra) {
+    Object.assign(output, extra);
+  }
+
+  stream.write(`${formatJson(output)}\n`);
+}

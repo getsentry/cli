@@ -20,7 +20,6 @@ import {
   formatLogsHeader,
   formatLogTable,
   isPlainOutput,
-  parseFieldsList,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
@@ -29,7 +28,6 @@ import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   applyFreshFlag,
   buildListCommand,
-  FIELDS_FLAG,
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
@@ -48,7 +46,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly trace?: string;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /** Maximum allowed value for --limit flag */
@@ -150,11 +148,10 @@ type SingleFetchOptions = {
   org: string;
   project: string;
   flags: ListFlags;
-  fields?: string[];
 };
 
 async function executeSingleFetch(options: SingleFetchOptions): Promise<void> {
-  const { stdout, org, project, flags, fields } = options;
+  const { stdout, org, project, flags } = options;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
@@ -163,7 +160,7 @@ async function executeSingleFetch(options: SingleFetchOptions): Promise<void> {
 
   if (flags.json) {
     // Reverse for chronological order (API returns newest first)
-    writeJson(stdout, [...logs].reverse(), fields);
+    writeJson(stdout, [...logs].reverse(), flags.fields);
     return;
   }
 
@@ -198,8 +195,6 @@ type FollowConfig<T extends LogLike> = {
   bannerText: string;
   /** Whether to show the trace-ID column in table output */
   includeTrace: boolean;
-  /** Optional field paths to include in JSON output */
-  fields?: string[];
   /**
    * Fetch logs with the given time window.
    * @param statsPeriod - Time window (e.g., "1m" for initial, "10m" for polls)
@@ -302,7 +297,7 @@ function executeFollowMode<T extends LogLike>(
         asJson: flags.json,
         table,
         includeTrace: config.includeTrace,
-        fields: config.fields,
+        fields: config.flags.fields,
       });
       lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
     }
@@ -346,7 +341,7 @@ function executeFollowMode<T extends LogLike>(
           asJson: flags.json,
           table,
           includeTrace: config.includeTrace,
-          fields: config.fields,
+          fields: config.flags.fields,
         });
         lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
         config.onInitialLogs?.(initialLogs);
@@ -371,13 +366,12 @@ type TraceSingleFetchOptions = {
   org: string;
   traceId: string;
   flags: ListFlags;
-  fields?: string[];
 };
 
 async function executeTraceSingleFetch(
   options: TraceSingleFetchOptions
 ): Promise<void> {
-  const { stdout, org, traceId, flags, fields } = options;
+  const { stdout, org, traceId, flags } = options;
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
@@ -390,7 +384,7 @@ async function executeTraceSingleFetch(
     traceId,
     limit: flags.limit,
     asJson: flags.json,
-    fields,
+    fields: flags.fields,
     emptyMessage:
       `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
       "Try 'sentry trace logs' for more options (e.g., --period 30d).\n",
@@ -419,6 +413,7 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list -q 'level:error'   # Filter to errors only\n" +
       "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -457,13 +452,7 @@ export const listCommand = buildListCommand("log", {
         brief: "Filter logs by trace ID (32-character hex string)",
         optional: true,
       },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: {
       n: "limit",
@@ -478,7 +467,6 @@ export const listCommand = buildListCommand("log", {
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     if (flags.trace) {
       // Trace mode: use the org-scoped trace-logs endpoint.
@@ -507,7 +495,6 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: `Streaming logs for trace ${traceId}...`,
           includeTrace: false,
-          fields,
           fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
               query: flags.query,
@@ -540,7 +527,6 @@ export const listCommand = buildListCommand("log", {
           org,
           traceId: flags.trace,
           flags,
-          fields,
         });
       }
     } else {
@@ -559,7 +545,6 @@ export const listCommand = buildListCommand("log", {
           flags,
           bannerText: "Streaming logs...",
           includeTrace: true,
-          fields,
           fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
               query: flags.query,
@@ -570,7 +555,12 @@ export const listCommand = buildListCommand("log", {
           extractNew: (logs) => logs,
         });
       } else {
-        await executeSingleFetch({ stdout, org, project, flags, fields });
+        await executeSingleFetch({
+          stdout,
+          org,
+          project,
+          flags,
+        });
       }
     }
   },

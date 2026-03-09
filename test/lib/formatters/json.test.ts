@@ -8,6 +8,7 @@ import {
   formatJson,
   parseFieldsList,
   writeJson,
+  writeJsonList,
 } from "../../../src/lib/formatters/json.js";
 
 /**
@@ -302,5 +303,199 @@ describe("formatJson", () => {
 
   test("handles arrays", () => {
     expect(formatJson([1, 2])).toBe("[\n  1,\n  2\n]");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeJsonList — paginated list output with per-element field filtering
+// ---------------------------------------------------------------------------
+
+describe("writeJsonList", () => {
+  /** Capture stdout writes and parse the result as JSON */
+  function capture(): {
+    writer: { write: (s: string) => void };
+    output: () => string;
+    parsed: () => unknown;
+  } {
+    let buf = "";
+    return {
+      writer: {
+        write: (s: string) => {
+          buf += s;
+        },
+      },
+      output: () => buf,
+      parsed: () => JSON.parse(buf),
+    };
+  }
+
+  test("wraps items in {data, hasMore} envelope", () => {
+    const { writer, parsed } = capture();
+    const items = [{ id: 1 }, { id: 2 }];
+    writeJsonList(writer, items, { hasMore: false });
+    expect(parsed()).toEqual({ data: [{ id: 1 }, { id: 2 }], hasMore: false });
+  });
+
+  test("includes nextCursor when provided", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], {
+      hasMore: true,
+      nextCursor: "abc123",
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBe("abc123");
+  });
+
+  test("omits nextCursor when null", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], {
+      hasMore: false,
+      nextCursor: null,
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("omits nextCursor when undefined", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], { hasMore: false });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("omits nextCursor when empty string", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], {
+      hasMore: false,
+      nextCursor: "",
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  test("includes errors when non-empty", () => {
+    const { writer, parsed } = capture();
+    const errors = [{ message: "org failed" }];
+    writeJsonList(writer, [{ id: 1 }], { hasMore: false, errors });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.errors).toEqual(errors);
+  });
+
+  test("omits errors when empty array", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], { hasMore: false, errors: [] });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.errors).toBeUndefined();
+  });
+
+  test("omits errors when undefined", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], { hasMore: false });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.errors).toBeUndefined();
+  });
+
+  test("handles empty items array", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [], { hasMore: false });
+    expect(parsed()).toEqual({ data: [], hasMore: false });
+  });
+
+  test("filters each array element when fields provided", () => {
+    const { writer, parsed } = capture();
+    const items = [
+      { id: 1, title: "Bug", status: "open", extra: true },
+      { id: 2, title: "Feature", status: "closed", extra: false },
+    ];
+    writeJsonList(writer, items, {
+      hasMore: true,
+      fields: ["id", "title"],
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.data).toEqual([
+      { id: 1, title: "Bug" },
+      { id: 2, title: "Feature" },
+    ]);
+    // Wrapper metadata is always preserved
+    expect(result.hasMore).toBe(true);
+  });
+
+  test("does not filter wrapper metadata keys", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1, title: "Bug" }], {
+      hasMore: true,
+      nextCursor: "xyz",
+      fields: ["id"],
+    });
+    const result = parsed() as Record<string, unknown>;
+    // Only array elements are filtered — wrapper keys preserved
+    expect(result.data).toEqual([{ id: 1 }]);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBe("xyz");
+  });
+
+  test("with empty fields array: outputs full items (no filtering)", () => {
+    const { writer, parsed } = capture();
+    const items = [{ id: 1, title: "Bug", extra: true }];
+    writeJsonList(writer, items, { hasMore: false, fields: [] });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.data).toEqual(items);
+  });
+
+  test("with undefined fields: outputs full items (no filtering)", () => {
+    const { writer, parsed } = capture();
+    const items = [{ id: 1, title: "Bug", extra: true }];
+    writeJsonList(writer, items, { hasMore: false, fields: undefined });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.data).toEqual(items);
+  });
+
+  test("supports dot-notation field filtering on nested items", () => {
+    const { writer, parsed } = capture();
+    const items = [
+      { id: 1, metadata: { type: "error", value: "ReferenceError" } },
+      { id: 2, metadata: { type: "warning", value: "DeprecationWarning" } },
+    ];
+    writeJsonList(writer, items, {
+      hasMore: false,
+      fields: ["id", "metadata.value"],
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.data).toEqual([
+      { id: 1, metadata: { value: "ReferenceError" } },
+      { id: 2, metadata: { value: "DeprecationWarning" } },
+    ]);
+  });
+
+  test("includes extra metadata in wrapper", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1 }], {
+      hasMore: true,
+      extra: { hint: "sentry project list my-org/ --json" },
+    });
+    const result = parsed() as Record<string, unknown>;
+    expect(result.hint).toBe("sentry project list my-org/ --json");
+    expect(result.hasMore).toBe(true);
+  });
+
+  test("extra metadata does not interfere with fields filtering", () => {
+    const { writer, parsed } = capture();
+    writeJsonList(writer, [{ id: 1, title: "Bug", extra: true }], {
+      hasMore: true,
+      fields: ["id"],
+      extra: { hint: "use --cursor" },
+    });
+    const result = parsed() as Record<string, unknown>;
+    // Items are filtered
+    expect(result.data).toEqual([{ id: 1 }]);
+    // Extra is in wrapper, not filtered
+    expect(result.hint).toBe("use --cursor");
+  });
+
+  test("output ends with newline", () => {
+    const { writer, output } = capture();
+    writeJsonList(writer, [{ id: 1 }], { hasMore: false });
+    expect(output().endsWith("\n")).toBe(true);
   });
 });

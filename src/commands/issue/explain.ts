@@ -7,18 +7,13 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
-import {
-  parseFieldsList,
-  writeFooter,
-  writeJson,
-} from "../../lib/formatters/index.js";
+import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -33,7 +28,7 @@ type ExplainFlags = {
   readonly json: boolean;
   readonly force: boolean;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 export const explainCommand = buildCommand({
@@ -64,21 +59,16 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
+  output: "json",
   parameters: {
     positional: issueIdPositional,
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       force: {
         kind: "boolean",
         brief: "Force new analysis even if one exists",
         default: false,
       },
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: FRESH_ALIASES,
   },
@@ -89,7 +79,6 @@ export const explainCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -123,7 +112,7 @@ export const explainCommand = buildCommand({
 
       // Output results
       if (flags.json) {
-        writeJson(stdout, causes, fields);
+        writeJson(stdout, causes, flags.fields);
         return;
       }
 

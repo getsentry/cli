@@ -12,6 +12,8 @@ import { writeJson } from "./json.js";
 type WriteOutputOptions<T> = {
   /** Output JSON format instead of human-readable */
   json: boolean;
+  /** Pre-parsed field paths to include in JSON output (from `--fields`) */
+  fields?: string[];
   /** Function to format data as a rendered string */
   formatHuman: (data: T) => string;
   /** Optional source description if data was auto-detected */
@@ -32,7 +34,7 @@ export function writeOutput<T>(
   options: WriteOutputOptions<T>
 ): void {
   if (options.json) {
-    writeJson(stdout, data);
+    writeJson(stdout, data, options.fields);
     return;
   }
 

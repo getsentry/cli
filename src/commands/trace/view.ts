@@ -20,13 +20,11 @@ import {
   computeTraceSummary,
   formatSimpleSpanTree,
   formatTraceSummary,
-  parseFieldsList,
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -44,7 +42,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /** Usage hint for ContextError messages */
@@ -202,6 +200,7 @@ export const viewCommand = buildCommand({
       "  sentry trace view <project> <trace-id>    # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "array",
@@ -213,11 +212,6 @@ export const viewCommand = buildCommand({
       },
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -225,7 +219,6 @@ export const viewCommand = buildCommand({
       },
       ...spansFlag,
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
@@ -236,7 +229,6 @@ export const viewCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
     const log = logger.withTag("trace.view");
 
     // Parse positional args
@@ -314,7 +306,7 @@ export const viewCommand = buildCommand({
     const summary = computeTraceSummary(traceId, spans);
 
     if (flags.json) {
-      writeJson(stdout, { summary, spans }, fields);
+      writeJson(stdout, { summary, spans }, flags.fields);
       return;
     }
 

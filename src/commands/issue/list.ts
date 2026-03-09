@@ -39,19 +39,16 @@ import {
 import {
   type IssueTableRow,
   muted,
-  parseFieldsList,
   writeIssueTable,
-  writeJson,
+  writeJsonList,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
   LIST_BASE_ALIASES,
-  LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
   parseCursorFlag,
   targetPatternExplanation,
@@ -87,7 +84,7 @@ type ListFlags = {
   readonly cursor?: string;
   readonly fresh: boolean;
   readonly compact: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -763,7 +760,6 @@ type OrgAllIssuesOptions = {
   org: string;
   flags: ListFlags;
   setContext: (orgs: string[], projects: string[]) => void;
-  fields?: string[];
 };
 
 /**
@@ -773,7 +769,7 @@ type OrgAllIssuesOptions = {
  * never accidentally reused.
  */
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
-  const { stdout, stderr, org, flags, setContext, fields } = options;
+  const { stdout, stderr, org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
@@ -803,10 +799,11 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   const hasMore = !!nextCursor;
 
   if (flags.json) {
-    const output = hasMore
-      ? { data: issues, nextCursor, hasMore: true }
-      : { data: issues, hasMore: false };
-    writeJson(stdout, output, fields);
+    writeJsonList(stdout, issues, {
+      hasMore,
+      nextCursor,
+      fields: flags.fields,
+    });
     return;
   }
 
@@ -851,7 +848,6 @@ type ResolvedTargetsOptions = {
   flags: ListFlags;
   cwd: string;
   setContext: (orgs: string[], projects: string[]) => void;
-  fields?: string[];
 };
 
 /**
@@ -866,7 +862,7 @@ type ResolvedTargetsOptions = {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<void> {
-  const { stdout, stderr, parsed, flags, cwd, setContext, fields } = options;
+  const { stdout, stderr, parsed, flags, cwd, setContext } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -1052,22 +1048,23 @@ async function handleResolvedTargets(
 
   if (flags.json) {
     const allIssues = issuesWithOptions.map((i) => i.issue);
-    const output: Record<string, unknown> = {
-      data: allIssues,
+    const errors =
+      failures.length > 0
+        ? failures.map(({ target: t, error: e }) =>
+            e instanceof ApiError
+              ? {
+                  project: `${t.org}/${t.project}`,
+                  status: e.status,
+                  message: e.message,
+                }
+              : { project: `${t.org}/${t.project}`, message: e.message }
+          )
+        : undefined;
+    writeJsonList(stdout, allIssues, {
       hasMore: hasMoreToShow,
-    };
-    if (failures.length > 0) {
-      output.errors = failures.map(({ target: t, error: e }) =>
-        e instanceof ApiError
-          ? {
-              project: `${t.org}/${t.project}`,
-              status: e.status,
-              message: e.message,
-            }
-          : { project: `${t.org}/${t.project}`, message: e.message }
-      );
-    }
-    writeJson(stdout, output, fields);
+      errors,
+      fields: flags.fields,
+    });
     return;
   }
 
@@ -1175,6 +1172,7 @@ export const listCommand = buildListCommand("issue", {
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).",
   },
+  output: "json",
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
     flags: {
@@ -1197,7 +1195,6 @@ export const listCommand = buildListCommand("issue", {
         brief: "Time period for issue activity (e.g. 24h, 14d, 90d)",
         default: "90d",
       },
-      json: LIST_JSON_FLAG,
       cursor: {
         kind: "parsed",
         parse: parseCursorFlag,
@@ -1211,7 +1208,6 @@ export const listCommand = buildListCommand("issue", {
         brief: "Single-line rows for compact output",
         default: false,
       },
-      fields: FIELDS_FLAG,
     },
     aliases: {
       ...LIST_BASE_ALIASES,
@@ -1228,7 +1224,6 @@ export const listCommand = buildListCommand("issue", {
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1248,7 +1243,12 @@ export const listCommand = buildListCommand("issue", {
 
     // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
     const resolveAndHandle: ModeHandler<any> = (ctx) =>
-      handleResolvedTargets({ ...ctx, flags, stderr, setContext, fields });
+      handleResolvedTargets({
+        ...ctx,
+        flags,
+        stderr,
+        setContext,
+      });
 
     await dispatchOrgScopedList({
       config: issueListMeta,
@@ -1270,7 +1270,6 @@ export const listCommand = buildListCommand("issue", {
             org: ctx.parsed.org,
             flags,
             setContext,
-            fields,
           }),
       },
     });

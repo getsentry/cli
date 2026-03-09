@@ -15,10 +15,12 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
+import { writeJson } from "../../lib/formatters/index.js";
 
 type RefreshFlags = {
   readonly json: boolean;
   readonly force: boolean;
+  readonly fields?: string[];
 };
 
 type RefreshOutput = {
@@ -50,13 +52,9 @@ Examples:
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
     `.trim(),
   },
+  output: "json",
   parameters: {
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output result as JSON",
-        default: false,
-      },
       force: {
         kind: "boolean",
         brief: "Force refresh even if token is still valid",
@@ -103,7 +101,7 @@ Examples:
     };
 
     if (flags.json) {
-      stdout.write(`${JSON.stringify(output)}\n`);
+      writeJson(stdout, output, flags.fields);
     } else if (result.refreshed) {
       stdout.write(
         `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(result.expiresIn ?? 0)}.\n`

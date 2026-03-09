@@ -10,14 +10,13 @@ import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
-import { parseFieldsList, writeJson } from "../../lib/formatters/index.js";
+import { writeJson } from "../../lib/formatters/index.js";
 import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
 import {
   applyFreshFlag,
-  FIELDS_FLAG,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
@@ -41,7 +40,7 @@ type PlanFlags = {
   readonly json: boolean;
   readonly force: boolean;
   readonly fresh: boolean;
-  readonly fields?: string;
+  readonly fields?: string[];
 };
 
 /**
@@ -172,6 +171,7 @@ export const planCommand = buildCommand({
       "  sentry issue plan cli-G --cause 0\n" +
       "  sentry issue plan 123456789 --force",
   },
+  output: "json",
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -181,18 +181,12 @@ export const planCommand = buildCommand({
         brief: "Root cause ID to plan (required if multiple causes exist)",
         optional: true,
       },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       force: {
         kind: "boolean",
         brief: "Force new plan even if one exists",
         default: false,
       },
       fresh: FRESH_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: FRESH_ALIASES,
   },
@@ -203,7 +197,6 @@ export const planCommand = buildCommand({
   ): Promise<void> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
-    const fields = flags.fields ? parseFieldsList(flags.fields) : undefined;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -242,7 +235,7 @@ export const planCommand = buildCommand({
             solution: existingSolution,
             state,
             json: flags.json,
-            fields,
+            fields: flags.fields,
           });
           return;
         }
@@ -287,7 +280,7 @@ export const planCommand = buildCommand({
         solution,
         state: finalState,
         json: flags.json,
-        fields,
+        fields: flags.fields,
       });
     } catch (error) {
       // Handle API errors with friendly messages
