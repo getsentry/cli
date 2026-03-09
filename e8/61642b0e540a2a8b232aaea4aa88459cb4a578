@@ -1,0 +1,27 @@
+## Implementation Plan: Magic @ Selectors (#45)
+
+### Phase 1: Parsing Layer (src/lib/arg-parsing.ts)
+1. Add `IssueSelector` type (`"@latest" | "@most_frequent"`) and `SELECTOR_MAP` constant
+   for case-insensitive matching with common variations
+2. Add `"selector"` variant to `ParsedIssueArg` union type: `{ type: "selector"; selector: IssueSelector; org?: string }`
+3. Detect `@`-prefixed selectors early in `parseIssueArg()` — before validation and other parsing
+   - Supports bare `@latest` and org-prefixed `sentry/@latest`
+   - Unrecognized `@` values fall through to normal parsing
+
+### Phase 2: Resolution Layer (src/commands/issue/utils.ts)
+4. Add `SELECTOR_SORT_MAP`: `@latest` → `"date"`, `@most_frequent` → `"freq"`
+5. Add `resolveSelector()` — resolves org context (explicit or auto-detected),
+   calls `listIssuesPaginated` with `sort`, `perPage: 1`, `query: "is:unresolved"`
+6. Add `"selector"` case to `resolveIssue()` switch statement
+7. Update `issueIdPositional` brief and `buildCommandHint` for selector format
+
+### Phase 3: Tests
+8. Property-based tests: canonical value stability, case-insensitivity,
+   bare vs org-prefixed parsing, non-@ rejection
+9. Unit tests: all selector spellings, org-prefixed forms, unrecognized fallthrough
+
+### Files Modified
+- `src/lib/arg-parsing.ts` — Selector type, SELECTOR_MAP, parseSelector(), parseIssueArg() detection
+- `src/commands/issue/utils.ts` — resolveSelector(), switch case, hints
+- `test/lib/arg-parsing.property.test.ts` — 5 property-based tests
+- `test/lib/arg-parsing.test.ts` — 8 unit tests
