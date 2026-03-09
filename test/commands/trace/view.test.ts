@@ -17,32 +17,42 @@ import {
 } from "../../../src/lib/errors.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
+const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
+const VALID_TRACE_ID_2 = "deadbeef12345678deadbeef12345678";
+const VALID_UUID = "ed29abc8-71c4-475b-9675-4655ef1a02d0";
+const VALID_UUID_STRIPPED = "ed29abc871c4475b96754655ef1a02d0";
+
 describe("parsePositionalArgs", () => {
   describe("single argument (trace ID only)", () => {
     test("parses single arg as trace ID", () => {
-      const result = parsePositionalArgs(["abc123def456"]);
-      expect(result.traceId).toBe("abc123def456");
+      const result = parsePositionalArgs([VALID_TRACE_ID]);
+      expect(result.traceId).toBe(VALID_TRACE_ID);
       expect(result.targetArg).toBeUndefined();
     });
 
     test("parses 32-char hex trace ID", () => {
-      const result = parsePositionalArgs(["aaaa1111bbbb2222cccc3333dddd4444"]);
-      expect(result.traceId).toBe("aaaa1111bbbb2222cccc3333dddd4444");
+      const result = parsePositionalArgs([VALID_TRACE_ID]);
+      expect(result.traceId).toBe(VALID_TRACE_ID);
       expect(result.targetArg).toBeUndefined();
+    });
+
+    test("normalizes uppercase trace ID to lowercase", () => {
+      const result = parsePositionalArgs(["AAAA1111BBBB2222CCCC3333DDDD4444"]);
+      expect(result.traceId).toBe(VALID_TRACE_ID);
     });
   });
 
   describe("two arguments (target + trace ID)", () => {
     test("parses org/project target and trace ID", () => {
-      const result = parsePositionalArgs(["my-org/frontend", "abc123def456"]);
+      const result = parsePositionalArgs(["my-org/frontend", VALID_TRACE_ID]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe("abc123def456");
+      expect(result.traceId).toBe(VALID_TRACE_ID);
     });
 
     test("parses project-only target and trace ID", () => {
-      const result = parsePositionalArgs(["frontend", "abc123def456"]);
+      const result = parsePositionalArgs(["frontend", VALID_TRACE_ID]);
       expect(result.targetArg).toBe("frontend");
-      expect(result.traceId).toBe("abc123def456");
+      expect(result.traceId).toBe(VALID_TRACE_ID);
     });
   });
 
@@ -60,23 +70,37 @@ describe("parsePositionalArgs", () => {
         expect((error as ContextError).message).toContain("Trace ID");
       }
     });
+
+    test("throws ValidationError for invalid trace ID", () => {
+      expect(() => parsePositionalArgs(["not-a-valid-trace-id"])).toThrow(
+        ValidationError
+      );
+    });
+
+    test("throws ValidationError for short hex", () => {
+      expect(() => parsePositionalArgs(["abc123"])).toThrow(ValidationError);
+    });
+
+    test("throws ValidationError for empty trace ID in two-arg case", () => {
+      expect(() => parsePositionalArgs(["my-org/frontend", ""])).toThrow(
+        ValidationError
+      );
+    });
   });
 
   describe("slash-separated org/project/traceId (single arg)", () => {
     test("parses org/project/traceId as target + trace ID", () => {
-      const result = parsePositionalArgs([
-        "sentry/cli/aaaa1111bbbb2222cccc3333dddd4444",
-      ]);
+      const result = parsePositionalArgs([`sentry/cli/${VALID_TRACE_ID}`]);
       expect(result.targetArg).toBe("sentry/cli");
-      expect(result.traceId).toBe("aaaa1111bbbb2222cccc3333dddd4444");
+      expect(result.traceId).toBe(VALID_TRACE_ID);
     });
 
     test("handles hyphenated org and project slugs", () => {
       const result = parsePositionalArgs([
-        "my-org/my-project/deadbeef12345678",
+        `my-org/my-project/${VALID_TRACE_ID_2}`,
       ]);
       expect(result.targetArg).toBe("my-org/my-project");
-      expect(result.traceId).toBe("deadbeef12345678");
+      expect(result.traceId).toBe(VALID_TRACE_ID_2);
     });
 
     test("one slash (org/project, missing trace ID) throws ContextError", () => {
@@ -102,17 +126,52 @@ describe("parsePositionalArgs", () => {
     test("handles more than two args (ignores extras)", () => {
       const result = parsePositionalArgs([
         "my-org/frontend",
-        "abc123",
+        VALID_TRACE_ID,
         "extra-arg",
       ]);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe("abc123");
+      expect(result.traceId).toBe(VALID_TRACE_ID);
+    });
+  });
+
+  describe("UUID auto-correction", () => {
+    test("strips dashes from UUID trace ID (single arg)", () => {
+      const result = parsePositionalArgs([VALID_UUID]);
+      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
+      expect(result.targetArg).toBeUndefined();
     });
 
-    test("handles empty string trace ID in two-arg case", () => {
-      const result = parsePositionalArgs(["my-org/frontend", ""]);
+    test("returns warning when UUID dashes are stripped", () => {
+      const result = parsePositionalArgs([VALID_UUID]);
+      expect(result.warning).toBeDefined();
+      expect(result.warning).toContain("Auto-corrected");
+      expect(result.warning).toContain(VALID_UUID_STRIPPED);
+    });
+
+    test("no warning for plain 32-char hex", () => {
+      const result = parsePositionalArgs([VALID_TRACE_ID]);
+      expect(result.warning).toBeUndefined();
+    });
+
+    test("strips dashes from UUID trace ID (two-arg case)", () => {
+      const result = parsePositionalArgs(["my-org/frontend", VALID_UUID]);
+      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe("");
+      expect(result.warning).toContain("Auto-corrected");
+    });
+
+    test("strips dashes from UUID in slash-separated form", () => {
+      const result = parsePositionalArgs([`sentry/cli/${VALID_UUID}`]);
+      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
+      expect(result.targetArg).toBe("sentry/cli");
+      expect(result.warning).toContain("Auto-corrected");
+    });
+
+    test("handles real user input from CLI-7Z", () => {
+      const result = parsePositionalArgs([
+        "ed29abc8-71c4-475b-9675-4655ef1a02d0",
+      ]);
+      expect(result.traceId).toBe("ed29abc871c4475b96754655ef1a02d0");
     });
   });
 });

@@ -197,7 +197,7 @@ describe("viewCommand.func", () => {
         context,
         { json: false, web: false, spans: 100 },
         "test-org/test-project",
-        "0000000000000000"
+        "00000000000000000000000000000000"
       )
     ).rejects.toThrow(ValidationError);
   });
@@ -213,12 +213,14 @@ describe("viewCommand.func", () => {
         context,
         { json: false, web: false, spans: 100 },
         "test-org/test-project",
-        "deadbeef12345678"
+        "deadbeef12345678deadbeef12345678"
       );
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).message).toContain("deadbeef12345678");
+      expect((error as ValidationError).message).toContain(
+        "deadbeef12345678deadbeef12345678"
+      );
     }
   });
 
