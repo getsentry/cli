@@ -84,11 +84,14 @@ export const viewCommand = buildCommand({
       "View detailed information about a Sentry issue by its ID or short ID. " +
       "The latest event is automatically included for full context.\n\n" +
       "Issue formats:\n" +
-      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  @latest         - Most recent unresolved issue\n" +
+      "  @most_frequent  - Issue with highest event frequency\n" +
+      "  <org>/ID        - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <org>/@selector - Selector with org: my-org/@latest\n" +
       "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
-      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
-      "  suffix         - Suffix only: G (requires DSN context)\n" +
-      "  numeric        - Numeric ID: 123456789\n\n" +
+      "  ID              - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix          - Suffix only: G (requires DSN context)\n" +
+      "  numeric         - Numeric ID: 123456789\n\n" +
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },

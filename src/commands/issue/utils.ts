@@ -10,9 +10,11 @@ import {
   getIssue,
   getIssueByShortId,
   getIssueInOrg,
+  type IssueSort,
+  listIssuesPaginated,
   triggerRootCauseAnalysis,
 } from "../../lib/api-client.js";
-import { parseIssueArg } from "../../lib/arg-parsing.js";
+import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
 import { getProjectByAlias } from "../../lib/db/project-aliases.js";
 import { detectAllDsns } from "../../lib/dsn/index.js";
 import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
@@ -33,7 +35,7 @@ export const issueIdPositional = {
     {
       placeholder: "issue",
       brief:
-        "Issue: <org>/ID, <project>-suffix, ID, or suffix (e.g., sentry/CLI-G, cli-G, CLI-G, G)",
+        "Issue: @latest, @most_frequent, <org>/ID, <project>-suffix, ID, or suffix",
       parse: String,
     },
   ],
@@ -51,6 +53,10 @@ export const issueIdPositional = {
  * @param issueId - The user-provided issue ID
  */
 export function buildCommandHint(command: string, issueId: string): string {
+  // Selectors already include the @ prefix and are self-contained
+  if (issueId.startsWith("@")) {
+    return `sentry issue ${command} <org>/${issueId}`;
+  }
   // Numeric IDs always need org context - can't be combined with project
   if (isAllDigits(issueId)) {
     return `sentry issue ${command} <org>/${issueId}`;
@@ -232,6 +238,83 @@ function resolveExplicitOrgSuffix(
 }
 
 /**
+ * Map magic selectors to Sentry issue list sort parameters.
+ *
+ * `@latest` → `"date"` (most recent `lastSeen` timestamp)
+ * `@most_frequent` → `"freq"` (highest event frequency)
+ */
+const SELECTOR_SORT_MAP: Record<IssueSelector, IssueSort> = {
+  "@latest": "date",
+  "@most_frequent": "freq",
+};
+
+/**
+ * Human-readable labels for selectors (used in error messages).
+ */
+const SELECTOR_LABELS: Record<IssueSelector, string> = {
+  "@latest": "most recent",
+  "@most_frequent": "most frequent",
+};
+
+/**
+ * Resolve a magic `@` selector to the top matching issue.
+ *
+ * Fetches the issue list sorted by the selector's criteria and returns
+ * the first result. Requires organization context (explicit or auto-detected).
+ *
+ * @param selector - The magic selector (e.g., `@latest`, `@most_frequent`)
+ * @param explicitOrg - Optional explicit org slug from `org/@selector` format
+ * @param cwd - Current working directory for context resolution
+ * @param commandHint - Hint for error messages
+ * @returns The resolved issue with org context
+ * @throws {ContextError} When organization cannot be resolved
+ * @throws {ResolutionError} When no issues match the selector
+ */
+async function resolveSelector(
+  selector: IssueSelector,
+  explicitOrg: string | undefined,
+  cwd: string,
+  commandHint: string
+): Promise<StrictResolvedIssue> {
+  // Resolve org: explicit from `org/@latest` or auto-detected from DSN/defaults
+  let orgSlug: string;
+  if (explicitOrg) {
+    orgSlug = await resolveEffectiveOrg(explicitOrg);
+  } else {
+    const resolved = await resolveOrg({ cwd });
+    if (!resolved) {
+      throw new ContextError("Organization", commandHint);
+    }
+    orgSlug = resolved.org;
+  }
+
+  const sort = SELECTOR_SORT_MAP[selector];
+  const label = SELECTOR_LABELS[selector];
+
+  // Fetch just the top issue with the appropriate sort
+  const { data: issues } = await listIssuesPaginated(orgSlug, "", {
+    sort,
+    perPage: 1,
+    query: "is:unresolved",
+  });
+
+  const issue = issues[0];
+  if (!issue) {
+    throw new ResolutionError(
+      `Selector '${selector}'`,
+      "no unresolved issues found",
+      commandHint,
+      [
+        `No unresolved issues found in org '${orgSlug}'.`,
+        `The ${label} issue selector only matches unresolved issues.`,
+      ]
+    );
+  }
+
+  return { org: orgSlug, issue };
+}
+
+/**
  * Options for resolving an issue ID.
  */
 export type ResolveIssueOptions = {
@@ -304,6 +387,7 @@ async function resolveNumericIssue(
  * Resolve an issue ID to organization slug and full issue object.
  *
  * Supports all issue ID formats (now parsed by parseIssueArg in arg-parsing.ts):
+ * - selector: "@latest", "sentry/@most_frequent" → top issue by criteria
  * - explicit: "sentry/cli-G" → org + project + suffix
  * - explicit-org-suffix: "sentry/G" → org + suffix (needs DSN for project)
  * - explicit-org-numeric: "sentry/123456789" → org + numeric ID
@@ -375,6 +459,10 @@ export async function resolveIssue(
     case "suffix-only":
       // Just suffix - need DSN for org and project
       return resolveSuffixOnly(parsed.suffix, cwd, commandHint);
+
+    case "selector":
+      // Magic @ selector - fetch top issue by sort criteria
+      return resolveSelector(parsed.selector, parsed.org, cwd, commandHint);
 
     default: {
       // Exhaustive check - this should never be reached

@@ -147,15 +147,19 @@ export const planCommand = buildCommand({
       "If multiple root causes are identified, use --cause to specify which one.\n" +
       "Use --force to regenerate a plan even if one already exists.\n\n" +
       "Issue formats:\n" +
-      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  @latest          - Most recent unresolved issue\n" +
+      "  @most_frequent   - Issue with highest event frequency\n" +
+      "  <org>/ID         - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <org>/@selector  - Selector with org: my-org/@latest\n" +
       "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
-      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
-      "  suffix         - Suffix only: G (requires DSN context)\n" +
-      "  numeric        - Numeric ID: 123456789\n\n" +
+      "  ID               - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix           - Suffix only: G (requires DSN context)\n" +
+      "  numeric          - Numeric ID: 123456789\n\n" +
       "Prerequisites:\n" +
       "  - GitHub integration configured for your organization\n" +
       "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
+      "  sentry issue plan @latest --cause 0\n" +
       "  sentry issue plan 123456789 --cause 0\n" +
       "  sentry issue plan sentry/EXTENSION-7 --cause 1\n" +
       "  sentry issue plan cli-G --cause 0\n" +

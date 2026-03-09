@@ -19,7 +19,14 @@ export const issueRoute = buildRouteMap({
       "  list     List issues in a project\n" +
       "  view     View details of a specific issue\n" +
       "  explain  Analyze an issue using Seer AI\n" +
-      "  plan     Generate a solution plan using Seer AI",
+      "  plan     Generate a solution plan using Seer AI\n\n" +
+      "Magic selectors (available for view, explain, plan):\n" +
+      "  @latest          Most recent unresolved issue\n" +
+      "  @most_frequent   Issue with the highest event frequency\n\n" +
+      "Examples:\n" +
+      "  sentry issue view @latest\n" +
+      "  sentry issue explain @most_frequent\n" +
+      "  sentry issue plan my-org/@latest",
     hideRoute: {},
   },
 });

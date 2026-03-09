@@ -42,12 +42,16 @@ export const explainCommand = buildCommand({
       "The analysis may take a few minutes for new issues.\n" +
       "Use --force to trigger a fresh analysis even if one already exists.\n\n" +
       "Issue formats:\n" +
-      "  <org>/ID       - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  @latest          - Most recent unresolved issue\n" +
+      "  @most_frequent   - Issue with highest event frequency\n" +
+      "  <org>/ID         - Explicit org: sentry/EXTENSION-7, sentry/cli-G\n" +
+      "  <org>/@selector  - Selector with org: my-org/@latest\n" +
       "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
-      "  ID             - Short ID: CLI-G (searches across orgs)\n" +
-      "  suffix         - Suffix only: G (requires DSN context)\n" +
-      "  numeric        - Numeric ID: 123456789\n\n" +
+      "  ID               - Short ID: CLI-G (searches across orgs)\n" +
+      "  suffix           - Suffix only: G (requires DSN context)\n" +
+      "  numeric          - Numeric ID: 123456789\n\n" +
       "Examples:\n" +
+      "  sentry issue explain @latest\n" +
       "  sentry issue explain 123456789\n" +
       "  sentry issue explain sentry/EXTENSION-7\n" +
       "  sentry issue explain cli-G\n" +

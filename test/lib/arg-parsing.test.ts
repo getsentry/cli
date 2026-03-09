@@ -441,6 +441,70 @@ describe("parseIssueArg", () => {
       });
     });
   });
+
+  describe("magic @ selectors", () => {
+    test("@latest returns selector type", () => {
+      expect(parseIssueArg("@latest")).toEqual({
+        type: "selector",
+        selector: "@latest",
+      });
+    });
+
+    test("@most_frequent returns selector type", () => {
+      expect(parseIssueArg("@most_frequent")).toEqual({
+        type: "selector",
+        selector: "@most_frequent",
+      });
+    });
+
+    test("case-insensitive: @LATEST and @Latest both work", () => {
+      expect(parseIssueArg("@LATEST")).toEqual({
+        type: "selector",
+        selector: "@latest",
+      });
+      expect(parseIssueArg("@Latest")).toEqual({
+        type: "selector",
+        selector: "@latest",
+      });
+    });
+
+    test("alternative spellings: @mostfrequent, @most-frequent", () => {
+      expect(parseIssueArg("@mostfrequent")).toEqual({
+        type: "selector",
+        selector: "@most_frequent",
+      });
+      expect(parseIssueArg("@most-frequent")).toEqual({
+        type: "selector",
+        selector: "@most_frequent",
+      });
+    });
+
+    test("org/@latest returns selector with org", () => {
+      expect(parseIssueArg("sentry/@latest")).toEqual({
+        type: "selector",
+        selector: "@latest",
+        org: "sentry",
+      });
+    });
+
+    test("org/@most_frequent returns selector with org", () => {
+      expect(parseIssueArg("my-org/@most_frequent")).toEqual({
+        type: "selector",
+        selector: "@most_frequent",
+        org: "my-org",
+      });
+    });
+
+    test("unrecognized @selector falls through to suffix-only", () => {
+      // Unrecognized @ values are treated as suffix-only since @ is not
+      // in the forbidden character set for resource IDs. They will fail
+      // at the API level rather than at parse time.
+      expect(parseIssueArg("@unknown")).toEqual({
+        type: "suffix-only",
+        suffix: "@UNKNOWN",
+      });
+    });
+  });
 });
 
 describe("normalizeSlug", () => {

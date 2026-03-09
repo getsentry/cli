@@ -46,6 +46,15 @@ describe("buildCommandHint", () => {
       "sentry issue explain <org>/PROJECT-ABC"
     );
   });
+
+  test("suggests <org>/@selector for selectors", () => {
+    expect(buildCommandHint("view", "@latest")).toBe(
+      "sentry issue view <org>/@latest"
+    );
+    expect(buildCommandHint("explain", "@most_frequent")).toBe(
+      "sentry issue explain <org>/@most_frequent"
+    );
+  });
 });
 
 const getConfigDir = useTestConfigDir("test-issue-utils-", {
@@ -1351,6 +1360,200 @@ describe("ensureRootCauseAnalysis", () => {
     });
 
     expect(stderrOutput).toContain("root cause analysis");
+  });
+});
+
+describe("resolveOrgAndIssueId: magic @ selectors", () => {
+  test("resolves @latest to the most recent unresolved issue", async () => {
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setDefaults("test-org", undefined);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listIssuesPaginated: /organizations/test-org/issues/?query=is:unresolved&sort=date&limit=1
+      if (
+        url.includes("/organizations/test-org/issues/") &&
+        url.includes("sort=date")
+      ) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "111222333",
+              shortId: "CLI-G",
+              title: "Latest issue",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "5",
+              userCount: 2,
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "@latest",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    expect(result.org).toBe("test-org");
+    expect(result.issueId).toBe("111222333");
+  });
+
+  test("resolves @most_frequent to the highest frequency issue", async () => {
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setDefaults("test-org", undefined);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // listIssuesPaginated: sort=freq
+      if (
+        url.includes("/organizations/test-org/issues/") &&
+        url.includes("sort=freq")
+      ) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "444555666",
+              shortId: "CLI-H",
+              title: "Frequent issue",
+              status: "unresolved",
+              platform: "python",
+              type: "error",
+              count: "1000",
+              userCount: 50,
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "@most_frequent",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    expect(result.org).toBe("test-org");
+    expect(result.issueId).toBe("444555666");
+  });
+
+  test("resolves org/@latest with explicit org prefix", async () => {
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      if (
+        url.includes("/organizations/my-org/issues/") &&
+        url.includes("sort=date")
+      ) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "777888999",
+              shortId: "BACKEND-Z",
+              title: "Latest in my-org",
+              status: "unresolved",
+              platform: "python",
+              type: "error",
+              count: "3",
+              userCount: 1,
+            },
+          ]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await resolveOrgAndIssueId({
+      issueArg: "my-org/@latest",
+      cwd: getConfigDir(),
+      command: "view",
+    });
+
+    expect(result.org).toBe("my-org");
+    expect(result.issueId).toBe("777888999");
+  });
+
+  test("throws ResolutionError when no unresolved issues found", async () => {
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await setDefaults("test-org", undefined);
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // Return empty list — no unresolved issues
+      if (url.includes("/organizations/test-org/issues/")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const err = await resolveOrgAndIssueId({
+      issueArg: "@latest",
+      cwd: getConfigDir(),
+      command: "view",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ResolutionError);
+    expect(String(err)).toContain("no unresolved issues found");
+    expect(String(err)).toContain("most recent");
+  });
+
+  test("throws ContextError when org cannot be resolved for bare @selector", async () => {
+    // Clear defaults so there's no org context
+    const { clearAuth } = await import("../../../src/lib/db/auth.js");
+    const { setDefaults } = await import("../../../src/lib/db/defaults.js");
+    await clearAuth();
+    await setDefaults(undefined, undefined);
+
+    await expect(
+      resolveOrgAndIssueId({
+        issueArg: "@latest",
+        cwd: getConfigDir(),
+        command: "view",
+      })
+    ).rejects.toThrow("Organization");
   });
 });
 
