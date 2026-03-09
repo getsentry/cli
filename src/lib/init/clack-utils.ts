@@ -63,7 +63,6 @@ export const STEP_LABELS: Record<string, string> = {
   "detect-platform": "Detecting platform and framework",
   "ensure-sentry-project": "Setting up Sentry project",
   "select-features": "Selecting features",
-  "determine-pm": "Detecting package manager",
   "install-deps": "Installing dependencies",
   "plan-codemods": "Planning code modifications",
   "apply-codemods": "Applying code modifications",
