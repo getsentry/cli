@@ -8,9 +8,14 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  extractStatsPoints,
+  formatIssueSubtitle,
+  formatProjectCreated,
   formatShortId,
   formatUserIdentity,
   type IssueTableRow,
+  type ProjectCreatedResult,
+  substatusLabel,
   writeIssueTable,
 } from "../../../src/lib/formatters/human.js";
 import type { SentryIssue } from "../../../src/types/index.js";
@@ -142,6 +147,23 @@ describe("formatShortId multi-project alias highlighting", () => {
   });
 });
 
+/** Capture stdout writes for table output testing */
+function capture(): {
+  writer: { write: (s: string) => boolean };
+  output: () => string;
+} {
+  let buf = "";
+  return {
+    writer: {
+      write: (s: string) => {
+        buf += s;
+        return true;
+      },
+    },
+    output: () => buf,
+  };
+}
+
 describe("writeIssueTable", () => {
   const mockIssue: SentryIssue = {
     id: "123",
@@ -156,28 +178,16 @@ describe("writeIssueTable", () => {
     permalink: "https://sentry.io/issues/123",
   };
 
-  function capture(): {
-    writer: { write: (s: string) => boolean };
-    output: () => string;
-  } {
-    let buf = "";
-    return {
-      writer: {
-        write: (s: string) => {
-          buf += s;
-          return true;
-        },
-      },
-      output: () => buf,
-    };
-  }
-
-  test("single project mode does not include ALIAS column", () => {
+  test("single project mode shows short ID without alias subtitle", () => {
     const { writer, output } = capture();
     const rows: IssueTableRow[] = [
-      { issue: mockIssue, formatOptions: { projectSlug: "dashboard" } },
+      {
+        issue: mockIssue,
+        orgSlug: "test-org",
+        formatOptions: { projectSlug: "dashboard" },
+      },
     ];
-    writeIssueTable(writer, rows, false);
+    writeIssueTable(writer, rows);
     const text = stripAnsi(output());
     expect(text).not.toContain("ALIAS");
     expect(text).toContain("DASHBOARD-");
@@ -185,11 +195,12 @@ describe("writeIssueTable", () => {
     expect(text).toContain("Test issue");
   });
 
-  test("multi-project mode includes ALIAS column with alias shorthand", () => {
+  test("multi-project mode shows alias alongside SHORT ID", () => {
     const { writer, output } = capture();
     const rows: IssueTableRow[] = [
       {
         issue: mockIssue,
+        orgSlug: "test-org",
         formatOptions: {
           projectSlug: "dashboard",
           projectAlias: "o1:d",
@@ -197,39 +208,292 @@ describe("writeIssueTable", () => {
         },
       },
     ];
-    writeIssueTable(writer, rows, true);
+    writeIssueTable(writer, rows);
     const text = stripAnsi(output());
-    expect(text).toContain("ALIAS");
+    // No separate ALIAS column header
+    expect(text).not.toContain("ALIAS");
+    // Alias shorthand appears alongside SHORT ID on the same line
     expect(text).toContain("o1:d-a3");
   });
 
   test("table contains all essential columns", () => {
     const { writer, output } = capture();
     const rows: IssueTableRow[] = [
-      { issue: mockIssue, formatOptions: { projectSlug: "dashboard" } },
+      {
+        issue: mockIssue,
+        orgSlug: "test-org",
+        formatOptions: { projectSlug: "dashboard" },
+      },
     ];
-    writeIssueTable(writer, rows, false);
+    writeIssueTable(writer, rows);
     const text = stripAnsi(output());
+    // Column set matching Sentry web UI
     for (const col of [
-      "LEVEL",
       "SHORT ID",
-      "COUNT",
+      "ISSUE",
       "SEEN",
-      "FIXABILITY",
-      "TITLE",
+      "AGE",
+      "EVENTS",
+      "USERS",
+      "TRIAGE",
     ]) {
       expect(text).toContain(col);
     }
+    // Old/removed columns should not appear
+    for (const col of [
+      "LEVEL",
+      "FIXABILITY",
+      "TITLE",
+      "GRAPH",
+      "ALIAS",
+      "ASSIGNEE",
+      "PRIORITY",
+    ]) {
+      expect(text).not.toContain(col);
+    }
+    // COUNT was renamed to EVENTS
+    expect(text).not.toContain(" COUNT ");
   });
 
-  test("level and title values appear in output", () => {
+  test("issue title and event count appear in output", () => {
     const { writer, output } = capture();
-    const rows: IssueTableRow[] = [{ issue: mockIssue, formatOptions: {} }];
-    writeIssueTable(writer, rows, false);
+    const rows: IssueTableRow[] = [
+      { issue: mockIssue, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
     const text = stripAnsi(output());
-    expect(text).toContain("ERROR");
     expect(text).toContain("Test issue");
     expect(text).toContain("42");
+  });
+
+  test("substatus label appears in TREND column on wide terminals", () => {
+    const { writer, output } = capture();
+    const issueWithSubstatus: SentryIssue = {
+      ...mockIssue,
+      substatus: "regressed",
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueWithSubstatus, orgSlug: "test-org", formatOptions: {} },
+    ];
+    // TREND column requires terminal width >= 100
+    const saved = process.stdout.columns;
+    process.stdout.columns = 200;
+    try {
+      writeIssueTable(writer, rows);
+    } finally {
+      process.stdout.columns = saved;
+    }
+    const text = stripAnsi(output());
+    expect(text).toContain("Regressed");
+    expect(text).toContain("Test issue");
+  });
+
+  test("default mode shows title and subtitle (2-line)", () => {
+    const { writer, output } = capture();
+    const issueWithMeta: SentryIssue = {
+      ...mockIssue,
+      metadata: { value: "Cannot read property 'x' of null" },
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueWithMeta, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    expect(text).toContain("Test issue");
+    expect(text).toContain("Cannot read property");
+  });
+
+  test("compact mode shows title only, no subtitle", () => {
+    const { writer, output } = capture();
+    const issueWithMeta: SentryIssue = {
+      ...mockIssue,
+      metadata: { value: "Cannot read property 'x' of null" },
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueWithMeta, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows, { compact: true });
+    const text = stripAnsi(output());
+    expect(text).toContain("Test issue");
+    expect(text).not.toContain("Cannot read property");
+  });
+
+  test("user count appears in USERS column", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      { issue: mockIssue, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    expect(text).toContain("10");
+  });
+
+  test("priority appears in TRIAGE column", () => {
+    const { writer, output } = capture();
+    const issueWithPriority: SentryIssue = {
+      ...mockIssue,
+      priority: "high",
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueWithPriority, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    expect(text).toContain("High");
+    expect(text).toContain("TRIAGE");
+  });
+
+  test("triage shows priority label with composite score", () => {
+    const { writer, output } = capture();
+    const issueWithBoth: SentryIssue = {
+      ...mockIssue,
+      priority: "high",
+      seerFixabilityScore: 0.85,
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueWithBoth, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    // high=0.75*0.6 + 0.85*0.4 = 0.45+0.34 = 0.79 → 79%
+    expect(text).toContain("High");
+    expect(text).toContain("79%");
+  });
+
+  test("triage shows only priority label without fixability", () => {
+    const { writer, output } = capture();
+    const issuePriorityOnly: SentryIssue = {
+      ...mockIssue,
+      priority: "medium",
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issuePriorityOnly, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    expect(text).toContain("Med");
+    expect(text).not.toContain("%");
+  });
+
+  test("triage shows only composite score without priority", () => {
+    const { writer, output } = capture();
+    const issueFixOnly: SentryIssue = {
+      ...mockIssue,
+      seerFixabilityScore: 0.75,
+    };
+    const rows: IssueTableRow[] = [
+      { issue: issueFixOnly, orgSlug: "test-org", formatOptions: {} },
+    ];
+    writeIssueTable(writer, rows);
+    const text = stripAnsi(output());
+    // default impact (0.5)*0.6 + 0.75*0.4 = 0.30+0.30 = 0.60 → 60%
+    expect(text).toContain("60%");
+  });
+});
+
+describe("substatusLabel", () => {
+  test("regressed returns colored label", () => {
+    expect(stripFormatting(substatusLabel("regressed"))).toBe("Regressed");
+  });
+
+  test("escalating returns colored label", () => {
+    expect(stripFormatting(substatusLabel("escalating"))).toBe("Escalating");
+  });
+
+  test("new returns colored label", () => {
+    expect(stripFormatting(substatusLabel("new"))).toBe("New");
+  });
+
+  test("ongoing returns muted label", () => {
+    expect(stripFormatting(substatusLabel("ongoing"))).toBe("Ongoing");
+  });
+
+  test("null returns empty string", () => {
+    expect(substatusLabel(null)).toBe("");
+  });
+
+  test("undefined returns empty string", () => {
+    expect(substatusLabel(undefined)).toBe("");
+  });
+});
+
+describe("formatIssueSubtitle", () => {
+  test("returns empty string for undefined metadata", () => {
+    expect(formatIssueSubtitle(undefined)).toBe("");
+  });
+
+  test("returns empty string for empty metadata", () => {
+    expect(formatIssueSubtitle({})).toBe("");
+  });
+
+  test("returns value when present", () => {
+    expect(formatIssueSubtitle({ value: "Some error message" })).toBe(
+      "Some error message"
+    );
+  });
+
+  test("collapses whitespace in multi-line values", () => {
+    const multiLine = "Error on line 1\n\nDetails on line 3\n  indented";
+    const result = formatIssueSubtitle({ value: multiLine });
+    expect(result).toBe("Error on line 1 Details on line 3 indented");
+  });
+
+  test("preserves long values without truncation", () => {
+    const longValue = "A".repeat(200);
+    const result = formatIssueSubtitle({ value: longValue });
+    expect(result).toBe(longValue);
+  });
+
+  test("falls back to type + function", () => {
+    expect(
+      formatIssueSubtitle({ type: "TypeError", function: "handleClick" })
+    ).toBe("TypeError in handleClick");
+  });
+
+  test("returns type alone when no function", () => {
+    expect(formatIssueSubtitle({ type: "TypeError" })).toBe("TypeError");
+  });
+
+  test("prefers value over type + function", () => {
+    expect(
+      formatIssueSubtitle({
+        value: "Error msg",
+        type: "TypeError",
+        function: "fn",
+      })
+    ).toBe("Error msg");
+  });
+});
+
+describe("extractStatsPoints", () => {
+  test("returns empty array for undefined stats", () => {
+    expect(extractStatsPoints(undefined)).toEqual([]);
+  });
+
+  test("returns empty array for empty stats", () => {
+    expect(extractStatsPoints({})).toEqual([]);
+  });
+
+  test("extracts counts from time-series buckets", () => {
+    const stats = {
+      "24h": [
+        [1_700_000_000, 5],
+        [1_700_003_600, 10],
+        [1_700_007_200, 3],
+      ],
+    };
+    expect(extractStatsPoints(stats)).toEqual([5, 10, 3]);
+  });
+
+  test("handles non-array stats values", () => {
+    expect(extractStatsPoints({ "24h": "not-an-array" })).toEqual([]);
+  });
+
+  test("handles malformed bucket entries", () => {
+    const stats = {
+      auto: [[1_700_000_000], [1_700_003_600, 5], "bad", [1_700_007_200, 3]],
+    };
+    expect(extractStatsPoints(stats)).toEqual([0, 5, 0, 3]);
   });
 });
 
@@ -263,5 +527,148 @@ describe("formatUserIdentity API shapes", () => {
       email: "oauth@example.com",
     });
     expect(result).toBe("OAuth User <oauth@example.com>");
+  });
+});
+
+describe("writeIssueTable priority labels", () => {
+  const baseMockIssue: SentryIssue = {
+    id: "1",
+    shortId: "TEST-1",
+    title: "Test",
+    culprit: "",
+    permalink: "https://sentry.io/issues/1/",
+    status: "unresolved",
+    level: "error",
+    count: "1",
+    userCount: 0,
+    firstSeen: "2024-01-01T00:00:00Z",
+    lastSeen: "2024-01-01T00:00:00Z",
+    metadata: {},
+  };
+
+  test("critical priority renders in triage column", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: { ...baseMockIssue, priority: "critical" },
+        orgSlug: "org",
+        formatOptions: {},
+      },
+    ];
+    writeIssueTable(writer, rows);
+    expect(stripAnsi(output())).toContain("Critical");
+  });
+
+  test("low priority renders in triage column", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: { ...baseMockIssue, priority: "low" },
+        orgSlug: "org",
+        formatOptions: {},
+      },
+    ];
+    writeIssueTable(writer, rows);
+    expect(stripAnsi(output())).toContain("Low");
+  });
+
+  test("unknown priority renders raw value", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: { ...baseMockIssue, priority: "urgent" },
+        orgSlug: "org",
+        formatOptions: {},
+      },
+    ];
+    writeIssueTable(writer, rows);
+    expect(stripAnsi(output())).toContain("urgent");
+  });
+});
+
+describe("formatProjectCreated", () => {
+  const baseResult: ProjectCreatedResult = {
+    project: {
+      id: "42",
+      name: "My Project",
+      slug: "my-project",
+      platform: "javascript",
+    } as ProjectCreatedResult["project"],
+    orgSlug: "my-org",
+    teamSlug: "my-team",
+    teamSource: "explicit",
+    requestedPlatform: "javascript",
+    dsn: "https://abc@o123.ingest.us.sentry.io/456",
+    url: "https://my-org.sentry.io/settings/projects/my-project/",
+    slugDiverged: false,
+    expectedSlug: "my-project",
+  };
+
+  test("includes project name and org in heading", () => {
+    const result = stripAnsi(formatProjectCreated(baseResult));
+    expect(result).toContain("My Project");
+    expect(result).toContain("my-org");
+  });
+
+  test("includes DSN when provided", () => {
+    const result = stripAnsi(formatProjectCreated(baseResult));
+    expect(result).toContain("abc@o123.ingest.us.sentry.io");
+  });
+
+  test("omits DSN row when null", () => {
+    const result = stripAnsi(
+      formatProjectCreated({ ...baseResult, dsn: null })
+    );
+    expect(result).not.toContain("DSN");
+  });
+
+  test("shows slug divergence note", () => {
+    const result = stripAnsi(
+      formatProjectCreated({
+        ...baseResult,
+        slugDiverged: true,
+        project: {
+          ...baseResult.project,
+          slug: "my-project-1",
+        } as ProjectCreatedResult["project"],
+        expectedSlug: "my-project",
+      })
+    );
+    expect(result).toContain("my-project-1");
+    expect(result).toContain("already taken");
+  });
+
+  test("shows auto-created team note", () => {
+    const result = stripAnsi(
+      formatProjectCreated({ ...baseResult, teamSource: "auto-created" })
+    );
+    expect(result).toContain("Created team");
+    expect(result).toContain("my-team");
+  });
+
+  test("shows auto-selected team note", () => {
+    const result = stripAnsi(
+      formatProjectCreated({ ...baseResult, teamSource: "auto-selected" })
+    );
+    expect(result).toContain("Using team");
+    expect(result).toContain("sentry team list");
+  });
+
+  test("uses requestedPlatform as fallback when project.platform is empty", () => {
+    const result = stripAnsi(
+      formatProjectCreated({
+        ...baseResult,
+        project: {
+          ...baseResult.project,
+          platform: "",
+        } as ProjectCreatedResult["project"],
+      })
+    );
+    expect(result).toContain("javascript");
+  });
+
+  test("includes tip with project view command", () => {
+    const result = stripAnsi(formatProjectCreated(baseResult));
+    expect(result).toContain("sentry project view my-org/my-project");
   });
 });

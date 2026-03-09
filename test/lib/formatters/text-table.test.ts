@@ -301,6 +301,35 @@ describe("truncate option", () => {
     expect(headerLine).toBeDefined();
     expect(headerLine).not.toContain("\u2026");
   });
+
+  test("ellipsis has right-side padding gap (not flush against border)", () => {
+    // Use a long string without word breaks to force hard truncation
+    const longUrl = `https://example.com/${"a".repeat(200)}`;
+    const out = renderTextTable(["URL"], [[longUrl]], {
+      maxWidth: 40,
+      truncate: true,
+    });
+    // Find the data line with the ellipsis
+    const dataLine = out.split("\n").find((l) => l.includes("\u2026"));
+    expect(dataLine).toBeDefined();
+    // The ellipsis should NOT be immediately adjacent to the right border │
+    // There should be at least one space between … and │
+    expect(dataLine).not.toMatch(/\u2026\u2502/);
+  });
+
+  test("ellipsis inherits ANSI color from surrounding text", () => {
+    const colored = `${chalk.hex("#898294")("A very long colored text that will be truncated at the boundary")}`;
+    const out = renderTextTable(["VAL"], [[colored]], {
+      maxWidth: 30,
+      truncate: true,
+    });
+    const dataLine = out.split("\n").find((l) => l.includes("\u2026"));
+    expect(dataLine).toBeDefined();
+    // The ellipsis should appear BEFORE the ANSI reset, not after it.
+    // i.e., the pattern should be: <text>…<reset> not <text><reset>…
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection
+    expect(dataLine).toMatch(/\u2026\x1b\[/);
+  });
 });
 
 describe("minWidths option", () => {

@@ -12,5 +12,6 @@ export * from "./log.js";
 export * from "./markdown.js";
 export * from "./output.js";
 export * from "./seer.js";
+export * from "./sparkline.js";
 export * from "./table.js";
 export * from "./trace.js";

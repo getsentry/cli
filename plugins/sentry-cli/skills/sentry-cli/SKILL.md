@@ -227,6 +227,7 @@ List issues in a project
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--compact - Single-line rows for compact output`
 
 **Examples:**
 
@@ -646,6 +647,7 @@ List issues in a project
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--compact - Single-line rows for compact output`
 
 ### Orgs
 

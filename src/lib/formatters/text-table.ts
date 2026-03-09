@@ -10,6 +10,22 @@
  */
 
 import stringWidth from "string-width";
+
+/** Matches one or more trailing ANSI SGR escape sequences at end of string. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection requires matching \x1b
+const TRAILING_ANSI_RE = /(?:\x1b\[[0-9;]*m)+$/;
+
+/**
+ * Compute the visual width of a cell that may contain `\n` line breaks.
+ *
+ * `string-width` sums character widths across the entire string without
+ * splitting on newlines, so `"abc\ndefgh"` returns 8 instead of the
+ * correct 5 (the widest line). This helper splits and takes the max.
+ */
+function cellVisualWidth(text: string): number {
+  return Math.max(...text.split("\n").map((line) => stringWidth(line)));
+}
+
 import wrapAnsi from "wrap-ansi";
 import {
   type BorderCharacters,
@@ -40,6 +56,16 @@ export type TextTableOptions = {
   shrinkable?: boolean[];
   /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
   truncate?: boolean;
+  /**
+   * Show horizontal separator lines between data rows.
+   *
+   * - `false` (default): no row separators
+   * - `true`: row separators in default terminal color
+   * - ANSI escape string (e.g., `"\x1b[38;2;137;130;148m"`): all table
+   *   borders (horizontal lines, vertical bars, corners) are colored with
+   *   the given prefix, making the frame visually subdued relative to content.
+   */
+  rowSeparator?: boolean | string;
 };
 
 /**
@@ -68,6 +94,7 @@ export function renderTextTable(
     minWidths = [],
     shrinkable = [],
     truncate = false,
+    rowSeparator = false,
   } = options;
 
   const border = BorderChars[borderStyle];
@@ -112,6 +139,7 @@ export function renderTextTable(
     border,
     cellPadding,
     headerSeparator,
+    rowSeparator,
   });
 }
 
@@ -134,9 +162,9 @@ function measureIntrinsicWidths(
     // Start with header width
     let maxW = stringWidth(headers[c] ?? "") + pad;
 
-    // Check all data rows
+    // Check all data rows — use cellVisualWidth for multi-line cells
     for (const row of rows) {
-      const cellWidth = stringWidth(row[c] ?? "") + pad;
+      const cellWidth = cellVisualWidth(row[c] ?? "") + pad;
       if (cellWidth > maxW) {
         maxW = cellWidth;
       }
@@ -388,6 +416,26 @@ function allocateShrink(params: ShrinkParams): number[] {
 }
 
 /**
+ * Truncate a single line to `maxWidth` with an ellipsis.
+ *
+ * Wraps to `maxWidth - 2` so the "…" + 1 char gap gives consistent right-side
+ * padding. Inserts "…" before any trailing ANSI resets so it inherits the
+ * text color instead of rendering in the default foreground.
+ */
+function truncateLine(line: string, maxWidth: number): string {
+  const shorter = wrapAnsi(line, Math.max(1, maxWidth - 2), {
+    hard: true,
+    trim: false,
+  });
+  const first = shorter.split("\n")[0] ?? "";
+  const ansiTail = TRAILING_ANSI_RE.exec(first);
+  if (ansiTail) {
+    return `${first.slice(0, ansiTail.index)}\u2026${ansiTail[0]}`;
+  }
+  return `${first}\u2026`;
+}
+
+/**
  * Wrap a row's cell values to their allocated column widths.
  * Returns an array of lines per cell (for multi-line rows).
  */
@@ -405,18 +453,25 @@ function wrapRow(
       wrappedCells.push([""]);
       continue;
     }
-    const wrapped = wrapAnsi(text, contentWidth, { hard: true, trim: false });
-    const lines = wrapped.split("\n");
-    if (truncate && lines.length > 1) {
-      // Re-wrap to contentWidth-1 so the ellipsis fits within the column
-      const shorter = wrapAnsi(text, Math.max(1, contentWidth - 1), {
+
+    // Split on explicit newlines first so intentional line breaks are preserved.
+    // Each sub-line is then wrapped/truncated independently — a 2-line cell
+    // stays 2 lines but long sub-lines won't overflow into a 3rd.
+    const inputLines = text.split("\n");
+    const outputLines: string[] = [];
+    for (const inputLine of inputLines) {
+      const wrapped = wrapAnsi(inputLine, contentWidth, {
         hard: true,
         trim: false,
       });
-      wrappedCells.push([`${shorter.split("\n")[0] ?? ""}\u2026`]);
-    } else {
-      wrappedCells.push(lines);
+      const subLines = wrapped.split("\n");
+      if (truncate && subLines.length > 1) {
+        outputLines.push(truncateLine(inputLine, contentWidth));
+      } else {
+        outputLines.push(...subLines);
+      }
     }
+    wrappedCells.push(outputLines);
   }
   return wrappedCells;
 }
@@ -457,7 +512,44 @@ type GridParams = {
   border: BorderCharacters;
   cellPadding: number;
   headerSeparator: boolean;
+  /** Draw separator between data rows. `true` for plain, or ANSI color prefix string. */
+  rowSeparator: boolean | string;
 };
+
+/** Context needed to render a single row's output lines. */
+type RowRenderContext = {
+  columnWidths: number[];
+  alignments: Array<Alignment | null>;
+  cellPadding: number;
+  vert: string;
+};
+
+/**
+ * Render a single multi-line row as an array of output lines.
+ *
+ * Each cell may contain multiple wrapped lines; the row height is the
+ * maximum across all cells. Shorter cells are padded with blanks.
+ */
+function renderRowLines(
+  wrappedCells: string[][],
+  ctx: RowRenderContext
+): string[] {
+  const { columnWidths, alignments, cellPadding, vert } = ctx;
+  const rowHeight = Math.max(1, ...wrappedCells.map((c) => c.length));
+  const out: string[] = [];
+  for (let line = 0; line < rowHeight; line++) {
+    const cellTexts: string[] = [];
+    for (let c = 0; c < columnWidths.length; c++) {
+      const cellLines = wrappedCells[c] ?? [""];
+      const text = cellLines[line] ?? "";
+      const align = alignments[c] ?? "left";
+      const colW = columnWidths[c] ?? 3;
+      cellTexts.push(padCell(text, colW, align, cellPadding));
+    }
+    out.push(`${vert}${cellTexts.join(vert)}${vert}`);
+  }
+  return out;
+}
 
 /**
  * Render the complete table grid with borders.
@@ -470,60 +562,76 @@ function renderGrid(params: GridParams): string {
     border,
     cellPadding,
     headerSeparator,
+    rowSeparator,
   } = params;
   const lines: string[] = [];
-
   const hz = border.horizontal;
+
+  // When rowSeparator is a color string, wrap all border lines in that color
+  const borderColor = typeof rowSeparator === "string" ? rowSeparator : "";
+  const borderReset = borderColor ? "\x1b[0m" : "";
+  const colorLine = (line: string): string =>
+    borderColor ? `${borderColor}${line}${borderReset}` : line;
+
+  const midLine = horizontalLine(columnWidths, {
+    left: border.leftT,
+    junction: border.cross,
+    right: border.rightT,
+    horizontal: hz,
+  });
+
+  // Row separators reuse the solid midLine — the muted color alone is enough
+  // to distinguish them from the header separator and outer borders.
+  const rowSepLine = rowSeparator ? colorLine(midLine) : "";
 
   // Top border
   lines.push(
-    horizontalLine(columnWidths, {
-      left: border.topLeft,
-      junction: border.topT,
-      right: border.topRight,
-      horizontal: hz,
-    })
+    colorLine(
+      horizontalLine(columnWidths, {
+        left: border.topLeft,
+        junction: border.topT,
+        right: border.topRight,
+        horizontal: hz,
+      })
+    )
   );
+
+  // Colored vertical border for row rendering
+  const vert = borderColor
+    ? `${borderColor}${border.vertical}${borderReset}`
+    : border.vertical;
+  const rowCtx: RowRenderContext = {
+    columnWidths,
+    alignments,
+    cellPadding,
+    vert,
+  };
 
   for (let r = 0; r < allRows.length; r++) {
     const wrappedCells = allRows[r] ?? [];
-    const rowHeight = Math.max(1, ...wrappedCells.map((c) => c.length));
+    lines.push(...renderRowLines(wrappedCells, rowCtx));
 
-    for (let line = 0; line < rowHeight; line++) {
-      const cellTexts: string[] = [];
-      for (let c = 0; c < columnWidths.length; c++) {
-        const cellLines = wrappedCells[c] ?? [""];
-        const text = cellLines[line] ?? "";
-        const align = alignments[c] ?? "left";
-        const colW = columnWidths[c] ?? 3;
-        cellTexts.push(padCell(text, colW, align, cellPadding));
-      }
-      lines.push(
-        `${border.vertical}${cellTexts.join(border.vertical)}${border.vertical}`
-      );
+    // Header separator (full weight, same color as other borders)
+    if (r === 0 && headerSeparator && allRows.length > 1) {
+      lines.push(colorLine(midLine));
     }
 
-    // Header separator
-    if (r === 0 && headerSeparator && allRows.length > 1) {
-      lines.push(
-        horizontalLine(columnWidths, {
-          left: border.leftT,
-          junction: border.cross,
-          right: border.rightT,
-          horizontal: hz,
-        })
-      );
+    // Row separator between data rows (dashed for lighter appearance)
+    if (rowSeparator && r > 0 && r < allRows.length - 1) {
+      lines.push(rowSepLine);
     }
   }
 
   // Bottom border
   lines.push(
-    horizontalLine(columnWidths, {
-      left: border.bottomLeft,
-      junction: border.bottomT,
-      right: border.bottomRight,
-      horizontal: hz,
-    })
+    colorLine(
+      horizontalLine(columnWidths, {
+        left: border.bottomLeft,
+        junction: border.bottomT,
+        right: border.bottomRight,
+        horizontal: hz,
+      })
+    )
   );
 
   return `${lines.join("\n")}\n`;

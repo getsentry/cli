@@ -80,6 +80,13 @@ export function buildMarkdownTable<T>(
 export type WriteTableOptions = {
   /** Truncate cells to one line with "\u2026" instead of wrapping. @default false */
   truncate?: boolean;
+  /**
+   * Draw separator lines between data rows.
+   * - `false`: no separators
+   * - `true`: dashed separators in default color
+   * - ANSI escape string: dashed separators in the given color
+   */
+  rowSeparator?: boolean | string;
 };
 
 export function writeTable<T>(
@@ -108,6 +115,7 @@ export function writeTable<T>(
       minWidths,
       shrinkable,
       truncate: options?.truncate,
+      rowSeparator: options?.rowSeparator,
     })
   );
 }

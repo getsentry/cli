@@ -94,6 +94,126 @@ describe("writeTable", () => {
 });
 
 // ---------------------------------------------------------------------------
+// TTY-mode output (ANSI box-drawing tables)
+// ---------------------------------------------------------------------------
+
+describe("writeTable (TTY mode)", () => {
+  const saved = {
+    plain: process.env.SENTRY_PLAIN_OUTPUT,
+    columns: process.stdout.columns,
+  };
+
+  function withTty(fn: () => void): void {
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+    process.stdout.columns = 120;
+    try {
+      fn();
+    } finally {
+      if (saved.plain !== undefined) {
+        process.env.SENTRY_PLAIN_OUTPUT = saved.plain;
+      } else {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+      process.stdout.columns = saved.columns as number;
+    }
+  }
+
+  test("renders Unicode box-drawing borders", () => {
+    withTty(() => {
+      const write = mock(() => true);
+      writeTable({ write }, [{ name: "a", count: 1, status: "ok" }], columns);
+      const output = write.mock.calls.map((c) => c[0]).join("");
+      expect(stripAnsi(output)).toContain("│");
+      expect(stripAnsi(output)).toContain("─");
+    });
+  });
+
+  test("renders content in ANSI mode", () => {
+    withTty(() => {
+      const write = mock(() => true);
+      writeTable(
+        { write },
+        [{ name: "alice", count: 42, status: "active" }],
+        columns
+      );
+      const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
+      expect(output).toContain("NAME");
+      expect(output).toContain("alice");
+      expect(output).toContain("42");
+      expect(output).toContain("active");
+    });
+  });
+
+  test("passes rowSeparator option to renderer", () => {
+    withTty(() => {
+      const write = mock(() => true);
+      writeTable(
+        { write },
+        [
+          { name: "a", count: 1, status: "x" },
+          { name: "b", count: 2, status: "y" },
+          { name: "c", count: 3, status: "z" },
+        ],
+        columns,
+        { rowSeparator: true }
+      );
+      const raw = write.mock.calls.map((c) => c[0]).join("");
+      const output = stripAnsi(raw);
+      // With 3 data rows, there should be 2 row separators (├─┼─┤ lines)
+      // plus 1 header separator = at least 3 mid-lines with ├
+      const midLines = output.split("\n").filter((l) => l.includes("├"));
+      expect(midLines.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  test("passes rowSeparator color string to renderer", () => {
+    withTty(() => {
+      const write = mock(() => true);
+      const color = "\x1b[38;2;137;130;148m";
+      writeTable(
+        { write },
+        [
+          { name: "a", count: 1, status: "x" },
+          { name: "b", count: 2, status: "y" },
+        ],
+        columns,
+        { rowSeparator: color }
+      );
+      const raw = write.mock.calls.map((c) => c[0]).join("");
+      // The color escape should appear in the output
+      expect(raw).toContain(color);
+    });
+  });
+
+  test("passes truncate option to renderer", () => {
+    withTty(() => {
+      const cols: Column<{ v: string }>[] = [
+        { header: "VAL", value: (r) => r.v, minWidth: 10 },
+      ];
+      const write = mock(() => true);
+      const longText = "a".repeat(200);
+      writeTable({ write }, [{ v: longText }], cols, { truncate: true });
+      const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
+      // Truncated text should have ellipsis
+      expect(output).toContain("…");
+    });
+  });
+
+  test("respects column alignment", () => {
+    withTty(() => {
+      const write = mock(() => true);
+      writeTable({ write }, [{ name: "x", count: 42, status: "ok" }], columns);
+      const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
+      // Right-aligned COUNT should have leading space before 42
+      const lines = output.split("\n").filter((l) => l.includes("42"));
+      expect(lines.length).toBeGreaterThan(0);
+      // The 42 should be preceded by at least one space (right-aligned)
+      expect(lines[0]).toMatch(/\s+42\s/);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Plain-mode output (raw markdown tables)
 // ---------------------------------------------------------------------------
 

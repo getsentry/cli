@@ -30,6 +30,22 @@ export type FileData = {
   fnhMax: number;
 };
 
+/**
+ * Per-input DA line tracking for phantom line filtering.
+ *
+ * Bun's coverage instrumentation generates DA entries for transitively imported
+ * modules, including lines that don't correspond to executable code. These
+ * "phantom" lines always have 0 hits and only appear in one input (typically
+ * the isolated test suite). We track which inputs contain each DA line so we
+ * can exclude 0-hit lines that appear in only one input.
+ */
+type PerInputDA = {
+  /** How many input files included this DA line */
+  inputCount: number;
+  /** Whether any input had hits > 0 */
+  hasHits: boolean;
+};
+
 function createFileData(): FileData {
   return {
     da: new Map(),
@@ -51,6 +67,8 @@ if (files.length === 0) {
 const merged = new Map<string, FileData>();
 /** Track insertion order of source files */
 const fileOrder: string[] = [];
+/** Per-source-file, per-line tracking of which inputs contributed each DA line */
+const daInputTracking = new Map<string, Map<number, PerInputDA>>();
 
 for (const filePath of files) {
   const content = await Bun.file(filePath).text();
@@ -63,6 +81,7 @@ for (const filePath of files) {
       if (!merged.has(currentSF)) {
         merged.set(currentSF, createFileData());
         fileOrder.push(currentSF);
+        daInputTracking.set(currentSF, new Map());
       }
       data = merged.get(currentSF) ?? null;
     } else if (line.startsWith("DA:") && data) {
@@ -71,6 +90,18 @@ for (const filePath of files) {
       const hits = Number.parseInt(line.slice(comma + 1), 10);
       if (!data.da.has(lineNo) || hits > (data.da.get(lineNo) ?? 0)) {
         data.da.set(lineNo, hits);
+      }
+
+      // Track which inputs contributed this DA line for phantom filtering
+      const tracking = daInputTracking.get(currentSF);
+      if (tracking) {
+        const existing = tracking.get(lineNo);
+        if (existing) {
+          existing.inputCount += 1;
+          existing.hasHits = existing.hasHits || hits > 0;
+        } else {
+          tracking.set(lineNo, { inputCount: 1, hasHits: hits > 0 });
+        }
       }
     } else if (line.startsWith("FN:") && data) {
       const val = line.slice(3);
@@ -156,16 +187,29 @@ for (const sf of fileOrder) {
     out.push(`FNH:${data.fnhMax}`);
   }
 
-  // DA lines sorted by line number + compute LF/LH
+  // DA lines sorted by line number + compute LF/LH.
+  // Filter out phantom lines: 0-hit DA entries that only appeared in a single
+  // input file. These are artifacts of Bun's coverage instrumentation for
+  // transitively imported modules and inflate the uncovered line count.
+  const tracking = daInputTracking.get(sf);
   const sortedLines = [...data.da.entries()].sort((a, b) => a[0] - b[0]);
+  let lf = 0;
   let lh = 0;
   for (const [lineNo, hits] of sortedLines) {
+    if (hits === 0 && files.length > 1 && tracking) {
+      const info = tracking.get(lineNo);
+      if (info && info.inputCount === 1 && !info.hasHits) {
+        // Phantom line: 0 hits, only in one input, never had hits — skip
+        continue;
+      }
+    }
     out.push(`DA:${lineNo},${hits}`);
+    lf += 1;
     if (hits > 0) {
       lh += 1;
     }
   }
-  out.push(`LF:${data.da.size}`);
+  out.push(`LF:${lf}`);
   out.push(`LH:${lh}`);
 
   // BRDA lines + compute BRF/BRH

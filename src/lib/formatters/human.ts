@@ -36,18 +36,10 @@ import {
   renderMarkdown,
   safeCodeSpan,
 } from "./markdown.js";
+import { sparkline } from "./sparkline.js";
 import { type Column, writeTable } from "./table.js";
 
 // Color tag maps
-
-/** Markdown color tags for issue level values */
-const LEVEL_TAGS: Record<string, Parameters<typeof colorTag>[0]> = {
-  fatal: "red",
-  error: "red",
-  warning: "yellow",
-  info: "cyan",
-  debug: "muted",
-};
 
 /** Markdown color tags for Seer fixability tiers */
 const FIXABILITY_TAGS: Record<FixabilityTier, Parameters<typeof colorTag>[0]> =
@@ -289,7 +281,7 @@ export type FormatShortIdOptions = {
   projectSlug?: string;
   /** Project alias (e.g., "e", "w", "o1:d") for multi-project display */
   projectAlias?: string;
-  /** Whether in multi-project mode (shows ALIAS column) */
+  /** Whether in multi-project mode (highlights alias chars in short ID) */
   isMultiProject?: boolean;
 };
 
@@ -396,6 +388,98 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
   return `${projectAlias}-${suffix}`;
 }
 
+// Issue Table Helpers
+
+/** Minimum terminal width to show the TREND sparkline column. */
+const TREND_MIN_TERM_WIDTH = 100;
+
+/**
+ * Substatus label for the TREND column's second line.
+ * Matches Sentry web UI visual indicators.
+ */
+export function substatusLabel(substatus?: string | null): string {
+  switch (substatus) {
+    case "regressed":
+      return colorTag("red", "Regressed");
+    case "escalating":
+      return colorTag("yellow", "Escalating");
+    case "new":
+      return colorTag("green", "New");
+    case "ongoing":
+      return colorTag("muted", "Ongoing");
+    default:
+      return "";
+  }
+}
+
+/**
+ * Build issue subtitle from metadata for the ISSUE column.
+ *
+ * Prefers `metadata.value` (error message), falling back to
+ * `metadata.type` + `metadata.function` for structured metadata.
+ *
+ * The result is a single line — truncation to the available column
+ * width is handled by the table renderer's word-wrapping/truncation.
+ *
+ * @param metadata - Issue metadata from the API
+ * @returns Subtitle string, or empty string if no relevant metadata
+ */
+export function formatIssueSubtitle(
+  metadata?: SentryIssue["metadata"]
+): string {
+  if (!metadata) {
+    return "";
+  }
+  if (metadata.value) {
+    return collapseWhitespace(metadata.value);
+  }
+  const parts: string[] = [];
+  if (metadata.type) {
+    parts.push(metadata.type);
+  }
+  if (metadata.function) {
+    parts.push(`in ${metadata.function}`);
+  }
+  return parts.join(" ");
+}
+
+/**
+ * Collapse runs of whitespace (including newlines) into single spaces
+ * and trim the result. Prevents multi-line metadata values from blowing
+ * up the ISSUE cell height.
+ */
+function collapseWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Extract sparkline data points from the issue stats object.
+ *
+ * Stats keys depend on `groupStatsPeriod` ("24h", "14d", "auto", etc.).
+ * Each entry in the time-series is `[timestamp, count]`.
+ * Takes the first available key since the API returns one key matching
+ * the requested period.
+ *
+ * @param stats - Issue stats object from the API
+ * @returns Array of numeric counts for each time bucket
+ */
+export function extractStatsPoints(stats?: Record<string, unknown>): number[] {
+  if (!stats) {
+    return [];
+  }
+  const key = Object.keys(stats)[0];
+  if (!key) {
+    return [];
+  }
+  const buckets = stats[key];
+  if (!Array.isArray(buckets)) {
+    return [];
+  }
+  return buckets.map((b: unknown) =>
+    Array.isArray(b) && b.length >= 2 ? Number(b[1]) || 0 : 0
+  );
+}
+
 /** Row data prepared for the issue table */
 export type IssueTableRow = {
   issue: SentryIssue;
@@ -405,83 +489,280 @@ export type IssueTableRow = {
 };
 
 /**
+ * Format the SHORT ID cell with optional alias.
+ *
+ * Default (2-line): linked short ID on line 1, muted alias on line 2.
+ * Compact (single-line): alias appended as a suffix on the same line.
+ *
+ * @param issue - The Sentry issue
+ * @param formatOptions - Formatting options with alias info
+ * @param compact - Whether to use single-line layout
+ * @returns Cell string
+ */
+function formatIdCell(
+  issue: SentryIssue,
+  formatOptions: FormatShortIdOptions,
+  compact = false
+): string {
+  const formatted = formatShortId(issue.shortId, formatOptions);
+  const linked = issue.permalink
+    ? `[${formatted}](${issue.permalink})`
+    : formatted;
+  const alias = computeAliasShorthand(
+    issue.shortId,
+    formatOptions.projectAlias
+  );
+  if (alias) {
+    const sep = compact ? " " : "\n";
+    return `${linked}${sep}${colorTag("muted", alias)}`;
+  }
+  return linked;
+}
+
+/**
+ * Format the ISSUE cell.
+ *
+ * Default (2-line): bold title on line 1, muted subtitle on line 2.
+ * Compact (single-line): bold title only — truncated with "…" by the renderer.
+ *
+ * @param issue - The Sentry issue
+ * @param compact - Whether to use single-line layout
+ * @returns Cell string
+ */
+function formatIssueCell(issue: SentryIssue, compact = false): string {
+  const title = `**${escapeMarkdownInline(issue.title)}**`;
+  if (compact) {
+    return title;
+  }
+  const subtitle = formatIssueSubtitle(issue.metadata);
+  if (subtitle) {
+    return `${title}\n${colorTag("muted", escapeMarkdownInline(subtitle))}`;
+  }
+  return title;
+}
+
+/**
+ * Format the TREND cell with sparkline and substatus label.
+ *
+ * Default (2-line): sparkline on line 1, substatus label on line 2.
+ * Compact (single-line): sparkline + substatus on the same line.
+ *
+ * @param issue - The Sentry issue
+ * @param compact - Whether to use single-line layout
+ * @returns Cell string
+ */
+function formatTrendCell(issue: SentryIssue, compact = false): string {
+  const points = extractStatsPoints(
+    issue.stats as Record<string, unknown> | undefined
+  );
+  const graph = points.length > 0 ? colorTag("muted", sparkline(points)) : "";
+  const status = substatusLabel(issue.substatus);
+  const parts = [graph, status].filter(Boolean);
+  const sep = compact ? " " : "\n";
+  return parts.join(sep);
+}
+
+/**
  * Write an issue list as a Unicode-bordered markdown table.
  *
- * Columns are conditionally included based on `isMultiProject` mode.
- * Cell values are pre-colored with ANSI codes which survive the
- * cli-table3 rendering pipeline.
+ * Columns match the Sentry web UI issue stream layout:
+ *
+ * | SHORT ID (+ alias) | ISSUE | SEEN | AGE | TREND | EVENTS | USERS | TRIAGE |
+ *
+ * Default mode: 2-line rows (title + subtitle, sparkline + substatus, etc.)
+ * for maximum information density. Row separators drawn between rows.
+ *
+ * Compact mode (`--compact`): single-line rows for quick scanning. All cells
+ * collapsed to one line, long titles truncated with "…".
  *
  * @param stdout - Output writer
  * @param rows - Issues with formatting options
- * @param isMultiProject - Whether to include the ALIAS column
+ * @param options - Display options
  */
 export function writeIssueTable(
   stdout: Writer,
   rows: IssueTableRow[],
-  isMultiProject: boolean
+  options?: { compact?: boolean }
 ): void {
+  const compact = options?.compact ?? false;
+  const termWidth = process.stdout.columns || 80;
+  const showTrend = termWidth >= TREND_MIN_TERM_WIDTH;
+
   const columns: Column<IssueTableRow>[] = [
-    {
-      header: "LEVEL",
-      value: ({ issue }) => {
-        const level = (issue.level ?? "unknown").toLowerCase();
-        const tag = LEVEL_TAGS[level];
-        const label = level.toUpperCase();
-        return tag ? colorTag(tag, label) : label;
-      },
-    },
-  ];
-
-  if (isMultiProject) {
-    columns.push({
-      header: "ALIAS",
-      value: ({ issue, formatOptions }) =>
-        computeAliasShorthand(issue.shortId, formatOptions.projectAlias),
-    });
-  }
-
-  columns.push(
+    // SHORT ID — primary identifier (+ alias), never shrink
     {
       header: "SHORT ID",
-      // Short IDs are the primary identifier users copy for
-      // `sentry issue view <ID>` — never shrink or truncate them.
       shrinkable: false,
-      value: ({ issue, formatOptions }) => {
-        const formatted = formatShortId(issue.shortId, formatOptions);
-        if (issue.permalink) {
-          return `[${formatted}](${issue.permalink})`;
-        }
-        return formatted;
-      },
+      value: ({ issue, formatOptions }) =>
+        formatIdCell(issue, formatOptions, compact),
     },
+    // ISSUE — title (+ subtitle in default mode)
     {
-      header: "COUNT",
-      value: ({ issue }) => abbreviateCount(`${issue.count}`),
-      align: "right",
+      header: "ISSUE",
+      value: ({ issue }) => formatIssueCell(issue, compact),
     },
+    // SEEN — lastSeen
     {
       header: "SEEN",
       value: ({ issue }) => formatRelativeTime(issue.lastSeen),
     },
+    // AGE — firstSeen
     {
-      header: "FIXABILITY",
-      value: ({ issue }) => {
-        const text = formatFixability(issue.seerFixabilityScore);
-        const score = issue.seerFixabilityScore;
-        if (text && score !== null && score !== undefined) {
-          const tier = getSeerFixabilityLabel(score);
-          return colorTag(FIXABILITY_TAGS[tier], text);
-        }
-        return "";
-      },
+      header: "AGE",
+      value: ({ issue }) => formatRelativeTime(issue.firstSeen),
     },
+  ];
+
+  // TREND — sparkline + substatus (2-line), auto-hidden on narrow terminals
+  if (showTrend) {
+    columns.push({
+      header: "TREND",
+      value: ({ issue }) => formatTrendCell(issue, compact),
+      shrinkable: false,
+    });
+  }
+
+  columns.push(
+    // EVENTS — period-scoped count
     {
-      header: "TITLE",
-      value: ({ issue }) => escapeMarkdownInline(issue.title),
+      header: "EVENTS",
+      value: ({ issue }) => abbreviateCount(`${issue.count}`),
+      align: "right",
+    },
+    // USERS — affected user count
+    {
+      header: "USERS",
+      value: ({ issue }) => abbreviateCount(`${issue.userCount ?? 0}`),
+      align: "right",
+    },
+    // TRIAGE — combined priority + fixability for actionability
+    {
+      header: "TRIAGE",
+      value: ({ issue }) =>
+        formatTriageCell(issue.priority, issue.seerFixabilityScore),
     }
   );
 
-  writeTable(stdout, rows, columns);
+  // Row separators colored with the muted palette color (#898294 → RGB 137,130,148)
+  // so they're lighter than the solid outer borders.
+  const mutedAnsi = "\x1b[38;2;137;130;148m";
+  writeTable(stdout, rows, columns, {
+    rowSeparator: mutedAnsi,
+    truncate: true,
+  });
+}
+
+/** Weight assigned to each priority level for composite triage scoring. */
+const PRIORITY_WEIGHTS: Record<string, number> = {
+  critical: 1.0,
+  high: 0.75,
+  medium: 0.5,
+  low: 0.25,
+};
+
+/** Default impact weight when priority is unknown. */
+const DEFAULT_IMPACT_WEIGHT = 0.5;
+
+/** How much impact (priority) contributes to the composite score. */
+const IMPACT_RATIO = 0.6;
+
+/**
+ * Compute composite triage score from priority and fixability.
+ *
+ * The score blends impact (from priority) and fixability (from Seer)
+ * using a weighted average: `impact × 0.6 + fixability × 0.4`.
+ * Higher scores mean "fix this first" — high impact AND easy to fix.
+ *
+ * @param priority - Priority string from the API
+ * @param fixabilityScore - Seer fixability score (0–1)
+ * @returns Composite score (0–1), or null if neither dimension is available
+ */
+function computeTriageScore(
+  priority?: string | null,
+  fixabilityScore?: number | null
+): number | null {
+  const hasPriority = Boolean(priority);
+  const hasFix = fixabilityScore !== null && fixabilityScore !== undefined;
+
+  if (!(hasPriority || hasFix)) {
+    return null;
+  }
+
+  const impact = hasPriority
+    ? (PRIORITY_WEIGHTS[priority?.toLowerCase() ?? ""] ?? DEFAULT_IMPACT_WEIGHT)
+    : DEFAULT_IMPACT_WEIGHT;
+
+  const fix = hasFix ? fixabilityScore : DEFAULT_IMPACT_WEIGHT;
+
+  return impact * IMPACT_RATIO + fix * (1 - IMPACT_RATIO);
+}
+
+/**
+ * Format the TRIAGE cell as a single-line composite score.
+ *
+ * Combines priority (impact) and Seer fixability into a single percentage
+ * that answers "should I fix this now?". The score is colored by tier:
+ * green (≥67%), yellow (34–66%), red (≤33%).
+ *
+ * Displays:
+ * - Both available: `"High 82%"` — priority label + composite score
+ * - Priority only: `"High"` — just the label (no score without fixability)
+ * - Fixability only: `"78%"` — composite score alone
+ * - Neither: empty
+ *
+ * @param priority - Priority string from the API
+ * @param fixabilityScore - Seer AI fixability score (0–1)
+ * @returns Single-line cell string
+ */
+function formatTriageCell(
+  priority?: string | null,
+  fixabilityScore?: number | null
+): string {
+  const hasFix = fixabilityScore !== null && fixabilityScore !== undefined;
+  const label = formatPriorityLabel(priority);
+  const score = computeTriageScore(priority, fixabilityScore);
+
+  // No data at all
+  if (score === null) {
+    return "";
+  }
+
+  // Priority without fixability — show label only (no fake %)
+  if (!hasFix) {
+    return label;
+  }
+
+  // Format the composite percentage
+  const pct = Math.round(score * 100);
+  const tier = getSeerFixabilityLabel(score);
+  const tag = FIXABILITY_TAGS[tier];
+  const pctStr = colorTag(tag, `${pct}%`);
+
+  return label ? `${label} ${pctStr}` : pctStr;
+}
+
+/**
+ * Format priority as a colored label.
+ *
+ * @param priority - Priority string from the API
+ * @returns Colored label or empty string
+ */
+function formatPriorityLabel(priority?: string | null): string {
+  if (!priority) {
+    return "";
+  }
+  switch (priority.toLowerCase()) {
+    case "critical":
+      return colorTag("red", "Critical");
+    case "high":
+      return colorTag("red", "High");
+    case "medium":
+      return colorTag("yellow", "Med");
+    case "low":
+      return colorTag("muted", "Low");
+    default:
+      return priority;
+  }
 }
 
 /**
@@ -1234,89 +1515,6 @@ export function formatProjectDetails(
   return renderMarkdown(lines.join("\n"));
 }
 
-// Project Creation Formatting
-
-/** Input for the project-created success formatter */
-export type ProjectCreatedResult = {
-  /** The created project */
-  project: SentryProject;
-  /** Organization slug the project was created in */
-  orgSlug: string;
-  /** Team slug the project was assigned to */
-  teamSlug: string;
-  /** How the team was resolved */
-  teamSource: "explicit" | "auto-selected" | "auto-created";
-  /** The platform the user requested via CLI argument (used as fallback display) */
-  requestedPlatform: string;
-  /** Primary DSN, if fetched successfully */
-  dsn: string | null;
-  /** Sentry web URL for the project settings page */
-  url: string;
-  /** Whether Sentry assigned a different slug than expected */
-  slugDiverged: boolean;
-  /** The slug the user expected (derived from the project name) */
-  expectedSlug: string;
-};
-
-/**
- * Format a successful project creation as rendered markdown.
- *
- * Includes a heading, contextual notes (slug divergence, team auto-selection),
- * a key-value detail table, and a tip footer.
- *
- * @param result - Project creation context
- * @returns Rendered terminal string
- */
-export function formatProjectCreated(result: ProjectCreatedResult): string {
-  const lines: string[] = [];
-
-  lines.push(
-    `## Created project '${escapeMarkdownInline(result.project.name)}' in ${escapeMarkdownInline(result.orgSlug)}`
-  );
-  lines.push("");
-
-  // Slug divergence note
-  if (result.slugDiverged) {
-    lines.push(
-      `> **Note:** Slug \`${result.project.slug}\` was assigned because \`${result.expectedSlug}\` is already taken.`
-    );
-    lines.push("");
-  }
-
-  // Team source notes
-  if (result.teamSource === "auto-created") {
-    lines.push(
-      `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
-    );
-    lines.push("");
-  } else if (result.teamSource === "auto-selected") {
-    lines.push(
-      `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
-    );
-    lines.push("");
-  }
-
-  const kvRows: [string, string][] = [
-    ["Project", escapeMarkdownInline(result.project.name)],
-    ["Slug", safeCodeSpan(result.project.slug)],
-    ["Org", safeCodeSpan(result.orgSlug)],
-    ["Team", safeCodeSpan(result.teamSlug)],
-    ["Platform", result.project.platform || result.requestedPlatform],
-  ];
-  if (result.dsn) {
-    kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
-  }
-  kvRows.push(["URL", result.url]);
-
-  lines.push(mdKvTable(kvRows));
-  lines.push("");
-  lines.push(
-    `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
-  );
-
-  return renderMarkdown(lines.join("\n"));
-}
-
 // User Identity Formatting
 
 /**
@@ -1409,4 +1607,87 @@ export function formatExpiration(expiresAt: number): string {
     (expiresDate.getTime() - now.getTime()) / 1000
   );
   return `${expiresDate.toLocaleString()} (${formatDuration(secondsRemaining)} remaining)`;
+}
+
+// Project Creation Formatting
+
+/** Input for the project-created success formatter */
+export type ProjectCreatedResult = {
+  /** The created project */
+  project: SentryProject;
+  /** Organization slug the project was created in */
+  orgSlug: string;
+  /** Team slug the project was assigned to */
+  teamSlug: string;
+  /** How the team was resolved */
+  teamSource: "explicit" | "auto-selected" | "auto-created";
+  /** The platform the user requested via CLI argument (used as fallback display) */
+  requestedPlatform: string;
+  /** Primary DSN, if fetched successfully */
+  dsn: string | null;
+  /** Sentry web URL for the project settings page */
+  url: string;
+  /** Whether Sentry assigned a different slug than expected */
+  slugDiverged: boolean;
+  /** The slug the user expected (derived from the project name) */
+  expectedSlug: string;
+};
+
+/**
+ * Format a successful project creation as rendered markdown.
+ *
+ * Includes a heading, contextual notes (slug divergence, team auto-selection),
+ * a key-value detail table, and a tip footer.
+ *
+ * @param result - Project creation context
+ * @returns Rendered terminal string
+ */
+export function formatProjectCreated(result: ProjectCreatedResult): string {
+  const lines: string[] = [];
+
+  lines.push(
+    `## Created project '${escapeMarkdownInline(result.project.name)}' in ${escapeMarkdownInline(result.orgSlug)}`
+  );
+  lines.push("");
+
+  // Slug divergence note
+  if (result.slugDiverged) {
+    lines.push(
+      `> **Note:** Slug \`${result.project.slug}\` was assigned because \`${result.expectedSlug}\` is already taken.`
+    );
+    lines.push("");
+  }
+
+  // Team source notes
+  if (result.teamSource === "auto-created") {
+    lines.push(
+      `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
+    );
+    lines.push("");
+  } else if (result.teamSource === "auto-selected") {
+    lines.push(
+      `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+    );
+    lines.push("");
+  }
+
+  const kvRows: [string, string][] = [
+    ["Project", escapeMarkdownInline(result.project.name)],
+    ["Slug", safeCodeSpan(result.project.slug)],
+    ["Org", safeCodeSpan(result.orgSlug)],
+    ["Team", safeCodeSpan(result.teamSlug)],
+    ["Platform", result.project.platform || result.requestedPlatform],
+  ];
+  if (result.dsn) {
+    kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
+  }
+  kvRows.push(["URL", result.url]);
+
+  lines.push(mdKvTable(kvRows));
+  lines.push("");
+  lines.push(
+    `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
+  );
+
+  return renderMarkdown(lines.join("\n"));
 }

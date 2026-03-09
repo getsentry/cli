@@ -1149,6 +1149,8 @@ export async function listIssuesPaginated(
      *  instead of `project:<slug>` search syntax, avoiding "not actively
      *  selected" errors. */
     projectId?: number;
+    /** Controls the time resolution of inline stats data. "auto" adapts to statsPeriod. */
+    groupStatsPeriod?: "" | "14d" | "24h" | "auto";
   } = {}
 ): Promise<PaginatedResponse<SentryIssue[]>> {
   // When we have a numeric project ID, use the `project` query param (Array<number>)
@@ -1175,6 +1177,7 @@ export async function listIssuesPaginated(
       limit: options.perPage ?? 25,
       sort: options.sort,
       statsPeriod: options.statsPeriod,
+      groupStatsPeriod: options.groupStatsPeriod,
     },
   });
 
@@ -1221,6 +1224,8 @@ export async function listIssuesAllPages(
     statsPeriod?: string;
     /** Numeric project ID for direct project selection via query param. */
     projectId?: number;
+    /** Controls the time resolution of inline stats data. "auto" adapts to statsPeriod. */
+    groupStatsPeriod?: "" | "14d" | "24h" | "auto";
     /** Resume pagination from this cursor instead of starting from the beginning. */
     startCursor?: string;
     /** Called after each page is fetched. Useful for progress indicators. */
@@ -1247,6 +1252,7 @@ export async function listIssuesAllPages(
       sort: options.sort,
       statsPeriod: options.statsPeriod,
       projectId: options.projectId,
+      groupStatsPeriod: options.groupStatsPeriod,
     });
 
     allResults.push(...response.data);

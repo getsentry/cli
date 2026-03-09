@@ -84,6 +84,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
+  readonly compact: boolean;
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -438,7 +439,7 @@ async function fetchIssuesForTarget(
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
-      { ...options, projectId: target.projectId }
+      { ...options, projectId: target.projectId, groupStatsPeriod: "auto" }
     );
     return { target, issues, hasMore: !!nextCursor, nextCursor };
   });
@@ -735,6 +736,7 @@ async function fetchOrgAllIssues(
       perPage,
       sort: flags.sort,
       statsPeriod: flags.period,
+      groupStatsPeriod: "auto",
     });
     return { issues: response.data, nextCursor: response.nextCursor };
   }
@@ -745,6 +747,7 @@ async function fetchOrgAllIssues(
     limit: flags.limit,
     sort: flags.sort,
     statsPeriod: flags.period,
+    groupStatsPeriod: "auto",
     onPage,
   });
   return { issues, nextCursor };
@@ -826,7 +829,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
       isMultiProject: true,
     },
   }));
-  writeIssueTable(stdout, issuesWithOpts, true);
+  writeIssueTable(stdout, issuesWithOpts, { compact: flags.compact });
 
   if (hasMore) {
     stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
@@ -1088,7 +1091,7 @@ async function handleResolvedTargets(
       : `Issues from ${validResults.length} projects`;
 
   writeListHeader(stdout, title);
-  writeIssueTable(stdout, issuesWithOptions, isMultiProject);
+  writeIssueTable(stdout, issuesWithOptions, { compact: flags.compact });
 
   let footerMode: "single" | "multi" | "none" = "none";
   if (isMultiProject) {
@@ -1198,6 +1201,11 @@ export const listCommand = buildListCommand("issue", {
         optional: true,
       },
       fresh: FRESH_FLAG,
+      compact: {
+        kind: "boolean",
+        brief: "Single-line rows for compact output",
+        default: false,
+      },
     },
     aliases: {
       ...LIST_BASE_ALIASES,
