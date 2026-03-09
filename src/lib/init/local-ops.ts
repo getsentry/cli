@@ -52,6 +52,7 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "&&", label: "command chaining (&&)" },
     { pattern: "||", label: "command chaining (||)" },
     { pattern: "|", label: "piping (|)" },
+    { pattern: "&", label: "background execution (&)" },
     { pattern: "`", label: "command substitution (`)" },
     { pattern: "$(", label: "command substitution ($()" },
     { pattern: "(", label: "subshell/grouping (()" },
@@ -64,7 +65,6 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "\r", label: "carriage return" },
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
-    { pattern: "&", label: "background execution (&)" },
     // Glob and brace expansion — brace expansion is the real risk
     // (e.g. `npm install {evil,@sentry/node}`)
     { pattern: "{", label: "brace expansion ({)" },
