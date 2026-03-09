@@ -24,6 +24,7 @@ import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { warning } from "./formatters/colors.js";
 import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
+import { disableResponseCache } from "./response-cache.js";
 
 // ---------------------------------------------------------------------------
 // Level A: shared parameter / flag definitions
@@ -82,6 +83,60 @@ export const LIST_JSON_FLAG = {
   brief: "Output JSON",
   default: false,
 } as const;
+
+/**
+ * The `--fresh` / `-f` flag shared by read-only commands.
+ * Bypasses the response cache and fetches fresh data from the API.
+ *
+ * Add to any command's `flags` object, then call `applyFreshFlag(flags)` at
+ * the top of `func()` to activate cache bypass when the flag is set.
+ *
+ * @example
+ * ```ts
+ * import { applyFreshFlag, FRESH_ALIASES, FRESH_FLAG } from "../lib/list-command.js";
+ *
+ * // In parameters:
+ * flags: { ..., fresh: FRESH_FLAG },
+ * aliases: { ...FRESH_ALIASES },
+ *
+ * // In func():
+ * applyFreshFlag(flags);
+ * ```
+ */
+export const FRESH_FLAG = {
+  kind: "boolean" as const,
+  brief: "Bypass cache and fetch fresh data",
+  default: false,
+} as const;
+
+/**
+ * Alias map for the `--fresh` flag: `-f` → `--fresh`.
+ *
+ * Spread into a command's `aliases` alongside other aliases:
+ * ```ts
+ * aliases: { ...FRESH_ALIASES, w: "web" }
+ * ```
+ *
+ * **Note**: Commands that use `-f` for a different flag (e.g. `log list`
+ * uses `-f` for `--follow`) should NOT spread this constant.
+ */
+export const FRESH_ALIASES = { f: "fresh" } as const;
+
+/**
+ * Apply the `--fresh` flag: disables the response cache for this invocation.
+ *
+ * Call at the top of a command's `func()` after defining the `fresh` flag:
+ * ```ts
+ * flags: { fresh: FRESH_FLAG },
+ * async func(this: SentryContext, flags) {
+ *   applyFreshFlag(flags);
+ * ```
+ */
+export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
+  if (flags.fresh) {
+    disableResponseCache();
+  }
+}
 
 /** Matches strings that are all digits — used to detect invalid cursor values */
 const ALL_DIGITS_RE = /^\d+$/;
@@ -346,8 +401,9 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         limit: buildListLimitFlag(config.entityPlural),
         json: LIST_JSON_FLAG,
         cursor: LIST_CURSOR_FLAG,
+        fresh: FRESH_FLAG,
       },
-      aliases: LIST_BASE_ALIASES,
+      aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES },
     },
     async func(
       this: SentryContext,
@@ -355,9 +411,11 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly limit: number;
         readonly json: boolean;
         readonly cursor?: string;
+        readonly fresh: boolean;
       },
       target?: string
     ): Promise<void> {
+      applyFreshFlag(flags);
       const { stdout, cwd } = this;
       const parsed = parseOrgProjectArg(target);
       await dispatchOrgScopedList({ config, stdout, cwd, flags, parsed });

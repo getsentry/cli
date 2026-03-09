@@ -8,6 +8,9 @@ const base = process.env.DOCS_BASE_PATH || "/";
 export default defineConfig({
   site: "https://cli.sentry.dev",
   base,
+  markdown: {
+    smartypants: false,
+  },
   integrations: [
     sentry({
       project: "cli-website",

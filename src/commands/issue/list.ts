@@ -31,10 +31,10 @@ import {
 import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import {
   ApiError,
-  AuthError,
   ContextError,
   ResolutionError,
   ValidationError,
+  withAuthGuard,
 } from "../../lib/errors.js";
 import {
   type IssueTableRow,
@@ -43,8 +43,11 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_JSON_FLAG,
   LIST_TARGET_POSITIONAL,
@@ -80,6 +83,7 @@ type ListFlags = {
   readonly period: string;
   readonly json: boolean;
   readonly cursor?: string;
+  readonly fresh: boolean;
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -354,9 +358,29 @@ async function resolveTargetsFromParsedArg(
 
     case "project-search": {
       // Find project across all orgs
-      const matches = await findProjectsBySlug(parsed.projectSlug);
+      const { projects: matches, orgs } = await findProjectsBySlug(
+        parsed.projectSlug
+      );
 
       if (matches.length === 0) {
+        // Check if the slug matches an organization — common mistake.
+        // Unlike simpler list commands that auto-redirect via orgAllFallback,
+        // issue list has custom per-project query logic (query rewriting,
+        // budget redistribution) that doesn't support org-all mode here.
+        // Throwing with actionable hints is the correct behavior.
+        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
+        if (isOrg) {
+          throw new ResolutionError(
+            `'${parsed.projectSlug}'`,
+            "is an organization, not a project",
+            `sentry issue list ${parsed.projectSlug}/`,
+            [
+              `List projects: sentry project list ${parsed.projectSlug}/`,
+              `Specify a project: sentry issue list ${parsed.projectSlug}/<project>`,
+            ]
+          );
+        }
+
         throw new ResolutionError(
           `Project '${parsed.projectSlug}'`,
           "not found",
@@ -410,27 +434,23 @@ async function fetchIssuesForTarget(
     onPage?: (fetched: number, limit: number) => void;
   }
 ): Promise<FetchResult> {
-  try {
+  const result = await withAuthGuard(async () => {
     const { issues, nextCursor } = await listIssuesAllPages(
       target.org,
       target.project,
       { ...options, projectId: target.projectId }
     );
-    return {
-      success: true,
-      data: { target, issues, hasMore: !!nextCursor, nextCursor },
-    };
-  } catch (error) {
-    // Auth errors should propagate - user needs to authenticate
-    if (error instanceof AuthError) {
-      throw error;
-    }
+    return { target, issues, hasMore: !!nextCursor, nextCursor };
+  });
 
-    return {
-      success: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
+  if (!result.ok) {
+    const error =
+      result.error instanceof Error
+        ? result.error
+        : new Error(String(result.error));
+    return { success: false, error };
   }
+  return { success: true, data: result.value };
 }
 
 /**
@@ -1177,14 +1197,22 @@ export const listCommand = buildListCommand("issue", {
           'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
       },
+      fresh: FRESH_FLAG,
     },
-    aliases: { ...LIST_BASE_ALIASES, q: "query", s: "sort", t: "period" },
+    aliases: {
+      ...LIST_BASE_ALIASES,
+      ...FRESH_ALIASES,
+      q: "query",
+      s: "sort",
+      t: "period",
+    },
   },
   async func(
     this: SentryContext,
     flags: ListFlags,
     target?: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);

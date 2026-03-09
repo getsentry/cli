@@ -26,7 +26,7 @@ import { setDefaults } from "../../../src/lib/db/defaults.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 type ListFlags = {
@@ -231,6 +231,60 @@ describe("issue list: error propagation", () => {
       expect(error).toBeInstanceOf(ApiError);
       const apiErr = error as ApiError;
       expect(apiErr.detail).toBeDefined();
+    }
+  });
+});
+
+describe("issue list: org-as-project detection", () => {
+  test("throws ResolutionError when bare slug matches an organization", async () => {
+    // Two orgs returned from /organizations/, but getProject returns 404 for both
+    // The slug "acme-corp" matches one of the org slugs
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+
+      // listOrganizations — return two orgs, one matching the slug
+      if (
+        req.url.includes("/organizations/") &&
+        !req.url.includes("/projects/")
+      ) {
+        return Response.json([
+          { slug: "acme-corp", name: "Acme Corp" },
+          { slug: "other-org", name: "Other Org" },
+        ]);
+      }
+
+      // getProject: no project found for either org
+      if (req.url.includes("/projects/")) {
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      }
+
+      // region resolution
+      if (req.url.includes("/region/")) {
+        return Response.json([{ name: "default", url: DEFAULT_SENTRY_URL }]);
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+
+    try {
+      // Bare slug "acme-corp" triggers project-search mode
+      await func.call(
+        context,
+        { limit: 10, sort: "date", json: false },
+        "acme-corp"
+      );
+      expect.unreachable("Should have thrown ResolutionError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("is an organization, not a project");
+      expect(msg).toContain("acme-corp/");
     }
   });
 });

@@ -2,6 +2,7 @@
  * Authentication credential storage (single-row table pattern).
  */
 
+import { clearResponseCache } from "../response-cache.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { runUpsert } from "./utils.js";
@@ -153,7 +154,7 @@ export function setAuthToken(
   });
 }
 
-export function clearAuth(): void {
+export async function clearAuth(): Promise<void> {
   withDbSpan("clearAuth", () => {
     const db = getDatabase();
     db.query("DELETE FROM auth WHERE id = 1").run();
@@ -162,6 +163,14 @@ export function clearAuth(): void {
     db.query("DELETE FROM org_regions").run();
     db.query("DELETE FROM pagination_cursors").run();
   });
+
+  // Clear cached API responses — they are tied to the current user's permissions.
+  // Awaited so cache is fully removed before the process exits.
+  try {
+    await clearResponseCache();
+  } catch {
+    // Non-fatal: cache directory may not exist yet
+  }
 }
 
 export async function isAuthenticated(): Promise<boolean> {

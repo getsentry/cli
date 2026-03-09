@@ -157,9 +157,10 @@ describe("resolveOrgProjectTarget", () => {
   });
 
   test("resolves project-search when single match found", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "found-org", slug: "my-proj", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ orgSlug: "found-org", slug: "my-proj", name: "My Project" }],
+      orgs: [],
+    });
 
     const parsed = { type: "project-search" as const, projectSlug: "my-proj" };
 
@@ -168,7 +169,7 @@ describe("resolveOrgProjectTarget", () => {
   });
 
   test("throws ResolutionError for project-search when no match", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
     const parsed = {
       type: "project-search" as const,
@@ -181,10 +182,13 @@ describe("resolveOrgProjectTarget", () => {
   });
 
   test("throws ResolutionError for project-search when multiple matches", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "org-a", slug: "my-proj", name: "My Project" },
-      { orgSlug: "org-b", slug: "my-proj", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-a", slug: "my-proj", name: "My Project" },
+        { orgSlug: "org-b", slug: "my-proj", name: "My Project" },
+      ],
+      orgs: [],
+    });
 
     const parsed = { type: "project-search" as const, projectSlug: "my-proj" };
 
@@ -229,6 +233,30 @@ describe("resolveOrgProjectTarget", () => {
       expect((err as Error).message).toContain("sentry");
     }
   });
+
+  test("throws ResolutionError when project-search slug matches an organization", async () => {
+    // Lines 1017-1023: slug matches an org but no project → org-as-project error
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
+    });
+
+    const parsed = {
+      type: "project-search" as const,
+      projectSlug: "acme-corp",
+    };
+
+    try {
+      await resolveOrgProjectTarget(parsed, CWD, "trace list");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ResolutionError);
+      const msg = (err as ResolutionError).message;
+      expect(msg).toContain("is an organization, not a project");
+      expect(msg).toContain("acme-corp/<project>");
+      expect(msg).toContain("sentry project list acme-corp/");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -263,9 +291,10 @@ describe("resolveOrgProjectFromArg", () => {
   });
 
   test("resolves bare project slug string via project-search", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { orgSlug: "found-org", slug: "my-proj", name: "My Project" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ orgSlug: "found-org", slug: "my-proj", name: "My Project" }],
+      orgs: [],
+    });
 
     const result = await resolveOrgProjectFromArg("my-proj", CWD, "log list");
     expect(result).toEqual({ org: "found-org", project: "my-proj" });

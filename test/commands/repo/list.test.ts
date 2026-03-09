@@ -87,9 +87,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("outputs JSON array when --json flag is set", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
@@ -105,9 +106,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("outputs empty JSON array when no repos found with --json", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -119,9 +121,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("writes 'No repositories found' when empty without --json", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -133,9 +136,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("writes header and rows for human output", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
@@ -160,9 +164,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
       id: String(i),
       name: `repo-${i}`,
     }));
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue(manyRepos);
 
     const { context, stdoutWrite } = createMockContext();
@@ -174,9 +179,10 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("shows all repos when count is under limit", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([
-      { slug: "test-proj", orgSlug: "test-org" },
-    ]);
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [{ slug: "test-proj", orgSlug: "test-org" }],
+      orgs: [],
+    });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
@@ -188,7 +194,7 @@ describe("listCommand.func — project-search (bare slug)", () => {
   });
 
   test("outputs empty JSON array when project not found", async () => {
-    findProjectsBySlugSpy.mockResolvedValue([]);
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();

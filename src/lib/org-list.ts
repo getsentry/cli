@@ -37,10 +37,18 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "./db/pagination.js";
-import { AuthError, ContextError, ValidationError } from "./errors.js";
+import {
+  type AuthGuardSuccess,
+  ContextError,
+  ValidationError,
+  withAuthGuard,
+} from "./errors.js";
 import { writeFooter, writeJson } from "./formatters/index.js";
+import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
+
+const log = logger.withTag("org-list");
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -210,15 +218,11 @@ export async function fetchOrgSafe<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   orgSlug: string
 ): Promise<TWithOrg[]> {
-  try {
+  const result = await withAuthGuard(async () => {
     const items = await config.listForOrg(orgSlug);
     return items.map((item) => config.withOrg(item, orgSlug));
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    return [];
-  }
+  });
+  return result.ok ? result.value : [];
 }
 
 /**
@@ -253,6 +257,30 @@ type OrgAllOptions<TEntity, TWithOrg> = {
   contextKey: string;
   cursor: string | undefined;
 };
+
+/**
+ * Run org-all mode for a given org slug.
+ *
+ * Convenience wrapper around {@link handleOrgAll} used by the project-search
+ * fallback when a bare slug turns out to be an organization. Starts a fresh
+ * listing (no cursor) for the org.
+ */
+function runOrgAll<TEntity, TWithOrg>(
+  config: OrgListConfig<TEntity, TWithOrg>,
+  stdout: Writer,
+  org: string,
+  flags: BaseListFlags
+): Promise<void> {
+  const contextKey = buildOrgContextKey(org);
+  return handleOrgAll({
+    config,
+    stdout,
+    org,
+    flags,
+    contextKey,
+    cursor: undefined,
+  });
+}
 
 /**
  * Handle org-all mode: cursor-paginated listing for a single org.
@@ -531,16 +559,42 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
  * If `config.listForProject` is available, fetches entities scoped to each
  * matched project. Otherwise fetches org-scoped entities from the matched
  * project's parent org (since the entity type is org-scoped).
+ *
+ * @param orgAllFallback - Optional callback invoked when the slug matches
+ *   an organization instead of a project. Receives the org slug and should
+ *   delegate to the org-all handler. When not provided, a helpful error is
+ *   thrown instead.
  */
 export async function handleProjectSearch<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
   stdout: Writer,
   projectSlug: string,
-  flags: BaseListFlags
+  options: {
+    flags: BaseListFlags;
+    orgAllFallback?: (orgSlug: string) => Promise<void>;
+  }
 ): Promise<void> {
-  const matches = await findProjectsBySlug(projectSlug);
+  const { flags, orgAllFallback } = options;
+  const { projects: matches, orgs } = await findProjectsBySlug(projectSlug);
 
   if (matches.length === 0) {
+    // Check if the slug matches an organization — common mistake
+    const matchingOrg = orgs.find((o) => o.slug === projectSlug);
+    if (matchingOrg) {
+      if (orgAllFallback) {
+        log.warn(
+          `'${projectSlug}' is an organization, not a project. ` +
+            `Listing all ${config.entityPlural} in '${projectSlug}'.`
+        );
+        return orgAllFallback(projectSlug);
+      }
+      throw new ContextError(
+        "Project",
+        `'${projectSlug}' is an organization, not a project.\n\n` +
+          `Did you mean: ${config.commandPrefix} ${projectSlug}/`
+      );
+    }
+
     if (flags.json) {
       writeJson(stdout, []);
       return;
@@ -561,19 +615,16 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     const listForProject = config.listForProject;
     // Fetch entities scoped to each matched project in parallel
     const results = await Promise.all(
-      matches.map(async (m) => {
-        try {
+      matches.map((m) =>
+        withAuthGuard(async () => {
           const raw = await listForProject(m.orgSlug, m.slug);
           return raw.map((entity) => config.withOrg(entity, m.orgSlug));
-        } catch (error) {
-          if (error instanceof AuthError) {
-            throw error;
-          }
-          return [] as TWithOrg[];
-        }
-      })
+        })
+      )
     );
-    allItems = results.flat();
+    allItems = results
+      .filter((r): r is AuthGuardSuccess<TWithOrg[]> => r.ok)
+      .flatMap((r) => r.value);
   } else {
     // Entity is org-scoped — fetch from each unique parent org
     const uniqueOrgs = [...new Set(matches.map((m) => m.orgSlug))];
@@ -678,12 +729,11 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
     },
 
     "project-search": (ctx) =>
-      handleProjectSearch(
-        config,
-        ctx.stdout,
-        ctx.parsed.projectSlug,
-        ctx.flags
-      ),
+      handleProjectSearch(config, ctx.stdout, ctx.parsed.projectSlug, {
+        flags: ctx.flags,
+        orgAllFallback: (orgSlug) =>
+          runOrgAll(config, ctx.stdout, orgSlug, ctx.flags),
+      }),
 
     "org-all": (ctx) => {
       const contextKey = buildOrgContextKey(ctx.parsed.org);

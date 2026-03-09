@@ -29,7 +29,7 @@ export const TEST_ISSUE_ID = "400001";
 export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
-export const TEST_LOG_ID = "log-detail-001";
+export const TEST_LOG_ID = "a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5";
 export const TEST_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 
 const projectKeysFixture = [
@@ -227,11 +227,20 @@ export const apiRoutes: MockRoute[] = [
         // Logs dataset (default)
         const query = url.searchParams.get("query");
         // If query contains sentry.item_id filter, return detailed log
-        // Query format: "project:${projectSlug} sentry.item_id:${logId}"
+        // Query format: "project:${proj} sentry.item_id:${id}" or
+        //               "project:${proj} sentry.item_id:[id1,id2,...]"
         if (query?.includes("sentry.item_id:")) {
-          const logIdMatch = query.match(/sentry\.item_id:(\S+)/);
-          const logId = logIdMatch?.[1];
-          if (logId === TEST_LOG_ID) {
+          // Extract IDs from both single and bracket syntax
+          const bracketMatch = query.match(/sentry\.item_id:\[([^\]]+)\]/);
+          const singleMatch = query.match(/sentry\.item_id:([0-9a-f]{32})/i);
+          let ids: string[] = [];
+          if (bracketMatch) {
+            ids = bracketMatch[1].split(",").map((s) => s.trim());
+          } else if (singleMatch) {
+            ids = [singleMatch[1]];
+          }
+
+          if (ids.includes(TEST_LOG_ID)) {
             return { body: logDetailFixture };
           }
           // Return empty data for non-existent log

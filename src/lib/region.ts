@@ -8,7 +8,7 @@
 import { retrieveAnOrganization } from "@sentry/api";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
-import { AuthError } from "./errors.js";
+import { withAuthGuard } from "./errors.js";
 import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
@@ -36,35 +36,29 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
   const baseUrl = getSentryBaseUrl();
   const config = getSdkConfig(baseUrl);
 
-  try {
-    const result = await retrieveAnOrganization({
+  const result = await withAuthGuard(async () => {
+    const response = await retrieveAnOrganization({
       ...config,
       path: { organization_id_or_slug: orgSlug },
     });
 
-    if (result.error !== undefined) {
-      // Propagate auth errors so callers can prompt login
-      if (result.error instanceof AuthError) {
-        throw result.error;
-      }
-      return baseUrl;
+    // Throw SDK errors so withAuthGuard can discriminate:
+    // AuthError propagates, others fall back to default URL
+    if (response.error !== undefined) {
+      throw response.error;
     }
 
-    const regionUrl = result.data?.links?.regionUrl ?? baseUrl;
+    const regionUrl = response.data?.links?.regionUrl ?? baseUrl;
 
     // Cache for future use
     await setOrgRegion(orgSlug, regionUrl);
 
     return regionUrl;
-  } catch (error) {
-    // Propagate auth errors so callers can prompt login
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Other errors (network, 404, etc.) fall back to default
-    // This handles self-hosted instances without multi-region
-    return getSentryBaseUrl();
-  }
+  });
+
+  // Other errors (network, 404, etc.) fall back to default
+  // This handles self-hosted instances without multi-region
+  return result.ok ? result.value : baseUrl;
 }
 
 /**

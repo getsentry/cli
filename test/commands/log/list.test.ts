@@ -784,7 +784,8 @@ describe("listCommand.func — follow mode (standard)", () => {
   });
 
   test("passes afterTimestamp to poll calls", async () => {
-    // sampleLogs[0] has the highest timestamp_precise (newest-first from API)
+    // maxTimestamp scans the entire batch for the highest timestamp_precise
+    const maxTs = Math.max(...sampleLogs.map((l) => l.timestamp_precise));
     listLogsSpy.mockResolvedValueOnce(sampleLogs).mockResolvedValueOnce([]);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
@@ -797,10 +798,10 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint.trigger();
     await promise;
 
-    // Poll call (index 1) should include afterTimestamp from first log
+    // Poll call (index 1) should include afterTimestamp from max in batch
     const pollCall = listLogsSpy.mock.calls[1];
     expect(pollCall).toBeDefined();
-    expect(pollCall[2].afterTimestamp).toBe(sampleLogs[0].timestamp_precise);
+    expect(pollCall[2].afterTimestamp).toBe(maxTs);
     expect(pollCall[2].statsPeriod).toBe("10m");
   });
 

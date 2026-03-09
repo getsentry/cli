@@ -15,6 +15,11 @@ import {
   formatSolution,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import type { Writer } from "../../types/index.js";
 import {
   type AutofixState,
@@ -34,6 +39,7 @@ type PlanFlags = {
   readonly cause?: number;
   readonly json: boolean;
   readonly force: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -174,13 +180,16 @@ export const planCommand = buildCommand({
         brief: "Force new plan even if one exists",
         default: false,
       },
+      fresh: FRESH_FLAG,
     },
+    aliases: FRESH_ALIASES,
   },
   async func(
     this: SentryContext,
     flags: PlanFlags,
     issueArg: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages

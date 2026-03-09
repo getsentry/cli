@@ -480,8 +480,10 @@ export const SentryLogSchema = z
     "sentry.item_id": z.string(),
     /** ISO timestamp of the log entry */
     timestamp: z.string(),
-    /** Nanosecond-precision timestamp for accurate ordering and filtering */
-    timestamp_precise: z.number(),
+    /** Nanosecond-precision timestamp for accurate ordering and filtering.
+     * Coerced from string because the API may return large integers as strings
+     * to avoid precision loss beyond Number.MAX_SAFE_INTEGER. */
+    timestamp_precise: z.coerce.number(),
     /** Log message content */
     message: z.string().nullable().optional(),
     /** Log severity level (error, warning, info, debug, etc.) */
@@ -516,8 +518,10 @@ export const DetailedSentryLogSchema = z
     "sentry.item_id": z.string(),
     /** ISO timestamp of the log entry */
     timestamp: z.string(),
-    /** Nanosecond-precision timestamp for accurate ordering */
-    timestamp_precise: z.number(),
+    /** Nanosecond-precision timestamp for accurate ordering.
+     * Coerced from string because the API may return large integers as strings
+     * to avoid precision loss beyond Number.MAX_SAFE_INTEGER. */
+    timestamp_precise: z.coerce.number(),
     /** Log message content */
     message: z.string().nullable().optional(),
     /** Log severity level (error, warning, info, debug, etc.) */
@@ -584,18 +588,24 @@ export const TraceLogSchema = z
   .object({
     /** Unique identifier for this log entry */
     id: z.string(),
-    /** Numeric ID of the project this log belongs to */
-    "project.id": z.number(),
+    /** Numeric ID of the project this log belongs to.
+     * Coerced from string because some API responses return numeric IDs as strings. */
+    "project.id": z.coerce.number(),
     /** The 32-character hex trace ID this log is associated with */
     trace: z.string(),
-    /** Numeric OTel severity level (e.g., 9 = INFO, 13 = WARN, 17 = ERROR) */
-    severity_number: z.number(),
+    /** Numeric OTel severity level (e.g., 9 = INFO, 13 = WARN, 17 = ERROR).
+     * Optional because not all log entries include this field.
+     * Coerced from string for resilience against API format variations. */
+    severity_number: z.coerce.number().optional(),
     /** Severity label (e.g., "info", "warn", "error") */
     severity: z.string(),
     /** ISO 8601 timestamp */
     timestamp: z.string(),
-    /** High-precision timestamp in nanoseconds */
-    timestamp_precise: z.number(),
+    /** High-precision timestamp in nanoseconds.
+     * Optional because some API responses may omit it.
+     * Coerced from string because nanosecond timestamps (≈1.7e18 in 2026)
+     * exceed Number.MAX_SAFE_INTEGER and APIs may return them as strings. */
+    timestamp_precise: z.coerce.number().optional(),
     /** Log message content */
     message: z.string().nullable().optional(),
   })

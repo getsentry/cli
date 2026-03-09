@@ -74,6 +74,8 @@ describe("parsePositionalArgs properties", () => {
       property(
         tuple(nonEmptyStringArb, nonEmptyStringArb),
         ([first, second]) => {
+          // Skip swap-detection cases (second has / but first doesn't)
+          pre(first.includes("/") || !second.includes("/"));
           const result = parsePositionalArgs([first, second]);
           expect(result.targetArg).toBe(first);
           expect(result.traceId).toBe(second);
@@ -108,6 +110,8 @@ describe("parsePositionalArgs properties", () => {
           array(nonEmptyStringArb, { minLength: 1, maxLength: 5 })
         ),
         ([first, second, extras]) => {
+          // Skip swap-detection cases (second has / but first doesn't)
+          pre(first.includes("/") || !second.includes("/"));
           const args = [first, second, ...extras];
           const result = parsePositionalArgs(args);
 

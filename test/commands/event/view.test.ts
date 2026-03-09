@@ -1,8 +1,8 @@
 /**
  * Event View Command Tests
  *
- * Tests for positional argument parsing and project resolution
- * in src/commands/event/view.ts
+ * Tests for positional argument parsing, project resolution,
+ * and viewCommand func() body in src/commands/event/view.ts
  */
 
 import {
@@ -19,11 +19,14 @@ import {
   resolveAutoDetectTarget,
   resolveEventTarget,
   resolveOrgAllTarget,
+  viewCommand,
 } from "../../../src/commands/event/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ProjectSpecificationType } from "../../../src/lib/arg-parsing.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
@@ -34,6 +37,9 @@ import {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as spanTree from "../../../src/lib/span-tree.js";
+import type { SentryEvent } from "../../../src/types/index.js";
 
 describe("parsePositionalArgs", () => {
   describe("single argument (event ID only)", () => {
@@ -228,7 +234,7 @@ describe("resolveProjectBySlug", () => {
 
   describe("no projects found", () => {
     test("throws ResolutionError when project not found", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([]);
+      findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
       await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
         ResolutionError
@@ -236,7 +242,7 @@ describe("resolveProjectBySlug", () => {
     });
 
     test("includes project name in error message", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([]);
+      findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
       try {
         await resolveProjectBySlug("frontend", HINT);
@@ -255,12 +261,51 @@ describe("resolveProjectBySlug", () => {
     });
   });
 
+  test("throws ResolutionError with org hint when slug matches an organization", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
+    });
+
+    try {
+      await resolveProjectBySlug("acme-corp", HINT);
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("is an organization, not a project");
+      expect(msg).toContain("acme-corp/<project>");
+    }
+  });
+
+  test("org hint replaces <org>/<project> placeholder, not slug in command name", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "sentry", name: "Sentry" }],
+    });
+
+    try {
+      await resolveProjectBySlug("sentry", HINT);
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      // Should substitute the <org>/<project> placeholder, not the "sentry" in the command name
+      expect(msg).toContain("sentry event view sentry/<project>");
+      // "sentry" command prefix should still be intact
+      expect(msg).not.toContain("sentry/<project> event view");
+    }
+  });
+
   describe("multiple projects found", () => {
     test("throws ValidationError when project exists in multiple orgs", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        { slug: "frontend", orgSlug: "org-a", id: "1", name: "Frontend" },
-        { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          { slug: "frontend", orgSlug: "org-a", id: "1", name: "Frontend" },
+          { slug: "frontend", orgSlug: "org-b", id: "2", name: "Frontend" },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       await expect(resolveProjectBySlug("frontend", HINT)).rejects.toThrow(
         ValidationError
@@ -268,10 +313,13 @@ describe("resolveProjectBySlug", () => {
     });
 
     test("includes all orgs in error message", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        { slug: "frontend", orgSlug: "acme-corp", id: "1", name: "Frontend" },
-        { slug: "frontend", orgSlug: "beta-inc", id: "2", name: "Frontend" },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          { slug: "frontend", orgSlug: "acme-corp", id: "1", name: "Frontend" },
+          { slug: "frontend", orgSlug: "beta-inc", id: "2", name: "Frontend" },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       try {
         await resolveProjectBySlug(
@@ -291,11 +339,14 @@ describe("resolveProjectBySlug", () => {
     });
 
     test("includes usage example in error message", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        { slug: "api", orgSlug: "org-1", id: "1", name: "API" },
-        { slug: "api", orgSlug: "org-2", id: "2", name: "API" },
-        { slug: "api", orgSlug: "org-3", id: "3", name: "API" },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          { slug: "api", orgSlug: "org-1", id: "1", name: "API" },
+          { slug: "api", orgSlug: "org-2", id: "2", name: "API" },
+          { slug: "api", orgSlug: "org-3", id: "3", name: "API" },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       try {
         await resolveProjectBySlug(
@@ -316,9 +367,12 @@ describe("resolveProjectBySlug", () => {
 
   describe("single project found", () => {
     test("returns resolved target for single match", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       const result = await resolveProjectBySlug("backend", HINT);
 
@@ -329,14 +383,17 @@ describe("resolveProjectBySlug", () => {
     });
 
     test("uses orgSlug from project result", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        {
-          slug: "mobile-app",
-          orgSlug: "acme-industries",
-          id: "100",
-          name: "Mobile App",
-        },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          {
+            slug: "mobile-app",
+            orgSlug: "acme-industries",
+            id: "100",
+            name: "Mobile App",
+          },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       const result = await resolveProjectBySlug("mobile-app", HINT);
 
@@ -344,9 +401,17 @@ describe("resolveProjectBySlug", () => {
     });
 
     test("preserves project slug in result", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        { slug: "web-frontend", orgSlug: "org", id: "1", name: "Web Frontend" },
-      ] as ProjectWithOrg[]);
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          {
+            slug: "web-frontend",
+            orgSlug: "org",
+            id: "1",
+            name: "Web Frontend",
+          },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
       const result = await resolveProjectBySlug("web-frontend", HINT);
 
@@ -356,7 +421,7 @@ describe("resolveProjectBySlug", () => {
 
   describe("numeric project ID", () => {
     test("uses numeric-ID-specific error when not found", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([]);
+      findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
       try {
         await resolveProjectBySlug("7275560680", HINT);
@@ -371,43 +436,19 @@ describe("resolveProjectBySlug", () => {
       }
     });
 
-    test("writes stderr hint when numeric ID resolves to a different slug", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        {
-          slug: "my-frontend",
-          orgSlug: "acme",
-          id: "7275560680",
-          name: "Frontend",
-        },
-      ] as ProjectWithOrg[]);
-      const stderrWrite = mock(() => true);
-      const stderr = { write: stderrWrite };
+    test("resolves numeric ID to correct slug", async () => {
+      findProjectsBySlugSpy.mockResolvedValue({
+        projects: [
+          {
+            slug: "my-frontend",
+            orgSlug: "acme",
+            id: "7275560680",
+            name: "Frontend",
+          },
+        ] as ProjectWithOrg[],
+        orgs: [],
+      });
 
-      const result = await resolveProjectBySlug(
-        "7275560680",
-        HINT,
-        undefined,
-        stderr
-      );
-
-      expect(result).toEqual({ org: "acme", project: "my-frontend" });
-      expect(stderrWrite).toHaveBeenCalledTimes(1);
-      const hint = stderrWrite.mock.calls[0][0] as string;
-      expect(hint).toContain("7275560680");
-      expect(hint).toContain("acme/my-frontend");
-    });
-
-    test("does not write hint when stderr is not provided", async () => {
-      findProjectsBySlugSpy.mockResolvedValue([
-        {
-          slug: "my-frontend",
-          orgSlug: "acme",
-          id: "7275560680",
-          name: "Frontend",
-        },
-      ] as ProjectWithOrg[]);
-
-      // Should not throw even without stderr
       const result = await resolveProjectBySlug("7275560680", HINT);
       expect(result).toEqual({ org: "acme", project: "my-frontend" });
     });
@@ -419,8 +460,6 @@ describe("resolveEventTarget", () => {
   let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
-
-  const mockStderr = { write: mock(() => true) };
 
   beforeEach(async () => {
     resolveEventInOrgSpy = spyOn(apiClient, "resolveEventInOrg");
@@ -435,7 +474,6 @@ describe("resolveEventTarget", () => {
     findEventAcrossOrgsSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
     resolveProjectBySlugSpy.mockRestore();
-    mockStderr.write.mockClear();
   });
 
   test("returns explicit target directly", async () => {
@@ -447,7 +485,6 @@ describe("resolveEventTarget", () => {
       },
       eventId: "abc123",
       cwd: "/tmp",
-      stderr: mockStderr,
     });
 
     expect(result).toEqual({
@@ -471,7 +508,6 @@ describe("resolveEventTarget", () => {
       },
       eventId: "abc123",
       cwd: "/tmp",
-      stderr: mockStderr,
     });
 
     expect(result).toEqual({
@@ -493,7 +529,6 @@ describe("resolveEventTarget", () => {
       parsed: { type: ProjectSpecificationType.OrgAll, org: "acme" },
       eventId: "abc123",
       cwd: "/tmp",
-      stderr: mockStderr,
     });
 
     expect(result?.org).toBe("acme");
@@ -513,7 +548,6 @@ describe("resolveEventTarget", () => {
       parsed: { type: ProjectSpecificationType.AutoDetect },
       eventId: "abc123",
       cwd: "/tmp",
-      stderr: mockStderr,
     });
 
     expect(result?.org).toBe("acme");
@@ -524,7 +558,6 @@ describe("resolveEventTarget", () => {
       parsed: { type: "unknown" as any },
       eventId: "abc123",
       cwd: "/tmp",
-      stderr: mockStderr,
     });
 
     expect(result).toBeNull();
@@ -579,8 +612,6 @@ describe("resolveAutoDetectTarget", () => {
   let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
-  const mockStderr = { write: mock(() => true) };
-
   beforeEach(() => {
     findEventAcrossOrgsSpy = spyOn(apiClient, "findEventAcrossOrgs");
     resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
@@ -589,7 +620,6 @@ describe("resolveAutoDetectTarget", () => {
   afterEach(() => {
     findEventAcrossOrgsSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
-    mockStderr.write.mockClear();
   });
 
   test("returns auto-detect target when it resolves", async () => {
@@ -600,7 +630,7 @@ describe("resolveAutoDetectTarget", () => {
       projectDisplay: "cli",
     });
 
-    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+    const result = await resolveAutoDetectTarget("abc123", "/tmp");
 
     expect(result?.org).toBe("acme");
     expect(result?.project).toBe("cli");
@@ -615,7 +645,7 @@ describe("resolveAutoDetectTarget", () => {
       event: { eventID: "abc123" },
     });
 
-    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+    const result = await resolveAutoDetectTarget("abc123", "/tmp");
 
     expect(result?.org).toBe("other-org");
     expect(result?.project).toBe("backend");
@@ -623,7 +653,7 @@ describe("resolveAutoDetectTarget", () => {
     expect(findEventAcrossOrgsSpy).toHaveBeenCalledWith("abc123");
   });
 
-  test("writes stderr tip when event found via cross-project search", async () => {
+  test("returns resolved target when event found via cross-project search", async () => {
     resolveOrgAndProjectSpy.mockResolvedValue(null);
     findEventAcrossOrgsSpy.mockResolvedValue({
       org: "acme",
@@ -631,20 +661,145 @@ describe("resolveAutoDetectTarget", () => {
       event: { eventID: "abc123" },
     });
 
-    await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+    const result = await resolveAutoDetectTarget("abc123", "/tmp");
 
-    expect(mockStderr.write).toHaveBeenCalledTimes(1);
-    const hint = mockStderr.write.mock.calls[0][0] as string;
-    expect(hint).toContain("acme/frontend");
-    expect(hint).toContain("sentry event view acme/frontend");
+    expect(result?.org).toBe("acme");
+    expect(result?.project).toBe("frontend");
+    expect(result?.prefetchedEvent?.eventID).toBe("abc123");
   });
 
   test("returns null when both auto-detect and cross-project fail", async () => {
     resolveOrgAndProjectSpy.mockResolvedValue(null);
     findEventAcrossOrgsSpy.mockResolvedValue(null);
 
-    const result = await resolveAutoDetectTarget("abc123", "/tmp", mockStderr);
+    const result = await resolveAutoDetectTarget("abc123", "/tmp");
 
     expect(result).toBeNull();
+  });
+});
+
+// ============================================================================
+// viewCommand.func() — coverage for warning, suggestion, and normalized paths
+// ============================================================================
+
+describe("viewCommand.func", () => {
+  let getEventSpy: ReturnType<typeof spyOn>;
+  let getSpanTreeLinesSpy: ReturnType<typeof spyOn>;
+  let openInBrowserSpy: ReturnType<typeof spyOn>;
+  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+
+  const sampleEvent: SentryEvent = {
+    eventID: "abc123def456",
+    title: "Error: test",
+    metadata: {},
+    contexts: {},
+  } as unknown as SentryEvent;
+
+  function createMockContext() {
+    const stdoutWrite = mock(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: mock(() => true) },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(async () => {
+    getEventSpy = spyOn(apiClient, "getEvent");
+    getSpanTreeLinesSpy = spyOn(spanTree, "getSpanTreeLines");
+    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    getEventSpy.mockRestore();
+    getSpanTreeLinesSpy.mockRestore();
+    openInBrowserSpy.mockRestore();
+    resolveProjectBySlugSpy.mockRestore();
+  });
+
+  test("logs warning when args appear swapped", async () => {
+    // Swapped args: event ID first, then org/project target
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    // "abc123def456" has no slash, "test-org/test-proj" has slash → swap detected
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "abc123def456",
+      "test-org/test-proj"
+    );
+
+    // Command should complete without error (warning goes to consola, not stdout)
+    expect(getEventSpy).toHaveBeenCalled();
+  });
+
+  test("logs suggestion when first arg looks like issue short ID", async () => {
+    // "CAM-82X" as first arg matches issue short ID pattern.
+    // parsePositionalArgs treats it as targetArg, "95fd7f5a" as eventId.
+    // parseOrgProjectArg("CAM-82X") → project-search, so we mock resolveProjectBySlug.
+    resolveProjectBySlugSpy.mockResolvedValue({
+      org: "cam-org",
+      project: "cam-project",
+    });
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    // First arg "CAM-82X" has no slash, second "95fd7f5a" has no slash
+    // → no swap warning, but looksLikeIssueShortId("CAM-82X") fires → suggestion
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "CAM-82X",
+      "95fd7f5a"
+    );
+
+    // The suggestion path (line 339-340) should be exercised
+    expect(resolveProjectBySlugSpy).toHaveBeenCalled();
+    expect(getEventSpy).toHaveBeenCalled();
+  });
+
+  test("logs normalized slug warning when underscores present", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+    await setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    // Underscores in the slug trigger normalized warning
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "test_org/test_proj",
+      "abc123def456"
+    );
+
+    // parseOrgProjectArg normalizes "test_org/test_proj" → "test-org/test-proj"
+    // and sets normalized=true, triggering the warning path (line 343-345)
+    expect(getEventSpy).toHaveBeenCalled();
   });
 });

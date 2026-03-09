@@ -7,7 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  API_MAX_PER_PAGE,
   buildSearchParams,
+  getLogs,
   listIssuesPaginated,
   listRepositoriesPaginated,
   listTeamsPaginated,
@@ -629,13 +631,14 @@ describe("findProjectsBySlug", () => {
       });
     };
 
-    const results = await findProjectsBySlug("frontend");
+    const { projects, orgs } = await findProjectsBySlug("frontend");
 
-    expect(results).toHaveLength(2);
-    expect(results[0].slug).toBe("frontend");
-    expect(results[0].orgSlug).toBe("acme");
-    expect(results[1].slug).toBe("frontend");
-    expect(results[1].orgSlug).toBe("beta");
+    expect(projects).toHaveLength(2);
+    expect(projects[0].slug).toBe("frontend");
+    expect(projects[0].orgSlug).toBe("acme");
+    expect(projects[1].slug).toBe("frontend");
+    expect(projects[1].orgSlug).toBe("beta");
+    expect(orgs).toHaveLength(2);
   });
 
   test("returns empty array when no projects match", async () => {
@@ -670,9 +673,9 @@ describe("findProjectsBySlug", () => {
       });
     };
 
-    const results = await findProjectsBySlug("nonexistent");
+    const { projects } = await findProjectsBySlug("nonexistent");
 
-    expect(results).toHaveLength(0);
+    expect(projects).toHaveLength(0);
   });
 
   test("skips orgs where user lacks access (403)", async () => {
@@ -726,10 +729,10 @@ describe("findProjectsBySlug", () => {
     };
 
     // Should not throw, should just skip the restricted org
-    const results = await findProjectsBySlug("frontend");
+    const { projects } = await findProjectsBySlug("frontend");
 
-    expect(results).toHaveLength(1);
-    expect(results[0].orgSlug).toBe("acme");
+    expect(projects).toHaveLength(1);
+    expect(projects[0].orgSlug).toBe("acme");
   });
 
   test("resolves numeric project ID when slug differs", async () => {
@@ -777,10 +780,10 @@ describe("findProjectsBySlug", () => {
     };
 
     // Numeric ID should resolve even though returned slug differs
-    const results = await findProjectsBySlug("7275560680");
-    expect(results).toHaveLength(1);
-    expect(results[0].slug).toBe("frontend");
-    expect(results[0].orgSlug).toBe("acme");
+    const { projects } = await findProjectsBySlug("7275560680");
+    expect(projects).toHaveLength(1);
+    expect(projects[0].slug).toBe("frontend");
+    expect(projects[0].orgSlug).toBe("acme");
   });
 
   test("rejects non-numeric input when returned slug differs", async () => {
@@ -821,8 +824,8 @@ describe("findProjectsBySlug", () => {
     };
 
     // Non-numeric input with slug mismatch should be rejected
-    const results = await findProjectsBySlug("wrong-slug");
-    expect(results).toHaveLength(0);
+    const { projects } = await findProjectsBySlug("wrong-slug");
+    expect(projects).toHaveLength(0);
   });
 });
 
@@ -1573,5 +1576,218 @@ describe("listTraceLogs", () => {
 
     const url = new URL(capturedUrl);
     expect(url.searchParams.get("statsPeriod")).toBe("14d");
+  });
+
+  test("coerces string numeric fields to numbers (API resilience)", async () => {
+    const stringFieldsData = {
+      data: [
+        {
+          id: "log001",
+          "project.id": "123",
+          trace: "aaaa1111bbbb2222cccc3333dddd4444",
+          severity_number: "9",
+          severity: "info",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          timestamp_precise: "1738247535000000000",
+          message: "Request received",
+        },
+      ],
+      meta: { fields: { id: "string" } },
+    };
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        return new Response(JSON.stringify(stringFieldsData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTraceLogs(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(result).toHaveLength(1);
+    expect(typeof result[0]["project.id"]).toBe("number");
+    expect(result[0]["project.id"]).toBe(123);
+    expect(typeof result[0].severity_number).toBe("number");
+    expect(result[0].severity_number).toBe(9);
+    expect(typeof result[0].timestamp_precise).toBe("number");
+  });
+
+  test("accepts responses with missing optional fields", async () => {
+    const minimalData = {
+      data: [
+        {
+          id: "log001",
+          "project.id": 123,
+          trace: "aaaa1111bbbb2222cccc3333dddd4444",
+          severity: "info",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          message: "Test",
+        },
+      ],
+    };
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/trace-logs/")) {
+        return new Response(JSON.stringify(minimalData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await listTraceLogs(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].severity_number).toBeUndefined();
+    expect(result[0].timestamp_precise).toBeUndefined();
+    expect(result[0].severity).toBe("info");
+  });
+});
+
+describe("getLogs", () => {
+  const LOG_ID_1 = "a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5";
+  const LOG_ID_2 = "1111222233334444555566667777aaaa";
+
+  function makeLogEntry(id: string) {
+    return {
+      "sentry.item_id": id,
+      timestamp: "2025-01-30T14:32:15+00:00",
+      timestamp_precise: 1_770_060_419_044_800_300,
+      message: `Log ${id}`,
+      severity: "info",
+      trace: "abc123def456abc123def456abc12345",
+      project: "test-project",
+      environment: "production",
+      release: "1.0.0",
+      "sdk.name": "sentry.javascript.node",
+      "sdk.version": "8.0.0",
+      span_id: "span123abc",
+      "code.function": "handleRequest",
+      "code.file.path": "src/handlers/api.ts",
+      "code.line.number": "42",
+      "sentry.otel.kind": null,
+      "sentry.otel.status_code": null,
+      "sentry.otel.instrumentation_scope.name": null,
+    };
+  }
+
+  beforeEach(async () => {
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+  });
+
+  test("returns matching log entries", async () => {
+    const responseData = {
+      data: [makeLogEntry(LOG_ID_1)],
+      meta: { fields: { "sentry.item_id": "string" } },
+    };
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        return new Response(JSON.stringify(responseData), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await getLogs("my-org", "my-project", [LOG_ID_1]);
+    expect(result).toHaveLength(1);
+    expect(result[0]["sentry.item_id"]).toBe(LOG_ID_1);
+  });
+
+  test("passes bracket syntax and per_page in query", async () => {
+    let capturedUrl = "";
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        capturedUrl = req.url;
+        return new Response(
+          JSON.stringify({ data: [], meta: { fields: {} } }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    await getLogs("my-org", "my-project", [LOG_ID_1, LOG_ID_2]);
+    const url = new URL(capturedUrl);
+    const query = url.searchParams.get("query");
+    expect(query).toContain(`sentry.item_id:[${LOG_ID_1},${LOG_ID_2}]`);
+    expect(url.searchParams.get("per_page")).toBe("2");
+  });
+
+  test("returns empty array when no logs found", async () => {
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        return new Response(
+          JSON.stringify({ data: [], meta: { fields: {} } }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await getLogs("my-org", "my-project", [
+      "deadbeefdeadbeefdeadbeefdeadbeef",
+    ]);
+    expect(result).toHaveLength(0);
+  });
+
+  test("batches requests when IDs exceed API_MAX_PER_PAGE", async () => {
+    // Create 150 IDs (should split into 2 batches: 100 + 50)
+    const ids = Array.from({ length: 150 }, (_, i) =>
+      i.toString(16).padStart(32, "0")
+    );
+    const capturedUrls: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/events/")) {
+        capturedUrls.push(req.url);
+        // Return one log per batch so we can verify results are merged
+        const url = new URL(req.url);
+        const query = url.searchParams.get("query") ?? "";
+        const bracketMatch = query.match(/sentry\.item_id:\[([^\]]+)\]/);
+        const batchIds = bracketMatch ? bracketMatch[1].split(",") : [];
+        return new Response(
+          JSON.stringify({
+            data: [makeLogEntry(batchIds[0])],
+            meta: { fields: {} },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+
+    const result = await getLogs("my-org", "my-project", ids);
+
+    // Should have made 2 separate requests
+    expect(capturedUrls).toHaveLength(2);
+
+    // First batch: 100 IDs
+    const url1 = new URL(capturedUrls[0]);
+    expect(url1.searchParams.get("per_page")).toBe(String(API_MAX_PER_PAGE));
+
+    // Second batch: 50 IDs
+    const url2 = new URL(capturedUrls[1]);
+    expect(url2.searchParams.get("per_page")).toBe("50");
+
+    // Results from both batches should be flattened
+    expect(result).toHaveLength(2);
   });
 });

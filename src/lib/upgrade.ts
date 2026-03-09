@@ -38,6 +38,7 @@ import {
   getNightlyVersion,
 } from "./ghcr.js";
 import { logger } from "./logger.js";
+import { clearPatchCache } from "./patch-cache.js";
 
 /** Scoped logger for upgrade operations */
 const log = logger.withTag("upgrade");
@@ -639,6 +640,12 @@ export async function downloadBinaryToTemp(
       log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
     }
+
+    // Clear consumed patch cache — patches for the old version are useless
+    // after the binary has been updated (whether via delta or full download).
+    clearPatchCache().catch(() => {
+      /* best-effort — don't fail the upgrade if cache cleanup fails */
+    });
 
     // Set executable permission (Unix only)
     if (process.platform !== "win32") {

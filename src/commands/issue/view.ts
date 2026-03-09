@@ -16,6 +16,11 @@ import {
   writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
@@ -24,6 +29,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly spans: number;
+  readonly fresh: boolean;
 };
 
 /**
@@ -100,14 +106,16 @@ export const viewCommand = buildCommand({
         default: false,
       },
       ...spansFlag,
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     issueArg: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
 
     // Resolve issue using shared resolution logic

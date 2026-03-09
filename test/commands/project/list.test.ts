@@ -426,6 +426,7 @@ describe("handleExplicit", () => {
     await handleExplicit(writer, "test-org", "frontend", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -440,6 +441,7 @@ describe("handleExplicit", () => {
     await handleExplicit(writer, "test-org", "frontend", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -454,6 +456,7 @@ describe("handleExplicit", () => {
     await handleExplicit(writer, "test-org", "nonexistent", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -469,6 +472,7 @@ describe("handleExplicit", () => {
     await handleExplicit(writer, "test-org", "nonexistent", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -483,6 +487,7 @@ describe("handleExplicit", () => {
       limit: 30,
       json: false,
       platform: "ruby",
+      fresh: false,
     });
 
     const text = output();
@@ -498,6 +503,7 @@ describe("handleExplicit", () => {
       limit: 30,
       json: false,
       platform: "javascript",
+      fresh: false,
     });
 
     const text = output();
@@ -524,7 +530,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false },
+      flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -546,7 +552,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: true },
+      flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -564,7 +570,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: true },
+      flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -584,7 +590,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false },
+      flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -607,7 +613,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false },
+      flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -626,7 +632,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false, platform: "rust" },
+      flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -644,7 +650,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false },
+      flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -660,7 +666,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false, platform: "rust" },
+      flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -680,7 +686,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false },
+      flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
@@ -701,7 +707,7 @@ describe("handleOrgAll", () => {
     await handleOrgAll({
       stdout: writer,
       org: "test-org",
-      flags: { limit: 30, json: false, platform: "python" },
+      flags: { limit: 30, json: false, platform: "python", fresh: false },
       contextKey: "type:org:test-org:platform:python",
       cursor: undefined,
     });
@@ -730,6 +736,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "frontend", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -743,6 +750,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "frontend", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -779,6 +787,7 @@ describe("handleProjectSearch", () => {
       handleProjectSearch(writer, "nonexistent", {
         limit: 30,
         json: false,
+        fresh: false,
       })
     ).rejects.toThrow(ContextError);
   });
@@ -811,6 +820,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "nonexistent", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -824,6 +834,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "frontend", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -838,6 +849,7 @@ describe("handleProjectSearch", () => {
       limit: 30,
       json: false,
       platform: "rust",
+      fresh: false,
     });
 
     const text = output();
@@ -894,6 +906,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "frontend", {
       limit: 1,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -950,6 +963,7 @@ describe("handleProjectSearch", () => {
     await handleProjectSearch(writer, "frontend", {
       limit: 1,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1063,7 +1077,7 @@ describe("fetchOrgProjectsSafe", () => {
 
   test("propagates AuthError when not authenticated", async () => {
     // Clear auth token so the API client throws AuthError before making any request
-    clearAuth();
+    await clearAuth();
 
     await expect(fetchOrgProjectsSafe("myorg")).rejects.toThrow(AuthError);
   });
@@ -1163,6 +1177,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -1179,6 +1194,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1194,6 +1210,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     expect(output()).toContain("No projects found");
@@ -1209,6 +1226,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 2,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1225,6 +1243,7 @@ describe("handleAutoDetect", () => {
       limit: 30,
       json: true,
       platform: "python",
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1243,6 +1262,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 2,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -1259,6 +1279,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1279,6 +1300,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: false,
+      fresh: false,
     });
 
     const text = output();
@@ -1298,6 +1320,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1325,6 +1348,7 @@ describe("handleAutoDetect", () => {
     await handleAutoDetect(writer, "/tmp/test-project", {
       limit: 30,
       json: true,
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());
@@ -1335,13 +1359,14 @@ describe("handleAutoDetect", () => {
   test("fast path: AuthError still propagates", async () => {
     await setDefaults("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
-    clearAuth();
+    await clearAuth();
     const { writer } = createCapture();
 
     await expect(
       handleAutoDetect(writer, "/tmp/test-project", {
         limit: 30,
         json: true,
+        fresh: false,
       })
     ).rejects.toThrow(AuthError);
   });
@@ -1356,6 +1381,7 @@ describe("handleAutoDetect", () => {
       limit: 30,
       json: true,
       platform: "python",
+      fresh: false,
     });
 
     const parsed = JSON.parse(output());

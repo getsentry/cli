@@ -11,6 +11,11 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { displayTraceLogs } from "../../lib/formatters/index.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { validateTraceId } from "../../lib/trace-id.js";
@@ -21,6 +26,7 @@ type LogsFlags = {
   readonly period: string;
   readonly limit: number;
   readonly query?: string;
+  readonly fresh: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -89,13 +95,11 @@ export function parsePositionalArgs(args: string[]): {
         throw new ContextError("Trace ID", USAGE_HINT);
       }
 
-      validateTraceId(traceId);
-      return { traceId, orgArg };
+      return { traceId: validateTraceId(traceId), orgArg };
     }
 
     // Plain trace ID — org will be auto-detected
-    validateTraceId(first);
-    return { traceId: first, orgArg: undefined };
+    return { traceId: validateTraceId(first), orgArg: undefined };
   }
 
   // Two or more args — first is org, second is trace ID
@@ -106,8 +110,7 @@ export function parsePositionalArgs(args: string[]): {
     throw new ContextError("Trace ID", USAGE_HINT);
   }
 
-  validateTraceId(traceId);
-  return { traceId, orgArg };
+  return { traceId: validateTraceId(traceId), orgArg };
 }
 
 export const logsCommand = buildCommand({
@@ -166,14 +169,22 @@ export const logsCommand = buildCommand({
         brief: "Additional filter query (Sentry search syntax)",
         optional: true,
       },
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web", t: "period", n: "limit", q: "query" },
+    aliases: {
+      ...FRESH_ALIASES,
+      w: "web",
+      t: "period",
+      n: "limit",
+      q: "query",
+    },
   },
   async func(
     this: SentryContext,
     flags: LogsFlags,
     ...args: string[]
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
 
     const { traceId, orgArg } = parsePositionalArgs(args);

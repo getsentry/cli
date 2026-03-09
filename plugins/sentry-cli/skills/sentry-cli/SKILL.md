@@ -89,6 +89,7 @@ View authentication status
 
 **Flags:**
 - `--show-token - Show the stored token (masked by default)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -106,6 +107,7 @@ Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Org
 
@@ -118,6 +120,7 @@ List organizations
 **Flags:**
 - `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -134,6 +137,7 @@ View details of an organization
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -166,6 +170,7 @@ List projects
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -187,6 +192,7 @@ View details of a project
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -220,6 +226,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -264,6 +271,7 @@ Analyze an issue's root cause using Seer AI
 **Flags:**
 - `--json - Output as JSON`
 - `--force - Force new analysis even if one exists`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -291,6 +299,7 @@ Generate a solution plan using Seer AI
 - `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--json - Output as JSON`
 - `--force - Force new plan even if one exists`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -318,6 +327,7 @@ View details of a specific issue
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -345,6 +355,7 @@ View details of a specific event
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -467,6 +478,7 @@ List repositories
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Team
 
@@ -480,6 +492,7 @@ List teams
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -510,6 +523,7 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
+- `--fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -550,11 +564,12 @@ sentry log list my-org/backend -f -q 'level:error'
 
 #### `sentry log view <args...>`
 
-View details of a specific log entry
+View details of one or more log entries
 
 **Flags:**
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 **Examples:**
 
@@ -591,6 +606,7 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 #### `sentry trace view <args...>`
 
@@ -600,6 +616,7 @@ View details of a specific trace
 - `--json - Output as JSON`
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 #### `sentry trace logs <args...>`
 
@@ -611,6 +628,7 @@ View logs associated with a trace
 - `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Additional filter query (Sentry search syntax)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Init
 
@@ -641,6 +659,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Orgs
 
@@ -653,6 +672,7 @@ List organizations
 **Flags:**
 - `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
 - `--json - Output JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Projects
 
@@ -667,6 +687,7 @@ List projects
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Repos
 
@@ -680,6 +701,7 @@ List repositories
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Teams
 
@@ -693,6 +715,7 @@ List teams
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
 - `--json - Output JSON`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Logs
 
@@ -708,6 +731,7 @@ List logs from a project
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
 - `--trace <value> - Filter logs by trace ID (32-character hex string)`
 - `--json - Output as JSON`
+- `--fresh - Bypass cache and fetch fresh data`
 
 ### Traces
 
@@ -723,6 +747,7 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `--json - Output as JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ### Whoami
 
@@ -734,6 +759,7 @@ Show the currently authenticated user
 
 **Flags:**
 - `--json - Output as JSON`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 
 ## Global Options
 

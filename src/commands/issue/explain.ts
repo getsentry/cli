@@ -12,6 +12,11 @@ import {
   formatRootCauseList,
   handleSeerApiError,
 } from "../../lib/formatters/seer.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
 import { extractRootCauses } from "../../types/seer.js";
 import {
   ensureRootCauseAnalysis,
@@ -22,6 +27,7 @@ import {
 type ExplainFlags = {
   readonly json: boolean;
   readonly force: boolean;
+  readonly fresh: boolean;
 };
 
 export const explainCommand = buildCommand({
@@ -61,13 +67,16 @@ export const explainCommand = buildCommand({
         brief: "Force new analysis even if one exists",
         default: false,
       },
+      fresh: FRESH_FLAG,
     },
+    aliases: FRESH_ALIASES,
   },
   async func(
     this: SentryContext,
     flags: ExplainFlags,
     issueArg: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages

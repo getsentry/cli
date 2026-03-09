@@ -12,11 +12,18 @@ import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
-import { buildListLimitFlag, LIST_JSON_FLAG } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  buildListLimitFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+  LIST_JSON_FLAG,
+} from "../../lib/list-command.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
+  readonly fresh: boolean;
 };
 
 /**
@@ -69,11 +76,13 @@ export const listCommand = buildCommand({
     flags: {
       limit: buildListLimitFlag("organizations"),
       json: LIST_JSON_FLAG,
+      fresh: FRESH_FLAG,
     },
     // Only -n for --limit; no -c since org list has no --cursor flag
-    aliases: { n: "limit" },
+    aliases: { ...FRESH_ALIASES, n: "limit" },
   },
   async func(this: SentryContext, flags: ListFlags): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout } = this;
 
     const orgs = await listOrganizations();

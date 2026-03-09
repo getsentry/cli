@@ -120,7 +120,8 @@ export async function withTelemetry<T>(
     );
   } catch (e) {
     const isExpectedAuthState =
-      e instanceof AuthError && e.reason === "not_authenticated";
+      e instanceof AuthError &&
+      (e.reason === "not_authenticated" || e.reason === "expired");
     // 4xx API errors are user errors (wrong ID, no access), not CLI bugs.
     // They're recorded as span attributes above for volume-spike detection.
     if (!(isExpectedAuthState || isClientApiError(e))) {
@@ -948,4 +949,38 @@ export function withFsSpan<T>(
   fn: () => T | Promise<T>
 ): Promise<T> {
   return withTracing(operation, "file", fn);
+}
+
+/**
+ * Wrap a cache operation with a Sentry Cache Module span.
+ *
+ * Implements the [Sentry Cache Module spec](https://develop.sentry.dev/sdk/performance/modules/caches/)
+ * for the Caches Insights dashboard. The span is passed to the callback so
+ * callers can set `cache.hit`, `cache.item_size`, etc. after the lookup.
+ *
+ * @param name - Span name (typically the cache key or a descriptive label)
+ * @param op - Cache operation: `"cache.get"` for reads, `"cache.put"` for writes
+ * @param fn - Function to execute, receives the span for dynamic attribute setting
+ * @param attributes - Initial span attributes (e.g., `cache.key`, `network.peer.address`)
+ * @returns The result of the function
+ */
+export function withCacheSpan<T>(
+  name: string,
+  op: "cache.get" | "cache.put",
+  fn: (span: Span) => T | Promise<T>,
+  attributes?: Record<string, string | number | boolean | string[]>
+): Promise<T> {
+  return Sentry.startSpan(
+    { name, op, attributes, onlyIfParent: true },
+    async (span) => {
+      try {
+        const result = await fn(span);
+        span.setStatus({ code: 1 }); // OK
+        return result;
+      } catch (error) {
+        span.setStatus({ code: 2 }); // Error
+        throw error;
+      }
+    }
+  );
 }

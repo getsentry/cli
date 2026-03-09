@@ -26,7 +26,9 @@ import {
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
+  applyFreshFlag,
   buildListCommand,
+  FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import {
@@ -43,6 +45,7 @@ type ListFlags = {
   readonly follow?: number;
   readonly json: boolean;
   readonly trace?: string;
+  readonly fresh: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -90,8 +93,9 @@ function parseFollow(value: string): number {
  */
 type LogLike = {
   timestamp: string;
-  /** Nanosecond-precision timestamp used for dedup in follow mode */
-  timestamp_precise: number;
+  /** Nanosecond-precision timestamp used for dedup in follow mode.
+   * Optional because TraceLog may omit it when the API response doesn't include it. */
+  timestamp_precise?: number;
   severity?: string | null;
   message?: string | null;
   trace?: string | null;
@@ -194,6 +198,11 @@ type FollowConfig<T extends LogLike> = {
   fetch: (statsPeriod: string, afterTimestamp?: number) => Promise<T[]>;
   /** Extract only the genuinely new entries from a poll response */
   extractNew: (logs: T[], lastTimestamp: number) => T[];
+  /**
+   * Called with the initial batch of logs before polling begins.
+   * Use this to seed dedup state (e.g., tracking seen log IDs).
+   */
+  onInitialLogs?: (logs: T[]) => void;
 };
 
 /**
@@ -252,23 +261,38 @@ function executeFollowMode<T extends LogLike>(
       pendingTimer = setTimeout(poll, pollIntervalMs);
     }
 
-    function writeNewLogs(newLogs: T[]) {
-      const newestLog = newLogs[0];
-      if (newestLog) {
-        if (!(flags.json || headerPrinted)) {
-          stdout.write(table ? table.header() : formatLogsHeader());
-          headerPrinted = true;
+    /** Find the highest timestamp_precise in a batch, or undefined if none have it. */
+    function maxTimestamp(logs: T[]): number | undefined {
+      let max: number | undefined;
+      for (const l of logs) {
+        if (l.timestamp_precise !== undefined) {
+          max =
+            max === undefined
+              ? l.timestamp_precise
+              : Math.max(max, l.timestamp_precise);
         }
-        const chronological = [...newLogs].reverse();
-        writeLogs({
-          stdout,
-          logs: chronological,
-          asJson: flags.json,
-          table,
-          includeTrace: config.includeTrace,
-        });
-        lastTimestamp = newestLog.timestamp_precise;
       }
+      return max;
+    }
+
+    function writeNewLogs(newLogs: T[]) {
+      if (newLogs.length === 0) {
+        return;
+      }
+
+      if (!(flags.json || headerPrinted)) {
+        stdout.write(table ? table.header() : formatLogsHeader());
+        headerPrinted = true;
+      }
+      const chronological = [...newLogs].reverse();
+      writeLogs({
+        stdout,
+        logs: chronological,
+        asJson: flags.json,
+        table,
+        includeTrace: config.includeTrace,
+      });
+      lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
     }
 
     async function poll() {
@@ -311,9 +335,8 @@ function executeFollowMode<T extends LogLike>(
           table,
           includeTrace: config.includeTrace,
         });
-        if (initialLogs[0]) {
-          lastTimestamp = initialLogs[0].timestamp_precise;
-        }
+        lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
+        config.onInitialLogs?.(initialLogs);
         scheduleNextPoll();
       })
       .catch((error: unknown) => {
@@ -419,6 +442,7 @@ export const listCommand = buildListCommand("log", {
         brief: "Output as JSON",
         default: false,
       },
+      fresh: FRESH_FLAG,
     },
     aliases: {
       n: "limit",
@@ -431,6 +455,7 @@ export const listCommand = buildListCommand("log", {
     flags: ListFlags,
     target?: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
     if (flags.trace) {
@@ -451,6 +476,9 @@ export const listCommand = buildListCommand("log", {
 
       if (flags.follow) {
         const traceId = flags.trace;
+        // Track IDs of logs seen without timestamp_precise so they are
+        // shown once but not duplicated on subsequent polls.
+        const seenWithoutTs = new Set<string>();
         await executeFollowMode({
           stdout,
           stderr,
@@ -464,7 +492,24 @@ export const listCommand = buildListCommand("log", {
               statsPeriod,
             }),
           extractNew: (logs, lastTs) =>
-            logs.filter((l) => l.timestamp_precise > lastTs),
+            logs.filter((l) => {
+              if (l.timestamp_precise !== undefined) {
+                return l.timestamp_precise > lastTs;
+              }
+              // No precise timestamp — deduplicate by id
+              if (seenWithoutTs.has(l.id)) {
+                return false;
+              }
+              seenWithoutTs.add(l.id);
+              return true;
+            }),
+          onInitialLogs: (logs) => {
+            for (const l of logs) {
+              if (l.timestamp_precise === undefined) {
+                seenWithoutTs.add(l.id);
+              }
+            }
+          },
         });
       } else {
         await executeTraceSingleFetch(stdout, org, flags.trace, flags);

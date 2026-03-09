@@ -20,6 +20,115 @@
 import { getUserAgent } from "./constants.js";
 import { UpgradeError } from "./errors.js";
 
+/** Default timeout for GHCR HTTP requests (10 seconds) */
+const GHCR_REQUEST_TIMEOUT = 10_000;
+
+/** Maximum number of retry attempts for transient failures */
+const GHCR_MAX_RETRIES = 1;
+
+/** Timeout for large blob downloads (30 seconds) */
+const GHCR_BLOB_TIMEOUT = 30_000;
+
+/**
+ * Check if an error is a transient network/timeout failure worth retrying.
+ *
+ * Matches timeout/abort errors from `AbortSignal.timeout()`, connection
+ * resets, and generic network failures. Does NOT match HTTP-level errors
+ * (those are handled by the caller after receiving a Response).
+ */
+function isRetryableError(error: Error): boolean {
+  // AbortSignal.timeout() throws a TimeoutError DOMException — check by name
+  // rather than relying on error message content (which varies across runtimes)
+  if (error.name === "TimeoutError" || error.name === "AbortError") {
+    return true;
+  }
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("timeout") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("network") ||
+    msg.includes("fetch failed")
+  );
+}
+
+/**
+ * Build a combined abort signal from the per-request timeout and an
+ * optional external signal (e.g., process-exit abort controller).
+ */
+function buildSignal(
+  timeout: number,
+  externalSignal?: AbortSignal
+): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  return externalSignal
+    ? AbortSignal.any([timeoutSignal, externalSignal])
+    : timeoutSignal;
+}
+
+/**
+ * Returns true when the given error was triggered by the external
+ * (caller-provided) abort signal rather than by our timeout.
+ */
+function isExternalAbort(error: Error, externalSignal?: AbortSignal): boolean {
+  return Boolean(externalSignal?.aborted && error.name === "AbortError");
+}
+
+type RetryOptions = {
+  timeout?: number;
+  signal?: AbortSignal;
+};
+
+/**
+ * Fetch with timeout and retry for GHCR requests.
+ *
+ * GHCR exhibits cold-start latency spikes (126ms → 30s for identical
+ * requests). A short timeout + retry keeps the worst case at ~20s instead
+ * of 30s, and helps when the first request hits a cold instance.
+ *
+ * @param url - Request URL
+ * @param init - Fetch init options (signal will be added/overridden)
+ * @param context - Human-readable context for error messages
+ * @param options - Retry options (timeout override, external abort signal)
+ * @returns Response from a successful fetch
+ * @throws {UpgradeError} On all attempts exhausted
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  context: string,
+  options?: RetryOptions
+): Promise<Response> {
+  const timeout = options?.timeout ?? GHCR_REQUEST_TIMEOUT;
+  const externalSignal = options?.signal;
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= GHCR_MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: buildSignal(timeout, externalSignal),
+      });
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      // Propagate external abort immediately — don't retry caller cancellation
+      if (isExternalAbort(lastError, externalSignal)) {
+        break;
+      }
+      // Only retry on timeout or network errors — not HTTP errors
+      if (attempt >= GHCR_MAX_RETRIES || !isRetryableError(lastError)) {
+        break;
+      }
+    }
+  }
+
+  throw new UpgradeError(
+    "network_error",
+    `${context}: ${lastError?.message ?? "unknown error"}`
+  );
+}
+
 /** GHCR repository for CLI distribution */
 export const GHCR_REPO = "getsentry/cli";
 
@@ -79,20 +188,14 @@ export type OciManifest = {
  * @returns Bearer token string
  * @throws {UpgradeError} On network failure or malformed response
  */
-export async function getAnonymousToken(): Promise<string> {
+export async function getAnonymousToken(signal?: AbortSignal): Promise<string> {
   const url = `${GHCR_REGISTRY}/token?scope=repository:${GHCR_REPO}:pull`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { "User-Agent": getUserAgent() },
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to GHCR: ${msg}`
-    );
-  }
+  const response = await fetchWithRetry(
+    url,
+    { headers: { "User-Agent": getUserAgent() } },
+    "Failed to connect to GHCR",
+    { signal }
+  );
 
   if (!response.ok) {
     throw new UpgradeError(
@@ -122,25 +225,22 @@ export async function getAnonymousToken(): Promise<string> {
  */
 export async function fetchManifest(
   token: string,
-  tag: string
+  tag: string,
+  signal?: AbortSignal
 ): Promise<OciManifest> {
   const url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/manifests/${tag}`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  const response = await fetchWithRetry(
+    url,
+    {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: OCI_MANIFEST_TYPE,
         "User-Agent": getUserAgent(),
       },
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    throw new UpgradeError(
-      "network_error",
-      `Failed to connect to GHCR: ${msg}`
-    );
-  }
+    },
+    `Failed to fetch manifest for tag "${tag}"`,
+    { signal }
+  );
 
   if (!response.ok) {
     throw new UpgradeError(
@@ -230,7 +330,8 @@ export function findLayerByFilename(
  */
 export async function downloadNightlyBlob(
   token: string,
-  digest: string
+  digest: string,
+  signal?: AbortSignal
 ): Promise<Response> {
   const blobUrl = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/blobs/${digest}`;
 
@@ -244,6 +345,7 @@ export async function downloadNightlyBlob(
         "User-Agent": getUserAgent(),
       },
       redirect: "manual",
+      signal: buildSignal(GHCR_BLOB_TIMEOUT, signal),
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -275,10 +377,16 @@ export async function downloadNightlyBlob(
     // Step 2: Follow the redirect WITHOUT the Authorization header.
     // Azure rejects requests that include a Bearer token alongside its own
     // signed query-string credentials (returns 404).
+    // No AbortSignal.timeout here: this fetch covers both connection AND
+    // body streaming. For full nightly binaries (~30 MB), a 30s timeout
+    // would require sustained ~8 Mbps throughput and fail on slow connections.
+    // The GHCR step 1 timeout above guards against GHCR-side latency;
+    // Azure Blob Storage has reliable latency characteristics.
     let redirectResponse: Response;
     try {
       redirectResponse = await fetch(redirectUrl, {
         headers: { "User-Agent": getUserAgent() },
+        signal,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -317,25 +425,25 @@ const TAGS_PAGE_SIZE = 100;
  */
 async function fetchTagPage(
   token: string,
-  lastTag?: string
+  lastTag?: string,
+  signal?: AbortSignal
 ): Promise<string[]> {
   let url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/tags/list?n=${TAGS_PAGE_SIZE}`;
   if (lastTag) {
     url += `&last=${encodeURIComponent(lastTag)}`;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  const response = await fetchWithRetry(
+    url,
+    {
       headers: {
         Authorization: `Bearer ${token}`,
         "User-Agent": getUserAgent(),
       },
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    throw new UpgradeError("network_error", `Failed to list GHCR tags: ${msg}`);
-  }
+    },
+    "Failed to list GHCR tags",
+    { signal }
+  );
 
   if (!response.ok) {
     throw new UpgradeError(
@@ -361,13 +469,14 @@ async function fetchTagPage(
  */
 export async function listTags(
   token: string,
-  prefix?: string
+  prefix?: string,
+  signal?: AbortSignal
 ): Promise<string[]> {
   const allTags: string[] = [];
   let lastTag: string | undefined;
 
   for (;;) {
-    const tags = await fetchTagPage(token, lastTag);
+    const tags = await fetchTagPage(token, lastTag, signal);
     if (tags.length === 0) {
       break;
     }
@@ -402,8 +511,9 @@ export async function listTags(
  */
 export async function downloadLayerBlob(
   token: string,
-  digest: string
+  digest: string,
+  signal?: AbortSignal
 ): Promise<ArrayBuffer> {
-  const response = await downloadNightlyBlob(token, digest);
+  const response = await downloadNightlyBlob(token, digest, signal);
   return response.arrayBuffer();
 }

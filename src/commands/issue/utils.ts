@@ -140,7 +140,7 @@ async function resolveProjectSearch(
   }
 
   // 2. Search for project across all accessible orgs
-  const projects = await findProjectsBySlug(projectSlug.toLowerCase());
+  const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
     throw new ResolutionError(

@@ -38,6 +38,7 @@ import {
   type OciManifest,
 } from "./ghcr.js";
 import { logger } from "./logger.js";
+import { loadCachedChain, savePatchesToCache } from "./patch-cache.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
@@ -75,6 +76,11 @@ export type PatchChain = {
   totalSize: number;
   /** Expected SHA-256 hex digest of the final output binary */
   expectedSha256: string;
+  /**
+   * Version step pairs in apply order (oldest first).
+   * Present when the chain was resolved from network — used for cache storage.
+   */
+  steps?: { fromVersion: string; toVersion: string }[];
 };
 
 /** Result of a successful delta upgrade */
@@ -142,7 +148,9 @@ export type GitHubRelease = {
  *
  * @returns Array of releases (newest first), or empty array on failure
  */
-export async function fetchRecentReleases(): Promise<GitHubRelease[]> {
+export async function fetchRecentReleases(
+  signal?: AbortSignal
+): Promise<GitHubRelease[]> {
   const perPage = MAX_CHAIN_DEPTH + 2;
   let response: Response;
   try {
@@ -151,6 +159,7 @@ export async function fetchRecentReleases(): Promise<GitHubRelease[]> {
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "sentry-cli",
       },
+      signal,
     });
   } catch {
     return [];
@@ -185,11 +194,15 @@ export function extractSha256(asset: GitHubAsset): string | null {
  * @returns Patch file data, or null on failure
  */
 export async function downloadStablePatch(
-  url: string
+  url: string,
+  signal?: AbortSignal
 ): Promise<Uint8Array | null> {
   let response: Response;
   try {
-    response = await fetch(url, { headers: { "User-Agent": "sentry-cli" } });
+    response = await fetch(url, {
+      headers: { "User-Agent": "sentry-cli" },
+      signal,
+    });
   } catch {
     return null;
   }
@@ -232,6 +245,8 @@ export type StableChainInfo = {
   patchUrls: string[];
   /** Expected SHA-256 of the final target binary */
   expectedSha256: string;
+  /** Version step pairs in apply order (oldest first) */
+  steps: { fromVersion: string; toVersion: string }[];
 };
 
 /**
@@ -290,7 +305,17 @@ export function extractStableChain(
 
   // Reverse to get apply order: oldest patch first
   patchUrls.reverse();
-  return { patchUrls, expectedSha256 };
+
+  // Build version steps in apply order (oldest first, matching patchUrls)
+  const reversedReleases = [...chainReleases].reverse();
+  const steps: { fromVersion: string; toVersion: string }[] = [];
+  let prevVersion = currentVersion;
+  for (const release of reversedReleases) {
+    steps.push({ fromVersion: prevVersion, toVersion: release.tag_name });
+    prevVersion = release.tag_name;
+  }
+
+  return { patchUrls, expectedSha256, steps };
 }
 
 /**
@@ -306,11 +331,12 @@ export function extractStableChain(
  */
 export async function resolveStableChain(
   currentVersion: string,
-  targetVersion: string
+  targetVersion: string,
+  signal?: AbortSignal
 ): Promise<PatchChain | null> {
   const binaryName = getPlatformBinaryName();
   const releases = await withTracing("fetch-releases", "http.client", () =>
-    fetchRecentReleases()
+    fetchRecentReleases(signal)
   );
 
   // Get .gz size from the target release for threshold calculation
@@ -341,7 +367,9 @@ export async function resolveStableChain(
     "download-patches",
     "http.client",
     () =>
-      Promise.all(chainInfo.patchUrls.map((url) => downloadStablePatch(url)))
+      Promise.all(
+        chainInfo.patchUrls.map((url) => downloadStablePatch(url, signal))
+      )
   );
 
   const patches: PatchLink[] = [];
@@ -354,7 +382,12 @@ export async function resolveStableChain(
     totalSize += data.byteLength;
   }
 
-  return { patches, totalSize, expectedSha256: chainInfo.expectedSha256 };
+  return {
+    patches,
+    totalSize,
+    expectedSha256: chainInfo.expectedSha256,
+    steps: chainInfo.steps,
+  };
 }
 
 // Nightly channel: GHCR
@@ -386,68 +419,59 @@ export function getPatchTargetSha256(
 }
 
 /** GHCR tag prefix for patch manifests */
-const PATCH_TAG_PREFIX = "patch-";
-
-/** A node in the patch graph: maps a fromVersion to the next version + manifest */
-export type PatchGraphEntry = {
-  /** Version this patch produces */
-  version: string;
-  /** Full OCI manifest (contains layer digests and annotations) */
-  manifest: OciManifest;
-};
+export const PATCH_TAG_PREFIX = "patch-";
 
 /**
- * Build a directed graph of all available nightly patches.
+ * Filter patch tags to only those in the upgrade chain from current to target,
+ * and sort them in apply order (oldest first).
  *
- * Fetches all `patch-*` tags from GHCR and their manifests in parallel,
- * then indexes by `from-version` annotation. The resulting map allows
- * instant chain walking from any version to its successor.
+ * Since nightly patches are sequential (each `patch-<V_n>` patches from V_{n-1}),
+ * the chain tags are those where the version is strictly greater than
+ * currentVersion and less than or equal to targetVersion.
  *
- * @param token - GHCR anonymous bearer token
- * @returns Map from fromVersion → { version, manifest }
+ * @param allTags - All patch tags from GHCR (e.g., `["patch-0.14.0-dev.100", ...]`)
+ * @param currentVersion - Version to upgrade from
+ * @param targetVersion - Version to upgrade to
+ * @returns Sorted tag names in apply order, or empty array if none match
  */
-export function buildNightlyPatchGraph(
-  token: string
-): Promise<Map<string, PatchGraphEntry>> {
-  return withTracingSpan(
-    "build-patch-graph",
-    "upgrade.delta.resolve",
-    async (span) => {
-      const tags = await listTags(token, PATCH_TAG_PREFIX);
-      span.setAttribute("graph.tag_count", tags.length);
+export function filterAndSortChainTags(
+  allTags: string[],
+  currentVersion: string,
+  targetVersion: string
+): string[] {
+  const chainTags: { tag: string; version: string }[] = [];
 
-      const entries = await Promise.all(
-        tags.map(async (tag): Promise<[string, PatchGraphEntry] | null> => {
-          const version = tag.slice(PATCH_TAG_PREFIX.length);
-          try {
-            const manifest = await fetchManifest(token, tag);
-            const fromVersion = getPatchFromVersion(manifest);
-            if (!fromVersion) {
-              return null;
-            }
-            return [fromVersion, { version, manifest }];
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      const graph = new Map<string, PatchGraphEntry>();
-      for (const entry of entries) {
-        if (entry) {
-          graph.set(entry[0], entry[1]);
-        }
-      }
-
-      span.setAttribute("graph.entry_count", graph.size);
-      return graph;
+  for (const tag of allTags) {
+    const version = tag.slice(PATCH_TAG_PREFIX.length);
+    // Include tags where: currentVersion < version <= targetVersion
+    if (
+      Bun.semver.order(version, currentVersion) === 1 &&
+      Bun.semver.order(version, targetVersion) !== 1
+    ) {
+      chainTags.push({ tag, version });
     }
-  );
+  }
+
+  // Sort by version (chronological for nightlies)
+  chainTags.sort((a, b) => Bun.semver.order(a.version, b.version));
+
+  return chainTags.map((t) => t.tag);
 }
 
-/** Options for walking the nightly patch chain through the graph */
-export type WalkNightlyChainOpts = {
-  graph: Map<string, PatchGraphEntry>;
+/** Result of validating a nightly chain of manifests */
+type NightlyChainValidation = {
+  /** Layer digests in apply order (oldest first) */
+  digests: string[];
+  /** Total size of all patch layers */
+  totalSize: number;
+  /** Expected SHA-256 of the final target binary */
+  expectedSha256: string;
+};
+
+/** Options for validating a nightly chain */
+type ValidateChainOpts = {
+  manifests: OciManifest[];
+  chainTags: string[];
   currentVersion: string;
   targetVersion: string;
   patchLayerName: string;
@@ -455,28 +479,46 @@ export type WalkNightlyChainOpts = {
   fullGzSize: number;
 };
 
-/** Result of walking the nightly patch chain */
-export type NightlyChainInfo = {
-  /** Layer digests in apply order (oldest first) */
-  layerDigests: string[];
-  /** Expected SHA-256 of the final target binary */
-  expectedSha256: string;
-};
+/**
+ * Validate a single step in the nightly chain.
+ *
+ * @returns Layer digest and size if valid, or null if the step is invalid
+ */
+function validateChainStep(
+  manifest: OciManifest,
+  opts: { expectedFrom: string; patchLayerName: string; sizeLimit: number }
+): { digest: string; size: number } | null {
+  const fromVersion = getPatchFromVersion(manifest);
+  if (fromVersion !== opts.expectedFrom) {
+    return null;
+  }
+
+  const layer = manifest.layers.find((l) => {
+    const title = l.annotations?.["org.opencontainers.image.title"];
+    return title === opts.patchLayerName;
+  });
+  if (!layer || layer.size > opts.sizeLimit) {
+    return null;
+  }
+
+  return { digest: layer.digest, size: layer.size };
+}
 
 /**
- * Walk the pre-built patch graph from current to target version.
+ * Validate a chain of manifests and extract patch layer info.
  *
- * Pure in-memory traversal — no HTTP calls. Validates that each step
- * has the expected platform layer and that cumulative size stays under
- * the threshold.
+ * Checks that each manifest's `from-version` links to the previous step,
+ * that the platform patch layer exists, and that cumulative size stays
+ * under the threshold.
  *
- * @returns Chain info with layer digests in apply order, or null
+ * @returns Validated chain info, or null if the chain is invalid
  */
-export function walkNightlyChain(
-  opts: WalkNightlyChainOpts
-): NightlyChainInfo | null {
+function validateNightlyChain(
+  opts: ValidateChainOpts
+): NightlyChainValidation | null {
   const {
-    graph,
+    manifests,
+    chainTags,
     currentVersion,
     targetVersion,
     patchLayerName,
@@ -485,100 +527,216 @@ export function walkNightlyChain(
   } = opts;
   const digests: string[] = [];
   let totalSize = 0;
-  let version = currentVersion;
+  let prevVersion = currentVersion;
 
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth++) {
-    const entry = graph.get(version);
-    if (!entry) {
+  for (let i = 0; i < manifests.length; i++) {
+    const manifest = manifests[i];
+    const tag = chainTags[i];
+    if (!(manifest && tag)) {
       return null;
     }
 
-    const layer = entry.manifest.layers.find((l) => {
-      const title = l.annotations?.["org.opencontainers.image.title"];
-      return title === patchLayerName;
+    const remainingBudget = fullGzSize * SIZE_THRESHOLD_RATIO - totalSize;
+    const step = validateChainStep(manifest, {
+      expectedFrom: prevVersion,
+      patchLayerName,
+      sizeLimit: remainingBudget,
     });
-    if (!layer) {
+    if (!step) {
       return null;
     }
 
-    digests.push(layer.digest);
-    totalSize += layer.size;
+    digests.push(step.digest);
+    totalSize += step.size;
+    prevVersion = tag.slice(PATCH_TAG_PREFIX.length);
 
-    if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
-      return null;
-    }
-
-    if (entry.version === targetVersion) {
-      const sha256 = getPatchTargetSha256(entry.manifest, binaryName) ?? "";
+    if (i === manifests.length - 1) {
+      // Verify the last tag actually corresponds to the target version.
+      // Without this check, a missing patch-<targetVersion> tag could
+      // cause the chain to silently stop at an intermediate version.
+      if (prevVersion !== targetVersion) {
+        return null;
+      }
+      const sha256 = getPatchTargetSha256(manifest, binaryName) ?? "";
       if (!sha256) {
         return null;
       }
-      return { layerDigests: digests, expectedSha256: sha256 };
+      return { digests, totalSize, expectedSha256: sha256 };
     }
-
-    version = entry.version;
   }
 
   return null;
 }
 
+/** Options for fetching chain manifests */
+type FetchManifestsOpts = {
+  token: string;
+  tags: string[];
+  allTagCount: number;
+  chainTagCount: number;
+  signal?: AbortSignal;
+};
+
+/**
+ * Fetch manifests for the given chain tags.
+ *
+ * @returns Map from tag → manifest for the tags that were fetched
+ */
+async function fetchChainManifests(
+  opts: FetchManifestsOpts
+): Promise<Map<string, OciManifest>> {
+  const { token, tags, allTagCount, chainTagCount, signal } = opts;
+  const fetchedManifests = new Map<string, OciManifest>();
+
+  const results = await withTracingSpan(
+    "fetch-chain-manifests",
+    "http.client",
+    (span) => {
+      span.setAttribute("chain.tags_total", allTagCount);
+      span.setAttribute("chain.tags_filtered", chainTagCount);
+      span.setAttribute("chain.fetched_count", tags.length);
+
+      return Promise.all(
+        tags.map(async (tag) => {
+          try {
+            const manifest = await fetchManifest(token, tag, signal);
+            return { tag, manifest };
+          } catch {
+            return { tag, manifest: null };
+          }
+        })
+      );
+    }
+  );
+
+  for (const { tag, manifest } of results) {
+    if (manifest) {
+      fetchedManifests.set(tag, manifest);
+    }
+  }
+
+  return fetchedManifests;
+}
+
 /**
  * Resolve a chain of nightly patches from current to target version.
  *
- * 1. Single API call: list all `patch-*` tags
- * 2. Parallel: fetch all patch manifests concurrently → build graph
- * 3. Walk graph in-memory to find chain (pure computation, no I/O)
- * 4. Parallel: download all patch layer blobs concurrently
+ * Uses a lazy approach that only fetches manifests actually needed:
+ * 1. Single API call: list all `patch-*` tags (cheap — just names)
+ * 2. Filter to tags in the upgrade range and sort by version
+ * 3. Fetch manifests for chain tags (typically 1-2 HTTP calls)
+ * 4. Validate chain linkage and size threshold
+ * 5. Parallel: download all patch layer blobs concurrently
  *
- * @param token - GHCR anonymous bearer token
- * @param currentVersion - Currently installed nightly version
- * @param targetVersion - Target nightly version
- * @param fullGzSize - Size of the full .gz layer for threshold calculation
+ * @param opts.token - GHCR anonymous bearer token
+ * @param opts.currentVersion - Currently installed nightly version
+ * @param opts.targetVersion - Target nightly version
+ * @param opts.fullGzSize - Size of the full .gz layer for threshold calculation
+ * @param opts.preloadedTags - Pre-fetched patch tags from `listTags`. When provided,
+ *   skips the `listTags` call. Used by `resolveNightlyDelta` to run the tag
+ *   listing in parallel with the target manifest fetch.
  * @returns Resolved patch chain, or null if unavailable
  */
-export async function resolveNightlyChain(
-  token: string,
-  currentVersion: string,
-  targetVersion: string,
-  fullGzSize: number
-): Promise<PatchChain | null> {
+export async function resolveNightlyChain(opts: {
+  token: string;
+  currentVersion: string;
+  targetVersion: string;
+  fullGzSize: number;
+  preloadedTags?: string[];
+  signal?: AbortSignal;
+}): Promise<PatchChain | null> {
+  const {
+    token,
+    currentVersion,
+    targetVersion,
+    fullGzSize,
+    preloadedTags,
+    signal,
+  } = opts;
   const binaryName = getPlatformBinaryName();
   const patchLayerName = `${binaryName}.patch`;
 
-  const graph = await buildNightlyPatchGraph(token);
+  // Step 1: Use pre-fetched tags or fetch them (for backward compat / direct callers)
+  const allTags =
+    preloadedTags ?? (await listTags(token, PATCH_TAG_PREFIX, signal));
 
-  const chainInfo = walkNightlyChain({
-    graph,
+  // Step 2: Extract versions, filter to chain range, sort chronologically
+  const chainTags = filterAndSortChainTags(
+    allTags,
+    currentVersion,
+    targetVersion
+  );
+  if (chainTags.length === 0 || chainTags.length > MAX_CHAIN_DEPTH) {
+    return null;
+  }
+
+  // Step 3: Fetch manifests for chain tags
+  const fetchedManifests = await fetchChainManifests({
+    token,
+    tags: chainTags,
+    allTagCount: allTags.length,
+    chainTagCount: chainTags.length,
+    signal,
+  });
+
+  // Build ordered manifests — any missing manifest means chain is broken
+  const manifests: (OciManifest | undefined)[] = chainTags.map((tag) =>
+    fetchedManifests.get(tag)
+  );
+  if (manifests.some((m) => !m)) {
+    return null;
+  }
+
+  // Step 4: Validate chain and collect patch info
+  const validation = validateNightlyChain({
+    manifests: manifests as OciManifest[],
+    chainTags,
     currentVersion,
     targetVersion,
     patchLayerName,
     binaryName,
     fullGzSize,
   });
-  if (!chainInfo) {
+  if (!validation) {
     return null;
   }
 
-  // Parallel blob download
+  // Step 5: Parallel blob download
   const downloadResults = await withTracing(
     "download-patches",
     "http.client",
     () =>
       Promise.all(
-        chainInfo.layerDigests.map((digest) =>
-          downloadLayerBlob(token, digest).then((buf) => new Uint8Array(buf))
+        validation.digests.map((digest) =>
+          downloadLayerBlob(token, digest, signal).then(
+            (buf) => new Uint8Array(buf)
+          )
         )
       )
   );
 
   const patches: PatchLink[] = [];
-  let totalSize = 0;
+  let downloadedSize = 0;
   for (const data of downloadResults) {
     patches.push({ data, size: data.byteLength });
-    totalSize += data.byteLength;
+    downloadedSize += data.byteLength;
   }
 
-  return { patches, totalSize, expectedSha256: chainInfo.expectedSha256 };
+  // Build version steps from chain tags (oldest first)
+  const steps: { fromVersion: string; toVersion: string }[] = [];
+  let prevVersion = currentVersion;
+  for (const tag of chainTags) {
+    const toVersion = tag.slice(PATCH_TAG_PREFIX.length);
+    steps.push({ fromVersion: prevVersion, toVersion });
+    prevVersion = toVersion;
+  }
+
+  return {
+    patches,
+    totalSize: downloadedSize,
+    expectedSha256: validation.expectedSha256,
+    steps,
+  };
 }
 
 /**
@@ -682,29 +840,50 @@ export function attemptDeltaUpgrade(
 }
 
 /**
- * Resolve and apply stable delta patches.
- *
- * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
+ * Build a cache key for Sentry Cache Insights instrumentation.
+ * Format: `patch-chain:{from}-{to}` (e.g., `patch-chain:0.13.0-0.14.0`).
  */
-export async function resolveStableDelta(
-  targetVersion: string,
-  oldBinaryPath: string,
-  destPath: string
-): Promise<DeltaResult | null> {
-  const chain = await withTracing(
-    "resolve-stable-chain",
-    "upgrade.delta.resolve",
-    () => resolveStableChain(CLI_VERSION, targetVersion)
-  );
-  if (chain) {
-    log.debug(
-      `Resolved stable chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
-    );
-  }
-  if (!chain) {
+function patchCacheKey(fromVersion: string, toVersion: string): string {
+  return `patch-chain:${fromVersion}-${toVersion}`;
+}
+
+/**
+ * Try to load a cached patch chain, catching and suppressing errors.
+ *
+ * Emits a `cache.get` span with standard Sentry Cache Module attributes
+ * so the operation appears in the Cache Insights dashboard.
+ *
+ * @returns Cached chain data, or null if unavailable or on any error
+ */
+async function tryLoadCachedChain(
+  currentVersion: string,
+  targetVersion: string
+): Promise<PatchChain | null> {
+  const key = patchCacheKey(currentVersion, targetVersion);
+  try {
+    return await withTracingSpan(key, "cache.get", async (span) => {
+      span.setAttribute("cache.key", [key]);
+      const result = await loadCachedChain(currentVersion, targetVersion);
+      const hit = result !== null;
+      span.setAttribute("cache.hit", hit);
+      if (hit) {
+        span.setAttribute("cache.item_size", result.totalSize);
+      }
+      return result;
+    });
+  } catch {
     return null;
   }
+}
 
+/**
+ * Apply a cached or network-resolved chain and return the delta result.
+ */
+async function applyChainAndReturn(
+  chain: PatchChain,
+  oldBinaryPath: string,
+  destPath: string
+): Promise<DeltaResult> {
   const sha256 = await withTracing(
     "apply-patch-chain",
     "upgrade.delta.apply",
@@ -717,30 +896,133 @@ export async function resolveStableDelta(
   };
 }
 
+/** Options for the shared cache-first resolve + apply logic */
+type ResolveAndApplyOpts = {
+  targetVersion: string;
+  oldBinaryPath: string;
+  destPath: string;
+  /** Channel-specific chain resolution callback */
+  resolveFromNetwork: () => Promise<PatchChain | null>;
+  /** Channel label for log messages (e.g., "stable", "nightly") */
+  channel: string;
+};
+
 /**
- * Resolve and apply nightly delta patches.
+ * Shared cache-first resolve + apply logic for both stable and nightly channels.
+ *
+ * 1. Check the patch cache for a fully offline upgrade
+ * 2. If no cache hit, resolve a fresh chain from the network
+ * 3. Apply the chain and return the delta result
+ */
+async function resolveAndApplyDelta(
+  opts: ResolveAndApplyOpts
+): Promise<DeltaResult | null> {
+  const {
+    targetVersion,
+    oldBinaryPath,
+    destPath,
+    resolveFromNetwork,
+    channel,
+  } = opts;
+  // Check patch cache first — enables fully offline upgrades
+  const cached = await tryLoadCachedChain(CLI_VERSION, targetVersion);
+  if (cached) {
+    Sentry.getActiveSpan()?.setAttribute("delta.source", "cache");
+    log.debug(
+      `Using cached patches: ${cached.patches.length} patch(es), ${cached.totalSize} bytes total`
+    );
+    return await applyChainAndReturn(cached, oldBinaryPath, destPath);
+  }
+  Sentry.getActiveSpan()?.setAttribute("delta.source", "network");
+
+  const chain = await resolveFromNetwork();
+  if (chain) {
+    log.debug(
+      `Resolved ${channel} chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
+    );
+  }
+  if (!chain) {
+    return null;
+  }
+
+  return await applyChainAndReturn(chain, oldBinaryPath, destPath);
+}
+
+/**
+ * Resolve and apply stable delta patches.
+ *
+ * Checks the patch cache first for fully offline upgrades.
+ * Falls back to network resolution if the cache is empty.
  *
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
-export async function resolveNightlyDelta(
+export function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string
 ): Promise<DeltaResult | null> {
+  return resolveAndApplyDelta({
+    targetVersion,
+    oldBinaryPath,
+    destPath,
+    resolveFromNetwork: () =>
+      withTracing("resolve-stable-chain", "upgrade.delta.resolve", () =>
+        resolveStableChain(CLI_VERSION, targetVersion)
+      ),
+    channel: "stable",
+  });
+}
+
+/**
+ * Resolve and apply nightly delta patches.
+ *
+ * Checks the patch cache first for fully offline upgrades.
+ * Falls back to network resolution if the cache is empty.
+ *
+ * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
+ */
+export function resolveNightlyDelta(
+  targetVersion: string,
+  oldBinaryPath: string,
+  destPath: string
+): Promise<DeltaResult | null> {
+  return resolveAndApplyDelta({
+    targetVersion,
+    oldBinaryPath,
+    destPath,
+    resolveFromNetwork: () => resolveNightlyChainWithContext(targetVersion),
+    channel: "nightly",
+  });
+}
+
+/**
+ * Resolve a nightly chain with full context setup (token, manifest, tags).
+ *
+ * Extracted to share between `resolveNightlyDelta` and `prefetchNightlyPatches`.
+ * Fetches the GHCR token, target manifest, and patch tags in parallel,
+ * then resolves the patch chain.
+ */
+async function resolveNightlyChainWithContext(
+  targetVersion: string,
+  signal?: AbortSignal
+): Promise<PatchChain | null> {
   const token = await withTracing("ghcr-token", "http.client", () =>
-    getAnonymousToken()
+    getAnonymousToken(signal)
   );
 
-  // Get the .gz layer size from the target version's manifest for threshold.
-  // Use the versioned tag (nightly-<version>) so the threshold reflects the
-  // actual binary being upgraded to, not the latest rolling nightly.
   const binaryName = getPlatformBinaryName();
   const targetTag = `nightly-${targetVersion}`;
-  const nightlyManifest = await withTracing(
-    "fetch-target-manifest",
-    "http.client",
-    () => fetchManifest(token, targetTag)
-  );
+
+  // Fetch target manifest and list patch tags in parallel — both only need token
+  const [nightlyManifest, patchTags] = await Promise.all([
+    withTracing("fetch-target-manifest", "http.client", () =>
+      fetchManifest(token, targetTag, signal)
+    ),
+    withTracing("list-patch-tags", "http.client", () =>
+      listTags(token, PATCH_TAG_PREFIX, signal)
+    ),
+  ]);
+
   const gzLayer = nightlyManifest.layers.find((l) => {
     const title = l.annotations?.["org.opencontainers.image.title"];
     return title === `${binaryName}.gz`;
@@ -749,30 +1031,19 @@ export async function resolveNightlyDelta(
     return null;
   }
 
-  const chain = await withTracing(
+  return await withTracing(
     "resolve-nightly-chain",
     "upgrade.delta.resolve",
-    () => resolveNightlyChain(token, CLI_VERSION, targetVersion, gzLayer.size)
+    () =>
+      resolveNightlyChain({
+        token,
+        currentVersion: CLI_VERSION,
+        targetVersion,
+        fullGzSize: gzLayer.size,
+        preloadedTags: patchTags,
+        signal,
+      })
   );
-  if (chain) {
-    log.debug(
-      `Resolved nightly chain: ${chain.patches.length} patch(es), ${chain.totalSize} bytes total`
-    );
-  }
-  if (!chain) {
-    return null;
-  }
-
-  const sha256 = await withTracing(
-    "apply-patch-chain",
-    "upgrade.delta.apply",
-    () => applyPatchChain(chain, oldBinaryPath, destPath)
-  );
-  return {
-    sha256,
-    patchBytes: chain.totalSize,
-    chainLength: chain.patches.length,
-  };
 }
 
 /** Remove intermediate patching files, ignoring errors. */
@@ -889,5 +1160,83 @@ export function applyPatchChain(
 
       return sha256;
     }
+  );
+}
+
+// ===================================================================
+// Patch Pre-fetching (called from version-check.ts)
+// ===================================================================
+
+/**
+ * Resolve a chain and save it to the cache for offline upgrades.
+ *
+ * Shared by both nightly and stable prefetch paths. Checks abort signal
+ * at key checkpoints to bail early when the process is exiting.
+ *
+ * @param targetVersion - The newly discovered version
+ * @param signal - Abort signal (process may exit)
+ * @param resolveChain - Channel-specific chain resolution callback
+ */
+async function prefetchAndCache(
+  targetVersion: string,
+  signal: AbortSignal | undefined,
+  resolveChain: () => Promise<PatchChain | null>
+): Promise<void> {
+  if (!canAttemptDelta(targetVersion) || signal?.aborted) {
+    return;
+  }
+
+  const chain = await resolveChain();
+  if (!chain?.steps || signal?.aborted) {
+    return;
+  }
+
+  const key = patchCacheKey(CLI_VERSION, targetVersion);
+  const steps = chain.steps;
+  await withTracingSpan(key, "cache.put", async (span) => {
+    span.setAttribute("cache.key", [key]);
+    span.setAttribute("cache.item_size", chain.totalSize);
+    await savePatchesToCache(chain, steps);
+  });
+}
+
+/**
+ * Pre-fetch nightly delta patches for a future upgrade.
+ *
+ * Called during background version check after discovering a new version.
+ * Downloads the patch chain and caches it to disk so that the subsequent
+ * `sentry cli upgrade` can apply patches offline.
+ *
+ * Runs as fire-and-forget — errors are silently ignored since this is
+ * a best-effort optimization.
+ *
+ * @param targetVersion - The newly discovered nightly version
+ * @param signal - Abort signal (process may exit)
+ */
+export function prefetchNightlyPatches(
+  targetVersion: string,
+  signal?: AbortSignal
+): Promise<void> {
+  return prefetchAndCache(targetVersion, signal, () =>
+    resolveNightlyChainWithContext(targetVersion, signal)
+  );
+}
+
+/**
+ * Pre-fetch stable delta patches for a future upgrade.
+ *
+ * Called during background version check after discovering a new stable version.
+ * Downloads the patch chain and caches it to disk so that the subsequent
+ * `sentry cli upgrade` can apply patches offline.
+ *
+ * @param targetVersion - The newly discovered stable version
+ * @param signal - Abort signal (process may exit)
+ */
+export function prefetchStablePatches(
+  targetVersion: string,
+  signal?: AbortSignal
+): Promise<void> {
+  return prefetchAndCache(targetVersion, signal, () =>
+    resolveStableChain(CLI_VERSION, targetVersion, signal)
   );
 }

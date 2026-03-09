@@ -1,6 +1,101 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.15.0
+
+### New Features ✨
+
+- (project) Display platform suggestions in multi-column tables by @betegon in [#365](https://github.com/getsentry/cli/pull/365)
+
+### Bug Fixes 🐛
+
+- (log-view) Support multiple log IDs and validate hex format by @BYK in [#362](https://github.com/getsentry/cli/pull/362)
+- (logs) Harden log schemas against API response format variations by @BYK in [#361](https://github.com/getsentry/cli/pull/361)
+- Improve argument parsing for common user mistakes by @BYK in [#363](https://github.com/getsentry/cli/pull/363)
+
+### Internal Changes 🔧
+
+- (delta-upgrade) Lazy chain walk, GHCR retry, parallel I/O, offline cache by @BYK in [#360](https://github.com/getsentry/cli/pull/360)
+- Use --timeout CLI flag for model-based test timeouts by @BYK in [#367](https://github.com/getsentry/cli/pull/367)
+
+## 0.14.0
+
+### New Features ✨
+
+#### Trace
+
+- Add cursor pagination to `trace list` by @BYK in [#324](https://github.com/getsentry/cli/pull/324)
+- Add `sentry trace logs` subcommand (#247) by @BYK in [#311](https://github.com/getsentry/cli/pull/311)
+
+#### Other
+
+- (api) Add --data/-d flag and auto-detect JSON body in fields by @BYK in [#320](https://github.com/getsentry/cli/pull/320)
+- (formatters) Render all terminal output as markdown by @BYK in [#297](https://github.com/getsentry/cli/pull/297)
+- (install) Add Sentry error telemetry to install script by @BYK in [#334](https://github.com/getsentry/cli/pull/334)
+- (issue-list) Global limit with fair distribution, compound cursor, and richer progress by @BYK in [#306](https://github.com/getsentry/cli/pull/306)
+- (log-list) Add --trace flag to filter logs by trace ID by @BYK in [#329](https://github.com/getsentry/cli/pull/329)
+- (logger) Add consola-based structured logging with Sentry integration by @BYK in [#338](https://github.com/getsentry/cli/pull/338)
+- (project) Add `project create` command by @betegon in [#237](https://github.com/getsentry/cli/pull/237)
+- (upgrade) Add binary delta patching via TRDIFF10/bsdiff by @BYK in [#327](https://github.com/getsentry/cli/pull/327)
+- Support SENTRY_AUTH_TOKEN and SENTRY_TOKEN env vars for headless auth by @BYK in [#356](https://github.com/getsentry/cli/pull/356)
+- Improve markdown rendering styles by @BYK in [#342](https://github.com/getsentry/cli/pull/342)
+
+### Bug Fixes 🐛
+
+#### Api
+
+- Use numeric project ID to avoid "not actively selected" error by @betegon in [#312](https://github.com/getsentry/cli/pull/312)
+- Use limit param for issues endpoint page size by @BYK in [#309](https://github.com/getsentry/cli/pull/309)
+- Auto-correct ':' to '=' in --field values with a warning by @BYK in [#302](https://github.com/getsentry/cli/pull/302)
+
+#### Formatters
+
+- Expand streaming table to fill terminal width by @betegon in [#314](https://github.com/getsentry/cli/pull/314)
+- Fix HTML entities and escaped underscores in table output by @betegon in [#313](https://github.com/getsentry/cli/pull/313)
+
+#### Setup
+
+- Suppress agent skills and welcome messages on upgrade by @BYK in [#328](https://github.com/getsentry/cli/pull/328)
+- Suppress shell completion messages on upgrade by @BYK in [#326](https://github.com/getsentry/cli/pull/326)
+
+#### Upgrade
+
+- Detect downgrades and skip delta attempt by @BYK in [#358](https://github.com/getsentry/cli/pull/358)
+- Check GHCR for nightly version existence instead of GitHub Releases by @BYK in [#352](https://github.com/getsentry/cli/pull/352)
+- Replace Bun.mmap with arrayBuffer on all platforms by @BYK in [#343](https://github.com/getsentry/cli/pull/343)
+- Replace Bun.mmap with arrayBuffer on macOS to prevent SIGKILL by @BYK in [#340](https://github.com/getsentry/cli/pull/340)
+- Use MAP_PRIVATE mmap to prevent macOS SIGKILL during delta upgrade by @BYK in [#339](https://github.com/getsentry/cli/pull/339)
+
+#### Other
+
+- (ci) Generate JUnit XML to silence codecov-action warnings by @BYK in [#300](https://github.com/getsentry/cli/pull/300)
+- (install) Fix nightly digest extraction on macOS by @BYK in [#331](https://github.com/getsentry/cli/pull/331)
+- (logger) Inject --verbose and --log-level as proper Stricli flags by @BYK in [#353](https://github.com/getsentry/cli/pull/353)
+- (nightly) Push to GHCR from artifacts dir so layer titles are bare filenames by @BYK in [#301](https://github.com/getsentry/cli/pull/301)
+- (project create) Auto-correct dot-separated platform to hyphens by @BYK in [#336](https://github.com/getsentry/cli/pull/336)
+- (region) Resolve DSN org prefix at resolution layer by @BYK in [#316](https://github.com/getsentry/cli/pull/316)
+- (test) Handle 0/-0 in getComparator anti-symmetry property test by @BYK in [#308](https://github.com/getsentry/cli/pull/308)
+- (trace-logs) Timestamp_precise is a number, not a string by @BYK in [#323](https://github.com/getsentry/cli/pull/323)
+
+### Documentation 📚
+
+- Document SENTRY_URL and self-hosted setup by @BYK in [#337](https://github.com/getsentry/cli/pull/337)
+
+### Internal Changes 🔧
+
+#### Api
+
+- Upgrade @sentry/api to 0.21.0, remove raw HTTP pagination workarounds by @BYK in [#321](https://github.com/getsentry/cli/pull/321)
+- Wire listIssuesPaginated through @sentry/api SDK for type safety by @BYK in [#310](https://github.com/getsentry/cli/pull/310)
+
+#### Other
+
+- (craft) Add sentry-release-registry target by @BYK in [#325](https://github.com/getsentry/cli/pull/325)
+- (errors) Return Result type from withAuthGuard, expand auto-login to expired tokens by @BYK in [#359](https://github.com/getsentry/cli/pull/359)
+- (project create) Migrate human output to markdown rendering system by @BYK in [#341](https://github.com/getsentry/cli/pull/341)
+- (telemetry) Add child spans to delta upgrade for bottleneck identification by @BYK in [#355](https://github.com/getsentry/cli/pull/355)
+- (upgrade) Use copy-then-mmap for zero JS heap during delta patching by @BYK in [#344](https://github.com/getsentry/cli/pull/344)
+
 ## 0.13.0
 
 ### New Features ✨

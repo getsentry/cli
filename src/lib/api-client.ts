@@ -61,7 +61,13 @@ import {
 } from "../types/index.js";
 
 import type { AutofixResponse, AutofixState } from "../types/seer.js";
-import { ApiError, AuthError, stringifyUnknown } from "./errors.js";
+import {
+  ApiError,
+  AuthError,
+  type AuthGuardSuccess,
+  stringifyUnknown,
+  withAuthGuard,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import { resolveOrgRegion } from "./region.js";
 import {
@@ -353,9 +359,14 @@ export async function apiRequestToRegion<T>(
   if (schema) {
     const result = schema.safeParse(data);
     if (!result.success) {
-      // Treat schema validation failures as API errors so they surface cleanly
-      // through the central error handler rather than showing a raw ZodError
-      // stack trace. This guards against unexpected API response format changes.
+      // Attach structured Zod issues to the Sentry event so we can diagnose
+      // exactly which field(s) failed validation — the ApiError.detail string
+      // alone may not be visible in the Sentry issue overview.
+      Sentry.setContext("zod_validation", {
+        endpoint,
+        status: response.status,
+        issues: result.error.issues.slice(0, 10),
+      });
       throw new ApiError(
         `Unexpected response format from ${endpoint}`,
         response.status,
@@ -500,16 +511,9 @@ export async function listOrganizationsInRegion(
 export async function listOrganizations(): Promise<SentryOrganization[]> {
   const { setOrgRegions } = await import("./db/regions.js");
 
-  let regions: Region[];
-  try {
-    regions = await getUserRegions();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Self-hosted instances may not have the regions endpoint (404)
-    regions = [];
-  }
+  // Self-hosted instances may not have the regions endpoint (404)
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default API for self-hosted instances
@@ -871,25 +875,37 @@ export async function listRepositoriesPaginated(
   );
 }
 
+/** Result of searching for projects by slug across all organizations. */
+export type ProjectSearchResult = {
+  /** Matching projects with their org context */
+  projects: ProjectWithOrg[];
+  /** All organizations fetched during the search — reuse for fallback checks */
+  orgs: SentryOrganization[];
+};
+
 /**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
  * Searches all orgs the user has access to and returns matches.
  *
+ * Returns both the matching projects and the full org list that was fetched,
+ * so callers can check whether a slug matches an organization without an
+ * additional API call (useful for "did you mean org/?" fallbacks).
+ *
  * @param projectSlug - Project slug to search for (exact match)
- * @returns Array of matching projects with their org context
+ * @returns Matching projects and the org list used during search
  */
 export async function findProjectsBySlug(
   projectSlug: string
-): Promise<ProjectWithOrg[]> {
+): Promise<ProjectSearchResult> {
   const orgs = await listOrganizations();
   const isNumericId = isAllDigits(projectSlug);
 
   // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(
-    orgs.map(async (org) => {
-      try {
+    orgs.map((org) =>
+      withAuthGuard(async () => {
         const project = await getProject(org.slug, projectSlug);
         // The API accepts project_id_or_slug, so a numeric input could
         // resolve by ID instead of slug. When the input is all digits,
@@ -902,17 +918,17 @@ export async function findProjectsBySlug(
           return null;
         }
         return { ...project, orgSlug: org.slug };
-      } catch (error) {
-        if (error instanceof AuthError) {
-          throw error;
-        }
-        // 404 or permission errors — project doesn't exist in this org
-        return null;
-      }
-    })
+      })
+    )
   );
 
-  return searchResults.filter((r): r is ProjectWithOrg => r !== null);
+  return {
+    projects: searchResults
+      .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
+      .map((r) => r.value)
+      .filter((v): v is ProjectWithOrg => v !== null),
+    orgs,
+  };
 }
 
 /**
@@ -965,22 +981,19 @@ export async function findProjectsByPattern(
   const orgs = await listOrganizations();
 
   const searchResults = await Promise.all(
-    orgs.map(async (org) => {
-      try {
+    orgs.map((org) =>
+      withAuthGuard(async () => {
         const projects = await listProjects(org.slug);
         return projects
           .filter((p) => matchesWordBoundary(pattern, p.slug))
           .map((p) => ({ ...p, orgSlug: org.slug }));
-      } catch (error) {
-        if (error instanceof AuthError) {
-          throw error;
-        }
-        return [];
-      }
-    })
+      })
+    )
   );
 
-  return searchResults.flat();
+  return searchResults
+    .filter((r): r is AuthGuardSuccess<ProjectWithOrg[]> => r.ok)
+    .flatMap((r) => r.value);
 }
 
 /**
@@ -996,15 +1009,8 @@ export async function findProjectsByPattern(
 export async function findProjectByDsnKey(
   publicKey: string
 ): Promise<SentryProject | null> {
-  let regions: Region[];
-  try {
-    regions = await getUserRegions();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    regions = [];
-  }
+  const regionsResult = await withAuthGuard(() => getUserRegions());
+  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
 
   if (regions.length === 0) {
     // Fall back to default region for self-hosted
@@ -1787,21 +1793,16 @@ const DETAILED_LOG_FIELDS = [
 ];
 
 /**
- * Get a single log entry by its item ID.
- * Uses the Explore/Events API with dataset=logs and a filter query.
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug for filtering
- * @param logId - The sentry.item_id of the log entry
- * @returns The detailed log entry, or null if not found
+ * Fetch a single batch of log entries by their item IDs.
+ * Batch size must not exceed {@link API_MAX_PER_PAGE}.
  */
-export async function getLog(
+async function getLogsBatch(
   orgSlug: string,
   projectSlug: string,
-  logId: string
-): Promise<DetailedSentryLog | null> {
-  const query = `project:${projectSlug} sentry.item_id:${logId}`;
-  const config = await getOrgSdkConfig(orgSlug);
+  batchIds: string[],
+  config: Awaited<ReturnType<typeof getOrgSdkConfig>>
+): Promise<DetailedSentryLog[]> {
+  const query = `project:${projectSlug} sentry.item_id:[${batchIds.join(",")}]`;
 
   const result = await queryExploreEventsInTableFormat({
     ...config,
@@ -1810,14 +1811,52 @@ export async function getLog(
       dataset: "logs",
       field: DETAILED_LOG_FIELDS,
       query,
-      per_page: 1,
+      per_page: batchIds.length,
       statsPeriod: "90d",
     },
   });
 
   const data = unwrapResult(result, "Failed to get log");
   const logsResponse = DetailedLogsResponseSchema.parse(data);
-  return logsResponse.data[0] ?? null;
+  return logsResponse.data;
+}
+
+/**
+ * Get one or more log entries by their item IDs.
+ * Uses the Explore/Events API with dataset=logs and a filter query.
+ * Bracket syntax (`sentry.item_id:[id1,id2,...]`) works for any count including one.
+ *
+ * When more than {@link API_MAX_PER_PAGE} IDs are requested, the fetch is
+ * split into batches to avoid silent API truncation.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug for filtering
+ * @param logIds - One or more sentry.item_id values to fetch
+ * @returns Array of matching detailed log entries (may be shorter than logIds if some weren't found)
+ */
+export async function getLogs(
+  orgSlug: string,
+  projectSlug: string,
+  logIds: string[]
+): Promise<DetailedSentryLog[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  // Single batch — no splitting needed
+  if (logIds.length <= API_MAX_PER_PAGE) {
+    return getLogsBatch(orgSlug, projectSlug, logIds, config);
+  }
+
+  // Split into batches of API_MAX_PER_PAGE and fetch in parallel
+  const batches: string[][] = [];
+  for (let i = 0; i < logIds.length; i += API_MAX_PER_PAGE) {
+    batches.push(logIds.slice(i, i + API_MAX_PER_PAGE));
+  }
+
+  const results = await Promise.all(
+    batches.map((batch) => getLogsBatch(orgSlug, projectSlug, batch, config))
+  );
+
+  return results.flat();
 }
 
 // Trace-log functions

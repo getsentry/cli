@@ -57,10 +57,10 @@ describe("parsePositionalArgs", () => {
       expect(result.orgArg).toBeUndefined();
     });
 
-    test("accepts mixed-case hex trace ID", () => {
+    test("normalizes mixed-case hex trace ID to lowercase", () => {
       const mixedCase = "AAAA1111bbbb2222CCCC3333dddd4444";
       const result = parsePositionalArgs([mixedCase]);
-      expect(result.traceId).toBe(mixedCase);
+      expect(result.traceId).toBe(mixedCase.toLowerCase());
       expect(result.orgArg).toBeUndefined();
     });
   });

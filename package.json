@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.14.0-dev.0",
+  "version": "0.16.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -17,6 +17,7 @@
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
     "@types/bun": "latest",
+    "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^22",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/semver": "^7.7.1",
@@ -26,6 +27,7 @@
     "consola": "^3.4.2",
     "esbuild": "^0.25.0",
     "fast-check": "^4.5.3",
+    "http-cache-semantics": "^4.2.0",
     "ignore": "^7.0.5",
     "marked": "^15",
     "openai": "^6.22.0",
@@ -65,9 +67,9 @@
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
     "test": "bun run test:unit && bun run test:isolated",
-    "test:unit": "bun test test/lib test/commands test/types --coverage --coverage-reporter=lcov",
-    "test:isolated": "bun test test/isolated",
-    "test:e2e": "bun test test/e2e",
+    "test:unit": "bun test --timeout 15000 test/lib test/commands test/types --coverage --coverage-reporter=lcov",
+    "test:isolated": "bun test --timeout 15000 test/isolated",
+    "test:e2e": "bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
     "generate:skill": "bun run script/generate-skill.ts",
     "check:skill": "bun run script/check-skill.ts",

@@ -19,7 +19,10 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  applyFreshFlag,
   buildListCommand,
+  FRESH_ALIASES,
+  FRESH_FLAG,
   LIST_CURSOR_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
@@ -31,6 +34,7 @@ type ListFlags = {
   readonly sort: "date" | "duration";
   readonly json: boolean;
   readonly cursor?: string;
+  readonly fresh: boolean;
 };
 
 type SortValue = "date" | "duration";
@@ -141,14 +145,22 @@ export const listCommand = buildListCommand("trace", {
         brief: "Output as JSON",
         default: false,
       },
+      fresh: FRESH_FLAG,
     },
-    aliases: { n: "limit", q: "query", s: "sort", c: "cursor" },
+    aliases: {
+      ...FRESH_ALIASES,
+      n: "limit",
+      q: "query",
+      s: "sort",
+      c: "cursor",
+    },
   },
   async func(
     this: SentryContext,
     flags: ListFlags,
     target?: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection

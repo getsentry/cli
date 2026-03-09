@@ -7,6 +7,8 @@
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
+  looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
   spansFlag,
@@ -22,6 +24,12 @@ import {
   writeJson,
 } from "../../lib/formatters/index.js";
 import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+} from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
+import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
@@ -32,6 +40,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly spans: number;
+  readonly fresh: boolean;
 };
 
 /** Usage hint for ContextError messages */
@@ -48,6 +57,10 @@ const USAGE_HINT = "sentry trace view <org>/<project> <trace-id>";
 export function parsePositionalArgs(args: string[]): {
   traceId: string;
   targetArg: string | undefined;
+  /** Warning message if arguments appear to be in the wrong order */
+  warning?: string;
+  /** Suggestion when first arg looks like an issue short ID */
+  suggestion?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID", USAGE_HINT);
@@ -72,8 +85,19 @@ export function parsePositionalArgs(args: string[]): {
     return { traceId: first, targetArg: undefined };
   }
 
+  // Detect swapped args: user put ID first and target second
+  const swapWarning = detectSwappedViewArgs(first, second);
+  if (swapWarning) {
+    return { traceId: first, targetArg: second, warning: swapWarning };
+  }
+
+  // Detect issue short ID passed as first arg (e.g., "CAM-82X some-trace-id")
+  const suggestion = looksLikeIssueShortId(first)
+    ? `Did you mean: sentry issue view ${first}`
+    : undefined;
+
   // Two or more args - first is target, second is trace ID
-  return { traceId: second, targetArg: first };
+  return { traceId: second, targetArg: first, suggestion };
 }
 
 /**
@@ -142,19 +166,32 @@ export const viewCommand = buildCommand({
         default: false,
       },
       ...spansFlag,
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     ...args: string[]
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
+    const log = logger.withTag("trace.view");
 
     // Parse positional args
-    const { traceId, targetArg } = parsePositionalArgs(args);
+    const { traceId, targetArg, warning, suggestion } =
+      parsePositionalArgs(args);
+    if (warning) {
+      log.warn(warning);
+    }
+    if (suggestion) {
+      log.warn(suggestion);
+    }
     const parsed = parseOrgProjectArg(targetArg);
+    if (parsed.type !== "auto-detect" && parsed.normalized) {
+      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
+    }
 
     let target: ResolvedTraceTarget | null = null;
 
@@ -170,8 +207,7 @@ export const viewCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`,
-          this.stderr
+          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`
         );
         break;
 

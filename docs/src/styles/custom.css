@@ -913,7 +913,7 @@ starlight-tabs [role="tabpanel"] {
    Code Blocks
    ========================================================================== */
 
-pre:not(.pm-pre) {
+pre:not(.pm-pre):not(.table-box) {
   background: rgba(20, 20, 25, 0.9) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 12px !important;
@@ -927,6 +927,32 @@ pre.pm-pre,
   border-radius: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
+}
+
+/* ASCII art tables inside terminals - no chrome, consistent monospace */
+pre.table-box {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+pre.table-box,
+pre.table-box * {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace !important;
+  font-size: inherit !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-variant: normal !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: normal !important;
+  font-stretch: normal !important;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  text-decoration: none !important;
+  text-transform: none !important;
+  -webkit-text-size-adjust: none !important;
 }
 
 code {
@@ -1089,7 +1115,7 @@ code {
 }
 
 /* Standalone pre */
-.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre) {
+.sl-markdown-content pre:not(.expressive-code pre):not(.pm-pre):not(.table-box) {
   background: #0a0a0f !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 12px !important;

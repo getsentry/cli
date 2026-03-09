@@ -13,14 +13,19 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { AuthError, ContextError } from "../../lib/errors.js";
+import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import {
   divider,
   formatProjectDetails,
   writeJson,
   writeOutput,
 } from "../../lib/formatters/index.js";
-import { TARGET_PATTERN_NOTE } from "../../lib/list-command.js";
+import {
+  applyFreshFlag,
+  FRESH_ALIASES,
+  FRESH_FLAG,
+  TARGET_PATTERN_NOTE,
+} from "../../lib/list-command.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
@@ -32,6 +37,7 @@ import type { SentryProject } from "../../types/index.js";
 type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
+  readonly fresh: boolean;
 };
 
 /** Usage hint for ContextError messages */
@@ -91,21 +97,15 @@ type ProjectWithDsn = {
 async function fetchProjectDetails(
   target: ResolvedTarget
 ): Promise<ProjectWithDsn | null> {
-  try {
+  const result = await withAuthGuard(async () => {
     // Fetch project and DSN in parallel
     const [project, dsn] = await Promise.all([
       getProject(target.org, target.project),
       tryGetPrimaryDsn(target.org, target.project),
     ]);
     return { project, dsn };
-  } catch (error) {
-    // Rethrow auth errors - user needs to know they're not authenticated
-    if (error instanceof AuthError) {
-      throw error;
-    }
-    // Silently skip other errors (e.g., no access to specific project)
-    return null;
-  }
+  });
+  return result.ok ? result.value : null;
 }
 
 /** Result of fetching project details for multiple targets */
@@ -203,14 +203,16 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
+      fresh: FRESH_FLAG,
     },
-    aliases: { w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web" },
   },
   async func(
     this: SentryContext,
     flags: ViewFlags,
     targetArg?: string
   ): Promise<void> {
+    applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(targetArg);
@@ -236,8 +238,7 @@ export const viewCommand = buildCommand({
         const resolved = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry project view <org>/${parsed.projectSlug}`,
-          this.stderr
+          `sentry project view <org>/${parsed.projectSlug}`
         );
         resolvedTargets = [
           {

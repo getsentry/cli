@@ -13,6 +13,7 @@ import {
   stringifyUnknown,
   UpgradeError,
   ValidationError,
+  withAuthGuard,
 } from "../../src/lib/errors.js";
 
 describe("CliError", () => {
@@ -421,5 +422,59 @@ describe("getExitCode", () => {
   test("returns 1 for non-errors", () => {
     expect(getExitCode("string")).toBe(1);
     expect(getExitCode(null)).toBe(1);
+  });
+});
+
+describe("withAuthGuard", () => {
+  test("returns ok result on success", async () => {
+    const result = await withAuthGuard(() => Promise.resolve("hello"));
+    expect(result).toEqual({ ok: true, value: "hello" });
+  });
+
+  test("rethrows AuthError('not_authenticated')", async () => {
+    await expect(
+      withAuthGuard(() => Promise.reject(new AuthError("not_authenticated")))
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  test("rethrows AuthError('expired')", async () => {
+    await expect(
+      withAuthGuard(() => Promise.reject(new AuthError("expired")))
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  test("rethrows AuthError('invalid')", async () => {
+    await expect(
+      withAuthGuard(() => Promise.reject(new AuthError("invalid")))
+    ).rejects.toBeInstanceOf(AuthError);
+  });
+
+  test("returns failure result with error on non-AuthError", async () => {
+    const thrownError = new Error("network error");
+    const result = await withAuthGuard(() => Promise.reject(thrownError));
+    expect(result).toEqual({ ok: false, error: thrownError });
+  });
+
+  test("returns failure result on ApiError", async () => {
+    const apiError = new ApiError("Not found", 404);
+    const result = await withAuthGuard(() => Promise.reject(apiError));
+    expect(result).toEqual({ ok: false, error: apiError });
+  });
+
+  test("preserves the original error object in failure result", async () => {
+    const thrownError = new Error("boom");
+    const result = await withAuthGuard(() => Promise.reject(thrownError));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe(thrownError);
+    }
+  });
+
+  test("handles non-Error thrown values", async () => {
+    const result = await withAuthGuard(() => Promise.reject("string error"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("string error");
+    }
   });
 });

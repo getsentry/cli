@@ -9,7 +9,8 @@
  */
 
 import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
-import { isEnvTokenActive, refreshToken } from "./db/auth.js";
+import { getAuthToken, isEnvTokenActive, refreshToken } from "./db/auth.js";
+import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
 import { withHttpSpan } from "./telemetry.js";
 
 /** Request timeout in milliseconds */
@@ -191,16 +192,20 @@ function handleFetchError(
   return { action: "retry" };
 }
 
+/** Extract the full URL string from a fetch input */
+function extractFullUrl(input: Request | string | URL): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
 /** Extract the URL pathname for span naming */
 function extractUrlPath(input: Request | string | URL): string {
-  let raw: string;
-  if (typeof input === "string") {
-    raw = input;
-  } else if (input instanceof URL) {
-    raw = input.href;
-  } else {
-    raw = input.url;
-  }
+  const raw = extractFullUrl(input);
   try {
     return new URL(raw).pathname;
   } catch {
@@ -209,9 +214,102 @@ function extractUrlPath(input: Request | string | URL): string {
 }
 
 /**
- * Create a fetch function with authentication, timeout, retry, and 401 refresh.
+ * Attempt to serve a GET request from the response cache.
+ * Returns the cached Response if valid, or undefined on miss.
+ *
+ * @param requestHeaders - Headers that were (or will be) sent with the request,
+ *   needed for correct `Vary` handling in CachePolicy freshness checks.
+ */
+async function tryCacheHit(
+  method: string,
+  fullUrl: string,
+  requestHeaders: Record<string, string>
+): Promise<Response | undefined> {
+  if (method !== "GET") {
+    return;
+  }
+  return await getCachedResponse(method, fullUrl, requestHeaders);
+}
+
+/**
+ * Store a successful GET response in the cache (fire-and-forget).
+ * Clones the response so the original body stream is preserved for the caller.
+ *
+ * @param requestHeaders - Headers sent with the request, stored in CachePolicy
+ *   for future `Vary`-aware freshness checks.
+ */
+function cacheResponse(
+  method: string,
+  fullUrl: string,
+  requestHeaders: Record<string, string>,
+  response: Response
+): void {
+  if (method !== "GET" || !response.ok) {
+    return;
+  }
+  // Cast needed: Bun extends Response with extra properties (toJSON, count, getAll)
+  // that .clone() doesn't carry over, but our cache only reads standard Response API
+  storeCachedResponse(
+    method,
+    fullUrl,
+    requestHeaders,
+    response.clone() as Response
+  ).catch(() => {
+    // Non-fatal: cache write failures don't affect the response
+  });
+}
+
+/** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
+function authHeaders(token: string | undefined): Record<string, string> {
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+/**
+ * Authenticate and execute a request with retry logic.
+ *
+ * Refreshes the auth token, then retries the request up to `MAX_RETRIES` times
+ * with exponential backoff on transient errors.
+ */
+async function fetchWithRetry(
+  input: Request | string | URL,
+  init: RequestInit | undefined,
+  method: string,
+  fullUrl: string
+): Promise<Response> {
+  const { token } = await refreshToken();
+  const headers = prepareHeaders(input, init, token);
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const isLastAttempt = attempt === MAX_RETRIES;
+    const result = await executeAttempt(input, init, headers, isLastAttempt);
+
+    if (result.action === "done") {
+      // Use getAuthToken() instead of captured `token` — after a 401 refresh,
+      // handleUnauthorized stores a new token in the DB
+      cacheResponse(
+        method,
+        fullUrl,
+        authHeaders(getAuthToken()),
+        result.response
+      );
+      return result.response;
+    }
+    if (result.action === "throw") {
+      throw result.error;
+    }
+
+    await Bun.sleep(backoffDelay(attempt));
+  }
+
+  // Unreachable: the last attempt always returns 'done' or 'throw'
+  throw new Error("Exhausted all retry attempts");
+}
+
+/**
+ * Create a fetch function with authentication, timeout, retry, caching, and 401 refresh.
  *
  * This wraps the native fetch with:
+ * - **Response caching** for GET requests (checked before hitting the network)
  * - Auth token injection (Bearer token)
  * - Request timeout via AbortController
  * - Automatic retry on transient HTTP errors (408, 429, 5xx)
@@ -219,6 +317,10 @@ function extractUrlPath(input: Request | string | URL): string {
  * - Exponential backoff between retries
  * - User-Agent header for API analytics
  * - Automatic HTTP span tracing for every request
+ *
+ * Cache is checked first — on a hit, auth refresh, timeout, and retry logic are
+ * all skipped. On a miss or for non-GET methods, the full authenticated flow runs
+ * and successful GET responses are stored in the cache afterward.
  *
  * @returns A fetch-compatible function for use with @sentry/api SDK functions
  */
@@ -235,30 +337,20 @@ function createAuthenticatedFetch(): (
     const urlPath = extractUrlPath(input);
 
     return withHttpSpan(method, urlPath, async () => {
-      const { token } = await refreshToken();
-      const headers = prepareHeaders(input, init, token);
+      const fullUrl = extractFullUrl(input);
 
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const isLastAttempt = attempt === MAX_RETRIES;
-        const result = await executeAttempt(
-          input,
-          init,
-          headers,
-          isLastAttempt
-        );
-
-        if (result.action === "done") {
-          return result.response;
-        }
-        if (result.action === "throw") {
-          throw result.error;
-        }
-
-        await Bun.sleep(backoffDelay(attempt));
+      // Check cache before auth/retry for GET requests.
+      // Uses current token (no refresh) so lookups are fast but Vary-correct.
+      const cached = await tryCacheHit(
+        method,
+        fullUrl,
+        authHeaders(getAuthToken())
+      );
+      if (cached) {
+        return cached;
       }
 
-      // Unreachable: the last attempt always returns 'done' or 'throw'
-      throw new Error("Exhausted all retry attempts");
+      return await fetchWithRetry(input, init, method, fullUrl);
     });
   };
 }

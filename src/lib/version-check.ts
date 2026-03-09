@@ -15,7 +15,12 @@ import {
   getVersionCheckInfo,
   setVersionCheckInfo,
 } from "./db/version-check.js";
+import {
+  prefetchNightlyPatches,
+  prefetchStablePatches,
+} from "./delta-upgrade.js";
 import { cyan, muted } from "./formatters/colors.js";
+import { cleanupPatchCache } from "./patch-cache.js";
 import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
 
 /** Target check interval: ~24 hours */
@@ -93,6 +98,38 @@ export function abortPendingVersionCheck(): void {
 }
 
 /**
+ * Pre-fetch delta patches for a newly discovered version.
+ *
+ * Best-effort: errors are silently caught so the version check still succeeds.
+ * After pre-fetching, opportunistically cleans up stale cached patches.
+ */
+async function maybePrefetchPatches(
+  channel: "stable" | "nightly",
+  latestVersion: string,
+  signal: AbortSignal
+): Promise<void> {
+  if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
+    return;
+  }
+  try {
+    if (channel === "nightly") {
+      await prefetchNightlyPatches(latestVersion, signal);
+    } else {
+      await prefetchStablePatches(latestVersion, signal);
+    }
+  } catch {
+    // Pre-fetch is best-effort — don't report errors
+  }
+
+  // Opportunistic cleanup of stale cached patches
+  try {
+    await cleanupPatchCache();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Start a background check for new versions.
  * Does not block - fires a fetch and lets it complete in the background.
  * Reports errors to Sentry in a detached span for visibility.
@@ -128,6 +165,10 @@ function checkForUpdateInBackgroundImpl(): void {
             ? await fetchLatestNightlyVersion(signal)
             : await fetchLatestFromGitHub(signal);
         setVersionCheckInfo(latestVersion);
+
+        // Pre-fetch delta patches so `sentry cli upgrade` can apply them offline
+        await maybePrefetchPatches(channel, latestVersion, signal);
+
         span.setStatus({ code: 1 }); // OK
       } catch (error) {
         // Don't report abort errors - they're expected when process exits.
