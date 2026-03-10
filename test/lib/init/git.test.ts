@@ -60,7 +60,7 @@ describe("getUncommittedOrUntrackedFiles", () => {
 
     const files = getUncommittedOrUntrackedFiles({ cwd: "/tmp" });
 
-    expect(files).toEqual(["- M src/index.ts", "- ?? new-file.ts"]);
+    expect(files).toEqual(["-  M src/index.ts", "- ?? new-file.ts"]);
   });
 
   test("returns empty array for clean repo", () => {

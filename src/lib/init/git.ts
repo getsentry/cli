@@ -29,10 +29,10 @@ export function getUncommittedOrUntrackedFiles(opts: {
   }
   return result.stdout
     .toString()
-    .trim()
+    .trimEnd()
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => `- ${line.trim()}`);
+    .map((line) => `- ${line.trimEnd()}`);
 }
 
 /**
