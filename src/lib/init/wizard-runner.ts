@@ -7,12 +7,16 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { cancel, intro, log, spinner } from "@clack/prompts";
+import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
-import { STEP_LABELS, WizardCancelledError } from "./clack-utils.js";
+import {
+  abortIfCancelled,
+  STEP_LABELS,
+  WizardCancelledError,
+} from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
   MASTRA_API_URL,
@@ -170,22 +174,54 @@ function withTimeout<T>(
   });
 }
 
-export async function runWizard(options: WizardOptions): Promise<void> {
-  const { directory, yes, dryRun, features } = options;
+/** Returns `true` if the user confirmed, `false` if they declined. */
+async function confirmExperimental(yes: boolean): Promise<boolean> {
+  if (yes) {
+    return true;
+  }
+  const proceed = await confirm({
+    message:
+      "EXPERIMENTAL: This feature is experimental and may modify your code. Continue?",
+  });
+  abortIfCancelled(proceed);
+  return !!proceed;
+}
 
+/**
+ * Pre-flight checks: TTY guard, banner, intro, and experimental warning.
+ * Returns `true` when the wizard should continue, `false` to abort.
+ */
+async function preamble(yes: boolean, dryRun: boolean): Promise<boolean> {
   if (!(yes || process.stdin.isTTY)) {
     process.stderr.write(
       "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
     );
     process.exitCode = 1;
-    return;
+    return false;
   }
 
   process.stderr.write(`\n${formatBanner()}\n\n`);
   intro("sentry init");
 
+  const confirmed = await confirmExperimental(yes);
+  if (!confirmed) {
+    cancel("Setup cancelled.");
+    process.exitCode = 0;
+    return false;
+  }
+
   if (dryRun) {
     log.warn("Dry-run mode: no files will be modified.");
+  }
+
+  return true;
+}
+
+export async function runWizard(options: WizardOptions): Promise<void> {
+  const { directory, yes, dryRun, features } = options;
+
+  if (!(await preamble(yes, dryRun))) {
+    return;
   }
 
   log.info(
