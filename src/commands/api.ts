@@ -995,7 +995,9 @@ export function writeDryRunHuman(stdout: Writer, request: DryRunRequest): void {
       typeof request.body === "string"
         ? request.body
         : JSON.stringify(request.body, null, 2);
-    stdout.write(`  Body:     ${bodyStr}\n`);
+    // Indent continuation lines to align with the first line after "Body:     "
+    const indented = bodyStr.replace(/\n/g, "\n            ");
+    stdout.write(`  Body:     ${indented}\n`);
   }
 
   stdout.write("\n");

@@ -1861,6 +1861,26 @@ describe("writeDryRunHuman", () => {
     expect(writer.output).toContain('"status": "resolved"');
   });
 
+  test("multiline JSON body has aligned indentation", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "POST",
+      url: "https://sentry.io/api/0/issues/",
+      headers: {},
+      body: { status: "resolved", assignedTo: "user:123" },
+    });
+
+    // Each continuation line of the JSON body should be indented to align
+    // with the first line (12 spaces = "  Body:     " prefix width)
+    const lines = writer.output.split("\n");
+    const bodyLineIdx = lines.findIndex((l) => l.includes("Body:"));
+    expect(bodyLineIdx).toBeGreaterThan(-1);
+    // The JSON is multiline, so check that the next line starts with spaces
+    const nextLine = lines[bodyLineIdx + 1];
+    expect(nextLine).toBeDefined();
+    expect(nextLine!.startsWith("            ")).toBe(true);
+  });
+
   test("writes string body as-is", () => {
     const writer = createMockWriter();
     writeDryRunHuman(writer, {
