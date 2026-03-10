@@ -6,10 +6,13 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { rawApiRequest } from "../lib/api-client.js";
+import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
+import { muted } from "../lib/formatters/colors.js";
+import { writeJson } from "../lib/formatters/json.js";
 import { validateEndpoint } from "../lib/input-validation.js";
+import { getApiBaseUrl } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -24,6 +27,11 @@ type ApiFlags = {
   readonly include: boolean;
   readonly silent: boolean;
   readonly verbose: boolean;
+  readonly "dry-run": boolean;
+  /** Injected by buildCommand via output: "json" */
+  readonly json: boolean;
+  /** Injected by buildCommand via output: "json" */
+  readonly fields?: string[];
 };
 
 // Request Parsing
@@ -909,6 +917,89 @@ export function writeVerboseResponse(
 }
 
 /**
+ * Resolve the full URL that rawApiRequest would use for a request.
+ *
+ * Mirrors the URL construction in rawApiRequest:
+ * `${baseUrl}/api/0/${endpoint}?${queryString}`
+ * @internal Exported for testing
+ */
+export function resolveRequestUrl(
+  endpoint: string,
+  params?: Record<string, string | string[]>
+): string {
+  const baseUrl = getApiBaseUrl();
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const searchParams = buildSearchParams(params);
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  return `${baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+}
+
+/**
+ * Dry-run request details — everything that would be sent without actually sending.
+ */
+type DryRunRequest = {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+};
+
+/** Components needed to build a dry-run request preview */
+type DryRunRequestInput = {
+  method: string;
+  endpoint: string;
+  params?: Record<string, string | string[]>;
+  headers?: Record<string, string>;
+  body?: unknown;
+};
+
+/**
+ * Build a DryRunRequest from the resolved request components.
+ * @internal Exported for testing
+ */
+export function buildDryRunRequest(input: DryRunRequestInput): DryRunRequest {
+  return {
+    method: input.method,
+    url: resolveRequestUrl(input.endpoint, input.params),
+    headers: input.headers ?? {},
+    body: input.body ?? null,
+  };
+}
+
+/**
+ * Write dry-run output in human-readable format.
+ * @internal Exported for testing
+ */
+export function writeDryRunHuman(stdout: Writer, request: DryRunRequest): void {
+  stdout.write(`${muted("Dry run — no request sent.")}\n\n`);
+  stdout.write(`  Method:   ${request.method}\n`);
+  stdout.write(`  URL:      ${request.url}\n`);
+
+  const headerEntries = Object.entries(request.headers);
+  if (headerEntries.length > 0) {
+    const [first, ...rest] = headerEntries;
+    if (first) {
+      stdout.write(`  Headers:  ${first[0]}: ${first[1]}\n`);
+      for (const [key, value] of rest) {
+        stdout.write(`            ${key}: ${value}\n`);
+      }
+    }
+  }
+
+  if (request.body !== null) {
+    const bodyStr =
+      typeof request.body === "string"
+        ? request.body
+        : JSON.stringify(request.body, null, 2);
+    stdout.write(`  Body:     ${bodyStr}\n`);
+  }
+
+  stdout.write("\n");
+}
+
+/**
  * Handle response output based on flags
  * @internal Exported for testing
  */
@@ -1066,6 +1157,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
+  output: "json",
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1158,6 +1250,11 @@ export const apiCommand = buildCommand({
         brief: "Include full HTTP request and response in the output",
         default: false,
       },
+      "dry-run": {
+        kind: "boolean",
+        brief: "Show the resolved request without sending it",
+        default: false,
+      },
     },
     aliases: {
       X: "method",
@@ -1166,6 +1263,7 @@ export const apiCommand = buildCommand({
       f: "raw-field",
       H: "header",
       i: "include",
+      n: "dry-run",
     },
   },
   async func(
@@ -1185,6 +1283,24 @@ export const apiCommand = buildCommand({
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
         : undefined;
+
+    // Dry-run mode: show the resolved request without sending it
+    if (flags["dry-run"]) {
+      const request = buildDryRunRequest({
+        method: flags.method,
+        endpoint: normalizedEndpoint,
+        params,
+        headers,
+        body,
+      });
+
+      if (flags.json) {
+        writeJson(stdout, request, flags.fields);
+      } else {
+        writeDryRunHuman(stdout, request);
+      }
+      return;
+    }
 
     // Verbose mode: show request details (unless silent)
     if (flags.verbose && !flags.silent) {

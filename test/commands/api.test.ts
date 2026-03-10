@@ -10,6 +10,7 @@ import { Readable } from "node:stream";
 import {
   buildBodyFromFields,
   buildBodyFromInput,
+  buildDryRunRequest,
   buildFromFields,
   buildQueryParams,
   buildQueryParamsFromFields,
@@ -26,7 +27,9 @@ import {
   prepareRequestOptions,
   readStdin,
   resolveBody,
+  resolveRequestUrl,
   setNestedValue,
+  writeDryRunHuman,
   writeResponseBody,
   writeResponseHeaders,
   writeVerboseRequest,
@@ -1728,5 +1731,169 @@ describe("dataToQueryParams", () => {
     expect(() =>
       dataToQueryParams(42 as unknown as Record<string, unknown>)
     ).toThrow(ValidationError);
+  });
+});
+
+// Dry-run tests
+
+describe("resolveRequestUrl", () => {
+  test("builds URL with base URL and endpoint", () => {
+    const url = resolveRequestUrl("organizations/");
+    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  });
+
+  test("strips leading slash from endpoint", () => {
+    const url = resolveRequestUrl("/organizations/");
+    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  });
+
+  test("appends query params", () => {
+    const url = resolveRequestUrl("issues/", { status: "unresolved" });
+    expect(url).toContain("?status=unresolved");
+    expect(url).toContain("/api/0/issues/");
+  });
+
+  test("handles array params", () => {
+    const url = resolveRequestUrl("events/", {
+      field: ["title", "timestamp"],
+    });
+    expect(url).toContain("field=title");
+    expect(url).toContain("field=timestamp");
+  });
+
+  test("omits query string when no params", () => {
+    const url = resolveRequestUrl("projects/");
+    expect(url).not.toContain("?");
+  });
+});
+
+describe("buildDryRunRequest", () => {
+  test("builds request with all fields", () => {
+    const request = buildDryRunRequest({
+      method: "POST",
+      endpoint: "issues/123/",
+      params: { status: "resolved" },
+      headers: { "Content-Type": "application/json" },
+      body: { status: "resolved" },
+    });
+
+    expect(request.method).toBe("POST");
+    expect(request.url).toContain("/api/0/issues/123/");
+    expect(request.url).toContain("status=resolved");
+    expect(request.headers).toEqual({
+      "Content-Type": "application/json",
+    });
+    expect(request.body).toEqual({ status: "resolved" });
+  });
+
+  test("defaults headers to empty object", () => {
+    const request = buildDryRunRequest({
+      method: "GET",
+      endpoint: "organizations/",
+    });
+
+    expect(request.headers).toEqual({});
+  });
+
+  test("defaults body to null", () => {
+    const request = buildDryRunRequest({
+      method: "GET",
+      endpoint: "organizations/",
+    });
+
+    expect(request.body).toBeNull();
+  });
+
+  test("preserves string body", () => {
+    const request = buildDryRunRequest({
+      method: "POST",
+      endpoint: "issues/",
+      body: '{"raw":"string"}',
+    });
+
+    expect(request.body).toBe('{"raw":"string"}');
+  });
+});
+
+describe("writeDryRunHuman", () => {
+  test("writes method and URL", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "GET",
+      url: "https://sentry.io/api/0/organizations/",
+      headers: {},
+      body: null,
+    });
+
+    expect(writer.output).toContain("Method:   GET");
+    expect(writer.output).toContain(
+      "URL:      https://sentry.io/api/0/organizations/"
+    );
+    expect(writer.output).toContain("Dry run");
+  });
+
+  test("writes headers", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "POST",
+      url: "https://sentry.io/api/0/issues/",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer token",
+      },
+      body: null,
+    });
+
+    expect(writer.output).toContain("Content-Type: application/json");
+    expect(writer.output).toContain("Authorization: Bearer token");
+  });
+
+  test("writes JSON body formatted", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "PUT",
+      url: "https://sentry.io/api/0/issues/123/",
+      headers: {},
+      body: { status: "resolved" },
+    });
+
+    expect(writer.output).toContain("Body:");
+    expect(writer.output).toContain('"status": "resolved"');
+  });
+
+  test("writes string body as-is", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "POST",
+      url: "https://sentry.io/api/0/events/",
+      headers: {},
+      body: "raw-body-content",
+    });
+
+    expect(writer.output).toContain("Body:     raw-body-content");
+  });
+
+  test("omits body when null", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "GET",
+      url: "https://sentry.io/api/0/organizations/",
+      headers: {},
+      body: null,
+    });
+
+    expect(writer.output).not.toContain("Body:");
+  });
+
+  test("omits headers section when empty", () => {
+    const writer = createMockWriter();
+    writeDryRunHuman(writer, {
+      method: "GET",
+      url: "https://sentry.io/api/0/organizations/",
+      headers: {},
+      body: null,
+    });
+
+    expect(writer.output).not.toContain("Headers:");
   });
 });

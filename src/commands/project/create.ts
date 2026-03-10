@@ -30,10 +30,12 @@ import {
   ContextError,
   withAuthGuard,
 } from "../../lib/errors.js";
+import { muted } from "../../lib/formatters/colors.js";
 import {
   formatProjectCreated,
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
+import { writeJson } from "../../lib/formatters/json.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
@@ -60,6 +62,7 @@ const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type CreateFlags = {
   readonly team?: string;
+  readonly "dry-run": boolean;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -308,8 +311,14 @@ export const createCommand = buildCommand({
         brief: "Team to create the project under",
         optional: true,
       },
+      "dry-run": {
+        kind: "boolean",
+        brief:
+          "Validate inputs and show what would be created without creating it",
+        default: false,
+      },
     },
-    aliases: { t: "team" },
+    aliases: { t: "team", n: "dry-run" },
   },
   async func(
     this: SentryContext,
@@ -380,6 +389,36 @@ export const createCommand = buildCommand({
       usageHint: USAGE_HINT,
       autoCreateSlug: slugify(name),
     });
+
+    // Dry-run mode: show what would be created without creating it
+    if (flags["dry-run"]) {
+      const { stdout } = this;
+      const dryRunData = {
+        organization: orgSlug,
+        team: team.slug,
+        teamSource: team.source,
+        name,
+        slug: slugify(name),
+        platform,
+      };
+
+      if (flags.json) {
+        writeJson(stdout, dryRunData, flags.fields);
+      } else {
+        stdout.write(`${muted("Dry run — no project created.")}\n\n`);
+        stdout.write(`  Organization:  ${orgSlug}\n`);
+        stdout.write(`  Team:          ${team.slug}`);
+        if (team.source !== "explicit") {
+          stdout.write(` (${team.source})`);
+        }
+        stdout.write("\n");
+        stdout.write(`  Name:          ${name}\n`);
+        stdout.write(`  Slug:          ${slugify(name)}\n`);
+        stdout.write(`  Platform:      ${platform}\n`);
+        stdout.write("\n");
+      }
+      return;
+    }
 
     // Create the project
     const project = await createProjectWithErrors({

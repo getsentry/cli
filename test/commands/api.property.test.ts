@@ -21,6 +21,7 @@ import {
   uniqueArray,
 } from "fast-check";
 import {
+  buildDryRunRequest,
   buildFromFields,
   extractJsonBody,
   normalizeEndpoint,
@@ -30,6 +31,7 @@ import {
   parseFieldValue,
   parseMethod,
   resolveBody,
+  resolveRequestUrl,
   setNestedValue,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
@@ -782,6 +784,130 @@ describe("property: resolveBody", () => {
               stderr
             )
           ).rejects.toThrow(ValidationError);
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+// Dry-run property tests
+
+/** Arbitrary for HTTP methods */
+const httpMethodArb = constantFrom("GET", "POST", "PUT", "DELETE", "PATCH");
+
+/** Arbitrary for clean API endpoint paths (no query string, for dry-run tests) */
+const dryRunEndpointArb = stringMatching(
+  /^[a-z][a-z0-9-]*\/[a-z0-9-]*\/$/
+).filter((s) => s.length > 3 && s.length < 80);
+
+/** Arbitrary for query param values */
+const paramValueArb = stringMatching(/^[a-zA-Z0-9_-]+$/).filter(
+  (s) => s.length > 0 && s.length < 40
+);
+
+/** Arbitrary for query param maps */
+const paramsArb = dictionary(
+  stringMatching(/^[a-zA-Z][a-zA-Z0-9_]*$/).filter(
+    (s) => s.length > 0 && s.length < 20
+  ),
+  paramValueArb,
+  { minKeys: 0, maxKeys: 3 }
+);
+
+describe("property: resolveRequestUrl", () => {
+  test("always contains /api/0/ prefix", () => {
+    fcAssert(
+      property(dryRunEndpointArb, (endpoint) => {
+        const url = resolveRequestUrl(endpoint);
+        expect(url).toContain("/api/0/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("always contains the endpoint path", () => {
+    fcAssert(
+      property(dryRunEndpointArb, (endpoint) => {
+        const url = resolveRequestUrl(endpoint);
+        const normalized = endpoint.startsWith("/")
+          ? endpoint.slice(1)
+          : endpoint;
+        expect(url).toContain(normalized);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("includes query string when params provided", () => {
+    fcAssert(
+      property(dryRunEndpointArb, paramsArb, (endpoint, params) => {
+        const url = resolveRequestUrl(endpoint, params);
+        if (Object.keys(params).length > 0) {
+          expect(url).toContain("?");
+          for (const key of Object.keys(params)) {
+            expect(url).toContain(key);
+          }
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("property: buildDryRunRequest", () => {
+  test("method is preserved exactly", () => {
+    fcAssert(
+      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
+        const request = buildDryRunRequest({ method, endpoint });
+        expect(request.method).toBe(method);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("URL contains the endpoint", () => {
+    fcAssert(
+      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
+        const request = buildDryRunRequest({ method, endpoint });
+        const normalized = endpoint.startsWith("/")
+          ? endpoint.slice(1)
+          : endpoint;
+        expect(request.url).toContain(normalized);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("headers default to empty object when undefined", () => {
+    fcAssert(
+      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
+        const request = buildDryRunRequest({ method, endpoint });
+        expect(request.headers).toEqual({});
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("body defaults to null when undefined", () => {
+    fcAssert(
+      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
+        const request = buildDryRunRequest({ method, endpoint });
+        expect(request.body).toBeNull();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("provided body is preserved", () => {
+    fcAssert(
+      property(
+        httpMethodArb,
+        dryRunEndpointArb,
+        jsonValue(),
+        (method, endpoint, body) => {
+          const request = buildDryRunRequest({ method, endpoint, body });
+          expect(request.body).toEqual(body);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }

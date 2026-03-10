@@ -626,4 +626,93 @@ describe("project create", () => {
     expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Invalid platform 'python-django-rest'");
   });
+
+  // --dry-run tests
+
+  test("dry-run shows what would be created without API call", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "my-app",
+      "node"
+    );
+
+    // Should NOT call createProject
+    expect(createProjectSpy).not.toHaveBeenCalled();
+    // Should NOT fetch DSN
+    expect(tryGetPrimaryDsnSpy).not.toHaveBeenCalled();
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("acme-corp");
+    expect(output).toContain("engineering");
+    expect(output).toContain("my-app");
+    expect(output).toContain("node");
+  });
+
+  test("dry-run still validates platform", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(
+        context,
+        { json: false, "dry-run": true },
+        "my-app",
+        "invalid-platform"
+      )
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform");
+  });
+
+  test("dry-run still resolves org", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "my-org/my-app",
+      "python"
+    );
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith({
+      org: "my-org",
+      cwd: "/tmp",
+    });
+  });
+
+  test("dry-run outputs JSON when --json is set", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: true, "dry-run": true }, "my-app", "node");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.organization).toBe("acme-corp");
+    expect(parsed.team).toBe("engineering");
+    expect(parsed.name).toBe("my-app");
+    expect(parsed.slug).toBe("my-app");
+    expect(parsed.platform).toBe("node");
+
+    // Should NOT call createProject
+    expect(createProjectSpy).not.toHaveBeenCalled();
+  });
+
+  test("dry-run shows team source for auto-selected teams", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "my-app",
+      "node"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    // Single team = auto-selected
+    expect(output).toContain("auto-selected");
+  });
 });
