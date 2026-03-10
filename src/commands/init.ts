@@ -22,8 +22,7 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
     brief: "Initialize Sentry in your project",
     fullDescription:
       "Runs the Sentry setup wizard to detect your project's framework, " +
-      "install the SDK, and configure error monitoring. Uses a remote " +
-      "workflow that coordinates local file operations through the CLI.",
+      "install the SDK, and configure Sentry.",
   },
   parameters: {
     positional: {
