@@ -14,6 +14,7 @@ import {
   buildQueryParams,
   buildQueryParamsFromFields,
   buildRawQueryParams,
+  dataToQueryParams,
   extractJsonBody,
   handleResponse,
   normalizeEndpoint,
@@ -1614,5 +1615,90 @@ describe("resolveBody", () => {
     );
     expect(result.body).toBeUndefined();
     expect(result.params).toEqual({ query: "is:unresolved" });
+  });
+
+  test("GET --data converts URL-encoded string to query params", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "GET", data: "stat=received&resolution=1d" },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toBeUndefined();
+    expect(result.params).toEqual({ stat: "received", resolution: "1d" });
+  });
+
+  test("GET --data converts JSON object to query params", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "GET", data: '{"stat":"received","resolution":"1d"}' },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toBeUndefined();
+    expect(result.params).toEqual({ stat: "received", resolution: "1d" });
+  });
+
+  test("GET --data with JSON array throws ValidationError", async () => {
+    const stderr = createMockWriter();
+    await expect(
+      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN, stderr)
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN, stderr)
+    ).rejects.toThrow(/cannot.*query parameters/i);
+  });
+
+  test("POST --data still returns body (regression guard)", async () => {
+    const stderr = createMockWriter();
+    const result = await resolveBody(
+      { method: "POST", data: '{"status":"resolved"}' },
+      MOCK_STDIN,
+      stderr
+    );
+    expect(result.body).toEqual({ status: "resolved" });
+    expect(result.params).toBeUndefined();
+  });
+});
+
+// -- dataToQueryParams: converts parsed --data to query params for GET --
+
+describe("dataToQueryParams", () => {
+  test("parses URL-encoded string", () => {
+    expect(dataToQueryParams("stat=received&resolution=1d")).toEqual({
+      stat: "received",
+      resolution: "1d",
+    });
+  });
+
+  test("handles duplicate keys as arrays", () => {
+    expect(dataToQueryParams("tag=foo&tag=bar&tag=baz")).toEqual({
+      tag: ["foo", "bar", "baz"],
+    });
+  });
+
+  test("handles empty string", () => {
+    expect(dataToQueryParams("")).toEqual({});
+  });
+
+  test("converts JSON object with string values", () => {
+    expect(dataToQueryParams({ stat: "received", resolution: "1d" })).toEqual({
+      stat: "received",
+      resolution: "1d",
+    });
+  });
+
+  test("stringifies non-string JSON values", () => {
+    expect(dataToQueryParams({ count: 5, enabled: true })).toEqual({
+      count: "5",
+      enabled: "true",
+    });
+  });
+
+  test("throws on JSON array", () => {
+    expect(() => dataToQueryParams([1, 2, 3])).toThrow(ValidationError);
+    expect(() => dataToQueryParams([1, 2, 3])).toThrow(
+      /cannot.*JSON array.*query parameters/i
+    );
   });
 });

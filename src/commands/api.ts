@@ -631,6 +631,59 @@ export function parseDataBody(
 }
 
 /**
+ * Convert `--data` content to query parameters for bodyless HTTP methods
+ * (GET, HEAD, OPTIONS).
+ *
+ * Handles two formats:
+ * - URL-encoded strings: `"stat=received&resolution=1d"` → `{ stat: "received", resolution: "1d" }`
+ * - JSON objects: `{ "stat": "received" }` → `{ stat: "received" }`
+ *
+ * Duplicate keys in URL-encoded strings are collected into arrays.
+ *
+ * @param data - Parsed output from {@link parseDataBody}
+ * @returns Query parameter map suitable for `rawApiRequest`'s `params` option
+ * @throws {ValidationError} When data is a JSON array (cannot be represented as query params)
+ * @internal Exported for testing
+ */
+export function dataToQueryParams(
+  data: Record<string, unknown> | unknown[] | string
+): Record<string, string | string[]> {
+  // String data: parse as URL-encoded query string
+  if (typeof data === "string") {
+    const params: Record<string, string | string[]> = {};
+    const searchParams = new URLSearchParams(data);
+    for (const [key, value] of searchParams) {
+      const existing = params[key];
+      if (existing !== undefined) {
+        params[key] = Array.isArray(existing)
+          ? [...existing, value]
+          : [existing, value];
+      } else {
+        params[key] = value;
+      }
+    }
+    return params;
+  }
+
+  // JSON arrays can't be represented as query params
+  if (Array.isArray(data)) {
+    throw new ValidationError(
+      "Cannot use --data with a JSON array for GET requests. " +
+        "JSON arrays cannot be converted to query parameters. " +
+        "Use --method POST or pass individual values with --field/-F.",
+      "data"
+    );
+  }
+
+  // JSON object: stringify non-string values
+  const params: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(data)) {
+    params[key] = typeof value === "string" ? value : JSON.stringify(value);
+  }
+  return params;
+}
+
+/**
  * Try to parse a single field as a bare JSON **object or array** body.
  *
  * The `startsWith` guard is intentional — not just an optimisation.  It
@@ -984,7 +1037,14 @@ export async function resolveBody(
   }
 
   if (flags.data !== undefined) {
-    return { body: parseDataBody(flags.data) };
+    const parsed = parseDataBody(flags.data);
+
+    // GET/HEAD/OPTIONS cannot have a body — convert data to query params
+    if (flags.method === "GET") {
+      return { params: dataToQueryParams(parsed) };
+    }
+
+    return { body: parsed };
   }
 
   if (flags.input !== undefined) {
