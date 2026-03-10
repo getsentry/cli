@@ -1,0 +1,112 @@
+# Fix CLI-CJ: `--data` with GET request causes `fetch() body` TypeError
+
+## Issue
+
+**CLI-CJ**: `TypeError: fetch() request with GET/HEAD/OPTIONS method cannot have body.`
+
+A user ran `sentry api projects/ari-perez/adjudicate/stats/ --data "stat=received&resolution=1d"` (default method is GET). The `--data` flag always produces a request body, but GET/HEAD/OPTIONS requests cannot have a body per the Fetch API spec.
+
+## Root Cause
+
+In `src/commands/api.ts`, `resolveBody()` (lines 982-984) handles `--data` without any method-awareness:
+
+```typescript
+if (flags.data !== undefined) {
+  return { body: parseDataBody(flags.data) };
+}
+```
+
+This always returns the data as a `body`, regardless of HTTP method. The field flags (`-F`/`-f`) already have method-aware routing via `prepareRequestOptions()` (line 569: `method !== "GET"` check), but `--data` bypasses that logic entirely.
+
+## Fix
+
+When `--data` is used with a GET request, convert the data to query parameters instead of a request body. This matches `gh api` and `curl -G` behavior.
+
+### Changes to `src/commands/api.ts`
+
+**1. Update `resolveBody()` (line 982-984)** — Add method-aware routing for `--data`:
+
+```typescript
+if (flags.data !== undefined) {
+  const parsed = parseDataBody(flags.data);
+
+  // GET/HEAD/OPTIONS cannot have a body — convert data to query params
+  if (flags.method === "GET" || flags.method === "HEAD" || flags.method === "OPTIONS") {
+    return { params: dataToQueryParams(parsed) };
+  }
+
+  return { body: parsed };
+}
+```
+
+**2. Add `dataToQueryParams()` helper function** — Convert parsed data (JSON object or URL-encoded string) to query params:
+
+```typescript
+/**
+ * Convert --data content to query parameters for bodyless HTTP methods.
+ * Handles two formats:
+ * - URL-encoded strings: "stat=received&resolution=1d" → { stat: "received", resolution: "1d" }
+ * - JSON objects: { "stat": "received" } → { stat: "received" }
+ *
+ * @throws {ValidationError} When data is a JSON array or non-object type (cannot be query params)
+ */
+export function dataToQueryParams(
+  data: Record<string, unknown> | unknown[] | string
+): Record<string, string | string[]> {
+  // String data: parse as URL-encoded query string
+  if (typeof data === "string") {
+    const params: Record<string, string | string[]> = {};
+    const searchParams = new URLSearchParams(data);
+    for (const [key, value] of searchParams) {
+      const existing = params[key];
+      if (existing !== undefined) {
+        params[key] = Array.isArray(existing)
+          ? [...existing, value]
+          : [existing, value];
+      } else {
+        params[key] = value;
+      }
+    }
+    return params;
+  }
+
+  // JSON arrays can't be represented as query params
+  if (Array.isArray(data)) {
+    throw new ValidationError(
+      "Cannot use --data with a JSON array for GET requests. " +
+        "JSON arrays cannot be converted to query parameters. " +
+        "Use --method POST or pass individual values with --field/-F.",
+      "data"
+    );
+  }
+
+  // JSON object: stringify values
+  const params: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(data)) {
+    params[key] = typeof value === "string" ? value : JSON.stringify(value);
+  }
+  return params;
+}
+```
+
+### Changes to `test/commands/api.test.ts`
+
+Add tests for:
+1. `dataToQueryParams()` — URL-encoded string parsing, JSON object conversion, array rejection
+2. `resolveBody()` with `method: "GET"` and `--data` — verify params returned instead of body
+3. `resolveBody()` with `method: "HEAD"` and `--data` — same behavior
+4. `resolveBody()` with `method: "POST"` and `--data` — unchanged body behavior (regression guard)
+
+## Files to Modify
+
+- `src/commands/api.ts` — Add `dataToQueryParams()`, update `resolveBody()`
+- `test/commands/api.test.ts` — Add tests for the new behavior
+
+## Verification
+
+```bash
+bun test test/commands/api.test.ts
+bun test test/commands/api.property.test.ts
+bun run typecheck
+bun run lint
+```
