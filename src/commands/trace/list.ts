@@ -16,7 +16,7 @@ import {
 import {
   formatTraceTable,
   writeFooter,
-  writeJson,
+  writeJsonList,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
@@ -35,6 +35,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 type SortValue = "date" | "duration";
@@ -108,6 +109,7 @@ export const listCommand = buildListCommand("trace", {
       "  sentry trace list --sort duration     # Sort by slowest first\n" +
       '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction',
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -140,11 +142,6 @@ export const listCommand = buildListCommand("trace", {
         default: "date" as const,
       },
       cursor: LIST_CURSOR_FLAG,
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       fresh: FRESH_FLAG,
     },
     aliases: {
@@ -195,10 +192,11 @@ export const listCommand = buildListCommand("trace", {
     const hasMore = !!nextCursor;
 
     if (flags.json) {
-      const output = hasMore
-        ? { data: traces, nextCursor, hasMore: true }
-        : { data: traces, hasMore: false };
-      writeJson(stdout, output);
+      writeJsonList(stdout, traces, {
+        hasMore,
+        nextCursor,
+        fields: flags.fields,
+      });
       return;
     }
 

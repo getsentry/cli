@@ -40,6 +40,7 @@ type PlanFlags = {
   readonly json: boolean;
   readonly force: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /**
@@ -113,20 +114,25 @@ type OutputSolutionOptions = {
   solution: SolutionArtifact | null;
   state: AutofixState;
   json: boolean;
+  fields?: string[];
 };
 
 /**
  * Output a solution artifact to stdout.
  */
 function outputSolution(options: OutputSolutionOptions): void {
-  const { stdout, stderr, solution, state, json } = options;
+  const { stdout, stderr, solution, state, json, fields } = options;
 
   if (json) {
-    writeJson(stdout, {
-      run_id: state.run_id,
-      status: state.status,
-      solution: solution?.data ?? null,
-    });
+    writeJson(
+      stdout,
+      {
+        run_id: state.run_id,
+        status: state.status,
+        solution: solution?.data ?? null,
+      },
+      fields
+    );
     return;
   }
 
@@ -165,6 +171,7 @@ export const planCommand = buildCommand({
       "  sentry issue plan cli-G --cause 0\n" +
       "  sentry issue plan 123456789 --force",
   },
+  output: "json",
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -173,11 +180,6 @@ export const planCommand = buildCommand({
         parse: numberParser,
         brief: "Root cause ID to plan (required if multiple causes exist)",
         optional: true,
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
       },
       force: {
         kind: "boolean",
@@ -233,6 +235,7 @@ export const planCommand = buildCommand({
             solution: existingSolution,
             state,
             json: flags.json,
+            fields: flags.fields,
           });
           return;
         }
@@ -277,6 +280,7 @@ export const planCommand = buildCommand({
         solution,
         state: finalState,
         json: flags.json,
+        fields: flags.fields,
       });
     } catch (error) {
       // Handle API errors with friendly messages

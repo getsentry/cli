@@ -55,6 +55,7 @@ const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 type CreateFlags = {
   readonly team?: string;
   readonly json: boolean;
+  readonly fields?: string[];
 };
 
 /** Build a 3-column grid string from a flat list of platforms. */
@@ -266,6 +267,7 @@ export const createCommand = buildCommand({
       "  sentry project create my-app python-django --team backend\n" +
       "  sentry project create my-app go --json",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -290,11 +292,6 @@ export const createCommand = buildCommand({
         parse: String,
         brief: "Team to create the project under",
         optional: true,
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
       },
     },
     aliases: { t: "team" },
@@ -383,7 +380,7 @@ export const createCommand = buildCommand({
 
     // JSON output
     if (flags.json) {
-      writeJson(stdout, { ...project, dsn, teamSlug: team.slug });
+      writeJson(stdout, { ...project, dsn, teamSlug: team.slug }, flags.fields);
       return;
     }
 

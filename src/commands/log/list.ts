@@ -46,6 +46,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly trace?: string;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /** Maximum allowed value for --limit flag */
@@ -108,6 +109,8 @@ type WriteLogsOptions = {
   table?: StreamingTable;
   /** Whether to append a short trace-ID suffix (default: true) */
   includeTrace?: boolean;
+  /** Optional field paths to include in JSON output */
+  fields?: string[];
 };
 
 /**
@@ -117,10 +120,10 @@ type WriteLogsOptions = {
  * bordered table. Otherwise falls back to plain markdown rows.
  */
 function writeLogs(options: WriteLogsOptions): void {
-  const { stdout, logs, asJson, table, includeTrace = true } = options;
+  const { stdout, logs, asJson, table, includeTrace = true, fields } = options;
   if (asJson) {
     for (const log of logs) {
-      writeJson(stdout, log);
+      writeJson(stdout, log, fields);
     }
   } else if (table) {
     for (const log of logs) {
@@ -140,12 +143,15 @@ function writeLogs(options: WriteLogsOptions): void {
 /**
  * Execute a single fetch of logs (non-streaming mode).
  */
-async function executeSingleFetch(
-  stdout: Writer,
-  org: string,
-  project: string,
-  flags: ListFlags
-): Promise<void> {
+type SingleFetchOptions = {
+  stdout: Writer;
+  org: string;
+  project: string;
+  flags: ListFlags;
+};
+
+async function executeSingleFetch(options: SingleFetchOptions): Promise<void> {
+  const { stdout, org, project, flags } = options;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
@@ -154,7 +160,7 @@ async function executeSingleFetch(
 
   if (flags.json) {
     // Reverse for chronological order (API returns newest first)
-    writeJson(stdout, [...logs].reverse());
+    writeJson(stdout, [...logs].reverse(), flags.fields);
     return;
   }
 
@@ -291,6 +297,7 @@ function executeFollowMode<T extends LogLike>(
         asJson: flags.json,
         table,
         includeTrace: config.includeTrace,
+        fields: config.flags.fields,
       });
       lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
     }
@@ -334,6 +341,7 @@ function executeFollowMode<T extends LogLike>(
           asJson: flags.json,
           table,
           includeTrace: config.includeTrace,
+          fields: config.flags.fields,
         });
         lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
         config.onInitialLogs?.(initialLogs);
@@ -353,12 +361,17 @@ const DEFAULT_TRACE_PERIOD = "14d";
  * Execute a single fetch of trace-filtered logs (non-streaming, --trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
  */
+type TraceSingleFetchOptions = {
+  stdout: Writer;
+  org: string;
+  traceId: string;
+  flags: ListFlags;
+};
+
 async function executeTraceSingleFetch(
-  stdout: Writer,
-  org: string,
-  traceId: string,
-  flags: ListFlags
+  options: TraceSingleFetchOptions
 ): Promise<void> {
+  const { stdout, org, traceId, flags } = options;
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
@@ -371,6 +384,7 @@ async function executeTraceSingleFetch(
     traceId,
     limit: flags.limit,
     asJson: flags.json,
+    fields: flags.fields,
     emptyMessage:
       `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
       "Try 'sentry trace logs' for more options (e.g., --period 30d).\n",
@@ -399,6 +413,7 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list -q 'level:error'   # Filter to errors only\n" +
       "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -436,11 +451,6 @@ export const listCommand = buildListCommand("log", {
         parse: validateTraceId,
         brief: "Filter logs by trace ID (32-character hex string)",
         optional: true,
-      },
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
       },
       fresh: FRESH_FLAG,
     },
@@ -512,7 +522,12 @@ export const listCommand = buildListCommand("log", {
           },
         });
       } else {
-        await executeTraceSingleFetch(stdout, org, flags.trace, flags);
+        await executeTraceSingleFetch({
+          stdout,
+          org,
+          traceId: flags.trace,
+          flags,
+        });
       }
     } else {
       // Standard project-scoped mode
@@ -540,7 +555,12 @@ export const listCommand = buildListCommand("log", {
           extractNew: (logs) => logs,
         });
       } else {
-        await executeSingleFetch(stdout, org, project, flags);
+        await executeSingleFetch({
+          stdout,
+          org,
+          project,
+          flags,
+        });
       }
     }
   },

@@ -22,6 +22,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 export const viewCommand = buildCommand({
@@ -34,6 +35,7 @@ export const viewCommand = buildCommand({
       "  2. Config defaults\n" +
       "  3. SENTRY_DSN environment variable or source code detection",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -47,11 +49,6 @@ export const viewCommand = buildCommand({
       ],
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -84,6 +81,7 @@ export const viewCommand = buildCommand({
 
     writeOutput(stdout, org, {
       json: flags.json,
+      fields: flags.fields,
       formatHuman: formatOrgDetails,
       detectedFrom: resolved.detectedFrom,
     });

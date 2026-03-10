@@ -30,6 +30,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /**
@@ -95,14 +96,10 @@ export const viewCommand = buildCommand({
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
+  output: "json",
   parameters: {
     positional: issueIdPositional,
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -158,7 +155,7 @@ export const viewCommand = buildCommand({
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
       const output = event ? { issue, event, trace } : { issue, trace };
-      writeJson(stdout, output);
+      writeJson(stdout, output, flags.fields);
       return;
     }
 

@@ -18,6 +18,8 @@ import {
 import {
   applyLoggingFlags,
   buildCommand,
+  FIELDS_FLAG,
+  JSON_FLAG,
   LOG_LEVEL_FLAG,
   numberParser,
   VERBOSE_FLAG,
@@ -601,5 +603,327 @@ describe("buildCommand", () => {
     } finally {
       setLogLevel(originalLevel);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JSON_FLAG and FIELDS_FLAG definitions
+// ---------------------------------------------------------------------------
+
+describe("JSON_FLAG", () => {
+  test("is a boolean flag defaulting to false", () => {
+    expect(JSON_FLAG.kind).toBe("boolean");
+    expect(JSON_FLAG.default).toBe(false);
+  });
+
+  test("is not hidden", () => {
+    expect("hidden" in JSON_FLAG).toBe(false);
+  });
+});
+
+describe("FIELDS_FLAG", () => {
+  test("is a parsed optional flag", () => {
+    expect(FIELDS_FLAG.kind).toBe("parsed");
+    expect(FIELDS_FLAG.optional).toBe(true);
+  });
+
+  test("parses input as string", () => {
+    expect(FIELDS_FLAG.parse("id,title")).toBe("id,title");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCommand output: "json" injection
+// ---------------------------------------------------------------------------
+
+describe("buildCommand output: json", () => {
+  test("injects --json flag when output: 'json'", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    // --json should be accepted without "No flag registered" error
+    await run(app, ["test", "--json"], { process } as TestContext);
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.json).toBe(true);
+  });
+
+  test("injects --fields flag when output: 'json'", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {},
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(app, ["test", "--json", "--fields", "id,title,status"], {
+      process,
+    } as TestContext);
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.json).toBe(true);
+    // --fields is pre-parsed from comma-string to string[]
+    expect(receivedFlags!.fields).toEqual(["id", "title", "status"]);
+  });
+
+  test("pre-parses --fields with whitespace and deduplication", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {},
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(app, ["test", "--fields", " id , title , id "], {
+      process,
+    } as TestContext);
+
+    expect(receivedFlags).toBeDefined();
+    // Whitespace trimmed, duplicates removed
+    expect(receivedFlags!.fields).toEqual(["id", "title"]);
+  });
+
+  test("fields is undefined when --fields not passed", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {},
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(app, ["test", "--json"], { process } as TestContext);
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.json).toBe(true);
+    expect(receivedFlags!.fields).toBeUndefined();
+  });
+
+  test("does not inject --json/--fields without output: 'json'", async () => {
+    let funcCalled = false;
+
+    // Command WITHOUT output: "json" — --json should be rejected by Stricli
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      docs: { brief: "Test" },
+      parameters: {},
+      func() {
+        funcCalled = true;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process, output } = createTestProcess();
+
+    // Stricli writes error to stderr and resolves — func is never called
+    await run(app, ["test", "--json"], { process } as TestContext);
+
+    expect(funcCalled).toBe(false);
+    expect(
+      output.some((s) => s.includes("No flag registered for --json"))
+    ).toBe(true);
+  });
+
+  test("preserves command's own --json flag when already defined", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    // Command defines its own --json with custom brief
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {
+        flags: {
+          json: {
+            kind: "boolean",
+            brief: "Custom JSON brief text",
+            default: false,
+          },
+        },
+      },
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(app, ["test", "--json", "--fields", "id"], {
+      process,
+    } as TestContext);
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.json).toBe(true);
+    // --fields is still injected and pre-parsed even when command owns --json
+    expect(receivedFlags!.fields).toEqual(["id"]);
+  });
+
+  test("supports dot-notation in --fields", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {},
+      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(
+      app,
+      ["test", "--fields", "id,metadata.value,contexts.trace.traceId"],
+      { process } as TestContext
+    );
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.fields).toEqual([
+      "id",
+      "metadata.value",
+      "contexts.trace.traceId",
+    ]);
+  });
+
+  test("--json and --fields coexist with other command flags", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[]; limit: number },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: "json",
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[]; limit: number }
+      ) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const { process } = createTestProcess();
+
+    await run(
+      app,
+      ["test", "--json", "--fields", "id", "--limit", "50", "--verbose"],
+      { process } as TestContext
+    );
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.json).toBe(true);
+    expect(receivedFlags!.fields).toEqual(["id"]);
+    expect(receivedFlags!.limit).toBe(50);
+    // --verbose is stripped (we injected it)
+    expect(receivedFlags!.verbose).toBeUndefined();
   });
 });

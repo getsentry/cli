@@ -38,6 +38,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /** Usage hint for ContextError messages */
@@ -180,6 +181,7 @@ export const viewCommand = buildCommand({
       `${TARGET_PATTERN_NOTE}\n\n` +
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "tuple",
@@ -193,11 +195,6 @@ export const viewCommand = buildCommand({
       ],
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -296,7 +293,8 @@ export const viewCommand = buildCommand({
       }));
       writeJson(
         stdout,
-        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn
+        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn,
+        flags.fields
       );
       return;
     }

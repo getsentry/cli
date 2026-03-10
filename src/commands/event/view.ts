@@ -47,6 +47,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 type HumanOutputOptions = {
@@ -302,6 +303,7 @@ export const viewCommand = buildCommand({
       "  sentry event view <org>/<proj> <event-id> # explicit org and project\n" +
       "  sentry event view <project> <event-id>    # find project across all orgs",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "array",
@@ -313,11 +315,6 @@ export const viewCommand = buildCommand({
       },
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -388,7 +385,7 @@ export const viewCommand = buildCommand({
       const trace = spanTreeResult?.success
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
-      writeJson(stdout, { event, trace });
+      writeJson(stdout, { event, trace }, flags.fields);
       return;
     }
 

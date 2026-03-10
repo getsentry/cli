@@ -42,6 +42,7 @@ type ViewFlags = {
   readonly web: boolean;
   readonly spans: number;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /** Usage hint for ContextError messages */
@@ -199,6 +200,7 @@ export const viewCommand = buildCommand({
       "  sentry trace view <project> <trace-id>    # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "array",
@@ -210,11 +212,6 @@ export const viewCommand = buildCommand({
       },
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -309,7 +306,7 @@ export const viewCommand = buildCommand({
     const summary = computeTraceSummary(traceId, spans);
 
     if (flags.json) {
-      writeJson(stdout, { summary, spans });
+      writeJson(stdout, { summary, spans }, flags.fields);
       return;
     }
 

@@ -43,7 +43,7 @@ import {
   ValidationError,
   withAuthGuard,
 } from "./errors.js";
-import { writeFooter, writeJson } from "./formatters/index.js";
+import { writeFooter, writeJson, writeJsonList } from "./formatters/index.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
@@ -76,6 +76,8 @@ export type BaseListFlags = {
   readonly limit: number;
   readonly json: boolean;
   readonly cursor?: string;
+  /** Pre-parsed field paths from `--fields` (injected by `buildCommand`). */
+  readonly fields?: string[];
 };
 
 /**
@@ -307,10 +309,11 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   }
 
   if (flags.json) {
-    const output = hasMore
-      ? { data: items, nextCursor, hasMore: true }
-      : { data: items, hasMore: false };
-    writeJson(stdout, output);
+    writeJsonList(stdout, items, {
+      hasMore,
+      nextCursor,
+      fields: flags.fields,
+    });
     return;
   }
 
@@ -369,7 +372,7 @@ export async function handleAutoDetect<TEntity, TWithOrg>(
   const limited = allItems.slice(0, limitCount);
 
   if (flags.json) {
-    writeJson(stdout, limited);
+    writeJson(stdout, limited, flags.fields);
     return;
   }
 
@@ -435,7 +438,7 @@ function displayFetchedItems<TEntity, TWithOrg>(
   const limited = items.slice(0, flags.limit);
 
   if (flags.json) {
-    writeJson(stdout, limited);
+    writeJson(stdout, limited, flags.fields);
     return;
   }
 
@@ -596,7 +599,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     }
 
     if (flags.json) {
-      writeJson(stdout, []);
+      writeJson(stdout, [], flags.fields);
       return;
     }
     // Use "Project" as the resource name (not config.entityName) because the
@@ -637,7 +640,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   const limited = allItems.slice(0, flags.limit);
 
   if (flags.json) {
-    writeJson(stdout, limited);
+    writeJson(stdout, limited, flags.fields);
     return;
   }
 

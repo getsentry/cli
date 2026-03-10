@@ -27,6 +27,7 @@ type LogsFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /** Maximum allowed value for --limit flag */
@@ -131,6 +132,7 @@ export const logsCommand = buildCommand({
       "  sentry trace logs --period 7d abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "array",
@@ -141,11 +143,6 @@ export const logsCommand = buildCommand({
       },
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open trace in browser",
@@ -218,6 +215,7 @@ export const logsCommand = buildCommand({
       traceId,
       limit: flags.limit,
       asJson: flags.json,
+      fields: flags.fields,
       emptyMessage:
         `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
         `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,

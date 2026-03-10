@@ -17,13 +17,13 @@ import {
   buildListLimitFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
-  LIST_JSON_FLAG,
 } from "../../lib/list-command.js";
 
 type ListFlags = {
   readonly limit: number;
   readonly json: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /**
@@ -72,10 +72,10 @@ export const listCommand = buildCommand({
       "  sentry org list --limit 10\n" +
       "  sentry org list --json",
   },
+  output: "json",
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),
-      json: LIST_JSON_FLAG,
       fresh: FRESH_FLAG,
     },
     // Only -n for --limit; no -c since org list has no --cursor flag
@@ -89,7 +89,7 @@ export const listCommand = buildCommand({
     const limitedOrgs = orgs.slice(0, flags.limit);
 
     if (flags.json) {
-      writeJson(stdout, limitedOrgs);
+      writeJson(stdout, limitedOrgs, flags.fields);
       return;
     }
 

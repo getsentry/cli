@@ -37,6 +37,7 @@ type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 /** Usage hint for ContextError messages */
@@ -318,6 +319,7 @@ export const viewCommand = buildCommand({
       "within a single argument (handy when piping from other commands).\n\n" +
       "The log ID is the 32-character hexadecimal identifier shown in log listings.",
   },
+  output: "json",
   parameters: {
     positional: {
       kind: "array",
@@ -329,11 +331,6 @@ export const viewCommand = buildCommand({
       },
     },
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
@@ -389,9 +386,9 @@ export const viewCommand = buildCommand({
       // Single ID: output single object for backward compatibility
       // Multiple IDs: output array
       if (logIds.length === 1 && logs.length === 1) {
-        writeJson(stdout, logs[0]);
+        writeJson(stdout, logs[0], flags.fields);
       } else {
-        writeJson(stdout, logs);
+        writeJson(stdout, logs, flags.fields);
       }
       return;
     }

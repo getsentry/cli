@@ -22,6 +22,7 @@ import {
 type WhoamiFlags = {
   readonly json: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
 
 export const whoamiCommand = buildCommand({
@@ -32,13 +33,9 @@ export const whoamiCommand = buildCommand({
       "This calls the Sentry API live (not cached) so the result always reflects " +
       "the current token. Works with all token types: OAuth, API tokens, and OAuth App tokens.",
   },
+  output: "json",
   parameters: {
     flags: {
-      json: {
-        kind: "boolean",
-        brief: "Output as JSON",
-        default: false,
-      },
       fresh: FRESH_FLAG,
     },
     aliases: FRESH_ALIASES,
@@ -67,12 +64,16 @@ export const whoamiCommand = buildCommand({
     }
 
     if (flags.json) {
-      writeJson(stdout, {
-        id: user.id,
-        name: user.name ?? null,
-        username: user.username ?? null,
-        email: user.email ?? null,
-      });
+      writeJson(
+        stdout,
+        {
+          id: user.id,
+          name: user.name ?? null,
+          username: user.username ?? null,
+          email: user.email ?? null,
+        },
+        flags.fields
+      );
       return;
     }
 

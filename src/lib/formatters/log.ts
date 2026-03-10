@@ -340,6 +340,8 @@ type DisplayTraceLogsOptions = {
   asJson: boolean;
   /** Message to show when no logs are found */
   emptyMessage: string;
+  /** Optional field paths to include in JSON output */
+  fields?: string[];
 };
 
 /**
@@ -349,10 +351,11 @@ type DisplayTraceLogsOptions = {
  * Used by both `sentry log list --trace` and `sentry trace logs`.
  */
 export function displayTraceLogs(options: DisplayTraceLogsOptions): void {
-  const { stdout, logs, traceId, limit, asJson, emptyMessage } = options;
+  const { stdout, logs, traceId, limit, asJson, emptyMessage, fields } =
+    options;
 
   if (asJson) {
-    writeJson(stdout, [...logs].reverse());
+    writeJson(stdout, [...logs].reverse(), fields);
     return;
   }
 

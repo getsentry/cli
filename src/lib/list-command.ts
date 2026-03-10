@@ -77,6 +77,10 @@ export function targetPatternExplanation(cursorNote?: string): string {
 /**
  * The `--json` flag shared by all list commands.
  * Outputs machine-readable JSON instead of a human-readable table.
+ *
+ * @deprecated Use `output: "json"` on `buildCommand` instead, which
+ * injects `--json` and `--fields` automatically. This constant is kept
+ * for commands that define `--json` with custom brief text.
  */
 export const LIST_JSON_FLAG = {
   kind: "boolean" as const,
@@ -337,6 +341,7 @@ export function buildListCommand<
       readonly fullDescription?: string;
     };
     readonly func: CommandFunction<FLAGS, ARGS, CONTEXT>;
+    readonly output?: "json";
   }
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
@@ -360,7 +365,11 @@ export function buildListCommand<
     return originalFunc.call(this, flags, ...(args as unknown as ARGS));
   } as typeof originalFunc;
 
-  return buildCommand({ ...builderArgs, func: wrappedFunc });
+  return buildCommand({
+    ...builderArgs,
+    func: wrappedFunc,
+    output: builderArgs.output,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -382,8 +391,10 @@ export type OrgListCommandDocs = {
  * This covers the team and repo list commands, where all runtime behaviour is
  * encapsulated in the shared org-list framework.  The resulting command has:
  * - An optional positional `target` argument
- * - `--limit` / `-n`, `--json`, `--cursor` / `-c` flags
+ * - `--limit` / `-n`, `--json`, `--fields`, `--cursor` / `-c` flags
  * - A `func` that calls `parseOrgProjectArg` then `dispatchOrgScopedList`
+ *
+ * `--json` and `--fields` are injected via `output: "json"` on `buildCommand`.
  *
  * @param config - The `OrgListConfig` that drives fetching and display
  * @param docs   - Brief and optional full description for `--help`
@@ -395,11 +406,11 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
 ): Command<SentryContext> {
   return buildListCommand(routeName, {
     docs,
+    output: "json",
     parameters: {
       positional: LIST_TARGET_POSITIONAL,
       flags: {
         limit: buildListLimitFlag(config.entityPlural),
-        json: LIST_JSON_FLAG,
         cursor: LIST_CURSOR_FLAG,
         fresh: FRESH_FLAG,
       },
@@ -412,6 +423,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly json: boolean;
         readonly cursor?: string;
         readonly fresh: boolean;
+        readonly fields?: string[];
       },
       target?: string
     ): Promise<void> {
