@@ -16,7 +16,9 @@ export class WizardCancelledError extends Error {
 
 export function abortIfCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    cancel(`Setup cancelled. Visit ${SENTRY_DOCS_URL} to set up manually.`);
+    cancel(
+      `Setup cancelled. You can visit ${SENTRY_DOCS_URL} to set up manually.`
+    );
     throw new WizardCancelledError();
   }
   return value as T;
