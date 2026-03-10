@@ -55,6 +55,7 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
 // ── Spy declarations ────────────────────────────────────────────────────────
 
 // clack
+let isCancelSpy: ReturnType<typeof spyOn>;
 let introSpy: ReturnType<typeof spyOn>;
 let confirmSpy: ReturnType<typeof spyOn>;
 let logInfoSpy: ReturnType<typeof spyOn>;
@@ -129,6 +130,9 @@ beforeEach(() => {
   process.exitCode = 0;
 
   // clack spies
+  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
+    (v: unknown) => v === Symbol.for("cancel")
+  );
   introSpy = spyOn(clack, "intro").mockImplementation(noop);
   confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
   logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
@@ -171,6 +175,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  isCancelSpy.mockRestore();
   introSpy.mockRestore();
   confirmSpy.mockRestore();
   logInfoSpy.mockRestore();
@@ -262,6 +267,29 @@ describe("runWizard", () => {
 
       expect(confirmSpy).not.toHaveBeenCalled();
       expect(formatResultSpy).toHaveBeenCalled();
+    });
+
+    test("exits cleanly when user presses Ctrl+C on experimental warning", async () => {
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: true,
+        configurable: true,
+      });
+
+      confirmSpy.mockResolvedValue(Symbol.for("cancel"));
+
+      await runWizard(makeOptions({ yes: false }));
+
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: origIsTTY,
+        configurable: true,
+      });
+
+      expect(cancelSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Setup cancelled")
+      );
+      expect(process.exitCode).toBe(0);
+      expect(formatResultSpy).not.toHaveBeenCalled();
     });
 
     test("exits cleanly when user declines experimental warning", async () => {

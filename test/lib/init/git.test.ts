@@ -26,6 +26,7 @@ const noop = () => {
 
 let execFileSyncSpy: ReturnType<typeof spyOn>;
 let confirmSpy: ReturnType<typeof spyOn>;
+let isCancelSpy: ReturnType<typeof spyOn>;
 let logWarnSpy: ReturnType<typeof spyOn>;
 
 // ── Setup / Teardown ────────────────────────────────────────────────────────
@@ -33,12 +34,16 @@ let logWarnSpy: ReturnType<typeof spyOn>;
 beforeEach(() => {
   execFileSyncSpy = spyOn(cp, "execFileSync");
   confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
+  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
+    (v: unknown) => v === Symbol.for("cancel")
+  );
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
 });
 
 afterEach(() => {
   execFileSyncSpy.mockRestore();
   confirmSpy.mockRestore();
+  isCancelSpy.mockRestore();
   logWarnSpy.mockRestore();
 });
 
@@ -133,6 +138,17 @@ describe("checkGitStatus", () => {
     expect(result).toBe(false);
   });
 
+  test("returns false without throwing when user cancels not-in-git-repo prompt", async () => {
+    execFileSyncSpy.mockImplementation(() => {
+      throw new Error("not a git repo");
+    });
+    confirmSpy.mockResolvedValue(Symbol.for("cancel"));
+
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+
+    expect(result).toBe(false);
+  });
+
   test("warns and auto-continues when not in git repo with --yes", async () => {
     execFileSyncSpy.mockImplementation(() => {
       throw new Error("not a git repo");
@@ -173,6 +189,17 @@ describe("checkGitStatus", () => {
       .mockReturnValueOnce(Buffer.from("true\n"))
       .mockReturnValueOnce(Buffer.from(" M dirty.ts\n"));
     confirmSpy.mockResolvedValue(false);
+
+    const result = await checkGitStatus({ cwd: "/tmp", yes: false });
+
+    expect(result).toBe(false);
+  });
+
+  test("returns false without throwing when user cancels dirty-tree prompt", async () => {
+    execFileSyncSpy
+      .mockReturnValueOnce(Buffer.from("true\n"))
+      .mockReturnValueOnce(Buffer.from(" M dirty.ts\n"));
+    confirmSpy.mockResolvedValue(Symbol.for("cancel"));
 
     const result = await checkGitStatus({ cwd: "/tmp", yes: false });
 

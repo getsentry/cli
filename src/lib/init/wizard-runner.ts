@@ -9,6 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { cancel, confirm, intro, log, spinner } from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
+import { captureException } from "@sentry/bun";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
@@ -208,7 +209,17 @@ async function preamble(
   process.stderr.write(`\n${formatBanner()}\n\n`);
   intro("sentry init");
 
-  const confirmed = await confirmExperimental(yes);
+  let confirmed: boolean;
+  try {
+    confirmed = await confirmExperimental(yes);
+  } catch (err) {
+    if (err instanceof WizardCancelledError) {
+      captureException(err);
+      process.exitCode = 0;
+      return false;
+    }
+    throw err;
+  }
   if (!confirmed) {
     cancel("Setup cancelled.");
     process.exitCode = 0;
@@ -335,7 +346,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      process.exitCode = 1;
+      captureException(err);
+      process.exitCode = 0;
       return;
     }
     if (spinState.running) {

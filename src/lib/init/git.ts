@@ -6,8 +6,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { confirm, log } from "@clack/prompts";
-import { abortIfCancelled } from "./clack-utils.js";
+import { confirm, isCancel, log } from "@clack/prompts";
 
 export function isInsideGitWorkTree(opts: { cwd: string }): boolean {
   try {
@@ -61,7 +60,9 @@ export async function checkGitStatus(opts: {
       message:
         "You are not inside a git repository. Unable to revert changes if something goes wrong. Continue?",
     });
-    abortIfCancelled(proceed);
+    if (isCancel(proceed)) {
+      return false;
+    }
     return !!proceed;
   }
 
@@ -78,7 +79,9 @@ export async function checkGitStatus(opts: {
     const proceed = await confirm({
       message: "Continue with uncommitted changes?",
     });
-    abortIfCancelled(proceed);
+    if (isCancel(proceed)) {
+      return false;
+    }
     return !!proceed;
   }
 
