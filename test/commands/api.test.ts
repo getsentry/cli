@@ -1280,6 +1280,30 @@ describe("handleResponse", () => {
       process.exit = originalExit;
     }
   });
+
+  test("filters response body with --fields", () => {
+    const writer = createMockWriter();
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      body: {
+        id: "123",
+        name: "my-project",
+        slug: "my-project",
+        platform: "node",
+      },
+    };
+
+    handleResponse(writer, response, {
+      silent: false,
+      verbose: false,
+      include: false,
+      fields: ["id", "name"],
+    });
+
+    const parsed = JSON.parse(writer.output);
+    expect(parsed).toEqual({ id: "123", name: "my-project" });
+  });
 });
 
 // --data/-d and JSON auto-detection (CLI-AF)

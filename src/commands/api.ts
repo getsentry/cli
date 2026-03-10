@@ -28,8 +28,10 @@ type ApiFlags = {
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
-  /** Output dry-run preview as JSON instead of human-readable */
+  /** Injected by buildCommand via output: "json" */
   readonly json: boolean;
+  /** Injected by buildCommand via output: "json" */
+  readonly fields?: string[];
 };
 
 // Request Parsing
@@ -1008,7 +1010,12 @@ export function writeDryRunHuman(stdout: Writer, request: DryRunRequest): void {
 export function handleResponse(
   stdout: Writer,
   response: { status: number; headers: Headers; body: unknown },
-  flags: { silent: boolean; verbose: boolean; include: boolean }
+  flags: {
+    silent: boolean;
+    verbose: boolean;
+    include: boolean;
+    fields?: string[];
+  }
 ): void {
   const isError = response.status >= 400;
 
@@ -1027,8 +1034,12 @@ export function handleResponse(
     writeResponseHeaders(stdout, response.status, response.headers);
   }
 
-  // Output body
-  writeResponseBody(stdout, response.body);
+  // Output body — apply --fields filtering when requested
+  if (flags.fields && flags.fields.length > 0) {
+    writeJson(stdout, response.body, flags.fields);
+  } else {
+    writeResponseBody(stdout, response.body);
+  }
 
   // Exit with error code for error responses
   if (isError) {
@@ -1159,6 +1170,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
+  output: "json",
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1256,11 +1268,6 @@ export const apiCommand = buildCommand({
         brief: "Show the resolved request without sending it",
         default: false,
       },
-      json: {
-        kind: "boolean",
-        brief: "Output dry-run preview as machine-readable JSON",
-        default: false,
-      },
     },
     aliases: {
       X: "method",
@@ -1301,7 +1308,7 @@ export const apiCommand = buildCommand({
       });
 
       if (flags.json) {
-        writeJson(stdout, request);
+        writeJson(stdout, request, flags.fields);
       } else {
         writeDryRunHuman(stdout, request);
       }
