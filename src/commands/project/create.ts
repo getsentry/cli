@@ -35,7 +35,30 @@ import {
   formatProjectCreated,
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
+import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { writeOutput } from "../../lib/formatters/output.js";
+import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
+import { renderTextTable } from "../../lib/formatters/text-table.js";
+import { logger } from "../../lib/logger.js";
+import {
+  COMMON_PLATFORMS,
+  isValidPlatform,
+  suggestPlatform,
+} from "../../lib/platforms.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  buildOrgNotFoundError,
+  type ResolvedTeam,
+  resolveOrCreateTeam,
+} from "../../lib/resolve-team.js";
+import { buildProjectUrl } from "../../lib/sentry-urls.js";
+import { slugify } from "../../lib/utils.js";
+import type { SentryProject } from "../../types/index.js";
+
+const log = logger.withTag("project.create");
+
+/** Usage hint template — base command without positionals */
+const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type DryRunData = {
   organization: string;
@@ -60,30 +83,6 @@ function formatDryRun(data: DryRunData): string {
   lines.push(`  Platform:      ${data.platform}`);
   return lines.join("\n");
 }
-
-import { isPlainOutput } from "../../lib/formatters/markdown.js";
-import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
-import { renderTextTable } from "../../lib/formatters/text-table.js";
-import { logger } from "../../lib/logger.js";
-import {
-  COMMON_PLATFORMS,
-  isValidPlatform,
-  suggestPlatform,
-} from "../../lib/platforms.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
-import {
-  buildOrgNotFoundError,
-  type ResolvedTeam,
-  resolveOrCreateTeam,
-} from "../../lib/resolve-team.js";
-import { buildProjectUrl } from "../../lib/sentry-urls.js";
-import { slugify } from "../../lib/utils.js";
-import type { SentryProject } from "../../types/index.js";
-
-const log = logger.withTag("project.create");
-
-/** Usage hint template — base command without positionals */
-const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type CreateFlags = {
   readonly team?: string;
