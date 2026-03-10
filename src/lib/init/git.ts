@@ -7,6 +7,9 @@
 
 import { confirm, isCancel, log } from "@clack/prompts";
 
+/** Maximum number of uncommitted files to display before truncating. */
+const MAX_DISPLAYED_FILES = 5;
+
 export function isInsideGitWorkTree(opts: { cwd: string }): boolean {
   const result = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], {
     stdout: "ignore",
@@ -64,7 +67,12 @@ export async function checkGitStatus(opts: {
 
   const uncommitted = getUncommittedOrUntrackedFiles({ cwd });
   if (uncommitted.length > 0) {
-    const fileList = uncommitted.join("\n");
+    const displayed = uncommitted.slice(0, MAX_DISPLAYED_FILES);
+    const remaining = uncommitted.length - displayed.length;
+    if (remaining > 0) {
+      displayed.push(`  + ${remaining} more uncommitted files`);
+    }
+    const fileList = displayed.join("\n");
     if (yes) {
       log.warn(
         `You have uncommitted or untracked files:\n${fileList}\nProceeding anyway (--yes).`
