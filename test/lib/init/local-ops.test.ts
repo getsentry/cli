@@ -25,7 +25,6 @@ import type {
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
     directory: "/tmp/test",
-    force: false,
     yes: false,
     dryRun: false,
     ...overrides,

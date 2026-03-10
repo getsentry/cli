@@ -44,7 +44,6 @@ const noop = () => {
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
     directory: "/tmp/test",
-    force: false,
     yes: true,
     dryRun: false,
     ...overrides,

@@ -9,7 +9,6 @@ import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
-  EXIT_SENTRY_ALREADY_INSTALLED,
   EXIT_VERIFICATION_FAILED,
 } from "./constants.js";
 import type { WizardOutput, WorkflowRunResult } from "./types.js";
@@ -87,9 +86,7 @@ export function formatError(result: WorkflowRunResult): void {
 
   log.error(String(message));
 
-  if (exitCode === EXIT_SENTRY_ALREADY_INSTALLED) {
-    log.warn("Hint: Use --force to override existing Sentry installation.");
-  } else if (exitCode === EXIT_PLATFORM_NOT_DETECTED) {
+  if (exitCode === EXIT_PLATFORM_NOT_DETECTED) {
     log.warn(
       "Hint: Could not detect your project's platform. Check that the directory contains a valid project."
     );

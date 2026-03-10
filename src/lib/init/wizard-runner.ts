@@ -171,7 +171,7 @@ function withTimeout<T>(
 }
 
 export async function runWizard(options: WizardOptions): Promise<void> {
-  const { directory, force, yes, dryRun, features } = options;
+  const { directory, yes, dryRun, features } = options;
 
   if (!(yes || process.stdin.isTTY)) {
     process.stderr.write(
@@ -227,7 +227,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     result = assertWorkflowResult(
       await withTimeout(
         run.startAsync({
-          inputData: { directory, force, yes, dryRun, features, dirListing },
+          inputData: { directory, yes, dryRun, features, dirListing },
           tracingOptions,
         }),
         API_TIMEOUT_MS,

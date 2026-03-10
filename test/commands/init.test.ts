@@ -54,7 +54,6 @@ describe("init command func", () => {
     test("splits comma-separated features", async () => {
       const ctx = makeContext();
       await func.call(ctx, {
-        force: false,
         yes: true,
         "dry-run": false,
         features: "errors,tracing,logs",
@@ -66,7 +65,6 @@ describe("init command func", () => {
     test("trims whitespace from features", async () => {
       const ctx = makeContext();
       await func.call(ctx, {
-        force: false,
         yes: true,
         "dry-run": false,
         features: " errors , tracing ",
@@ -78,7 +76,6 @@ describe("init command func", () => {
     test("filters empty segments", async () => {
       const ctx = makeContext();
       await func.call(ctx, {
-        force: false,
         yes: true,
         "dry-run": false,
         features: "errors,,tracing,",
@@ -90,7 +87,6 @@ describe("init command func", () => {
     test("passes undefined when features not provided", async () => {
       const ctx = makeContext();
       await func.call(ctx, {
-        force: false,
         yes: true,
         "dry-run": false,
       });
@@ -103,7 +99,6 @@ describe("init command func", () => {
     test("defaults to cwd when no directory provided", async () => {
       const ctx = makeContext("/projects/app");
       await func.call(ctx, {
-        force: false,
         yes: true,
         "dry-run": false,
       });
@@ -116,7 +111,6 @@ describe("init command func", () => {
       await func.call(
         ctx,
         {
-          force: false,
           yes: true,
           "dry-run": false,
         },
@@ -130,15 +124,13 @@ describe("init command func", () => {
   });
 
   describe("flag forwarding", () => {
-    test("forwards force, yes, and dry-run flags", async () => {
+    test("forwards yes and dry-run flags", async () => {
       const ctx = makeContext();
       await func.call(ctx, {
-        force: true,
         yes: true,
         "dry-run": true,
       });
 
-      expect(capturedArgs?.force).toBe(true);
       expect(capturedArgs?.yes).toBe(true);
       expect(capturedArgs?.dryRun).toBe(true);
     });

@@ -6,7 +6,6 @@ export type DirEntry = {
 
 export type WizardOptions = {
   directory: string;
-  force: boolean;
   yes: boolean;
   dryRun: boolean;
   features?: string[];

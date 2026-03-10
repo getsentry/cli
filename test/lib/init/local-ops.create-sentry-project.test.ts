@@ -26,7 +26,6 @@ import type { SentryProject } from "../../../src/types/index.js";
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
     directory: "/tmp/test",
-    force: false,
     yes: false,
     dryRun: false,
     ...overrides,

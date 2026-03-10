@@ -16,7 +16,7 @@ export type WizardResult = {
 };
 
 /**
- * Run `sentry init --yes --force` on a project directory and capture results.
+ * Run `sentry init --yes` on a project directory and capture results.
  * When `features` is provided, passes `--features <comma-separated>` to the wizard.
  */
 export async function runWizard(
@@ -57,7 +57,7 @@ export async function runWizard(
     // Some templates (e.g. Python) might not need install
   }
 
-  const initArgs = [...cmd, "init", "--yes", "--force"];
+  const initArgs = [...cmd, "init", "--yes"];
   if (features && features.length > 0) {
     initArgs.push("--features", features.join(","));
   }
