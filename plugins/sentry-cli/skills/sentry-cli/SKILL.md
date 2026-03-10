@@ -661,7 +661,7 @@ Initialize Sentry in your project
 **Flags:**
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
-- `-feature, --features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
 
 ### Issues
 
