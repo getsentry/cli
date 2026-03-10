@@ -1,0 +1,31 @@
+## Phase 2 Plan: writeOutput convergence
+
+### Goal
+Converge Tier 1 commands from manual `if (flags.json) { writeJson(...) } else { format(...) }`
+branching to the unified `writeOutput` helper.
+
+### Analysis
+Surveyed 11 commands (9 candidates + 2 existing callers). Found two key patterns:
+1. Same data for JSON and human (rare — only org/view, issue/explain)
+2. Divergent data shapes (majority — JSON gets narrowed/enriched object, human formatter needs different context)
+
+### API Enhancement
+Added to writeOutput<T, J = T>:
+- `footer?: string` — collapses writeFooter() calls (3 commands had this pattern)
+- `jsonData?: J` — decouples JSON serialization from human formatter data
+
+### Migrated (3 commands)
+- auth/whoami: jsonData narrows user to {id, name, username, email}
+- auth/refresh: inline formatHuman replaces 3-branch if/else
+- issue/explain: formatRootCauseList + footer replaces 3 separate calls
+
+### Skipped (5 commands — don't fit writeOutput cleanly)
+- issue/view, event/view, trace/view: multi-part human output (multiple formatters + span tree)
+- project/create: human-only data computed after JSON early-return
+- log/view: conditional single/array JSON shape + loop with separators
+
+### Convergence Roadmap
+Phase 1 (PR #373): output: "json" flag injection — DONE
+Phase 2 (this PR): writeOutput convergence — DONE
+Phase 3 (future): Return-based output — commands return data, wrapper handles formatting
+Phase 4 (future): Format flags (--markdown, --plain, --rendered)
