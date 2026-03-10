@@ -56,7 +56,40 @@ describe("init command func", () => {
       await func.call(ctx, {
         yes: true,
         "dry-run": false,
-        features: "errors,tracing,logs",
+        features: ["errors,tracing,logs"],
+      });
+
+      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+    });
+
+    test("splits plus-separated features", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        yes: true,
+        "dry-run": false,
+        features: ["errors+tracing+logs"],
+      });
+
+      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+    });
+
+    test("splits space-separated features", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        yes: true,
+        "dry-run": false,
+        features: ["errors tracing logs"],
+      });
+
+      expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
+    });
+
+    test("merges multiple --features flags", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        yes: true,
+        "dry-run": false,
+        features: ["errors,tracing", "logs"],
       });
 
       expect(capturedArgs?.features).toEqual(["errors", "tracing", "logs"]);
@@ -67,7 +100,7 @@ describe("init command func", () => {
       await func.call(ctx, {
         yes: true,
         "dry-run": false,
-        features: " errors , tracing ",
+        features: [" errors , tracing "],
       });
 
       expect(capturedArgs?.features).toEqual(["errors", "tracing"]);
@@ -78,7 +111,7 @@ describe("init command func", () => {
       await func.call(ctx, {
         yes: true,
         "dry-run": false,
-        features: "errors,,tracing,",
+        features: ["errors,,tracing,"],
       });
 
       expect(capturedArgs?.features).toEqual(["errors", "tracing"]);

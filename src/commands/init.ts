@@ -11,10 +11,12 @@ import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 
+const FEATURE_DELIMITER = /[,+ ]+/;
+
 type InitFlags = {
   readonly yes: boolean;
   readonly "dry-run": boolean;
-  readonly features?: string;
+  readonly features?: string[];
 };
 
 export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
@@ -50,19 +52,20 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       features: {
         kind: "parsed",
         parse: String,
-        brief: "Comma-separated features: errors,tracing,logs,replay,metrics",
+        brief: "Features to enable: errors,tracing,logs,replay,metrics",
+        variadic: true,
         optional: true,
-        placeholder: "list",
       },
     },
     aliases: {
       y: "yes",
+      feature: "features",
     },
   },
   async func(this: SentryContext, flags: InitFlags, directory?: string) {
     const targetDir = directory ? path.resolve(this.cwd, directory) : this.cwd;
     const featuresList = flags.features
-      ?.split(",")
+      ?.flatMap((f) => f.split(FEATURE_DELIMITER))
       .map((f) => f.trim())
       .filter(Boolean);
 
