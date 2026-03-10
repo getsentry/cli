@@ -163,6 +163,7 @@ Create a new project
 
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
+- `-n, --dry-run - Validate inputs and show what would be created without creating it`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -398,6 +399,9 @@ Make an authenticated API request
 - `-i, --include - Include HTTP response status line and headers in the output`
 - `--silent - Do not print the response body`
 - `--verbose - Include full HTTP request and response in the output`
+- `-n, --dry-run - Show the resolved request without sending it`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 **Examples:**
 
