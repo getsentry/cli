@@ -256,4 +256,59 @@ describe("renderCommandOutput", () => {
     renderCommandOutput(w, { value: 42 }, config, { json: false });
     expect(w.output).toBe("Value: 42\n");
   });
+
+  test("jsonExclude strips fields from JSON output", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{
+      id: number;
+      name: string;
+      spanTreeLines?: string[];
+    }> = {
+      json: true,
+      human: (d) => `${d.id}: ${d.name}`,
+      jsonExclude: ["spanTreeLines"],
+    };
+    renderCommandOutput(
+      w,
+      { id: 1, name: "Alice", spanTreeLines: ["line1", "line2"] },
+      config,
+      { json: true }
+    );
+    const parsed = JSON.parse(w.output);
+    expect(parsed).toEqual({ id: 1, name: "Alice" });
+    expect(parsed).not.toHaveProperty("spanTreeLines");
+  });
+
+  test("jsonExclude does not affect human output", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{
+      id: number;
+      spanTreeLines?: string[];
+    }> = {
+      json: true,
+      human: (d) =>
+        `${d.id}\n${d.spanTreeLines ? d.spanTreeLines.join("\n") : ""}`,
+      jsonExclude: ["spanTreeLines"],
+    };
+    renderCommandOutput(
+      w,
+      { id: 1, spanTreeLines: ["line1", "line2"] },
+      config,
+      { json: false }
+    );
+    expect(w.output).toContain("line1");
+    expect(w.output).toContain("line2");
+  });
+
+  test("jsonExclude with empty array is a no-op", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ id: number; extra: string }> = {
+      json: true,
+      human: (d) => `${d.id}`,
+      jsonExclude: [],
+    };
+    renderCommandOutput(w, { id: 1, extra: "keep" }, config, { json: true });
+    const parsed = JSON.parse(w.output);
+    expect(parsed).toEqual({ id: 1, extra: "keep" });
+  });
 });

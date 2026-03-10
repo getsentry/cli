@@ -5,7 +5,6 @@
  * Used by commands that need to wait for async operations to complete.
  */
 
-import type { Writer } from "../types/index.js";
 import {
   formatProgressLine,
   truncateProgressMessage,
@@ -30,8 +29,6 @@ export type PollOptions<T> = {
   shouldStop: (state: T) => boolean;
   /** Get progress message from state */
   getProgressMessage: (state: T) => string;
-  /** Output stream for progress */
-  stderr: Writer;
   /** Suppress progress output (JSON mode) */
   json?: boolean;
   /** Poll interval in ms (default: 1000) */
@@ -62,7 +59,6 @@ export type PollOptions<T> = {
  *   fetchState: () => getAutofixState(org, issueId),
  *   shouldStop: (state) => isTerminalStatus(state.status),
  *   getProgressMessage: (state) => state.message ?? "Processing...",
- *   stderr: process.stderr,
  *   json: false,
  *   timeoutMs: 360_000,
  *   timeoutMessage: "Operation timed out after 6 minutes.",
@@ -74,7 +70,6 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
     fetchState,
     shouldStop,
     getProgressMessage,
-    stderr,
     json = false,
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -83,7 +78,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
   } = options;
 
   const startTime = Date.now();
-  const spinner = json ? null : startSpinner(stderr, initialMessage);
+  const spinner = json ? null : startSpinner(initialMessage);
 
   try {
     while (Date.now() - startTime < timeoutMs) {
@@ -107,7 +102,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
   } finally {
     spinner?.stop();
     if (!json) {
-      stderr.write("\n");
+      process.stderr.write("\n");
     }
   }
 }
@@ -116,12 +111,12 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
  * Start an animated spinner that writes progress to stderr.
  *
  * Returns a controller with `setMessage` to update the displayed text
- * and `stop` to halt the animation.
+ * and `stop` to halt the animation. Writes directly to `process.stderr`.
  */
-function startSpinner(
-  stderr: Writer,
-  initialMessage: string
-): { setMessage: (msg: string) => void; stop: () => void } {
+function startSpinner(initialMessage: string): {
+  setMessage: (msg: string) => void;
+  stop: () => void;
+} {
   let currentMessage = initialMessage;
   let tick = 0;
   let stopped = false;
@@ -131,7 +126,7 @@ function startSpinner(
       return;
     }
     const display = truncateProgressMessage(currentMessage);
-    stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
+    process.stderr.write(`\r\x1b[K${formatProgressLine(display, tick)}`);
     tick += 1;
     setTimeout(scheduleFrame, ANIMATION_INTERVAL_MS).unref();
   };
@@ -151,8 +146,6 @@ function startSpinner(
  * Options for {@link withProgress}.
  */
 export type WithProgressOptions = {
-  /** Output stream for progress */
-  stderr: Writer;
   /** Initial spinner message */
   message: string;
 };
@@ -175,7 +168,7 @@ export type WithProgressOptions = {
  * @example
  * ```typescript
  * const result = await withProgress(
- *   { stderr, message: "Fetching issues..." },
+ *   { message: "Fetching issues..." },
  *   async (setMessage) => {
  *     const data = await fetchWithPages({
  *       onPage: (fetched, total) => setMessage(`Fetching issues... ${fetched}/${total}`),
@@ -189,12 +182,12 @@ export async function withProgress<T>(
   options: WithProgressOptions,
   fn: (setMessage: (msg: string) => void) => Promise<T>
 ): Promise<T> {
-  const spinner = startSpinner(options.stderr, options.message);
+  const spinner = startSpinner(options.message);
 
   try {
     return await fn(spinner.setMessage);
   } finally {
     spinner.stop();
-    options.stderr.write("\r\x1b[K");
+    process.stderr.write("\r\x1b[K");
   }
 }

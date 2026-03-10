@@ -5,7 +5,6 @@
  * Uses Bun.spawn and Bun.which for process management.
  */
 
-import type { Writer } from "../types/index.js";
 import { generateQRCode } from "./qrcode.js";
 
 /**
@@ -69,26 +68,24 @@ export async function openBrowser(url: string): Promise<boolean> {
  * Attempts to open the browser first. If that fails (no browser available,
  * headless environment, etc.), displays the URL and a QR code for mobile scanning.
  *
- * @param stdout - Output stream for messages
+ * Writes directly to `process.stdout` — callers don't need to pass a writer.
+ *
  * @param url - The URL to open or display
  * @returns true if browser opened, false if showing fallback
  */
-export async function openOrShowUrl(
-  stdout: Writer,
-  url: string
-): Promise<boolean> {
+export async function openOrShowUrl(url: string): Promise<boolean> {
   const opened = await openBrowser(url);
   if (opened) {
-    stdout.write("Opening in browser...\n");
+    process.stdout.write("Opening in browser...\n");
     return true;
   }
 
   // Fallback: show URL and QR code
-  stdout.write("Could not open browser. Visit this URL:\n\n");
-  stdout.write(`${url}\n\n`);
+  process.stdout.write("Could not open browser. Visit this URL:\n\n");
+  process.stdout.write(`${url}\n\n`);
   const qr = await generateQRCode(url);
-  stdout.write(qr);
-  stdout.write("\n");
+  process.stdout.write(qr);
+  process.stdout.write("\n");
   return false;
 }
 
@@ -98,18 +95,18 @@ export async function openOrShowUrl(
  * Opens the URL in a browser if available, otherwise shows URL + QR code.
  * If URL is undefined/null, prints an error message.
  *
- * @param stdout - Output stream for messages
+ * Writes directly to `process.stdout` — callers don't need to pass a writer.
+ *
  * @param url - The URL to open (or undefined if not available)
  * @param entityName - Name of the entity for error message (e.g., "issue", "project")
  */
 export async function openInBrowser(
-  stdout: Writer,
   url: string | undefined,
   entityName = "resource"
 ): Promise<void> {
   if (!url) {
-    stdout.write(`No URL available for this ${entityName}.\n`);
+    process.stdout.write(`No URL available for this ${entityName}.\n`);
     return;
   }
-  await openOrShowUrl(stdout, url);
+  await openOrShowUrl(url);
 }

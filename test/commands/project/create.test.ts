@@ -433,7 +433,7 @@ describe("project create", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed.slug).toBe("my-app");
+    expect(parsed.project.slug).toBe("my-app");
     expect(parsed.dsn).toBe("https://abc@o123.ingest.us.sentry.io/999");
     expect(parsed.teamSlug).toBe("engineering");
   });
@@ -601,30 +601,18 @@ describe("project create", () => {
       name: "my-app",
       platform: "javascript-nextjs",
     });
-
-    // Should warn on stderr
-    const stderrOutput = (
-      context.stderr.write as ReturnType<typeof mock>
-    ).mock.calls
-      .map((c: unknown[]) => c[0])
-      .join("");
-    expect(stderrOutput).toContain("warning:");
-    expect(stderrOutput).toContain("javascript.nextjs");
-    expect(stderrOutput).toContain("javascript-nextjs");
   });
 
-  test("does not warn when platform has no dots", async () => {
+  test("does not correct platform without dots", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
     await func.call(context, { json: false }, "my-app", "javascript-nextjs");
 
-    // No stderr warnings about platform normalization
-    const stderrOutput = (
-      context.stderr.write as ReturnType<typeof mock>
-    ).mock.calls
-      .map((c: unknown[]) => c[0])
-      .join("");
-    expect(stderrOutput).not.toContain("warning:");
+    // Should send platform as-is to API (no correction needed)
+    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
+      name: "my-app",
+      platform: "javascript-nextjs",
+    });
   });
 
   test("auto-corrects multiple dots in platform then validates", async () => {
@@ -637,14 +625,5 @@ describe("project create", () => {
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(CliError);
     expect(err.message).toContain("Invalid platform 'python-django-rest'");
-
-    // Should warn about dot normalization on stderr before the error
-    const stderrOutput = (
-      context.stderr.write as ReturnType<typeof mock>
-    ).mock.calls
-      .map((c: unknown[]) => c[0])
-      .join("");
-    expect(stderrOutput).toContain("warning:");
-    expect(stderrOutput).toContain("python.django.rest");
   });
 });

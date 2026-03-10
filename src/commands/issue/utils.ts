@@ -20,13 +20,16 @@ import { detectAllDsns } from "../../lib/dsn/index.js";
 import { ApiError, ContextError, ResolutionError } from "../../lib/errors.js";
 import { getProgressMessage } from "../../lib/formatters/seer.js";
 import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
+import { logger } from "../../lib/logger.js";
 import { poll } from "../../lib/polling.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
 import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { isAllDigits } from "../../lib/utils.js";
-import type { SentryIssue, Writer } from "../../types/index.js";
+import type { SentryIssue } from "../../types/index.js";
 import { type AutofixState, isTerminalStatus } from "../../types/seer.js";
+
+const log = logger.withTag("issue.utils");
 
 /** Shared positional parameter for issue ID */
 export const issueIdPositional = {
@@ -499,8 +502,6 @@ type PollAutofixOptions = {
   orgSlug: string;
   /** Numeric issue ID */
   issueId: string;
-  /** Writer for progress output */
-  stderr: Writer;
   /** Whether to suppress progress output (JSON mode) */
   json: boolean;
   /** Polling interval in milliseconds (default: 1000) */
@@ -518,8 +519,6 @@ type EnsureRootCauseOptions = {
   org: string;
   /** Numeric issue ID */
   issueId: string;
-  /** Writer for progress output */
-  stderr: Writer;
   /** Whether to suppress progress output (JSON mode) */
   json: boolean;
   /** Force new analysis even if one exists */
@@ -539,7 +538,7 @@ type EnsureRootCauseOptions = {
 export async function ensureRootCauseAnalysis(
   options: EnsureRootCauseOptions
 ): Promise<AutofixState> {
-  const { org, issueId, stderr, json, force = false } = options;
+  const { org, issueId, json, force = false } = options;
 
   // 1. Check for existing analysis (skip if --force)
   let state = force ? null : await getAutofixState(org, issueId);
@@ -547,7 +546,7 @@ export async function ensureRootCauseAnalysis(
   // Handle error status - we will retry the analysis
   if (state?.status === "ERROR") {
     if (!json) {
-      stderr.write("Previous analysis failed, retrying...\n");
+      log.info("Previous analysis failed, retrying...");
     }
     state = null;
   }
@@ -556,9 +555,7 @@ export async function ensureRootCauseAnalysis(
   if (!state) {
     if (!json) {
       const prefix = force ? "Forcing fresh" : "Starting";
-      stderr.write(
-        `${prefix} root cause analysis, it can take several minutes...\n`
-      );
+      log.info(`${prefix} root cause analysis, it can take several minutes...`);
     }
     await triggerRootCauseAnalysis(org, issueId);
   }
@@ -572,7 +569,6 @@ export async function ensureRootCauseAnalysis(
     state = await pollAutofixState({
       orgSlug: org,
       issueId,
-      stderr,
       json,
       stopOnWaitingForUser: true,
     });
@@ -615,7 +611,6 @@ export async function pollAutofixState(
   const {
     orgSlug,
     issueId,
-    stderr,
     json,
     pollIntervalMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -627,7 +622,6 @@ export async function pollAutofixState(
     fetchState: () => getAutofixState(orgSlug, issueId),
     shouldStop: (state) => shouldStopPolling(state, stopOnWaitingForUser),
     getProgressMessage,
-    stderr,
     json,
     pollIntervalMs,
     timeoutMs,

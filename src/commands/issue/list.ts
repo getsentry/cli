@@ -756,7 +756,6 @@ async function fetchOrgAllIssues(
 /** Options for {@link handleOrgAllIssues}. */
 type OrgAllIssuesOptions = {
   stdout: Writer;
-  stderr: Writer;
   org: string;
   flags: ListFlags;
   setContext: (orgs: string[], projects: string[]) => void;
@@ -769,7 +768,7 @@ type OrgAllIssuesOptions = {
  * never accidentally reused.
  */
 async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
-  const { stdout, stderr, org, flags, setContext } = options;
+  const { stdout, org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
@@ -781,7 +780,7 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
   setContext([org], []);
 
   const { issues, nextCursor } = await withProgress(
-    { stderr, message: `Fetching issues (up to ${flags.limit})...` },
+    { message: `Fetching issues (up to ${flags.limit})...` },
     (setMessage) =>
       fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
         setMessage(
@@ -927,7 +926,7 @@ async function handleResolvedTargets(
       : "Fetching issues";
 
   const { results, hasMore } = await withProgress(
-    { stderr, message: `${baseMessage} (up to ${flags.limit})...` },
+    { message: `${baseMessage} (up to ${flags.limit})...` },
     (setMessage) =>
       fetchWithBudget(
         activeTargets,
@@ -1266,7 +1265,6 @@ export const listCommand = buildListCommand("issue", {
         "org-all": (ctx) =>
           handleOrgAllIssues({
             stdout: ctx.stdout,
-            stderr,
             org: ctx.parsed.org,
             flags,
             setContext,

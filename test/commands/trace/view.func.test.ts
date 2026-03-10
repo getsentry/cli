@@ -1,7 +1,7 @@
 /**
  * Trace View Command Func Tests
  *
- * Tests for the viewCommand func() body and writeHumanOutput
+ * Tests for the viewCommand func() body and formatTraceView
  * in src/commands/trace/view.ts.
  *
  * Uses spyOn to mock api-client and resolve-target to test
@@ -18,8 +18,8 @@ import {
   test,
 } from "bun:test";
 import {
+  formatTraceView,
   viewCommand,
-  writeHumanOutput,
 } from "../../../src/commands/trace/view.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
@@ -33,53 +33,49 @@ import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceSpan } from "../../../src/types/sentry.js";
 
 // ============================================================================
-// writeHumanOutput
+// formatTraceView
 // ============================================================================
 
-describe("writeHumanOutput", () => {
-  test("writes summary and span tree lines", () => {
-    const stdoutWrite = mock(() => true);
-    const stdout = { write: stdoutWrite };
+describe("formatTraceView", () => {
+  const mockSummary = {
+    traceId: "abc123",
+    duration: 245,
+    spanCount: 1,
+    projects: ["test-project"],
+    startTimestamp: 1_700_000_000,
+  };
 
-    writeHumanOutput(stdout, {
-      summaryLines: ["Trace: abc123", "Duration: 245ms"],
+  test("formats summary and span tree lines", () => {
+    const result = formatTraceView({
+      summary: mockSummary,
+      spans: [],
       spanTreeLines: ["  └─ GET /api/users [245ms]"],
     });
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Trace: abc123");
-    expect(output).toContain("Duration: 245ms");
-    expect(output).toContain("GET /api/users");
+    expect(result).toContain("abc123");
+    expect(result).toContain("GET /api/users");
   });
 
-  test("writes only summary when spanTreeLines is undefined", () => {
-    const stdoutWrite = mock(() => true);
-    const stdout = { write: stdoutWrite };
-
-    writeHumanOutput(stdout, {
-      summaryLines: ["Trace: abc123"],
+  test("returns only summary when spanTreeLines is undefined", () => {
+    const result = formatTraceView({
+      summary: mockSummary,
+      spans: [],
       spanTreeLines: undefined,
     });
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Trace: abc123");
-    // Only one write call for summary
-    expect(stdoutWrite).toHaveBeenCalledTimes(1);
+    expect(result).toContain("abc123");
+    expect(result).not.toContain("└─");
   });
 
-  test("writes only summary when spanTreeLines is empty", () => {
-    const stdoutWrite = mock(() => true);
-    const stdout = { write: stdoutWrite };
-
-    writeHumanOutput(stdout, {
-      summaryLines: ["Trace: abc123"],
+  test("returns only summary when spanTreeLines is empty", () => {
+    const result = formatTraceView({
+      summary: mockSummary,
+      spans: [],
       spanTreeLines: [],
     });
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Trace: abc123");
-    // Empty array means no span tree write
-    expect(stdoutWrite).toHaveBeenCalledTimes(1);
+    expect(result).toContain("abc123");
+    expect(result).not.toContain("└─");
   });
 });
 

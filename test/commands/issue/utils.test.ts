@@ -709,12 +709,6 @@ describe("resolveOrgAndIssueId", () => {
 });
 
 describe("pollAutofixState", () => {
-  const mockStderr = {
-    write: () => {
-      // Intentionally empty - suppress output in tests
-    },
-  };
-
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;
 
@@ -739,7 +733,7 @@ describe("pollAutofixState", () => {
     const result = await pollAutofixState({
       orgSlug: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -767,7 +761,7 @@ describe("pollAutofixState", () => {
     const result = await pollAutofixState({
       orgSlug: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -794,7 +788,7 @@ describe("pollAutofixState", () => {
     const result = await pollAutofixState({
       orgSlug: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
       stopOnWaitingForUser: true,
     });
@@ -844,7 +838,7 @@ describe("pollAutofixState", () => {
     const result = await pollAutofixState({
       orgSlug: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
       pollIntervalMs: 10, // Short interval for test
     });
@@ -857,32 +851,55 @@ describe("pollAutofixState", () => {
     let stderrOutput = "";
     let fetchCount = 0;
 
-    // Return PROCESSING first to allow animation interval to fire,
-    // then COMPLETED on second call
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async () => {
-      fetchCount += 1;
+    // Spy on process.stderr.write to capture spinner output
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
 
-      if (fetchCount === 1) {
+    try {
+      // Return PROCESSING first to allow animation interval to fire,
+      // then COMPLETED on second call
+      // @ts-expect-error - partial mock
+      globalThis.fetch = async () => {
+        fetchCount += 1;
+
+        if (fetchCount === 1) {
+          return new Response(
+            JSON.stringify({
+              autofix: {
+                run_id: 12_345,
+                status: "PROCESSING",
+                steps: [
+                  {
+                    id: "step-1",
+                    key: "analysis",
+                    status: "PROCESSING",
+                    title: "Analysis",
+                    progress: [
+                      {
+                        message: "Analyzing...",
+                        timestamp: "2025-01-01T00:00:00Z",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
         return new Response(
           JSON.stringify({
             autofix: {
               run_id: 12_345,
-              status: "PROCESSING",
-              steps: [
-                {
-                  id: "step-1",
-                  key: "analysis",
-                  status: "PROCESSING",
-                  title: "Analysis",
-                  progress: [
-                    {
-                      message: "Analyzing...",
-                      timestamp: "2025-01-01T00:00:00Z",
-                    },
-                  ],
-                },
-              ],
+              status: "COMPLETED",
+              steps: [],
             },
           }),
           {
@@ -890,38 +907,19 @@ describe("pollAutofixState", () => {
             headers: { "Content-Type": "application/json" },
           }
         );
-      }
+      };
 
-      return new Response(
-        JSON.stringify({
-          autofix: {
-            run_id: 12_345,
-            status: "COMPLETED",
-            steps: [],
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    };
+      await pollAutofixState({
+        orgSlug: "test-org",
+        issueId: "123456789",
+        json: false,
+        pollIntervalMs: 100, // Allow animation interval (80ms) to fire
+      });
 
-    const stderrMock = {
-      write: (s: string) => {
-        stderrOutput += s;
-      },
-    };
-
-    await pollAutofixState({
-      orgSlug: "test-org",
-      issueId: "123456789",
-      stderr: stderrMock,
-      json: false,
-      pollIntervalMs: 100, // Allow animation interval (80ms) to fire
-    });
-
-    expect(stderrOutput).toContain("Analyzing");
+      expect(stderrOutput).toContain("Analyzing");
+    } finally {
+      process.stderr.write = origWrite;
+    }
   });
 
   test("throws timeout error when exceeding timeoutMs", async () => {
@@ -945,7 +943,7 @@ describe("pollAutofixState", () => {
       pollAutofixState({
         orgSlug: "test-org",
         issueId: "123456789",
-        stderr: mockStderr,
+
         json: true,
         timeoutMs: 50,
         pollIntervalMs: 20,
@@ -987,7 +985,7 @@ describe("pollAutofixState", () => {
     const result = await pollAutofixState({
       orgSlug: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
       pollIntervalMs: 10,
     });
@@ -998,12 +996,6 @@ describe("pollAutofixState", () => {
 });
 
 describe("ensureRootCauseAnalysis", () => {
-  const mockStderr = {
-    write: () => {
-      // Intentionally empty - suppress output in tests
-    },
-  };
-
   test("returns immediately when state is COMPLETED", async () => {
     let fetchCount = 0;
 
@@ -1028,7 +1020,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -1060,7 +1052,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -1118,7 +1110,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -1184,7 +1176,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -1242,7 +1234,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
     });
 
@@ -1293,7 +1285,7 @@ describe("ensureRootCauseAnalysis", () => {
     const result = await ensureRootCauseAnalysis({
       org: "test-org",
       issueId: "123456789",
-      stderr: mockStderr,
+
       json: true,
       force: true,
     });
@@ -1306,60 +1298,69 @@ describe("ensureRootCauseAnalysis", () => {
     let stderrOutput = "";
     let triggerCalled = false;
 
-    // @ts-expect-error - partial mock
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
-      const url = req.url;
+    // Spy on process.stderr.write to capture logger output
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
 
-      if (url.includes("/autofix/") && req.method === "GET") {
-        if (triggerCalled) {
-          return new Response(
-            JSON.stringify({
-              autofix: {
-                run_id: 12_345,
-                status: "COMPLETED",
-                steps: [],
-              },
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
+    try {
+      // @ts-expect-error - partial mock
+      globalThis.fetch = async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ) => {
+        const req = new Request(input, init);
+        const url = req.url;
+
+        if (url.includes("/autofix/") && req.method === "GET") {
+          if (triggerCalled) {
+            return new Response(
+              JSON.stringify({
+                autofix: {
+                  run_id: 12_345,
+                  status: "COMPLETED",
+                  steps: [],
+                },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }
+            );
+          }
+          return new Response(JSON.stringify({ autofix: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
         }
-        return new Response(JSON.stringify({ autofix: null }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
 
-      if (url.includes("/autofix/") && req.method === "POST") {
-        triggerCalled = true;
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+        if (url.includes("/autofix/") && req.method === "POST") {
+          triggerCalled = true;
+          return new Response(JSON.stringify({ success: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
 
-      return new Response(JSON.stringify({ detail: "Not found" }), {
-        status: 404,
+        return new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        });
+      };
+
+      await ensureRootCauseAnalysis({
+        org: "test-org",
+        issueId: "123456789",
+        json: false, // Not JSON mode, should output progress
       });
-    };
 
-    const stderrMock = {
-      write: (s: string) => {
-        stderrOutput += s;
-      },
-    };
-
-    await ensureRootCauseAnalysis({
-      org: "test-org",
-      issueId: "123456789",
-      stderr: stderrMock,
-      json: false, // Not JSON mode, should output progress
-    });
-
-    expect(stderrOutput).toContain("root cause analysis");
+      // The logger.info() messages go through consola and the poll spinner
+      // writes directly to stderr — check for the spinner's initial message
+      expect(stderrOutput).toContain("Waiting for analysis");
+    } finally {
+      process.stderr.write = origWrite;
+    }
   });
 });
 

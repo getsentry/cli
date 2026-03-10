@@ -30,10 +30,14 @@ import {
   ContextError,
   withAuthGuard,
 } from "../../lib/errors.js";
-import { formatProjectCreated, writeJson } from "../../lib/formatters/index.js";
+import {
+  formatProjectCreated,
+  type ProjectCreatedResult,
+} from "../../lib/formatters/human.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
+import { logger } from "../../lib/logger.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
@@ -47,7 +51,9 @@ import {
 } from "../../lib/resolve-team.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import { slugify } from "../../lib/utils.js";
-import type { SentryProject, Writer } from "../../types/index.js";
+import type { SentryProject } from "../../types/index.js";
+
+const log = logger.withTag("project.create");
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
@@ -93,18 +99,18 @@ function platformGrid(items: readonly string[]): string {
  * Sentry's SDK guide URLs use dots (e.g., `sentry.io/for/javascript.nextjs`)
  * but platform identifiers use hyphens (`javascript-nextjs`). Users often
  * copy the dot-notation directly. This auto-corrects dots to hyphens and
- * warns on stderr, following the same pattern as `normalizeFields` in `api.ts`.
+ * warns via consola logger, following the same pattern as `normalizeFields` in `api.ts`.
  *
  * Safe to auto-correct because the input is already invalid (dots are never
  * valid in platform identifiers) and the correction is unambiguous.
  */
-function normalizePlatform(platform: string, stderr: Writer): string {
+function normalizePlatform(platform: string): string {
   if (!platform.includes(".")) {
     return platform;
   }
   const corrected = platform.replace(/\./g, "-");
-  stderr.write(
-    `warning: platform '${platform}' uses '.' instead of '-' — interpreting as '${corrected}'\n`
+  log.warn(
+    `Platform '${platform}' uses '.' instead of '-' — interpreting as '${corrected}'`
   );
   return corrected;
 }
@@ -267,7 +273,16 @@ export const createCommand = buildCommand({
       "  sentry project create my-app python-django --team backend\n" +
       "  sentry project create my-app go --json",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatProjectCreated,
+    jsonExclude: [
+      "slugDiverged",
+      "expectedSlug",
+      "teamSource",
+      "requestedPlatform",
+    ],
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -301,8 +316,8 @@ export const createCommand = buildCommand({
     flags: CreateFlags,
     nameArg?: string,
     platformArg?: string
-  ): Promise<void> {
-    const { stdout, cwd } = this;
+  ) {
+    const { cwd } = this;
 
     if (!nameArg) {
       throw new ContextError(
@@ -319,7 +334,7 @@ export const createCommand = buildCommand({
       throw new CliError(buildPlatformError(nameArg));
     }
 
-    const platform = normalizePlatform(platformArg, this.stderr);
+    const platform = normalizePlatform(platformArg);
 
     if (!isValidPlatform(platform)) {
       throw new CliError(buildPlatformError(nameArg, platform));
@@ -378,28 +393,20 @@ export const createCommand = buildCommand({
     // Fetch DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
 
-    // JSON output
-    if (flags.json) {
-      writeJson(stdout, { ...project, dsn, teamSlug: team.slug }, flags.fields);
-      return;
-    }
-
-    // Human-readable output
-    const url = buildProjectUrl(orgSlug, project.slug);
     const expectedSlug = slugify(name);
 
-    stdout.write(
-      `${formatProjectCreated({
-        project,
-        orgSlug,
-        teamSlug: team.slug,
-        teamSource: team.source,
-        requestedPlatform: platform,
-        dsn,
-        url,
-        slugDiverged: project.slug !== expectedSlug,
-        expectedSlug,
-      })}\n`
-    );
+    const result: ProjectCreatedResult = {
+      project,
+      orgSlug,
+      teamSlug: team.slug,
+      teamSource: team.source,
+      requestedPlatform: platform,
+      dsn,
+      url: buildProjectUrl(orgSlug, project.slug),
+      slugDiverged: project.slug !== expectedSlug,
+      expectedSlug,
+    };
+
+    return { data: result };
   },
 });

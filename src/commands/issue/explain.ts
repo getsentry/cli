@@ -73,7 +73,7 @@ export const explainCommand = buildCommand({
   },
   async func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { stderr, cwd } = this;
+    const { cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -91,7 +91,6 @@ export const explainCommand = buildCommand({
       const state = await ensureRootCauseAnalysis({
         org,
         issueId: numericId,
-        stderr,
         json: flags.json,
         force: flags.force,
       });

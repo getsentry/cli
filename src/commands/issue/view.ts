@@ -13,8 +13,6 @@ import {
   formatEventDetails,
   formatIssueDetails,
   muted,
-  writeFooter,
-  writeJson,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
@@ -22,7 +20,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
-import type { SentryEvent, SentryIssue, Writer } from "../../types/index.js";
+import type { SentryEvent, SentryIssue } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
 
 type ViewFlags = {
@@ -52,30 +50,36 @@ async function tryGetLatestEvent(
   }
 }
 
-type HumanOutputOptions = {
+/** Return type for issue view — includes all data both renderers need */
+type IssueViewData = {
   issue: SentryIssue;
-  event?: SentryEvent;
+  event: SentryEvent | null;
+  trace: { traceId: string; spans: unknown[] } | null;
+  /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
 };
 
 /**
- * Write human-readable issue output
+ * Format issue view data for human-readable terminal output.
+ *
+ * Renders issue details, optional latest event, and optional span tree.
  */
-function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
-  const { issue, event, spanTreeLines } = options;
+function formatIssueView(data: IssueViewData): string {
+  const parts: string[] = [];
 
-  stdout.write(`${formatIssueDetails(issue)}\n`);
+  parts.push(formatIssueDetails(data.issue));
 
-  if (event) {
-    // Pass issue permalink for constructing replay links
-    stdout.write(
-      `${formatEventDetails(event, "Latest Event", issue.permalink)}\n`
+  if (data.event) {
+    parts.push(
+      formatEventDetails(data.event, "Latest Event", data.issue.permalink)
     );
   }
 
-  if (spanTreeLines && spanTreeLines.length > 0) {
-    stdout.write(`${spanTreeLines.join("\n")}\n`);
+  if (data.spanTreeLines && data.spanTreeLines.length > 0) {
+    parts.push(data.spanTreeLines.join("\n"));
   }
+
+  return parts.join("\n");
 }
 
 export const viewCommand = buildCommand({
@@ -96,7 +100,11 @@ export const viewCommand = buildCommand({
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatIssueView,
+    jsonExclude: ["spanTreeLines"],
+  },
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -110,13 +118,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    issueArg: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     // Resolve issue using shared resolution logic
     const { org: orgSlug, issue } = await resolveIssue({
@@ -132,7 +136,7 @@ export const viewCommand = buildCommand({
     );
 
     if (flags.web) {
-      await openInBrowser(stdout, issue.permalink, "issue");
+      await openInBrowser(issue.permalink, "issue");
       return;
     }
 
@@ -150,14 +154,6 @@ export const viewCommand = buildCommand({
       spanTreeResult = await getSpanTreeLines(orgSlug, event, flags.spans);
     }
 
-    if (flags.json) {
-      const trace = spanTreeResult?.success
-        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-        : null;
-      writeJson(stdout, { issue, event: event ?? null, trace }, flags.fields);
-      return;
-    }
-
     // Prepare span tree lines for human output
     let spanTreeLines: string[] | undefined;
     if (spanTreeResult) {
@@ -170,11 +166,13 @@ export const viewCommand = buildCommand({
       spanTreeLines = [muted("\nCould not fetch event to display span tree.")];
     }
 
-    writeHumanOutput(stdout, { issue, event, spanTreeLines });
+    const trace = spanTreeResult?.success
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+      : null;
 
-    writeFooter(
-      stdout,
-      `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`
-    );
+    return {
+      data: { issue, event: event ?? null, trace, spanTreeLines },
+      hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
+    };
   },
 });

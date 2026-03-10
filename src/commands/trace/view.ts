@@ -20,8 +20,6 @@ import {
   computeTraceSummary,
   formatSimpleSpanTree,
   formatTraceSummary,
-  writeFooter,
-  writeJson,
 } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
@@ -35,7 +33,6 @@ import {
 } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { validateTraceId } from "../../lib/trace-id.js";
-import type { Writer } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -167,26 +164,32 @@ export type ResolvedTraceTarget = {
 };
 
 /**
- * Write human-readable trace output to stdout.
- *
- * @param stdout - Output stream
- * @param options - Output options
+ * Return type for trace view — includes all data both renderers need.
  * @internal Exported for testing
  */
-export function writeHumanOutput(
-  stdout: Writer,
-  options: {
-    summaryLines: string;
-    spanTreeLines?: string[];
-  }
-): void {
-  const { summaryLines, spanTreeLines } = options;
+export type TraceViewData = {
+  summary: ReturnType<typeof computeTraceSummary>;
+  spans: unknown[];
+  /** Pre-formatted span tree lines for human output (not serialized) */
+  spanTreeLines?: string[];
+};
 
-  stdout.write(`${summaryLines}\n`);
+/**
+ * Format trace view data for human-readable terminal output.
+ *
+ * Renders trace summary and optional span tree.
+ * @internal Exported for testing
+ */
+export function formatTraceView(data: TraceViewData): string {
+  const parts: string[] = [];
 
-  if (spanTreeLines && spanTreeLines.length > 0) {
-    stdout.write(`${spanTreeLines.join("\n")}\n`);
+  parts.push(formatTraceSummary(data.summary));
+
+  if (data.spanTreeLines && data.spanTreeLines.length > 0) {
+    parts.push(data.spanTreeLines.join("\n"));
   }
+
+  return parts.join("\n");
 }
 
 export const viewCommand = buildCommand({
@@ -200,7 +203,11 @@ export const viewCommand = buildCommand({
       "  sentry trace view <project> <trace-id>    # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatTraceView,
+    jsonExclude: ["spanTreeLines"],
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -222,13 +229,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    ...args: string[]
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
     const log = logger.withTag("trace.view");
 
     // Parse positional args
@@ -287,7 +290,7 @@ export const viewCommand = buildCommand({
     setContext([target.org], [target.project]);
 
     if (flags.web) {
-      await openInBrowser(stdout, buildTraceUrl(target.org, traceId), "trace");
+      await openInBrowser(buildTraceUrl(target.org, traceId), "trace");
       return;
     }
 
@@ -305,25 +308,15 @@ export const viewCommand = buildCommand({
 
     const summary = computeTraceSummary(traceId, spans);
 
-    if (flags.json) {
-      writeJson(stdout, { summary, spans }, flags.fields);
-      return;
-    }
-
     // Format span tree (unless disabled with --spans 0 or --spans no)
     const spanTreeLines =
       flags.spans > 0
         ? formatSimpleSpanTree(traceId, spans, flags.spans)
         : undefined;
 
-    writeHumanOutput(stdout, {
-      summaryLines: formatTraceSummary(summary),
-      spanTreeLines,
-    });
-
-    writeFooter(
-      stdout,
-      `Tip: Open in browser with 'sentry trace view --web ${traceId}'`
-    );
+    return {
+      data: { summary, spans, spanTreeLines },
+      hint: `Tip: Open in browser with 'sentry trace view --web ${traceId}'`,
+    };
   },
 });

@@ -64,10 +64,7 @@ function buildContextError(skippedSelfHosted?: number): ContextError {
  * Handle --web flag: open a single project in browser.
  * Throws if multiple targets are found.
  */
-async function handleWebView(
-  stdout: { write: (s: string) => void },
-  resolvedTargets: ResolvedTarget[]
-): Promise<void> {
+async function handleWebView(resolvedTargets: ResolvedTarget[]): Promise<void> {
   if (resolvedTargets.length > 1) {
     throw new ContextError(
       "Single project",
@@ -78,7 +75,6 @@ async function handleWebView(
 
   const target = resolvedTargets[0];
   await openInBrowser(
-    stdout,
     target ? buildProjectUrl(target.org, target.project) : undefined,
     "project"
   );
@@ -272,7 +268,7 @@ export const viewCommand = buildCommand({
     }
 
     if (flags.web) {
-      await handleWebView(stdout, resolvedTargets);
+      await handleWebView(resolvedTargets);
       return;
     }
 

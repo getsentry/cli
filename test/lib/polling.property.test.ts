@@ -16,23 +16,10 @@ import {
 import { poll } from "../../src/lib/polling.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
-/** Mock stderr that captures output */
-function createMockStderr() {
-  const lines: string[] = [];
-  return {
-    write: (s: string) => {
-      lines.push(s);
-      return true;
-    },
-    getOutput: () => lines.join(""),
-  };
-}
-
 describe("poll properties", () => {
   test("returns immediately when shouldStop is true on first fetch", async () => {
     await fcAssert(
       asyncProperty(nat(100), async (stateValue) => {
-        const stderr = createMockStderr();
         let fetchCount = 0;
 
         const result = await poll({
@@ -42,7 +29,6 @@ describe("poll properties", () => {
           },
           shouldStop: () => true, // Always stop
           getProgressMessage: () => "Testing...",
-          stderr,
           json: true, // Suppress output for cleaner tests
           pollIntervalMs: 10,
           timeoutMs: 1000,
@@ -61,7 +47,6 @@ describe("poll properties", () => {
         integer({ min: 1, max: 5 }), // stopAfter: 1-5 fetches
         nat(100), // stateValue
         async (stopAfter, stateValue) => {
-          const stderr = createMockStderr();
           let fetchCount = 0;
 
           const result = await poll({
@@ -71,7 +56,6 @@ describe("poll properties", () => {
             },
             shouldStop: (state) => state.count >= stopAfter,
             getProgressMessage: () => "Testing...",
-            stderr,
             json: true,
             pollIntervalMs: 5, // Fast polling for tests
             timeoutMs: 5000,
@@ -89,7 +73,6 @@ describe("poll properties", () => {
   test("throws timeout error when shouldStop never returns true", async () => {
     await fcAssert(
       asyncProperty(nat(50), async (stateValue) => {
-        const stderr = createMockStderr();
         const timeoutMs = 50; // Very short timeout for testing
         const customMessage = `Custom timeout: ${stateValue}`;
 
@@ -98,7 +81,6 @@ describe("poll properties", () => {
             fetchState: async () => ({ value: stateValue }),
             shouldStop: () => false, // Never stop
             getProgressMessage: () => "Testing...",
-            stderr,
             json: true,
             pollIntervalMs: 10,
             timeoutMs,
@@ -116,7 +98,6 @@ describe("poll properties", () => {
         integer({ min: 10, max: 50 }), // pollIntervalMs
         integer({ min: 50, max: 200 }), // timeoutMs
         async (pollIntervalMs, timeoutMs) => {
-          const stderr = createMockStderr();
           let fetchCount = 0;
 
           // Ensure timeout > interval
@@ -130,7 +111,6 @@ describe("poll properties", () => {
               },
               shouldStop: () => false, // Never stop
               getProgressMessage: () => "Testing...",
-              stderr,
               json: true,
               pollIntervalMs,
               timeoutMs: actualTimeout,
@@ -156,7 +136,6 @@ describe("poll properties", () => {
         integer({ min: 1, max: 5 }), // nullCount: number of nulls before valid state
         nat(100), // stateValue
         async (nullCount, stateValue) => {
-          const stderr = createMockStderr();
           let fetchCount = 0;
 
           const result = await poll({
@@ -170,7 +149,6 @@ describe("poll properties", () => {
             },
             shouldStop: () => true,
             getProgressMessage: () => "Testing...",
-            stderr,
             json: true,
             pollIntervalMs: 5,
             timeoutMs: 5000,
@@ -189,7 +167,6 @@ describe("poll properties", () => {
       asyncProperty(
         array(nat(100), { minLength: 1, maxLength: 5 }),
         async (stateValues) => {
-          const stderr = createMockStderr();
           let fetchIndex = 0;
           const messages: string[] = [];
 
@@ -207,7 +184,6 @@ describe("poll properties", () => {
               messages.push(msg);
               return msg;
             },
-            stderr,
             json: true, // Suppress animation
             pollIntervalMs: 5,
             timeoutMs: 5000,
@@ -224,15 +200,12 @@ describe("poll properties", () => {
 
 describe("poll edge cases", () => {
   test("handles immediate timeout (timeoutMs = 0)", async () => {
-    const stderr = createMockStderr();
-
     // With 0 timeout, should throw immediately or after first fetch
     await expect(
       poll({
         fetchState: async () => ({ value: 1 }),
         shouldStop: () => false,
         getProgressMessage: () => "Testing...",
-        stderr,
         json: true,
         pollIntervalMs: 10,
         timeoutMs: 0,
@@ -241,8 +214,6 @@ describe("poll edge cases", () => {
   });
 
   test("handles fetchState throwing errors", async () => {
-    const stderr = createMockStderr();
-
     await expect(
       poll({
         fetchState: async () => {
@@ -250,7 +221,6 @@ describe("poll edge cases", () => {
         },
         shouldStop: () => true,
         getProgressMessage: () => "Testing...",
-        stderr,
         json: true,
         pollIntervalMs: 10,
         timeoutMs: 1000,

@@ -60,7 +60,7 @@ export const viewCommand = buildCommand({
   },
   async func(this: SentryContext, flags: ViewFlags, orgSlug?: string) {
     applyFreshFlag(flags);
-    const { stdout, cwd } = this;
+    const { cwd } = this;
 
     const resolved = await resolveOrg({ org: orgSlug, cwd });
 
@@ -69,7 +69,7 @@ export const viewCommand = buildCommand({
     }
 
     if (flags.web) {
-      await openInBrowser(stdout, buildOrgUrl(resolved.org), "organization");
+      await openInBrowser(buildOrgUrl(resolved.org), "organization");
       return;
     }
 

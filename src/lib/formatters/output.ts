@@ -77,6 +77,14 @@ export type OutputConfig<T> = {
   json: true;
   /** Format data as a human-readable string for terminal output */
   human: (data: T) => string;
+  /**
+   * Top-level keys to strip from JSON output.
+   *
+   * Use this for fields that exist only for the human formatter
+   * (e.g. pre-formatted terminal strings) and should not appear
+   * in the JSON contract.
+   */
+  jsonExclude?: ReadonlyArray<keyof T & string>;
 };
 
 /**
@@ -92,7 +100,7 @@ export type OutputConfig<T> = {
 export type CommandOutput<T> = {
   /** The data to render (serialized as-is to JSON, passed to `human` formatter) */
   data: T;
-  /** Short hint line appended after human output (e.g. "Detected from .env") */
+  /** Hint line appended after human output (suppressed in JSON mode) */
   hint?: string;
 };
 
@@ -105,7 +113,7 @@ type RenderContext = {
   json: boolean;
   /** Pre-parsed `--fields` value */
   fields?: string[];
-  /** Short hint line appended after human output (suppressed in JSON mode) */
+  /** Hint line appended after human output (suppressed in JSON mode) */
   hint?: string;
 };
 
@@ -129,7 +137,20 @@ export function renderCommandOutput(
   ctx: RenderContext
 ): void {
   if (ctx.json) {
-    writeJson(stdout, data, ctx.fields);
+    let jsonData = data;
+    if (
+      config.jsonExclude &&
+      config.jsonExclude.length > 0 &&
+      typeof data === "object" &&
+      data !== null
+    ) {
+      const copy = { ...data } as Record<string, unknown>;
+      for (const key of config.jsonExclude) {
+        delete copy[key];
+      }
+      jsonData = copy;
+    }
+    writeJson(stdout, jsonData, ctx.fields);
     return;
   }
 
@@ -137,7 +158,7 @@ export function renderCommandOutput(
   stdout.write(`${text}\n`);
 
   if (ctx.hint) {
-    stdout.write(`\n${muted(ctx.hint)}\n`);
+    writeFooter(stdout, ctx.hint);
   }
 }
 

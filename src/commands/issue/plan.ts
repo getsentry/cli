@@ -9,8 +9,6 @@ import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
-import { muted } from "../../lib/formatters/colors.js";
-import { writeJson } from "../../lib/formatters/index.js";
 import {
   formatSolution,
   handleSeerApiError,
@@ -20,7 +18,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import type { Writer } from "../../types/index.js";
+import { logger } from "../../lib/logger.js";
 import {
   type AutofixState,
   extractRootCauses,
@@ -108,39 +106,39 @@ function validateCauseSelection(
   return causeId;
 }
 
-type OutputSolutionOptions = {
-  stdout: Writer;
-  stderr: Writer;
-  solution: SolutionArtifact | null;
-  state: AutofixState;
-  json: boolean;
-  fields?: string[];
+/** Return type for issue plan — includes state metadata and solution data */
+type PlanData = {
+  run_id: number;
+  status: string;
+  /** The solution data (without the artifact wrapper). Null when no solution is available. */
+  solution: SolutionArtifact["data"] | null;
 };
 
 /**
- * Output a solution artifact to stdout.
+ * Format solution plan data for human-readable terminal output.
+ *
+ * Returns the formatted solution or a "no solution" message.
  */
-function outputSolution(options: OutputSolutionOptions): void {
-  const { stdout, stderr, solution, state, json, fields } = options;
-
-  if (json) {
-    writeJson(
-      stdout,
-      {
-        run_id: state.run_id,
-        status: state.status,
-        solution: solution?.data ?? null,
-      },
-      fields
-    );
-    return;
+function formatPlanOutput(data: PlanData): string {
+  if (data.solution) {
+    return formatSolution({ key: "solution", data: data.solution });
   }
+  return "No solution found. Check the Sentry web UI for details.";
+}
 
-  if (solution) {
-    stdout.write(`${formatSolution(solution)}\n`);
-  } else {
-    stderr.write("No solution found. Check the Sentry web UI for details.\n");
-  }
+/**
+ * Build the plan data object from autofix state.
+ *
+ * Stores `solution.data` (not the full artifact) to keep the JSON shape flat —
+ * consumers get `{ run_id, status, solution: { one_line_summary, steps, ... } }`.
+ */
+function buildPlanData(state: AutofixState): PlanData {
+  const solution = extractSolution(state);
+  return {
+    run_id: state.run_id,
+    status: state.status,
+    solution: solution?.data ?? null,
+  };
 }
 
 export const planCommand = buildCommand({
@@ -171,7 +169,10 @@ export const planCommand = buildCommand({
       "  sentry issue plan cli-G --cause 0\n" +
       "  sentry issue plan 123456789 --force",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatPlanOutput,
+  },
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -190,13 +191,9 @@ export const planCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(
-    this: SentryContext,
-    flags: PlanFlags,
-    issueArg: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: PlanFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { stdout, stderr, cwd } = this;
+    const { cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -214,7 +211,6 @@ export const planCommand = buildCommand({
       const state = await ensureRootCauseAnalysis({
         org,
         issueId: numericId,
-        stderr,
         json: flags.json,
       });
 
@@ -229,23 +225,16 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          outputSolution({
-            stdout,
-            stderr,
-            solution: existingSolution,
-            state,
-            json: flags.json,
-            fields: flags.fields,
-          });
-          return;
+          return { data: buildPlanData(state) };
         }
       }
 
       // No solution exists, trigger planning
       if (!flags.json) {
-        stderr.write(`Creating plan for cause #${causeId}...\n`);
+        const log = logger.withTag("issue.plan");
+        log.info(`Creating plan for cause #${causeId}...`);
         if (selectedCause) {
-          stderr.write(`${muted(`"${selectedCause.description}"`)}\n\n`);
+          log.info(`"${selectedCause.description}"`);
         }
       }
 
@@ -255,7 +244,6 @@ export const planCommand = buildCommand({
       const finalState = await pollAutofixState({
         orgSlug: org,
         issueId: numericId,
-        stderr,
         json: flags.json,
         timeoutMessage:
           "Plan creation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
@@ -272,16 +260,7 @@ export const planCommand = buildCommand({
         throw new Error("Plan creation was cancelled.");
       }
 
-      // Extract and output solution
-      const solution = extractSolution(finalState);
-      outputSolution({
-        stdout,
-        stderr,
-        solution,
-        state: finalState,
-        json: flags.json,
-        fields: flags.fields,
-      });
+      return { data: buildPlanData(finalState) };
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

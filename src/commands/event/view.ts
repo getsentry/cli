@@ -22,7 +22,7 @@ import {
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
-import { formatEventDetails, writeJson } from "../../lib/formatters/index.js";
+import { formatEventDetails } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -40,7 +40,7 @@ import {
 } from "../../lib/sentry-url-parser.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
-import type { SentryEvent, Writer } from "../../types/index.js";
+import type { SentryEvent } from "../../types/index.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -50,30 +50,29 @@ type ViewFlags = {
   readonly fields?: string[];
 };
 
-type HumanOutputOptions = {
+/** Return type for event view — includes all data both renderers need */
+type EventViewData = {
   event: SentryEvent;
-  detectedFrom?: string;
+  trace: { traceId: string; spans: unknown[] } | null;
+  /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
 };
 
 /**
- * Write human-readable event output to stdout.
+ * Format event view data for human-readable terminal output.
  *
- * @param stdout - Output stream
- * @param options - Output options including event, detectedFrom, and spanTreeLines
+ * Renders event details and optional span tree.
  */
-function writeHumanOutput(stdout: Writer, options: HumanOutputOptions): void {
-  const { event, detectedFrom, spanTreeLines } = options;
+function formatEventView(data: EventViewData): string {
+  const parts: string[] = [];
 
-  stdout.write(`${formatEventDetails(event, `Event ${event.eventID}`)}\n`);
+  parts.push(formatEventDetails(data.event, `Event ${data.event.eventID}`));
 
-  if (spanTreeLines && spanTreeLines.length > 0) {
-    stdout.write(`${spanTreeLines.join("\n")}\n`);
+  if (data.spanTreeLines && data.spanTreeLines.length > 0) {
+    parts.push(data.spanTreeLines.join("\n"));
   }
 
-  if (detectedFrom) {
-    stdout.write(`\nDetected from ${detectedFrom}\n`);
-  }
+  return parts.join("\n");
 }
 
 /** Usage hint for ContextError messages */
@@ -303,7 +302,11 @@ export const viewCommand = buildCommand({
       "  sentry event view <org>/<proj> <event-id> # explicit org and project\n" +
       "  sentry event view <project> <event-id>    # find project across all orgs",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatEventView,
+    jsonExclude: ["spanTreeLines"],
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -325,13 +328,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    ...args: string[]
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd } = this;
+    const { cwd } = this;
 
     const log = logger.withTag("event.view");
 
@@ -360,11 +359,7 @@ export const viewCommand = buildCommand({
     }
 
     if (flags.web) {
-      await openInBrowser(
-        stdout,
-        buildEventSearchUrl(target.org, eventId),
-        "event"
-      );
+      await openInBrowser(buildEventSearchUrl(target.org, eventId), "event");
       return;
     }
 
@@ -381,18 +376,15 @@ export const viewCommand = buildCommand({
         ? await getSpanTreeLines(target.org, event, flags.spans)
         : undefined;
 
-    if (flags.json) {
-      const trace = spanTreeResult?.success
-        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-        : null;
-      writeJson(stdout, { event, trace }, flags.fields);
-      return;
-    }
+    const trace = spanTreeResult?.success
+      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+      : null;
 
-    writeHumanOutput(stdout, {
-      event,
-      detectedFrom: target.detectedFrom,
-      spanTreeLines: spanTreeResult?.lines,
-    });
+    return {
+      data: { event, trace, spanTreeLines: spanTreeResult?.lines },
+      hint: target.detectedFrom
+        ? `Detected from ${target.detectedFrom}`
+        : undefined,
+    };
   },
 });

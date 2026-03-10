@@ -133,8 +133,8 @@ describe("log view --web interactive prompt", () => {
 
     expect(mockPrompt).toHaveBeenCalled();
     expect(openInBrowserSpy).toHaveBeenCalledTimes(2);
-    const url1 = openInBrowserSpy.mock.calls[0][1] as string;
-    const url2 = openInBrowserSpy.mock.calls[1][1] as string;
+    const url1 = openInBrowserSpy.mock.calls[0][0] as string;
+    const url2 = openInBrowserSpy.mock.calls[1][0] as string;
     expect(url1).toContain(ID1);
     expect(url2).toContain(ID2);
   });

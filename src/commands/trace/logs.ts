@@ -199,7 +199,7 @@ export const logsCommand = buildCommand({
     setContext([org], []);
 
     if (flags.web) {
-      await openInBrowser(stdout, buildTraceUrl(org, traceId), "trace");
+      await openInBrowser(buildTraceUrl(org, traceId), "trace");
       return;
     }
 

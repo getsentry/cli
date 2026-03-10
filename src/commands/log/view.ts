@@ -222,16 +222,10 @@ function warnMissingIds(logIds: string[], logs: DetailedSentryLog[]): void {
  * Prompts for confirmation in interactive mode when multiple IDs are given.
  * Aborts in non-interactive mode with a warning.
  *
- * @param stdout - Output stream for openInBrowser
  * @param orgSlug - Organization slug for URL building
  * @param logIds - Log IDs to open
- * @returns true if handled (caller should return), false if not --web
  */
-async function handleWebOpen(
-  stdout: { write(s: string): void },
-  orgSlug: string,
-  logIds: string[]
-): Promise<void> {
+async function handleWebOpen(orgSlug: string, logIds: string[]): Promise<void> {
   if (logIds.length > 1) {
     if (!isatty(0)) {
       log.warn(
@@ -251,7 +245,7 @@ async function handleWebOpen(
     }
   }
   for (const id of logIds) {
-    await openInBrowser(stdout, buildLogsUrl(orgSlug, id), "log");
+    await openInBrowser(buildLogsUrl(orgSlug, id), "log");
   }
 }
 
@@ -369,7 +363,7 @@ export const viewCommand = buildCommand({
     setContext([target.org], [target.project]);
 
     if (flags.web) {
-      await handleWebOpen(stdout, target.org, logIds);
+      await handleWebOpen(target.org, logIds);
       return;
     }
 

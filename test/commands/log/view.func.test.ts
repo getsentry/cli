@@ -261,7 +261,7 @@ describe("viewCommand.func", () => {
       await func.call(context, { json: false, web: true }, "my-org/proj", ID1);
 
       expect(openInBrowserSpy).toHaveBeenCalled();
-      const url = openInBrowserSpy.mock.calls[0][1] as string;
+      const url = openInBrowserSpy.mock.calls[0][0] as string;
       expect(url).toContain(ID1);
       // Should NOT fetch logs when using --web
       expect(getLogsSpy).not.toHaveBeenCalled();
