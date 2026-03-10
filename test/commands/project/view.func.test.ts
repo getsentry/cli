@@ -91,8 +91,10 @@ describe("viewCommand.func", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed.slug).toBe("test-project");
-    expect(parsed.dsn).toBe("https://abc123@o1.ingest.sentry.io/42");
+    // JSON output is always an array for consistent shape
+    expect(parsed).toBeArray();
+    expect(parsed[0].slug).toBe("test-project");
+    expect(parsed[0].dsn).toBe("https://abc123@o1.ingest.sentry.io/42");
   });
 
   test("explicit org/project outputs human-readable details", async () => {
@@ -174,7 +176,8 @@ describe("viewCommand.func", () => {
     );
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed.slug).toBe("frontend");
+    expect(parsed).toBeArray();
+    expect(parsed[0].slug).toBe("frontend");
   });
 
   test("org-only target (org/) throws ContextError", async () => {

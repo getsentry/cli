@@ -9,7 +9,7 @@ import { getOrganization } from "../../lib/api-client.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
-import { formatOrgDetails, writeOutput } from "../../lib/formatters/index.js";
+import { formatOrgDetails } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -35,7 +35,7 @@ export const viewCommand = buildCommand({
       "  2. Config defaults\n" +
       "  3. SENTRY_DSN environment variable or source code detection",
   },
-  output: "json",
+  output: { json: true, human: formatOrgDetails },
   parameters: {
     positional: {
       kind: "tuple",
@@ -58,11 +58,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    orgSlug?: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, orgSlug?: string) {
     applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
@@ -79,11 +75,9 @@ export const viewCommand = buildCommand({
 
     const org = await getOrganization(resolved.org);
 
-    writeOutput(stdout, org, {
-      json: flags.json,
-      fields: flags.fields,
-      formatHuman: formatOrgDetails,
-      detectedFrom: resolved.detectedFrom,
-    });
+    const hint = resolved.detectedFrom
+      ? `Detected from ${resolved.detectedFrom}`
+      : undefined;
+    return { data: org, hint };
   },
 });

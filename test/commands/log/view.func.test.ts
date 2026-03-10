@@ -98,9 +98,9 @@ describe("viewCommand.func", () => {
 
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(output);
-      // Single ID: outputs a single object (not array) for backward compat
-      expect(parsed["sentry.item_id"]).toBe(ID1);
-      expect(Array.isArray(parsed)).toBe(false);
+      // Always emits array for consistent JSON shape
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed[0]["sentry.item_id"]).toBe(ID1);
     });
 
     test("explicit org/project outputs human-readable details", async () => {

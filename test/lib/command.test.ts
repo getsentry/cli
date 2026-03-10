@@ -29,27 +29,40 @@ import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 /** Minimal context for test commands */
 type TestContext = CommandContext & {
   process: { stdout: { write: (s: string) => boolean } };
+  /** stdout on context — used by buildCommand's return-based output handler */
+  stdout: { write: (s: string) => boolean };
 };
 
-/** Creates a minimal writable stream for testing */
-function createTestProcess() {
-  const output: string[] = [];
+/**
+ * Creates a minimal test context with writable streams.
+ * Returns both `process` (Stricli needs this) and `stdout` (return-based output handler needs this).
+ *
+ * Use as: `const ctx = createTestContext();`
+ * Then pass to `run(app, args, ctx as TestContext)`.
+ * Access collected output via `ctx.output`.
+ */
+function createTestContext() {
+  const collected: string[] = [];
+  const stdoutWriter = {
+    write: (s: string) => {
+      collected.push(s);
+      return true;
+    },
+  };
   return {
     process: {
-      stdout: {
-        write: (s: string) => {
-          output.push(s);
-          return true;
-        },
-      },
+      stdout: stdoutWriter,
       stderr: {
         write: (s: string) => {
-          output.push(s);
+          collected.push(s);
           return true;
         },
       },
     },
-    output,
+    /** stdout on context — used by buildCommand's return-based output handler */
+    stdout: stdoutWriter,
+    /** All collected output chunks */
+    output: collected,
   };
 }
 
@@ -130,11 +143,9 @@ describe("buildCommand telemetry integration", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--verbose", "--limit", "50"], {
-      process,
-    } as TestContext);
+    await run(app, ["test", "--verbose", "--limit", "50"], ctx as TestContext);
 
     // Original func was called with parsed flags
     expect(calledWith).toEqual({ verbose: true, limit: 50 });
@@ -162,9 +173,9 @@ describe("buildCommand telemetry integration", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test"], { process } as TestContext);
+    await run(app, ["test"], ctx as TestContext);
 
     // Should not set tag for default false boolean
     const flagCalls = setTagSpy.mock.calls.filter(
@@ -194,9 +205,9 @@ describe("buildCommand telemetry integration", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "PROJECT-123"], { process } as TestContext);
+    await run(app, ["test", "PROJECT-123"], ctx as TestContext);
 
     expect(calledArgs).toBe("PROJECT-123");
     expect(setContextSpy).toHaveBeenCalledWith("args", {
@@ -222,9 +233,9 @@ describe("buildCommand telemetry integration", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test"], { process } as TestContext);
+    await run(app, ["test"], ctx as TestContext);
 
     expect(capturedStdout).toBe(true);
   });
@@ -255,9 +266,9 @@ describe("buildCommand telemetry integration", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--delay", "1"], { process } as TestContext);
+    await run(app, ["test", "--delay", "1"], ctx as TestContext);
 
     expect(executed).toBe(true);
     expect(setTagSpy).toHaveBeenCalledWith("flag.delay", "1");
@@ -375,12 +386,10 @@ describe("buildCommand", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
     // Should NOT throw "No flag registered for --verbose"
-    await run(app, ["test", "--verbose", "--json"], {
-      process,
-    } as TestContext);
+    await run(app, ["test", "--verbose", "--json"], ctx as TestContext);
 
     // Original func receives json flag but NOT verbose/log-level
     expect(calledFlags).toBeDefined();
@@ -405,9 +414,9 @@ describe("buildCommand", () => {
         docs: { brief: "Test app" },
       });
       const app = buildApplication(routeMap, { name: "test" });
-      const { process } = createTestProcess();
+      const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], { process } as TestContext);
+      await run(app, ["test", "--verbose"], ctx as TestContext);
 
       expect(logger.level).toBe(4); // debug
     } finally {
@@ -431,11 +440,9 @@ describe("buildCommand", () => {
         docs: { brief: "Test app" },
       });
       const app = buildApplication(routeMap, { name: "test" });
-      const { process } = createTestProcess();
+      const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level", "trace"], {
-        process,
-      } as TestContext);
+      await run(app, ["test", "--log-level", "trace"], ctx as TestContext);
 
       expect(logger.level).toBe(5); // trace
     } finally {
@@ -459,11 +466,9 @@ describe("buildCommand", () => {
         docs: { brief: "Test app" },
       });
       const app = buildApplication(routeMap, { name: "test" });
-      const { process } = createTestProcess();
+      const ctx = createTestContext();
 
-      await run(app, ["test", "--log-level=error"], {
-        process,
-      } as TestContext);
+      await run(app, ["test", "--log-level=error"], ctx as TestContext);
 
       expect(logger.level).toBe(0); // error
     } finally {
@@ -496,12 +501,12 @@ describe("buildCommand", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
     await run(
       app,
       ["test", "--verbose", "--log-level", "debug", "--limit", "50"],
-      { process } as TestContext
+      ctx as TestContext
     );
 
     expect(receivedFlags).toBeDefined();
@@ -547,11 +552,13 @@ describe("buildCommand", () => {
         docs: { brief: "Test app" },
       });
       const app = buildApplication(routeMap, { name: "test" });
-      const { process } = createTestProcess();
+      const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose", "--log-level", "trace"], {
-        process,
-      } as TestContext);
+      await run(
+        app,
+        ["test", "--verbose", "--log-level", "trace"],
+        ctx as TestContext
+      );
 
       // Command's own --verbose is passed through (not stripped)
       expect(receivedFlags).toBeDefined();
@@ -592,11 +599,9 @@ describe("buildCommand", () => {
         docs: { brief: "Test app" },
       });
       const app = buildApplication(routeMap, { name: "test" });
-      const { process } = createTestProcess();
+      const ctx = createTestContext();
 
-      await run(app, ["test", "--verbose"], {
-        process,
-      } as TestContext);
+      await run(app, ["test", "--verbose"], ctx as TestContext);
 
       // Even though verbose is command-owned, it triggers debug-level logging
       expect(logger.level).toBe(4); // debug
@@ -667,10 +672,10 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
     // --json should be accepted without "No flag registered" error
-    await run(app, ["test", "--json"], { process } as TestContext);
+    await run(app, ["test", "--json"], ctx as TestContext);
 
     expect(receivedFlags).toBeDefined();
     expect(receivedFlags!.json).toBe(true);
@@ -697,11 +702,13 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--json", "--fields", "id,title,status"], {
-      process,
-    } as TestContext);
+    await run(
+      app,
+      ["test", "--json", "--fields", "id,title,status"],
+      ctx as TestContext
+    );
 
     expect(receivedFlags).toBeDefined();
     expect(receivedFlags!.json).toBe(true);
@@ -730,11 +737,13 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--fields", " id , title , id "], {
-      process,
-    } as TestContext);
+    await run(
+      app,
+      ["test", "--fields", " id , title , id "],
+      ctx as TestContext
+    );
 
     expect(receivedFlags).toBeDefined();
     // Whitespace trimmed, duplicates removed
@@ -762,9 +771,9 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--json"], { process } as TestContext);
+    await run(app, ["test", "--json"], ctx as TestContext);
 
     expect(receivedFlags).toBeDefined();
     expect(receivedFlags!.json).toBe(true);
@@ -788,14 +797,14 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process, output } = createTestProcess();
+    const ctx = createTestContext();
 
     // Stricli writes error to stderr and resolves — func is never called
-    await run(app, ["test", "--json"], { process } as TestContext);
+    await run(app, ["test", "--json"], ctx as TestContext);
 
     expect(funcCalled).toBe(false);
     expect(
-      output.some((s) => s.includes("No flag registered for --json"))
+      ctx.output.some((s) => s.includes("No flag registered for --json"))
     ).toBe(true);
   });
 
@@ -829,11 +838,9 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
-    await run(app, ["test", "--json", "--fields", "id"], {
-      process,
-    } as TestContext);
+    await run(app, ["test", "--json", "--fields", "id"], ctx as TestContext);
 
     expect(receivedFlags).toBeDefined();
     expect(receivedFlags!.json).toBe(true);
@@ -862,12 +869,12 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
     await run(
       app,
       ["test", "--fields", "id,metadata.value,contexts.trace.traceId"],
-      { process } as TestContext
+      ctx as TestContext
     );
 
     expect(receivedFlags).toBeDefined();
@@ -911,12 +918,12 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test app" },
     });
     const app = buildApplication(routeMap, { name: "test" });
-    const { process } = createTestProcess();
+    const ctx = createTestContext();
 
     await run(
       app,
       ["test", "--json", "--fields", "id", "--limit", "50", "--verbose"],
-      { process } as TestContext
+      ctx as TestContext
     );
 
     expect(receivedFlags).toBeDefined();
@@ -925,5 +932,308 @@ describe("buildCommand output: json", () => {
     expect(receivedFlags!.limit).toBe(50);
     // --verbose is stripped (we injected it)
     expect(receivedFlags!.verbose).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCommand return-based output integration
+// ---------------------------------------------------------------------------
+
+describe("buildCommand return-based output", () => {
+  test("renders human output when func returns data", async () => {
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
+      },
+      parameters: {},
+      func(this: TestContext) {
+        return { data: { name: "Alice", role: "admin" } };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test"], ctx as TestContext);
+
+    expect(ctx.output.join("")).toContain("Alice (admin)");
+  });
+
+  test("renders JSON output when --json is passed", async () => {
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
+      },
+      parameters: {},
+      func(this: TestContext) {
+        return { data: { name: "Alice", role: "admin" } };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--json"], ctx as TestContext);
+
+    const jsonOutput = JSON.parse(ctx.output.join(""));
+    expect(jsonOutput).toEqual({ name: "Alice", role: "admin" });
+  });
+
+  test("applies --fields filtering to JSON output", async () => {
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { id: number; name: string; role: string }) => `${d.name}`,
+      },
+      parameters: {},
+      func(this: TestContext) {
+        return { data: { id: 1, name: "Alice", role: "admin" } };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(
+      app,
+      ["test", "--json", "--fields", "id,name"],
+      ctx as TestContext
+    );
+
+    const jsonOutput = JSON.parse(ctx.output.join(""));
+    expect(jsonOutput).toEqual({ id: 1, name: "Alice" });
+    expect(jsonOutput).not.toHaveProperty("role");
+  });
+
+  test("shows hint in human mode, suppresses in JSON mode", async () => {
+    const makeCommand = () =>
+      buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        docs: { brief: "Test" },
+        output: {
+          json: true,
+          human: (d: { value: number }) => `Value: ${d.value}`,
+        },
+        parameters: {},
+        func(this: TestContext) {
+          return {
+            data: { value: 42 },
+            hint: "Run 'sentry help' for more info",
+          };
+        },
+      });
+
+    // Human mode — hint should appear
+    const routeMap1 = buildRouteMap({
+      routes: { test: makeCommand() },
+      docs: { brief: "Test app" },
+    });
+    const app1 = buildApplication(routeMap1, { name: "test" });
+    const ctx1 = createTestContext();
+    await run(app1, ["test"], ctx1 as TestContext);
+
+    const humanOutput = ctx1.output.join("");
+    expect(humanOutput).toContain("Value: 42");
+    expect(humanOutput).toContain("Run 'sentry help' for more info");
+
+    // JSON mode — hint should be suppressed
+    const routeMap2 = buildRouteMap({
+      routes: { test: makeCommand() },
+      docs: { brief: "Test app" },
+    });
+    const app2 = buildApplication(routeMap2, { name: "test" });
+    const ctx2 = createTestContext();
+    await run(app2, ["test", "--json"], ctx2 as TestContext);
+
+    const jsonRaw = ctx2.output.join("");
+    expect(jsonRaw).not.toContain("Run 'sentry help' for more info");
+    const jsonOutput = JSON.parse(jsonRaw);
+    expect(jsonOutput).toEqual({ value: 42 });
+  });
+
+  test("void return does nothing (no crash)", async () => {
+    let executed = false;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: () => "unused",
+      },
+      parameters: {},
+      func(this: TestContext) {
+        executed = true;
+        // Void return — simulates --web early exit
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test"], ctx as TestContext);
+
+    expect(executed).toBe(true);
+    // No output written — void return is silently ignored
+    expect(ctx.output).toHaveLength(0);
+  });
+
+  test("data return is ignored without output config", async () => {
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      docs: { brief: "Test" },
+      // Deliberately no output config
+      parameters: {},
+      func(this: TestContext) {
+        // This returns data, but without output config
+        // the wrapper should NOT render it
+        return { value: 42 };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test"], ctx as TestContext);
+
+    // No output written — data return was silently ignored
+    expect(ctx.output).toHaveLength(0);
+  });
+
+  test("works with async command functions", async () => {
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { name: string }) => `Hello, ${d.name}!`,
+      },
+      parameters: {},
+      async func(this: TestContext) {
+        await Bun.sleep(1);
+        return { data: { name: "Bob" } };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--json"], ctx as TestContext);
+
+    const jsonOutput = JSON.parse(ctx.output.join(""));
+    expect(jsonOutput).toEqual({ name: "Bob" });
+  });
+
+  test("array data works correctly via { data } wrapper", async () => {
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: Array<{ id: number }>) => d.map((x) => x.id).join(", "),
+      },
+      parameters: {},
+      func(this: TestContext) {
+        return { data: [{ id: 1 }, { id: 2 }] };
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--json"], ctx as TestContext);
+
+    const jsonOutput = JSON.parse(ctx.output.join(""));
+    expect(Array.isArray(jsonOutput)).toBe(true);
+    expect(jsonOutput).toHaveLength(2);
+    expect(jsonOutput[0]).toEqual({ id: 1 });
+    expect(jsonOutput[1]).toEqual({ id: 2 });
+  });
+
+  test("hint shown in human mode only", async () => {
+    const makeCommand = () =>
+      buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
+        docs: { brief: "Test" },
+        output: {
+          json: true,
+          human: (d: { org: string }) => `Org: ${d.org}`,
+        },
+        parameters: {},
+        func(this: TestContext) {
+          return { data: { org: "sentry" }, hint: "Detected from .env file" };
+        },
+      });
+
+    const routeMap = buildRouteMap({
+      routes: { test: makeCommand() },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+
+    // Human mode
+    const ctx1 = createTestContext();
+    await run(app, ["test"], ctx1 as TestContext);
+    const humanOutput = ctx1.output.join("");
+    expect(humanOutput).toContain("Org: sentry");
+    expect(humanOutput).toContain("Detected from .env file");
+
+    // JSON mode
+    const ctx2 = createTestContext();
+    await run(app, ["test", "--json"], ctx2 as TestContext);
+    const jsonRaw = ctx2.output.join("");
+    expect(jsonRaw).not.toContain("Detected from");
+    expect(JSON.parse(jsonRaw)).toEqual({ org: "sentry" });
   });
 });

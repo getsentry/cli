@@ -197,7 +197,7 @@ describe("whoamiCommand.func", () => {
       expect(parsed.email).toBe("jane@example.com");
     });
 
-    test("outputs null for missing optional fields", async () => {
+    test("omits missing optional fields from output", async () => {
       isAuthenticatedSpy.mockResolvedValue(true);
       getCurrentUserSpy.mockResolvedValue(ID_ONLY_USER);
       setUserInfoSpy.mockReturnValue(undefined);
@@ -207,9 +207,11 @@ describe("whoamiCommand.func", () => {
 
       const parsed = JSON.parse(getOutput());
       expect(parsed.id).toBe("7");
-      expect(parsed.name).toBeNull();
-      expect(parsed.username).toBeNull();
-      expect(parsed.email).toBeNull();
+      // Optional fields absent from the API response are omitted from JSON
+      // (not normalized to null). Use --fields to select specific fields.
+      expect(parsed).not.toHaveProperty("name");
+      expect(parsed).not.toHaveProperty("username");
+      expect(parsed).not.toHaveProperty("email");
     });
 
     test("still updates DB cache when --json is used", async () => {

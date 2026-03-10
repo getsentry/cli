@@ -15,7 +15,6 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
-import { writeOutput } from "../../lib/formatters/index.js";
 
 type RefreshFlags = {
   readonly json: boolean;
@@ -30,6 +29,13 @@ type RefreshOutput = {
   expiresIn?: number;
   expiresAt?: string;
 };
+
+/** Format refresh result for terminal output */
+function formatRefreshResult(data: RefreshOutput): string {
+  return data.refreshed
+    ? `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
+    : `Token still valid (expires in ${formatDuration(data.expiresIn ?? 0)}).\nUse --force to refresh anyway.`;
+}
 
 export const refreshCommand = buildCommand({
   docs: {
@@ -52,7 +58,7 @@ Examples:
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
     `.trim(),
   },
-  output: "json",
+  output: { json: true, human: formatRefreshResult },
   parameters: {
     flags: {
       force: {
@@ -62,9 +68,7 @@ Examples:
       },
     },
   },
-  async func(this: SentryContext, flags: RefreshFlags): Promise<void> {
-    const { stdout } = this;
-
+  async func(this: SentryContext, flags: RefreshFlags) {
     // Env var tokens can't be refreshed
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
@@ -88,7 +92,7 @@ Examples:
 
     const result = await refreshToken({ force: flags.force });
 
-    const output: RefreshOutput = {
+    const payload: RefreshOutput = {
       success: true,
       refreshed: result.refreshed,
       message: result.refreshed
@@ -100,13 +104,6 @@ Examples:
         : undefined,
     };
 
-    writeOutput(stdout, output, {
-      json: flags.json,
-      fields: flags.fields,
-      formatHuman: (data) =>
-        data.refreshed
-          ? `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
-          : `Token still valid (expires in ${formatDuration(data.expiresIn ?? 0)}).\nUse --force to refresh anyway.`,
-    });
+    return { data: payload };
   },
 });
