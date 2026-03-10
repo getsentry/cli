@@ -12,7 +12,7 @@ import { ValidationError } from "../lib/errors.js";
 import { muted } from "../lib/formatters/colors.js";
 import { writeJson } from "../lib/formatters/json.js";
 import { validateEndpoint } from "../lib/input-validation.js";
-import { getApiBaseUrl } from "../lib/sentry-client.js";
+import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -927,7 +927,9 @@ export function resolveRequestUrl(
   endpoint: string,
   params?: Record<string, string | string[]>
 ): string {
-  const baseUrl = getApiBaseUrl();
+  // Use getDefaultSdkConfig().baseUrl — same as rawApiRequest — to ensure
+  // trailing slashes are stripped and the URL matches what would be sent.
+  const { baseUrl } = getDefaultSdkConfig();
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
     : endpoint;

@@ -382,12 +382,12 @@ export const createCommand = buildCommand({
     }
     const orgSlug = resolved.org;
 
-    // Resolve team — auto-creates a team if the org has none
+    // Resolve team — auto-creates a team if the org has none (skipped in dry-run)
     const team: ResolvedTeam = await resolveOrCreateTeam(orgSlug, {
       team: flags.team,
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
-      autoCreateSlug: slugify(name),
+      autoCreateSlug: flags["dry-run"] ? undefined : slugify(name),
     });
 
     // Dry-run mode: show what would be created without creating it
