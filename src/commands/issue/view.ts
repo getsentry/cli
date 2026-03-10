@@ -154,8 +154,7 @@ export const viewCommand = buildCommand({
       const trace = spanTreeResult?.success
         ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
         : null;
-      const output = event ? { issue, event, trace } : { issue, trace };
-      writeJson(stdout, output, flags.fields);
+      writeJson(stdout, { issue, event: event ?? null, trace }, flags.fields);
       return;
     }
 

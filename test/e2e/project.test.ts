@@ -269,7 +269,8 @@ describe("sentry project view", () => {
 
       expect(result.exitCode).toBe(0);
       const data = JSON.parse(result.stdout);
-      expect(data.slug).toBe(TEST_PROJECT);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data[0].slug).toBe(TEST_PROJECT);
     },
     { timeout: 15_000 }
   );
@@ -288,7 +289,8 @@ describe("sentry project view", () => {
 
       expect(result.exitCode).toBe(0);
       const data = JSON.parse(result.stdout);
-      expect(data.dsn).toBe(TEST_DSN);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data[0].dsn).toBe(TEST_DSN);
     },
     { timeout: 15_000 }
   );

@@ -14,11 +14,11 @@
  *    own `--verbose` flag (e.g. `api` uses it for HTTP output), the injected
  *    one is skipped and the command's own value is used for both purposes.
  *
- * 3. **Output mode injection** — when `output: "json"` is set, `--json` and
- *    `--fields` flags are injected automatically. `--fields` is pre-parsed
- *    from a comma-separated string into a `string[]` before reaching `func`.
- *    Commands that define their own `json` flag (e.g. for custom brief text)
- *    keep theirs — only `--fields` is injected.
+ * 3. **Output mode injection** — when `output` has an {@link OutputConfig},
+ *    `--json` and `--fields` flags are injected automatically. The command
+ *    returns a `{ data, hint? }` object and the wrapper handles rendering
+ *    via the config's `human` formatter.
+ *    Commands that define their own `json` flag keep theirs.
  *
  * ALL commands MUST use `buildCommand` from this module, NOT from
  * `@stricli/core`. Importing directly from Stricli silently bypasses
@@ -33,11 +33,15 @@
 import {
   type Command,
   type CommandContext,
-  type CommandFunction,
   buildCommand as stricliCommand,
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import { parseFieldsList } from "./formatters/json.js";
+import {
+  type CommandOutput,
+  type OutputConfig,
+  renderCommandOutput,
+} from "./formatters/output.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
@@ -65,13 +69,35 @@ type CommandDocumentation = {
 };
 
 /**
- * Supported output modes for automatic flag injection.
+ * Return value from a command with `output` config.
  *
- * - `"json"` — injects `--json` (boolean) and `--fields` (parsed string)
- *   flags. `--fields` is pre-parsed from a comma-separated string into a
- *   `string[]` before reaching `func`. Future values: `"markdown"`, `"plain"`.
+ * Commands can return:
+ * - `void` — no automatic output (e.g. `--web` early exit)
+ * - `Error` — Stricli error handling
+ * - `CommandOutput<T>` — `{ data, hint? }` rendered by the output config
  */
-type OutputMode = "json";
+// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
+type SyncCommandReturn = void | Error | unknown;
+
+// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
+type AsyncCommandReturn = Promise<void | Error | unknown>;
+
+/**
+ * Command function type for Sentry CLI commands.
+ *
+ * When the command has an `output` config, it can return a
+ * `{ data, hint? }` object — the wrapper renders it automatically.
+ * Without `output`, it behaves like a standard Stricli command function.
+ */
+type SentryCommandFunction<
+  FLAGS extends BaseFlags,
+  ARGS extends BaseArgs,
+  CONTEXT extends CommandContext,
+> = (
+  this: CONTEXT,
+  flags: FLAGS,
+  ...args: ARGS
+) => SyncCommandReturn | AsyncCommandReturn;
 
 /**
  * Arguments for building a command with a local function.
@@ -84,20 +110,33 @@ type LocalCommandBuilderArguments<
 > = {
   readonly parameters?: Record<string, unknown>;
   readonly docs: CommandDocumentation;
-  readonly func: CommandFunction<FLAGS, ARGS, CONTEXT>;
+  readonly func: SentryCommandFunction<FLAGS, ARGS, CONTEXT>;
   /**
-   * Opt-in output mode — causes output-related flags to be injected
-   * automatically.
+   * Output configuration — controls flag injection and optional auto-rendering.
    *
-   * When set to `"json"`, the command receives:
-   * - `flags.json: boolean` — whether `--json` was passed
-   * - `flags.fields: string[] | undefined` — pre-parsed `--fields` value
+   * Two forms:
    *
-   * Commands that already define their own `json` flag keep theirs; only
-   * `--fields` is injected in that case. This mirrors the `--verbose`
-   * opt-out pattern used by the `api` command.
+   * 1. **`"json"`** — injects `--json` and `--fields` flags only. The command
+   *    handles its own output via `writeOutput` or direct writes.
+   *
+   * 2. **`{ json: true, human: fn }`** — injects flags AND auto-renders.
+   *    The command returns `{ data }` or `{ data, hint }` and the wrapper
+   *    handles JSON/human branching. Void returns are ignored.
+   *
+   * @example
+   * ```ts
+   * // Flag injection only:
+   * buildCommand({ output: "json", func() { writeOutput(...); } })
+   *
+   * // Full auto-render:
+   * buildCommand({
+   *   output: { json: true, human: formatUserIdentity },
+   *   func() { return user; },
+   * })
+   * ```
    */
-  readonly output?: OutputMode;
+  // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but we erase types at the builder level
+  readonly output?: "json" | OutputConfig<any>;
 };
 
 // ---------------------------------------------------------------------------
@@ -130,11 +169,11 @@ export const VERBOSE_FLAG = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// JSON output flags (injected when output: "json")
+// JSON output flags (injected when output config is present)
 // ---------------------------------------------------------------------------
 
 /**
- * `--json` flag injected by {@link buildCommand} when `output: "json"`.
+ * `--json` flag injected by {@link buildCommand} when `output` config is set.
  * Outputs machine-readable JSON instead of human-readable text.
  */
 export const JSON_FLAG = {
@@ -144,7 +183,7 @@ export const JSON_FLAG = {
 } as const;
 
 /**
- * `--fields` flag injected by {@link buildCommand} when `output: "json"`.
+ * `--fields` flag injected by {@link buildCommand} when `output` config is set.
  *
  * Accepts a comma-separated list of field paths (dot-notation supported)
  * to include in JSON output. Reduces token consumption for agent workflows.
@@ -198,8 +237,8 @@ export function applyLoggingFlags(
  * 2. Intercepts them before the original `func` runs to call `setLogLevel()`
  * 3. Strips injected flags so the original function never sees them
  * 4. Captures flag values and positional arguments as Sentry telemetry context
- * 5. When `output: "json"`, injects `--json` and `--fields` flags and
- *    pre-parses `--fields` from comma-string to `string[]`
+ * 5. When `output` has an {@link OutputConfig}, injects `--json` and `--fields`
+ *    flags, pre-parses `--fields`, and auto-renders the command's `{ data }` return
  *
  * When a command already defines its own `verbose` flag (e.g. the `api` command
  * uses `--verbose` for HTTP request/response output), the injected `VERBOSE_FLAG`
@@ -225,7 +264,11 @@ export function buildCommand<
   builderArgs: LocalCommandBuilderArguments<FLAGS, ARGS, CONTEXT>
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
-  const hasJsonOutput = builderArgs.output === "json";
+  const rawOutput = builderArgs.output;
+  /** Resolved output config (object form), or undefined if no auto-rendering */
+  const outputConfig = typeof rawOutput === "object" ? rawOutput : undefined;
+  /** Whether to inject --json/--fields flags */
+  const hasJsonOutput = rawOutput === "json" || rawOutput?.json === true;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -248,7 +291,7 @@ export function buildCommand<
     mergedFlags.verbose = VERBOSE_FLAG;
   }
 
-  // Inject --json and --fields when output: "json" is set
+  // Inject --json and --fields when output config is set
   if (hasJsonOutput) {
     if (!commandOwnsJson) {
       mergedFlags.json = JSON_FLAG;
@@ -259,48 +302,100 @@ export function buildCommand<
 
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
-  // Wrap func to intercept logging flags, capture telemetry, then call original
-  // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
-  const wrappedFunc = function (this: CONTEXT, flags: any, ...args: any[]) {
-    // Apply logging side-effects from whichever flags are present.
-    // The command's own --verbose (if any) also triggers debug-level logging.
-    const logLevel = flags[LOG_LEVEL_KEY] as LogLevelName | undefined;
-    const verbose = flags.verbose as boolean;
-    applyLoggingFlags(logLevel, verbose);
+  /**
+   * Check if a value is a {@link CommandOutput} object (`{ data, hint? }`).
+   *
+   * The presence of a `data` property is the unambiguous discriminant —
+   * no heuristic key-sniffing needed.
+   */
+  function isCommandOutput(v: unknown): v is CommandOutput<unknown> {
+    return typeof v === "object" && v !== null && "data" in v;
+  }
 
-    // Strip only the flags WE injected — never strip command-owned flags.
-    // --log-level is always ours. --verbose is only stripped when we injected it.
-    const cleanFlags: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(
-      flags as Record<string, unknown>
-    )) {
+  /**
+   * If the command returned a {@link CommandOutput}, render it via the
+   * output config. Void/undefined/Error returns are ignored.
+   */
+  function handleReturnValue(
+    context: CONTEXT,
+    value: unknown,
+    flags: Record<string, unknown>
+  ): void {
+    if (
+      !outputConfig ||
+      value === null ||
+      value === undefined ||
+      value instanceof Error ||
+      !isCommandOutput(value)
+    ) {
+      return;
+    }
+    const stdout = (context as Record<string, unknown>)
+      .stdout as import("../types/index.js").Writer;
+
+    renderCommandOutput(stdout, value.data, outputConfig, {
+      hint: value.hint,
+      json: Boolean(flags.json),
+      fields: flags.fields as string[] | undefined,
+    });
+  }
+
+  /**
+   * Strip injected flags from the raw Stricli-parsed flags object.
+   * --log-level is always stripped. --verbose is stripped only when we
+   * injected it (not when the command defines its own). --fields is
+   * pre-parsed from comma-string to string[] when output: "json".
+   */
+  function cleanRawFlags(
+    raw: Record<string, unknown>
+  ): Record<string, unknown> {
+    const clean: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
       if (key === LOG_LEVEL_KEY) {
         continue;
       }
       if (key === "verbose" && !commandOwnsVerbose) {
         continue;
       }
-      cleanFlags[key] = value;
+      clean[key] = value;
     }
-
-    // Pre-parse --fields from comma-string to string[] when output: "json"
-    if (hasJsonOutput && typeof cleanFlags.fields === "string") {
-      cleanFlags.fields = parseFieldsList(cleanFlags.fields);
+    if (hasJsonOutput && typeof clean.fields === "string") {
+      clean.fields = parseFieldsList(clean.fields);
     }
+    return clean;
+  }
 
-    // Capture flag values as telemetry tags
+  // Wrap func to intercept logging flags, capture telemetry, then call original
+  // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
+  const wrappedFunc = function (this: CONTEXT, flags: any, ...args: any[]) {
+    applyLoggingFlags(
+      flags[LOG_LEVEL_KEY] as LogLevelName | undefined,
+      flags.verbose as boolean
+    );
+
+    const cleanFlags = cleanRawFlags(flags as Record<string, unknown>);
     setFlagContext(cleanFlags);
-
-    // Capture positional arguments as context
     if (args.length > 0) {
       setArgsContext(args);
     }
 
-    return originalFunc.call(
+    // Call original and intercept data returns.
+    // Commands with output config return { data, hint? };
+    // the wrapper renders automatically. Void returns are ignored.
+    const result = originalFunc.call(
       this,
       cleanFlags as FLAGS,
       ...(args as unknown as ARGS)
     );
+
+    if (result instanceof Promise) {
+      return result.then((resolved) => {
+        handleReturnValue(this, resolved, cleanFlags);
+      }) as ReturnType<typeof originalFunc>;
+    }
+
+    handleReturnValue(this, result, cleanFlags);
+    return result as ReturnType<typeof originalFunc>;
   } as typeof originalFunc;
 
   // Build the command with the wrapped function via Stricli

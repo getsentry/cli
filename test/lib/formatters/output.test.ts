@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type OutputConfig,
+  renderCommandOutput,
   writeFooter,
   writeOutput,
 } from "../../../src/lib/formatters/output.js";
@@ -81,7 +83,7 @@ describe("writeOutput", () => {
       expect(w.output).not.toContain("Should not appear");
     });
 
-    test("does not write detectedFrom in json mode", () => {
+    test("does not write hint in json mode", () => {
       const w = createTestWriter();
       writeOutput(
         w,
@@ -89,7 +91,7 @@ describe("writeOutput", () => {
         {
           json: true,
           formatHuman: () => "unused",
-          detectedFrom: ".env",
+          hint: "Detected from .env",
         }
       );
       expect(w.output).not.toContain(".env");
@@ -110,12 +112,12 @@ describe("writeOutput", () => {
       expect(w.output).toBe("Hello Alice\n");
     });
 
-    test("appends detectedFrom when provided", () => {
+    test("appends hint when provided", () => {
       const w = createTestWriter();
       writeOutput(w, "data", {
         json: false,
         formatHuman: () => "Result",
-        detectedFrom: ".env.local",
+        hint: "Detected from .env.local",
       });
       expect(w.output).toContain("Result\n");
       expect(w.output).toContain("Detected from .env.local");
@@ -132,21 +134,21 @@ describe("writeOutput", () => {
       expect(w.output).toContain("Tip: try something");
     });
 
-    test("writes detectedFrom before footer", () => {
+    test("writes hint before footer", () => {
       const w = createTestWriter();
       writeOutput(w, "data", {
         json: false,
         formatHuman: () => "Body",
-        detectedFrom: "DSN",
+        hint: "Detected from DSN",
         footer: "Hint",
       });
-      const detectedIdx = w.output.indexOf("Detected from DSN");
+      const hintIdx = w.output.indexOf("Detected from DSN");
       const footerIdx = w.output.indexOf("Hint");
-      expect(detectedIdx).toBeGreaterThan(-1);
-      expect(footerIdx).toBeGreaterThan(detectedIdx);
+      expect(hintIdx).toBeGreaterThan(-1);
+      expect(footerIdx).toBeGreaterThan(hintIdx);
     });
 
-    test("omits detectedFrom when not provided", () => {
+    test("omits hint when not provided", () => {
       const w = createTestWriter();
       writeOutput(w, 42, {
         json: false,
@@ -166,65 +168,6 @@ describe("writeOutput", () => {
       expect(w.chunks).toHaveLength(1);
     });
   });
-
-  describe("jsonData (divergent data)", () => {
-    test("uses jsonData for JSON output instead of data", () => {
-      const w = createTestWriter();
-      const fullUser = { id: 1, name: "Alice", internalSecret: "s3cret" };
-      writeOutput(w, fullUser, {
-        json: true,
-        jsonData: { id: fullUser.id, name: fullUser.name },
-        formatHuman: () => "unused",
-      });
-      const parsed = JSON.parse(w.output);
-      expect(parsed).toEqual({ id: 1, name: "Alice" });
-      expect(w.output).not.toContain("s3cret");
-    });
-
-    test("uses data for formatHuman even when jsonData is provided", () => {
-      const w = createTestWriter();
-      const fullUser = { id: 1, name: "Alice", role: "admin" };
-      writeOutput(w, fullUser, {
-        json: false,
-        jsonData: { id: fullUser.id },
-        formatHuman: (user) => `${user.name} (${user.role})`,
-      });
-      expect(w.output).toBe("Alice (admin)\n");
-    });
-
-    test("applies fields filtering to jsonData", () => {
-      const w = createTestWriter();
-      writeOutput(
-        w,
-        { full: true },
-        {
-          json: true,
-          fields: ["id"],
-          jsonData: { id: 1, name: "Alice", extra: "x" },
-          formatHuman: () => "unused",
-        }
-      );
-      expect(JSON.parse(w.output)).toEqual({ id: 1 });
-    });
-
-    test("works with footer and detectedFrom in human mode", () => {
-      const w = createTestWriter();
-      writeOutput(
-        w,
-        { name: "Alice" },
-        {
-          json: false,
-          jsonData: { id: 1 },
-          formatHuman: (data) => `User: ${data.name}`,
-          footer: "Done",
-          detectedFrom: ".env",
-        }
-      );
-      expect(w.output).toContain("User: Alice\n");
-      expect(w.output).toContain("Detected from .env");
-      expect(w.output).toContain("Done");
-    });
-  });
 });
 
 describe("writeFooter", () => {
@@ -236,5 +179,81 @@ describe("writeFooter", () => {
     // Second chunk contains the hint text with trailing newline
     expect(w.chunks[1]).toContain("Some hint");
     expect(w.chunks[1]).toEndWith("\n");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Return-based output (renderCommandOutput)
+// ---------------------------------------------------------------------------
+
+describe("renderCommandOutput", () => {
+  test("renders JSON when json=true", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ id: number; name: string }> = {
+      json: true,
+      human: (d) => `${d.name}`,
+    };
+    renderCommandOutput(w, { id: 1, name: "Alice" }, config, { json: true });
+    expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
+  });
+
+  test("renders human output when json=false", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ name: string }> = {
+      json: true,
+      human: (d) => `Hello ${d.name}`,
+    };
+    renderCommandOutput(w, { name: "Alice" }, config, { json: false });
+    expect(w.output).toBe("Hello Alice\n");
+  });
+
+  test("applies fields filtering in JSON mode", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ id: number; name: string; secret: string }> = {
+      json: true,
+      human: () => "unused",
+    };
+    renderCommandOutput(w, { id: 1, name: "Alice", secret: "x" }, config, {
+      json: true,
+      fields: ["id", "name"],
+    });
+    expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
+  });
+
+  test("renders hint in human mode", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<string> = {
+      json: true,
+      human: () => "Result",
+    };
+    renderCommandOutput(w, "data", config, {
+      json: false,
+      hint: "Detected from .env.local",
+    });
+    expect(w.output).toContain("Result\n");
+    expect(w.output).toContain("Detected from .env.local");
+  });
+
+  test("suppresses hint in JSON mode", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<string> = {
+      json: true,
+      human: () => "Result",
+    };
+    renderCommandOutput(w, "data", config, {
+      json: true,
+      hint: "Detected from .env.local",
+    });
+    expect(w.output).not.toContain(".env.local");
+  });
+
+  test("works without hint", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ value: number }> = {
+      json: true,
+      human: (d) => `Value: ${d.value}`,
+    };
+    renderCommandOutput(w, { value: 42 }, config, { json: false });
+    expect(w.output).toBe("Value: 42\n");
   });
 });

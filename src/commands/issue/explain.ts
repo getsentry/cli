@@ -7,7 +7,6 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
-import { writeOutput } from "../../lib/formatters/index.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
@@ -59,7 +58,7 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
-  output: "json",
+  output: { json: true, human: formatRootCauseList },
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -72,13 +71,9 @@ export const explainCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(
-    this: SentryContext,
-    flags: ExplainFlags,
-    issueArg: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
     applyFreshFlag(flags);
-    const { stdout, stderr, cwd } = this;
+    const { stderr, cwd } = this;
 
     // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
@@ -110,13 +105,10 @@ export const explainCommand = buildCommand({
         );
       }
 
-      // Output results
-      writeOutput(stdout, causes, {
-        json: flags.json,
-        fields: flags.fields,
-        formatHuman: formatRootCauseList,
-        footer: `To create a plan, run: sentry issue plan ${issueArg}`,
-      });
+      return {
+        data: causes,
+        hint: `To create a plan, run: sentry issue plan ${issueArg}`,
+      };
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

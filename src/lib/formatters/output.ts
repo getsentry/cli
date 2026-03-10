@@ -3,11 +3,36 @@
  *
  * Handles the common pattern of JSON vs human-readable output
  * that appears in most CLI commands.
+ *
+ * Two usage modes:
+ *
+ * 1. **Imperative** — call {@link writeOutput} directly from the command:
+ *    ```ts
+ *    writeOutput(stdout, data, { json, formatHuman, hint });
+ *    ```
+ *
+ * 2. **Return-based** — declare formatting in {@link OutputConfig} on
+ *    `buildCommand`, then return bare data from `func`:
+ *    ```ts
+ *    buildCommand({
+ *      output: { json: true, human: fn },
+ *      func() { return data; },
+ *    })
+ *    ```
+ *    The wrapper reads `json`/`fields` from flags and applies formatting
+ *    automatically. Commands return `{ data }` or `{ data, hint }` objects.
+ *
+ * Both modes serialize the same data object to JSON and pass it to
+ * `formatHuman` — there is no divergent-data path.
  */
 
 import type { Writer } from "../../types/index.js";
 import { muted } from "./colors.js";
 import { writeJson } from "./json.js";
+
+// ---------------------------------------------------------------------------
+// Shared option types
+// ---------------------------------------------------------------------------
 
 /**
  * Options for {@link writeOutput} when JSON and human data share the same type.
@@ -22,62 +47,126 @@ type WriteOutputOptions<T> = {
   fields?: string[];
   /** Function to format data as a rendered string */
   formatHuman: (data: T) => string;
-  /** Optional source description if data was auto-detected */
-  detectedFrom?: string;
+  /** Short hint appended after human output (suppressed in JSON mode) */
+  hint?: string;
   /** Footer hint shown after human output (suppressed in JSON mode) */
   footer?: string;
 };
 
+// ---------------------------------------------------------------------------
+// Return-based output config (declared on buildCommand)
+// ---------------------------------------------------------------------------
+
 /**
- * Options for {@link writeOutput} when JSON needs a different data shape.
+ * Output configuration declared on `buildCommand` for automatic rendering.
  *
- * Some commands build a richer or narrower object for JSON than the one
- * the human formatter receives. Supply `jsonData` to decouple the two.
+ * Two forms:
  *
- * @typeParam T - Type of data used by the human formatter
- * @typeParam J - Type of data serialized to JSON (defaults to T)
+ * 1. **Flag-only** — `output: "json"` — injects `--json` and `--fields` flags
+ *    but does not intercept returns. Commands handle their own output.
+ *
+ * 2. **Full config** — `output: { json: true, human: fn }` — injects flags
+ *    AND auto-renders the command's return value. Commands return
+ *    `{ data }` or `{ data, hint }` objects.
+ *
+ * @typeParam T - Type of data the command returns (used by `human` formatter
+ *   and serialized as-is to JSON)
  */
-type WriteOutputDivergentOptions<T, J> = WriteOutputOptions<T> & {
-  /**
-   * Separate data object to serialize when `json: true`.
-   * When provided, `data` is only used by `formatHuman` and
-   * `jsonData` is passed to `writeJson`.
-   */
-  jsonData: J;
+export type OutputConfig<T> = {
+  /** Enable `--json` and `--fields` flag injection */
+  json: true;
+  /** Format data as a human-readable string for terminal output */
+  human: (data: T) => string;
 };
+
+/**
+ * Return type for commands with {@link OutputConfig}.
+ *
+ * Commands wrap their return value in this object so the `buildCommand` wrapper
+ * can unambiguously detect data vs void returns. The optional `hint` provides
+ * rendering metadata that depends on execution-time values (e.g. auto-detection
+ * source). Hints are shown in human mode and suppressed in JSON mode.
+ *
+ * @typeParam T - The data type (matches the `OutputConfig<T>` type parameter)
+ */
+export type CommandOutput<T> = {
+  /** The data to render (serialized as-is to JSON, passed to `human` formatter) */
+  data: T;
+  /** Short hint line appended after human output (e.g. "Detected from .env") */
+  hint?: string;
+};
+
+/**
+ * Full rendering context passed to {@link renderCommandOutput}.
+ * Combines the command's runtime hints with wrapper-injected flags.
+ */
+type RenderContext = {
+  /** Whether `--json` was passed */
+  json: boolean;
+  /** Pre-parsed `--fields` value */
+  fields?: string[];
+  /** Short hint line appended after human output (suppressed in JSON mode) */
+  hint?: string;
+};
+
+/**
+ * Render a command's return value using an {@link OutputConfig}.
+ *
+ * Called by the `buildCommand` wrapper when a command with `output: { ... }`
+ * returns data. In JSON mode the data is serialized as-is (with optional
+ * field filtering); in human mode the config's `human` formatter is called.
+ *
+ * @param stdout - Writer to output to
+ * @param data - The data returned by the command
+ * @param config - The output config declared on buildCommand
+ * @param ctx - Merged rendering context (command hints + runtime flags)
+ */
+export function renderCommandOutput(
+  stdout: Writer,
+  data: unknown,
+  // biome-ignore lint/suspicious/noExplicitAny: Variance — human is contravariant in T; safe because data and config are paired at build time.
+  config: OutputConfig<any>,
+  ctx: RenderContext
+): void {
+  if (ctx.json) {
+    writeJson(stdout, data, ctx.fields);
+    return;
+  }
+
+  const text = config.human(data);
+  stdout.write(`${text}\n`);
+
+  if (ctx.hint) {
+    stdout.write(`\n${muted(ctx.hint)}\n`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Imperative output
+// ---------------------------------------------------------------------------
 
 /**
  * Write formatted output to stdout based on output format.
  *
  * Handles the common JSON-vs-human pattern used across commands:
- * - JSON mode: serialize data (or `jsonData` if provided) with optional field filtering
- * - Human mode: call `formatHuman`, then optionally print `detectedFrom` and `footer`
- *
- * When JSON and human paths need different data shapes, pass `jsonData`:
- * ```ts
- * writeOutput(stdout, fullUser, {
- *   json: true,
- *   jsonData: { id: fullUser.id, email: fullUser.email },
- *   formatHuman: formatUserIdentity,
- * });
- * ```
+ * - JSON mode: serialize data with optional field filtering
+ * - Human mode: call `formatHuman`, then optionally print `hint` and `footer`
  */
-export function writeOutput<T, J = T>(
+export function writeOutput<T>(
   stdout: Writer,
   data: T,
-  options: WriteOutputOptions<T> | WriteOutputDivergentOptions<T, J>
+  options: WriteOutputOptions<T>
 ): void {
   if (options.json) {
-    const jsonPayload = "jsonData" in options ? options.jsonData : data;
-    writeJson(stdout, jsonPayload, options.fields);
+    writeJson(stdout, data, options.fields);
     return;
   }
 
   const text = options.formatHuman(data);
   stdout.write(`${text}\n`);
 
-  if (options.detectedFrom) {
-    stdout.write(`\nDetected from ${options.detectedFrom}\n`);
+  if (options.hint) {
+    stdout.write(`\n${muted(options.hint)}\n`);
   }
 
   if (options.footer) {

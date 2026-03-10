@@ -271,7 +271,8 @@ describe("sentry log view", () => {
 
     expect(result.exitCode).toBe(0);
     const data = JSON.parse(result.stdout);
-    expect(data["sentry.item_id"]).toBe(TEST_LOG_ID);
+    expect(Array.isArray(data)).toBe(true);
+    expect(data[0]["sentry.item_id"]).toBe(TEST_LOG_ID);
   });
 
   test("handles non-existent log", async () => {

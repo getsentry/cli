@@ -383,13 +383,7 @@ export const viewCommand = buildCommand({
     warnMissingIds(logIds, logs);
 
     if (flags.json) {
-      // Single ID: output single object for backward compatibility
-      // Multiple IDs: output array
-      if (logIds.length === 1 && logs.length === 1) {
-        writeJson(stdout, logs[0], flags.fields);
-      } else {
-        writeJson(stdout, logs, flags.fields);
-      }
+      writeJson(stdout, logs, flags.fields);
       return;
     }
 

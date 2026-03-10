@@ -12,7 +12,7 @@ import { buildCommand } from "../../lib/command.js";
 import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { formatUserIdentity, writeOutput } from "../../lib/formatters/index.js";
+import { formatUserIdentity } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -33,16 +33,18 @@ export const whoamiCommand = buildCommand({
       "This calls the Sentry API live (not cached) so the result always reflects " +
       "the current token. Works with all token types: OAuth, API tokens, and OAuth App tokens.",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatUserIdentity,
+  },
   parameters: {
     flags: {
       fresh: FRESH_FLAG,
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: WhoamiFlags): Promise<void> {
+  async func(this: SentryContext, flags: WhoamiFlags) {
     applyFreshFlag(flags);
-    const { stdout } = this;
 
     if (!(await isAuthenticated())) {
       throw new AuthError("not_authenticated");
@@ -63,16 +65,6 @@ export const whoamiCommand = buildCommand({
       // Cache update failure is non-essential — user identity was already fetched.
     }
 
-    writeOutput(stdout, user, {
-      json: flags.json,
-      fields: flags.fields,
-      jsonData: {
-        id: user.id,
-        name: user.name ?? null,
-        username: user.username ?? null,
-        email: user.email ?? null,
-      },
-      formatHuman: formatUserIdentity,
-    });
+    return { data: user };
   },
 });

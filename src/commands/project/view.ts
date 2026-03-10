@@ -284,18 +284,14 @@ export const viewCommand = buildCommand({
       throw buildContextError();
     }
 
-    // JSON output - array if multiple, single object if one
+    // JSON output - always an array for consistent shape
     if (flags.json) {
       // Add dsn field to JSON output
       const projectsWithDsn = projects.map((p, i) => ({
         ...p,
         dsn: dsns[i] ?? null,
       }));
-      writeJson(
-        stdout,
-        projectsWithDsn.length === 1 ? projectsWithDsn[0] : projectsWithDsn,
-        flags.fields
-      );
+      writeJson(stdout, projectsWithDsn, flags.fields);
       return;
     }
 
@@ -307,7 +303,9 @@ export const viewCommand = buildCommand({
       writeOutput(stdout, firstProject, {
         json: false,
         formatHuman: (p: SentryProject) => formatProjectDetails(p, firstDsn),
-        detectedFrom: firstTarget?.detectedFrom,
+        hint: firstTarget?.detectedFrom
+          ? `Detected from ${firstTarget.detectedFrom}`
+          : undefined,
       });
     } else {
       writeMultipleProjects(stdout, projects, dsns, targets);
