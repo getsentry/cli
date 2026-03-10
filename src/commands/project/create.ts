@@ -30,12 +30,17 @@ import {
   ContextError,
   withAuthGuard,
 } from "../../lib/errors.js";
-import { muted } from "../../lib/formatters/colors.js";
 import {
   formatProjectCreated,
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
-import { isPlainOutput } from "../../lib/formatters/markdown.js";
+import {
+  escapeMarkdownInline,
+  isPlainOutput,
+  mdKvTable,
+  renderMarkdown,
+  safeCodeSpan,
+} from "../../lib/formatters/markdown.js";
 import { writeOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
@@ -69,19 +74,39 @@ type DryRunData = {
   platform: string;
 };
 
-/** Format dry-run preview as human-readable text */
+/** Format dry-run preview as human-readable markdown */
 function formatDryRun(data: DryRunData): string {
   const lines: string[] = [];
-  lines.push(muted("Dry run — no project created."));
+
+  lines.push(
+    `## <muted>Dry run</muted> — project '${escapeMarkdownInline(data.name)}' in ${escapeMarkdownInline(data.organization)}`
+  );
   lines.push("");
-  lines.push(`  Organization:  ${data.organization}`);
-  const teamSuffix =
-    data.teamSource !== "explicit" ? ` (${data.teamSource})` : "";
-  lines.push(`  Team:          ${data.team}${teamSuffix}`);
-  lines.push(`  Name:          ${data.name}`);
-  lines.push(`  Slug:          ${data.slug}`);
-  lines.push(`  Platform:      ${data.platform}`);
-  return lines.join("\n");
+
+  // Team source notes (same pattern as formatProjectCreated)
+  if (data.teamSource === "auto-created") {
+    lines.push(
+      `> **Note:** Would create team '${escapeMarkdownInline(data.team)}' (org has no teams).`
+    );
+    lines.push("");
+  } else if (data.teamSource === "auto-selected") {
+    lines.push(
+      `> **Note:** Would use team '${escapeMarkdownInline(data.team)}'. See all teams: \`sentry team list\``
+    );
+    lines.push("");
+  }
+
+  const kvRows: [string, string][] = [
+    ["Name", escapeMarkdownInline(data.name)],
+    ["Slug", safeCodeSpan(data.slug)],
+    ["Org", safeCodeSpan(data.organization)],
+    ["Team", safeCodeSpan(data.team)],
+    ["Platform", data.platform],
+  ];
+
+  lines.push(mdKvTable(kvRows));
+
+  return renderMarkdown(lines.join("\n"));
 }
 
 type CreateFlags = {

@@ -712,8 +712,8 @@ describe("project create", () => {
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    // Single team = auto-selected
-    expect(output).toContain("auto-selected");
+    // Single team = auto-selected → note about team usage
+    expect(output).toContain("Would use team");
   });
 
   test("dry-run with no teams shows auto-created team without creating it", async () => {
@@ -736,6 +736,6 @@ describe("project create", () => {
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Dry run");
     expect(output).toContain("my-app");
-    expect(output).toContain("auto-created");
+    expect(output).toContain("Would create team");
   });
 });
