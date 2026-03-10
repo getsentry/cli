@@ -715,4 +715,27 @@ describe("project create", () => {
     // Single team = auto-selected
     expect(output).toContain("auto-selected");
   });
+
+  test("dry-run with no teams shows auto-created team without creating it", async () => {
+    listTeamsSpy.mockResolvedValue([]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "my-app",
+      "node"
+    );
+
+    // Should NOT call createTeam
+    expect(createTeamSpy).not.toHaveBeenCalled();
+    // Should NOT call createProject
+    expect(createProjectSpy).not.toHaveBeenCalled();
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("my-app");
+    expect(output).toContain("auto-created");
+  });
 });
