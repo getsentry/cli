@@ -59,7 +59,6 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
     },
     aliases: {
       y: "yes",
-      feature: "features",
     },
   },
   async func(this: SentryContext, flags: InitFlags, directory?: string) {
