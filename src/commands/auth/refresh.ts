@@ -15,7 +15,7 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
-import { writeJson } from "../../lib/formatters/index.js";
+import { writeOutput } from "../../lib/formatters/index.js";
 
 type RefreshFlags = {
   readonly json: boolean;
@@ -100,17 +100,13 @@ Examples:
         : undefined,
     };
 
-    if (flags.json) {
-      writeJson(stdout, output, flags.fields);
-    } else if (result.refreshed) {
-      stdout.write(
-        `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(result.expiresIn ?? 0)}.\n`
-      );
-    } else {
-      stdout.write(
-        `Token still valid (expires in ${formatDuration(result.expiresIn ?? 0)}).\n` +
-          "Use --force to refresh anyway.\n"
-      );
-    }
+    writeOutput(stdout, output, {
+      json: flags.json,
+      fields: flags.fields,
+      formatHuman: (data) =>
+        data.refreshed
+          ? `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
+          : `Token still valid (expires in ${formatDuration(data.expiresIn ?? 0)}).\nUse --force to refresh anyway.`,
+    });
   },
 });

@@ -12,7 +12,7 @@ import { buildCommand } from "../../lib/command.js";
 import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { formatUserIdentity, writeJson } from "../../lib/formatters/index.js";
+import { formatUserIdentity, writeOutput } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -63,20 +63,16 @@ export const whoamiCommand = buildCommand({
       // Cache update failure is non-essential — user identity was already fetched.
     }
 
-    if (flags.json) {
-      writeJson(
-        stdout,
-        {
-          id: user.id,
-          name: user.name ?? null,
-          username: user.username ?? null,
-          email: user.email ?? null,
-        },
-        flags.fields
-      );
-      return;
-    }
-
-    stdout.write(`${formatUserIdentity(user)}\n`);
+    writeOutput(stdout, user, {
+      json: flags.json,
+      fields: flags.fields,
+      jsonData: {
+        id: user.id,
+        name: user.name ?? null,
+        username: user.username ?? null,
+        email: user.email ?? null,
+      },
+      formatHuman: formatUserIdentity,
+    });
   },
 });

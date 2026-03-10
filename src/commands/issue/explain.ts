@@ -7,7 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
-import { writeFooter, writeJson } from "../../lib/formatters/index.js";
+import { writeOutput } from "../../lib/formatters/index.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
@@ -111,17 +111,12 @@ export const explainCommand = buildCommand({
       }
 
       // Output results
-      if (flags.json) {
-        writeJson(stdout, causes, flags.fields);
-        return;
-      }
-
-      // Human-readable output
-      stdout.write(`${formatRootCauseList(causes)}\n`);
-      writeFooter(
-        stdout,
-        `To create a plan, run: sentry issue plan ${issueArg}`
-      );
+      writeOutput(stdout, causes, {
+        json: flags.json,
+        fields: flags.fields,
+        formatHuman: formatRootCauseList,
+        footer: `To create a plan, run: sentry issue plan ${issueArg}`,
+      });
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
