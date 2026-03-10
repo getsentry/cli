@@ -214,6 +214,8 @@ async function preamble(
     confirmed = await confirmExperimental(yes);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
+      // Intentionally captured: track why users bail before completing
+      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return false;
@@ -346,6 +348,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     }
   } catch (err) {
     if (err instanceof WizardCancelledError) {
+      // Intentionally captured: track why users bail before completing
+      // instrumentation so we can improve the onboarding flow.
       captureException(err);
       process.exitCode = 0;
       return;

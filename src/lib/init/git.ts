@@ -5,38 +5,34 @@
  * working tree before the init wizard starts modifying files.
  */
 
-import { execFileSync } from "node:child_process";
 import { confirm, isCancel, log } from "@clack/prompts";
 
 export function isInsideGitWorkTree(opts: { cwd: string }): boolean {
-  try {
-    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      stdio: "ignore",
-      cwd: opts.cwd,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const result = Bun.spawnSync(["git", "rev-parse", "--is-inside-work-tree"], {
+    stdout: "ignore",
+    stderr: "ignore",
+    cwd: opts.cwd,
+  });
+  return result.success;
 }
 
 export function getUncommittedOrUntrackedFiles(opts: {
   cwd: string;
 }): string[] {
-  try {
-    const output = execFileSync("git", ["status", "--porcelain=v1"], {
-      stdio: ["ignore", "pipe", "ignore"],
-      cwd: opts.cwd,
-    });
-    return output
-      .toString()
-      .trim()
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .map((line) => `- ${line.trim()}`);
-  } catch {
+  const result = Bun.spawnSync(["git", "status", "--porcelain=v1"], {
+    stdout: "pipe",
+    stderr: "ignore",
+    cwd: opts.cwd,
+  });
+  if (!(result.success && result.stdout)) {
     return [];
   }
+  return result.stdout
+    .toString()
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => `- ${line.trim()}`);
 }
 
 /**
