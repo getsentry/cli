@@ -26,6 +26,8 @@ import * as auth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as git from "../../../src/lib/init/git.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as ops from "../../../src/lib/init/local-ops.js";
@@ -60,6 +62,9 @@ let logWarnSpy: ReturnType<typeof spyOn>;
 let logErrorSpy: ReturnType<typeof spyOn>;
 let cancelSpy: ReturnType<typeof spyOn>;
 let spinnerSpy: ReturnType<typeof spyOn>;
+
+// git
+let checkGitStatusSpy: ReturnType<typeof spyOn>;
 
 // deps
 let getAuthTokenSpy: ReturnType<typeof spyOn>;
@@ -137,6 +142,9 @@ beforeEach(() => {
   spinnerMock.stop.mockClear();
   spinnerMock.message.mockClear();
 
+  // git spy — default: pass all checks
+  checkGitStatusSpy = spyOn(git, "checkGitStatus").mockResolvedValue(true);
+
   // dep spies
   getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("fake-token");
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
@@ -171,6 +179,7 @@ afterEach(() => {
   cancelSpy.mockRestore();
   spinnerSpy.mockRestore();
 
+  checkGitStatusSpy.mockRestore();
   getAuthTokenSpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
@@ -301,11 +310,10 @@ describe("runWizard", () => {
 
       const promise = runWizard(makeOptions());
 
-      // Flush microtasks so runWizard reaches the withTimeout setTimeout
-      // (extra ticks needed for async preamble + confirmExperimental)
-      for (let i = 0; i < 8; i++) {
-        await Promise.resolve();
-      }
+      // Flush microtasks so runWizard reaches the withTimeout setTimeout.
+      // preamble() → confirmExperimental() → checkGitStatus() → createRun()
+      // each need a tick.
+      for (let i = 0; i < 10; i++) await Promise.resolve();
 
       // Advance past the timeout
       jest.advanceTimersByTime(API_TIMEOUT_MS);
@@ -373,6 +381,50 @@ describe("runWizard", () => {
       expect(logWarnSpy).toHaveBeenCalled();
       const warnMsg: string = logWarnSpy.mock.calls[0][0];
       expect(warnMsg).toContain("Dry-run");
+    });
+  });
+
+  describe("git safety check", () => {
+    test("calls checkGitStatus with directory and yes from options", async () => {
+      mockStartResult = { status: "success" };
+
+      await runWizard(makeOptions({ directory: "/my/project", yes: true }));
+
+      expect(checkGitStatusSpy).toHaveBeenCalledWith({
+        cwd: "/my/project",
+        yes: true,
+      });
+    });
+
+    test("aborts gracefully when checkGitStatus returns false", async () => {
+      checkGitStatusSpy.mockResolvedValue(false);
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: true,
+        configurable: true,
+      });
+
+      await runWizard(makeOptions({ yes: false }));
+
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: origIsTTY,
+        configurable: true,
+      });
+
+      expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+      expect(process.exitCode).toBe(0);
+      // Should not proceed to workflow
+      expect(getWorkflowSpy).not.toHaveBeenCalled();
+    });
+
+    test("continues to workflow when checkGitStatus returns true", async () => {
+      checkGitStatusSpy.mockResolvedValue(true);
+      mockStartResult = { status: "success" };
+
+      await runWizard(makeOptions());
+
+      expect(checkGitStatusSpy).toHaveBeenCalled();
+      expect(formatResultSpy).toHaveBeenCalled();
     });
   });
 

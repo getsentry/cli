@@ -25,6 +25,7 @@ import {
   WORKFLOW_ID,
 } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
+import { checkGitStatus } from "./git.js";
 import { handleInteractive } from "./interactive.js";
 import { handleLocalOp, precomputeDirListing } from "./local-ops.js";
 import type {
@@ -191,7 +192,11 @@ async function confirmExperimental(yes: boolean): Promise<boolean> {
  * Pre-flight checks: TTY guard, banner, intro, and experimental warning.
  * Returns `true` when the wizard should continue, `false` to abort.
  */
-async function preamble(yes: boolean, dryRun: boolean): Promise<boolean> {
+async function preamble(
+  directory: string,
+  yes: boolean,
+  dryRun: boolean
+): Promise<boolean> {
   if (!(yes || process.stdin.isTTY)) {
     process.stderr.write(
       "Error: Interactive mode requires a terminal. Use --yes for non-interactive mode.\n"
@@ -214,13 +219,20 @@ async function preamble(yes: boolean, dryRun: boolean): Promise<boolean> {
     log.warn("Dry-run mode: no files will be modified.");
   }
 
+  const gitOk = await checkGitStatus({ cwd: directory, yes });
+  if (!gitOk) {
+    cancel("Setup cancelled.");
+    process.exitCode = 0;
+    return false;
+  }
+
   return true;
 }
 
 export async function runWizard(options: WizardOptions): Promise<void> {
   const { directory, yes, dryRun, features } = options;
 
-  if (!(await preamble(yes, dryRun))) {
+  if (!(await preamble(directory, yes, dryRun))) {
     return;
   }
 
