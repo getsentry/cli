@@ -54,6 +54,7 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
 
 // clack
 let introSpy: ReturnType<typeof spyOn>;
+let confirmSpy: ReturnType<typeof spyOn>;
 let logInfoSpy: ReturnType<typeof spyOn>;
 let logWarnSpy: ReturnType<typeof spyOn>;
 let logErrorSpy: ReturnType<typeof spyOn>;
@@ -124,6 +125,7 @@ beforeEach(() => {
 
   // clack spies
   introSpy = spyOn(clack, "intro").mockImplementation(noop);
+  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
   logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
   logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
   logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
@@ -162,6 +164,7 @@ beforeEach(() => {
 
 afterEach(() => {
   introSpy.mockRestore();
+  confirmSpy.mockRestore();
   logInfoSpy.mockRestore();
   logWarnSpy.mockRestore();
   logErrorSpy.mockRestore();
@@ -218,6 +221,62 @@ describe("runWizard", () => {
     });
   });
 
+  describe("experimental warning", () => {
+    test("shows experimental warning and proceeds on confirm", async () => {
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: true,
+        configurable: true,
+      });
+
+      mockStartResult = { status: "success" };
+
+      await runWizard(makeOptions({ yes: false }));
+
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: origIsTTY,
+        configurable: true,
+      });
+
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining("EXPERIMENTAL"),
+        })
+      );
+      expect(formatResultSpy).toHaveBeenCalled();
+    });
+
+    test("skips experimental warning with --yes", async () => {
+      mockStartResult = { status: "success" };
+
+      await runWizard(makeOptions({ yes: true }));
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(formatResultSpy).toHaveBeenCalled();
+    });
+
+    test("exits cleanly when user declines experimental warning", async () => {
+      const origIsTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: true,
+        configurable: true,
+      });
+
+      confirmSpy.mockResolvedValue(false);
+
+      await runWizard(makeOptions({ yes: false }));
+
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: origIsTTY,
+        configurable: true,
+      });
+
+      expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+      expect(process.exitCode).toBe(0);
+      expect(formatResultSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe("connection error", () => {
     test("times out if startAsync hangs", async () => {
       jest.useFakeTimers();
@@ -243,8 +302,10 @@ describe("runWizard", () => {
       const promise = runWizard(makeOptions());
 
       // Flush microtasks so runWizard reaches the withTimeout setTimeout
-      await Promise.resolve();
-      await Promise.resolve();
+      // (extra ticks needed for async preamble + confirmExperimental)
+      for (let i = 0; i < 8; i++) {
+        await Promise.resolve();
+      }
 
       // Advance past the timeout
       jest.advanceTimersByTime(API_TIMEOUT_MS);
