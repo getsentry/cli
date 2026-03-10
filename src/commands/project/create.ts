@@ -35,7 +35,32 @@ import {
   formatProjectCreated,
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
-import { writeJson } from "../../lib/formatters/json.js";
+import { writeOutput } from "../../lib/formatters/output.js";
+
+type DryRunData = {
+  organization: string;
+  team: string;
+  teamSource: string;
+  name: string;
+  slug: string;
+  platform: string;
+};
+
+/** Format dry-run preview as human-readable text */
+function formatDryRun(data: DryRunData): string {
+  const lines: string[] = [];
+  lines.push(muted("Dry run — no project created."));
+  lines.push("");
+  lines.push(`  Organization:  ${data.organization}`);
+  const teamSuffix =
+    data.teamSource !== "explicit" ? ` (${data.teamSource})` : "";
+  lines.push(`  Team:          ${data.team}${teamSuffix}`);
+  lines.push(`  Name:          ${data.name}`);
+  lines.push(`  Slug:          ${data.slug}`);
+  lines.push(`  Platform:      ${data.platform}`);
+  return lines.join("\n");
+}
+
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
@@ -393,7 +418,6 @@ export const createCommand = buildCommand({
 
     // Dry-run mode: show what would be created without creating it
     if (flags["dry-run"]) {
-      const { stdout } = this;
       const dryRunData = {
         organization: orgSlug,
         team: team.slug,
@@ -403,21 +427,11 @@ export const createCommand = buildCommand({
         platform,
       };
 
-      if (flags.json) {
-        writeJson(stdout, dryRunData, flags.fields);
-      } else {
-        stdout.write(`${muted("Dry run — no project created.")}\n\n`);
-        stdout.write(`  Organization:  ${orgSlug}\n`);
-        stdout.write(`  Team:          ${team.slug}`);
-        if (team.source !== "explicit") {
-          stdout.write(` (${team.source})`);
-        }
-        stdout.write("\n");
-        stdout.write(`  Name:          ${name}\n`);
-        stdout.write(`  Slug:          ${slugify(name)}\n`);
-        stdout.write(`  Platform:      ${platform}\n`);
-        stdout.write("\n");
-      }
+      writeOutput(this.stdout, dryRunData, {
+        json: flags.json,
+        fields: flags.fields,
+        formatHuman: formatDryRun,
+      });
       return;
     }
 
