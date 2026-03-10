@@ -28,10 +28,8 @@ type ApiFlags = {
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
-  /** Injected by buildCommand via output: "json" */
+  /** Output dry-run preview as JSON instead of human-readable */
   readonly json: boolean;
-  /** Injected by buildCommand via output: "json" */
-  readonly fields?: string[];
 };
 
 // Request Parsing
@@ -1161,7 +1159,6 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: "json",
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1259,6 +1256,11 @@ export const apiCommand = buildCommand({
         brief: "Show the resolved request without sending it",
         default: false,
       },
+      json: {
+        kind: "boolean",
+        brief: "Output dry-run preview as machine-readable JSON",
+        default: false,
+      },
     },
     aliases: {
       X: "method",
@@ -1299,7 +1301,7 @@ export const apiCommand = buildCommand({
       });
 
       if (flags.json) {
-        writeJson(stdout, request, flags.fields);
+        writeJson(stdout, request);
       } else {
         writeDryRunHuman(stdout, request);
       }
