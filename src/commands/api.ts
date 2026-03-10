@@ -962,10 +962,23 @@ type DryRunRequestInput = {
  * @internal Exported for testing
  */
 export function buildDryRunRequest(input: DryRunRequestInput): DryRunRequest {
+  const headers = { ...(input.headers ?? {}) };
+
+  // Mirror rawApiRequest: auto-add Content-Type for object bodies
+  // when no Content-Type was explicitly provided
+  if (
+    input.body !== undefined &&
+    input.body !== null &&
+    typeof input.body !== "string" &&
+    !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
+  ) {
+    headers["Content-Type"] = "application/json";
+  }
+
   return {
     method: input.method,
     url: resolveRequestUrl(input.endpoint, input.params),
-    headers: input.headers ?? {},
+    headers,
     body: input.body ?? null,
   };
 }
