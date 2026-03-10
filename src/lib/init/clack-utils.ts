@@ -17,7 +17,7 @@ export class WizardCancelledError extends Error {
 export function abortIfCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
     cancel(
-      `Setup cancelled. You can visit ${SENTRY_DOCS_URL} to set up manually.`
+      `Setup cancelled. You can visit ${SENTRY_DOCS_URL} to set up manually.`,
     );
     throw new WizardCancelledError();
   }
@@ -27,10 +27,10 @@ export function abortIfCancelled<T>(value: T | symbol): T {
 const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
-    hint: "Automatic error and crash reporting",
+    hint: "Error and crash reporting",
   },
   performanceMonitoring: {
-    label: "Performance Monitoring",
+    label: "Performance Monitoring (Tracing)",
     hint: "Transaction and span tracing",
   },
   sessionReplay: {
