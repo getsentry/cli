@@ -1649,6 +1649,16 @@ describe("resolveBody", () => {
     ).rejects.toThrow(/cannot.*query parameters/i);
   });
 
+  test("GET --data with JSON primitive throws ValidationError", async () => {
+    const stderr = createMockWriter();
+    await expect(
+      resolveBody({ method: "GET", data: "null" }, MOCK_STDIN, stderr)
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      resolveBody({ method: "GET", data: "42" }, MOCK_STDIN, stderr)
+    ).rejects.toThrow(ValidationError);
+  });
+
   test("POST --data still returns body (regression guard)", async () => {
     const stderr = createMockWriter();
     const result = await resolveBody(
@@ -1698,7 +1708,25 @@ describe("dataToQueryParams", () => {
   test("throws on JSON array", () => {
     expect(() => dataToQueryParams([1, 2, 3])).toThrow(ValidationError);
     expect(() => dataToQueryParams([1, 2, 3])).toThrow(
-      /cannot.*JSON array.*query parameters/i
+      /cannot.*JSON primitive or array.*query parameters/i
     );
+  });
+
+  test("throws on null", () => {
+    expect(() =>
+      dataToQueryParams(null as unknown as Record<string, unknown>)
+    ).toThrow(ValidationError);
+  });
+
+  test("throws on boolean", () => {
+    expect(() =>
+      dataToQueryParams(true as unknown as Record<string, unknown>)
+    ).toThrow(ValidationError);
+  });
+
+  test("throws on number", () => {
+    expect(() =>
+      dataToQueryParams(42 as unknown as Record<string, unknown>)
+    ).toThrow(ValidationError);
   });
 });

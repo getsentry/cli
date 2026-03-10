@@ -631,6 +631,27 @@ export function parseDataBody(
 }
 
 /**
+ * Parse a URL-encoded string into a query parameter map.
+ * Duplicate keys are collected into arrays.
+ */
+function parseUrlEncodedParams(
+  data: string
+): Record<string, string | string[]> {
+  const params: Record<string, string | string[]> = {};
+  for (const [key, value] of new URLSearchParams(data)) {
+    const existing = params[key];
+    if (existing !== undefined) {
+      params[key] = Array.isArray(existing)
+        ? [...existing, value]
+        : [existing, value];
+    } else {
+      params[key] = value;
+    }
+  }
+  return params;
+}
+
+/**
  * Convert `--data` content to query parameters for bodyless HTTP methods
  * (GET, HEAD, OPTIONS).
  *
@@ -642,35 +663,23 @@ export function parseDataBody(
  *
  * @param data - Parsed output from {@link parseDataBody}
  * @returns Query parameter map suitable for `rawApiRequest`'s `params` option
- * @throws {ValidationError} When data is a JSON array (cannot be represented as query params)
+ * @throws {ValidationError} When data is a JSON array or primitive (cannot be query params)
  * @internal Exported for testing
  */
 export function dataToQueryParams(
   data: Record<string, unknown> | unknown[] | string
 ): Record<string, string | string[]> {
-  // String data: parse as URL-encoded query string
   if (typeof data === "string") {
-    const params: Record<string, string | string[]> = {};
-    const searchParams = new URLSearchParams(data);
-    for (const [key, value] of searchParams) {
-      const existing = params[key];
-      if (existing !== undefined) {
-        params[key] = Array.isArray(existing)
-          ? [...existing, value]
-          : [existing, value];
-      } else {
-        params[key] = value;
-      }
-    }
-    return params;
+    return parseUrlEncodedParams(data);
   }
 
-  // JSON arrays can't be represented as query params
-  if (Array.isArray(data)) {
+  // JSON arrays and primitives (null, boolean, number) can't be query params.
+  // parseDataBody uses `as` to narrow JSON.parse output, but primitives slip through.
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
     throw new ValidationError(
-      "Cannot use --data with a JSON array for GET requests. " +
-        "JSON arrays cannot be converted to query parameters. " +
-        "Use --method POST or pass individual values with --field/-F.",
+      "Cannot use --data with a JSON primitive or array for GET requests. " +
+        "Only JSON objects and URL-encoded strings can be converted to query parameters. " +
+        "Use --method POST to send this data as a request body.",
       "data"
     );
   }
