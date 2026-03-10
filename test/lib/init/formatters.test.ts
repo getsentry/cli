@@ -125,13 +125,6 @@ describe("formatError", () => {
     );
   });
 
-  test("shows --force hint for already-installed exit code (10)", () => {
-    formatError({ status: "failed", result: { exitCode: 10 } });
-
-    const warnMsg: string = logWarnSpy.mock.calls[0][0];
-    expect(warnMsg).toContain("--force");
-  });
-
   test("shows platform hint for detection failure exit code (20)", () => {
     formatError({ status: "failed", result: { exitCode: 20 } });
 

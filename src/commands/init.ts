@@ -12,7 +12,6 @@ import { buildCommand } from "../lib/command.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 
 type InitFlags = {
-  readonly force: boolean;
   readonly yes: boolean;
   readonly "dry-run": boolean;
   readonly features?: string;
@@ -39,11 +38,6 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       ],
     },
     flags: {
-      force: {
-        kind: "boolean",
-        brief: "Continue even if Sentry is already installed",
-        default: false,
-      },
       yes: {
         kind: "boolean",
         brief: "Non-interactive mode (accept defaults)",
@@ -75,7 +69,6 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
 
     await runWizard({
       directory: targetDir,
-      force: flags.force,
       yes: flags.yes,
       dryRun: flags["dry-run"],
       features: featuresList,

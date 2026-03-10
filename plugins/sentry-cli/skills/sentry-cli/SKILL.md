@@ -659,7 +659,6 @@ Initialize Sentry in your project
 Initialize Sentry in your project
 
 **Flags:**
-- `--force - Continue even if Sentry is already installed`
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
 - `--features <value> - Comma-separated features: errors,tracing,logs,replay,metrics`
