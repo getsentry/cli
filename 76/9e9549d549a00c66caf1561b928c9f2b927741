@@ -1,0 +1,47 @@
+# Auto-Compact Mode for `sentry issue list`
+
+## Summary
+
+Auto-detect compact mode based on terminal height. When the estimated table height
+exceeds the terminal's row count, automatically switch to compact (single-line) rows.
+Users can still force `--compact` or `--no-compact` to override.
+
+## Changes (already implemented in working tree)
+
+### 1. `src/lib/formatters/human.ts` — Auto-compact detection utility
+
+- Added `LINES_PER_DEFAULT_ROW = 3` (2-line content + 1 separator per row)
+- Added `TABLE_LINE_OVERHEAD = 4` (top border + header + header sep + bottom border)
+- Added exported `shouldAutoCompact(rowCount)`:
+  - Returns `false` for non-TTY (when `process.stdout.rows` is undefined/0)
+  - Returns `true` when `rowCount * 3 + 4 > terminalHeight`
+
+### 2. `src/commands/issue/list.ts` — Tri-state compact flag + resolution
+
+- Changed `ListFlags.compact` from `boolean` to `boolean | undefined` (optional)
+- Changed Stricli flag from `default: false` to `optional: true` — gives `undefined`
+  when neither `--compact` nor `--no-compact` is specified
+- Added `resolveCompact(flag, rowCount)` helper:
+  - `true`/`false` → returned as-is (explicit user override)
+  - `undefined` → delegates to `shouldAutoCompact()`
+- Updated both `writeIssueTable` call sites to use `resolveCompact()`
+- Updated brief text: `"Single-line rows for compact output (auto-detects if omitted)"`
+
+### 3. `test/lib/formatters/auto-compact.property.test.ts` — Property-based tests (new)
+
+7 property-based tests:
+- Non-TTY returns false (undefined rows)
+- Zero terminal height returns false
+- Zero rows only compact if overhead exceeds terminal
+- Returns true when estimated height exceeds terminal
+- Returns false when estimated height fits
+- Monotonicity: more rows never decreases compactness
+- Determinism: same inputs → same output
+
+## Verification
+
+- [x] `bun test test/lib/formatters/auto-compact.property.test.ts` — 7 pass
+- [x] `bun run typecheck` — clean
+- [x] `bun run lint` — clean
+- [ ] Run full test suite: `bun test`
+- [ ] Commit changes
