@@ -28,6 +28,7 @@ import {
   resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
+  writeResponseBody,
   writeResponseHeaders,
   writeVerboseRequest,
   writeVerboseResponse,
@@ -912,6 +913,54 @@ describe("writeResponseHeaders", () => {
   });
 });
 
+describe("writeResponseBody", () => {
+  test("writes JSON object with pretty-printing", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, { key: "value", num: 42 });
+    expect(writer.output).toBe('{\n  "key": "value",\n  "num": 42\n}\n');
+  });
+
+  test("writes JSON array with pretty-printing", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, [1, 2, 3]);
+    expect(writer.output).toBe("[\n  1,\n  2,\n  3\n]\n");
+  });
+
+  test("writes string directly without JSON quoting", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, "plain text response");
+    expect(writer.output).toBe("plain text response\n");
+  });
+
+  test("writes number as string", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, 42);
+    expect(writer.output).toBe("42\n");
+  });
+
+  test("does not write null", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, null);
+    expect(writer.output).toBe("");
+  });
+
+  test("does not write undefined", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, undefined);
+    expect(writer.output).toBe("");
+  });
+
+  test("applies --fields filtering to objects", () => {
+    const writer = createMockWriter();
+    writeResponseBody(writer, { id: "1", name: "test", extra: "data" }, [
+      "id",
+      "name",
+    ]);
+    const parsed = JSON.parse(writer.output);
+    expect(parsed).toEqual({ id: "1", name: "test" });
+  });
+});
+
 describe("writeVerboseRequest", () => {
   test("writes method and endpoint", () => {
     const writer = createMockWriter();
@@ -1110,6 +1159,16 @@ describe("resolveEffectiveHeaders", () => {
   test("defaults to empty object when no headers provided", () => {
     const headers = resolveEffectiveHeaders(undefined, undefined);
     expect(headers).toEqual({});
+  });
+
+  test("adds Content-Type for null body (matches rawApiRequest)", () => {
+    const headers = resolveEffectiveHeaders(undefined, null);
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
+
+  test("does not add Content-Type for undefined body", () => {
+    const headers = resolveEffectiveHeaders(undefined, undefined);
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 });
 

@@ -27,9 +27,9 @@ type ApiFlags = {
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
-  /** Injected by buildCommand via output: { json: true } */
+  /** Injected by buildCommand via output: "json" */
   readonly json: boolean;
-  /** Injected by buildCommand via output: { json: true } */
+  /** Injected by buildCommand via output: "json" */
   readonly fields?: string[];
 };
 
@@ -865,6 +865,31 @@ export function writeResponseHeaders(
 }
 
 /**
+ * Write API response body to stdout.
+ *
+ * Preserves raw strings (plain text, HTML error pages) without JSON quoting.
+ * Objects/arrays are JSON-formatted with optional `--fields` filtering.
+ * Null/undefined bodies produce no output.
+ *
+ * @internal Exported for testing
+ */
+export function writeResponseBody(
+  stdout: Writer,
+  body: unknown,
+  fields?: string[]
+): void {
+  if (body === null || body === undefined) {
+    return;
+  }
+
+  if (typeof body === "object") {
+    writeJson(stdout, body, fields);
+  } else {
+    stdout.write(`${String(body)}\n`);
+  }
+}
+
+/**
  * Write verbose request output (curl-style format)
  * @internal Exported for testing
  */
@@ -933,13 +958,14 @@ export function resolveEffectiveHeaders(
   customHeaders: Record<string, string> | undefined,
   body: unknown
 ): Record<string, string> {
+  // Mirror rawApiRequest exactly: auto-add Content-Type for any non-string,
+  // non-undefined body when no Content-Type was explicitly provided.
+  const isStringBody = typeof body === "string";
   const headers = { ...(customHeaders ?? {}) };
-  if (
-    body !== undefined &&
-    body !== null &&
-    typeof body !== "string" &&
-    !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
-  ) {
+  const hasContentType = Object.keys(headers).some(
+    (k) => k.toLowerCase() === "content-type"
+  );
+  if (!(isStringBody || hasContentType) && body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
   return headers;
@@ -1068,7 +1094,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: { json: true },
+  output: "json",
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1192,15 +1218,19 @@ export const apiCommand = buildCommand({
         : undefined;
 
     // Dry-run mode: preview the request that would be sent
+    // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
-      return {
-        data: {
+      writeJson(
+        stdout,
+        {
           method: flags.method,
           url: resolveRequestUrl(normalizedEndpoint, params),
           headers: resolveEffectiveHeaders(headers, body),
           body: body ?? null,
         },
-      };
+        flags.fields
+      );
+      return;
     }
 
     // Verbose mode: show request details before the response
@@ -1225,21 +1255,22 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Output response headers when requested (side-effect before body)
+    // Output response headers when requested
     if (flags.verbose) {
       writeVerboseResponse(stdout, response.status, response.headers);
     } else if (flags.include) {
       writeResponseHeaders(stdout, response.status, response.headers);
     }
 
-    // Error responses: Stricli overwrites process.exitCode after the
-    // command returns, so we must use process.exit(1) directly.
-    // Return { data } for success so the output wrapper renders it.
+    // Write response body — preserve raw strings, JSON-format objects.
+    // The api command is a raw proxy; non-JSON responses (plain text,
+    // HTML error pages) must not be wrapped in JSON string quotes.
+    writeResponseBody(stdout, response.body, flags.fields);
+
+    // Error exit: Stricli overwrites process.exitCode after the command
+    // returns, so we must call process.exit(1) directly.
     if (isError) {
-      writeJson(stdout, response.body, flags.fields);
       process.exit(1);
     }
-
-    return { data: response.body };
   },
 });
