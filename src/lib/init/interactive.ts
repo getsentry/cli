@@ -8,7 +8,12 @@
 
 import { confirm, log, multiselect, select } from "@clack/prompts";
 import chalk from "chalk";
-import { abortIfCancelled, featureHint, featureLabel } from "./clack-utils.js";
+import {
+  abortIfCancelled,
+  featureHint,
+  featureLabel,
+  sortFeatures,
+} from "./clack-utils.js";
 import { REQUIRED_FEATURE } from "./constants.js";
 import type {
   ConfirmPayload,
@@ -90,7 +95,7 @@ async function handleMultiSelect(
     return { features: available };
   }
 
-  const optional = available.filter((f) => f !== REQUIRED_FEATURE);
+  const optional = sortFeatures(available.filter((f) => f !== REQUIRED_FEATURE));
 
   if (optional.length === 0) {
     if (hasRequired) {

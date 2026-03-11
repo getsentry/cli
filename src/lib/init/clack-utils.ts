@@ -57,6 +57,25 @@ export function featureHint(id: string): string | undefined {
   return FEATURE_INFO[id]?.hint;
 }
 
+const FEATURE_DISPLAY_ORDER = [
+  "errorMonitoring",
+  "sessionReplay",
+  "performanceMonitoring",
+  "logs",
+  "metrics",
+  "profiling",
+  "sourceMaps",
+];
+
+/** Sort features into canonical display order for the multi-select prompt. */
+export function sortFeatures(features: string[]): string[] {
+  return features.slice().sort((a, b) => {
+    const ai = FEATURE_DISPLAY_ORDER.indexOf(a);
+    const bi = FEATURE_DISPLAY_ORDER.indexOf(b);
+    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+  });
+}
+
 export const STEP_LABELS: Record<string, string> = {
   "discover-context": "Analyzing project structure",
   "select-target-app": "Selecting target application",
