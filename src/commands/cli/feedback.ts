@@ -12,10 +12,16 @@
 import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { ValidationError } from "../../lib/errors.js";
-import { logger } from "../../lib/logger.js";
+import { ConfigError, ValidationError } from "../../lib/errors.js";
+import { formatFeedbackResult } from "../../lib/formatters/human.js";
 
-const log = logger.withTag("cli.feedback");
+/** Structured result of the feedback submission */
+export type FeedbackResult = {
+  /** Whether the feedback was successfully sent */
+  sent: boolean;
+  /** The submitted message */
+  message: string;
+};
 
 export const feedbackCommand = buildCommand({
   docs: {
@@ -24,6 +30,7 @@ export const feedbackCommand = buildCommand({
       "Submit feedback about your experience with the Sentry CLI. " +
       "All text after 'feedback' is sent as your message.",
   },
+  output: { json: true, human: formatFeedbackResult },
   parameters: {
     flags: {},
     positional: {
@@ -35,8 +42,12 @@ export const feedbackCommand = buildCommand({
       },
     },
   },
-  // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
-  async func(this: SentryContext, _flags: {}, ...messageParts: string[]) {
+  async func(
+    this: SentryContext,
+    // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
+    _flags: {},
+    ...messageParts: string[]
+  ): Promise<{ data: FeedbackResult }> {
     const message = messageParts.join(" ");
 
     if (!message.trim()) {
@@ -44,9 +55,10 @@ export const feedbackCommand = buildCommand({
     }
 
     if (!Sentry.isEnabled()) {
-      log.warn("Feedback not sent: telemetry is disabled.");
-      log.warn("Unset SENTRY_CLI_NO_TELEMETRY to enable feedback.");
-      return;
+      throw new ConfigError(
+        "Feedback not sent: telemetry is disabled.",
+        "Unset SENTRY_CLI_NO_TELEMETRY to enable feedback."
+      );
     }
 
     Sentry.captureFeedback({ message });
@@ -54,10 +66,11 @@ export const feedbackCommand = buildCommand({
     // Flush to ensure feedback is sent before process exits
     const sent = await Sentry.flush(3000);
 
-    if (sent) {
-      log.success("Feedback submitted. Thank you!");
-    } else {
-      log.warn("Feedback may not have been sent (network timeout).");
-    }
+    return {
+      data: {
+        sent,
+        message,
+      },
+    };
   },
 });

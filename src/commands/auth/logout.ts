@@ -13,9 +13,16 @@ import {
   isEnvTokenActive,
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
-import { logger } from "../../lib/logger.js";
+import { AuthError } from "../../lib/errors.js";
+import { formatLogoutResult } from "../../lib/formatters/human.js";
 
-const log = logger.withTag("auth.logout");
+/** Structured result of the logout operation */
+export type LogoutResult = {
+  /** Whether logout actually cleared credentials */
+  loggedOut: boolean;
+  /** Path where credentials were stored (when loggedOut is true) */
+  configPath?: string;
+};
 
 export const logoutCommand = buildCommand({
   docs: {
@@ -23,26 +30,34 @@ export const logoutCommand = buildCommand({
     fullDescription:
       "Remove stored authentication credentials from the configuration file.",
   },
+  output: { json: true, human: formatLogoutResult },
   parameters: {
     flags: {},
   },
-  async func(this: SentryContext): Promise<void> {
+  async func(this: SentryContext): Promise<{ data: LogoutResult }> {
     if (!(await isAuthenticated())) {
-      log.warn("Not currently authenticated.");
-      return;
+      throw new AuthError("not_authenticated", undefined, {
+        skipAutoAuth: true,
+      });
     }
 
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
-      log.warn(
-        `Authentication is provided via ${envVar} environment variable.\n` +
+      throw new AuthError(
+        "invalid",
+        `Authentication is provided via ${envVar} environment variable. ` +
           `Unset ${envVar} to log out.`
       );
-      return;
     }
 
+    const configPath = getDbPath();
     await clearAuth();
-    log.success("Logged out successfully.");
-    log.info(`Credentials removed from: ${getDbPath()}`);
+
+    return {
+      data: {
+        loggedOut: true,
+        configPath,
+      },
+    };
   },
 });

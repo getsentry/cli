@@ -1609,6 +1609,48 @@ export function formatExpiration(expiresAt: number): string {
   return `${expiresDate.toLocaleString()} (${formatDuration(secondsRemaining)} remaining)`;
 }
 
+// Feedback Formatting
+
+/** Structured feedback result (imported from the command module) */
+type FeedbackResult = import("../../commands/cli/feedback.js").FeedbackResult;
+
+/**
+ * Format feedback submission result as rendered markdown.
+ *
+ * @param data - Structured feedback result from the command
+ * @returns Rendered terminal string
+ */
+export function formatFeedbackResult(data: FeedbackResult): string {
+  if (data.sent) {
+    return renderMarkdown(
+      `${colorTag("green", "✓")} Feedback submitted. Thank you!`
+    );
+  }
+  return renderMarkdown(
+    `${colorTag("yellow", "⚠")} Feedback may not have been sent (network timeout).`
+  );
+}
+
+// Auth Logout Formatting
+
+/** Structured logout result data (imported from the command module) */
+type LogoutResult = import("../../commands/auth/logout.js").LogoutResult;
+
+/**
+ * Format logout result as rendered markdown.
+ *
+ * @param data - Structured logout result from the command
+ * @returns Rendered terminal string
+ */
+export function formatLogoutResult(data: LogoutResult): string {
+  const lines: string[] = [];
+  lines.push(`${colorTag("green", "✓")} Logged out successfully.`);
+  if (data.configPath) {
+    lines.push(`Credentials removed from: ${safeCodeSpan(data.configPath)}`);
+  }
+  return renderMarkdown(lines.join("\n\n"));
+}
+
 // Auth Status Formatting
 
 /** Structured auth status data shape (re-imported from the command module) */

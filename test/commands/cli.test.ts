@@ -82,22 +82,17 @@ describe("feedbackCommand.func", () => {
     );
   });
 
-  test("writes telemetry disabled message when Sentry is disabled", async () => {
+  test("throws ConfigError when Sentry is disabled", async () => {
     const func = await feedbackCommand.loader();
-    const { context, getOutput, restore } = createMockContext();
+    const mockContext = {
+      stdout: { write: mock(() => true) },
+      stderr: { write: mock(() => true) },
+    };
 
-    try {
-      // Sentry is disabled in test environment (no DSN)
-      await func.call(context, {}, "test", "feedback");
-
-      const output = getOutput();
-      expect(output).toContain("Feedback not sent: telemetry is disabled.");
-      expect(output).toContain(
-        "Unset SENTRY_CLI_NO_TELEMETRY to enable feedback."
-      );
-    } finally {
-      restore();
-    }
+    // Sentry is disabled in test environment (no DSN)
+    await expect(
+      func.call(mockContext, {}, "test", "feedback")
+    ).rejects.toThrow("Feedback not sent: telemetry is disabled.");
   });
 });
 
