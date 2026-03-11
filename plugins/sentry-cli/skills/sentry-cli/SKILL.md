@@ -396,7 +396,6 @@ Make an authenticated API request
 - `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
 - `-H, --header <value>... - Add a HTTP request header in key:value format`
 - `--input <value> - The file to use as body for the HTTP request (use "-" to read from standard input)`
-- `-i, --include - Include HTTP response status line and headers in the output`
 - `--silent - Do not print the response body`
 - `--verbose - Include full HTTP request and response in the output`
 - `-n, --dry-run - Show the resolved request without sending it`
