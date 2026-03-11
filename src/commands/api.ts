@@ -1218,7 +1218,6 @@ export const apiCommand = buildCommand({
         : undefined;
 
     // Dry-run mode: preview the request that would be sent
-    // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
       writeJson(
         stdout,
