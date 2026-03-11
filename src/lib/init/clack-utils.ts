@@ -72,7 +72,7 @@ export function sortFeatures(features: string[]): string[] {
   return features.slice().sort((a, b) => {
     const ai = FEATURE_DISPLAY_ORDER.indexOf(a);
     const bi = FEATURE_DISPLAY_ORDER.indexOf(b);
-    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
+    return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) - (bi === -1 ? Number.MAX_SAFE_INTEGER : bi);
   });
 }
 
