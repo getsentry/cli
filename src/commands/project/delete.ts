@@ -25,7 +25,7 @@ import {
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
-import { CliError, ContextError } from "../../lib/errors.js";
+import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { resolveProjectBySlug } from "../../lib/resolve-target.js";
 
@@ -138,7 +138,19 @@ export const deleteCommand = buildCommand({
       }
     }
 
-    await deleteProject(orgSlug, project.slug);
+    try {
+      await deleteProject(orgSlug, project.slug);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        throw new CliError(
+          `Permission denied: You don't have permission to delete '${orgSlug}/${project.slug}'.\n\n` +
+            "Project deletion requires the 'project:admin' scope.\n" +
+            `  - Check your role:  sentry org view ${orgSlug}\n` +
+            "  - Re-authenticate:  sentry auth login"
+        );
+      }
+      throw error;
+    }
 
     if (flags.json) {
       stdout.write(

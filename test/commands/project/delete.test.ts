@@ -151,7 +151,7 @@ describe("project delete", () => {
     expect(deleteProjectSpy).not.toHaveBeenCalled();
   });
 
-  test("propagates 403 from deleteProject", async () => {
+  test("shows actionable message on 403 from deleteProject", async () => {
     deleteProjectSpy.mockRejectedValue(
       new ApiError("Forbidden", 403, "You do not have permission")
     );
@@ -161,7 +161,7 @@ describe("project delete", () => {
 
     await expect(
       func.call(context, { yes: true, json: false }, "acme-corp/my-app")
-    ).rejects.toThrow(ApiError);
+    ).rejects.toThrow("project:admin");
   });
 
   test("verifies project exists before attempting delete", async () => {
