@@ -46,7 +46,7 @@ describe("featureLabel", () => {
   test("returns label for known feature", () => {
     expect(featureLabel("errorMonitoring")).toBe("Error Monitoring");
     expect(featureLabel("performanceMonitoring")).toBe(
-      "Performance Monitoring"
+      "Performance Monitoring (Tracing)"
     );
     expect(featureLabel("logs")).toBe("Logging");
   });
@@ -58,9 +58,7 @@ describe("featureLabel", () => {
 
 describe("featureHint", () => {
   test("returns hint for known feature", () => {
-    expect(featureHint("errorMonitoring")).toBe(
-      "Automatic error and crash reporting"
-    );
+    expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
     expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
   });
 
