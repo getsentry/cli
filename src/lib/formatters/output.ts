@@ -28,7 +28,7 @@
 
 import type { Writer } from "../../types/index.js";
 import { muted } from "./colors.js";
-import { writeJson } from "./json.js";
+import { formatJson, writeJson } from "./json.js";
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -83,8 +83,25 @@ export type OutputConfig<T> = {
    * Use this for fields that exist only for the human formatter
    * (e.g. pre-formatted terminal strings) and should not appear
    * in the JSON contract.
+   *
+   * Ignored when {@link jsonTransform} is set — the transform is
+   * responsible for shaping the final JSON output.
    */
   jsonExclude?: ReadonlyArray<keyof T & string>;
+  /**
+   * Custom JSON serialization transform.
+   *
+   * When set, replaces the default JSON output path entirely.
+   * The function receives the raw command data and the parsed `--fields`
+   * list, and returns the final object to serialize.
+   *
+   * This is useful for list commands that wrap items in a
+   * `{ data, hasMore, nextCursor }` envelope and need per-element
+   * field filtering rather than top-level filtering.
+   *
+   * When `jsonTransform` is set, `jsonExclude` is ignored.
+   */
+  jsonTransform?: (data: T, fields?: string[]) => unknown;
 };
 
 /**
@@ -137,6 +154,13 @@ export function renderCommandOutput(
   ctx: RenderContext
 ): void {
   if (ctx.json) {
+    // Custom transform: the function handles both shaping and field filtering
+    if (config.jsonTransform) {
+      const transformed = config.jsonTransform(data, ctx.fields);
+      stdout.write(`${formatJson(transformed)}\n`);
+      return;
+    }
+
     let jsonData = data;
     if (
       config.jsonExclude &&
@@ -144,11 +168,26 @@ export function renderCommandOutput(
       typeof data === "object" &&
       data !== null
     ) {
-      const copy = { ...data } as Record<string, unknown>;
-      for (const key of config.jsonExclude) {
-        delete copy[key];
+      const keys = config.jsonExclude;
+      if (Array.isArray(data)) {
+        // Strip excluded keys from each element in the array
+        jsonData = data.map((item: unknown) => {
+          if (typeof item !== "object" || item === null) {
+            return item;
+          }
+          const copy = { ...item } as Record<string, unknown>;
+          for (const key of keys) {
+            delete copy[key];
+          }
+          return copy;
+        });
+      } else {
+        const copy = { ...data } as Record<string, unknown>;
+        for (const key of keys) {
+          delete copy[key];
+        }
+        jsonData = copy;
       }
-      jsonData = copy;
     }
     writeJson(stdout, jsonData, ctx.fields);
     return;

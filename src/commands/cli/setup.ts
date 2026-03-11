@@ -27,6 +27,7 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
+import { logger } from "../../lib/logger.js";
 import {
   addToGitHubPath,
   addToPath,
@@ -40,6 +41,8 @@ import {
   type InstallationMethod,
   parseInstallationMethod,
 } from "../../lib/upgrade.js";
+
+const log = logger.withTag("cli.setup");
 
 type SetupFlags = {
   readonly install: boolean;
@@ -71,7 +74,7 @@ async function handleInstall(
   execPath: string,
   homeDir: string,
   env: NodeJS.ProcessEnv,
-  log: Logger
+  emit: Logger
 ): Promise<{ binaryPath: string; binaryDir: string; created: boolean }> {
   const installDir = determineInstallDir(homeDir, env);
   const targetPath = join(installDir, getBinaryFilename());
@@ -80,7 +83,7 @@ async function handleInstall(
   const binaryPath = await installBinary(execPath, installDir);
   const binaryDir = dirname(binaryPath);
 
-  log(`Binary: Installed to ${binaryPath}`);
+  emit(`Binary: Installed to ${binaryPath}`);
 
   // Clean up temp binary (Posix only — the inode stays alive for the running process)
   if (process.platform !== "win32") {
@@ -101,12 +104,12 @@ async function handlePathModification(
   binaryDir: string,
   shell: ShellInfo,
   env: NodeJS.ProcessEnv,
-  log: Logger
+  emit: Logger
 ): Promise<void> {
   const alreadyInPath = isInPath(binaryDir, env.PATH);
 
   if (alreadyInPath) {
-    log(`PATH: ${binaryDir} is already in PATH`);
+    emit(`PATH: ${binaryDir} is already in PATH`);
     return;
   }
 
@@ -114,24 +117,24 @@ async function handlePathModification(
     const result = await addToPath(shell.configFile, binaryDir, shell.type);
 
     if (result.modified) {
-      log(`PATH: ${result.message}`);
-      log(`      Restart your shell or run: source ${shell.configFile}`);
+      emit(`PATH: ${result.message}`);
+      emit(`      Restart your shell or run: source ${shell.configFile}`);
     } else if (result.manualCommand) {
-      log(`PATH: ${result.message}`);
-      log(`      Add manually: ${result.manualCommand}`);
+      emit(`PATH: ${result.message}`);
+      emit(`      Add manually: ${result.manualCommand}`);
     } else {
-      log(`PATH: ${result.message}`);
+      emit(`PATH: ${result.message}`);
     }
   } else {
     const cmd = getPathCommand(shell.type, binaryDir);
-    log("PATH: No shell config file found");
-    log(`      Add manually to your shell config: ${cmd}`);
+    emit("PATH: No shell config file found");
+    emit(`      Add manually to your shell config: ${cmd}`);
   }
 
   // Handle GitHub Actions
   const addedToGitHub = await addToGitHubPath(binaryDir, env);
   if (addedToGitHub) {
-    log("PATH: Added to $GITHUB_PATH");
+    emit("PATH: Added to $GITHUB_PATH");
   }
 }
 
@@ -232,11 +235,11 @@ async function handleCompletions(
  * Only produces output when the skill file is freshly created. Subsequent
  * runs (e.g. after upgrade) silently update without printing.
  */
-async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
+async function handleAgentSkills(homeDir: string, emit: Logger): Promise<void> {
   const location = await installAgentSkills(homeDir, CLI_VERSION);
 
   if (location?.created) {
-    log(`Agent skills: Installed to ${location.path}`);
+    emit(`Agent skills: Installed to ${location.path}`);
   }
 }
 
@@ -244,18 +247,18 @@ async function handleAgentSkills(homeDir: string, log: Logger): Promise<void> {
  * Print a rich welcome message after fresh install.
  */
 function printWelcomeMessage(
-  log: Logger,
+  emit: Logger,
   version: string,
   binaryPath: string
 ): void {
-  log("");
-  log(`Installed sentry v${version} to ${binaryPath}`);
-  log("");
-  log("Get started:");
-  log("  sentry auth login  Authenticate with Sentry");
-  log("  sentry --help      See all available commands");
-  log("");
-  log("https://cli.sentry.dev");
+  emit("");
+  emit(`Installed sentry v${version} to ${binaryPath}`);
+  emit("");
+  emit("Get started:");
+  emit("  sentry auth login  Authenticate with Sentry");
+  emit("  sentry --help      See all available commands");
+  emit("");
+  emit("https://cli.sentry.dev");
 }
 
 type WarnLogger = (step: string, error: unknown) => void;
@@ -288,7 +291,7 @@ type ConfigStepOptions = {
   readonly binaryDir: string;
   readonly homeDir: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly log: Logger;
+  readonly emit: Logger;
   readonly warn: WarnLogger;
 };
 
@@ -299,7 +302,7 @@ type ConfigStepOptions = {
  * error) doesn't prevent the others from running.
  */
 async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
-  const { flags, binaryPath, binaryDir, homeDir, env, log, warn } = opts;
+  const { flags, binaryPath, binaryDir, homeDir, env, emit, warn } = opts;
   const shell = detectShell(env.SHELL, homeDir, env.XDG_CONFIG_HOME);
 
   // 1. Record installation info
@@ -314,7 +317,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
           version: CLI_VERSION,
         });
         if (!flags.install) {
-          log(`Recorded installation method: ${method}`);
+          emit(`Recorded installation method: ${method}`);
         }
       },
       warn
@@ -329,7 +332,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
       () => {
         setReleaseChannel(channel);
         if (!flags.install) {
-          log(`Recorded release channel: ${channel}`);
+          emit(`Recorded release channel: ${channel}`);
         }
       },
       warn
@@ -340,7 +343,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
   if (!flags["no-modify-path"]) {
     await bestEffort(
       "PATH modification",
-      () => handlePathModification(binaryDir, shell, env, log),
+      () => handlePathModification(binaryDir, shell, env, emit),
       warn
     );
   }
@@ -357,7 +360,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
           env.PATH
         );
         for (const line of completionLines) {
-          log(line);
+          emit(line);
         }
       },
       warn
@@ -368,7 +371,7 @@ async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
   if (!flags["no-agent-skills"]) {
     await bestEffort(
       "Agent skills",
-      () => handleAgentSkills(homeDir, log),
+      () => handleAgentSkills(homeDir, emit),
       warn
     );
   }
@@ -440,18 +443,17 @@ export const setupCommand = buildCommand({
   },
   async func(this: SentryContext, flags: SetupFlags): Promise<void> {
     const { process, homeDir } = this;
-    const { stdout, stderr } = process;
 
-    const log: Logger = (msg: string) => {
+    const emit: Logger = (msg: string) => {
       if (!flags.quiet) {
-        stdout.write(`${msg}\n`);
+        log.info(msg);
       }
     };
 
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      stderr.write(`Warning: ${step} failed: ${msg}\n`);
+      log.warn(`${step} failed: ${msg}`);
     };
 
     let binaryPath = process.execPath;
@@ -464,7 +466,7 @@ export const setupCommand = buildCommand({
         process.execPath,
         homeDir,
         process.env,
-        log
+        emit
       );
       binaryPath = result.binaryPath;
       binaryDir = result.binaryDir;
@@ -478,14 +480,14 @@ export const setupCommand = buildCommand({
       binaryDir,
       homeDir,
       env: process.env,
-      log,
+      emit,
       warn,
     });
 
     // 5. Print welcome message only on fresh install — upgrades are silent
     // since the upgrade command itself prints a success message.
     if (!flags.quiet && freshInstall) {
-      printWelcomeMessage(log, CLI_VERSION, binaryPath);
+      printWelcomeMessage(emit, CLI_VERSION, binaryPath);
     }
   },
 });

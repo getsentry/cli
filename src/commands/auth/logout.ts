@@ -13,7 +13,9 @@ import {
   isEnvTokenActive,
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
-import { success } from "../../lib/formatters/colors.js";
+import { logger } from "../../lib/logger.js";
+
+const log = logger.withTag("auth.logout");
 
 export const logoutCommand = buildCommand({
   docs: {
@@ -25,24 +27,22 @@ export const logoutCommand = buildCommand({
     flags: {},
   },
   async func(this: SentryContext): Promise<void> {
-    const { stdout } = this;
-
     if (!(await isAuthenticated())) {
-      stdout.write("Not currently authenticated.\n");
+      log.warn("Not currently authenticated.");
       return;
     }
 
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
-      stdout.write(
+      log.warn(
         `Authentication is provided via ${envVar} environment variable.\n` +
-          `Unset ${envVar} to log out.\n`
+          `Unset ${envVar} to log out.`
       );
       return;
     }
 
     await clearAuth();
-    stdout.write(`${success("✓")} Logged out successfully.\n`);
-    stdout.write(`  Credentials removed from: ${getDbPath()}\n`);
+    log.success("Logged out successfully.");
+    log.info(`Credentials removed from: ${getDbPath()}`);
   },
 });

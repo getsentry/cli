@@ -13,16 +13,12 @@
  *   buildOrgListCommand
  */
 
-import type {
-  Aliases,
-  Command,
-  CommandContext,
-  CommandFunction,
-} from "@stricli/core";
+import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { warning } from "./formatters/colors.js";
+import type { OutputConfig } from "./formatters/output.js";
 import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
 import { disableResponseCache } from "./response-cache.js";
 
@@ -303,6 +299,28 @@ export function interceptSubcommand(
 /** Base flags type (mirrors command.ts) */
 type BaseFlags = Readonly<Partial<Record<string, unknown>>>;
 
+/** Base args type (mirrors command.ts) */
+type BaseArgs = readonly unknown[];
+
+/**
+ * Wider command function type that allows returning `CommandOutput<T>`.
+ *
+ * Mirrors `SentryCommandFunction` from `command.ts`. The Stricli
+ * `CommandFunction` type constrains returns to `void | Error`, which is
+ * too narrow for the return-based output pattern. This type adds `unknown`
+ * to the return union so `{ data, hint }` objects pass through.
+ */
+type ListCommandFunction<
+  FLAGS extends BaseFlags,
+  ARGS extends BaseArgs,
+  CONTEXT extends CommandContext,
+> = (
+  this: CONTEXT,
+  flags: FLAGS,
+  ...args: ARGS
+  // biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
+) => void | Error | unknown | Promise<void | Error | unknown>;
+
 /**
  * Build a Stricli command for a list endpoint with automatic plural-alias
  * interception.
@@ -340,8 +358,9 @@ export function buildListCommand<
       readonly brief: string;
       readonly fullDescription?: string;
     };
-    readonly func: CommandFunction<FLAGS, ARGS, CONTEXT>;
-    readonly output?: "json";
+    readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
+    // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
+    readonly output?: "json" | OutputConfig<any>;
   }
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;

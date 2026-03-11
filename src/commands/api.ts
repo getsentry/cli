@@ -12,7 +12,8 @@ import { OutputError, ValidationError } from "../lib/errors.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
-import type { Writer } from "../types/index.js";
+
+const log = logger.withTag("api");
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -309,7 +310,7 @@ export function setNestedValue(
 
 /**
  * Auto-correct fields that use ':' instead of '=' as the separator, and warn
- * the user on stderr.
+ * the user via the module logger.
  *
  * This recovers from a common mistake where users write Sentry search-query
  * style syntax (`-F status:resolved`) instead of the required key=value form
@@ -325,14 +326,12 @@ export function setNestedValue(
  * downstream parser can throw its normal error.
  *
  * @param fields - Raw field strings from --field or --raw-field flags
- * @param stderr - Writer to emit warnings on (command's stderr)
  * @returns New array with corrected field strings (or the original array if no
  *   corrections were needed)
  * @internal Exported for testing
  */
 export function normalizeFields(
-  fields: string[] | undefined,
-  stderr: Writer
+  fields: string[] | undefined
 ): string[] | undefined {
   if (!fields || fields.length === 0) {
     return fields;
@@ -358,8 +357,8 @@ export function normalizeFields(
       const key = field.substring(0, colonIndex);
       const value = field.substring(colonIndex + 1);
       const corrected = `${key}=${value}`;
-      stderr.write(
-        `warning: field '${field}' looks like it uses ':' instead of '=' — interpreting as '${corrected}'\n`
+      log.warn(
+        `field '${field}' looks like it uses ':' instead of '=' — interpreting as '${corrected}'`
       );
       return corrected;
     }
@@ -742,10 +741,10 @@ function tryParseJsonField(
  *   was empty/undefined.
  * @internal Exported for testing
  */
-export function extractJsonBody(
-  fields: string[] | undefined,
-  stderr: Writer
-): { body?: Record<string, unknown> | unknown[]; remaining?: string[] } {
+export function extractJsonBody(fields: string[] | undefined): {
+  body?: Record<string, unknown> | unknown[];
+  remaining?: string[];
+} {
   if (!fields || fields.length === 0) {
     return {};
   }
@@ -771,9 +770,8 @@ export function extractJsonBody(
 
     jsonBody = parsed;
     const preview = field.length > 60 ? `${field.substring(0, 57)}...` : field;
-    stderr.write(
-      `hint: '${preview}' was used as the request body. ` +
-        "Use --data/-d to pass inline JSON next time.\n"
+    log.info(
+      `'${preview}' was used as the request body. Use --data/-d to pass inline JSON next time.`
     );
   }
 
@@ -913,28 +911,27 @@ export function resolveEffectiveHeaders(
  * Build body and params from field flags, auto-detecting bare JSON bodies.
  *
  * Runs colon-to-equals normalization, extracts any JSON body passed as a
- * field value (with a stderr hint about `--data`), and routes the remaining
+ * field value (with a logged hint about `--data`), and routes the remaining
  * fields to body or query params based on the HTTP method.
  *
  * @internal Exported for testing
  */
 export function buildFromFields(
   method: HttpMethod,
-  flags: Pick<ApiFlags, "field" | "raw-field">,
-  stderr: Writer
+  flags: Pick<ApiFlags, "field" | "raw-field">
 ): {
   body?: Record<string, unknown> | unknown[];
   params?: Record<string, string | string[]>;
 } {
-  const field = normalizeFields(flags.field, stderr);
-  let rawField = normalizeFields(flags["raw-field"], stderr);
+  const field = normalizeFields(flags.field);
+  let rawField = normalizeFields(flags["raw-field"]);
 
   // Auto-detect bare JSON passed as a field value (common mistake).
   // GET requests don't have a body — skip detection so JSON-shaped values
   // fall through to query-param routing (which will throw a clear error).
   let body: Record<string, unknown> | unknown[] | undefined;
   if (method !== "GET") {
-    const extracted = extractJsonBody(rawField, stderr);
+    const extracted = extractJsonBody(rawField);
     body = extracted.body;
     rawField = extracted.remaining;
   }
@@ -986,8 +983,7 @@ export function buildFromFields(
  */
 export async function resolveBody(
   flags: Pick<ApiFlags, "method" | "data" | "input" | "field" | "raw-field">,
-  stdin: NodeJS.ReadStream & { fd: 0 },
-  stderr: Writer
+  stdin: NodeJS.ReadStream & { fd: 0 }
 ): Promise<{
   body?: Record<string, unknown> | unknown[] | string;
   params?: Record<string, string | string[]>;
@@ -1026,12 +1022,10 @@ export async function resolveBody(
     return { body: await buildBodyFromInput(flags.input, stdin) };
   }
 
-  return buildFromFields(flags.method, flags, stderr);
+  return buildFromFields(flags.method, flags);
 }
 
 // Command Definition
-
-const log = logger.withTag("api");
 
 /** Log outgoing request details in `> ` curl-verbose style. */
 function logRequest(
@@ -1162,10 +1156,10 @@ export const apiCommand = buildCommand({
     },
   },
   async func(this: SentryContext, flags: ApiFlags, endpoint: string) {
-    const { stderr, stdin } = this;
+    const { stdin } = this;
 
     const normalizedEndpoint = normalizeEndpoint(endpoint);
-    const { body, params } = await resolveBody(flags, stdin, stderr);
+    const { body, params } = await resolveBody(flags, stdin);
 
     const headers =
       flags.header && flags.header.length > 0

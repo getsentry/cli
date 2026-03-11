@@ -4,6 +4,9 @@
  * Unit tests for the --token authentication path in src/commands/auth/login.ts.
  * Uses spyOn to mock api-client, db/auth, db/user, and interactive-login
  * to cover all branches without real HTTP calls or database access.
+ *
+ * Status messages go through consola (→ process.stderr). Tests capture stderr
+ * via a spy on process.stderr.write and assert on the collected output.
  */
 
 import {
@@ -38,18 +41,30 @@ const SAMPLE_USER = {
   email: "jane@example.com",
 };
 
+/**
+ * Create a mock Stricli context and a stderr capture for consola output.
+ *
+ * The context provides `stdout`/`stderr` Writers for `runInteractiveLogin`,
+ * while `getOutput()` returns the combined consola output captured from
+ * `process.stderr.write`.
+ */
 function createContext() {
-  const stdoutLines: string[] = [];
-  const stderrLines: string[] = [];
+  const stderrChunks: string[] = [];
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+
   const context = {
     stdout: {
-      write: mock((s: string) => {
-        stdoutLines.push(s);
+      write: mock((_s: string) => {
+        /* unused — status output goes through consola */
       }),
     },
     stderr: {
-      write: mock((s: string) => {
-        stderrLines.push(s);
+      write: mock((_s: string) => {
+        /* unused — status output goes through consola */
       }),
     },
     cwd: "/tmp",
@@ -57,8 +72,11 @@ function createContext() {
       /* no-op */
     }),
   };
-  const getStdout = () => stdoutLines.join("");
-  return { context, getStdout };
+  const getOutput = () => stderrChunks.join("");
+  const restore = () => {
+    process.stderr.write = origWrite;
+  };
+  return { context, getOutput, restore };
 }
 
 describe("loginCommand.func --token path", () => {
@@ -99,12 +117,16 @@ describe("loginCommand.func --token path", () => {
   test("already authenticated (OAuth): prints re-auth message", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
 
-    const { context, getStdout } = createContext();
-    await func.call(context, { timeout: 900 });
+    const { context, getOutput, restore } = createContext();
+    try {
+      await func.call(context, { timeout: 900 });
 
-    expect(getStdout()).toContain("already authenticated");
-    expect(setAuthTokenSpy).not.toHaveBeenCalled();
-    expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(getOutput()).toContain("already authenticated");
+      expect(setAuthTokenSpy).not.toHaveBeenCalled();
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   test("already authenticated (env token SENTRY_AUTH_TOKEN): tells user to unset specific var", async () => {
@@ -117,14 +139,18 @@ describe("loginCommand.func --token path", () => {
       source: "env:SENTRY_AUTH_TOKEN",
     });
 
-    const { context, getStdout } = createContext();
-    await func.call(context, { timeout: 900 });
+    const { context, getOutput, restore } = createContext();
+    try {
+      await func.call(context, { timeout: 900 });
 
-    expect(getStdout()).toContain("SENTRY_AUTH_TOKEN");
-    expect(getStdout()).toContain("environment variable");
-    expect(getStdout()).toContain("Unset SENTRY_AUTH_TOKEN");
-    expect(getStdout()).not.toContain("already authenticated");
-    getAuthConfigSpy.mockRestore();
+      expect(getOutput()).toContain("SENTRY_AUTH_TOKEN");
+      expect(getOutput()).toContain("environment variable");
+      expect(getOutput()).toContain("Unset SENTRY_AUTH_TOKEN");
+      expect(getOutput()).not.toContain("already authenticated");
+    } finally {
+      restore();
+      getAuthConfigSpy.mockRestore();
+    }
   });
 
   test("already authenticated (env token SENTRY_TOKEN): shows specific var name", async () => {
@@ -133,12 +159,13 @@ describe("loginCommand.func --token path", () => {
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
 
-    const { context, getStdout } = createContext();
+    const { context, getOutput, restore } = createContext();
     try {
       await func.call(context, { timeout: 900 });
-      expect(getStdout()).toContain("SENTRY_TOKEN");
-      expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+      expect(getOutput()).toContain("SENTRY_TOKEN");
+      expect(getOutput()).not.toContain("SENTRY_AUTH_TOKEN");
     } finally {
+      restore();
       delete process.env.SENTRY_TOKEN;
     }
   });
@@ -150,20 +177,24 @@ describe("loginCommand.func --token path", () => {
     getCurrentUserSpy.mockResolvedValue(SAMPLE_USER);
     setUserInfoSpy.mockReturnValue(undefined);
 
-    const { context, getStdout } = createContext();
-    await func.call(context, { token: "my-token", timeout: 900 });
+    const { context, getOutput, restore } = createContext();
+    try {
+      await func.call(context, { token: "my-token", timeout: 900 });
 
-    expect(setAuthTokenSpy).toHaveBeenCalledWith("my-token");
-    expect(getCurrentUserSpy).toHaveBeenCalled();
-    expect(setUserInfoSpy).toHaveBeenCalledWith({
-      userId: "42",
-      name: "Jane Doe",
-      username: "janedoe",
-      email: "jane@example.com",
-    });
-    const out = getStdout();
-    expect(out).toContain("Authenticated");
-    expect(out).toContain("Jane Doe");
+      expect(setAuthTokenSpy).toHaveBeenCalledWith("my-token");
+      expect(getCurrentUserSpy).toHaveBeenCalled();
+      expect(setUserInfoSpy).toHaveBeenCalledWith({
+        userId: "42",
+        name: "Jane Doe",
+        username: "janedoe",
+        email: "jane@example.com",
+      });
+      const out = getOutput();
+      expect(out).toContain("Authenticated");
+      expect(out).toContain("Jane Doe");
+    } finally {
+      restore();
+    }
   });
 
   test("--token: invalid token clears auth and throws AuthError", async () => {
@@ -172,14 +203,17 @@ describe("loginCommand.func --token path", () => {
     getUserRegionsSpy.mockRejectedValue(new Error("401 Unauthorized"));
     clearAuthSpy.mockResolvedValue(undefined);
 
-    const { context } = createContext();
+    const { context, restore } = createContext();
+    try {
+      await expect(
+        func.call(context, { token: "bad-token", timeout: 900 })
+      ).rejects.toBeInstanceOf(AuthError);
 
-    await expect(
-      func.call(context, { token: "bad-token", timeout: 900 })
-    ).rejects.toBeInstanceOf(AuthError);
-
-    expect(clearAuthSpy).toHaveBeenCalled();
-    expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(clearAuthSpy).toHaveBeenCalled();
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   test("--token: shows 'Logged in as' when user info fetch succeeds", async () => {
@@ -189,11 +223,15 @@ describe("loginCommand.func --token path", () => {
     getCurrentUserSpy.mockResolvedValue({ id: "5", email: "only@email.com" });
     setUserInfoSpy.mockReturnValue(undefined);
 
-    const { context, getStdout } = createContext();
-    await func.call(context, { token: "valid-token", timeout: 900 });
+    const { context, getOutput, restore } = createContext();
+    try {
+      await func.call(context, { token: "valid-token", timeout: 900 });
 
-    expect(getStdout()).toContain("Logged in as");
-    expect(getStdout()).toContain("only@email.com");
+      expect(getOutput()).toContain("Logged in as");
+      expect(getOutput()).toContain("only@email.com");
+    } finally {
+      restore();
+    }
   });
 
   test("--token: login succeeds even when getCurrentUser() fails transiently", async () => {
@@ -202,28 +240,35 @@ describe("loginCommand.func --token path", () => {
     getUserRegionsSpy.mockResolvedValue([]);
     getCurrentUserSpy.mockRejectedValue(new Error("Network error"));
 
-    const { context, getStdout } = createContext();
+    const { context, getOutput, restore } = createContext();
+    try {
+      // Must not throw — login should succeed with the stored token
+      await func.call(context, { token: "valid-token", timeout: 900 });
 
-    // Must not throw — login should succeed with the stored token
-    await func.call(context, { token: "valid-token", timeout: 900 });
-
-    const out = getStdout();
-    expect(out).toContain("Authenticated");
-    // 'Logged in as' is omitted when user info is unavailable
-    expect(out).not.toContain("Logged in as");
-    // Token was stored and not cleared
-    expect(clearAuthSpy).not.toHaveBeenCalled();
-    expect(setUserInfoSpy).not.toHaveBeenCalled();
+      const out = getOutput();
+      expect(out).toContain("Authenticated");
+      // 'Logged in as' is omitted when user info is unavailable
+      expect(out).not.toContain("Logged in as");
+      // Token was stored and not cleared
+      expect(clearAuthSpy).not.toHaveBeenCalled();
+      expect(setUserInfoSpy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 
   test("no token: falls through to interactive login", async () => {
     isAuthenticatedSpy.mockResolvedValue(false);
     runInteractiveLoginSpy.mockResolvedValue(true);
 
-    const { context } = createContext();
-    await func.call(context, { timeout: 900 });
+    const { context, restore } = createContext();
+    try {
+      await func.call(context, { timeout: 900 });
 
-    expect(runInteractiveLoginSpy).toHaveBeenCalled();
-    expect(setAuthTokenSpy).not.toHaveBeenCalled();
+      expect(runInteractiveLoginSpy).toHaveBeenCalled();
+      expect(setAuthTokenSpy).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 });

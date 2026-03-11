@@ -4,6 +4,9 @@
  * Tests the `sentry cli upgrade` command through Stricli's run().
  * Covers resolveTargetVersion branches (check mode, already up-to-date,
  * version validation) and error paths.
+ *
+ * Status messages go through consola (→ process.stderr). Tests capture stderr
+ * via a spy on process.stderr.write and assert on the collected output.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -31,15 +34,26 @@ function mockFetch(
   globalThis.fetch = fn as typeof globalThis.fetch;
 }
 
-/** Create a mock SentryContext for testing */
+/**
+ * Create a mock Stricli context and a stderr capture for consola output.
+ *
+ * `getOutput()` returns the combined consola output captured from
+ * `process.stderr.write` (where consola routes all messages).
+ * `errors` captures Stricli error output written to context.stderr.
+ */
 function createMockContext(
   overrides: Partial<{
     homeDir: string;
     env: Record<string, string | undefined>;
     execPath: string;
   }> = {}
-): { context: SentryContext; output: string[]; errors: string[] } {
-  const output: string[] = [];
+): {
+  context: SentryContext;
+  getOutput: () => string;
+  errors: string[];
+  restore: () => void;
+} {
+  const stderrChunks: string[] = [];
   const errors: string[] = [];
   const env: Record<string, string | undefined> = {
     PATH: "/usr/bin:/bin",
@@ -47,13 +61,19 @@ function createMockContext(
     ...overrides.env,
   };
 
+  // Capture consola output (routed to process.stderr)
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+
   const context = {
     process: {
       stdout: {
-        write: (s: string) => {
-          output.push(s);
-          return true;
-        },
+        write: mock((_s: string) => {
+          /* unused — upgrade output goes through consola */
+        }),
       },
       stderr: {
         write: (s: string) => {
@@ -75,10 +95,9 @@ function createMockContext(
     configDir: "/tmp/test-config",
     env,
     stdout: {
-      write: (s: string) => {
-        output.push(s);
-        return true;
-      },
+      write: mock((_s: string) => {
+        /* unused — upgrade output goes through consola */
+      }),
     },
     stderr: {
       write: (s: string) => {
@@ -95,7 +114,14 @@ function createMockContext(
     },
   } as unknown as SentryContext;
 
-  return { context, output, errors };
+  return {
+    context,
+    getOutput: () => stderrChunks.join(""),
+    errors,
+    restore: () => {
+      process.stderr.write = origWrite;
+    },
+  };
 }
 
 /**
@@ -205,6 +231,7 @@ function mockNightlyVersion(version: string): void {
 
 describe("sentry cli upgrade", () => {
   let testDir: string;
+  let restoreStderr: (() => void) | undefined;
 
   beforeEach(() => {
     testDir = join(
@@ -216,6 +243,8 @@ describe("sentry cli upgrade", () => {
   });
 
   afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     globalThis.fetch = originalFetch;
     rmSync(testDir, { recursive: true, force: true });
   });
@@ -224,7 +253,10 @@ describe("sentry cli upgrade", () => {
     test("shows 'already on the target version' when current equals latest", async () => {
       mockGitHubVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -232,7 +264,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Installation method: curl");
       expect(combined).toContain(`Current version: ${CLI_VERSION}`);
       expect(combined).toContain(`Latest version: ${CLI_VERSION}`);
@@ -242,7 +274,10 @@ describe("sentry cli upgrade", () => {
     test("shows upgrade command hint when newer version available", async () => {
       mockGitHubVersion("99.99.99");
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -250,7 +285,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Latest version: 99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
@@ -258,7 +293,10 @@ describe("sentry cli upgrade", () => {
     test("shows version-specific upgrade hint when user-specified version", async () => {
       mockGitHubVersion("99.99.99");
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -266,7 +304,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Target version: 88.88.88");
       expect(combined).toContain(
         "Run 'sentry cli upgrade 88.88.88' to update."
@@ -278,11 +316,14 @@ describe("sentry cli upgrade", () => {
     test("reports already up to date when current equals target", async () => {
       mockGitHubVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Already up to date.");
       expect(combined).not.toContain("Upgrading to");
     });
@@ -291,13 +332,14 @@ describe("sentry cli upgrade", () => {
   describe("brew method", () => {
     test("errors immediately when specific version requested with brew", async () => {
       // No fetch mock needed — error is thrown before any network call
-      const { context, output, errors } = createMockContext({
+      const { context, getOutput, errors, restore } = createMockContext({
         homeDir: testDir,
       });
+      restoreStderr = restore;
 
       await run(app, ["cli", "upgrade", "--method", "brew", "1.2.3"], context);
 
-      const allOutput = [...output, ...errors].join("");
+      const allOutput = getOutput() + errors.join("");
       expect(allOutput).toContain(
         "Homebrew does not support installing a specific version"
       );
@@ -306,7 +348,10 @@ describe("sentry cli upgrade", () => {
     test("check mode works for brew method", async () => {
       mockGitHubVersion("99.99.99");
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -314,7 +359,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Installation method: brew");
       expect(combined).toContain("Latest version: 99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
@@ -336,21 +381,25 @@ describe("sentry cli upgrade", () => {
         return new Response("Not Found", { status: 404 });
       });
 
-      const { context, output, errors } = createMockContext({
+      const { context, getOutput, errors, restore } = createMockContext({
         homeDir: testDir,
       });
+      restoreStderr = restore;
 
       await run(app, ["cli", "upgrade", "--method", "curl", "0.0.1"], context);
 
       // Stricli catches errors and writes to stderr / calls exit
-      const allOutput = [...output, ...errors].join("");
+      const allOutput = getOutput() + errors.join("");
       expect(allOutput).toContain("Version 0.0.1 not found");
     });
 
     test("strips v prefix from user-specified version", async () => {
       mockGitHubVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       // Pass "v<current>" — should strip prefix and match current
       await run(
@@ -359,7 +408,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       // Should match current version (after stripping v prefix) and report up to date
       expect(combined).toContain("Already up to date.");
     });
@@ -371,7 +420,10 @@ describe("sentry cli upgrade", () => {
       // 'nightly' as positional switches channel to nightly — fetches from GHCR
       mockGhcrNightlyVersion(nightlyVersion);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -379,7 +431,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       // Should show nightly channel and latest version from GHCR
       expect(combined).toContain("nightly");
       expect(combined).toContain(nightlyVersion);
@@ -389,7 +441,10 @@ describe("sentry cli upgrade", () => {
       const nightlyVersion = "0.0.0-dev.1740000000";
       mockGhcrNightlyVersion(nightlyVersion);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -397,7 +452,7 @@ describe("sentry cli upgrade", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       // CLI_VERSION is "0.0.0-dev" (not matching nightlyVersion), show upgrade hint
       expect(combined).toContain("sentry cli upgrade");
     });
@@ -408,6 +463,7 @@ describe("sentry cli upgrade — nightly channel", () => {
   useTestConfigDir("test-upgrade-nightly-");
 
   let testDir: string;
+  let restoreStderr: (() => void) | undefined;
 
   beforeEach(() => {
     testDir = join(
@@ -419,6 +475,8 @@ describe("sentry cli upgrade — nightly channel", () => {
   });
 
   afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     globalThis.fetch = originalFetch;
     rmSync(testDir, { recursive: true, force: true });
   });
@@ -427,7 +485,10 @@ describe("sentry cli upgrade — nightly channel", () => {
     test("'nightly' positional sets channel to nightly", async () => {
       mockNightlyVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -435,7 +496,7 @@ describe("sentry cli upgrade — nightly channel", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Channel: nightly");
     });
 
@@ -443,7 +504,10 @@ describe("sentry cli upgrade — nightly channel", () => {
       mockGitHubVersion(CLI_VERSION);
       setReleaseChannel("nightly");
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -451,7 +515,7 @@ describe("sentry cli upgrade — nightly channel", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Channel: stable");
     });
 
@@ -459,7 +523,10 @@ describe("sentry cli upgrade — nightly channel", () => {
       setReleaseChannel("nightly");
       mockNightlyVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -467,7 +534,7 @@ describe("sentry cli upgrade — nightly channel", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Channel: nightly");
     });
   });
@@ -476,7 +543,8 @@ describe("sentry cli upgrade — nightly channel", () => {
     test("persists nightly channel when 'nightly' positional is passed", async () => {
       mockNightlyVersion(CLI_VERSION);
 
-      const { context } = createMockContext({ homeDir: testDir });
+      const { context, restore } = createMockContext({ homeDir: testDir });
+      restoreStderr = restore;
 
       expect(getReleaseChannel()).toBe("stable");
 
@@ -493,7 +561,8 @@ describe("sentry cli upgrade — nightly channel", () => {
       setReleaseChannel("nightly");
       mockGitHubVersion(CLI_VERSION);
 
-      const { context } = createMockContext({ homeDir: testDir });
+      const { context, restore } = createMockContext({ homeDir: testDir });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -509,7 +578,10 @@ describe("sentry cli upgrade — nightly channel", () => {
     test("shows 'already on target' when current matches nightly latest", async () => {
       mockNightlyVersion(CLI_VERSION);
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -517,7 +589,7 @@ describe("sentry cli upgrade — nightly channel", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Channel: nightly");
       expect(combined).toContain(`Latest version: ${CLI_VERSION}`);
       expect(combined).toContain("You are already on the target version");
@@ -526,7 +598,10 @@ describe("sentry cli upgrade — nightly channel", () => {
     test("shows upgrade hint when newer nightly available", async () => {
       mockNightlyVersion("0.99.0-dev.9999999999");
 
-      const { context, output } = createMockContext({ homeDir: testDir });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -534,7 +609,7 @@ describe("sentry cli upgrade — nightly channel", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       expect(combined).toContain("Channel: nightly");
       expect(combined).toContain("Latest version: 0.99.0-dev.9999999999");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
@@ -559,6 +634,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   let testDir: string;
   let originalSpawn: typeof Bun.spawn;
   let spawnedArgs: string[][];
+  let restoreStderr: (() => void) | undefined;
 
   /** Default install paths (default curl dir) */
   const defaultBinDir = join(homedir(), ".sentry", "bin");
@@ -583,6 +659,8 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   });
 
   afterEach(async () => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     globalThis.fetch = originalFetch;
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
@@ -621,11 +699,14 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   test("runs setup on downloaded binary after curl upgrade", async () => {
     mockBinaryDownloadWithVersion("99.99.99");
 
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
-    const combined = output.join("");
+    const combined = getOutput();
     expect(combined).toContain("Upgrading to 99.99.99...");
     expect(combined).toContain("Successfully upgraded to 99.99.99.");
 
@@ -660,7 +741,10 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
       exited: Promise.resolve(1),
     })) as typeof Bun.spawn;
 
-    const { context, errors } = createMockContext({ homeDir: testDir });
+    const { context, errors, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
@@ -720,7 +804,8 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     });
 
     // "nightly" positional switches channel to nightly
-    const { context } = createMockContext({ homeDir: testDir });
+    const { context, restore } = createMockContext({ homeDir: testDir });
+    restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "curl", "nightly"], context);
 
@@ -734,11 +819,14 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   test("--force bypasses 'already up to date' and proceeds to download", async () => {
     mockBinaryDownloadWithVersion(CLI_VERSION); // Same version — would normally short-circuit
 
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "curl", "--force"], context);
 
-    const combined = output.join("");
+    const combined = getOutput();
     // With --force, should NOT show "Already up to date"
     expect(combined).not.toContain("Already up to date.");
     // Should proceed to upgrade and succeed
@@ -752,6 +840,7 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
 
   let testDir: string;
   let originalSpawn: typeof Bun.spawn;
+  let restoreStderr: (() => void) | undefined;
 
   const defaultBinDir = join(homedir(), ".sentry", "bin");
 
@@ -772,6 +861,8 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
   });
 
   afterEach(async () => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     globalThis.fetch = originalFetch;
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
@@ -838,11 +929,14 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
     // Switch to nightly and use npm method → triggers migration
     setReleaseChannel("nightly");
 
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "npm", "nightly"], context);
 
-    const combined = output.join("");
+    const combined = getOutput();
     expect(combined).toContain(
       "Nightly builds are only available as standalone binaries."
     );
