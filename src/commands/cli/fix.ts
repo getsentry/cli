@@ -263,12 +263,6 @@ function resolveUid(username: string): number | null {
   }
 }
 
-/**
- * Perform chown on the given ownership issues, transferring files to
- * `username`. Called only when the current process is already root.
- *
- * @returns Object with lists of human-readable success and failure messages
- */
 /** Per-issue repair outcome, aligned by index with the input issues array */
 type RepairOutcome = {
   /** Whether the repair succeeded */
@@ -277,6 +271,12 @@ type RepairOutcome = {
   message: string;
 };
 
+/**
+ * Perform chown on the given ownership issues, transferring files to
+ * `username`. Called only when the current process is already root.
+ *
+ * @returns Per-issue outcomes aligned by index with the input issues array
+ */
 async function repairOwnership(
   issues: OwnershipIssue[],
   username: string,
