@@ -387,11 +387,14 @@ export function buildCommand<
     // simply `throw new OutputError(data)`.
     const handleOutputError = (err: unknown): never => {
       if (err instanceof OutputError && outputConfig) {
-        handleReturnValue(
-          this,
-          { data: err.data } as CommandOutput<unknown>,
-          cleanFlags
-        );
+        // Only render if there's actual data to show
+        if (err.data !== null && err.data !== undefined) {
+          handleReturnValue(
+            this,
+            { data: err.data } as CommandOutput<unknown>,
+            cleanFlags
+          );
+        }
         process.exit(err.exitCode);
       }
       throw err;

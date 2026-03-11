@@ -439,7 +439,7 @@ sentry api /projects/my-org/my-project/ \
 sentry api /organizations/ \
   --header "X-Custom-Header:value"
 
-sentry api /organizations/ --include
+sentry api /organizations/ --verbose
 
 # Get all issues (automatically follows pagination)
 sentry api /projects/my-org/my-project/issues/ --paginate
