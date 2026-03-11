@@ -859,7 +859,7 @@ describe("property: buildDryRunRequest", () => {
   test("method is preserved exactly", () => {
     fcAssert(
       property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest({ method, endpoint });
+        const request = buildDryRunRequest(method, endpoint, {});
         expect(request.method).toBe(method);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -869,7 +869,7 @@ describe("property: buildDryRunRequest", () => {
   test("URL contains the endpoint", () => {
     fcAssert(
       property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest({ method, endpoint });
+        const request = buildDryRunRequest(method, endpoint, {});
         const normalized = endpoint.startsWith("/")
           ? endpoint.slice(1)
           : endpoint;
@@ -882,7 +882,7 @@ describe("property: buildDryRunRequest", () => {
   test("headers default to empty object when undefined", () => {
     fcAssert(
       property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest({ method, endpoint });
+        const request = buildDryRunRequest(method, endpoint, {});
         expect(request.headers).toEqual({});
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -892,7 +892,7 @@ describe("property: buildDryRunRequest", () => {
   test("body defaults to null when undefined", () => {
     fcAssert(
       property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest({ method, endpoint });
+        const request = buildDryRunRequest(method, endpoint, {});
         expect(request.body).toBeNull();
       }),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -906,7 +906,7 @@ describe("property: buildDryRunRequest", () => {
         dryRunEndpointArb,
         jsonValue(),
         (method, endpoint, body) => {
-          const request = buildDryRunRequest({ method, endpoint, body });
+          const request = buildDryRunRequest(method, endpoint, { body });
           expect(request.body).toEqual(body);
         }
       ),

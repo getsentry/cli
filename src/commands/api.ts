@@ -9,8 +9,13 @@ import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
-import { muted } from "../lib/formatters/colors.js";
 import { writeJson } from "../lib/formatters/json.js";
+import {
+  escapeMarkdownInline,
+  mdKvTable,
+  renderMarkdown,
+  safeCodeSpan,
+} from "../lib/formatters/markdown.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
@@ -941,66 +946,76 @@ export function resolveRequestUrl(
 /**
  * Dry-run request details — everything that would be sent without actually sending.
  */
-type DryRunRequest = {
+export type DryRunRequest = {
   method: string;
   url: string;
   headers: Record<string, string>;
   body: unknown;
 };
 
-/** Components needed to build a dry-run request preview */
-type DryRunRequestInput = {
-  method: string;
-  endpoint: string;
-  params?: Record<string, string | string[]>;
-  headers?: Record<string, string>;
-  body?: unknown;
-};
-
 /**
  * Build a DryRunRequest from the resolved request components.
+ *
+ * Mirrors the URL and header logic from rawApiRequest so the
+ * preview matches what the real request would look like.
+ *
  * @internal Exported for testing
  */
-export function buildDryRunRequest(input: DryRunRequestInput): DryRunRequest {
-  const headers = { ...(input.headers ?? {}) };
+export function buildDryRunRequest(
+  method: string,
+  endpoint: string,
+  options: {
+    params?: Record<string, string | string[]>;
+    headers?: Record<string, string>;
+    body?: unknown;
+  }
+): DryRunRequest {
+  const headers = { ...(options.headers ?? {}) };
 
   // Mirror rawApiRequest: auto-add Content-Type for object bodies
   // when no Content-Type was explicitly provided
   if (
-    input.body !== undefined &&
-    input.body !== null &&
-    typeof input.body !== "string" &&
+    options.body !== undefined &&
+    options.body !== null &&
+    typeof options.body !== "string" &&
     !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
   ) {
     headers["Content-Type"] = "application/json";
   }
 
   return {
-    method: input.method,
-    url: resolveRequestUrl(input.endpoint, input.params),
+    method,
+    url: resolveRequestUrl(endpoint, options.params),
     headers,
-    body: input.body ?? null,
+    body: options.body ?? null,
   };
 }
 
 /**
- * Write dry-run output in human-readable format.
+ * Format a dry-run request preview as rendered markdown.
+ *
+ * Uses the standard mdKvTable layout for consistency with other commands.
+ *
  * @internal Exported for testing
  */
-export function writeDryRunHuman(stdout: Writer, request: DryRunRequest): void {
-  stdout.write(`${muted("Dry run — no request sent.")}\n\n`);
-  stdout.write(`  Method:   ${request.method}\n`);
-  stdout.write(`  URL:      ${request.url}\n`);
+export function formatDryRunRequest(request: DryRunRequest): string {
+  const lines: string[] = [];
+  lines.push(
+    `## <muted>Dry run</muted> — ${escapeMarkdownInline(request.method)} ${escapeMarkdownInline(request.url)}`
+  );
+  lines.push("");
+
+  const kvRows: [string, string][] = [
+    ["Method", request.method],
+    ["URL", request.url],
+  ];
 
   const headerEntries = Object.entries(request.headers);
   if (headerEntries.length > 0) {
-    const [first, ...rest] = headerEntries;
-    if (first) {
-      stdout.write(`  Headers:  ${first[0]}: ${first[1]}\n`);
-      for (const [key, value] of rest) {
-        stdout.write(`            ${key}: ${value}\n`);
-      }
-    }
+    kvRows.push([
+      "Headers",
+      headerEntries.map(([k, v]) => `${k}: ${v}`).join(", "),
+    ]);
   }
 
   if (request.body !== null) {
@@ -1008,12 +1023,11 @@ export function writeDryRunHuman(stdout: Writer, request: DryRunRequest): void {
       typeof request.body === "string"
         ? request.body
         : JSON.stringify(request.body, null, 2);
-    // Indent continuation lines to align with the first line after "Body:     "
-    const indented = bodyStr.replace(/\n/g, "\n            ");
-    stdout.write(`  Body:     ${indented}\n`);
+    kvRows.push(["Body", safeCodeSpan(bodyStr)]);
   }
 
-  stdout.write("\n");
+  lines.push(mdKvTable(kvRows));
+  return renderMarkdown(lines.join("\n"));
 }
 
 /**
@@ -1183,7 +1197,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: "json",
+  output: { json: true, human: formatDryRunRequest },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1292,11 +1306,7 @@ export const apiCommand = buildCommand({
       n: "dry-run",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ApiFlags,
-    endpoint: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ApiFlags, endpoint: string) {
     const { stdout, stderr, stdin } = this;
 
     // Normalize endpoint to ensure trailing slash (Sentry API requirement)
@@ -1312,20 +1322,13 @@ export const apiCommand = buildCommand({
 
     // Dry-run mode: show the resolved request without sending it
     if (flags["dry-run"]) {
-      const request = buildDryRunRequest({
-        method: flags.method,
-        endpoint: normalizedEndpoint,
-        params,
-        headers,
-        body,
-      });
-
-      if (flags.json) {
-        writeJson(stdout, request, flags.fields);
-      } else {
-        writeDryRunHuman(stdout, request);
-      }
-      return;
+      return {
+        data: buildDryRunRequest(flags.method, normalizedEndpoint, {
+          params,
+          headers,
+          body,
+        }),
+      };
     }
 
     // Verbose mode: show request details (unless silent)

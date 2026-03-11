@@ -15,8 +15,10 @@ import {
   buildQueryParams,
   buildQueryParamsFromFields,
   buildRawQueryParams,
+  type DryRunRequest,
   dataToQueryParams,
   extractJsonBody,
+  formatDryRunRequest,
   handleResponse,
   normalizeEndpoint,
   normalizeFields,
@@ -29,7 +31,6 @@ import {
   resolveBody,
   resolveRequestUrl,
   setNestedValue,
-  writeDryRunHuman,
   writeResponseBody,
   writeResponseHeaders,
   writeVerboseRequest,
@@ -1793,9 +1794,7 @@ describe("resolveRequestUrl", () => {
 
 describe("buildDryRunRequest", () => {
   test("builds request with all fields", () => {
-    const request = buildDryRunRequest({
-      method: "POST",
-      endpoint: "issues/123/",
+    const request = buildDryRunRequest("POST", "issues/123/", {
       params: { status: "resolved" },
       headers: { "Content-Type": "application/json" },
       body: { status: "resolved" },
@@ -1811,27 +1810,19 @@ describe("buildDryRunRequest", () => {
   });
 
   test("defaults headers to empty object", () => {
-    const request = buildDryRunRequest({
-      method: "GET",
-      endpoint: "organizations/",
-    });
+    const request = buildDryRunRequest("GET", "organizations/", {});
 
     expect(request.headers).toEqual({});
   });
 
   test("defaults body to null", () => {
-    const request = buildDryRunRequest({
-      method: "GET",
-      endpoint: "organizations/",
-    });
+    const request = buildDryRunRequest("GET", "organizations/", {});
 
     expect(request.body).toBeNull();
   });
 
   test("preserves string body", () => {
-    const request = buildDryRunRequest({
-      method: "POST",
-      endpoint: "issues/",
+    const request = buildDryRunRequest("POST", "issues/", {
       body: '{"raw":"string"}',
     });
 
@@ -1839,105 +1830,74 @@ describe("buildDryRunRequest", () => {
   });
 });
 
-describe("writeDryRunHuman", () => {
-  test("writes method and URL", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "GET",
-      url: "https://sentry.io/api/0/organizations/",
-      headers: {},
-      body: null,
-    });
+describe("formatDryRunRequest", () => {
+  const req = (overrides: Partial<DryRunRequest> = {}): DryRunRequest => ({
+    method: "GET",
+    url: "https://sentry.io/api/0/organizations/",
+    headers: {},
+    body: null,
+    ...overrides,
+  });
 
-    expect(writer.output).toContain("Method:   GET");
-    expect(writer.output).toContain(
-      "URL:      https://sentry.io/api/0/organizations/"
+  test("includes method and URL", () => {
+    const output = formatDryRunRequest(req());
+
+    expect(output).toContain("GET");
+    expect(output).toContain("https://sentry.io/api/0/organizations/");
+    expect(output).toContain("Dry run");
+  });
+
+  test("includes headers", () => {
+    const output = formatDryRunRequest(
+      req({
+        method: "POST",
+        url: "https://sentry.io/api/0/issues/",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer token",
+        },
+      })
     );
-    expect(writer.output).toContain("Dry run");
+
+    expect(output).toContain("Content-Type: application/json");
+    expect(output).toContain("Authorization: Bearer token");
   });
 
-  test("writes headers", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "POST",
-      url: "https://sentry.io/api/0/issues/",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer token",
-      },
-      body: null,
-    });
+  test("includes JSON body", () => {
+    const output = formatDryRunRequest(
+      req({
+        method: "PUT",
+        url: "https://sentry.io/api/0/issues/123/",
+        body: { status: "resolved" },
+      })
+    );
 
-    expect(writer.output).toContain("Content-Type: application/json");
-    expect(writer.output).toContain("Authorization: Bearer token");
+    expect(output).toContain("Body");
+    expect(output).toContain('"status": "resolved"');
   });
 
-  test("writes JSON body formatted", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "PUT",
-      url: "https://sentry.io/api/0/issues/123/",
-      headers: {},
-      body: { status: "resolved" },
-    });
+  test("includes string body as-is", () => {
+    const output = formatDryRunRequest(
+      req({
+        method: "POST",
+        url: "https://sentry.io/api/0/events/",
+        body: "raw-body-content",
+      })
+    );
 
-    expect(writer.output).toContain("Body:");
-    expect(writer.output).toContain('"status": "resolved"');
-  });
-
-  test("multiline JSON body has aligned indentation", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "POST",
-      url: "https://sentry.io/api/0/issues/",
-      headers: {},
-      body: { status: "resolved", assignedTo: "user:123" },
-    });
-
-    // Each continuation line of the JSON body should be indented to align
-    // with the first line (12 spaces = "  Body:     " prefix width)
-    const lines = writer.output.split("\n");
-    const bodyLineIdx = lines.findIndex((l) => l.includes("Body:"));
-    expect(bodyLineIdx).toBeGreaterThan(-1);
-    // The JSON is multiline, so check that the next line starts with spaces
-    const nextLine = lines[bodyLineIdx + 1];
-    expect(nextLine).toBeDefined();
-    expect(nextLine!.startsWith("            ")).toBe(true);
-  });
-
-  test("writes string body as-is", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "POST",
-      url: "https://sentry.io/api/0/events/",
-      headers: {},
-      body: "raw-body-content",
-    });
-
-    expect(writer.output).toContain("Body:     raw-body-content");
+    expect(output).toContain("Body");
+    expect(output).toContain("raw-body-content");
   });
 
   test("omits body when null", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "GET",
-      url: "https://sentry.io/api/0/organizations/",
-      headers: {},
-      body: null,
-    });
+    const output = formatDryRunRequest(req());
 
-    expect(writer.output).not.toContain("Body:");
+    expect(output).not.toContain("Body");
   });
 
-  test("omits headers section when empty", () => {
-    const writer = createMockWriter();
-    writeDryRunHuman(writer, {
-      method: "GET",
-      url: "https://sentry.io/api/0/organizations/",
-      headers: {},
-      body: null,
-    });
+  test("omits headers row when empty", () => {
+    const output = formatDryRunRequest(req());
 
-    expect(writer.output).not.toContain("Headers:");
+    expect(output).not.toContain("Headers");
   });
 });
