@@ -9,6 +9,7 @@ import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
+import { writeJson } from "../lib/formatters/json.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
@@ -1224,16 +1225,19 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Output response headers when requested
+    // Output response headers when requested (side-effect before body)
     if (flags.verbose) {
       writeVerboseResponse(stdout, response.status, response.headers);
     } else if (flags.include) {
       writeResponseHeaders(stdout, response.status, response.headers);
     }
 
-    // Set error exit code (before return so the process exits after output)
+    // Error responses: Stricli overwrites process.exitCode after the
+    // command returns, so we must use process.exit(1) directly.
+    // Return { data } for success so the output wrapper renders it.
     if (isError) {
-      process.exitCode = 1;
+      writeJson(stdout, response.body, flags.fields);
+      process.exit(1);
     }
 
     return { data: response.body };
