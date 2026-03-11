@@ -1,0 +1,38 @@
+# Output Convergence Plan
+
+## Vision
+Commands become pure data producers returning structured data. The framework
+selects a rendering template based on flags (--json, TTY detection). Commands
+never call writeJson or stdout.write directly.
+
+## Two output forms in buildCommand
+1. `"json"` — flag injection only, command handles own output
+2. `{ json: true, human: fn }` — full auto-render with { data, hint? } return
+
+## Phased rollout
+
+### Phase 1 (merged in #382): Core infrastructure + Tier 1 commands
+- OutputConfig<T> on buildCommand with human/json/jsonExclude
+- CommandOutput<T> return type ({ data, hint? })
+- OutputError for non-zero exit with output data
+- Converted: event/view, issue/view, issue/explain, issue/plan, org/view
+
+### Phase 2 (this PR): Tier 2-3 commands
+- Return-based: project/view, log/view, org/list, trace/list
+- jsonTransform on OutputConfig for custom JSON envelopes
+- Consola: auth/login, logout, status, cli/feedback, setup, fix, upgrade, api.ts
+- Removed stderr: Writer threading from api.ts helpers
+
+### Phase 3 (future): Streaming list commands
+- Convert issue/list, project/list, log/list (complex dispatch + pagination)
+- Potential buildStreamingCommand with JSONL output
+- Follow-mode stderr.write in log/list
+
+### Phase 4 (future): Final cleanup
+- Remove remaining direct stdout/stderr/writeJson usage
+- Add lint rule to prevent regression
+- interactive-login.ts conversion (separate PR)
+
+## Intentionally preserved
+- auth/token: stdout.write for pipe capture (| pbcopy)
+- interactive-login.ts: 15+ writes, deeply coupled, separate PR
