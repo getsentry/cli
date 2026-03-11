@@ -10,14 +10,12 @@ import { Readable } from "node:stream";
 import {
   buildBodyFromFields,
   buildBodyFromInput,
-  buildDryRunRequest,
   buildFromFields,
   buildQueryParams,
   buildQueryParamsFromFields,
   buildRawQueryParams,
   dataToQueryParams,
   extractJsonBody,
-  handleResponse,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -27,6 +25,7 @@ import {
   prepareRequestOptions,
   readStdin,
   resolveBody,
+  resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
   writeResponseBody,
@@ -1130,178 +1129,46 @@ describe("buildBodyFromInput", () => {
   });
 });
 
-describe("handleResponse", () => {
-  // Mock process.exit for tests
-  const originalExit = process.exit;
-
-  test("outputs body for successful response", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: { success: true },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: false,
-      include: false,
-    });
-
-    expect(writer.output).toContain('"success": true');
+describe("resolveEffectiveHeaders", () => {
+  test("auto-adds Content-Type for object bodies", () => {
+    const headers = resolveEffectiveHeaders(undefined, { key: "value" });
+    expect(headers["Content-Type"]).toBe("application/json");
   });
 
-  test("outputs headers with --include flag", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers({ "Content-Type": "application/json" }),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: false,
-      include: true,
-    });
-
-    expect(writer.output).toMatch(/^HTTP 200\n/);
-    expect(writer.output).toMatch(/content-type:/i);
+  test("does not add Content-Type for string bodies", () => {
+    const headers = resolveEffectiveHeaders(undefined, "raw-string");
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 
-  test("outputs verbose format with --verbose flag", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers({ "Content-Type": "application/json" }),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: true,
-      include: false,
-    });
-
-    expect(writer.output).toMatch(/^< HTTP 200\n/);
-    expect(writer.output).toMatch(/< content-type:/i);
+  test("does not override explicit Content-Type", () => {
+    const headers = resolveEffectiveHeaders(
+      { "Content-Type": "text/plain" },
+      { key: "value" }
+    );
+    expect(headers["Content-Type"]).toBe("text/plain");
   });
 
-  test("verbose takes precedence over include", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: "test",
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: true,
-      include: true,
-    });
-
-    // Should use verbose format (< prefix), not include format
-    expect(writer.output).toMatch(/^< HTTP/);
+  test("case-insensitive Content-Type check", () => {
+    const headers = resolveEffectiveHeaders(
+      { "content-type": "text/xml" },
+      { key: "value" }
+    );
+    expect(headers["content-type"]).toBe("text/xml");
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 
-  test("silent mode produces no output for success", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: true,
-      verbose: false,
-      include: false,
-    });
-
-    expect(writer.output).toBe("");
+  test("preserves custom headers", () => {
+    const headers = resolveEffectiveHeaders(
+      { Authorization: "Bearer token", "X-Custom": "value" },
+      undefined
+    );
+    expect(headers.Authorization).toBe("Bearer token");
+    expect(headers["X-Custom"]).toBe("value");
   });
 
-  test("silent mode with error calls process.exit(1)", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 500,
-      headers: new Headers(),
-      body: { error: "Internal Server Error" },
-    };
-
-    let exitCode: number | undefined;
-    process.exit = ((code?: number) => {
-      exitCode = code;
-      throw new Error("process.exit called");
-    }) as typeof process.exit;
-
-    try {
-      expect(() =>
-        handleResponse(writer, response, {
-          silent: true,
-          verbose: false,
-          include: false,
-        })
-      ).toThrow("process.exit called");
-      expect(exitCode).toBe(1);
-    } finally {
-      process.exit = originalExit;
-    }
-  });
-
-  test("error response calls process.exit(1) after output", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 404,
-      headers: new Headers(),
-      body: { detail: "Not found" },
-    };
-
-    let exitCode: number | undefined;
-    process.exit = ((code?: number) => {
-      exitCode = code;
-      throw new Error("process.exit called");
-    }) as typeof process.exit;
-
-    try {
-      expect(() =>
-        handleResponse(writer, response, {
-          silent: false,
-          verbose: false,
-          include: false,
-        })
-      ).toThrow("process.exit called");
-      expect(exitCode).toBe(1);
-      // Should have output the body before exiting
-      expect(writer.output).toContain("Not found");
-    } finally {
-      process.exit = originalExit;
-    }
-  });
-
-  test("filters response body with --fields", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: {
-        id: "123",
-        name: "my-project",
-        slug: "my-project",
-        platform: "node",
-      },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: false,
-      include: false,
-      fields: ["id", "name"],
-    });
-
-    const parsed = JSON.parse(writer.output);
-    expect(parsed).toEqual({ id: "123", name: "my-project" });
+  test("defaults to empty object when no headers provided", () => {
+    const headers = resolveEffectiveHeaders(undefined, undefined);
+    expect(headers).toEqual({});
   });
 });
 
@@ -1787,43 +1654,5 @@ describe("resolveRequestUrl", () => {
   test("omits query string when no params", () => {
     const url = resolveRequestUrl("projects/");
     expect(url).not.toContain("?");
-  });
-});
-
-describe("buildDryRunRequest", () => {
-  test("builds request with all fields", () => {
-    const request = buildDryRunRequest("POST", "issues/123/", {
-      params: { status: "resolved" },
-      headers: { "Content-Type": "application/json" },
-      body: { status: "resolved" },
-    });
-
-    expect(request.method).toBe("POST");
-    expect(request.url).toContain("/api/0/issues/123/");
-    expect(request.url).toContain("status=resolved");
-    expect(request.headers).toEqual({
-      "Content-Type": "application/json",
-    });
-    expect(request.body).toEqual({ status: "resolved" });
-  });
-
-  test("defaults headers to empty object", () => {
-    const request = buildDryRunRequest("GET", "organizations/", {});
-
-    expect(request.headers).toEqual({});
-  });
-
-  test("defaults body to null", () => {
-    const request = buildDryRunRequest("GET", "organizations/", {});
-
-    expect(request.body).toBeNull();
-  });
-
-  test("preserves string body", () => {
-    const request = buildDryRunRequest("POST", "issues/", {
-      body: '{"raw":"string"}',
-    });
-
-    expect(request.body).toBe('{"raw":"string"}');
   });
 });

@@ -60,7 +60,7 @@ type WriteOutputOptions<T> = {
 /**
  * Output configuration declared on `buildCommand` for automatic rendering.
  *
- * Two forms:
+ * Three forms:
  *
  * 1. **Flag-only** — `output: "json"` — injects `--json` and `--fields` flags
  *    but does not intercept returns. Commands handle their own output.
@@ -69,14 +69,23 @@ type WriteOutputOptions<T> = {
  *    AND auto-renders the command's return value. Commands return
  *    `{ data }` or `{ data, hint }` objects.
  *
+ * 3. **JSON-only config** — `output: { json: true }` — like full config but
+ *    without a `human` formatter. Data is always serialized as JSON.
+ *
  * @typeParam T - Type of data the command returns (used by `human` formatter
  *   and serialized as-is to JSON)
  */
 export type OutputConfig<T> = {
   /** Enable `--json` and `--fields` flag injection */
   json: true;
-  /** Format data as a human-readable string for terminal output */
-  human: (data: T) => string;
+  /**
+   * Format data as a human-readable string for terminal output.
+   *
+   * When omitted the command is **JSON-only**: data is always serialized
+   * as JSON regardless of whether `--json` was passed.  The `--json` and
+   * `--fields` flags are still injected for consistency.
+   */
+  human?: (data: T) => string;
   /**
    * Top-level keys to strip from JSON output.
    *
@@ -136,7 +145,8 @@ export function renderCommandOutput(
   config: OutputConfig<any>,
   ctx: RenderContext
 ): void {
-  if (ctx.json) {
+  // JSON mode: explicit --json flag, or no human formatter (JSON-only command)
+  if (ctx.json || !config.human) {
     let jsonData = data;
     if (
       config.jsonExclude &&

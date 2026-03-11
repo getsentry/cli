@@ -9,7 +9,6 @@ import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
-import { writeJson } from "../lib/formatters/json.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
@@ -27,9 +26,9 @@ type ApiFlags = {
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
-  /** Injected by buildCommand via output: "json" */
+  /** Injected by buildCommand via output: { json: true } */
   readonly json: boolean;
-  /** Injected by buildCommand via output: "json" */
+  /** Injected by buildCommand via output: { json: true } */
   readonly fields?: string[];
 };
 
@@ -938,95 +937,27 @@ export function resolveRequestUrl(
 }
 
 /**
- * Dry-run request details — everything that would be sent without actually sending.
- */
-export type DryRunRequest = {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  body: unknown;
-};
-
-/**
- * Build a DryRunRequest from the resolved request components.
+ * Resolve effective request headers, mirroring rawApiRequest logic.
  *
- * Mirrors the URL and header logic from rawApiRequest so the
- * preview matches what the real request would look like.
+ * Auto-adds Content-Type: application/json for non-string object bodies
+ * when no Content-Type was explicitly provided.
  *
  * @internal Exported for testing
  */
-export function buildDryRunRequest(
-  method: string,
-  endpoint: string,
-  options: {
-    params?: Record<string, string | string[]>;
-    headers?: Record<string, string>;
-    body?: unknown;
-  }
-): DryRunRequest {
-  const headers = { ...(options.headers ?? {}) };
-
-  // Mirror rawApiRequest: auto-add Content-Type for object bodies
-  // when no Content-Type was explicitly provided
+export function resolveEffectiveHeaders(
+  customHeaders: Record<string, string> | undefined,
+  body: unknown
+): Record<string, string> {
+  const headers = { ...(customHeaders ?? {}) };
   if (
-    options.body !== undefined &&
-    options.body !== null &&
-    typeof options.body !== "string" &&
+    body !== undefined &&
+    body !== null &&
+    typeof body !== "string" &&
     !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
   ) {
     headers["Content-Type"] = "application/json";
   }
-
-  return {
-    method,
-    url: resolveRequestUrl(endpoint, options.params),
-    headers,
-    body: options.body ?? null,
-  };
-}
-
-/**
- * Handle response output based on flags
- * @internal Exported for testing
- */
-export function handleResponse(
-  stdout: Writer,
-  response: { status: number; headers: Headers; body: unknown },
-  flags: {
-    silent: boolean;
-    verbose: boolean;
-    include: boolean;
-    fields?: string[];
-  }
-): void {
-  const isError = response.status >= 400;
-
-  // Silent mode - only set exit code
-  if (flags.silent) {
-    if (isError) {
-      process.exit(1);
-    }
-    return;
-  }
-
-  // Output headers (verbose or include mode)
-  if (flags.verbose) {
-    writeVerboseResponse(stdout, response.status, response.headers);
-  } else if (flags.include) {
-    writeResponseHeaders(stdout, response.status, response.headers);
-  }
-
-  // Output body — apply --fields filtering when requested
-  if (flags.fields && flags.fields.length > 0) {
-    writeJson(stdout, response.body, flags.fields);
-  } else {
-    writeResponseBody(stdout, response.body);
-  }
-
-  // Exit with error code for error responses
-  if (isError) {
-    process.exit(1);
-  }
+  return headers;
 }
 
 /**
@@ -1152,7 +1083,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: "json",
+  output: { json: true },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1275,18 +1206,19 @@ export const apiCommand = buildCommand({
         ? parseHeaders(flags.header)
         : undefined;
 
-    // Dry-run mode: show the resolved request without sending it
+    // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
-      const request = buildDryRunRequest(flags.method, normalizedEndpoint, {
-        params,
-        headers,
-        body,
-      });
-      writeJson(stdout, request, flags.fields);
-      return;
+      return {
+        data: {
+          method: flags.method,
+          url: resolveRequestUrl(normalizedEndpoint, params),
+          headers: resolveEffectiveHeaders(headers, body),
+          body: body ?? null,
+        },
+      };
     }
 
-    // Verbose mode: show request details (unless silent)
+    // Verbose mode: show request details before the response
     if (flags.verbose && !flags.silent) {
       writeVerboseRequest(stdout, flags.method, normalizedEndpoint, headers);
     }
@@ -1298,6 +1230,28 @@ export const apiCommand = buildCommand({
       headers,
     });
 
-    handleResponse(stdout, response, flags);
+    const isError = response.status >= 400;
+
+    // Silent mode — only set exit code, no output
+    if (flags.silent) {
+      if (isError) {
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Output response headers when requested
+    if (flags.verbose) {
+      writeVerboseResponse(stdout, response.status, response.headers);
+    } else if (flags.include) {
+      writeResponseHeaders(stdout, response.status, response.headers);
+    }
+
+    // Set error exit code (before return so the process exits after output)
+    if (isError) {
+      process.exitCode = 1;
+    }
+
+    return { data: response.body };
   },
 });

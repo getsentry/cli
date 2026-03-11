@@ -16,12 +16,12 @@ import {
   oneof,
   property,
   record,
+  string,
   stringMatching,
   tuple,
   uniqueArray,
 } from "fast-check";
 import {
-  buildDryRunRequest,
   buildFromFields,
   extractJsonBody,
   normalizeEndpoint,
@@ -31,6 +31,7 @@ import {
   parseFieldValue,
   parseMethod,
   resolveBody,
+  resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
 } from "../../src/commands/api.js";
@@ -794,7 +795,6 @@ describe("property: resolveBody", () => {
 // Dry-run property tests
 
 /** Arbitrary for HTTP methods */
-const httpMethodArb = constantFrom("GET", "POST", "PUT", "DELETE", "PATCH");
 
 /** Arbitrary for clean API endpoint paths (no query string, for dry-run tests) */
 const dryRunEndpointArb = stringMatching(
@@ -855,61 +855,65 @@ describe("property: resolveRequestUrl", () => {
   });
 });
 
-describe("property: buildDryRunRequest", () => {
-  test("method is preserved exactly", () => {
-    fcAssert(
-      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest(method, endpoint, {});
-        expect(request.method).toBe(method);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
+describe("property: resolveEffectiveHeaders", () => {
+  /** Arbitrary for custom header entries (non-content-type keys) */
+  const headerKeyArb = stringMatching(/^X-[A-Za-z]{1,10}$/);
+  const headerValueArb = string({ minLength: 1, maxLength: 20 });
+  const customHeadersArb = dictionary(headerKeyArb, headerValueArb, {
+    minKeys: 0,
+    maxKeys: 3,
   });
 
-  test("URL contains the endpoint", () => {
+  test("preserves all custom headers", () => {
     fcAssert(
-      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest(method, endpoint, {});
-        const normalized = endpoint.startsWith("/")
-          ? endpoint.slice(1)
-          : endpoint;
-        expect(request.url).toContain(normalized);
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("headers default to empty object when undefined", () => {
-    fcAssert(
-      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest(method, endpoint, {});
-        expect(request.headers).toEqual({});
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("body defaults to null when undefined", () => {
-    fcAssert(
-      property(httpMethodArb, dryRunEndpointArb, (method, endpoint) => {
-        const request = buildDryRunRequest(method, endpoint, {});
-        expect(request.body).toBeNull();
-      }),
-      { numRuns: DEFAULT_NUM_RUNS }
-    );
-  });
-
-  test("provided body is preserved", () => {
-    fcAssert(
-      property(
-        httpMethodArb,
-        dryRunEndpointArb,
-        jsonValue(),
-        (method, endpoint, body) => {
-          const request = buildDryRunRequest(method, endpoint, { body });
-          expect(request.body).toEqual(body);
+      property(customHeadersArb, (custom) => {
+        const result = resolveEffectiveHeaders(custom, undefined);
+        for (const [key, value] of Object.entries(custom)) {
+          expect(result[key]).toBe(value);
         }
-      ),
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("auto-adds Content-Type for object bodies without it", () => {
+    fcAssert(
+      property(customHeadersArb, jsonValue(), (custom, body) => {
+        // Ensure body is a non-null object (not string/number/boolean/null)
+        if (body === null || body === undefined || typeof body !== "object") {
+          return;
+        }
+        const result = resolveEffectiveHeaders(custom, body);
+        expect(result["Content-Type"]).toBe("application/json");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("never adds Content-Type for string bodies", () => {
+    fcAssert(
+      property(customHeadersArb, string(), (custom, body) => {
+        const result = resolveEffectiveHeaders(custom, body);
+        // Should not have auto-added Content-Type (only custom headers)
+        if (!custom["Content-Type"]) {
+          expect(result["Content-Type"]).toBeUndefined();
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("does not override explicit Content-Type", () => {
+    const contentTypeArb = constantFrom(
+      "text/plain",
+      "text/xml",
+      "application/x-www-form-urlencoded"
+    );
+    fcAssert(
+      property(contentTypeArb, jsonValue(), (ct, body) => {
+        const result = resolveEffectiveHeaders({ "Content-Type": ct }, body);
+        expect(result["Content-Type"]).toBe(ct);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
