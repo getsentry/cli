@@ -63,6 +63,10 @@ SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 Log out of Sentry
 
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 **Examples:**
 
 ```bash
@@ -91,6 +95,8 @@ View authentication status
 **Flags:**
 - `--show-token - Show the stored token (masked by default)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 **Examples:**
 
@@ -453,12 +459,18 @@ CLI-related commands
 
 Send feedback about the CLI
 
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry cli fix`
 
 Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 #### `sentry cli setup`
 
@@ -481,6 +493,8 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 ### Repo
 
