@@ -118,15 +118,16 @@ export function parseSort(value: string): SortValue {
 /**
  * Format trace list data for human-readable terminal output.
  *
- * Handles two display states:
- * - Empty list → "No traces found." (next-page hint is in CommandOutput.hint)
+ * Handles three display states:
+ * - Empty list with more pages → "No traces on this page."
+ * - Empty list, no more pages → "No traces found."
  * - Non-empty → header line + formatted table
  */
 function formatTraceListHuman(result: TraceListResult): string {
-  const { traces, org, project } = result;
+  const { traces, hasMore, org, project } = result;
 
   if (traces.length === 0) {
-    return "No traces found.";
+    return hasMore ? "No traces on this page." : "No traces found.";
   }
 
   return `Recent traces in ${org}/${project}:\n\n${formatTraceTable(traces)}`;
@@ -267,7 +268,7 @@ export const listCommand = buildListCommand("trace", {
     // Build footer hint based on result state
     let hint: string | undefined;
     if (traces.length === 0 && hasMore) {
-      hint = `No traces on this page. Try the next page: ${nextPageHint(org, project, flags)}`;
+      hint = `Try the next page: ${nextPageHint(org, project, flags)}`;
     } else if (traces.length > 0) {
       const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
       hint = hasMore
