@@ -130,6 +130,26 @@ export class ConfigError extends CliError {
   }
 }
 
+/**
+ * Thrown when a command produces valid output but should exit non-zero.
+ *
+ * Unlike other errors, the output data is rendered to stdout (not stderr)
+ * through the normal output system — the `buildCommand` wrapper catches
+ * this before it reaches the global error handler. Think "HTTP 404 body":
+ * useful data, but the operation itself failed.
+ *
+ * @param data - The output data to render (same type as CommandOutput.data)
+ */
+export class OutputError extends CliError {
+  readonly data: unknown;
+
+  constructor(data: unknown) {
+    super("", 1);
+    this.name = "OutputError";
+    this.data = data;
+  }
+}
+
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
   "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",

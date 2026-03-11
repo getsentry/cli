@@ -16,7 +16,7 @@ import {
   buildRawQueryParams,
   dataToQueryParams,
   extractJsonBody,
-  handleResponse,
+  formatApiResponse,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -26,11 +26,9 @@ import {
   prepareRequestOptions,
   readStdin,
   resolveBody,
+  resolveEffectiveHeaders,
+  resolveRequestUrl,
   setNestedValue,
-  writeResponseBody,
-  writeResponseHeaders,
-  writeVerboseRequest,
-  writeVerboseResponse,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
 import type { Writer } from "../../src/types/index.js";
@@ -877,163 +875,37 @@ describe("buildBodyFromFields", () => {
   });
 });
 
-describe("writeResponseHeaders", () => {
-  test("writes status and headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers({
-      "Content-Type": "application/json",
-      "X-Custom": "value",
-    });
-
-    writeResponseHeaders(writer, 200, headers);
-
-    expect(writer.output).toMatch(/^HTTP 200\n/);
-    expect(writer.output).toMatch(/content-type: application\/json/i);
-    expect(writer.output).toMatch(/x-custom: value/i);
-    expect(writer.output).toMatch(/\n$/);
+describe("formatApiResponse", () => {
+  test("formats JSON object with pretty-printing", () => {
+    expect(formatApiResponse({ key: "value", num: 42 })).toBe(
+      '{\n  "key": "value",\n  "num": 42\n}'
+    );
   });
 
-  test("handles different status codes", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
-
-    writeResponseHeaders(writer, 404, headers);
-
-    expect(writer.output).toMatch(/^HTTP 404\n/);
+  test("formats JSON array with pretty-printing", () => {
+    expect(formatApiResponse([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
   });
 
-  test("handles empty headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
-
-    writeResponseHeaders(writer, 200, headers);
-
-    expect(writer.output).toBe("HTTP 200\n\n");
-  });
-});
-
-describe("writeResponseBody", () => {
-  test("writes JSON object with formatting", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, { key: "value", num: 42 });
-
-    expect(writer.output).toBe('{\n  "key": "value",\n  "num": 42\n}\n');
+  test("formats string directly without JSON quoting", () => {
+    expect(formatApiResponse("plain text response")).toBe(
+      "plain text response"
+    );
   });
 
-  test("writes JSON array with formatting", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, [1, 2, 3]);
-
-    expect(writer.output).toBe("[\n  1,\n  2,\n  3\n]\n");
+  test("formats number as string", () => {
+    expect(formatApiResponse(42)).toBe("42");
   });
 
-  test("writes string directly", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, "plain text response");
-
-    expect(writer.output).toBe("plain text response\n");
+  test("formats boolean as string", () => {
+    expect(formatApiResponse(true)).toBe("true");
   });
 
-  test("writes number as string", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, 42);
-
-    expect(writer.output).toBe("42\n");
+  test("returns empty string for null", () => {
+    expect(formatApiResponse(null)).toBe("");
   });
 
-  test("writes boolean as string", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, true);
-
-    expect(writer.output).toBe("true\n");
-  });
-
-  test("does not write null", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, null);
-
-    expect(writer.output).toBe("");
-  });
-
-  test("does not write undefined", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, undefined);
-
-    expect(writer.output).toBe("");
-  });
-});
-
-describe("writeVerboseRequest", () => {
-  test("writes method and endpoint", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "GET", "organizations/", undefined);
-
-    expect(writer.output).toBe("> GET /api/0/organizations/\n>\n");
-  });
-
-  test("writes headers when provided", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "POST", "issues/", {
-      "Content-Type": "application/json",
-      "X-Custom": "value",
-    });
-
-    expect(writer.output).toMatch(/^> POST \/api\/0\/issues\/\n/);
-    expect(writer.output).toMatch(/> Content-Type: application\/json\n/);
-    expect(writer.output).toMatch(/> X-Custom: value\n/);
-    expect(writer.output).toMatch(/>\n$/);
-  });
-
-  test("handles empty headers object", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "DELETE", "issues/123/", {});
-
-    expect(writer.output).toBe("> DELETE /api/0/issues/123/\n>\n");
-  });
-});
-
-describe("writeVerboseResponse", () => {
-  test("writes status and headers with < prefix", () => {
-    const writer = createMockWriter();
-    const headers = new Headers({
-      "Content-Type": "application/json",
-      "X-Request-Id": "abc123",
-    });
-
-    writeVerboseResponse(writer, 200, headers);
-
-    expect(writer.output).toMatch(/^< HTTP 200\n/);
-    expect(writer.output).toMatch(/< content-type: application\/json/i);
-    expect(writer.output).toMatch(/< x-request-id: abc123/i);
-    expect(writer.output).toMatch(/<\n$/);
-  });
-
-  test("handles error status codes", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
-
-    writeVerboseResponse(writer, 500, headers);
-
-    expect(writer.output).toMatch(/^< HTTP 500\n/);
-  });
-
-  test("handles empty headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
-
-    writeVerboseResponse(writer, 204, headers);
-
-    expect(writer.output).toBe("< HTTP 204\n<\n");
+  test("returns empty string for undefined", () => {
+    expect(formatApiResponse(undefined)).toBe("");
   });
 });
 
@@ -1128,154 +1000,56 @@ describe("buildBodyFromInput", () => {
   });
 });
 
-describe("handleResponse", () => {
-  // Mock process.exit for tests
-  const originalExit = process.exit;
-
-  test("outputs body for successful response", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: { success: true },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: false,
-      include: false,
-    });
-
-    expect(writer.output).toContain('"success": true');
+describe("resolveEffectiveHeaders", () => {
+  test("auto-adds Content-Type for object bodies", () => {
+    const headers = resolveEffectiveHeaders(undefined, { key: "value" });
+    expect(headers["Content-Type"]).toBe("application/json");
   });
 
-  test("outputs headers with --include flag", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers({ "Content-Type": "application/json" }),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: false,
-      include: true,
-    });
-
-    expect(writer.output).toMatch(/^HTTP 200\n/);
-    expect(writer.output).toMatch(/content-type:/i);
+  test("does not add Content-Type for string bodies", () => {
+    const headers = resolveEffectiveHeaders(undefined, "raw-string");
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 
-  test("outputs verbose format with --verbose flag", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers({ "Content-Type": "application/json" }),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: true,
-      include: false,
-    });
-
-    expect(writer.output).toMatch(/^< HTTP 200\n/);
-    expect(writer.output).toMatch(/< content-type:/i);
+  test("does not override explicit Content-Type", () => {
+    const headers = resolveEffectiveHeaders(
+      { "Content-Type": "text/plain" },
+      { key: "value" }
+    );
+    expect(headers["Content-Type"]).toBe("text/plain");
   });
 
-  test("verbose takes precedence over include", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: "test",
-    };
-
-    handleResponse(writer, response, {
-      silent: false,
-      verbose: true,
-      include: true,
-    });
-
-    // Should use verbose format (< prefix), not include format
-    expect(writer.output).toMatch(/^< HTTP/);
+  test("case-insensitive Content-Type check", () => {
+    const headers = resolveEffectiveHeaders(
+      { "content-type": "text/xml" },
+      { key: "value" }
+    );
+    expect(headers["content-type"]).toBe("text/xml");
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 
-  test("silent mode produces no output for success", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 200,
-      headers: new Headers(),
-      body: { data: "test" },
-    };
-
-    handleResponse(writer, response, {
-      silent: true,
-      verbose: false,
-      include: false,
-    });
-
-    expect(writer.output).toBe("");
+  test("preserves custom headers", () => {
+    const headers = resolveEffectiveHeaders(
+      { Authorization: "Bearer token", "X-Custom": "value" },
+      undefined
+    );
+    expect(headers.Authorization).toBe("Bearer token");
+    expect(headers["X-Custom"]).toBe("value");
   });
 
-  test("silent mode with error calls process.exit(1)", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 500,
-      headers: new Headers(),
-      body: { error: "Internal Server Error" },
-    };
-
-    let exitCode: number | undefined;
-    process.exit = ((code?: number) => {
-      exitCode = code;
-      throw new Error("process.exit called");
-    }) as typeof process.exit;
-
-    try {
-      expect(() =>
-        handleResponse(writer, response, {
-          silent: true,
-          verbose: false,
-          include: false,
-        })
-      ).toThrow("process.exit called");
-      expect(exitCode).toBe(1);
-    } finally {
-      process.exit = originalExit;
-    }
+  test("defaults to empty object when no headers provided", () => {
+    const headers = resolveEffectiveHeaders(undefined, undefined);
+    expect(headers).toEqual({});
   });
 
-  test("error response calls process.exit(1) after output", () => {
-    const writer = createMockWriter();
-    const response = {
-      status: 404,
-      headers: new Headers(),
-      body: { detail: "Not found" },
-    };
+  test("adds Content-Type for null body (matches rawApiRequest)", () => {
+    const headers = resolveEffectiveHeaders(undefined, null);
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
 
-    let exitCode: number | undefined;
-    process.exit = ((code?: number) => {
-      exitCode = code;
-      throw new Error("process.exit called");
-    }) as typeof process.exit;
-
-    try {
-      expect(() =>
-        handleResponse(writer, response, {
-          silent: false,
-          verbose: false,
-          include: false,
-        })
-      ).toThrow("process.exit called");
-      expect(exitCode).toBe(1);
-      // Should have output the body before exiting
-      expect(writer.output).toContain("Not found");
-    } finally {
-      process.exit = originalExit;
-    }
+  test("does not add Content-Type for undefined body", () => {
+    const headers = resolveEffectiveHeaders(undefined, undefined);
+    expect(headers["Content-Type"]).toBeUndefined();
   });
 });
 
@@ -1728,5 +1502,38 @@ describe("dataToQueryParams", () => {
     expect(() =>
       dataToQueryParams(42 as unknown as Record<string, unknown>)
     ).toThrow(ValidationError);
+  });
+});
+
+// Dry-run tests
+
+describe("resolveRequestUrl", () => {
+  test("builds URL with base URL and endpoint", () => {
+    const url = resolveRequestUrl("organizations/");
+    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  });
+
+  test("strips leading slash from endpoint", () => {
+    const url = resolveRequestUrl("/organizations/");
+    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  });
+
+  test("appends query params", () => {
+    const url = resolveRequestUrl("issues/", { status: "unresolved" });
+    expect(url).toContain("?status=unresolved");
+    expect(url).toContain("/api/0/issues/");
+  });
+
+  test("handles array params", () => {
+    const url = resolveRequestUrl("events/", {
+      field: ["title", "timestamp"],
+    });
+    expect(url).toContain("field=title");
+    expect(url).toContain("field=timestamp");
+  });
+
+  test("omits query string when no params", () => {
+    const url = resolveRequestUrl("projects/");
+    expect(url).not.toContain("?");
   });
 });

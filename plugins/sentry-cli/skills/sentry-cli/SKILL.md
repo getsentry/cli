@@ -163,6 +163,7 @@ Create a new project
 
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
+- `-n, --dry-run - Validate inputs and show what would be created without creating it`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -395,9 +396,11 @@ Make an authenticated API request
 - `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
 - `-H, --header <value>... - Add a HTTP request header in key:value format`
 - `--input <value> - The file to use as body for the HTTP request (use "-" to read from standard input)`
-- `-i, --include - Include HTTP response status line and headers in the output`
 - `--silent - Do not print the response body`
 - `--verbose - Include full HTTP request and response in the output`
+- `-n, --dry-run - Show the resolved request without sending it`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 **Examples:**
 
@@ -436,7 +439,7 @@ sentry api /projects/my-org/my-project/ \
 sentry api /organizations/ \
   --header "X-Custom-Header:value"
 
-sentry api /organizations/ --include
+sentry api /organizations/ --verbose
 
 # Get all issues (automatically follows pagination)
 sentry api /projects/my-org/my-project/issues/ --paginate
