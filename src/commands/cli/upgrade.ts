@@ -58,7 +58,7 @@ const CHANNEL_VERSIONS = new Set(["nightly", "stable"]);
  */
 export type UpgradeResult = {
   /** What action was taken */
-  action: "upgraded" | "downgraded" | "up-to-date" | "checked" | "channel-only";
+  action: "upgraded" | "downgraded" | "up-to-date" | "checked";
   /** Current CLI version before upgrade */
   currentVersion: string;
   /** Target version (the version we upgraded/downgraded to, or the latest available) */
@@ -120,7 +120,7 @@ type ResolveTargetOptions = {
  *
  * - `target`: the version string to upgrade/downgrade to (proceed with upgrade)
  * - `UpgradeResult`: structured result when no upgrade should proceed
- *   (check-only mode, already up to date, or channel-only switch)
+ *   (check-only mode, or already up to date)
  */
 type ResolveResult =
   | { kind: "target"; target: string }

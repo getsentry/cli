@@ -269,33 +269,38 @@ function resolveUid(username: string): number | null {
  *
  * @returns Object with lists of human-readable success and failure messages
  */
+/** Per-issue repair outcome, aligned by index with the input issues array */
+type RepairOutcome = {
+  /** Whether the repair succeeded */
+  success: boolean;
+  /** Human-readable repair message */
+  message: string;
+};
+
 async function repairOwnership(
   issues: OwnershipIssue[],
   username: string,
   targetUid: number
-): Promise<{ fixed: string[]; failed: string[] }> {
-  const fixed: string[] = [];
-  const failed: string[] = [];
-
+): Promise<RepairOutcome[]> {
   const results = await Promise.allSettled(
     issues.map((issue) => chown(issue.path, targetUid, -1))
   );
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i] as PromiseSettledResult<void>;
+  return results.map((result, i) => {
     const issue = issues[i] as OwnershipIssue;
     if (result.status === "fulfilled") {
-      fixed.push(`${issue.kind} ${issue.path}: transferred to ${username}`);
-    } else {
-      const reason =
-        result.reason instanceof Error
-          ? result.reason.message
-          : "unknown error";
-      failed.push(`${issue.kind} ${issue.path}: ${reason}`);
+      return {
+        success: true,
+        message: `${issue.kind} ${issue.path}: transferred to ${username}`,
+      };
     }
-  }
-
-  return { fixed, failed };
+    const reason =
+      result.reason instanceof Error ? result.reason.message : "unknown error";
+    return {
+      success: false,
+      message: `${issue.kind} ${issue.path}: ${reason}`,
+    };
+  });
 }
 
 /** Result of diagnosing a category of issues (used internally) */
@@ -413,34 +418,23 @@ async function handleOwnershipIssues(
   // Running as root — perform chown. resolvedTargetUid is guaranteed non-null
   // and non-zero here (we bailed out above if it couldn't be resolved).
   const resolvedUid = resolvedTargetUid as number;
-  const { fixed, failed } = await repairOwnership(
-    rawIssues,
-    username,
-    resolvedUid
-  );
+  const outcomes = await repairOwnership(rawIssues, username, resolvedUid);
 
-  // Mark each issue with its repair outcome
+  // Mark each issue with its repair outcome (aligned by index)
+  let anyFailed = false;
   for (let i = 0; i < fixIssues.length; i++) {
     const issue = fixIssues[i] as FixIssue;
-    if (i < fixed.length) {
-      issue.repaired = true;
-      issue.repairMessage = fixed[i];
+    const outcome = outcomes[i] as RepairOutcome;
+    issue.repaired = outcome.success;
+    issue.repairMessage = outcome.message;
+    if (!outcome.success) {
+      anyFailed = true;
     }
-  }
-
-  // Append failed repairs as issues with repaired=false
-  for (const f of failed) {
-    fixIssues.push({
-      category: "ownership",
-      description: f,
-      repaired: false,
-      repairMessage: f,
-    });
   }
 
   return {
     issues: fixIssues,
-    repairFailed: failed.length > 0,
+    repairFailed: anyFailed,
   };
 }
 

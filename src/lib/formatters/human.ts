@@ -2018,7 +2018,6 @@ const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
   downgraded: "Downgraded",
   "up-to-date": "Already up to date",
   checked: "Update check complete",
-  "channel-only": "Channel updated",
 };
 
 /**
@@ -2066,11 +2065,6 @@ export function formatUpgradeResult(data: UpgradeResult): string {
       }
       break;
     }
-    case "channel-only":
-      lines.push(
-        `${colorTag("green", "✓")} Channel set to ${escapeMarkdownInline(data.channel)}`
-      );
-      break;
     default: {
       // Exhaustive check — all action types should be handled above
       const _: never = data.action;
