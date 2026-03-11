@@ -396,8 +396,15 @@ const TREND_MIN_TERM_WIDTH = 100;
 /** Lines per issue row in non-compact mode (2-line content + separator). */
 const LINES_PER_DEFAULT_ROW = 3;
 
-/** Fixed line overhead: top border, header, header separator, bottom border. */
-const TABLE_LINE_OVERHEAD = 4;
+/**
+ * Fixed line overhead for the rendered table.
+ *
+ * Top border (1) + header row (1) + header separator (1) + bottom border (1) = 4,
+ * minus 1 because the last data row has no trailing separator (row separators
+ * are drawn between data rows only: `r > 0 && r < allRows.length - 1`).
+ * Net overhead = 3.
+ */
+const TABLE_LINE_OVERHEAD = 3;
 
 /**
  * Determine whether auto-compact should activate based on terminal height.

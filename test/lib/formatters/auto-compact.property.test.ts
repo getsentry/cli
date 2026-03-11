@@ -14,8 +14,8 @@ import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 /** Lines per non-compact row (2 content + 1 separator). */
 const LINES_PER_ROW = 3;
 
-/** Fixed overhead: top border + header + header separator + bottom border. */
-const OVERHEAD = 4;
+/** Fixed overhead: top border + header + header sep + bottom border − 1 (no trailing row sep). */
+const OVERHEAD = 3;
 
 /** Save original process.stdout.rows so we can restore it after each test. */
 let originalRows: number | undefined;
