@@ -17,7 +17,6 @@ import {
   dataToQueryParams,
   extractJsonBody,
   formatApiResponse,
-  formatBody,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -876,185 +875,37 @@ describe("buildBodyFromFields", () => {
   });
 });
 
-describe("formatApiResponse with --include envelope", () => {
-  test("renders status and headers", () => {
-    const output = formatApiResponse({
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "x-custom": "value",
-      },
-      body: null,
-    });
-
-    expect(output).toMatch(/^HTTP 200\n/);
-    expect(output).toContain("content-type: application/json");
-    expect(output).toContain("x-custom: value");
-  });
-
-  test("handles different status codes", () => {
-    const output = formatApiResponse({
-      status: 404,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("HTTP 404");
-  });
-
-  test("handles empty headers", () => {
-    const output = formatApiResponse({
-      status: 200,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("HTTP 200");
-  });
-
-  test("includes body after headers", () => {
-    const output = formatApiResponse({
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: { key: "value" },
-    });
-
-    expect(output).toContain("HTTP 200");
-    expect(output).toContain("content-type: application/json");
-    expect(output).toContain('"key": "value"');
-  });
-});
-
-describe("formatBody", () => {
+describe("formatApiResponse", () => {
   test("formats JSON object with pretty-printing", () => {
-    expect(formatBody({ key: "value", num: 42 })).toBe(
+    expect(formatApiResponse({ key: "value", num: 42 })).toBe(
       '{\n  "key": "value",\n  "num": 42\n}'
     );
   });
 
   test("formats JSON array with pretty-printing", () => {
-    expect(formatBody([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
+    expect(formatApiResponse([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
   });
 
   test("formats string directly without JSON quoting", () => {
-    expect(formatBody("plain text response")).toBe("plain text response");
+    expect(formatApiResponse("plain text response")).toBe(
+      "plain text response"
+    );
   });
 
   test("formats number as string", () => {
-    expect(formatBody(42)).toBe("42");
+    expect(formatApiResponse(42)).toBe("42");
+  });
+
+  test("formats boolean as string", () => {
+    expect(formatApiResponse(true)).toBe("true");
   });
 
   test("returns empty string for null", () => {
-    expect(formatBody(null)).toBe("");
+    expect(formatApiResponse(null)).toBe("");
   });
 
   test("returns empty string for undefined", () => {
-    expect(formatBody(undefined)).toBe("");
-  });
-});
-
-describe("formatApiResponse with raw body (no envelope)", () => {
-  test("delegates to formatBody for non-envelope data", () => {
-    expect(formatApiResponse({ key: "value" })).toBe('{\n  "key": "value"\n}');
-    expect(formatApiResponse("plain text")).toBe("plain text");
-    expect(formatApiResponse(null)).toBe("");
     expect(formatApiResponse(undefined)).toBe("");
-  });
-});
-
-describe("formatApiResponse with --verbose envelope", () => {
-  test("renders request method and endpoint", () => {
-    const output = formatApiResponse({
-      request: {
-        method: "GET",
-        endpoint: "organizations/",
-      },
-      status: 200,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("> GET /api/0/organizations/");
-    expect(output).toContain(">");
-  });
-
-  test("renders request headers when provided", () => {
-    const output = formatApiResponse({
-      request: {
-        method: "POST",
-        endpoint: "issues/",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Custom": "value",
-        },
-      },
-      status: 200,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("> POST /api/0/issues/");
-    expect(output).toContain("> Content-Type: application/json");
-    expect(output).toContain("> X-Custom: value");
-  });
-
-  test("renders response status and headers with < prefix", () => {
-    const output = formatApiResponse({
-      request: {
-        method: "GET",
-        endpoint: "organizations/",
-      },
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "x-request-id": "abc123",
-      },
-      body: null,
-    });
-
-    expect(output).toContain("< HTTP 200");
-    expect(output).toContain("< content-type: application/json");
-    expect(output).toContain("< x-request-id: abc123");
-  });
-
-  test("handles error status codes", () => {
-    const output = formatApiResponse({
-      request: { method: "GET", endpoint: "issues/" },
-      status: 500,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("< HTTP 500");
-  });
-
-  test("handles empty request headers", () => {
-    const output = formatApiResponse({
-      request: {
-        method: "DELETE",
-        endpoint: "issues/123/",
-      },
-      status: 204,
-      headers: {},
-      body: null,
-    });
-
-    expect(output).toContain("> DELETE /api/0/issues/123/");
-    expect(output).toContain("< HTTP 204");
-  });
-
-  test("includes body after response headers", () => {
-    const output = formatApiResponse({
-      request: { method: "GET", endpoint: "issues/" },
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: { id: 123, title: "Bug" },
-    });
-
-    expect(output).toContain("> GET /api/0/issues/");
-    expect(output).toContain("< HTTP 200");
-    expect(output).toContain('"id": 123');
-    expect(output).toContain('"title": "Bug"');
   });
 });
 

@@ -10,6 +10,7 @@ import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { OutputError, ValidationError } from "../lib/errors.js";
 import { validateEndpoint } from "../lib/input-validation.js";
+import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
 
@@ -22,7 +23,6 @@ type ApiFlags = {
   readonly "raw-field"?: string[];
   readonly header?: string[];
   readonly input?: string;
-  readonly include: boolean;
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
@@ -849,88 +849,17 @@ export function buildBodyFromFields(
 
 /**
  * Format a raw response body value for human-readable output.
- * @internal Exported for testing
- */
-export function formatBody(body: unknown): string {
-  if (body === null || body === undefined) {
-    return "";
-  }
-  if (typeof body === "object") {
-    return JSON.stringify(body, null, 2);
-  }
-  return String(body);
-}
-
-/**
- * Shape returned when --include or --verbose wraps the response body
- * with HTTP metadata. When neither flag is set, data is the raw body.
- */
-type ApiResponseEnvelope = {
-  status: number;
-  headers: Record<string, string>;
-  body: unknown;
-  /** Present only in --verbose mode */
-  request?: {
-    method: string;
-    endpoint: string;
-    headers?: Record<string, string>;
-  };
-};
-
-/** Type guard: does the data carry HTTP metadata? */
-function isEnvelope(data: unknown): data is ApiResponseEnvelope {
-  return (
-    typeof data === "object" &&
-    data !== null &&
-    "status" in data &&
-    "headers" in data &&
-    "body" in data
-  );
-}
-
-/**
- * Format an API response for human-readable output.
- *
- * Handles two shapes:
- * - Raw body (default) — formatted via formatBody
- * - Envelope (--include/--verbose) — renders HTTP header block
- *   before the body, using curl-style `< ` prefixes in verbose mode.
- *
+ * Objects are pretty-printed as JSON, strings pass through, null/undefined → empty.
  * @internal Exported for testing
  */
 export function formatApiResponse(data: unknown): string {
-  if (!isEnvelope(data)) {
-    return formatBody(data);
+  if (data === null || data === undefined) {
+    return "";
   }
-
-  const lines: string[] = [];
-  const prefix = data.request ? "< " : "";
-
-  // Verbose: request block first
-  if (data.request) {
-    lines.push(`> ${data.request.method} /api/0/${data.request.endpoint}`);
-    if (data.request.headers) {
-      for (const [key, value] of Object.entries(data.request.headers)) {
-        lines.push(`> ${key}: ${value}`);
-      }
-    }
-    lines.push(">");
+  if (typeof data === "object") {
+    return JSON.stringify(data, null, 2);
   }
-
-  // Response status + headers
-  lines.push(`${prefix}HTTP ${data.status}`);
-  for (const [key, value] of Object.entries(data.headers)) {
-    lines.push(`${prefix}${key}: ${value}`);
-  }
-  lines.push(prefix.trimEnd());
-
-  // Body
-  const bodyStr = formatBody(data.body);
-  if (bodyStr) {
-    lines.push(bodyStr);
-  }
-
-  return lines.join("\n");
+  return String(data);
 }
 
 /**
@@ -1102,6 +1031,8 @@ export async function resolveBody(
 
 // Command Definition
 
+const log = logger.withTag("api");
+
 export const apiCommand = buildCommand({
   output: { json: true, human: formatApiResponse },
   docs: {
@@ -1181,11 +1112,6 @@ export const apiCommand = buildCommand({
         optional: true,
         placeholder: "file",
       },
-      include: {
-        kind: "boolean",
-        brief: "Include HTTP response status line and headers in the output",
-        default: false,
-      },
       silent: {
         kind: "boolean",
         brief: "Do not print the response body",
@@ -1208,7 +1134,6 @@ export const apiCommand = buildCommand({
       F: "field",
       f: "raw-field",
       H: "header",
-      i: "include",
       n: "dry-run",
     },
   },
@@ -1235,6 +1160,17 @@ export const apiCommand = buildCommand({
       };
     }
 
+    // Verbose: log request details to stderr before making the call
+    if (flags.verbose) {
+      log.debug(`> ${flags.method} /api/0/${normalizedEndpoint}`);
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          log.debug(`> ${key}: ${value}`);
+        }
+      }
+      log.debug(">");
+    }
+
     const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
@@ -1244,6 +1180,15 @@ export const apiCommand = buildCommand({
 
     const isError = response.status >= 400;
 
+    // Verbose: log response metadata to stderr
+    if (flags.verbose) {
+      log.debug(`< HTTP ${response.status}`);
+      response.headers.forEach((value, key) => {
+        log.debug(`< ${key}: ${value}`);
+      });
+      log.debug("<");
+    }
+
     // Silent mode — no output, just exit code
     if (flags.silent) {
       if (isError) {
@@ -1252,42 +1197,11 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Convert Headers to plain object for serialization
-    const headersToObject = (h: Headers): Record<string, string> => {
-      const obj: Record<string, string> = {};
-      h.forEach((value, key) => {
-        obj[key] = value;
-      });
-      return obj;
-    };
-
-    // Build response data — shape varies by flags
-    let responseData: unknown;
-    if (flags.verbose) {
-      responseData = {
-        request: {
-          method: flags.method,
-          endpoint: normalizedEndpoint,
-          headers,
-        },
-        status: response.status,
-        headers: headersToObject(response.headers),
-        body: response.body,
-      };
-    } else if (flags.include) {
-      responseData = {
-        status: response.status,
-        headers: headersToObject(response.headers),
-        body: response.body,
-      };
-    } else {
-      responseData = response.body;
-    }
-
+    // Always return raw body — --fields filters it directly
     if (isError) {
-      throw new OutputError(responseData);
+      throw new OutputError(response.body);
     }
 
-    return { data: responseData };
+    return { data: response.body };
   },
 });
