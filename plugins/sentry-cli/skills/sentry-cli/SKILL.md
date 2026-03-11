@@ -234,7 +234,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
-- `--compact - Single-line rows for compact output`
+- `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -681,7 +681,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
-- `--compact - Single-line rows for compact output`
+- `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
