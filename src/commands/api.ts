@@ -10,12 +10,6 @@ import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
 import { writeJson } from "../lib/formatters/json.js";
-import {
-  escapeMarkdownInline,
-  mdKvTable,
-  renderMarkdown,
-  safeCodeSpan,
-} from "../lib/formatters/markdown.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
@@ -992,45 +986,6 @@ export function buildDryRunRequest(
 }
 
 /**
- * Format a dry-run request preview as rendered markdown.
- *
- * Uses the standard mdKvTable layout for consistency with other commands.
- *
- * @internal Exported for testing
- */
-export function formatDryRunRequest(request: DryRunRequest): string {
-  const lines: string[] = [];
-  lines.push(
-    `## <muted>Dry run</muted> — ${escapeMarkdownInline(request.method)} ${escapeMarkdownInline(request.url)}`
-  );
-  lines.push("");
-
-  const kvRows: [string, string][] = [
-    ["Method", request.method],
-    ["URL", request.url],
-  ];
-
-  const headerEntries = Object.entries(request.headers);
-  if (headerEntries.length > 0) {
-    kvRows.push([
-      "Headers",
-      headerEntries.map(([k, v]) => `${k}: ${v}`).join(", "),
-    ]);
-  }
-
-  if (request.body !== null) {
-    const bodyStr =
-      typeof request.body === "string"
-        ? request.body
-        : JSON.stringify(request.body, null, 2);
-    kvRows.push(["Body", safeCodeSpan(bodyStr)]);
-  }
-
-  lines.push(mdKvTable(kvRows));
-  return renderMarkdown(lines.join("\n"));
-}
-
-/**
  * Handle response output based on flags
  * @internal Exported for testing
  */
@@ -1197,7 +1152,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: { json: true, human: formatDryRunRequest },
+  output: "json",
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1322,13 +1277,13 @@ export const apiCommand = buildCommand({
 
     // Dry-run mode: show the resolved request without sending it
     if (flags["dry-run"]) {
-      return {
-        data: buildDryRunRequest(flags.method, normalizedEndpoint, {
-          params,
-          headers,
-          body,
-        }),
-      };
+      const request = buildDryRunRequest(flags.method, normalizedEndpoint, {
+        params,
+        headers,
+        body,
+      });
+      writeJson(stdout, request, flags.fields);
+      return;
     }
 
     // Verbose mode: show request details (unless silent)

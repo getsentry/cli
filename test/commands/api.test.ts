@@ -15,10 +15,8 @@ import {
   buildQueryParams,
   buildQueryParamsFromFields,
   buildRawQueryParams,
-  type DryRunRequest,
   dataToQueryParams,
   extractJsonBody,
-  formatDryRunRequest,
   handleResponse,
   normalizeEndpoint,
   normalizeFields,
@@ -1827,77 +1825,5 @@ describe("buildDryRunRequest", () => {
     });
 
     expect(request.body).toBe('{"raw":"string"}');
-  });
-});
-
-describe("formatDryRunRequest", () => {
-  const req = (overrides: Partial<DryRunRequest> = {}): DryRunRequest => ({
-    method: "GET",
-    url: "https://sentry.io/api/0/organizations/",
-    headers: {},
-    body: null,
-    ...overrides,
-  });
-
-  test("includes method and URL", () => {
-    const output = formatDryRunRequest(req());
-
-    expect(output).toContain("GET");
-    expect(output).toContain("https://sentry.io/api/0/organizations/");
-    expect(output).toContain("Dry run");
-  });
-
-  test("includes headers", () => {
-    const output = formatDryRunRequest(
-      req({
-        method: "POST",
-        url: "https://sentry.io/api/0/issues/",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer token",
-        },
-      })
-    );
-
-    expect(output).toContain("Content-Type: application/json");
-    expect(output).toContain("Authorization: Bearer token");
-  });
-
-  test("includes JSON body", () => {
-    const output = formatDryRunRequest(
-      req({
-        method: "PUT",
-        url: "https://sentry.io/api/0/issues/123/",
-        body: { status: "resolved" },
-      })
-    );
-
-    expect(output).toContain("Body");
-    expect(output).toContain('"status": "resolved"');
-  });
-
-  test("includes string body as-is", () => {
-    const output = formatDryRunRequest(
-      req({
-        method: "POST",
-        url: "https://sentry.io/api/0/events/",
-        body: "raw-body-content",
-      })
-    );
-
-    expect(output).toContain("Body");
-    expect(output).toContain("raw-body-content");
-  });
-
-  test("omits body when null", () => {
-    const output = formatDryRunRequest(req());
-
-    expect(output).not.toContain("Body");
-  });
-
-  test("omits headers row when empty", () => {
-    const output = formatDryRunRequest(req());
-
-    expect(output).not.toContain("Headers");
   });
 });
