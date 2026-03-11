@@ -28,7 +28,6 @@ import {
   resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
-  writeResponseBody,
   writeResponseHeaders,
   writeVerboseRequest,
   writeVerboseResponse,
@@ -910,64 +909,6 @@ describe("writeResponseHeaders", () => {
     writeResponseHeaders(writer, 200, headers);
 
     expect(writer.output).toBe("HTTP 200\n\n");
-  });
-});
-
-describe("writeResponseBody", () => {
-  test("writes JSON object with formatting", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, { key: "value", num: 42 });
-
-    expect(writer.output).toBe('{\n  "key": "value",\n  "num": 42\n}\n');
-  });
-
-  test("writes JSON array with formatting", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, [1, 2, 3]);
-
-    expect(writer.output).toBe("[\n  1,\n  2,\n  3\n]\n");
-  });
-
-  test("writes string directly", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, "plain text response");
-
-    expect(writer.output).toBe("plain text response\n");
-  });
-
-  test("writes number as string", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, 42);
-
-    expect(writer.output).toBe("42\n");
-  });
-
-  test("writes boolean as string", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, true);
-
-    expect(writer.output).toBe("true\n");
-  });
-
-  test("does not write null", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, null);
-
-    expect(writer.output).toBe("");
-  });
-
-  test("does not write undefined", () => {
-    const writer = createMockWriter();
-
-    writeResponseBody(writer, undefined);
-
-    expect(writer.output).toBe("");
   });
 });
 

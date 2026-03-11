@@ -864,22 +864,6 @@ export function writeResponseHeaders(
 }
 
 /**
- * Write response body to stdout
- * @internal Exported for testing
- */
-export function writeResponseBody(stdout: Writer, body: unknown): void {
-  if (body === null || body === undefined) {
-    return;
-  }
-
-  if (typeof body === "object") {
-    stdout.write(`${JSON.stringify(body, null, 2)}\n`);
-  } else {
-    stdout.write(`${String(body)}\n`);
-  }
-}
-
-/**
  * Write verbose request output (curl-style format)
  * @internal Exported for testing
  */
