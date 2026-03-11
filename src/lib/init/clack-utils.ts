@@ -27,10 +27,10 @@ export function abortIfCancelled<T>(value: T | symbol): T {
 const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
-    hint: "Automatic error and crash reporting",
+    hint: "Error and crash reporting",
   },
   performanceMonitoring: {
-    label: "Performance Monitoring",
+    label: "Performance Monitoring (Tracing)",
     hint: "Transaction and span tracing",
   },
   sessionReplay: {
@@ -55,6 +55,28 @@ export function featureLabel(id: string): string {
 
 export function featureHint(id: string): string | undefined {
   return FEATURE_INFO[id]?.hint;
+}
+
+const FEATURE_DISPLAY_ORDER = [
+  "errorMonitoring",
+  "sessionReplay",
+  "performanceMonitoring",
+  "logs",
+  "metrics",
+  "profiling",
+  "sourceMaps",
+];
+
+/** Sort features into canonical display order for the multi-select prompt. */
+export function sortFeatures(features: string[]): string[] {
+  return features.slice().sort((a, b) => {
+    const ai = FEATURE_DISPLAY_ORDER.indexOf(a);
+    const bi = FEATURE_DISPLAY_ORDER.indexOf(b);
+    return (
+      (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) -
+      (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
+    );
+  });
 }
 
 export const STEP_LABELS: Record<string, string> = {
