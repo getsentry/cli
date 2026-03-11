@@ -2,9 +2,11 @@
  * Trace-specific formatters
  *
  * Provides formatting utilities for displaying Sentry traces in the CLI.
+ * Includes flat span utilities for `span list` and `span view` commands.
  */
 
 import type { TraceSpan, TransactionListItem } from "../../types/index.js";
+import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
 import {
   escapeMarkdownCell,
@@ -16,6 +18,7 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
+import { type Column, writeTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
 
 /**
@@ -278,4 +281,400 @@ export function formatTraceSummary(summary: TraceSummary): string {
 
   const md = `## Trace \`${summary.traceId}\`\n\n${mdKvTable(kvRows)}\n`;
   return renderMarkdown(md);
+}
+
+// ---------------------------------------------------------------------------
+// Flat span utilities (for span list / span view)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the duration of a span in milliseconds.
+ * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
+ *
+ * @returns Duration in milliseconds, or undefined if not computable
+ */
+export function computeSpanDurationMs(span: TraceSpan): number | undefined {
+  if (span.duration !== undefined && Number.isFinite(span.duration)) {
+    return span.duration;
+  }
+  const endTs = span.end_timestamp || span.timestamp;
+  if (endTs !== undefined && Number.isFinite(endTs)) {
+    const ms = (endTs - span.start_timestamp) * 1000;
+    return ms >= 0 ? ms : undefined;
+  }
+  return;
+}
+
+/** Flat span for list output — no nested children */
+export type FlatSpan = {
+  span_id: string;
+  parent_span_id?: string | null;
+  op?: string;
+  description?: string | null;
+  duration_ms?: number;
+  start_timestamp: number;
+  project_slug?: string;
+  transaction?: string;
+  depth: number;
+  child_count: number;
+};
+
+/**
+ * Flatten a hierarchical TraceSpan[] tree into a depth-first flat array.
+ *
+ * @param spans - Root-level spans from the /trace/ API
+ * @returns Flat array with depth and child_count computed
+ */
+export function flattenSpanTree(spans: TraceSpan[]): FlatSpan[] {
+  const result: FlatSpan[] = [];
+
+  function walk(span: TraceSpan, depth: number): void {
+    const children = span.children ?? [];
+    result.push({
+      span_id: span.span_id,
+      parent_span_id: span.parent_span_id,
+      op: span.op || span["transaction.op"],
+      description: span.description || span.transaction,
+      duration_ms: computeSpanDurationMs(span),
+      start_timestamp: span.start_timestamp,
+      project_slug: span.project_slug,
+      transaction: span.transaction,
+      depth,
+      child_count: children.length,
+    });
+    for (const child of children) {
+      walk(child, depth + 1);
+    }
+  }
+
+  for (const span of spans) {
+    walk(span, 0);
+  }
+  return result;
+}
+
+/** Result of finding a span by ID in the tree */
+export type FoundSpan = {
+  span: TraceSpan;
+  depth: number;
+  ancestors: TraceSpan[];
+};
+
+/**
+ * Find a span by ID in the tree, returning the span, its depth, and ancestor chain.
+ *
+ * @param spans - Root-level spans from the /trace/ API
+ * @param spanId - The span ID to search for
+ * @returns Found span with depth and ancestors (root→parent), or null
+ */
+export function findSpanById(
+  spans: TraceSpan[],
+  spanId: string
+): FoundSpan | null {
+  function search(
+    span: TraceSpan,
+    depth: number,
+    ancestors: TraceSpan[]
+  ): FoundSpan | null {
+    if (span.span_id === spanId) {
+      return { span, depth, ancestors };
+    }
+    for (const child of span.children ?? []) {
+      const found = search(child, depth + 1, [...ancestors, span]);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  for (const root of spans) {
+    const found = search(root, 0, []);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** Parsed span filter from a query string */
+export type SpanFilter = {
+  op?: string;
+  project?: string;
+  description?: string;
+  minDuration?: number;
+  maxDuration?: number;
+};
+
+/**
+ * Parse a "-q" filter string into structured filters.
+ *
+ * Supports: `op:db`, `project:backend`, `description:fetch`,
+ * `duration:>100ms`, `duration:<500ms`
+ *
+ * Bare words without a `:` prefix are treated as description filters.
+ *
+ * @param query - Raw query string
+ * @returns Parsed filter
+ */
+export function parseSpanQuery(query: string): SpanFilter {
+  const filter: SpanFilter = {};
+  const tokens = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+
+  for (const token of tokens) {
+    applyQueryToken(filter, token);
+  }
+  return filter;
+}
+
+/**
+ * Apply a single query token to a filter.
+ * Bare words (no colon) are treated as description filters.
+ */
+function applyQueryToken(filter: SpanFilter, token: string): void {
+  const colonIdx = token.indexOf(":");
+  if (colonIdx === -1) {
+    filter.description = token;
+    return;
+  }
+  const key = token.slice(0, colonIdx).toLowerCase();
+  let value = token.slice(colonIdx + 1);
+  // Strip quotes
+  if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+
+  switch (key) {
+    case "op":
+      filter.op = value.toLowerCase();
+      break;
+    case "project":
+      filter.project = value.toLowerCase();
+      break;
+    case "description":
+      filter.description = value;
+      break;
+    case "duration": {
+      const ms = parseDurationValue(value);
+      if (ms !== null) {
+        if (value.startsWith(">")) {
+          filter.minDuration = ms;
+        } else if (value.startsWith("<")) {
+          filter.maxDuration = ms;
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/** Regex to strip comparison operators from duration values */
+const COMPARISON_OP_RE = /^[><]=?/;
+
+/** Regex to parse a numeric duration with optional unit */
+const DURATION_RE = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/i;
+
+/**
+ * Parse a duration filter value like ">100ms", "<2s", ">500".
+ * Returns the numeric milliseconds, or null if unparseable.
+ */
+function parseDurationValue(value: string): number | null {
+  // Strip comparison operator
+  const numStr = value.replace(COMPARISON_OP_RE, "");
+  const match = numStr.match(DURATION_RE);
+  if (!match || match[1] === undefined) {
+    return null;
+  }
+  const num = Number(match[1]);
+  const unit = (match[2] ?? "ms").toLowerCase();
+  switch (unit) {
+    case "s":
+      return num * 1000;
+    case "m":
+      return num * 60_000;
+    default:
+      return num;
+  }
+}
+
+/**
+ * Test whether a single span matches all active filter criteria.
+ */
+function matchesFilter(span: FlatSpan, filter: SpanFilter): boolean {
+  if (filter.op && !span.op?.toLowerCase().includes(filter.op)) {
+    return false;
+  }
+  if (
+    filter.project &&
+    !span.project_slug?.toLowerCase().includes(filter.project)
+  ) {
+    return false;
+  }
+  if (filter.description) {
+    const desc = (span.description || "").toLowerCase();
+    if (!desc.includes(filter.description.toLowerCase())) {
+      return false;
+    }
+  }
+  if (
+    filter.minDuration !== undefined &&
+    (span.duration_ms === undefined || span.duration_ms < filter.minDuration)
+  ) {
+    return false;
+  }
+  if (
+    filter.maxDuration !== undefined &&
+    (span.duration_ms === undefined || span.duration_ms > filter.maxDuration)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Apply a parsed filter to a flat span list.
+ *
+ * @param spans - Flat span array
+ * @param filter - Parsed span filter
+ * @returns Filtered array (does not mutate input)
+ */
+export function applySpanFilter(
+  spans: FlatSpan[],
+  filter: SpanFilter
+): FlatSpan[] {
+  return spans.filter((span) => matchesFilter(span, filter));
+}
+
+/** Column definitions for the flat span table */
+const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
+  {
+    header: "Span ID",
+    value: (s) => `\`${s.span_id}\``,
+    minWidth: 18,
+    shrinkable: false,
+  },
+  {
+    header: "Op",
+    value: (s) => escapeMarkdownCell(s.op || "—"),
+    minWidth: 6,
+  },
+  {
+    header: "Description",
+    value: (s) => escapeMarkdownCell(s.description || "(no description)"),
+    truncate: true,
+  },
+  {
+    header: "Duration",
+    value: (s) =>
+      s.duration_ms !== undefined ? formatTraceDuration(s.duration_ms) : "—",
+    align: "right",
+    minWidth: 8,
+    shrinkable: false,
+  },
+  {
+    header: "Depth",
+    value: (s) => String(s.depth),
+    align: "right",
+    minWidth: 5,
+    shrinkable: false,
+  },
+];
+
+/**
+ * Write a flat span list as a formatted table.
+ *
+ * @param stdout - Output writer
+ * @param spans - Flat span array to display
+ */
+export function writeSpanTable(
+  stdout: { write(s: string): void },
+  spans: FlatSpan[]
+): void {
+  writeTable(stdout, spans, SPAN_TABLE_COLUMNS, { truncate: true });
+}
+
+/**
+ * Build key-value rows for a span's metadata.
+ */
+function buildSpanKvRows(span: TraceSpan, traceId: string): [string, string][] {
+  const kvRows: [string, string][] = [];
+
+  kvRows.push(["Span ID", `\`${span.span_id}\``]);
+  kvRows.push(["Trace ID", `\`${traceId}\``]);
+
+  if (span.parent_span_id) {
+    kvRows.push(["Parent", `\`${span.parent_span_id}\``]);
+  }
+
+  const op = span.op || span["transaction.op"];
+  if (op) {
+    kvRows.push(["Op", `\`${op}\``]);
+  }
+
+  const desc = span.description || span.transaction;
+  if (desc) {
+    kvRows.push(["Description", escapeMarkdownCell(desc)]);
+  }
+
+  const durationMs = computeSpanDurationMs(span);
+  if (durationMs !== undefined) {
+    kvRows.push(["Duration", formatTraceDuration(durationMs)]);
+  }
+
+  if (span.project_slug) {
+    kvRows.push(["Project", span.project_slug]);
+  }
+
+  if (isValidTimestamp(span.start_timestamp)) {
+    const date = new Date(span.start_timestamp * 1000);
+    kvRows.push(["Started", date.toLocaleString("sv-SE")]);
+  }
+
+  kvRows.push(["Children", String((span.children ?? []).length)]);
+
+  return kvRows;
+}
+
+/**
+ * Format an ancestor chain as indented tree lines.
+ */
+function formatAncestorChain(ancestors: TraceSpan[]): string {
+  const lines: string[] = ["", muted("─── Ancestors ───"), ""];
+  for (let i = 0; i < ancestors.length; i++) {
+    const a = ancestors[i];
+    if (!a) {
+      continue;
+    }
+    const indent = "  ".repeat(i);
+    const aOp = a.op || a["transaction.op"] || "unknown";
+    const aDesc = a.description || a.transaction || "(no description)";
+    lines.push(`${indent}${muted(aOp)} — ${aDesc} ${muted(`(${a.span_id})`)}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Format a single span's details for human-readable output.
+ *
+ * @param span - The TraceSpan to format
+ * @param ancestors - Ancestor chain from root to parent
+ * @param traceId - The trace ID for context
+ * @returns Rendered terminal string
+ */
+export function formatSpanDetails(
+  span: TraceSpan,
+  ancestors: TraceSpan[],
+  traceId: string
+): string {
+  const kvRows = buildSpanKvRows(span, traceId);
+  const md = `## Span \`${span.span_id}\`\n\n${mdKvTable(kvRows)}\n`;
+  let output = renderMarkdown(md);
+
+  if (ancestors.length > 0) {
+    output += formatAncestorChain(ancestors);
+  }
+
+  return output;
 }

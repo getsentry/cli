@@ -38,6 +38,7 @@ import {
 } from "./markdown.js";
 import { sparkline } from "./sparkline.js";
 import { type Column, writeTable } from "./table.js";
+import { computeSpanDurationMs } from "./trace.js";
 
 // Color tag maps
 
@@ -1037,24 +1038,6 @@ function buildRequestMarkdown(requestEntry: RequestEntry): string {
 }
 
 // Span Tree Formatting
-
-/**
- * Compute the duration of a span in milliseconds.
- * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
- *
- * @returns Duration in milliseconds, or undefined if not computable
- */
-function computeSpanDurationMs(span: TraceSpan): number | undefined {
-  if (span.duration !== undefined && Number.isFinite(span.duration)) {
-    return span.duration;
-  }
-  const endTs = span.end_timestamp || span.timestamp;
-  if (endTs !== undefined && Number.isFinite(endTs)) {
-    const ms = (endTs - span.start_timestamp) * 1000;
-    return ms >= 0 ? ms : undefined;
-  }
-  return;
-}
 
 type FormatSpanOptions = {
   lines: string[];
