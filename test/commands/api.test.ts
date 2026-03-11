@@ -17,6 +17,7 @@ import {
   dataToQueryParams,
   extractJsonBody,
   formatApiResponse,
+  formatBody,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -29,9 +30,6 @@ import {
   resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
-  writeResponseHeaders,
-  writeVerboseRequest,
-  writeVerboseResponse,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
 import type { Writer } from "../../src/types/index.js";
@@ -878,135 +876,185 @@ describe("buildBodyFromFields", () => {
   });
 });
 
-describe("writeResponseHeaders", () => {
-  test("writes status and headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers({
-      "Content-Type": "application/json",
-      "X-Custom": "value",
+describe("formatApiResponse with --include envelope", () => {
+  test("renders status and headers", () => {
+    const output = formatApiResponse({
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "x-custom": "value",
+      },
+      body: null,
     });
 
-    writeResponseHeaders(writer, 200, headers);
-
-    expect(writer.output).toMatch(/^HTTP 200\n/);
-    expect(writer.output).toMatch(/content-type: application\/json/i);
-    expect(writer.output).toMatch(/x-custom: value/i);
-    expect(writer.output).toMatch(/\n$/);
+    expect(output).toMatch(/^HTTP 200\n/);
+    expect(output).toContain("content-type: application/json");
+    expect(output).toContain("x-custom: value");
   });
 
   test("handles different status codes", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
+    const output = formatApiResponse({
+      status: 404,
+      headers: {},
+      body: null,
+    });
 
-    writeResponseHeaders(writer, 404, headers);
-
-    expect(writer.output).toMatch(/^HTTP 404\n/);
+    expect(output).toContain("HTTP 404");
   });
 
   test("handles empty headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
+    const output = formatApiResponse({
+      status: 200,
+      headers: {},
+      body: null,
+    });
 
-    writeResponseHeaders(writer, 200, headers);
+    expect(output).toContain("HTTP 200");
+  });
 
-    expect(writer.output).toBe("HTTP 200\n\n");
+  test("includes body after headers", () => {
+    const output = formatApiResponse({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { key: "value" },
+    });
+
+    expect(output).toContain("HTTP 200");
+    expect(output).toContain("content-type: application/json");
+    expect(output).toContain('"key": "value"');
   });
 });
 
-describe("formatApiResponse", () => {
+describe("formatBody", () => {
   test("formats JSON object with pretty-printing", () => {
-    expect(formatApiResponse({ key: "value", num: 42 })).toBe(
+    expect(formatBody({ key: "value", num: 42 })).toBe(
       '{\n  "key": "value",\n  "num": 42\n}'
     );
   });
 
   test("formats JSON array with pretty-printing", () => {
-    expect(formatApiResponse([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
+    expect(formatBody([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
   });
 
   test("formats string directly without JSON quoting", () => {
-    expect(formatApiResponse("plain text response")).toBe(
-      "plain text response"
-    );
+    expect(formatBody("plain text response")).toBe("plain text response");
   });
 
   test("formats number as string", () => {
-    expect(formatApiResponse(42)).toBe("42");
+    expect(formatBody(42)).toBe("42");
   });
 
   test("returns empty string for null", () => {
-    expect(formatApiResponse(null)).toBe("");
+    expect(formatBody(null)).toBe("");
   });
 
   test("returns empty string for undefined", () => {
+    expect(formatBody(undefined)).toBe("");
+  });
+});
+
+describe("formatApiResponse with raw body (no envelope)", () => {
+  test("delegates to formatBody for non-envelope data", () => {
+    expect(formatApiResponse({ key: "value" })).toBe('{\n  "key": "value"\n}');
+    expect(formatApiResponse("plain text")).toBe("plain text");
+    expect(formatApiResponse(null)).toBe("");
     expect(formatApiResponse(undefined)).toBe("");
   });
 });
 
-describe("writeVerboseRequest", () => {
-  test("writes method and endpoint", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "GET", "organizations/", undefined);
-
-    expect(writer.output).toBe("> GET /api/0/organizations/\n>\n");
-  });
-
-  test("writes headers when provided", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "POST", "issues/", {
-      "Content-Type": "application/json",
-      "X-Custom": "value",
+describe("formatApiResponse with --verbose envelope", () => {
+  test("renders request method and endpoint", () => {
+    const output = formatApiResponse({
+      request: {
+        method: "GET",
+        endpoint: "organizations/",
+      },
+      status: 200,
+      headers: {},
+      body: null,
     });
 
-    expect(writer.output).toMatch(/^> POST \/api\/0\/issues\/\n/);
-    expect(writer.output).toMatch(/> Content-Type: application\/json\n/);
-    expect(writer.output).toMatch(/> X-Custom: value\n/);
-    expect(writer.output).toMatch(/>\n$/);
+    expect(output).toContain("> GET /api/0/organizations/");
+    expect(output).toContain(">");
   });
 
-  test("handles empty headers object", () => {
-    const writer = createMockWriter();
-
-    writeVerboseRequest(writer, "DELETE", "issues/123/", {});
-
-    expect(writer.output).toBe("> DELETE /api/0/issues/123/\n>\n");
-  });
-});
-
-describe("writeVerboseResponse", () => {
-  test("writes status and headers with < prefix", () => {
-    const writer = createMockWriter();
-    const headers = new Headers({
-      "Content-Type": "application/json",
-      "X-Request-Id": "abc123",
+  test("renders request headers when provided", () => {
+    const output = formatApiResponse({
+      request: {
+        method: "POST",
+        endpoint: "issues/",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Custom": "value",
+        },
+      },
+      status: 200,
+      headers: {},
+      body: null,
     });
 
-    writeVerboseResponse(writer, 200, headers);
+    expect(output).toContain("> POST /api/0/issues/");
+    expect(output).toContain("> Content-Type: application/json");
+    expect(output).toContain("> X-Custom: value");
+  });
 
-    expect(writer.output).toMatch(/^< HTTP 200\n/);
-    expect(writer.output).toMatch(/< content-type: application\/json/i);
-    expect(writer.output).toMatch(/< x-request-id: abc123/i);
-    expect(writer.output).toMatch(/<\n$/);
+  test("renders response status and headers with < prefix", () => {
+    const output = formatApiResponse({
+      request: {
+        method: "GET",
+        endpoint: "organizations/",
+      },
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": "abc123",
+      },
+      body: null,
+    });
+
+    expect(output).toContain("< HTTP 200");
+    expect(output).toContain("< content-type: application/json");
+    expect(output).toContain("< x-request-id: abc123");
   });
 
   test("handles error status codes", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
+    const output = formatApiResponse({
+      request: { method: "GET", endpoint: "issues/" },
+      status: 500,
+      headers: {},
+      body: null,
+    });
 
-    writeVerboseResponse(writer, 500, headers);
-
-    expect(writer.output).toMatch(/^< HTTP 500\n/);
+    expect(output).toContain("< HTTP 500");
   });
 
-  test("handles empty headers", () => {
-    const writer = createMockWriter();
-    const headers = new Headers();
+  test("handles empty request headers", () => {
+    const output = formatApiResponse({
+      request: {
+        method: "DELETE",
+        endpoint: "issues/123/",
+      },
+      status: 204,
+      headers: {},
+      body: null,
+    });
 
-    writeVerboseResponse(writer, 204, headers);
+    expect(output).toContain("> DELETE /api/0/issues/123/");
+    expect(output).toContain("< HTTP 204");
+  });
 
-    expect(writer.output).toBe("< HTTP 204\n<\n");
+  test("includes body after response headers", () => {
+    const output = formatApiResponse({
+      request: { method: "GET", endpoint: "issues/" },
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { id: 123, title: "Bug" },
+    });
+
+    expect(output).toContain("> GET /api/0/issues/");
+    expect(output).toContain("< HTTP 200");
+    expect(output).toContain('"id": 123');
+    expect(output).toContain('"title": "Bug"');
   });
 });
 

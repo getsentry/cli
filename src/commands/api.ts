@@ -848,32 +848,10 @@ export function buildBodyFromFields(
 // Response Output
 
 /**
- * Write response headers to stdout (standard format)
+ * Format a raw response body value for human-readable output.
  * @internal Exported for testing
  */
-export function writeResponseHeaders(
-  stdout: Writer,
-  status: number,
-  headers: Headers
-): void {
-  stdout.write(`HTTP ${status}\n`);
-  headers.forEach((value, key) => {
-    stdout.write(`${key}: ${value}\n`);
-  });
-  stdout.write("\n");
-}
-
-/**
- * Format an API response body for human-readable output.
- *
- * The api command is a raw proxy — the response body is the output.
- * Objects/arrays are JSON-formatted; strings (plain text, HTML error
- * pages) pass through without JSON quoting; null/undefined produce
- * no output.
- *
- * @internal Exported for testing
- */
-export function formatApiResponse(body: unknown): string {
+export function formatBody(body: unknown): string {
   if (body === null || body === undefined) {
     return "";
   }
@@ -884,38 +862,75 @@ export function formatApiResponse(body: unknown): string {
 }
 
 /**
- * Write verbose request output (curl-style format)
- * @internal Exported for testing
+ * Shape returned when --include or --verbose wraps the response body
+ * with HTTP metadata. When neither flag is set, data is the raw body.
  */
-export function writeVerboseRequest(
-  stdout: Writer,
-  method: string,
-  endpoint: string,
-  headers: Record<string, string> | undefined
-): void {
-  stdout.write(`> ${method} /api/0/${endpoint}\n`);
-  if (headers) {
-    for (const [key, value] of Object.entries(headers)) {
-      stdout.write(`> ${key}: ${value}\n`);
-    }
-  }
-  stdout.write(">\n");
+type ApiResponseEnvelope = {
+  status: number;
+  headers: Record<string, string>;
+  body: unknown;
+  /** Present only in --verbose mode */
+  request?: {
+    method: string;
+    endpoint: string;
+    headers?: Record<string, string>;
+  };
+};
+
+/** Type guard: does the data carry HTTP metadata? */
+function isEnvelope(data: unknown): data is ApiResponseEnvelope {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "status" in data &&
+    "headers" in data &&
+    "body" in data
+  );
 }
 
 /**
- * Write verbose response output (curl-style format)
+ * Format an API response for human-readable output.
+ *
+ * Handles two shapes:
+ * - Raw body (default) — formatted via formatBody
+ * - Envelope (--include/--verbose) — renders HTTP header block
+ *   before the body, using curl-style `< ` prefixes in verbose mode.
+ *
  * @internal Exported for testing
  */
-export function writeVerboseResponse(
-  stdout: Writer,
-  status: number,
-  headers: Headers
-): void {
-  stdout.write(`< HTTP ${status}\n`);
-  headers.forEach((value, key) => {
-    stdout.write(`< ${key}: ${value}\n`);
-  });
-  stdout.write("<\n");
+export function formatApiResponse(data: unknown): string {
+  if (!isEnvelope(data)) {
+    return formatBody(data);
+  }
+
+  const lines: string[] = [];
+  const prefix = data.request ? "< " : "";
+
+  // Verbose: request block first
+  if (data.request) {
+    lines.push(`> ${data.request.method} /api/0/${data.request.endpoint}`);
+    if (data.request.headers) {
+      for (const [key, value] of Object.entries(data.request.headers)) {
+        lines.push(`> ${key}: ${value}`);
+      }
+    }
+    lines.push(">");
+  }
+
+  // Response status + headers
+  lines.push(`${prefix}HTTP ${data.status}`);
+  for (const [key, value] of Object.entries(data.headers)) {
+    lines.push(`${prefix}${key}: ${value}`);
+  }
+  lines.push(prefix.trimEnd());
+
+  // Body
+  const bodyStr = formatBody(data.body);
+  if (bodyStr) {
+    lines.push(bodyStr);
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -1198,12 +1213,9 @@ export const apiCommand = buildCommand({
     },
   },
   async func(this: SentryContext, flags: ApiFlags, endpoint: string) {
-    const { stdout, stderr, stdin } = this;
+    const { stderr, stdin } = this;
 
-    // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
-
-    // Resolve body and query params from flags (--data, --input, or fields)
     const { body, params } = await resolveBody(flags, stdin, stderr);
 
     const headers =
@@ -1223,11 +1235,6 @@ export const apiCommand = buildCommand({
       };
     }
 
-    // Verbose mode: show request details before the response
-    if (flags.verbose && !flags.silent) {
-      writeVerboseRequest(stdout, flags.method, normalizedEndpoint, headers);
-    }
-
     const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
@@ -1237,27 +1244,50 @@ export const apiCommand = buildCommand({
 
     const isError = response.status >= 400;
 
-    // Silent mode — only set exit code, no output
+    // Silent mode — no output, just exit code
     if (flags.silent) {
       if (isError) {
-        process.exit(1);
+        throw new OutputError(null);
       }
       return;
     }
 
-    // Output response headers when requested (side-effect before body)
+    // Convert Headers to plain object for serialization
+    const headersToObject = (h: Headers): Record<string, string> => {
+      const obj: Record<string, string> = {};
+      h.forEach((value, key) => {
+        obj[key] = value;
+      });
+      return obj;
+    };
+
+    // Build response data — shape varies by flags
+    let responseData: unknown;
     if (flags.verbose) {
-      writeVerboseResponse(stdout, response.status, response.headers);
+      responseData = {
+        request: {
+          method: flags.method,
+          endpoint: normalizedEndpoint,
+          headers,
+        },
+        status: response.status,
+        headers: headersToObject(response.headers),
+        body: response.body,
+      };
     } else if (flags.include) {
-      writeResponseHeaders(stdout, response.status, response.headers);
+      responseData = {
+        status: response.status,
+        headers: headersToObject(response.headers),
+        body: response.body,
+      };
+    } else {
+      responseData = response.body;
     }
 
-    // Error responses: throw so the wrapper renders the body then exits 1.
-    // The body is still useful (API error details), just indicates failure.
     if (isError) {
-      throw new OutputError(response.body);
+      throw new OutputError(responseData);
     }
 
-    return { data: response.body };
+    return { data: responseData };
   },
 });
