@@ -1886,3 +1886,120 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
 
   return renderMarkdown(lines.join("\n"));
 }
+
+// CLI Fix Formatting
+
+/** Structured fix result (imported from the command module) */
+type FixResult = import("../../commands/cli/fix.js").FixResult;
+
+/** Structured fix issue (imported from the command module) */
+type FixIssue = import("../../commands/cli/fix.js").FixIssue;
+
+/** Status marker for a fix issue bullet point */
+function issueMarker(issue: FixIssue): string {
+  if (issue.repaired === true) {
+    return colorTag("green", "✓");
+  }
+  if (issue.repaired === false) {
+    return colorTag("red", "✗");
+  }
+  return "•";
+}
+
+/**
+ * Build a section for a specific issue category.
+ * Returns empty string if there are no issues in this category.
+ */
+function formatFixCategory(issues: FixIssue[], heading: string): string {
+  if (issues.length === 0) {
+    return "";
+  }
+
+  const lines: string[] = [];
+  lines.push(`### ${heading}`);
+  lines.push("");
+  lines.push(`Found ${issues.length} issue(s):`);
+  lines.push("");
+
+  for (const issue of issues) {
+    const marker = issueMarker(issue);
+    const desc = escapeMarkdownInline(issue.description);
+    if (issue.repairMessage && issue.repaired !== undefined) {
+      lines.push(`- ${marker} ${escapeMarkdownInline(issue.repairMessage)}`);
+    } else {
+      lines.push(`- ${marker} ${desc}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format fix command result as rendered markdown.
+ *
+ * Produces sections for each issue category (ownership, permissions, schema)
+ * with status markers for each issue. Designed as the `human` formatter
+ * for the `cli fix` command's {@link OutputConfig}.
+ *
+ * @param data - Structured fix result collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatFixResult(data: FixResult): string {
+  const lines: string[] = [];
+
+  // Header
+  lines.push(`## Database: ${safeCodeSpan(data.dbPath)}`);
+  lines.push("");
+  lines.push(`Schema version: ${data.schemaVersion}`);
+
+  if (data.dryRun) {
+    lines.push("");
+    lines.push(`*${colorTag("muted", "Dry run — no changes will be made")}*`);
+  }
+
+  // Category sections
+  const ownershipIssues = data.issues.filter((i) => i.category === "ownership");
+  const permissionIssues = data.issues.filter(
+    (i) => i.category === "permission"
+  );
+  const schemaIssues = data.issues.filter((i) => i.category === "schema");
+
+  const ownershipSection = formatFixCategory(ownershipIssues, "Ownership");
+  const permissionSection = formatFixCategory(permissionIssues, "Permissions");
+  const schemaSection = formatFixCategory(schemaIssues, "Schema");
+
+  if (ownershipSection) {
+    lines.push("");
+    lines.push(ownershipSection);
+  }
+  if (permissionSection) {
+    lines.push("");
+    lines.push(permissionSection);
+  }
+  if (schemaSection) {
+    lines.push("");
+    lines.push(schemaSection);
+  }
+
+  // Instructions block (manual steps when automatic repair isn't possible)
+  if (data.instructions) {
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+    lines.push(escapeMarkdownInline(data.instructions));
+  }
+
+  // Summary
+  lines.push("");
+  if (data.issues.length === 0 && !data.repairFailed) {
+    lines.push(
+      `${colorTag("green", "✓")} No issues found. Database schema and permissions are correct.`
+    );
+  } else if (data.dryRun && data.issues.length > 0 && !data.repairFailed) {
+    lines.push("Run `sentry cli fix` to apply fixes.");
+  } else if (!data.repairFailed) {
+    lines.push(`${colorTag("green", "✓")} All issues repaired successfully.`);
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}

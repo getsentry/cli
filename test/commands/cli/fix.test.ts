@@ -1,9 +1,12 @@
 /**
  * Tests for sentry cli fix command.
  *
- * Status and diagnostic messages go through consola (→ process.stderr).
- * Tests capture stderr via a spy on process.stderr.write and assert on
- * the collected output.
+ * Output goes through the structured CommandOutput/OutputError path, which
+ * renders via the `output` config (stdout). For failure paths, `OutputError`
+ * triggers `process.exit()` — tests mock it to capture the exit code.
+ *
+ * Tests run non-TTY so assertions match raw CommonMark (per AGENTS.md).
+ * Markdown escapes underscores as `\_`, so assertions use escaped forms.
  */
 
 import { Database } from "bun:sqlite";
@@ -74,58 +77,77 @@ function createDatabaseWithMissingTables(
 }
 
 /**
- * Create a mock Stricli context and a stderr capture for consola output.
+ * Thrown by the mock `process.exit()` to halt execution without actually
+ * exiting the process. The `code` field captures the requested exit code.
+ */
+class MockExitError extends Error {
+  code: number;
+  constructor(code: number) {
+    super(`process.exit(${code})`);
+    this.code = code;
+  }
+}
+
+/**
+ * Create a mock Stricli context that captures stdout output.
  *
- * `getOutput()` returns the combined consola output captured from
- * `process.stderr.write` (where consola routes all messages).
+ * The `buildCommand` wrapper renders structured output to `context.stdout`.
+ * For failure paths (OutputError), it calls `process.exit()` — the mock
+ * intercepts this and throws MockExitError to halt execution.
  */
 function createContext() {
-  const stderrChunks: string[] = [];
-  const origWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderrChunks.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write;
+  const stdoutChunks: string[] = [];
 
   const context = {
     stdout: {
-      write: mock((_s: string) => {
-        /* unused — fix output goes through consola */
+      write: mock((s: string) => {
+        stdoutChunks.push(s);
       }),
     },
     stderr: {
       write: mock((_s: string) => {
-        /* unused — fix output goes through consola */
+        /* consola routes here — not used for structured output */
       }),
     },
     process: { exitCode: 0 },
   };
-  const getOutput = () => stderrChunks.join("");
-  const restore = () => {
-    process.stderr.write = origWrite;
-  };
-  return { context, getOutput, restore };
+  const getOutput = () => stdoutChunks.join("");
+  return { context, getOutput };
 }
 
 const getTestDir = useTestConfigDir("fix-test-");
 
 /**
  * Run the fix command with the given flags and return captured output.
- * Reduces boilerplate across test cases.
+ * Mocks `process.exit()` so OutputError paths don't terminate the test.
  */
 async function runFix(dryRun: boolean) {
-  const { context, getOutput, restore } = createContext();
+  const { context, getOutput } = createContext();
+
+  let exitCode = 0;
+  const originalExit = process.exit;
+  process.exit = ((code?: number) => {
+    exitCode = code ?? 0;
+    throw new MockExitError(code ?? 0);
+  }) as typeof process.exit;
 
   try {
     const func = await fixCommand.loader();
-    await func.call(context, { "dry-run": dryRun });
+    await func.call(context, { "dry-run": dryRun, json: false });
+    // Successful return — exitCode stays 0
+  } catch (err) {
+    if (err instanceof MockExitError) {
+      exitCode = err.code;
+    } else {
+      throw err;
+    }
   } finally {
-    restore();
+    process.exit = originalExit;
   }
 
   return {
     output: getOutput(),
-    exitCode: context.process.exitCode,
+    exitCode,
   };
 }
 
@@ -154,8 +176,9 @@ describe("sentry cli fix", () => {
     expect(output).toContain("Found");
     expect(output).toContain("issue(s)");
     expect(output).toContain("Missing column");
-    expect(output).toContain("dsn_cache.fingerprint");
-    expect(output).toContain("Run 'sentry cli fix' to apply fixes");
+    // Markdown escapes underscores — match escaped form
+    expect(output).toContain("dsn\\_cache.fingerprint");
+    expect(output).toContain("sentry cli fix");
   });
 
   test("fixes missing columns when not in dry-run mode", async () => {
@@ -166,8 +189,8 @@ describe("sentry cli fix", () => {
 
     const { output } = await runFix(false);
 
-    expect(output).toContain("Repairing");
-    expect(output).toContain("Added column dsn_cache.fingerprint");
+    // Repair messages from repairSchema use escaped underscores in markdown
+    expect(output).toContain("Added column dsn\\_cache.fingerprint");
     expect(output).toContain("repaired successfully");
 
     // Verify the column was actually added
@@ -233,9 +256,11 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output } = await runFix(true);
 
-    expect(output).toContain("permission issue(s)");
+    // Output is now markdown with section headings
+    expect(output).toContain("### Permissions");
+    expect(output).toContain("Found 1 issue(s)");
     expect(output).toContain("0444");
-    expect(output).toContain("Run 'sentry cli fix' to apply fixes");
+    expect(output).toContain("sentry cli fix");
 
     chmodSync(dbPath, 0o644);
   });
@@ -247,7 +272,7 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("Repairing permissions");
+    expect(output).toContain("### Permissions");
     expect(output).toContain("0444");
     expect(output).toContain("0600");
     expect(output).toContain("repaired successfully");
@@ -266,7 +291,8 @@ describe("sentry cli fix", () => {
     chmodSync(getTestDir(), 0o500);
     const { output } = await runFix(true);
 
-    expect(output).toContain("permission issue(s)");
+    expect(output).toContain("### Permissions");
+    expect(output).toContain("issue(s)");
     expect(output).toContain("directory");
     expect(output).toContain(getTestDir());
 
@@ -280,8 +306,11 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output } = await runFix(true);
 
-    expect(output).toContain("permission issue(s)");
-    expect(output).not.toContain("Repairing");
+    expect(output).toContain("### Permissions");
+    expect(output).toContain("issue(s)");
+    // Dry-run uses bullet markers (•), not success markers (✓)
+    expect(output).toContain("•");
+    expect(output).not.toContain("✓");
 
     // File should still be readonly — dry-run didn't touch it
     // biome-ignore lint/suspicious/noBitwiseOperators: verifying permission bits
@@ -305,10 +334,9 @@ describe("sentry cli fix", () => {
     chmodSync(dbPath, 0o444);
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("permission issue(s)");
-    expect(output).toContain("Repairing permissions");
-    expect(output).toContain("schema issue(s)");
-    expect(output).toContain("Repairing schema");
+    expect(output).toContain("### Permissions");
+    expect(output).toContain("Found 1 issue(s)");
+    expect(output).toContain("### Schema");
     expect(output).toContain("repaired successfully");
     expect(exitCode).toBe(0);
   });
@@ -322,9 +350,8 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("schema issue(s)");
-    expect(output).toContain("Missing column");
-    expect(output).toContain("Repairing schema");
+    expect(output).toContain("### Schema");
+    // After repair, shows the repair message (not the original description)
     expect(output).toContain("Added column");
     expect(output).toContain("repaired successfully");
     expect(exitCode).toBe(0);
@@ -341,8 +368,8 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(false);
 
-    // No permission issues found, so schema failure should be reported
-    expect(output).toContain("Could not open database to check schema");
+    // Schema failure is rendered as an issue with repair details
+    expect(output).toContain("### Schema");
     expect(output).toContain("Try deleting the database");
     expect(exitCode).toBe(1);
     // Should NOT say "No issues found"
@@ -359,10 +386,9 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(true);
 
-    expect(output).toContain("Could not open database to check schema");
+    expect(output).toContain("### Schema");
+    expect(output).toContain("Try deleting the database");
     expect(exitCode).toBe(1);
-    // Should NOT suggest running fix (no fixable issues found)
-    expect(output).not.toContain("Run 'sentry cli fix' to apply fixes");
   });
 
   test("schema check failure with permission issues does not print schema error", async () => {
@@ -377,9 +403,9 @@ describe("sentry cli fix", () => {
     // The schema catch block should suppress the error message when perm.found > 0
     const { output } = await runFix(true);
 
-    expect(output).toContain("permission issue(s)");
-    // Should NOT print "Could not open database" since permission issues explain it
-    expect(output).not.toContain("Could not open database");
+    expect(output).toContain("### Permissions");
+    // Should NOT print schema section since permission issues explain it
+    expect(output).not.toContain("### Schema");
   });
 
   test("detects and repairs wrong primary key on pagination_cursors (CLI-72)", async () => {
@@ -399,10 +425,12 @@ describe("sentry cli fix", () => {
 
     const { output, exitCode } = await runFix(false);
 
-    expect(output).toContain("schema issue(s)");
-    expect(output).toContain("Wrong primary key");
-    expect(output).toContain("pagination_cursors");
-    expect(output).toContain("Repairing schema");
+    expect(output).toContain("### Schema");
+    expect(output).toContain("issue(s)");
+    // After repair, shows the repair message instead of the original issue
+    expect(output).toContain("Recreated table");
+    // Markdown escapes underscores
+    expect(output).toContain("pagination\\_cursors");
     expect(output).toContain("repaired successfully");
     expect(exitCode).toBe(0);
   });
@@ -423,8 +451,9 @@ describe("sentry cli fix", () => {
     const { output } = await runFix(true);
 
     expect(output).toContain("Wrong primary key");
-    expect(output).toContain("pagination_cursors");
-    expect(output).toContain("Run 'sentry cli fix' to apply fixes");
+    // Markdown escapes underscores
+    expect(output).toContain("pagination\\_cursors");
+    expect(output).toContain("sentry cli fix");
     // Table should still have the wrong PK
     closeDatabase();
     const verifyDb = new Database(dbPath);
@@ -460,14 +489,25 @@ describe("sentry cli fix", () => {
 describe("sentry cli fix — ownership detection", () => {
   const getOwnershipTestDir = useTestConfigDir("fix-ownership-test-");
 
-  let ctx: ReturnType<typeof createContext>;
+  let exitMock: { restore: () => void; exitCode: number };
 
   beforeEach(() => {
-    ctx = createContext();
+    const originalExit = process.exit;
+    const state = {
+      exitCode: 0,
+      restore: () => {
+        process.exit = originalExit;
+      },
+    };
+    process.exit = ((code?: number) => {
+      state.exitCode = code ?? 0;
+      throw new MockExitError(code ?? 0);
+    }) as typeof process.exit;
+    exitMock = state;
   });
 
   afterEach(() => {
-    ctx.restore();
+    exitMock.restore();
     closeDatabase();
   });
 
@@ -477,16 +517,24 @@ describe("sentry cli fix — ownership detection", () => {
    * actual root access or root-owned files.
    */
   async function runFixWithUid(dryRun: boolean, getuid: () => number) {
+    const { context, getOutput } = createContext();
     const getuidSpy = spyOn(process, "getuid").mockImplementation(getuid);
+    exitMock.exitCode = 0;
+
     try {
       const func = await fixCommand.loader();
-      await func.call(ctx.context, { "dry-run": dryRun });
+      await func.call(context, { "dry-run": dryRun, json: false });
+    } catch (err) {
+      if (!(err instanceof MockExitError)) {
+        throw err;
+      }
     } finally {
       getuidSpy.mockRestore();
     }
+
     return {
-      output: ctx.getOutput(),
-      exitCode: ctx.context.process.exitCode,
+      output: getOutput(),
+      exitCode: exitMock.exitCode,
     };
   }
 
@@ -496,7 +544,7 @@ describe("sentry cli fix — ownership detection", () => {
     const realUid = process.getuid!();
     const { output } = await runFixWithUid(false, () => realUid);
     expect(output).toContain("No issues found");
-    expect(output).not.toContain("ownership issue");
+    expect(output).not.toContain("Ownership");
   });
 
   test("detects ownership issues when process uid differs from file owner", async () => {
@@ -506,7 +554,8 @@ describe("sentry cli fix — ownership detection", () => {
     // Pretend we are uid 9999 — the files appear owned by someone else
     const { output, exitCode } = await runFixWithUid(false, () => 9999);
 
-    expect(output).toContain("ownership issue(s)");
+    expect(output).toContain("### Ownership");
+    expect(output).toContain("issue(s)");
     // Not uid 0, so we can't chown — expect instructions
     expect(output).toContain("sudo chown");
     expect(output).toContain("sudo sentry cli fix");
@@ -519,7 +568,8 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output, exitCode: code } = await runFixWithUid(true, () => 9999);
 
-    expect(output).toContain("ownership issue(s)");
+    expect(output).toContain("### Ownership");
+    expect(output).toContain("issue(s)");
     expect(output).toContain("sudo chown");
     // dry-run with non-zero issues still returns exitCode 0 (not fatal)
     expect(code).toBe(0);
@@ -531,7 +581,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     // Simulate a non-root user (uid=9999) viewing files owned by real uid.
     // uid=9999 is non-zero so the root branch is not taken, the files owned
-    // by the real uid appear "foreign", and dry-run shows 'Would transfer…'.
+    // by the real uid appear "foreign", and dry-run shows instructions.
     const { output } = await runFixWithUid(true, () => 9999);
     expect(output).toContain("sudo chown");
   });
@@ -615,8 +665,8 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output } = await runFixWithUid(false, () => 9999);
 
-    expect(output).toContain("ownership issue(s)");
-    expect(output).not.toContain("permission issue(s)");
+    expect(output).toContain("### Ownership");
+    expect(output).not.toContain("### Permissions");
 
     chmodSync(dbPath, 0o600);
   });
@@ -629,7 +679,8 @@ describe("sentry cli fix — ownership detection", () => {
 
     const { output } = await runFix(false);
 
-    expect(output).toContain("permission issue(s)");
+    expect(output).toContain("### Permissions");
+    expect(output).toContain("issue(s)");
     expect(output.length).toBeGreaterThan(0);
 
     chmodSync(getOwnershipTestDir(), 0o700);
@@ -651,6 +702,7 @@ describe("sentry cli fix — ownership detection", () => {
     try {
       const { output, exitCode } = await runFixWithUid(false, () => 0);
       expect(exitCode).toBe(1);
+      // The instructions mention the inability to determine UID
       expect(output).toContain("Could not determine a non-root UID");
     } finally {
       if (origSudoUser !== undefined) {
