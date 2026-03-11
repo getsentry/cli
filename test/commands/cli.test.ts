@@ -3,25 +3,29 @@
  *
  * Tests for the sentry cli command group.
  *
- * Status messages go through consola (→ process.stderr). Tests capture stderr
- * via a spy on process.stderr.write and assert on the collected output.
+ * Progress messages go through consola (→ process.stderr). Final results are
+ * returned as structured data and rendered to stdout by the output system.
+ * Tests capture both stderr (progress) and stdout (results) to verify behavior.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
+import type { UpgradeResult } from "../../src/commands/cli/upgrade.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
 
 /**
  * Create a mock context with a process.stderr.write spy for capturing
- * consola output, plus Stricli error capture via context.stderr.
+ * consola output, plus stdout capture for structured output.
  */
 function createMockContext(overrides: Partial<{ execPath: string }> = {}): {
   context: Record<string, unknown>;
-  getOutput: () => string;
+  getStderr: () => string;
+  getStdout: () => string;
   errors: string[];
   restore: () => void;
 } {
   const stderrChunks: string[] = [];
+  const stdoutChunks: string[] = [];
   const errors: string[] = [];
 
   // Capture consola output (routed to process.stderr)
@@ -34,9 +38,10 @@ function createMockContext(overrides: Partial<{ execPath: string }> = {}): {
   const context = {
     process: { execPath: overrides.execPath ?? "/test/path/sentry" },
     stdout: {
-      write: mock((_s: string) => {
-        /* unused — output goes through consola */
-      }),
+      write: (s: string) => {
+        stdoutChunks.push(s);
+        return true;
+      },
     },
     stderr: {
       write: (s: string) => {
@@ -48,7 +53,8 @@ function createMockContext(overrides: Partial<{ execPath: string }> = {}): {
 
   return {
     context,
-    getOutput: () => stderrChunks.join(""),
+    getStderr: () => stderrChunks.join(""),
+    getStdout: () => stdoutChunks.join(""),
     errors,
     restore: () => {
       process.stderr.write = origWrite;
@@ -124,16 +130,22 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getOutput, restore } = createMockContext();
+    const { context, getStderr, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
-    // Use method flag to bypass detection (curl uses GitHub)
-    await func.call(context, { check: false, method: "curl" });
+    // Use method flag to bypass detection (curl uses GitHub).
+    // Pass json: true so the output config renders structured JSON to stdout.
+    await func.call(context, { check: false, method: "curl", json: true });
 
-    const output = getOutput();
-    expect(output).toContain("Installation method: curl");
-    expect(output).toContain("Current version:");
-    expect(output).toContain("Already up to date.");
+    // Progress messages go to stderr
+    const stderr = getStderr();
+    expect(stderr).toContain("Installation method: curl");
+    expect(stderr).toContain("Current version:");
+
+    // Final result is rendered as JSON to stdout by the output system
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("up-to-date");
+    expect(data.method).toBe("curl");
   });
 
   test("check mode shows update available", async () => {
@@ -145,13 +157,15 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getOutput, restore } = createMockContext();
+    const { context, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
-    await func.call(context, { check: true, method: "curl" });
+    await func.call(context, { check: true, method: "curl", json: true });
 
-    const output = getOutput();
-    expect(output).toContain("Run 'sentry cli upgrade' to update.");
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.targetVersion).toBe("99.0.0");
+    expect(data.warnings).toContain("Run 'sentry cli upgrade' to update.");
   });
 
   test("check mode with version shows versioned command", async () => {
@@ -162,14 +176,24 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getOutput, restore } = createMockContext();
+    const { context, getStderr, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
-    await func.call(context, { check: true, method: "curl" }, "2.0.0");
+    await func.call(
+      context,
+      { check: true, method: "curl", json: true },
+      "2.0.0"
+    );
 
-    const output = getOutput();
-    expect(output).toContain("Target version: 2.0.0");
-    expect(output).toContain("Run 'sentry cli upgrade 2.0.0' to update.");
+    // Target version is still logged as progress to stderr
+    const stderr = getStderr();
+    expect(stderr).toContain("Target version: 2.0.0");
+
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.warnings).toContain(
+      "Run 'sentry cli upgrade 2.0.0' to update."
+    );
   });
 
   test("check mode shows already on target when versions match", async () => {
@@ -180,13 +204,16 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const { context, getOutput, restore } = createMockContext();
+    const { context, getStdout, restore } = createMockContext();
     restoreStderr = restore;
 
-    await func.call(context, { check: true, method: "curl" });
+    await func.call(context, { check: true, method: "curl", json: true });
 
-    const output = getOutput();
-    expect(output).toContain("You are already on the target version.");
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.currentVersion).toBe(data.targetVersion);
+    // No warnings when already on target
+    expect(data.warnings).toBeUndefined();
   });
 
   test("throws UpgradeError when specified version does not exist", async () => {

@@ -2003,3 +2003,87 @@ export function formatFixResult(data: FixResult): string {
 
   return renderMarkdown(lines.join("\n"));
 }
+
+// CLI Upgrade Formatting
+
+/** Structured upgrade result (imported from the command module) */
+type UpgradeResult = import("../../commands/cli/upgrade.js").UpgradeResult;
+
+/** Action descriptions for human-readable output */
+const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
+  upgraded: "Upgraded",
+  downgraded: "Downgraded",
+  "up-to-date": "Already up to date",
+  checked: "Update check complete",
+  "channel-only": "Channel updated",
+};
+
+/**
+ * Format upgrade result as rendered markdown.
+ *
+ * Produces a concise summary line with the action taken, version info,
+ * and any warnings (e.g., PATH shadowing from old package manager install).
+ * Designed as the `human` formatter for the `cli upgrade` command's
+ * {@link OutputConfig}.
+ *
+ * @param data - Structured upgrade result collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatUpgradeResult(data: UpgradeResult): string {
+  const lines: string[] = [];
+
+  switch (data.action) {
+    case "upgraded":
+    case "downgraded": {
+      const verb = ACTION_DESCRIPTIONS[data.action];
+      lines.push(
+        `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}`
+      );
+      if (data.currentVersion !== data.targetVersion) {
+        lines.push(
+          `${escapeMarkdownInline(data.currentVersion)} → ${escapeMarkdownInline(data.targetVersion)}`
+        );
+      }
+      break;
+    }
+    case "up-to-date":
+      lines.push(
+        `${colorTag("green", "✓")} Already up to date (${safeCodeSpan(data.currentVersion)})`
+      );
+      break;
+    case "checked": {
+      if (data.currentVersion === data.targetVersion) {
+        lines.push(
+          `${colorTag("green", "✓")} You are already on the target version (${safeCodeSpan(data.currentVersion)})`
+        );
+      } else {
+        lines.push(
+          `Latest: ${safeCodeSpan(data.targetVersion)} (current: ${safeCodeSpan(data.currentVersion)})`
+        );
+      }
+      break;
+    }
+    case "channel-only":
+      lines.push(
+        `${colorTag("green", "✓")} Channel set to ${escapeMarkdownInline(data.channel)}`
+      );
+      break;
+    default: {
+      // Exhaustive check — all action types should be handled above
+      const _: never = data.action;
+      lines.push(
+        `${ACTION_DESCRIPTIONS[_ as UpgradeResult["action"]] ?? "Done"}`
+      );
+    }
+  }
+
+  // Append warnings with ⚠ markers
+  if (data.warnings && data.warnings.length > 0) {
+    lines.push("");
+    for (const warning of data.warnings) {
+      lines.push(`${colorTag("yellow", "⚠")} ${escapeMarkdownInline(warning)}`);
+    }
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}

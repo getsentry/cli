@@ -35,10 +35,11 @@ function mockFetch(
 }
 
 /**
- * Create a mock Stricli context and a stderr capture for consola output.
+ * Create a mock Stricli context with stderr and stdout capture.
  *
- * `getOutput()` returns the combined consola output captured from
- * `process.stderr.write` (where consola routes all messages).
+ * `getOutput()` returns **both** consola output (stderr) and structured
+ * output (stdout) combined, so assertions work regardless of whether
+ * a message is a progress log or a rendered result.
  * `errors` captures Stricli error output written to context.stderr.
  */
 function createMockContext(
@@ -54,6 +55,7 @@ function createMockContext(
   restore: () => void;
 } {
   const stderrChunks: string[] = [];
+  const stdoutChunks: string[] = [];
   const errors: string[] = [];
   const env: Record<string, string | undefined> = {
     PATH: "/usr/bin:/bin",
@@ -68,13 +70,16 @@ function createMockContext(
     return true;
   }) as typeof process.stderr.write;
 
+  const stdoutWriter = {
+    write: (s: string) => {
+      stdoutChunks.push(s);
+      return true;
+    },
+  };
+
   const context = {
     process: {
-      stdout: {
-        write: mock((_s: string) => {
-          /* unused — upgrade output goes through consola */
-        }),
-      },
+      stdout: stdoutWriter,
       stderr: {
         write: (s: string) => {
           errors.push(s);
@@ -94,11 +99,7 @@ function createMockContext(
     cwd: "/tmp",
     configDir: "/tmp/test-config",
     env,
-    stdout: {
-      write: mock((_s: string) => {
-        /* unused — upgrade output goes through consola */
-      }),
-    },
+    stdout: stdoutWriter,
     stderr: {
       write: (s: string) => {
         errors.push(s);
@@ -116,7 +117,9 @@ function createMockContext(
 
   return {
     context,
-    getOutput: () => stderrChunks.join(""),
+    // Combine stderr (progress) and stdout (rendered result) so assertions
+    // work regardless of which stream a message goes to
+    getOutput: () => stderrChunks.join("") + stdoutChunks.join(""),
     errors,
     restore: () => {
       process.stderr.write = origWrite;
@@ -324,7 +327,7 @@ describe("sentry cli upgrade", () => {
       await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
       const combined = getOutput();
-      expect(combined).toContain("Already up to date.");
+      expect(combined).toContain("Already up to date");
       expect(combined).not.toContain("Upgrading to");
     });
   });
@@ -410,7 +413,7 @@ describe("sentry cli upgrade", () => {
 
       const combined = getOutput();
       // Should match current version (after stripping v prefix) and report up to date
-      expect(combined).toContain("Already up to date.");
+      expect(combined).toContain("Already up to date");
     });
   });
 
@@ -708,7 +711,8 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
 
     const combined = getOutput();
     expect(combined).toContain("Upgrading to 99.99.99...");
-    expect(combined).toContain("Successfully upgraded to 99.99.99.");
+    expect(combined).toContain("Upgraded to");
+    expect(combined).toContain("99.99.99");
 
     // Verify Bun.spawn was called with the downloaded binary + setup args
     expect(spawnedArgs.length).toBeGreaterThan(0);
@@ -828,10 +832,11 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
 
     const combined = getOutput();
     // With --force, should NOT show "Already up to date"
-    expect(combined).not.toContain("Already up to date.");
+    expect(combined).not.toContain("Already up to date");
     // Should proceed to upgrade and succeed
     expect(combined).toContain(`Upgrading to ${CLI_VERSION}...`);
-    expect(combined).toContain(`Successfully upgraded to ${CLI_VERSION}.`);
+    expect(combined).toContain("Upgraded to");
+    expect(combined).toContain(CLI_VERSION);
   });
 });
 
@@ -941,8 +946,8 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
       "Nightly builds are only available as standalone binaries."
     );
     expect(combined).toContain("Migrating to standalone installation...");
-    expect(combined).toContain("Successfully installed nightly");
-    // Warns about old npm install
+    expect(combined).toContain("Upgraded to");
+    // Warns about old npm install (rendered via formatUpgradeResult warnings)
     expect(combined).toContain(
       "npm-installed sentry may still appear earlier in PATH"
     );
