@@ -574,18 +574,16 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
  */
 function resolvePatchContent(
   absPath: string,
-  filePath: string,
-  rawContent: string,
-  action: string
+  patch: ApplyPatchsetPayload["params"]["patches"][number]
 ): string {
-  if (!filePath.endsWith(".json")) {
-    return rawContent;
+  if (!patch.path.endsWith(".json")) {
+    return patch.patch;
   }
-  if (action === "modify") {
+  if (patch.action === "modify") {
     const existing = fs.readFileSync(absPath, "utf-8");
-    return prettyPrintJson(rawContent, detectJsonIndent(existing));
+    return prettyPrintJson(patch.patch, detectJsonIndent(existing));
   }
-  return prettyPrintJson(rawContent, DEFAULT_JSON_INDENT);
+  return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
 }
 
 function applyPatchset(
@@ -619,12 +617,7 @@ function applyPatchset(
       case "create": {
         const dir = path.dirname(absPath);
         fs.mkdirSync(dir, { recursive: true });
-        const content = resolvePatchContent(
-          absPath,
-          patch.path,
-          patch.patch,
-          patch.action
-        );
+        const content = resolvePatchContent(absPath, patch);
         fs.writeFileSync(absPath, content, "utf-8");
         applied.push({ path: patch.path, action: "create" });
         break;
@@ -637,12 +630,7 @@ function applyPatchset(
             data: { applied },
           };
         }
-        const content = resolvePatchContent(
-          absPath,
-          patch.path,
-          patch.patch,
-          patch.action
-        );
+        const content = resolvePatchContent(absPath, patch);
         fs.writeFileSync(absPath, content, "utf-8");
         applied.push({ path: patch.path, action: "modify" });
         break;
