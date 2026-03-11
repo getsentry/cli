@@ -173,6 +173,7 @@ Delete a project
 
 **Flags:**
 - `-y, --yes - Skip confirmation prompt`
+- `-n, --dry-run - Validate inputs and show what would be deleted without deleting it`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
