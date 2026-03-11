@@ -1033,6 +1033,30 @@ export async function resolveBody(
 
 const log = logger.withTag("api");
 
+/** Log outgoing request details in `> ` curl-verbose style. */
+function logRequest(
+  method: string,
+  endpoint: string,
+  headers: Record<string, string> | undefined
+): void {
+  log.debug(`> ${method} /api/0/${endpoint}`);
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      log.debug(`> ${key}: ${value}`);
+    }
+  }
+  log.debug(">");
+}
+
+/** Log incoming response details in `< ` curl-verbose style. */
+function logResponse(response: { status: number; headers: Headers }): void {
+  log.debug(`< HTTP ${response.status}`);
+  response.headers.forEach((value, key) => {
+    log.debug(`< ${key}: ${value}`);
+  });
+  log.debug("<");
+}
+
 export const apiCommand = buildCommand({
   output: { json: true, human: formatApiResponse },
   docs: {
@@ -1160,15 +1184,10 @@ export const apiCommand = buildCommand({
       };
     }
 
-    // Verbose: log request details to stderr before making the call
-    if (flags.verbose) {
-      log.debug(`> ${flags.method} /api/0/${normalizedEndpoint}`);
-      if (headers) {
-        for (const [key, value] of Object.entries(headers)) {
-          log.debug(`> ${key}: ${value}`);
-        }
-      }
-      log.debug(">");
+    const verbose = flags.verbose && !flags.silent;
+
+    if (verbose) {
+      logRequest(flags.method, normalizedEndpoint, headers);
     }
 
     const response = await rawApiRequest(normalizedEndpoint, {
@@ -1180,13 +1199,8 @@ export const apiCommand = buildCommand({
 
     const isError = response.status >= 400;
 
-    // Verbose: log response metadata to stderr
-    if (flags.verbose) {
-      log.debug(`< HTTP ${response.status}`);
-      response.headers.forEach((value, key) => {
-        log.debug(`< ${key}: ${value}`);
-      });
-      log.debug("<");
+    if (verbose) {
+      logResponse(response);
     }
 
     // Silent mode — no output, just exit code
