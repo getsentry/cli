@@ -143,14 +143,14 @@ export const listCommand = buildCommand({
         : undefined,
     }));
 
-    let hint: string | undefined;
+    const hints: string[] = [];
     if (orgs.length > flags.limit) {
-      hint = `Showing ${flags.limit} of ${orgs.length} organizations`;
-    } else if (entries.length > 0) {
-      hint = "Tip: Use 'sentry org view <slug>' for details";
+      hints.push(`Showing ${flags.limit} of ${orgs.length} organizations`);
     }
-    // When entries is empty, hint remains undefined — no tip is shown
+    if (entries.length > 0) {
+      hints.push("Tip: Use 'sentry org view <slug>' for details");
+    }
 
-    return { data: entries, hint };
+    return { data: entries, hint: hints.join("\n") || undefined };
   },
 });
