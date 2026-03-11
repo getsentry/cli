@@ -404,10 +404,18 @@ export type SpanFilter = {
   description?: string;
   minDuration?: number;
   maxDuration?: number;
+  /** When true, minDuration comparison is strict `>` (default). When false, `>=`. */
+  minExclusive?: boolean;
+  /** When true, maxDuration comparison is strict `<` (default). When false, `<=`. */
+  maxExclusive?: boolean;
 };
 
 /**
  * Parse a "-q" filter string into structured filters.
+ *
+ * Unlike issue/log/trace list (which pass --query to Sentry's search API for
+ * server-side filtering), the trace detail API returns the full span tree with
+ * no query parameter — so span filtering must be done client-side.
  *
  * Supports: `op:db`, `project:backend`, `description:fetch`,
  * `duration:>100ms`, `duration:<500ms`
@@ -459,8 +467,10 @@ function applyQueryToken(filter: SpanFilter, token: string): void {
       if (ms !== null) {
         if (value.startsWith(">")) {
           filter.minDuration = ms;
+          filter.minExclusive = !value.startsWith(">=");
         } else if (value.startsWith("<")) {
           filter.maxDuration = ms;
+          filter.maxExclusive = !value.startsWith("<=");
         }
       }
       break;
@@ -499,6 +509,57 @@ function parseDurationValue(value: string): number | null {
   }
 }
 
+/** Check whether a duration value passes a single bound (min or max). */
+function passesDurationBound(
+  durationMs: number,
+  bound: number,
+  exclusive: boolean,
+  isMin: boolean
+): boolean {
+  if (isMin) {
+    return exclusive ? durationMs > bound : durationMs >= bound;
+  }
+  return exclusive ? durationMs < bound : durationMs <= bound;
+}
+
+/** Check if a span's duration passes the min/max filter bounds. */
+function matchesDurationFilter(
+  durationMs: number | undefined,
+  filter: SpanFilter
+): boolean {
+  if (filter.minDuration !== undefined) {
+    if (durationMs === undefined) {
+      return false;
+    }
+    if (
+      !passesDurationBound(
+        durationMs,
+        filter.minDuration,
+        filter.minExclusive !== false,
+        true
+      )
+    ) {
+      return false;
+    }
+  }
+  if (filter.maxDuration !== undefined) {
+    if (durationMs === undefined) {
+      return false;
+    }
+    if (
+      !passesDurationBound(
+        durationMs,
+        filter.maxDuration,
+        filter.maxExclusive !== false,
+        false
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Test whether a single span matches all active filter criteria.
  */
@@ -518,19 +579,7 @@ function matchesFilter(span: FlatSpan, filter: SpanFilter): boolean {
       return false;
     }
   }
-  if (
-    filter.minDuration !== undefined &&
-    (span.duration_ms === undefined || span.duration_ms < filter.minDuration)
-  ) {
-    return false;
-  }
-  if (
-    filter.maxDuration !== undefined &&
-    (span.duration_ms === undefined || span.duration_ms > filter.maxDuration)
-  ) {
-    return false;
-  }
-  return true;
+  return matchesDurationFilter(span.duration_ms, filter);
 }
 
 /**

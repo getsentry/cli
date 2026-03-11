@@ -217,7 +217,7 @@ function buildJsonResults(results: SpanResult[], traceId: string): unknown {
       description: c.description || c.transaction,
     })),
   }));
-  return mapped.length === 1 ? mapped[0] : mapped;
+  return mapped;
 }
 
 export const viewCommand = buildCommand({
