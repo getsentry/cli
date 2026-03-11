@@ -17,7 +17,7 @@ export class WizardCancelledError extends Error {
 export function abortIfCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
     cancel(
-      `Setup cancelled. You can visit ${SENTRY_DOCS_URL} to set up manually.`,
+      `Setup cancelled. You can visit ${SENTRY_DOCS_URL} to set up manually.`
     );
     throw new WizardCancelledError();
   }
@@ -72,7 +72,10 @@ export function sortFeatures(features: string[]): string[] {
   return features.slice().sort((a, b) => {
     const ai = FEATURE_DISPLAY_ORDER.indexOf(a);
     const bi = FEATURE_DISPLAY_ORDER.indexOf(b);
-    return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) - (bi === -1 ? Number.MAX_SAFE_INTEGER : bi);
+    return (
+      (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) -
+      (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
+    );
   });
 }
 

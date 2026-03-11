@@ -58,9 +58,7 @@ describe("featureLabel", () => {
 
 describe("featureHint", () => {
   test("returns hint for known feature", () => {
-    expect(featureHint("errorMonitoring")).toBe(
-      "Error and crash reporting"
-    );
+    expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
     expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
   });
 

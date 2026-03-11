@@ -95,7 +95,9 @@ async function handleMultiSelect(
     return { features: available };
   }
 
-  const optional = sortFeatures(available.filter((f) => f !== REQUIRED_FEATURE));
+  const optional = sortFeatures(
+    available.filter((f) => f !== REQUIRED_FEATURE)
+  );
 
   if (optional.length === 0) {
     if (hasRequired) {
