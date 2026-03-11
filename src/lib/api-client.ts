@@ -36,9 +36,12 @@ import * as Sentry from "@sentry/bun";
 import type { z } from "zod";
 
 import {
+  type CustomerTrialInfo,
+  CustomerTrialInfoSchema,
   DetailedLogsResponseSchema,
   type DetailedSentryLog,
   LogsResponseSchema,
+  type ProductTrial,
   type ProjectKey,
   type Region,
   type SentryEvent,
@@ -1687,6 +1690,61 @@ export async function triggerSolutionPlanning(
     }
   );
   return data;
+}
+
+// Seer Trial functions
+
+/**
+ * Check if a Seer product trial is available for the organization.
+ *
+ * Fetches customer data from the internal `/customers/{org}/` endpoint and
+ * looks for an unstarted `seerUsers` trial. Returns the trial object if
+ * available, or null if no trial exists or it's already started.
+ *
+ * @param orgSlug - Organization slug
+ * @returns The unstarted trial if available, null otherwise
+ */
+export async function getSeerTrialStatus(
+  orgSlug: string
+): Promise<ProductTrial | null> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<CustomerTrialInfo>(
+    regionUrl,
+    `/customers/${orgSlug}/`,
+    { schema: CustomerTrialInfoSchema }
+  );
+  const trials = data.productTrials ?? [];
+  // Prefer seat-based seerUsers, fall back to legacy seerAutofix
+  return (
+    trials.find((t) => t.category === "seerUsers" && !t.isStarted) ??
+    trials.find((t) => t.category === "seerAutofix" && !t.isStarted) ??
+    null
+  );
+}
+
+/**
+ * Start a Seer product trial for the organization.
+ *
+ * Sends a PUT to the internal `/customers/{org}/product-trial/` endpoint
+ * to activate a 14-day Seer trial. Any org member with `org:read` or higher
+ * permission can start a trial.
+ *
+ * @param orgSlug - Organization slug
+ * @param category - Trial category from getSeerTrialStatus (e.g., "seerUsers", "seerAutofix")
+ * @throws {ApiError} On API errors (e.g., trial already active, permissions)
+ */
+export async function startSeerTrial(
+  orgSlug: string,
+  category: string
+): Promise<void> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  await apiRequestToRegion(regionUrl, `/customers/${orgSlug}/product-trial/`, {
+    method: "PUT",
+    body: {
+      referrer: "sentry-cli",
+      productTrial: { category, reasonCode: 0 },
+    },
+  });
 }
 
 // User functions

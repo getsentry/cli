@@ -2,10 +2,16 @@ import { isatty } from "node:tty";
 import { run } from "@stricli/core";
 import { app } from "./app.js";
 import { buildContext } from "./context.js";
-import { AuthError, formatError, getExitCode } from "./lib/errors.js";
+import {
+  AuthError,
+  formatError,
+  getExitCode,
+  SeerError,
+} from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
 import { getEnvLogLevel, setLogLevel } from "./lib/logger.js";
+import { isTrialEligible, promptAndStartTrial } from "./lib/seer-trial.js";
 import { withTelemetry } from "./lib/telemetry.js";
 import { startCleanupOldBinary } from "./lib/upgrade.js";
 import {
@@ -37,6 +43,45 @@ async function runCommand(args: string[]): Promise<void> {
 }
 
 /**
+ * Execute command with automatic Seer trial prompt.
+ *
+ * If the command fails with a trial-eligible SeerError in an interactive TTY,
+ * checks for available trial, prompts user, starts trial, and retries.
+ *
+ * Shows a brief context message (not the full error format with URLs) before
+ * the trial prompt. If the trial isn't available or the user declines, the
+ * full error is re-thrown so the outer handler in main() displays it normally.
+ *
+ * @throws Re-throws the original error when trial is unavailable or declined
+ */
+async function executeWithSeerTrialPrompt(args: string[]): Promise<void> {
+  try {
+    await runCommand(args);
+  } catch (err) {
+    if (err instanceof SeerError && isTrialEligible(err)) {
+      // isTrialEligible ensures orgSlug is defined
+      const started = await promptAndStartTrial(
+        // biome-ignore lint/style/noNonNullAssertion: isTrialEligible guarantees orgSlug is defined
+        err.orgSlug!,
+        err.reason,
+        process.stderr
+      );
+
+      if (started) {
+        process.stderr.write("\nRetrying command...\n\n");
+        await runCommand(args);
+        return;
+      }
+
+      // Trial not started (unavailable, declined, or failed) — re-throw
+      // so the outer error handler in main() displays the full error
+      // with the upgrade/settings URL
+    }
+    throw err;
+  }
+}
+
+/**
  * Execute command with automatic authentication.
  *
  * If the command fails due to missing authentication and we're in a TTY,
@@ -46,7 +91,7 @@ async function runCommand(args: string[]): Promise<void> {
  */
 async function executeWithAutoAuth(args: string[]): Promise<void> {
   try {
-    await runCommand(args);
+    await executeWithSeerTrialPrompt(args);
   } catch (err) {
     // Auto-login for auth errors in interactive TTY environments
     // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
@@ -71,7 +116,7 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 
       if (loginSuccess) {
         process.stderr.write("\nRetrying command...\n\n");
-        await runCommand(args);
+        await executeWithSeerTrialPrompt(args);
         return;
       }
 
