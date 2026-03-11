@@ -20,6 +20,8 @@ import { formatLogoutResult } from "../../lib/formatters/human.js";
 export type LogoutResult = {
   /** Whether logout actually cleared credentials */
   loggedOut: boolean;
+  /** Informational message when no action was taken */
+  message?: string;
   /** Path where credentials were stored (when loggedOut is true) */
   configPath?: string;
 };
@@ -36,9 +38,9 @@ export const logoutCommand = buildCommand({
   },
   async func(this: SentryContext): Promise<{ data: LogoutResult }> {
     if (!(await isAuthenticated())) {
-      throw new AuthError("not_authenticated", undefined, {
-        skipAutoAuth: true,
-      });
+      return {
+        data: { loggedOut: false, message: "Not currently authenticated." },
+      };
     }
 
     if (isEnvTokenActive()) {

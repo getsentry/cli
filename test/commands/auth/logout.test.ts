@@ -81,25 +81,14 @@ describe("logoutCommand.func", () => {
     getDbPathSpy.mockRestore();
   });
 
-  test("not authenticated: throws AuthError", async () => {
+  test("not authenticated: returns loggedOut false with message", async () => {
     isAuthenticatedSpy.mockResolvedValue(false);
-    const { context } = createContext();
+    const { context, getOutput } = createContext();
 
-    await expect(func.call(context, {})).rejects.toThrow(AuthError);
+    await func.call(context, {});
+
     expect(clearAuthSpy).not.toHaveBeenCalled();
-  });
-
-  test("not authenticated: error has skipAutoAuth", async () => {
-    isAuthenticatedSpy.mockResolvedValue(false);
-    const { context } = createContext();
-
-    try {
-      await func.call(context, {});
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AuthError);
-      expect((err as AuthError).skipAutoAuth).toBe(true);
-    }
+    expect(getOutput()).toContain("Not currently authenticated");
   });
 
   test("OAuth token: clears auth and writes success to stdout", async () => {

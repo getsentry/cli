@@ -1643,6 +1643,9 @@ type LogoutResult = import("../../commands/auth/logout.js").LogoutResult;
  * @returns Rendered terminal string
  */
 export function formatLogoutResult(data: LogoutResult): string {
+  if (!data.loggedOut) {
+    return renderMarkdown(data.message ?? "Not currently authenticated.");
+  }
   const lines: string[] = [];
   lines.push(`${colorTag("green", "✓")} Logged out successfully.`);
   if (data.configPath) {
