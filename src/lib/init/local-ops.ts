@@ -336,6 +336,7 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
     try {
       const absPath = safePath(cwd, filePath);
       const stat = fs.statSync(absPath);
+      let content: string;
       if (stat.size > maxBytes) {
         // Read only up to maxBytes
         const buffer = Buffer.alloc(maxBytes);
@@ -345,10 +346,21 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
         } finally {
           fs.closeSync(fd);
         }
-        files[filePath] = buffer.toString("utf-8");
+        content = buffer.toString("utf-8");
       } else {
-        files[filePath] = fs.readFileSync(absPath, "utf-8");
+        content = fs.readFileSync(absPath, "utf-8");
       }
+
+      // Minify JSON files by stripping whitespace/formatting
+      if (filePath.endsWith(".json")) {
+        try {
+          content = JSON.stringify(JSON.parse(content));
+        } catch {
+          // Not valid JSON (truncated, JSONC, etc.) — send as-is
+        }
+      }
+
+      files[filePath] = content;
     } catch {
       files[filePath] = null;
     }
