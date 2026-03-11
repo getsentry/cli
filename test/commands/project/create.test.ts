@@ -691,11 +691,14 @@ describe("project create", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed.organization).toBe("acme-corp");
-    expect(parsed.team).toBe("engineering");
-    expect(parsed.name).toBe("my-app");
-    expect(parsed.slug).toBe("my-app");
-    expect(parsed.platform).toBe("node");
+    // Same ProjectCreatedResult shape as normal path
+    expect(parsed.orgSlug).toBe("acme-corp");
+    expect(parsed.teamSlug).toBe("engineering");
+    expect(parsed.project.name).toBe("my-app");
+    expect(parsed.project.slug).toBe("my-app");
+    expect(parsed.project.platform).toBe("node");
+    expect(parsed.dsn).toBeNull();
+    expect(parsed.dryRun).toBe(true);
 
     // Should NOT call createProject
     expect(createProjectSpy).not.toHaveBeenCalled();

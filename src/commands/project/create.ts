@@ -34,14 +34,7 @@ import {
   formatProjectCreated,
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
-import {
-  escapeMarkdownInline,
-  isPlainOutput,
-  mdKvTable,
-  renderMarkdown,
-  safeCodeSpan,
-} from "../../lib/formatters/markdown.js";
-import { writeOutput } from "../../lib/formatters/output.js";
+import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
@@ -64,50 +57,6 @@ const log = logger.withTag("project.create");
 
 /** Usage hint template — base command without positionals */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
-
-type DryRunData = {
-  organization: string;
-  team: string;
-  teamSource: string;
-  name: string;
-  slug: string;
-  platform: string;
-};
-
-/** Format dry-run preview as human-readable markdown */
-function formatDryRun(data: DryRunData): string {
-  const lines: string[] = [];
-
-  lines.push(
-    `## <muted>Dry run</muted> — project '${escapeMarkdownInline(data.name)}' in ${escapeMarkdownInline(data.organization)}`
-  );
-  lines.push("");
-
-  // Team source notes (same pattern as formatProjectCreated)
-  if (data.teamSource === "auto-created") {
-    lines.push(
-      `> **Note:** Would create team '${escapeMarkdownInline(data.team)}' (org has no teams).`
-    );
-    lines.push("");
-  } else if (data.teamSource === "auto-selected") {
-    lines.push(
-      `> **Note:** Would use team '${escapeMarkdownInline(data.team)}'. See all teams: \`sentry team list\``
-    );
-    lines.push("");
-  }
-
-  const kvRows: [string, string][] = [
-    ["Name", escapeMarkdownInline(data.name)],
-    ["Slug", safeCodeSpan(data.slug)],
-    ["Org", safeCodeSpan(data.organization)],
-    ["Team", safeCodeSpan(data.team)],
-    ["Platform", data.platform],
-  ];
-
-  lines.push(mdKvTable(kvRows));
-
-  return renderMarkdown(lines.join("\n"));
-}
 
 type CreateFlags = {
   readonly team?: string;
@@ -440,23 +389,23 @@ export const createCommand = buildCommand({
       dryRun: flags["dry-run"],
     });
 
+    const expectedSlug = slugify(name);
+
     // Dry-run mode: show what would be created without creating it
     if (flags["dry-run"]) {
-      const dryRunData = {
-        organization: orgSlug,
-        team: team.slug,
+      const result: ProjectCreatedResult = {
+        project: { id: "", slug: expectedSlug, name, platform },
+        orgSlug,
+        teamSlug: team.slug,
         teamSource: team.source,
-        name,
-        slug: slugify(name),
-        platform,
+        requestedPlatform: platform,
+        dsn: null,
+        url: "",
+        slugDiverged: false,
+        expectedSlug,
+        dryRun: true,
       };
-
-      writeOutput(this.stdout, dryRunData, {
-        json: flags.json,
-        fields: flags.fields,
-        formatHuman: formatDryRun,
-      });
-      return;
+      return { data: result };
     }
 
     // Create the project
@@ -470,8 +419,6 @@ export const createCommand = buildCommand({
 
     // Fetch DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
-
-    const expectedSlug = slugify(name);
 
     const result: ProjectCreatedResult = {
       project,

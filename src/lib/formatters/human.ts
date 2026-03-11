@@ -1631,6 +1631,8 @@ export type ProjectCreatedResult = {
   slugDiverged: boolean;
   /** The slug the user expected (derived from the project name) */
   expectedSlug: string;
+  /** When true, nothing was actually created — output uses tentative wording */
+  dryRun?: boolean;
 };
 
 /**
@@ -1644,13 +1646,19 @@ export type ProjectCreatedResult = {
  */
 export function formatProjectCreated(result: ProjectCreatedResult): string {
   const lines: string[] = [];
+  const dry = result.dryRun === true;
+  const nameEsc = escapeMarkdownInline(result.project.name);
+  const orgEsc = escapeMarkdownInline(result.orgSlug);
 
-  lines.push(
-    `## Created project '${escapeMarkdownInline(result.project.name)}' in ${escapeMarkdownInline(result.orgSlug)}`
-  );
+  // Heading
+  if (dry) {
+    lines.push(`## <muted>Dry run</muted> — project '${nameEsc}' in ${orgEsc}`);
+  } else {
+    lines.push(`## Created project '${nameEsc}' in ${orgEsc}`);
+  }
   lines.push("");
 
-  // Slug divergence note
+  // Slug divergence note (never applies in dry-run — we can't predict server renames)
   if (result.slugDiverged) {
     lines.push(
       `> **Note:** Slug \`${result.project.slug}\` was assigned because \`${result.expectedSlug}\` is already taken.`
@@ -1658,21 +1666,25 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
     lines.push("");
   }
 
-  // Team source notes
+  // Team source notes — tentative wording in dry-run
   if (result.teamSource === "auto-created") {
     lines.push(
-      `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
+      dry
+        ? `> **Note:** Would create team '${escapeMarkdownInline(result.teamSlug)}' (org has no teams).`
+        : `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
     );
     lines.push("");
   } else if (result.teamSource === "auto-selected") {
     lines.push(
-      `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+      dry
+        ? `> **Note:** Would use team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+        : `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
     );
     lines.push("");
   }
 
   const kvRows: [string, string][] = [
-    ["Project", escapeMarkdownInline(result.project.name)],
+    ["Project", nameEsc],
     ["Slug", safeCodeSpan(result.project.slug)],
     ["Org", safeCodeSpan(result.orgSlug)],
     ["Team", safeCodeSpan(result.teamSlug)],
@@ -1681,13 +1693,19 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
   if (result.dsn) {
     kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
   }
-  kvRows.push(["URL", result.url]);
+  if (result.url) {
+    kvRows.push(["URL", result.url]);
+  }
 
   lines.push(mdKvTable(kvRows));
-  lines.push("");
-  lines.push(
-    `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
-  );
+
+  // Tip footer — only when a real project exists to view
+  if (!dry) {
+    lines.push("");
+    lines.push(
+      `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
+    );
+  }
 
   return renderMarkdown(lines.join("\n"));
 }
