@@ -31,6 +31,9 @@ const sampleProject: SentryProject = {
   dateCreated: "2026-02-12T10:00:00Z",
 };
 
+/** Default flags for non-dry-run, non-JSON, confirmed deletion */
+const defaultFlags = { yes: true, "dry-run": false, json: false };
+
 function createMockContext() {
   const stdoutWrite = mock(() => true);
   const stderrWrite = mock(() => true);
@@ -76,7 +79,7 @@ describe("project delete", () => {
   test("deletes project with explicit org/project and --yes", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { yes: true, json: false }, "acme-corp/my-app");
+    await func.call(context, defaultFlags, "acme-corp/my-app");
 
     expect(getProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
     expect(deleteProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
@@ -89,7 +92,7 @@ describe("project delete", () => {
   test("deletes project with bare slug and --yes", async () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { yes: true, json: false }, "my-app");
+    await func.call(context, defaultFlags, "my-app");
 
     expect(resolveProjectBySlugSpy).toHaveBeenCalledWith(
       "my-app",
@@ -104,7 +107,7 @@ describe("project delete", () => {
     const func = await deleteCommand.loader();
 
     await expect(
-      func.call(context, { yes: true, json: false }, "acme-corp/")
+      func.call(context, defaultFlags, "acme-corp/")
     ).rejects.toThrow(ContextError);
 
     expect(deleteProjectSpy).not.toHaveBeenCalled();
@@ -116,7 +119,7 @@ describe("project delete", () => {
 
     // isatty(0) returns false in test environments (non-TTY)
     await expect(
-      func.call(context, { yes: false, json: false }, "acme-corp/my-app")
+      func.call(context, { ...defaultFlags, yes: false }, "acme-corp/my-app")
     ).rejects.toThrow("non-interactive mode");
 
     expect(deleteProjectSpy).not.toHaveBeenCalled();
@@ -125,7 +128,11 @@ describe("project delete", () => {
   test("outputs JSON when --json flag is set", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { yes: true, json: true }, "acme-corp/my-app");
+    await func.call(
+      context,
+      { ...defaultFlags, json: true },
+      "acme-corp/my-app"
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output.trim());
@@ -145,13 +152,13 @@ describe("project delete", () => {
     const func = await deleteCommand.loader();
 
     await expect(
-      func.call(context, { yes: true, json: false }, "acme-corp/my-app")
+      func.call(context, defaultFlags, "acme-corp/my-app")
     ).rejects.toThrow(ApiError);
 
     expect(deleteProjectSpy).not.toHaveBeenCalled();
   });
 
-  test("shows actionable message on 403 from deleteProject", async () => {
+  test("shows actionable ApiError on 403 from deleteProject", async () => {
     deleteProjectSpy.mockRejectedValue(
       new ApiError("Forbidden", 403, "You do not have permission")
     );
@@ -159,19 +166,65 @@ describe("project delete", () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
 
-    await expect(
-      func.call(context, { yes: true, json: false }, "acme-corp/my-app")
-    ).rejects.toThrow("project:admin");
+    try {
+      await func.call(context, defaultFlags, "acme-corp/my-app");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiErr = error as ApiError;
+      expect(apiErr.status).toBe(403);
+      expect(apiErr.message).toContain("project:admin");
+      expect(apiErr.message).toContain("sentry auth login");
+    }
   });
 
   test("verifies project exists before attempting delete", async () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
-    await func.call(context, { yes: true, json: false }, "acme-corp/my-app");
+    await func.call(context, defaultFlags, "acme-corp/my-app");
 
     // getProject must be called before deleteProject
     const getProjectOrder = getProjectSpy.mock.invocationCallOrder[0];
     const deleteProjectOrder = deleteProjectSpy.mock.invocationCallOrder[0];
     expect(getProjectOrder).toBeLessThan(deleteProjectOrder ?? 0);
+  });
+
+  // Dry-run tests
+
+  test("dry-run shows what would be deleted without calling deleteProject", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { ...defaultFlags, "dry-run": true },
+      "acme-corp/my-app"
+    );
+
+    expect(getProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Would delete project 'My App'");
+    expect(output).toContain("acme-corp/my-app");
+  });
+
+  test("dry-run outputs JSON when --json is also set", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { ...defaultFlags, "dry-run": true, json: true },
+      "acme-corp/my-app"
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.org).toBe("acme-corp");
+    expect(parsed.project).toBe("my-app");
+    expect(parsed.name).toBe("My App");
+    expect(parsed.url).toContain("acme-corp");
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
   });
 });
