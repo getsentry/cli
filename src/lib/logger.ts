@@ -154,11 +154,11 @@ const scopedLoggers: ConsolaInstance[] = [];
  */
 export const logger = createConsola({
   level: DEFAULT_LOG_LEVEL,
-  // stderr is the correct stream for diagnostic/log output in CLIs —
-  // stdout is reserved for command output (data, JSON, tables).
+  // All diagnostic/log output goes to stderr — stdout is reserved for
+  // command output (data, JSON, tables). Both streams must be set because
+  // consola's BasicReporter (non-TTY) routes debug/info to stdout by default.
+  stdout: process.stderr,
   stderr: process.stderr,
-  // FancyReporter is included by default for TTY, BasicReporter for CI/non-TTY.
-  // Sentry reporter is added after Sentry.init() via attachSentryReporter().
 });
 
 /**
