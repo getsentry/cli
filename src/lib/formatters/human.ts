@@ -1609,6 +1609,141 @@ export function formatExpiration(expiresAt: number): string {
   return `${expiresDate.toLocaleString()} (${formatDuration(secondsRemaining)} remaining)`;
 }
 
+// Auth Status Formatting
+
+/** Structured auth status data shape (re-imported from the command module) */
+type AuthStatusData = import("../../commands/auth/status.js").AuthStatusData;
+
+/**
+ * Build the markdown header line based on auth source.
+ */
+function formatAuthHeader(source: string): string {
+  if (source.startsWith("env:")) {
+    const varName = source.slice("env:".length);
+    return `## ${colorTag("green", "✓")} Authenticated via ${escapeMarkdownInline(varName)} environment variable`;
+  }
+  return `## ${colorTag("green", "✓")} Authenticated`;
+}
+
+/**
+ * Build the key-value rows for the main auth details section.
+ */
+function buildAuthDetailRows(data: AuthStatusData): [string, string][] {
+  const rows: [string, string][] = [];
+  const isEnv = data.source.startsWith("env:");
+
+  if (data.configPath) {
+    rows.push(["Config", safeCodeSpan(data.configPath)]);
+  }
+  if (data.user) {
+    rows.push(["User", formatUserIdentity(data.user)]);
+  }
+  if (data.token) {
+    rows.push(["Token", safeCodeSpan(data.token.display)]);
+    if (data.token.expiresAt) {
+      rows.push(["Expires", formatExpiration(data.token.expiresAt)]);
+    }
+    // Only show auto-refresh for non-env tokens
+    if (!isEnv) {
+      rows.push([
+        "Auto-refresh",
+        data.token.refreshEnabled ? "enabled" : "disabled (no refresh token)",
+      ]);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Build the defaults section markdown (heading + kv table).
+ * Returns empty string when no defaults are set.
+ */
+function formatDefaultsSection(
+  defaults: NonNullable<AuthStatusData["defaults"]>
+): string {
+  const rows: [string, string][] = [];
+  if (defaults.organization) {
+    rows.push(["Organization", safeCodeSpan(defaults.organization)]);
+  }
+  if (defaults.project) {
+    rows.push(["Project", safeCodeSpan(defaults.project)]);
+  }
+  if (rows.length === 0) {
+    return "";
+  }
+  return `\n${mdKvTable(rows, "Defaults")}`;
+}
+
+/** Maximum orgs to display in the verification list before truncating */
+const MAX_VERIFY_DISPLAY = 5;
+
+/**
+ * Build the credential verification section markdown.
+ */
+function formatVerificationSection(
+  verification: NonNullable<AuthStatusData["verification"]>
+): string {
+  const lines: string[] = [""];
+
+  if (verification.success) {
+    const orgs = verification.organizations ?? [];
+    lines.push(
+      `### ${colorTag("green", "✓")} Access verified — ${orgs.length} organization(s)`
+    );
+    if (orgs.length > 0) {
+      lines.push("");
+      for (const org of orgs.slice(0, MAX_VERIFY_DISPLAY)) {
+        lines.push(
+          `- ${escapeMarkdownInline(org.name)} (${safeCodeSpan(org.slug)})`
+        );
+      }
+      if (orgs.length > MAX_VERIFY_DISPLAY) {
+        lines.push(`- *… and ${orgs.length - MAX_VERIFY_DISPLAY} more*`);
+      }
+    }
+  } else {
+    lines.push(`### ${colorTag("red", "✗")} Could not verify credentials`);
+    if (verification.error) {
+      lines.push("");
+      lines.push(escapeMarkdownInline(verification.error));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format auth status data as rendered markdown.
+ *
+ * Produces sections for authentication source, user identity, token info,
+ * defaults, and credential verification. Designed as the `human` formatter
+ * for the `auth status` command's {@link OutputConfig}.
+ *
+ * @param data - Structured auth status data collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatAuthStatus(data: AuthStatusData): string {
+  const lines: string[] = [];
+
+  lines.push(formatAuthHeader(data.source));
+  lines.push("");
+
+  const authRows = buildAuthDetailRows(data);
+  if (authRows.length > 0) {
+    lines.push(mdKvTable(authRows));
+  }
+
+  if (data.defaults) {
+    lines.push(formatDefaultsSection(data.defaults));
+  }
+
+  if (data.verification) {
+    lines.push(formatVerificationSection(data.verification));
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
+
 // Project Creation Formatting
 
 /** Input for the project-created success formatter */

@@ -21,116 +21,118 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
-import {
-  formatExpiration,
-  formatUserIdentity,
-  maskToken,
-} from "../../lib/formatters/human.js";
+import { formatAuthStatus, maskToken } from "../../lib/formatters/human.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { logger } from "../../lib/logger.js";
-
-const log = logger.withTag("auth.status");
 
 type StatusFlags = {
   readonly "show-token": boolean;
+  readonly json: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
-
-/**
- * Log user identity information if available.
- */
-function logUserInfo(): void {
-  const user = getUserInfo();
-  if (!user) {
-    return;
-  }
-  log.info(`User: ${formatUserIdentity(user)}`);
-}
 
 /** Check if the auth source is an environment variable */
 function isEnvSource(source: AuthSource): boolean {
   return source.startsWith(ENV_SOURCE_PREFIX);
 }
 
-/** Extract the env var name from an env-based AuthSource (e.g. "env:SENTRY_AUTH_TOKEN" → "SENTRY_AUTH_TOKEN") */
-function envVarName(source: AuthSource): string {
-  return source.slice(ENV_SOURCE_PREFIX.length);
-}
+/**
+ * Structured data representing the full auth status.
+ * Serves as both the JSON output shape and input to the human formatter.
+ */
+export type AuthStatusData = {
+  /** Whether the user is currently authenticated */
+  authenticated: boolean;
+  /** Auth source: "oauth" or "env:SENTRY_AUTH_TOKEN" etc. */
+  source: string;
+  /** Path to the SQLite config database (only for non-env tokens) */
+  configPath?: string;
+  /** User identity from cached user info */
+  user?: { name?: string; email?: string; username?: string };
+  /** Token display and metadata */
+  token?: {
+    /** Masked or full token string depending on --show-token */
+    display: string;
+    /** Expiration timestamp (ms since epoch), if available */
+    expiresAt?: number;
+    /** Whether auto-refresh via refresh token is enabled */
+    refreshEnabled: boolean;
+  };
+  /** Default org/project settings */
+  defaults?: {
+    organization?: string;
+    project?: string;
+  };
+  /** Credential verification results */
+  verification?: {
+    /** Whether the API call succeeded */
+    success: boolean;
+    /** Organizations accessible with the current token */
+    organizations?: Array<{ name: string; slug: string }>;
+    /** Error message if verification failed */
+    error?: string;
+  };
+};
 
 /**
- * Log token information.
+ * Collect token information into the data structure.
  */
-function logTokenInfo(auth: AuthConfig | undefined, showToken: boolean): void {
+function collectTokenInfo(
+  auth: AuthConfig | undefined,
+  showToken: boolean
+): AuthStatusData["token"] | undefined {
   if (!auth?.token) {
     return;
   }
 
-  const tokenDisplay = showToken ? auth.token : maskToken(auth.token);
-  log.info(`Token: ${tokenDisplay}`);
+  const display = showToken ? auth.token : maskToken(auth.token);
+  const fromEnv = isEnvSource(auth.source);
 
-  // Env var tokens have no expiry or refresh — skip those sections
-  if (isEnvSource(auth.source)) {
-    return;
-  }
-
-  if (auth.expiresAt) {
-    log.info(`Expires: ${formatExpiration(auth.expiresAt)}`);
-  }
-
-  // Show refresh token status
-  if (auth.refreshToken) {
-    log.info("Auto-refresh: enabled");
-  } else {
-    log.info("Auto-refresh: disabled (no refresh token)");
-  }
+  return {
+    display,
+    // Env var tokens have no expiry or refresh
+    expiresAt: fromEnv ? undefined : auth.expiresAt,
+    refreshEnabled: fromEnv ? false : Boolean(auth.refreshToken),
+  };
 }
 
 /**
- * Log default org/project settings if configured.
+ * Collect default org/project into the data structure.
  */
-async function logDefaults(): Promise<void> {
-  const defaultOrg = await getDefaultOrganization();
-  const defaultProject = await getDefaultProject();
+async function collectDefaults(): Promise<AuthStatusData["defaults"]> {
+  const org = await getDefaultOrganization();
+  const project = await getDefaultProject();
 
-  if (!(defaultOrg || defaultProject)) {
+  if (!(org || project)) {
     return;
   }
 
-  log.info("Defaults:");
-  if (defaultOrg) {
-    log.info(`  Organization: ${defaultOrg}`);
-  }
-  if (defaultProject) {
-    log.info(`  Project: ${defaultProject}`);
-  }
+  return {
+    organization: org ?? undefined,
+    project: project ?? undefined,
+  };
 }
 
 /**
  * Verify credentials by fetching organizations.
+ * Captures success/failure into data rather than throwing.
  */
-async function verifyCredentials(): Promise<void> {
-  log.info("Verifying credentials...");
-
+async function verifyCredentials(): Promise<AuthStatusData["verification"]> {
   try {
     const orgs = await listOrganizations();
-    log.success(
-      `Access verified. You have access to ${orgs.length} organization(s):`
-    );
-
-    const maxDisplay = 5;
-    for (const org of orgs.slice(0, maxDisplay)) {
-      log.info(`  - ${org.name} (${org.slug})`);
-    }
-    if (orgs.length > maxDisplay) {
-      log.info(`  ... and ${orgs.length - maxDisplay} more`);
-    }
+    return {
+      success: true,
+      organizations: orgs.map((o) => ({ name: o.name, slug: o.slug })),
+    };
   } catch (err) {
-    const message = stringifyUnknown(err);
-    log.error(`Could not verify credentials: ${message}`);
+    return {
+      success: false,
+      error: stringifyUnknown(err),
+    };
   }
 }
 
@@ -141,6 +143,7 @@ export const statusCommand = buildCommand({
       "Display information about your current authentication status, " +
       "including whether you're logged in and your default organization/project settings.",
   },
+  output: { json: true, human: formatAuthStatus },
   parameters: {
     flags: {
       "show-token": {
@@ -152,17 +155,12 @@ export const statusCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: StatusFlags): Promise<void> {
+  async func(this: SentryContext, flags: StatusFlags) {
     applyFreshFlag(flags);
 
-    const auth = await getAuthConfig();
+    const auth = getAuthConfig();
     const authenticated = await isAuthenticated();
-    const fromEnv = auth && isEnvSource(auth.source);
-
-    // Show config path only for stored (OAuth) tokens — irrelevant for env vars
-    if (!fromEnv) {
-      log.info(`Config: ${getDbPath()}`);
-    }
+    const fromEnv = auth ? isEnvSource(auth.source) : false;
 
     if (!authenticated) {
       // Skip auto-login - user explicitly ran status to check auth state
@@ -171,17 +169,26 @@ export const statusCommand = buildCommand({
       });
     }
 
-    if (fromEnv) {
-      log.success(
-        `Authenticated via ${envVarName(auth.source)} environment variable`
-      );
-    } else {
-      log.success("Authenticated");
-    }
-    logUserInfo();
+    // Build the user info
+    const userInfo = getUserInfo();
+    const user = userInfo
+      ? {
+          name: userInfo.name,
+          email: userInfo.email,
+          username: userInfo.username,
+        }
+      : undefined;
 
-    logTokenInfo(auth, flags["show-token"]);
-    await logDefaults();
-    await verifyCredentials();
+    const data: AuthStatusData = {
+      authenticated: true,
+      source: auth?.source ?? "oauth",
+      configPath: fromEnv ? undefined : getDbPath(),
+      user,
+      token: collectTokenInfo(auth, flags["show-token"]),
+      defaults: await collectDefaults(),
+      verification: await verifyCredentials(),
+    };
+
+    return { data };
   },
 });
