@@ -9,7 +9,6 @@ import { listOrganizations } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
-import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
@@ -18,6 +17,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import type { SentryOrganization, Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -25,6 +25,15 @@ type ListFlags = {
   readonly fresh: boolean;
   readonly fields?: string[];
 };
+
+/**
+ * An organization enriched with an optional region display name.
+ *
+ * The `region` field is only present when the user's orgs span multiple
+ * regions (e.g. both US and EU). It is included in JSON output as well,
+ * providing region context to machine consumers.
+ */
+type OrgListEntry = SentryOrganization & { region?: string };
 
 /**
  * Extract a human-readable region name from a region URL.
@@ -62,6 +71,41 @@ function getRegionDisplayName(regionUrl: string): string {
   }
 }
 
+/**
+ * Format org list entries as a human-readable table.
+ *
+ * Includes a REGION column only when at least one entry has a region set
+ * (indicating the user's orgs span multiple regions).
+ */
+function formatOrgListHuman(entries: OrgListEntry[]): string {
+  if (entries.length === 0) {
+    return "No organizations found.";
+  }
+
+  const showRegion = entries.some((e) => e.region !== undefined);
+
+  type OrgRow = { slug: string; name: string; region?: string };
+  const rows: OrgRow[] = entries.map((org) => ({
+    slug: org.slug,
+    name: org.name,
+    region: showRegion ? (org.region ?? "") : undefined,
+  }));
+
+  const columns: Column<OrgRow>[] = [
+    { header: "SLUG", value: (r) => r.slug },
+    ...(showRegion
+      ? [{ header: "REGION", value: (r: OrgRow) => r.region ?? "" }]
+      : []),
+    { header: "NAME", value: (r) => escapeMarkdownCell(r.name) },
+  ];
+
+  const parts: string[] = [];
+  const buffer: Writer = { write: (s) => parts.push(s) };
+  writeTable(buffer, rows, columns);
+
+  return parts.join("").trimEnd();
+}
+
 export const listCommand = buildCommand({
   docs: {
     brief: "List organizations",
@@ -72,7 +116,7 @@ export const listCommand = buildCommand({
       "  sentry org list --limit 10\n" +
       "  sentry org list --json",
   },
-  output: "json",
+  output: { json: true, human: formatOrgListHuman },
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),
@@ -81,54 +125,32 @@ export const listCommand = buildCommand({
     // Only -n for --limit; no -c since org list has no --cursor flag
     aliases: { ...FRESH_ALIASES, n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags): Promise<void> {
+  async func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
-    const { stdout } = this;
 
     const orgs = await listOrganizations();
     const limitedOrgs = orgs.slice(0, flags.limit);
-
-    if (flags.json) {
-      writeJson(stdout, limitedOrgs, flags.fields);
-      return;
-    }
-
-    if (limitedOrgs.length === 0) {
-      stdout.write("No organizations found.\n");
-      return;
-    }
 
     // Check if user has orgs in multiple regions
     const orgRegions = await getAllOrgRegions();
     const uniqueRegions = new Set(orgRegions.values());
     const showRegion = uniqueRegions.size > 1;
 
-    // Build columns — include REGION when orgs span multiple regions
-    type OrgRow = { slug: string; name: string; region?: string };
-    const rows: OrgRow[] = limitedOrgs.map((org) => ({
-      slug: org.slug,
-      name: org.name,
+    const entries: OrgListEntry[] = limitedOrgs.map((org) => ({
+      ...org,
       region: showRegion
         ? getRegionDisplayName(orgRegions.get(org.slug) ?? "")
         : undefined,
     }));
 
-    const columns: Column<OrgRow>[] = [
-      { header: "SLUG", value: (r) => r.slug },
-      ...(showRegion
-        ? [{ header: "REGION", value: (r: OrgRow) => r.region ?? "" }]
-        : []),
-      { header: "NAME", value: (r) => escapeMarkdownCell(r.name) },
-    ];
-
-    writeTable(stdout, rows, columns);
-
+    let hint: string | undefined;
     if (orgs.length > flags.limit) {
-      stdout.write(
-        `\nShowing ${flags.limit} of ${orgs.length} organizations\n`
-      );
+      hint = `Showing ${flags.limit} of ${orgs.length} organizations`;
+    } else if (entries.length > 0) {
+      hint = "Tip: Use 'sentry org view <slug>' for details";
     }
+    // When entries is empty, hint remains undefined — no tip is shown
 
-    writeFooter(stdout, "Tip: Use 'sentry org view <slug>' for details");
+    return { data: entries, hint };
   },
 });

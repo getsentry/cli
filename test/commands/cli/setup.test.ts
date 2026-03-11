@@ -2,6 +2,9 @@
  * Setup Command Tests
  *
  * Tests the `sentry cli setup` command end-to-end through Stricli's run().
+ *
+ * Status messages go through consola (→ process.stderr). Tests capture stderr
+ * via a spy on process.stderr.write and assert on the collected output.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -23,15 +26,32 @@ function mockFetch(
   globalThis.fetch = fn as typeof globalThis.fetch;
 }
 
-/** Create a mock SentryContext for testing */
+/**
+ * Create a mock Stricli context and a stderr capture for consola output.
+ *
+ * The context provides process/env stubs for the setup command, while
+ * `getOutput()` returns the combined consola output captured from
+ * `process.stderr.write` (where consola routes all messages).
+ */
 function createMockContext(
   overrides: Partial<{
     homeDir: string;
     env: Record<string, string | undefined>;
     execPath: string;
   }> = {}
-): { context: SentryContext; output: string[] } {
-  const output: string[] = [];
+): {
+  context: SentryContext;
+  getOutput: () => string;
+  clearOutput: () => void;
+  restore: () => void;
+} {
+  const stderrChunks: string[] = [];
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+
   const env: Record<string, string | undefined> = {
     PATH: "/usr/bin:/bin",
     SHELL: "/bin/bash",
@@ -41,16 +61,10 @@ function createMockContext(
   const context = {
     process: {
       stdout: {
-        write: (s: string) => {
-          output.push(s);
-          return true;
-        },
+        write: mock((_s: string) => true),
       },
       stderr: {
-        write: (s: string) => {
-          output.push(s);
-          return true;
-        },
+        write: mock((_s: string) => true),
       },
       stdin: process.stdin,
       env,
@@ -66,16 +80,10 @@ function createMockContext(
     configDir: "/tmp/test-config",
     env,
     stdout: {
-      write: (s: string) => {
-        output.push(s);
-        return true;
-      },
+      write: mock((_s: string) => true),
     },
     stderr: {
-      write: (s: string) => {
-        output.push(s);
-        return true;
-      },
+      write: mock((_s: string) => true),
     },
     stdin: process.stdin,
     setContext: () => {
@@ -86,11 +94,21 @@ function createMockContext(
     },
   } as unknown as SentryContext;
 
-  return { context, output };
+  return {
+    context,
+    getOutput: () => stderrChunks.join(""),
+    clearOutput: () => {
+      stderrChunks.length = 0;
+    },
+    restore: () => {
+      process.stderr.write = origWrite;
+    },
+  };
 }
 
 describe("sentry cli setup", () => {
   let testDir: string;
+  let restoreStderr: (() => void) | undefined;
 
   beforeEach(() => {
     testDir = join(
@@ -101,11 +119,16 @@ describe("sentry cli setup", () => {
   });
 
   afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     rmSync(testDir, { recursive: true, force: true });
   });
 
   test("runs with --quiet and skips all output", async () => {
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -121,13 +144,16 @@ describe("sentry cli setup", () => {
     );
 
     // With --quiet, no output should be produced
-    expect(output.join("")).toBe("");
+    expect(getOutput()).toBe("");
   });
 
   test("produces no welcome or completion output without --install", async () => {
     // Without --install, setup is being called for an upgrade or manual re-run.
     // Output is suppressed — the upgrade command itself prints success.
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -141,12 +167,14 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toBe("");
+    expect(getOutput()).toBe("");
   });
 
   test("records install method when --method is provided", async () => {
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -162,8 +190,7 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("Recorded installation method: curl");
+    expect(getOutput()).toContain("Recorded installation method: curl");
   });
 
   test("handles PATH modification when binary not in PATH", async () => {
@@ -171,7 +198,7 @@ describe("sentry cli setup", () => {
     const bashrc = join(testDir, ".bashrc");
     writeFileSync(bashrc, "# existing config\n");
 
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -179,6 +206,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/bash",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -186,15 +214,14 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("PATH:");
+    expect(getOutput()).toContain("PATH:");
   });
 
   test("reports PATH already configured when binary dir is in PATH", async () => {
     const binDir = join(testDir, "bin");
     mkdirSync(binDir, { recursive: true });
 
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(binDir, "sentry"),
       env: {
@@ -202,6 +229,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/bash",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -209,18 +237,18 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("already in PATH");
+    expect(getOutput()).toContain("already in PATH");
   });
 
   test("reports no config file found for unknown shell", async () => {
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       env: {
         PATH: "/usr/bin:/bin",
         SHELL: "/bin/tcsh",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -228,16 +256,15 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("No shell config file found");
-    expect(combined).toContain("Add manually");
+    expect(getOutput()).toContain("No shell config file found");
+    expect(getOutput()).toContain("Add manually");
   });
 
   test("installs completions when not skipped", async () => {
     const bashrc = join(testDir, ".bashrc");
     writeFileSync(bashrc, "# existing\n");
 
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -245,6 +272,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/bash",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -252,12 +280,11 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("Completions:");
+    expect(getOutput()).toContain("Completions:");
   });
 
   test("shows zsh fpath hint for zsh completions", async () => {
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -265,6 +292,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/zsh",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -272,15 +300,14 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("fpath=");
+    expect(getOutput()).toContain("fpath=");
   });
 
   test("handles GitHub Actions PATH when GITHUB_ACTIONS is set", async () => {
     const ghPathFile = join(testDir, "github_path");
     writeFileSync(ghPathFile, "");
 
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -290,6 +317,7 @@ describe("sentry cli setup", () => {
         GITHUB_PATH: ghPathFile,
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -297,8 +325,7 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("GITHUB_PATH");
+    expect(getOutput()).toContain("GITHUB_PATH");
   });
 
   test("falls back to bash completions for unsupported shell when bash is available", async () => {
@@ -311,7 +338,7 @@ describe("sentry cli setup", () => {
     wf(fakeBash, "#!/bin/sh\necho fake-bash");
     chmodSync(fakeBash, 0o755);
 
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -319,6 +346,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/xonsh",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -326,14 +354,15 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("Your shell (xonsh) is not directly supported");
-    expect(combined).toContain("bash completions as a fallback");
-    expect(combined).toContain("bash-completion");
+    expect(getOutput()).toContain(
+      "Your shell (xonsh) is not directly supported"
+    );
+    expect(getOutput()).toContain("bash completions as a fallback");
+    expect(getOutput()).toContain("bash-completion");
   });
 
   test("silently skips completions for unsupported shell when bash is not in PATH", async () => {
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -342,6 +371,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/xonsh",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -349,14 +379,13 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
     // Nothing actionable — no message produced
-    expect(combined).not.toContain("Completions:");
-    expect(combined).not.toContain("Not supported");
+    expect(getOutput()).not.toContain("Completions:");
+    expect(getOutput()).not.toContain("Not supported");
   });
 
   test("suppresses completion messages on subsequent runs (upgrade scenario)", async () => {
-    const { context, output } = createMockContext({
+    const { context, getOutput, clearOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -364,6 +393,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/bash",
       },
     });
+    restoreStderr = restore;
 
     // First run — should show "Installed to"
     await run(
@@ -372,23 +402,21 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const firstRun = output.join("");
-    expect(firstRun).toContain("Completions: Installed to");
+    expect(getOutput()).toContain("Completions: Installed to");
 
     // Second run — completion file already exists, should be silent
-    output.length = 0;
+    clearOutput();
     await run(
       app,
       ["cli", "setup", "--no-modify-path", "--no-agent-skills"],
       context
     );
 
-    const secondRun = output.join("");
-    expect(secondRun).not.toContain("Completions:");
+    expect(getOutput()).not.toContain("Completions:");
   });
 
   test("silently skips completions for sh shell", async () => {
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "bin", "sentry"),
       env: {
@@ -396,6 +424,7 @@ describe("sentry cli setup", () => {
         SHELL: "/bin/sh",
       },
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -403,13 +432,15 @@ describe("sentry cli setup", () => {
       context
     );
 
-    const combined = output.join("");
     // sh/ash shells silently skip completions — no message at all
-    expect(combined).not.toContain("Completions:");
+    expect(getOutput()).not.toContain("Completions:");
   });
 
   test("supports kebab-case flags", async () => {
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     // Verify kebab-case works (--no-modify-path instead of --noModifyPath)
     await run(
@@ -426,7 +457,7 @@ describe("sentry cli setup", () => {
     );
 
     // Should not error
-    expect(output.join("")).toBe("");
+    expect(getOutput()).toBe("");
   });
 
   describe("--install flag", () => {
@@ -439,7 +470,7 @@ describe("sentry cli setup", () => {
       const { chmodSync } = await import("node:fs");
       chmodSync(sourcePath, 0o755);
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: sourcePath,
         env: {
@@ -448,6 +479,7 @@ describe("sentry cli setup", () => {
           SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -464,7 +496,7 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
 
       // Should show welcome message, not "Setup complete!"
       expect(combined).toContain("Installed sentry v");
@@ -487,7 +519,7 @@ describe("sentry cli setup", () => {
       const { chmodSync } = await import("node:fs");
       chmodSync(sourcePath, 0o755);
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: sourcePath,
         env: {
@@ -496,6 +528,7 @@ describe("sentry cli setup", () => {
           SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -512,9 +545,8 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
       // With --install, the "Recorded installation method" log is suppressed
-      expect(combined).not.toContain("Recorded installation method");
+      expect(getOutput()).not.toContain("Recorded installation method");
     });
 
     test("--install suppresses welcome when binary already exists (upgrade)", async () => {
@@ -530,7 +562,7 @@ describe("sentry cli setup", () => {
       const { chmodSync } = await import("node:fs");
       chmodSync(sourcePath, 0o755);
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: sourcePath,
         env: {
@@ -539,6 +571,7 @@ describe("sentry cli setup", () => {
           SENTRY_INSTALL_DIR: installDir,
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -555,7 +588,7 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
 
       // Binary placement is still logged
       expect(combined).toContain("Binary: Installed to");
@@ -572,7 +605,7 @@ describe("sentry cli setup", () => {
       const { chmodSync } = await import("node:fs");
       chmodSync(sourcePath, 0o755);
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: sourcePath,
         env: {
@@ -581,6 +614,7 @@ describe("sentry cli setup", () => {
           SENTRY_INSTALL_DIR: join(testDir, "install-dir"),
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -598,7 +632,7 @@ describe("sentry cli setup", () => {
         context
       );
 
-      expect(output.join("")).toBe("");
+      expect(getOutput()).toBe("");
     });
   });
 
@@ -619,7 +653,7 @@ describe("sentry cli setup", () => {
       // Create ~/.claude to simulate Claude Code being installed
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
         env: {
@@ -627,6 +661,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/bash",
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -634,9 +669,8 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
-      expect(combined).toContain("Agent skills:");
-      expect(combined).toContain("Installed to");
+      expect(getOutput()).toContain("Agent skills:");
+      expect(getOutput()).toContain("Installed to");
 
       // Verify the file was actually written
       const skillPath = join(
@@ -650,7 +684,7 @@ describe("sentry cli setup", () => {
     });
 
     test("silently skips when Claude Code is not detected", async () => {
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
         env: {
@@ -658,6 +692,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/bash",
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -665,14 +700,13 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
-      expect(combined).not.toContain("Agent skills:");
+      expect(getOutput()).not.toContain("Agent skills:");
     });
 
     test("suppresses agent skills message on subsequent runs (upgrade scenario)", async () => {
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, clearOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
         env: {
@@ -680,6 +714,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/bash",
         },
       });
+      restoreStderr = restore;
 
       // First run — should show "Installed to"
       await run(
@@ -688,25 +723,23 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const firstRun = output.join("");
-      expect(firstRun).toContain("Agent skills: Installed to");
+      expect(getOutput()).toContain("Agent skills: Installed to");
 
       // Second run — skill file already exists, should be silent
-      output.length = 0;
+      clearOutput();
       await run(
         app,
         ["cli", "setup", "--no-modify-path", "--no-completions"],
         context
       );
 
-      const secondRun = output.join("");
-      expect(secondRun).not.toContain("Agent skills:");
+      expect(getOutput()).not.toContain("Agent skills:");
     });
 
     test("skips when --no-agent-skills is set", async () => {
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
         env: {
@@ -714,6 +747,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/bash",
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -727,8 +761,7 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
-      expect(combined).not.toContain("Agent skills:");
+      expect(getOutput()).not.toContain("Agent skills:");
     });
 
     test("does not break setup on network failure", async () => {
@@ -738,7 +771,7 @@ describe("sentry cli setup", () => {
         throw new Error("Network error");
       });
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
         execPath: join(testDir, "bin", "sentry"),
         env: {
@@ -746,6 +779,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/bash",
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -754,9 +788,7 @@ describe("sentry cli setup", () => {
       );
 
       // Setup should still complete without errors (no output without --install)
-      const combined = output.join("");
-      expect(combined).not.toContain("Agent skills:");
-      expect(combined).not.toContain("Warning:");
+      expect(getOutput()).not.toContain("Agent skills:");
     });
 
     test("bestEffort catches errors from steps and setup still completes", async () => {
@@ -771,7 +803,7 @@ describe("sentry cli setup", () => {
       mkdirSync(zshDir, { recursive: true });
       chmod(zshDir, 0o444); // read-only → completion write will throw
 
-      const { context, output } = createMockContext({
+      const { context, getOutput, restore } = createMockContext({
         homeDir,
         env: {
           XDG_DATA_HOME: xdgData,
@@ -779,6 +811,7 @@ describe("sentry cli setup", () => {
           SHELL: "/bin/zsh",
         },
       });
+      restoreStderr = restore;
 
       await run(
         app,
@@ -786,10 +819,10 @@ describe("sentry cli setup", () => {
         context
       );
 
-      const combined = output.join("");
+      const combined = getOutput();
       // Setup must complete even though the completions step threw —
-      // the warning goes to stderr but no crash
-      expect(combined).toContain("Warning:");
+      // the warning goes to stderr via consola ([warn] format)
+      expect(combined).toContain("[warn]");
       expect(combined).toContain("Shell completions failed");
 
       chmod(zshDir, 0o755);
@@ -801,6 +834,7 @@ describe("sentry cli setup — --channel flag", () => {
   useTestConfigDir("test-setup-channel-");
 
   let testDir: string;
+  let restoreStderr: (() => void) | undefined;
 
   beforeEach(() => {
     testDir = join(
@@ -811,11 +845,14 @@ describe("sentry cli setup — --channel flag", () => {
   });
 
   afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     rmSync(testDir, { recursive: true, force: true });
   });
 
   test("persists 'nightly' channel when --channel nightly is passed", async () => {
-    const { context } = createMockContext({ homeDir: testDir });
+    const { context, restore } = createMockContext({ homeDir: testDir });
+    restoreStderr = restore;
 
     expect(getReleaseChannel()).toBe("stable");
 
@@ -837,7 +874,8 @@ describe("sentry cli setup — --channel flag", () => {
   });
 
   test("persists 'stable' channel when --channel stable is passed", async () => {
-    const { context } = createMockContext({ homeDir: testDir });
+    const { context, restore } = createMockContext({ homeDir: testDir });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -857,7 +895,10 @@ describe("sentry cli setup — --channel flag", () => {
   });
 
   test("logs channel when not in --install mode", async () => {
-    const { context, output } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -873,17 +914,17 @@ describe("sentry cli setup — --channel flag", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).toContain("Recorded release channel: nightly");
+    expect(getOutput()).toContain("Recorded release channel: nightly");
   });
 
   test("does not log channel in --install mode", async () => {
     // In --install mode, the setup is silent about the channel
     // (it's set during binary placement, before user sees output)
-    const { context, output } = createMockContext({
+    const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
       execPath: join(testDir, "sentry.download"),
     });
+    restoreStderr = restore;
 
     await run(
       app,
@@ -900,7 +941,6 @@ describe("sentry cli setup — --channel flag", () => {
       context
     );
 
-    const combined = output.join("");
-    expect(combined).not.toContain("Recorded release channel: nightly");
+    expect(getOutput()).not.toContain("Recorded release channel: nightly");
   });
 });

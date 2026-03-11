@@ -13,6 +13,9 @@ import * as Sentry from "@sentry/bun";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ValidationError } from "../../lib/errors.js";
+import { logger } from "../../lib/logger.js";
+
+const log = logger.withTag("cli.feedback");
 
 export const feedbackCommand = buildCommand({
   docs: {
@@ -34,7 +37,6 @@ export const feedbackCommand = buildCommand({
   },
   // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
   async func(this: SentryContext, _flags: {}, ...messageParts: string[]) {
-    const { stdout, stderr } = this;
     const message = messageParts.join(" ");
 
     if (!message.trim()) {
@@ -42,8 +44,8 @@ export const feedbackCommand = buildCommand({
     }
 
     if (!Sentry.isEnabled()) {
-      stderr.write("Feedback not sent: telemetry is disabled.\n");
-      stderr.write("Unset SENTRY_CLI_NO_TELEMETRY to enable feedback.\n");
+      log.warn("Feedback not sent: telemetry is disabled.");
+      log.warn("Unset SENTRY_CLI_NO_TELEMETRY to enable feedback.");
       return;
     }
 
@@ -53,9 +55,9 @@ export const feedbackCommand = buildCommand({
     const sent = await Sentry.flush(3000);
 
     if (sent) {
-      stdout.write("Feedback submitted. Thank you!\n");
+      log.success("Feedback submitted. Thank you!");
     } else {
-      stderr.write("Feedback may not have been sent (network timeout).\n");
+      log.warn("Feedback may not have been sent (network timeout).");
     }
   },
 });

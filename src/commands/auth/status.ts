@@ -21,7 +21,6 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
-import { error, muted, success } from "../../lib/formatters/colors.js";
 import {
   formatExpiration,
   formatUserIdentity,
@@ -32,7 +31,9 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import type { Writer } from "../../types/index.js";
+import { logger } from "../../lib/logger.js";
+
+const log = logger.withTag("auth.status");
 
 type StatusFlags = {
   readonly "show-token": boolean;
@@ -40,14 +41,14 @@ type StatusFlags = {
 };
 
 /**
- * Write user identity information
+ * Log user identity information if available.
  */
-function writeUserInfo(stdout: Writer): void {
+function logUserInfo(): void {
   const user = getUserInfo();
   if (!user) {
     return;
   }
-  stdout.write(`User: ${muted(formatUserIdentity(user))}\n`);
+  log.info(`User: ${formatUserIdentity(user)}`);
 }
 
 /** Check if the auth source is an environment variable */
@@ -61,19 +62,15 @@ function envVarName(source: AuthSource): string {
 }
 
 /**
- * Write token information
+ * Log token information.
  */
-function writeTokenInfo(
-  stdout: Writer,
-  auth: AuthConfig | undefined,
-  showToken: boolean
-): void {
+function logTokenInfo(auth: AuthConfig | undefined, showToken: boolean): void {
   if (!auth?.token) {
     return;
   }
 
   const tokenDisplay = showToken ? auth.token : maskToken(auth.token);
-  stdout.write(`Token: ${tokenDisplay}\n`);
+  log.info(`Token: ${tokenDisplay}`);
 
   // Env var tokens have no expiry or refresh — skip those sections
   if (isEnvSource(auth.source)) {
@@ -81,21 +78,21 @@ function writeTokenInfo(
   }
 
   if (auth.expiresAt) {
-    stdout.write(`Expires: ${formatExpiration(auth.expiresAt)}\n`);
+    log.info(`Expires: ${formatExpiration(auth.expiresAt)}`);
   }
 
   // Show refresh token status
   if (auth.refreshToken) {
-    stdout.write(`Auto-refresh: ${success("enabled")}\n`);
+    log.info("Auto-refresh: enabled");
   } else {
-    stdout.write("Auto-refresh: disabled (no refresh token)\n");
+    log.info("Auto-refresh: disabled (no refresh token)");
   }
 }
 
 /**
- * Write default settings
+ * Log default org/project settings if configured.
  */
-async function writeDefaults(stdout: Writer): Promise<void> {
+async function logDefaults(): Promise<void> {
   const defaultOrg = await getDefaultOrganization();
   const defaultProject = await getDefaultProject();
 
@@ -103,40 +100,37 @@ async function writeDefaults(stdout: Writer): Promise<void> {
     return;
   }
 
-  stdout.write("\nDefaults:\n");
+  log.info("Defaults:");
   if (defaultOrg) {
-    stdout.write(`  Organization: ${defaultOrg}\n`);
+    log.info(`  Organization: ${defaultOrg}`);
   }
   if (defaultProject) {
-    stdout.write(`  Project: ${defaultProject}\n`);
+    log.info(`  Project: ${defaultProject}`);
   }
 }
 
 /**
- * Verify credentials by fetching organizations
+ * Verify credentials by fetching organizations.
  */
-async function verifyCredentials(
-  stdout: Writer,
-  stderr: Writer
-): Promise<void> {
-  stdout.write("\nVerifying credentials...\n");
+async function verifyCredentials(): Promise<void> {
+  log.info("Verifying credentials...");
 
   try {
     const orgs = await listOrganizations();
-    stdout.write(
-      `\n${success("✓")} Access verified. You have access to ${orgs.length} organization(s):\n`
+    log.success(
+      `Access verified. You have access to ${orgs.length} organization(s):`
     );
 
     const maxDisplay = 5;
     for (const org of orgs.slice(0, maxDisplay)) {
-      stdout.write(`  - ${org.name} (${org.slug})\n`);
+      log.info(`  - ${org.name} (${org.slug})`);
     }
     if (orgs.length > maxDisplay) {
-      stdout.write(`  ... and ${orgs.length - maxDisplay} more\n`);
+      log.info(`  ... and ${orgs.length - maxDisplay} more`);
     }
   } catch (err) {
     const message = stringifyUnknown(err);
-    stderr.write(`\n${error("✗")} Could not verify credentials: ${message}\n`);
+    log.error(`Could not verify credentials: ${message}`);
   }
 }
 
@@ -160,7 +154,6 @@ export const statusCommand = buildCommand({
   },
   async func(this: SentryContext, flags: StatusFlags): Promise<void> {
     applyFreshFlag(flags);
-    const { stdout, stderr } = this;
 
     const auth = await getAuthConfig();
     const authenticated = await isAuthenticated();
@@ -168,7 +161,7 @@ export const statusCommand = buildCommand({
 
     // Show config path only for stored (OAuth) tokens — irrelevant for env vars
     if (!fromEnv) {
-      stdout.write(`Config: ${getDbPath()}\n`);
+      log.info(`Config: ${getDbPath()}`);
     }
 
     if (!authenticated) {
@@ -179,17 +172,16 @@ export const statusCommand = buildCommand({
     }
 
     if (fromEnv) {
-      stdout.write(
-        `Status: Authenticated via ${envVarName(auth.source)} environment variable ${success("✓")}\n`
+      log.success(
+        `Authenticated via ${envVarName(auth.source)} environment variable`
       );
     } else {
-      stdout.write(`Status: Authenticated ${success("✓")}\n`);
+      log.success("Authenticated");
     }
-    writeUserInfo(stdout);
-    stdout.write("\n");
+    logUserInfo();
 
-    writeTokenInfo(stdout, auth, flags["show-token"]);
-    await writeDefaults(stdout);
-    await verifyCredentials(stdout, stderr);
+    logTokenInfo(auth, flags["show-token"]);
+    await logDefaults();
+    await verifyCredentials();
   },
 });

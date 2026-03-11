@@ -14,12 +14,7 @@ import {
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
-import {
-  divider,
-  formatProjectDetails,
-  writeJson,
-  writeOutput,
-} from "../../lib/formatters/index.js";
+import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -80,6 +75,17 @@ async function handleWebView(resolvedTargets: ResolvedTarget[]): Promise<void> {
   );
 }
 
+/**
+ * A project entry enriched with its DSN and optional detection source.
+ * This is the data shape returned by the command for both JSON and human output.
+ */
+type ProjectViewEntry = SentryProject & {
+  /** Primary DSN for the project, or null if unavailable */
+  dsn: string | null;
+  /** Where the project was auto-detected from (e.g. ".env", "source code") */
+  detectedFrom?: string;
+};
+
 /** Result of fetching a single project with its DSN */
 type ProjectWithDsn = {
   project: SentryProject;
@@ -139,30 +145,31 @@ async function fetchAllProjectDetails(
 }
 
 /**
- * Write multiple project details with separators.
+ * Format project view entries for human-readable terminal output.
+ *
+ * Renders each project's details with dividers between multiple projects,
+ * and appends detection source information when available.
  */
-function writeMultipleProjects(
-  stdout: { write: (s: string) => void },
-  projects: SentryProject[],
-  dsns: (string | null)[],
-  targets: ResolvedTarget[]
-): void {
-  for (let i = 0; i < projects.length; i++) {
-    const project = projects[i];
-    const dsn = dsns[i];
-    const target = targets[i];
+function formatProjectViewHuman(entries: ProjectViewEntry[]): string {
+  const parts: string[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) {
+      continue;
+    }
 
     if (i > 0) {
-      stdout.write(`\n${divider(60)}\n\n`);
+      parts.push(`\n${divider(60)}\n`);
     }
 
-    if (project) {
-      stdout.write(`${formatProjectDetails(project, dsn)}\n`);
-      if (target?.detectedFrom) {
-        stdout.write(`\nDetected from: ${target.detectedFrom}\n`);
-      }
+    parts.push(formatProjectDetails(entry, entry.dsn));
+    if (entry.detectedFrom) {
+      parts.push(`\nDetected from: ${entry.detectedFrom}`);
     }
   }
+
+  return parts.join("\n");
 }
 
 export const viewCommand = buildCommand({
@@ -177,7 +184,11 @@ export const viewCommand = buildCommand({
       `${TARGET_PATTERN_NOTE}\n\n` +
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatProjectViewHuman,
+    jsonExclude: ["detectedFrom"],
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -200,13 +211,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    targetArg?: string
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, targetArg?: string) {
     applyFreshFlag(flags);
-    const { stdout, cwd } = this;
+    const { cwd } = this;
 
     const parsed = parseOrgProjectArg(targetArg);
 
@@ -280,35 +287,13 @@ export const viewCommand = buildCommand({
       throw buildContextError();
     }
 
-    // JSON output - always an array for consistent shape
-    if (flags.json) {
-      // Add dsn field to JSON output
-      const projectsWithDsn = projects.map((p, i) => ({
-        ...p,
-        dsn: dsns[i] ?? null,
-      }));
-      writeJson(stdout, projectsWithDsn, flags.fields);
-      return;
-    }
+    // Build enriched entries array — always an array for consistent JSON shape
+    const entries: ProjectViewEntry[] = projects.map((p, i) => ({
+      ...p,
+      dsn: dsns[i] ?? null,
+      detectedFrom: targets[i]?.detectedFrom,
+    }));
 
-    // Human output
-    const firstProject = projects[0];
-    const firstDsn = dsns[0];
-    const firstTarget = targets[0];
-    if (projects.length === 1 && firstProject) {
-      writeOutput(stdout, firstProject, {
-        json: false,
-        formatHuman: (p: SentryProject) => formatProjectDetails(p, firstDsn),
-        hint: firstTarget?.detectedFrom
-          ? `Detected from ${firstTarget.detectedFrom}`
-          : undefined,
-      });
-    } else {
-      writeMultipleProjects(stdout, projects, dsns, targets);
-    }
-
-    if (footer) {
-      stdout.write(`\n${footer}\n`);
-    }
+    return { data: entries, hint: footer };
   },
 });

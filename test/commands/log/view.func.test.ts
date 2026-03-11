@@ -98,7 +98,6 @@ describe("viewCommand.func", () => {
 
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(output);
-      // Always emits array for consistent JSON shape
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed[0]["sentry.item_id"]).toBe(ID1);
     });
@@ -138,7 +137,7 @@ describe("viewCommand.func", () => {
   });
 
   describe("multiple log IDs", () => {
-    test("fetches and outputs multiple logs as JSON array", async () => {
+    test("fetches and outputs multiple logs as JSON", async () => {
       const logs = [makeSampleLog(ID1, "Log 1"), makeSampleLog(ID2, "Log 2")];
       getLogsSpy.mockResolvedValue(logs);
 
@@ -220,7 +219,6 @@ describe("viewCommand.func", () => {
       // Should still output the found log as JSON
       const stdoutOutput = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(stdoutOutput);
-      // Multiple IDs requested → array output even if only one found
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed).toHaveLength(1);
       expect(parsed[0]["sentry.item_id"]).toBe(ID1);

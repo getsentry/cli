@@ -30,6 +30,7 @@ import {
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
+import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
@@ -41,6 +42,8 @@ import {
   VERSION_PREFIX_REGEX,
   versionExists,
 } from "../../lib/upgrade.js";
+
+const log = logger.withTag("cli.upgrade");
 
 /** Special version strings that select a channel rather than a specific release. */
 const CHANNEL_VERSIONS = new Set(["nightly", "stable"]);
@@ -85,7 +88,6 @@ type ResolveTargetOptions = {
   versionArg: string | undefined;
   channelChanged: boolean;
   flags: UpgradeFlags;
-  stdout: { write: (s: string) => void };
 };
 
 /**
@@ -97,23 +99,23 @@ type ResolveTargetOptions = {
 async function resolveTargetVersion(
   opts: ResolveTargetOptions
 ): Promise<string | null> {
-  const { method, channel, versionArg, channelChanged, flags, stdout } = opts;
+  const { method, channel, versionArg, channelChanged, flags } = opts;
   const latest = await fetchLatestVersion(method, channel);
   const target = versionArg?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
-  stdout.write(`Channel: ${channel}\n`);
-  stdout.write(`Latest version: ${latest}\n`);
+  log.info(`Channel: ${channel}`);
+  log.info(`Latest version: ${latest}`);
   if (versionArg) {
-    stdout.write(`Target version: ${target}\n`);
+    log.info(`Target version: ${target}`);
   }
 
   if (flags.check) {
-    return handleCheckMode(target, versionArg, stdout);
+    return handleCheckMode(target, versionArg);
   }
 
   // Skip if already on target — unless forced or switching channels
   if (CLI_VERSION === target && !flags.force && !channelChanged) {
-    stdout.write("\nAlready up to date.\n");
+    log.success("Already up to date.");
     return null;
   }
 
@@ -137,19 +139,15 @@ async function resolveTargetVersion(
 /**
  * Print check-only output and return null (no upgrade to perform).
  */
-function handleCheckMode(
-  target: string,
-  versionArg: string | undefined,
-  stdout: { write: (s: string) => void }
-): null {
+function handleCheckMode(target: string, versionArg: string | undefined): null {
   if (CLI_VERSION === target) {
-    stdout.write("\nYou are already on the target version.\n");
+    log.success("You are already on the target version.");
   } else {
     const cmd =
       versionArg && !CHANNEL_VERSIONS.has(versionArg)
         ? `sentry cli upgrade ${target}`
         : "sentry cli upgrade";
-    stdout.write(`\nRun '${cmd}' to update.\n`);
+    log.info(`Run '${cmd}' to update.`);
   }
   return null;
 }
@@ -283,11 +281,10 @@ async function executeStandardUpgrade(opts: {
 async function migrateToStandaloneForNightly(
   method: InstallationMethod,
   target: string,
-  stdout: { write: (s: string) => void },
   versionArg: string | undefined
 ): Promise<void> {
-  stdout.write("\nNightly builds are only available as standalone binaries.\n");
-  stdout.write("Migrating to standalone installation...\n\n");
+  log.info("Nightly builds are only available as standalone binaries.");
+  log.info("Migrating to standalone installation...");
 
   // Use the rolling "nightly" tag for latest nightly; use the specific version
   // tag if the user requested a pinned version.
@@ -325,11 +322,9 @@ async function migrateToStandaloneForNightly(
     brew: "brew uninstall getsentry/tools/sentry",
   };
   const hint = uninstallHints[method];
-  stdout.write(
-    `\nNote: your ${method}-installed sentry may still appear earlier in PATH.\n`
-  );
+  log.warn(`Your ${method}-installed sentry may still appear earlier in PATH.`);
   if (hint) {
-    stdout.write(`      Consider removing it: ${hint}\n`);
+    log.warn(`Consider removing it: ${hint}`);
   }
 }
 
@@ -391,8 +386,6 @@ export const upgradeCommand = buildCommand({
     flags: UpgradeFlags,
     version?: string
   ): Promise<void> {
-    const { stdout } = this;
-
     // Resolve effective channel and version from positional
     const { channel, versionArg } = resolveChannelAndVersion(version);
 
@@ -423,8 +416,8 @@ export const upgradeCommand = buildCommand({
       );
     }
 
-    stdout.write(`Installation method: ${method}\n`);
-    stdout.write(`Current version: ${CLI_VERSION}\n`);
+    log.info(`Installation method: ${method}`);
+    log.info(`Current version: ${CLI_VERSION}`);
 
     const target = await resolveTargetVersion({
       method,
@@ -432,23 +425,20 @@ export const upgradeCommand = buildCommand({
       versionArg,
       channelChanged,
       flags,
-      stdout,
     });
     if (!target) {
       return;
     }
 
     const downgrade = isDowngrade(CLI_VERSION, target);
-    stdout.write(
-      `\n${downgrade ? "Downgrading" : "Upgrading"} to ${target}...\n`
-    );
+    log.info(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}...`);
 
     // Nightly is GitHub-only. If the current install method is not curl,
     // migrate to a standalone binary first then return — the migration
     // handles setup internally.
     if (channel === "nightly" && method !== "curl") {
-      await migrateToStandaloneForNightly(method, target, stdout, versionArg);
-      stdout.write(`\nSuccessfully installed nightly ${target}.\n`);
+      await migrateToStandaloneForNightly(method, target, versionArg);
+      log.success(`Successfully installed nightly ${target}.`);
       return;
     }
 
@@ -460,8 +450,8 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    stdout.write(
-      `\nSuccessfully ${downgrade ? "downgraded" : "upgraded"} to ${target}.\n`
+    log.success(
+      `Successfully ${downgrade ? "downgraded" : "upgraded"} to ${target}.`
     );
   },
 });

@@ -13,11 +13,9 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import {
-  formatTraceTable,
-  writeFooter,
-  writeJsonList,
-} from "../../lib/formatters/index.js";
+import { formatTraceTable } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
+import type { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -27,6 +25,7 @@ import {
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import type { TransactionListItem } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -39,6 +38,25 @@ type ListFlags = {
 };
 
 type SortValue = "date" | "duration";
+
+/**
+ * Result data for the trace list command.
+ *
+ * Contains the traces array plus pagination metadata and context
+ * needed by both the human formatter and JSON transform.
+ */
+type TraceListResult = {
+  /** The list of transactions returned by the API */
+  traces: TransactionListItem[];
+  /** Whether more pages are available */
+  hasMore: boolean;
+  /** Opaque cursor for fetching the next page (null/undefined when no more) */
+  nextCursor?: string | null;
+  /** Org slug (used by human formatter for display and next-page hint) */
+  org: string;
+  /** Project slug (used by human formatter for display and next-page hint) */
+  project: string;
+};
 
 /** Accepted values for the --sort flag */
 const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
@@ -59,7 +77,11 @@ const COMMAND_NAME = "trace list";
 export const PAGINATION_KEY = "trace-list";
 
 /** Build the CLI hint for fetching the next page, preserving active flags. */
-function nextPageHint(org: string, project: string, flags: ListFlags): string {
+function nextPageHint(
+  org: string,
+  project: string,
+  flags: Pick<ListFlags, "sort" | "query">
+): string {
   const base = `sentry trace list ${org}/${project} -c last`;
   const parts: string[] = [];
   if (flags.sort !== "date") {
@@ -93,6 +115,57 @@ export function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
+/**
+ * Format trace list data for human-readable terminal output.
+ *
+ * Handles three display states:
+ * - Empty list with more pages → "No traces on this page."
+ * - Empty list, no more pages → "No traces found."
+ * - Non-empty → header line + formatted table
+ *
+ * The hint/footer is handled separately by the {@link CommandOutput.hint}
+ * field, not by this formatter.
+ */
+function formatTraceListHuman(result: TraceListResult): string {
+  const { traces, hasMore, org, project } = result;
+
+  if (traces.length === 0) {
+    return hasMore ? "No traces on this page." : "No traces found.";
+  }
+
+  return `Recent traces in ${org}/${project}:\n\n${formatTraceTable(traces)}`;
+}
+
+/**
+ * Transform trace list data into the JSON list envelope.
+ *
+ * Produces the standard `{ data, hasMore, nextCursor? }` envelope.
+ * Field filtering is applied per-element inside `data` (not to the
+ * wrapper), matching the behaviour of `writeJsonList`.
+ */
+function jsonTransformTraceList(
+  result: TraceListResult,
+  fields?: string[]
+): unknown {
+  const items =
+    fields && fields.length > 0
+      ? result.traces.map((t) => filterFields(t, fields))
+      : result.traces;
+
+  const envelope: Record<string, unknown> = {
+    data: items,
+    hasMore: result.hasMore,
+  };
+  if (
+    result.nextCursor !== null &&
+    result.nextCursor !== undefined &&
+    result.nextCursor !== ""
+  ) {
+    envelope.nextCursor = result.nextCursor;
+  }
+  return envelope;
+}
+
 export const listCommand = buildListCommand("trace", {
   docs: {
     brief: "List recent traces in a project",
@@ -109,7 +182,11 @@ export const listCommand = buildListCommand("trace", {
       "  sentry trace list --sort duration     # Sort by slowest first\n" +
       '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction',
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatTraceListHuman,
+    jsonTransform: jsonTransformTraceList,
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -156,9 +233,9 @@ export const listCommand = buildListCommand("trace", {
     this: SentryContext,
     flags: ListFlags,
     target?: string
-  ): Promise<void> {
+  ): Promise<CommandOutput<TraceListResult>> {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
     const { org, project } = await resolveOrgProjectFromArg(
@@ -191,41 +268,20 @@ export const listCommand = buildListCommand("trace", {
 
     const hasMore = !!nextCursor;
 
-    if (flags.json) {
-      writeJsonList(stdout, traces, {
-        hasMore,
-        nextCursor,
-        fields: flags.fields,
-      });
-      return;
+    // Build footer hint based on result state
+    let hint: string | undefined;
+    if (traces.length === 0 && hasMore) {
+      hint = `Try the next page: ${nextPageHint(org, project, flags)}`;
+    } else if (traces.length > 0) {
+      const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
+      hint = hasMore
+        ? `${countText} Next page: ${nextPageHint(org, project, flags)}`
+        : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    if (traces.length === 0) {
-      if (hasMore) {
-        stdout.write(
-          `No traces on this page. Try the next page: ${nextPageHint(org, project, flags)}\n`
-        );
-      } else {
-        stdout.write("No traces found.\n");
-      }
-      return;
-    }
-
-    stdout.write(`Recent traces in ${org}/${project}:\n\n`);
-    stdout.write(formatTraceTable(traces));
-
-    // Show footer with pagination info
-    const countText = `Showing ${traces.length} trace${traces.length === 1 ? "" : "s"}.`;
-    if (hasMore) {
-      writeFooter(
-        stdout,
-        `${countText} Next page: ${nextPageHint(org, project, flags)}`
-      );
-    } else {
-      writeFooter(
-        stdout,
-        `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`
-      );
-    }
+    return {
+      data: { traces, hasMore, nextCursor, org, project },
+      hint,
+    };
   },
 });

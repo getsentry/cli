@@ -27,6 +27,7 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
+import { logger } from "../../lib/logger.js";
 import {
   addToGitHubPath,
   addToPath,
@@ -40,6 +41,8 @@ import {
   type InstallationMethod,
   parseInstallationMethod,
 } from "../../lib/upgrade.js";
+
+const cmdLog = logger.withTag("cli.setup");
 
 type SetupFlags = {
   readonly install: boolean;
@@ -440,18 +443,17 @@ export const setupCommand = buildCommand({
   },
   async func(this: SentryContext, flags: SetupFlags): Promise<void> {
     const { process, homeDir } = this;
-    const { stdout, stderr } = process;
 
     const log: Logger = (msg: string) => {
       if (!flags.quiet) {
-        stdout.write(`${msg}\n`);
+        cmdLog.info(msg);
       }
     };
 
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      stderr.write(`Warning: ${step} failed: ${msg}\n`);
+      cmdLog.warn(`${step} failed: ${msg}`);
     };
 
     let binaryPath = process.execPath;
