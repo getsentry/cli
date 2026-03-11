@@ -456,37 +456,44 @@ function formatMode(mode: number): string {
  * @param issues - Permission issues to repair
  * @returns Separate lists of human-readable repair successes and failures
  */
-async function repairPermissions(issues: PermissionIssue[]): Promise<{
-  fixed: string[];
-  failed: string[];
-}> {
-  const fixed: string[] = [];
-  const failed: string[] = [];
+/**
+ * Repair permissions, returning outcomes aligned by index with input.
+ *
+ * Repairs directories before files to avoid EACCES on child chmod calls.
+ */
+async function repairPermissions(
+  issues: PermissionIssue[]
+): Promise<RepairOutcome[]> {
+  const outcomes = new Array<RepairOutcome>(issues.length);
 
-  // Repair directories first so child file chmod calls don't fail with EACCES
-  const dirIssues = issues.filter((i) => i.kind === "directory");
-  const fileIssues = issues.filter((i) => i.kind !== "directory");
+  // Build index maps for dirs and files
+  const dirEntries: Array<{ idx: number; issue: PermissionIssue }> = [];
+  const fileEntries: Array<{ idx: number; issue: PermissionIssue }> = [];
+  for (let i = 0; i < issues.length; i++) {
+    const issue = issues[i] as PermissionIssue;
+    if (issue.kind === "directory") {
+      dirEntries.push({ idx: i, issue });
+    } else {
+      fileEntries.push({ idx: i, issue });
+    }
+  }
 
-  await collectResults(dirIssues, fixed, failed);
-  await collectResults(fileIssues, fixed, failed);
+  // Repair directories first, then files
+  await collectPermResults(dirEntries, outcomes);
+  await collectPermResults(fileEntries, outcomes);
 
-  return { fixed, failed };
+  return outcomes;
 }
 
 /**
- * Run chmod for each issue in parallel, collecting successes and failures.
- *
- * @param issues - Permission issues to repair
- * @param fixed - Accumulator for successful repair messages
- * @param failed - Accumulator for failed repair messages
+ * Run chmod for each entry in parallel, writing outcomes by original index.
  */
-async function collectResults(
-  issues: PermissionIssue[],
-  fixed: string[],
-  failed: string[]
+async function collectPermResults(
+  entries: Array<{ idx: number; issue: PermissionIssue }>,
+  outcomes: RepairOutcome[]
 ): Promise<void> {
   const results = await Promise.allSettled(
-    issues.map(async (issue) => {
+    entries.map(async ({ issue }) => {
       await chmod(issue.path, issue.expectedMode);
       return `${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} -> ${formatMode(issue.expectedMode)}`;
     })
@@ -494,15 +501,18 @@ async function collectResults(
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i] as PromiseSettledResult<string>;
+    const entry = entries[i] as { idx: number; issue: PermissionIssue };
     if (result.status === "fulfilled") {
-      fixed.push(result.value);
+      outcomes[entry.idx] = { success: true, message: result.value };
     } else {
-      const issue = issues[i] as PermissionIssue;
       const reason =
         result.reason instanceof Error
           ? result.reason.message
-          : "permission denied";
-      failed.push(`${issue.kind} ${issue.path}: ${reason}`);
+          : "unknown error";
+      outcomes[entry.idx] = {
+        success: false,
+        message: `${entry.issue.kind} ${entry.issue.path}: ${reason}`,
+      };
     }
   }
 }
@@ -533,38 +543,26 @@ async function handlePermissionIssues(
     return { issues: fixIssues, repairFailed: false };
   }
 
-  const { fixed, failed } = await repairPermissions(permIssues);
+  const outcomes = await repairPermissions(permIssues);
 
-  // Map repair results back to issues
-  const repairedIssues: FixIssue[] = [];
-
-  for (const f of fixed) {
-    repairedIssues.push({
-      category: "permission",
-      description: f,
-      repaired: true,
-      repairMessage: f,
-    });
-  }
-
-  if (failed.length > 0) {
-    for (const f of failed) {
-      repairedIssues.push({
-        category: "permission",
-        description: f,
-        repaired: false,
-        repairMessage: f,
-      });
+  // Mark each issue with its repair outcome (aligned by index)
+  let anyFailed = false;
+  for (let i = 0; i < fixIssues.length; i++) {
+    const issue = fixIssues[i] as FixIssue;
+    const outcome = outcomes[i] as RepairOutcome;
+    issue.repaired = outcome.success;
+    issue.repairMessage = outcome.message;
+    if (!outcome.success) {
+      anyFailed = true;
     }
   }
 
   return {
-    issues: repairedIssues.length > 0 ? repairedIssues : fixIssues,
-    instructions:
-      failed.length > 0
-        ? `You may need to fix permissions manually:\n  chmod 700 "${getConfigDir()}"\n  chmod 600 "${dbPath}"`
-        : undefined,
-    repairFailed: failed.length > 0,
+    issues: fixIssues,
+    instructions: anyFailed
+      ? `You may need to fix permissions manually:\n  chmod 700 "${getConfigDir()}"\n  chmod 600 "${dbPath}"`
+      : undefined,
+    repairFailed: anyFailed,
   };
 }
 
@@ -593,37 +591,24 @@ function handleSchemaIssues(dbPath: string, dryRun: boolean): HandlerResult {
   }
 
   const { fixed, failed } = repairSchema(db);
+  const anyFailed = failed.length > 0;
 
-  // Map repair results back to issues
-  const repairedIssues: FixIssue[] = [];
-
-  for (const f of fixed) {
-    repairedIssues.push({
-      category: "schema",
-      description: f,
-      repaired: true,
-      repairMessage: f,
-    });
-  }
-
-  if (failed.length > 0) {
-    for (const f of failed) {
-      repairedIssues.push({
-        category: "schema",
-        description: f,
-        repaired: false,
-        repairMessage: f,
-      });
-    }
+  // Mark original issues with repair outcomes.
+  // Schema repair runs independently of detection — mark all issues based
+  // on overall success/failure. Attach repair messages for diagnostics.
+  for (const issue of fixIssues) {
+    issue.repaired = !anyFailed;
+    issue.repairMessage = anyFailed
+      ? failed.join("; ")
+      : fixed.join("; ") || "Schema repaired";
   }
 
   return {
-    issues: repairedIssues.length > 0 ? repairedIssues : fixIssues,
-    instructions:
-      failed.length > 0
-        ? `Try deleting the database and restarting: rm "${dbPath}"`
-        : undefined,
-    repairFailed: failed.length > 0,
+    issues: fixIssues,
+    instructions: anyFailed
+      ? `Try deleting the database and restarting: rm "${dbPath}"`
+      : undefined,
+    repairFailed: anyFailed,
   };
 }
 
