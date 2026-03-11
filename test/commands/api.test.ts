@@ -16,6 +16,7 @@ import {
   buildRawQueryParams,
   dataToQueryParams,
   extractJsonBody,
+  formatApiResponse,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -28,7 +29,6 @@ import {
   resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
-  writeResponseBody,
   writeResponseHeaders,
   writeVerboseRequest,
   writeVerboseResponse,
@@ -913,51 +913,33 @@ describe("writeResponseHeaders", () => {
   });
 });
 
-describe("writeResponseBody", () => {
-  test("writes JSON object with pretty-printing", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, { key: "value", num: 42 });
-    expect(writer.output).toBe('{\n  "key": "value",\n  "num": 42\n}\n');
+describe("formatApiResponse", () => {
+  test("formats JSON object with pretty-printing", () => {
+    expect(formatApiResponse({ key: "value", num: 42 })).toBe(
+      '{\n  "key": "value",\n  "num": 42\n}'
+    );
   });
 
-  test("writes JSON array with pretty-printing", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, [1, 2, 3]);
-    expect(writer.output).toBe("[\n  1,\n  2,\n  3\n]\n");
+  test("formats JSON array with pretty-printing", () => {
+    expect(formatApiResponse([1, 2, 3])).toBe("[\n  1,\n  2,\n  3\n]");
   });
 
-  test("writes string directly without JSON quoting", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, "plain text response");
-    expect(writer.output).toBe("plain text response\n");
+  test("formats string directly without JSON quoting", () => {
+    expect(formatApiResponse("plain text response")).toBe(
+      "plain text response"
+    );
   });
 
-  test("writes number as string", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, 42);
-    expect(writer.output).toBe("42\n");
+  test("formats number as string", () => {
+    expect(formatApiResponse(42)).toBe("42");
   });
 
-  test("does not write null", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, null);
-    expect(writer.output).toBe("");
+  test("returns empty string for null", () => {
+    expect(formatApiResponse(null)).toBe("");
   });
 
-  test("does not write undefined", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, undefined);
-    expect(writer.output).toBe("");
-  });
-
-  test("applies --fields filtering to objects", () => {
-    const writer = createMockWriter();
-    writeResponseBody(writer, { id: "1", name: "test", extra: "data" }, [
-      "id",
-      "name",
-    ]);
-    const parsed = JSON.parse(writer.output);
-    expect(parsed).toEqual({ id: "1", name: "test" });
+  test("returns empty string for undefined", () => {
+    expect(formatApiResponse(undefined)).toBe("");
   });
 });
 

@@ -8,8 +8,7 @@
 import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
-import { ValidationError } from "../lib/errors.js";
-import { writeJson } from "../lib/formatters/json.js";
+import { OutputError, ValidationError } from "../lib/errors.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
 import type { Writer } from "../types/index.js";
@@ -27,9 +26,9 @@ type ApiFlags = {
   readonly silent: boolean;
   readonly verbose: boolean;
   readonly "dry-run": boolean;
-  /** Injected by buildCommand via output: "json" */
+  /** Injected by buildCommand via output config */
   readonly json: boolean;
-  /** Injected by buildCommand via output: "json" */
+  /** Injected by buildCommand via output config */
   readonly fields?: string[];
 };
 
@@ -865,28 +864,23 @@ export function writeResponseHeaders(
 }
 
 /**
- * Write API response body to stdout.
+ * Format an API response body for human-readable output.
  *
- * Preserves raw strings (plain text, HTML error pages) without JSON quoting.
- * Objects/arrays are JSON-formatted with optional `--fields` filtering.
- * Null/undefined bodies produce no output.
+ * The api command is a raw proxy — the response body is the output.
+ * Objects/arrays are JSON-formatted; strings (plain text, HTML error
+ * pages) pass through without JSON quoting; null/undefined produce
+ * no output.
  *
  * @internal Exported for testing
  */
-export function writeResponseBody(
-  stdout: Writer,
-  body: unknown,
-  fields?: string[]
-): void {
+export function formatApiResponse(body: unknown): string {
   if (body === null || body === undefined) {
-    return;
+    return "";
   }
-
   if (typeof body === "object") {
-    writeJson(stdout, body, fields);
-  } else {
-    stdout.write(`${String(body)}\n`);
+    return JSON.stringify(body, null, 2);
   }
+  return String(body);
 }
 
 /**
@@ -1094,7 +1088,7 @@ export async function resolveBody(
 // Command Definition
 
 export const apiCommand = buildCommand({
-  output: "json",
+  output: { json: true, human: formatApiResponse },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1219,17 +1213,14 @@ export const apiCommand = buildCommand({
 
     // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
-      writeJson(
-        stdout,
-        {
+      return {
+        data: {
           method: flags.method,
           url: resolveRequestUrl(normalizedEndpoint, params),
           headers: resolveEffectiveHeaders(headers, body),
           body: body ?? null,
         },
-        flags.fields
-      );
-      return;
+      };
     }
 
     // Verbose mode: show request details before the response
@@ -1254,22 +1245,19 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Output response headers when requested
+    // Output response headers when requested (side-effect before body)
     if (flags.verbose) {
       writeVerboseResponse(stdout, response.status, response.headers);
     } else if (flags.include) {
       writeResponseHeaders(stdout, response.status, response.headers);
     }
 
-    // Write response body — preserve raw strings, JSON-format objects.
-    // The api command is a raw proxy; non-JSON responses (plain text,
-    // HTML error pages) must not be wrapped in JSON string quotes.
-    writeResponseBody(stdout, response.body, flags.fields);
-
-    // Error exit: Stricli overwrites process.exitCode after the command
-    // returns, so we must call process.exit(1) directly.
+    // Error responses: throw so the wrapper renders the body then exits 1.
+    // The body is still useful (API error details), just indicates failure.
     if (isError) {
-      process.exit(1);
+      throw new OutputError(response.body);
     }
+
+    return { data: response.body };
   },
 });

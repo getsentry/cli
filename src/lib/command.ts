@@ -36,6 +36,7 @@ import {
   buildCommand as stricliCommand,
   numberParser as stricliNumberParser,
 } from "@stricli/core";
+import { OutputError } from "./errors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
   type CommandOutput,
@@ -379,19 +380,43 @@ export function buildCommand<
       setArgsContext(args);
     }
 
+    // OutputError handler: render data through the output system, then
+    // exit with the error's code. Stricli overwrites process.exitCode = 0
+    // after successful returns, so process.exit() is the only way to
+    // preserve a non-zero code. This lives in the framework — commands
+    // simply `throw new OutputError(data)`.
+    const handleOutputError = (err: unknown): never => {
+      if (err instanceof OutputError && outputConfig) {
+        handleReturnValue(
+          this,
+          { data: err.data } as CommandOutput<unknown>,
+          cleanFlags
+        );
+        process.exit(err.exitCode);
+      }
+      throw err;
+    };
+
     // Call original and intercept data returns.
     // Commands with output config return { data, hint? };
     // the wrapper renders automatically. Void returns are ignored.
-    const result = originalFunc.call(
-      this,
-      cleanFlags as FLAGS,
-      ...(args as unknown as ARGS)
-    );
+    let result: ReturnType<typeof originalFunc>;
+    try {
+      result = originalFunc.call(
+        this,
+        cleanFlags as FLAGS,
+        ...(args as unknown as ARGS)
+      );
+    } catch (err) {
+      handleOutputError(err);
+    }
 
     if (result instanceof Promise) {
-      return result.then((resolved) => {
-        handleReturnValue(this, resolved, cleanFlags);
-      }) as ReturnType<typeof originalFunc>;
+      return result
+        .then((resolved) => {
+          handleReturnValue(this, resolved, cleanFlags);
+        })
+        .catch(handleOutputError) as ReturnType<typeof originalFunc>;
     }
 
     handleReturnValue(this, result, cleanFlags);
