@@ -141,30 +141,16 @@ describe("parsePositionalArgs", () => {
       expect(result.targetArg).toBeUndefined();
     });
 
-    test("returns warning when UUID dashes are stripped", () => {
-      const result = parsePositionalArgs([VALID_UUID]);
-      expect(result.warning).toBeDefined();
-      expect(result.warning).toContain("Auto-corrected");
-      expect(result.warning).toContain(VALID_UUID_STRIPPED);
-    });
-
-    test("no warning for plain 32-char hex", () => {
-      const result = parsePositionalArgs([VALID_TRACE_ID]);
-      expect(result.warning).toBeUndefined();
-    });
-
     test("strips dashes from UUID trace ID (two-arg case)", () => {
       const result = parsePositionalArgs(["my-org/frontend", VALID_UUID]);
       expect(result.traceId).toBe(VALID_UUID_STRIPPED);
       expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.warning).toContain("Auto-corrected");
     });
 
     test("strips dashes from UUID in slash-separated form", () => {
       const result = parsePositionalArgs([`sentry/cli/${VALID_UUID}`]);
       expect(result.traceId).toBe(VALID_UUID_STRIPPED);
       expect(result.targetArg).toBe("sentry/cli");
-      expect(result.warning).toContain("Auto-corrected");
     });
 
     test("handles real user input from CLI-7Z", () => {

@@ -14,6 +14,7 @@ import {
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
+  type FoundSpan,
   findSpanById,
   formatSimpleSpanTree,
   formatSpanDetails,
@@ -187,12 +188,7 @@ async function resolveTarget(
 }
 
 /** Resolved span result from tree search. */
-type SpanResult = {
-  spanId: string;
-  span: NonNullable<ReturnType<typeof findSpanById>>["span"];
-  ancestors: NonNullable<ReturnType<typeof findSpanById>>["ancestors"];
-  depth: number;
-};
+type SpanResult = FoundSpan & { spanId: string };
 
 /**
  * Serialize span results for JSON output.

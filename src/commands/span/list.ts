@@ -60,22 +60,6 @@ const DEFAULT_LIMIT = 25;
 const USAGE_HINT = "sentry span list [<org>/<project>] <trace-id>";
 
 /**
- * Validate a trace ID and detect UUID auto-correction.
- */
-function validateAndWarn(raw: string): {
-  traceId: string;
-  uuidWarning?: string;
-} {
-  const traceId = validateTraceId(raw);
-  const trimmedRaw = raw.trim().toLowerCase();
-  const uuidWarning =
-    trimmedRaw.includes("-") && trimmedRaw !== traceId
-      ? `Auto-corrected trace ID: stripped dashes → ${traceId}`
-      : undefined;
-  return { traceId, uuidWarning };
-}
-
-/**
  * Parse positional arguments for span list.
  * Handles: `<trace-id>` or `<target> <trace-id>`
  *
@@ -87,7 +71,6 @@ function validateAndWarn(raw: string): {
 export function parsePositionalArgs(args: string[]): {
   traceId: string;
   targetArg: string | undefined;
-  warning?: string;
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID", USAGE_HINT);
@@ -104,31 +87,16 @@ export function parsePositionalArgs(args: string[]): {
       "Trace ID",
       USAGE_HINT
     );
-    const validated = validateAndWarn(id);
-    return {
-      traceId: validated.traceId,
-      targetArg,
-      warning: validated.uuidWarning,
-    };
+    return { traceId: validateTraceId(id), targetArg };
   }
 
   const second = args[1];
   if (second === undefined) {
-    const validated = validateAndWarn(first);
-    return {
-      traceId: validated.traceId,
-      targetArg: undefined,
-      warning: validated.uuidWarning,
-    };
+    return { traceId: validateTraceId(first), targetArg: undefined };
   }
 
   // Two or more args — first is target, second is trace ID
-  const validated = validateAndWarn(second);
-  return {
-    traceId: validated.traceId,
-    targetArg: first,
-    warning: validated.uuidWarning,
-  };
+  return { traceId: validateTraceId(second), targetArg: first };
 }
 
 /**
@@ -219,10 +187,7 @@ export const listCommand = buildCommand({
     const log = logger.withTag("span.list");
 
     // Parse positional args
-    const { traceId, targetArg, warning } = parsePositionalArgs(args);
-    if (warning) {
-      log.warn(warning);
-    }
+    const { traceId, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
     if (parsed.type !== "auto-detect" && parsed.normalized) {
       log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
