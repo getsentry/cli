@@ -145,8 +145,7 @@ export const deleteCommand = buildCommand({
         throw new CliError(
           `Permission denied: You don't have permission to delete '${orgSlug}/${project.slug}'.\n\n` +
             "Project deletion requires the 'project:admin' scope.\n" +
-            `  - Check your role:  sentry org view ${orgSlug}\n` +
-            "  - Re-authenticate:  sentry auth login"
+            "  Re-authenticate:  sentry auth login"
         );
       }
       throw error;
