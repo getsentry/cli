@@ -393,6 +393,34 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
 /** Minimum terminal width to show the TREND sparkline column. */
 const TREND_MIN_TERM_WIDTH = 100;
 
+/** Lines per issue row in non-compact mode (2-line content + separator). */
+const LINES_PER_DEFAULT_ROW = 3;
+
+/** Fixed line overhead: top border, header, header separator, bottom border. */
+const TABLE_LINE_OVERHEAD = 4;
+
+/**
+ * Determine whether auto-compact should activate based on terminal height.
+ *
+ * Returns `true` when the estimated non-compact table height exceeds the
+ * terminal's row count, meaning compact mode would keep output on-screen.
+ *
+ * Returns `false` when terminal height is unknown (non-TTY/piped output)
+ * to prefer full output for downstream parsing.
+ *
+ * @param rowCount - Number of issue rows to render
+ * @returns Whether compact mode should be used
+ */
+export function shouldAutoCompact(rowCount: number): boolean {
+  const termHeight = process.stdout.rows;
+  if (!termHeight) {
+    return false;
+  }
+  const estimatedHeight =
+    rowCount * LINES_PER_DEFAULT_ROW + TABLE_LINE_OVERHEAD;
+  return estimatedHeight > termHeight;
+}
+
 /**
  * Substatus label for the TREND column's second line.
  * Matches Sentry web UI visual indicators.
@@ -574,6 +602,9 @@ function formatTrendCell(issue: SentryIssue, compact = false): string {
  *
  * Compact mode (`--compact`): single-line rows for quick scanning. All cells
  * collapsed to one line, long titles truncated with "…".
+ *
+ * Callers should resolve auto-compact (via {@link shouldAutoCompact}) before
+ * passing `compact` — this function treats `undefined` as `false`.
  *
  * @param stdout - Output writer
  * @param rows - Issues with formatting options
