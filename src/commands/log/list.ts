@@ -15,15 +15,15 @@ import { AuthError, ContextError, stringifyUnknown } from "../../lib/errors.js";
 import {
   buildLogRowCells,
   createLogStreamingTable,
-  displayTraceLogs,
   formatLogRow,
   formatLogsHeader,
   formatLogTable,
   isPlainOutput,
-  writeFooter,
   writeJson,
 } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
+import type { CommandOutput } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   applyFreshFlag,
@@ -47,6 +47,15 @@ type ListFlags = {
   readonly trace?: string;
   readonly fresh: boolean;
   readonly fields?: string[];
+};
+
+/** Result for non-follow log list operations. */
+type LogListResult = {
+  logs: LogLike[];
+  /** Human-readable hint (e.g., "Showing 100 logs. Use --limit to show more.") */
+  hint?: string;
+  /** Trace ID, present for trace-filtered queries */
+  traceId?: string;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -142,43 +151,38 @@ function writeLogs(options: WriteLogsOptions): void {
 
 /**
  * Execute a single fetch of logs (non-streaming mode).
+ *
+ * Returns the fetched logs and a human-readable hint. The caller
+ * (via the output config) handles rendering to stdout.
  */
 type SingleFetchOptions = {
-  stdout: Writer;
   org: string;
   project: string;
   flags: ListFlags;
 };
 
-async function executeSingleFetch(options: SingleFetchOptions): Promise<void> {
-  const { stdout, org, project, flags } = options;
+async function executeSingleFetch(
+  options: SingleFetchOptions
+): Promise<LogListResult> {
+  const { org, project, flags } = options;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
     statsPeriod: "90d",
   });
 
-  if (flags.json) {
-    // Reverse for chronological order (API returns newest first)
-    writeJson(stdout, [...logs].reverse(), flags.fields);
-    return;
-  }
-
   if (logs.length === 0) {
-    stdout.write("No logs found.\n");
-    return;
+    return { logs: [], hint: "No logs found." };
   }
 
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
   const chronological = [...logs].reverse();
 
-  stdout.write(formatLogTable(chronological));
-
-  // Show footer with tip if we hit the limit
   const hasMore = logs.length >= flags.limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
-  writeFooter(stdout, `${countText}${tip}`);
+
+  return { logs: chronological, hint: `${countText}${tip}` };
 }
 
 /**
@@ -360,9 +364,11 @@ const DEFAULT_TRACE_PERIOD = "14d";
 /**
  * Execute a single fetch of trace-filtered logs (non-streaming, --trace mode).
  * Uses the dedicated trace-logs endpoint which is org-scoped.
+ *
+ * Returns the fetched logs, trace ID, and a human-readable hint.
+ * The caller (via the output config) handles rendering to stdout.
  */
 type TraceSingleFetchOptions = {
-  stdout: Writer;
   org: string;
   traceId: string;
   flags: ListFlags;
@@ -370,25 +376,71 @@ type TraceSingleFetchOptions = {
 
 async function executeTraceSingleFetch(
   options: TraceSingleFetchOptions
-): Promise<void> {
-  const { stdout, org, traceId, flags } = options;
+): Promise<LogListResult> {
+  const { org, traceId, flags } = options;
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
     statsPeriod: DEFAULT_TRACE_PERIOD,
   });
 
-  displayTraceLogs({
-    stdout,
-    logs,
-    traceId,
-    limit: flags.limit,
-    asJson: flags.json,
-    fields: flags.fields,
-    emptyMessage:
-      `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
-      "Try 'sentry trace logs' for more options (e.g., --period 30d).\n",
-  });
+  if (logs.length === 0) {
+    return {
+      logs: [],
+      traceId,
+      hint:
+        `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
+        "Try 'sentry trace logs' for more options (e.g., --period 30d).",
+    };
+  }
+
+  const chronological = [...logs].reverse();
+
+  const hasMore = logs.length >= flags.limit;
+  const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
+  const tip = hasMore ? " Use --limit to show more." : "";
+
+  return { logs: chronological, traceId, hint: `${countText}${tip}` };
+}
+
+// ---------------------------------------------------------------------------
+// Output formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a {@link LogListResult} as human-readable terminal output.
+ *
+ * Handles three cases:
+ * - Empty logs → return the hint text (e.g., "No logs found.")
+ * - Trace-filtered logs → table without trace-ID column
+ * - Standard logs → table with trace-ID column
+ *
+ * The returned string omits a trailing newline — the output framework
+ * appends one automatically.
+ */
+function formatLogListHuman(result: LogListResult): string {
+  if (result.logs.length === 0) {
+    return result.hint ?? "No logs found.";
+  }
+
+  const includeTrace = !result.traceId;
+  return formatLogTable(result.logs, includeTrace).trimEnd();
+}
+
+/**
+ * Transform a {@link LogListResult} into the JSON output shape.
+ *
+ * Returns the logs array directly (no wrapper envelope).
+ * Applies per-element field filtering when `--fields` is provided.
+ */
+function jsonTransformLogList(
+  result: LogListResult,
+  fields?: string[]
+): unknown {
+  if (fields && fields.length > 0) {
+    return result.logs.map((log) => filterFields(log, fields));
+  }
+  return result.logs;
 }
 
 export const listCommand = buildListCommand("log", {
@@ -413,7 +465,11 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list -q 'level:error'   # Filter to errors only\n" +
       "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatLogListHuman,
+    jsonTransform: jsonTransformLogList,
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -464,9 +520,10 @@ export const listCommand = buildListCommand("log", {
     this: SentryContext,
     flags: ListFlags,
     target?: string
-  ): Promise<void> {
+    // biome-ignore lint/suspicious/noConfusingVoidType: void for follow-mode paths that write directly to stdout
+  ): Promise<CommandOutput<LogListResult> | void> {
     applyFreshFlag(flags);
-    const { stdout, stderr, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     if (flags.trace) {
       // Trace mode: use the org-scoped trace-logs endpoint.
@@ -485,6 +542,7 @@ export const listCommand = buildListCommand("log", {
       setContext([org], []);
 
       if (flags.follow) {
+        const { stdout, stderr } = this;
         const traceId = flags.trace;
         // Track IDs of logs seen without timestamp_precise so they are
         // shown once but not duplicated on subsequent polls.
@@ -521,16 +579,23 @@ export const listCommand = buildListCommand("log", {
             }
           },
         });
-      } else {
-        await executeTraceSingleFetch({
-          stdout,
-          org,
-          traceId: flags.trace,
-          flags,
-        });
+        return; // void — follow mode writes directly
       }
-    } else {
-      // Standard project-scoped mode
+
+      const result = await executeTraceSingleFetch({
+        org,
+        traceId: flags.trace,
+        flags,
+      });
+      // Only forward hint to the footer when items exist — empty results
+      // already render hint text inside the human formatter.
+      const hint = result.logs.length > 0 ? result.hint : undefined;
+      return { data: result, hint };
+    }
+
+    // Standard project-scoped mode — kept in else-like block to avoid
+    // `org` shadowing the trace-mode `org` declaration above.
+    {
       const { org, project } = await resolveOrgProjectFromArg(
         target,
         cwd,
@@ -539,6 +604,7 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
+        const { stdout, stderr } = this;
         await executeFollowMode({
           stdout,
           stderr,
@@ -554,14 +620,18 @@ export const listCommand = buildListCommand("log", {
             }),
           extractNew: (logs) => logs,
         });
-      } else {
-        await executeSingleFetch({
-          stdout,
-          org,
-          project,
-          flags,
-        });
+        return; // void — follow mode writes directly
       }
+
+      const result = await executeSingleFetch({
+        org,
+        project,
+        flags,
+      });
+      // Only forward hint to the footer when items exist — empty results
+      // already render hint text inside the human formatter.
+      const hint = result.logs.length > 0 ? result.hint : undefined;
+      return { data: result, hint };
     }
   },
 });
