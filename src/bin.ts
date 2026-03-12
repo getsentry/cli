@@ -2,12 +2,7 @@ import { isatty } from "node:tty";
 import { run } from "@stricli/core";
 import { app } from "./app.js";
 import { buildContext } from "./context.js";
-import {
-  AuthError,
-  formatError,
-  getExitCode,
-  SeerError,
-} from "./lib/errors.js";
+import { AuthError, formatError, getExitCode } from "./lib/errors.js";
 import { error } from "./lib/formatters/colors.js";
 import { runInteractiveLogin } from "./lib/interactive-login.js";
 import { getEnvLogLevel, setLogLevel } from "./lib/logger.js";
@@ -58,13 +53,13 @@ async function executeWithSeerTrialPrompt(args: string[]): Promise<void> {
   try {
     await runCommand(args);
   } catch (err) {
-    if (err instanceof SeerError && isTrialEligible(err)) {
-      // isTrialEligible ensures orgSlug is defined
+    // isTrialEligible handles instanceof SeerError check + reason + orgSlug + TTY
+    if (isTrialEligible(err)) {
+      // isTrialEligible narrows err to SeerError with defined orgSlug
       const started = await promptAndStartTrial(
         // biome-ignore lint/style/noNonNullAssertion: isTrialEligible guarantees orgSlug is defined
         err.orgSlug!,
-        err.reason,
-        process.stderr
+        err.reason
       );
 
       if (started) {

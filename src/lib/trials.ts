@@ -143,8 +143,8 @@ export function getTrialStatus(trial: ProductTrial): TrialStatus {
   if (trial.endDate) {
     const end = new Date(trial.endDate);
     const now = new Date();
-    // Compare date-only (ignore time) — trial ends at end of endDate
-    end.setHours(23, 59, 59, 999);
+    // Compare date-only (ignore time) — trial ends at end of endDate UTC
+    end.setUTCHours(23, 59, 59, 999);
     if (now > end) {
       return "expired";
     }

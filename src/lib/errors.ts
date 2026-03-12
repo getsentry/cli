@@ -371,7 +371,11 @@ export class SeerError extends CliError {
   }
 
   override format(): string {
-    const trialHint = "\n\nOr start a free trial:\n  sentry trial start seer";
+    // Soften trial hint — we can't check availability synchronously,
+    // so use "check" language rather than "start" to avoid misleading
+    // users whose trial is already expired
+    const trialHint =
+      "\n\nYou may be eligible for a free trial:\n  sentry trial list";
 
     // When org slug is known, provide direct URLs to settings
     if (this.orgSlug) {

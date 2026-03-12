@@ -1707,9 +1707,9 @@ export async function triggerSolutionPlanning(
 export async function getProductTrials(
   orgSlug: string
 ): Promise<ProductTrial[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
+  // /customers/ is a control silo endpoint (billing), not region-scoped
   const { data } = await apiRequestToRegion<CustomerTrialInfo>(
-    regionUrl,
+    getControlSiloUrl(),
     `/customers/${orgSlug}/`,
     { schema: CustomerTrialInfoSchema }
   );
@@ -1730,14 +1730,18 @@ export async function startProductTrial(
   orgSlug: string,
   category: string
 ): Promise<void> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  await apiRequestToRegion(regionUrl, `/customers/${orgSlug}/product-trial/`, {
-    method: "PUT",
-    body: {
-      referrer: "sentry-cli",
-      productTrial: { category, reasonCode: 0 },
-    },
-  });
+  // /customers/ is a control silo endpoint (billing), not region-scoped
+  await apiRequestToRegion(
+    getControlSiloUrl(),
+    `/customers/${orgSlug}/product-trial/`,
+    {
+      method: "PUT",
+      body: {
+        referrer: "sentry-cli",
+        productTrial: { category, reasonCode: 0 },
+      },
+    }
+  );
 }
 
 // User functions
