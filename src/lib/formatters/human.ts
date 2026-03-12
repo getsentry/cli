@@ -1122,7 +1122,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
     line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
   }
 
-  line += `  ${muted(span.span_id)}`;
+  line += `  ${muted(span.span_id ?? "")}`;
 
   lines.push(line);
 
