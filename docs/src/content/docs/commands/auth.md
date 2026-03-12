@@ -106,16 +106,20 @@ The CLI checks for auth tokens in the following order, using the first one found
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
 
-### Reading the Token Externally
+### Direct Database Access
 
-Other tools can read the stored token directly from the database. The config directory defaults to `~/.sentry/` but can be overridden with the `SENTRY_CONFIG_DIR` environment variable.
+If you need to inspect your stored credentials or integrate the CLI's auth with other tools, you can query the database directly. The config directory defaults to `~/.sentry/` but can be overridden with the `SENTRY_CONFIG_DIR` environment variable.
 
 ```bash
+# Read the current access token
 sqlite3 ~/.sentry/cli.db "SELECT token FROM auth WHERE id = 1;"
+
+# Check token expiry
+sqlite3 ~/.sentry/cli.db "SELECT datetime(expires_at / 1000, 'unixepoch') FROM auth WHERE id = 1;"
 ```
 
 Keep in mind a few caveats when accessing the database from outside the CLI:
 
-- **Token expiry** — Check `expires_at` before using the token. The CLI automatically refreshes tokens when they are close to expiring, but an external reader will not trigger a refresh.
+- **Token expiry** — Check `expires_at` before using the token. The CLI automatically refreshes expired tokens, but reading the database directly will not trigger a refresh.
 - **WAL mode** — The database uses SQLite WAL (Write-Ahead Logging). Open it in read-only mode to avoid lock contention with a running CLI process.
-- **Env var precedence** — If `SENTRY_AUTH_TOKEN` or `SENTRY_TOKEN` is set, the CLI uses that instead of the database value. We recommend following the same precedence in external tools.
+- **Env var precedence** — If `SENTRY_AUTH_TOKEN` or `SENTRY_TOKEN` is set, the CLI ignores the database value. Follow the same precedence in external tools.

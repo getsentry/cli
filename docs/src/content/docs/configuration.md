@@ -145,4 +145,4 @@ We store credentials and caches in a SQLite database (`cli.db`) inside the confi
 - Region URL mappings
 - Project aliases (for monorepo support)
 
-Other tools can query the database directly to read the stored auth token. See [Credential Storage](./commands/auth/#credential-storage) in the auth command docs for the schema and usage details.
+Other tools can query the database directly to inspect stored credentials and cached data. See [Credential Storage](./commands/auth/#credential-storage) in the auth command docs for the full schema and access details.
