@@ -301,7 +301,7 @@ export async function performDeviceFlow(
 }
 
 /**
- * Complete the OAuth flow by storing the token in the config file.
+ * Complete the OAuth flow by storing the token in the database.
  *
  * @param tokenResponse - The token response from performDeviceFlow
  */

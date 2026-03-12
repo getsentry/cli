@@ -84,18 +84,38 @@ sentry auth refresh
 
 This is typically handled automatically when tokens expire.
 
-## Configuration
+## Credential Storage
 
-Credentials are stored in `~/.sentry/config.json` with restricted file permissions (mode 600).
+We store credentials in a SQLite database at `~/.sentry/cli.db` with restricted file permissions (mode 600). The database uses a single-row `auth` table with the following columns:
 
-**Config structure:**
+| Column | Type | Description |
+|--------|------|-------------|
+| `token` | TEXT | OAuth access token |
+| `refresh_token` | TEXT | OAuth refresh token |
+| `expires_at` | INTEGER | Token expiry (ms since epoch) |
+| `issued_at` | INTEGER | Token issue time (ms since epoch) |
+| `updated_at` | INTEGER | Last modification time (ms since epoch) |
 
-```json
-{
-  "auth": {
-    "token": "...",
-    "refreshToken": "...",
-    "expiresAt": "2024-12-31T00:00:00Z"
-  }
-}
+### Environment Variable Precedence
+
+The CLI checks for auth tokens in the following order, using the first one found:
+
+1. `SENTRY_AUTH_TOKEN` environment variable
+2. `SENTRY_TOKEN` environment variable (legacy)
+3. The `auth` table in the SQLite database
+
+When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
+
+### Reading the Token Externally
+
+Other tools can read the stored token directly from the database. The config directory defaults to `~/.sentry/` but can be overridden with the `SENTRY_CONFIG_DIR` environment variable.
+
+```bash
+sqlite3 ~/.sentry/cli.db "SELECT token FROM auth WHERE id = 1;"
 ```
+
+Keep in mind a few caveats when accessing the database from outside the CLI:
+
+- **Token expiry** — Check `expires_at` before using the token. The CLI automatically refreshes tokens when they are close to expiring, but an external reader will not trigger a refresh.
+- **WAL mode** — The database uses SQLite WAL (Write-Ahead Logging). Open it in read-only mode to avoid lock contention with a running CLI process.
+- **Env var precedence** — If `SENTRY_AUTH_TOKEN` or `SENTRY_TOKEN` is set, the CLI uses that instead of the database value. We recommend following the same precedence in external tools.

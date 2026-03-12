@@ -138,9 +138,11 @@ The `sentry api` command also uses `--verbose` to show full HTTP request/respons
 
 ## Credential Storage
 
-Credentials are stored in a SQLite database at `~/.sentry/` (or the path set by `SENTRY_CONFIG_DIR`) with restricted file permissions (mode 600) for security. The database also caches:
+We store credentials and caches in a SQLite database (`cli.db`) inside the config directory (`~/.sentry/` by default, overridable via `SENTRY_CONFIG_DIR`). The database file and its WAL side-files are created with restricted permissions (mode 600) so that only the current user can read them. The database also caches:
 
 - Organization and project defaults
 - DSN resolution results
 - Region URL mappings
 - Project aliases (for monorepo support)
+
+Other tools can query the database directly to read the stored auth token. See [Credential Storage](./commands/auth/#credential-storage) in the auth command docs for the schema and usage details.
