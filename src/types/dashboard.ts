@@ -103,6 +103,101 @@ export type DashboardListItem = z.infer<typeof DashboardListItemSchema>;
 export type DashboardDetail = z.infer<typeof DashboardDetailSchema>;
 
 // ---------------------------------------------------------------------------
+// Auto-layout utilities
+// ---------------------------------------------------------------------------
+
+/** Sentry dashboard grid column count */
+const GRID_COLUMNS = 6;
+
+/** Default widget dimensions by displayType */
+const DEFAULT_WIDGET_SIZE: Record<
+  string,
+  { w: number; h: number; minH: number }
+> = {
+  big_number: { w: 2, h: 1, minH: 1 },
+  line: { w: 4, h: 2, minH: 2 },
+  area: { w: 4, h: 2, minH: 2 },
+  bar: { w: 4, h: 2, minH: 2 },
+  table: { w: 6, h: 2, minH: 2 },
+  world_map: { w: 4, h: 2, minH: 2 },
+};
+const FALLBACK_SIZE = { w: 4, h: 2, minH: 2 };
+
+/** Build a set of occupied grid cells and the max bottom edge from existing layouts. */
+function buildOccupiedGrid(widgets: DashboardWidget[]): {
+  occupied: Set<string>;
+  maxY: number;
+} {
+  const occupied = new Set<string>();
+  let maxY = 0;
+  for (const w of widgets) {
+    if (!w.layout) {
+      continue;
+    }
+    const bottom = w.layout.y + w.layout.h;
+    if (bottom > maxY) {
+      maxY = bottom;
+    }
+    for (let y = w.layout.y; y < bottom; y++) {
+      for (let x = w.layout.x; x < w.layout.x + w.layout.w; x++) {
+        occupied.add(`${x},${y}`);
+      }
+    }
+  }
+  return { occupied, maxY };
+}
+
+/** Check whether a rectangle fits at a position without overlapping occupied cells. */
+function regionFits(
+  occupied: Set<string>,
+  rect: { px: number; py: number; w: number; h: number }
+): boolean {
+  for (let dy = 0; dy < rect.h; dy++) {
+    for (let dx = 0; dx < rect.w; dx++) {
+      if (occupied.has(`${rect.px + dx},${rect.py + dy}`)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Assign a default layout to a widget if it doesn't already have one.
+ * Packs the widget into the first available space in a 6-column grid,
+ * scanning rows top-to-bottom and left-to-right.
+ *
+ * @param widget - Widget that may be missing a layout
+ * @param existingWidgets - Widgets already in the dashboard (used to compute placement)
+ * @returns Widget with layout guaranteed
+ */
+export function assignDefaultLayout(
+  widget: DashboardWidget,
+  existingWidgets: DashboardWidget[]
+): DashboardWidget {
+  if (widget.layout) {
+    return widget;
+  }
+
+  const { w, h, minH } =
+    DEFAULT_WIDGET_SIZE[widget.displayType] ?? FALLBACK_SIZE;
+
+  const { occupied, maxY } = buildOccupiedGrid(existingWidgets);
+
+  // Scan rows to find the first position where the widget fits
+  for (let y = 0; y <= maxY; y++) {
+    for (let x = 0; x <= GRID_COLUMNS - w; x++) {
+      if (regionFits(occupied, { px: x, py: y, w, h })) {
+        return { ...widget, layout: { x, y, w, h, minH } };
+      }
+    }
+  }
+
+  // No gap found — place below everything
+  return { ...widget, layout: { x: 0, y: maxY, w, h, minH } };
+}
+
+// ---------------------------------------------------------------------------
 // Server field stripping utilities
 // ---------------------------------------------------------------------------
 
@@ -174,9 +269,11 @@ export function stripWidgetServerFields(
 export function prepareDashboardForUpdate(dashboard: DashboardDetail): {
   title: string;
   widgets: DashboardWidget[];
+  projects?: number[];
 } {
   return {
     title: dashboard.title,
     widgets: (dashboard.widgets ?? []).map(stripWidgetServerFields),
+    projects: dashboard.projects,
   };
 }

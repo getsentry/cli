@@ -5,26 +5,135 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { createDashboard } from "../../lib/api-client.js";
+import { createDashboard, getProject } from "../../lib/api-client.js";
+import {
+  type ParsedOrgProject,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatDashboardCreated } from "../../lib/formatters/human.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  fetchProjectId,
+  resolveAllTargets,
+  resolveOrg,
+  resolveProjectBySlug,
+  toNumericId,
+} from "../../lib/resolve-target.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import {
+  assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
   DashboardWidgetSchema,
 } from "../../types/dashboard.js";
 
 type CreateFlags = {
-  readonly org?: string;
   readonly "widget-json"?: string;
   readonly json: boolean;
   readonly fields?: string[];
 };
 
 type CreateResult = DashboardDetail & { url: string };
+
+/**
+ * Parse array positional args for `dashboard create`.
+ *
+ * Handles:
+ * - `<title>` — title only (auto-detect org/project)
+ * - `<target> <title>` — explicit target + title
+ */
+function parsePositionalArgs(args: string[]): {
+  title: string;
+  targetArg: string | undefined;
+} {
+  if (args.length === 0) {
+    throw new ValidationError("Dashboard title is required.", "title");
+  }
+  if (args.length === 1) {
+    return { title: args[0] as string, targetArg: undefined };
+  }
+  // Two args: first is target, second is title
+  return { title: args[1] as string, targetArg: args[0] as string };
+}
+
+/** Result of resolving org + project IDs from the parsed target */
+type ResolvedDashboardTarget = {
+  orgSlug: string;
+  projectIds: number[];
+};
+
+/** Enrich targets that lack a projectId by calling the project API */
+async function enrichTargetProjectIds(
+  targets: { org: string; project: string; projectId?: number }[]
+): Promise<number[]> {
+  const enriched = await Promise.all(
+    targets.map(async (t) => {
+      if (t.projectId !== undefined) {
+        return t.projectId;
+      }
+      try {
+        const info = await getProject(t.org, t.project);
+        return toNumericId(info.id);
+      } catch {
+        return;
+      }
+    })
+  );
+  return enriched.filter((id): id is number => id !== undefined);
+}
+
+/** Resolve org and project IDs from the parsed target argument */
+async function resolveDashboardTarget(
+  parsed: ParsedOrgProject,
+  cwd: string
+): Promise<ResolvedDashboardTarget> {
+  switch (parsed.type) {
+    case "explicit": {
+      const pid = await fetchProjectId(parsed.org, parsed.project);
+      return {
+        orgSlug: parsed.org,
+        projectIds: pid !== undefined ? [pid] : [],
+      };
+    }
+    case "org-all":
+      return { orgSlug: parsed.org, projectIds: [] };
+
+    case "project-search": {
+      const found = await resolveProjectBySlug(
+        parsed.projectSlug,
+        "sentry dashboard create <org>/<project> <title>"
+      );
+      const pid = await fetchProjectId(found.org, found.project);
+      return {
+        orgSlug: found.org,
+        projectIds: pid !== undefined ? [pid] : [],
+      };
+    }
+    case "auto-detect": {
+      const result = await resolveAllTargets({ cwd });
+      if (result.targets.length === 0) {
+        const resolved = await resolveOrg({ cwd });
+        if (!resolved) {
+          throw new ContextError(
+            "Organization",
+            "sentry dashboard create <org>/ <title>"
+          );
+        }
+        return { orgSlug: resolved.org, projectIds: [] };
+      }
+      const orgSlug = (result.targets[0] as (typeof result.targets)[0]).org;
+      const projectIds = await enrichTargetProjectIds(result.targets);
+      return { orgSlug, projectIds };
+    }
+    default: {
+      const _exhaustive: never = parsed;
+      throw new Error(
+        `Unexpected parsed type: ${(_exhaustive as { type: string }).type}`
+      );
+    }
+  }
+}
 
 export const createCommand = buildCommand({
   docs: {
@@ -33,7 +142,8 @@ export const createCommand = buildCommand({
       "Create a new Sentry dashboard.\n\n" +
       "Examples:\n" +
       "  sentry dashboard create 'My Dashboard'\n" +
-      "  sentry dashboard create 'My Dashboard' --org my-org\n" +
+      "  sentry dashboard create my-org/ 'My Dashboard'\n" +
+      "  sentry dashboard create my-org/my-project 'My Dashboard'\n" +
       "  sentry dashboard create 'My Dashboard' --widget-json widgets.json",
   },
   output: {
@@ -42,21 +152,13 @@ export const createCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Dashboard title",
-          parse: String,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        brief: "[<org/project>] <title>",
+        parse: String,
+      },
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       "widget-json": {
         kind: "parsed",
         parse: String,
@@ -64,19 +166,13 @@ export const createCommand = buildCommand({
         optional: true,
       },
     },
-    aliases: { o: "org" },
   },
-  async func(this: SentryContext, flags: CreateFlags, title: string) {
+  async func(this: SentryContext, flags: CreateFlags, ...args: string[]) {
     const { cwd } = this;
 
-    const resolved = await resolveOrg({ org: flags.org, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry dashboard create <title> --org <org>"
-      );
-    }
-    const { org: orgSlug } = resolved;
+    const { title, targetArg } = parsePositionalArgs(args);
+    const parsed = parseOrgProjectArg(targetArg);
+    const { orgSlug, projectIds } = await resolveDashboardTarget(parsed, cwd);
 
     const widgets: DashboardWidget[] = [];
     const widgetJsonPath = flags["widget-json"];
@@ -89,9 +185,9 @@ export const createCommand = buildCommand({
         );
       }
       const raw = await file.text();
-      let parsed: unknown;
+      let widgetParsed: unknown;
       try {
-        parsed = JSON.parse(raw);
+        widgetParsed = JSON.parse(raw);
       } catch {
         throw new ValidationError(
           `Invalid JSON in widget file: ${widgetJsonPath}`,
@@ -99,7 +195,7 @@ export const createCommand = buildCommand({
         );
       }
 
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      const arr = Array.isArray(widgetParsed) ? widgetParsed : [widgetParsed];
       for (const item of arr) {
         const result = DashboardWidgetSchema.safeParse(item);
         if (!result.success) {
@@ -108,11 +204,16 @@ export const createCommand = buildCommand({
             "widget-json"
           );
         }
-        widgets.push(result.data);
+        // Assign layout sequentially so each widget stacks below the previous
+        widgets.push(assignDefaultLayout(result.data, widgets));
       }
     }
 
-    const dashboard = await createDashboard(orgSlug, { title, widgets });
+    const dashboard = await createDashboard(orgSlug, {
+      title,
+      widgets,
+      projects: projectIds.length > 0 ? projectIds : undefined,
+    });
     const url = buildDashboardUrl(orgSlug, dashboard.id);
 
     return {

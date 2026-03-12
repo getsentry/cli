@@ -6,10 +6,10 @@
 
 import type { SentryContext } from "../../../context.js";
 import { getDashboard, updateDashboard } from "../../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
-import { ContextError, ValidationError } from "../../../lib/errors.js";
+import { ValidationError } from "../../../lib/errors.js";
 import { formatWidgetEdited } from "../../../lib/formatters/human.js";
-import { resolveOrg } from "../../../lib/resolve-target.js";
 import { buildDashboardUrl } from "../../../lib/sentry-urls.js";
 import {
   type DashboardDetail,
@@ -17,9 +17,13 @@ import {
   DashboardWidgetSchema,
   prepareDashboardForUpdate,
 } from "../../../types/dashboard.js";
+import {
+  parseDashboardPositionalArgs,
+  resolveDashboardId,
+  resolveOrgFromTarget,
+} from "../resolve.js";
 
 type EditFlags = {
-  readonly org?: string;
   readonly "from-json": string;
   readonly index?: number;
   readonly title?: string;
@@ -33,15 +37,41 @@ type EditResult = {
   url: string;
 };
 
+/** Resolve widget index from --index or --title flags */
+function resolveWidgetIndex(
+  widgets: DashboardWidget[],
+  index: number | undefined,
+  title: string | undefined
+): number {
+  if (index !== undefined) {
+    if (index < 0 || index >= widgets.length) {
+      throw new ValidationError(
+        `Widget index ${index} out of range (dashboard has ${widgets.length} widgets).`,
+        "index"
+      );
+    }
+    return index;
+  }
+  const matchIndex = widgets.findIndex((w) => w.title === title);
+  if (matchIndex === -1) {
+    throw new ValidationError(
+      `No widget with title '${title}' found in dashboard.`,
+      "title"
+    );
+  }
+  return matchIndex;
+}
+
 export const editCommand = buildCommand({
   docs: {
     brief: "Edit a widget in a dashboard",
     fullDescription:
       "Edit a widget in an existing Sentry dashboard.\n\n" +
+      "The dashboard can be specified by numeric ID or title.\n" +
       "Identify the widget by --index (0-based) or --title.\n\n" +
       "Examples:\n" +
       "  sentry dashboard widget edit 12345 --index 0 --from-json widget.json\n" +
-      "  sentry dashboard widget edit 12345 --title 'Error Rate' --from-json widget.json",
+      "  sentry dashboard widget edit 'My Dashboard' --title 'Error Rate' --from-json widget.json",
   },
   output: {
     json: true,
@@ -49,21 +79,13 @@ export const editCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Dashboard ID",
-          parse: numberParser,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        brief: "[<org/project>] <dashboard-id-or-title>",
+        parse: String,
+      },
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       "from-json": {
         kind: "parsed",
         parse: String,
@@ -82,9 +104,9 @@ export const editCommand = buildCommand({
         optional: true,
       },
     },
-    aliases: { o: "org", i: "index", t: "title" },
+    aliases: { i: "index", t: "title" },
   },
-  async func(this: SentryContext, flags: EditFlags, dashboardId: number) {
+  async func(this: SentryContext, flags: EditFlags, ...args: string[]) {
     const { cwd } = this;
 
     if (flags.index === undefined && !flags.title) {
@@ -94,14 +116,14 @@ export const editCommand = buildCommand({
       );
     }
 
-    const resolved = await resolveOrg({ org: flags.org, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry dashboard widget edit <id> --from-json <path> --org <org>"
-      );
-    }
-    const { org: orgSlug } = resolved;
+    const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
+    const parsed = parseOrgProjectArg(targetArg);
+    const orgSlug = await resolveOrgFromTarget(
+      parsed,
+      cwd,
+      "sentry dashboard widget edit <org>/ <id> --from-json <path>"
+    );
+    const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
     // Read and validate widget JSON
     const jsonPath = flags["from-json"];
@@ -113,9 +135,9 @@ export const editCommand = buildCommand({
       );
     }
     const raw = await file.text();
-    let parsed: unknown;
+    let widgetParsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      widgetParsed = JSON.parse(raw);
     } catch {
       throw new ValidationError(
         `Invalid JSON in widget file: ${jsonPath}`,
@@ -123,49 +145,31 @@ export const editCommand = buildCommand({
       );
     }
 
-    const widgetResult = DashboardWidgetSchema.safeParse(parsed);
+    const widgetResult = DashboardWidgetSchema.safeParse(widgetParsed);
     if (!widgetResult.success) {
       throw new ValidationError(
         `Invalid widget definition: ${widgetResult.error.message}`,
         "from-json"
       );
     }
-    const replacement = widgetResult.data;
+    let replacement = widgetResult.data;
 
     // GET current dashboard → find widget → replace → PUT
-    const current = await getDashboard(orgSlug, String(dashboardId));
+    const current = await getDashboard(orgSlug, dashboardId);
     const widgets = current.widgets ?? [];
 
-    let widgetIndex: number;
-    if (flags.index !== undefined) {
-      if (flags.index < 0 || flags.index >= widgets.length) {
-        throw new ValidationError(
-          `Widget index ${flags.index} out of range (dashboard has ${widgets.length} widgets).`,
-          "index"
-        );
-      }
-      widgetIndex = flags.index;
-    } else {
-      // Find by title
-      const matchIndex = widgets.findIndex((w) => w.title === flags.title);
-      if (matchIndex === -1) {
-        throw new ValidationError(
-          `No widget with title '${flags.title}' found in dashboard.`,
-          "title"
-        );
-      }
-      widgetIndex = matchIndex;
-    }
+    const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
 
     const updateBody = prepareDashboardForUpdate(current);
+    // Preserve existing layout when replacement doesn't specify one
+    const existingWidget = updateBody.widgets[widgetIndex];
+    if (!replacement.layout && existingWidget?.layout) {
+      replacement = { ...replacement, layout: existingWidget.layout };
+    }
     updateBody.widgets[widgetIndex] = replacement;
 
-    const updated = await updateDashboard(
-      orgSlug,
-      String(dashboardId),
-      updateBody
-    );
-    const url = buildDashboardUrl(orgSlug, String(dashboardId));
+    const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
+    const url = buildDashboardUrl(orgSlug, dashboardId);
 
     return {
       data: { dashboard: updated, widget: replacement, url } as EditResult,

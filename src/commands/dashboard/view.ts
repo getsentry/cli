@@ -6,16 +6,19 @@
 
 import type { SentryContext } from "../../context.js";
 import { getDashboard } from "../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
+import { buildCommand } from "../../lib/command.js";
 import { formatDashboardView } from "../../lib/formatters/human.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import type { DashboardDetail } from "../../types/dashboard.js";
+import {
+  parseDashboardPositionalArgs,
+  resolveDashboardId,
+  resolveOrgFromTarget,
+} from "./resolve.js";
 
 type ViewFlags = {
-  readonly org?: string;
   readonly web: boolean;
   readonly json: boolean;
   readonly fields?: string[];
@@ -28,9 +31,11 @@ export const viewCommand = buildCommand({
     brief: "View a dashboard",
     fullDescription:
       "View details of a specific Sentry dashboard.\n\n" +
+      "The dashboard can be specified by numeric ID or title.\n\n" +
       "Examples:\n" +
       "  sentry dashboard view 12345\n" +
-      "  sentry dashboard view 12345 --org my-org\n" +
+      "  sentry dashboard view 'My Dashboard'\n" +
+      "  sentry dashboard view my-org/ 12345\n" +
       "  sentry dashboard view 12345 --json\n" +
       "  sentry dashboard view 12345 --web",
   },
@@ -40,49 +45,41 @@ export const viewCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "tuple",
-      parameters: [
-        {
-          brief: "Dashboard ID",
-          parse: numberParser,
-        },
-      ],
+      kind: "array",
+      parameter: {
+        brief: "[<org/project>] <dashboard-id-or-title>",
+        parse: String,
+      },
     },
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
         default: false,
       },
     },
-    aliases: { o: "org", w: "web" },
+    aliases: { w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, dashboardId: number) {
+  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     const { cwd } = this;
 
-    const resolved = await resolveOrg({ org: flags.org, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry dashboard view <id> --org <org>"
-      );
-    }
-    const { org: orgSlug } = resolved;
+    const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
+    const parsed = parseOrgProjectArg(targetArg);
+    const orgSlug = await resolveOrgFromTarget(
+      parsed,
+      cwd,
+      "sentry dashboard view <org>/ <id>"
+    );
+    const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
-    const url = buildDashboardUrl(orgSlug, String(dashboardId));
+    const url = buildDashboardUrl(orgSlug, dashboardId);
 
     if (flags.web) {
       await openInBrowser(url, "dashboard");
       return;
     }
 
-    const dashboard = await getDashboard(orgSlug, String(dashboardId));
+    const dashboard = await getDashboard(orgSlug, dashboardId);
 
     return {
       data: { ...dashboard, url } as ViewResult,

@@ -6,62 +6,84 @@
 
 import type { SentryContext } from "../../context.js";
 import { listDashboards } from "../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
-import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { writeFooter, writeJson } from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
+import {
+  buildListCommand,
+  LIST_TARGET_POSITIONAL,
+} from "../../lib/list-command.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildDashboardsListUrl } from "../../lib/sentry-urls.js";
 import type { DashboardListItem } from "../../types/dashboard.js";
 
 type ListFlags = {
-  readonly org?: string;
   readonly web: boolean;
   readonly json: boolean;
   readonly fields?: string[];
 };
 
-export const listCommand = buildCommand({
+/** Resolve org slug from parsed target argument */
+async function resolveOrgFromTarget(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  cwd: string
+): Promise<string> {
+  switch (parsed.type) {
+    case "explicit":
+    case "org-all":
+      return parsed.org;
+    case "project-search":
+    case "auto-detect": {
+      const resolved = await resolveOrg({ cwd });
+      if (!resolved) {
+        throw new ContextError("Organization", "sentry dashboard list <org>/");
+      }
+      return resolved.org;
+    }
+    default: {
+      const _exhaustive: never = parsed;
+      throw new Error(
+        `Unexpected parsed type: ${(_exhaustive as { type: string }).type}`
+      );
+    }
+  }
+}
+
+export const listCommand = buildListCommand("dashboard", {
   docs: {
     brief: "List dashboards",
     fullDescription:
       "List dashboards in a Sentry organization.\n\n" +
       "Examples:\n" +
       "  sentry dashboard list\n" +
-      "  sentry dashboard list --org my-org\n" +
+      "  sentry dashboard list my-org/\n" +
       "  sentry dashboard list --json\n" +
       "  sentry dashboard list --web",
   },
   output: "json",
   parameters: {
+    positional: LIST_TARGET_POSITIONAL,
     flags: {
-      org: {
-        kind: "parsed",
-        parse: String,
-        brief: "Organization slug",
-        optional: true,
-      },
       web: {
         kind: "boolean",
         brief: "Open in browser",
         default: false,
       },
     },
-    aliases: { o: "org", w: "web" },
+    aliases: { w: "web" },
   },
-  async func(this: SentryContext, flags: ListFlags): Promise<void> {
+  async func(
+    this: SentryContext,
+    flags: ListFlags,
+    target?: string
+  ): Promise<void> {
     const { stdout, cwd } = this;
 
-    const resolved = await resolveOrg({ org: flags.org, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry dashboard list --org <org>"
-      );
-    }
-    const { org: orgSlug } = resolved;
+    const parsed = parseOrgProjectArg(target);
+    const orgSlug = await resolveOrgFromTarget(parsed, cwd);
 
     if (flags.web) {
       await openInBrowser(buildDashboardsListUrl(orgSlug), "dashboards");

@@ -1972,7 +1972,7 @@ export async function getDashboard(
  */
 export async function createDashboard(
   orgSlug: string,
-  body: { title: string; widgets?: DashboardWidget[] }
+  body: { title: string; widgets?: DashboardWidget[]; projects?: number[] }
 ): Promise<DashboardDetail> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<DashboardDetail>(
@@ -1995,7 +1995,7 @@ export async function createDashboard(
 export async function updateDashboard(
   orgSlug: string,
   dashboardId: string,
-  body: { title: string; widgets: DashboardWidget[] }
+  body: { title: string; widgets: DashboardWidget[]; projects?: number[] }
 ): Promise<DashboardDetail> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<DashboardDetail>(
