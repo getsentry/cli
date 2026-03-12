@@ -231,9 +231,7 @@ export const listCommand = buildCommand({
     });
 
     if (!resolved) {
-      throw new ContextError("Organization", "sentry trial list", [
-        "sentry trial list <org>",
-      ]);
+      throw new ContextError("Organization", "sentry trial list <org>");
     }
 
     const info = await getCustomerTrialInfo(resolved.org);

@@ -125,9 +125,7 @@ export const startCommand = buildCommand({
     });
 
     if (!resolved) {
-      throw new ContextError("Organization", "sentry trial start", [
-        "sentry trial start <name> <org>",
-      ]);
+      throw new ContextError("Organization", "sentry trial start <name> <org>");
     }
 
     const orgSlug = resolved.org;
