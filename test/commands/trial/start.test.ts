@@ -18,10 +18,17 @@ import {
 import { startCommand } from "../../../src/commands/trial/start.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as browserMod from "../../../src/lib/browser.js";
 import { ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as qrcodeMod from "../../../src/lib/qrcode.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
-import type { ProductTrial } from "../../../src/types/index.js";
+import type {
+  CustomerTrialInfo,
+  ProductTrial,
+} from "../../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -202,6 +209,30 @@ describe("trial start command", () => {
     expect(getProductTrialsSpy).toHaveBeenCalledWith("my-org");
   });
 
+  test("detects swapped arguments for plan pseudo-trial", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    const getInfoSpy = spyOn(
+      apiClient,
+      "getCustomerTrialInfo"
+    ).mockResolvedValue({
+      productTrials: [],
+      canTrial: true,
+      isTrial: false,
+      planDetails: { name: "Developer" },
+    } as CustomerTrialInfo);
+
+    const { context } = createMockContext();
+    const func = await startCommand.loader();
+    // Swapped: org first, "plan" second
+    await func.call(context, { json: true }, "my-org", "plan");
+
+    // Should resolve correctly despite swap
+    expect(resolveOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ org: "my-org" })
+    );
+    getInfoSpy.mockRestore();
+  });
+
   test("starts replays trial", async () => {
     const replaysTrial: ProductTrial = {
       ...MOCK_TRIAL,
@@ -219,5 +250,168 @@ describe("trial start command", () => {
     expect(parsed.name).toBe("replays");
     expect(parsed.category).toBe("replays");
     expect(startProductTrialSpy).toHaveBeenCalledWith("test-org", "replays");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan trial tests
+// ---------------------------------------------------------------------------
+
+function makeCustomerInfo(
+  overrides: Partial<CustomerTrialInfo> = {}
+): CustomerTrialInfo {
+  return {
+    productTrials: [],
+    canTrial: false,
+    isTrial: false,
+    trialEnd: null,
+    planDetails: { name: "Developer", trialPlan: "am3_t" },
+    ...overrides,
+  };
+}
+
+describe("trial start plan", () => {
+  let getCustomerTrialInfoSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let openBrowserSpy: ReturnType<typeof spyOn>;
+  let generateQRCodeSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    getCustomerTrialInfoSpy = spyOn(apiClient, "getCustomerTrialInfo");
+    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    openBrowserSpy = spyOn(browserMod, "openBrowser").mockResolvedValue(true);
+    generateQRCodeSpy = spyOn(qrcodeMod, "generateQRCode").mockResolvedValue(
+      "[QR CODE]\n"
+    );
+  });
+
+  afterEach(() => {
+    getCustomerTrialInfoSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
+    openBrowserSpy.mockRestore();
+    generateQRCodeSpy.mockRestore();
+  });
+
+  test("returns JSON with url and opened fields", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({ canTrial: true })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await startCommand.loader();
+    await func.call(context, { json: true }, "plan");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.name).toBe("plan");
+    expect(parsed.category).toBe("plan");
+    expect(parsed.organization).toBe("test-org");
+    expect(parsed.url).toContain("billing");
+    expect(typeof parsed.opened).toBe("boolean");
+  });
+
+  test("shows billing URL in output", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({ canTrial: true })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await startCommand.loader();
+    await func.call(context, { json: false }, "plan");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("billing");
+    expect(output).toContain("test-org");
+  });
+
+  test("generates QR code for billing URL", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({ canTrial: true })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await startCommand.loader();
+    await func.call(context, { json: false }, "plan");
+
+    expect(generateQRCodeSpy).toHaveBeenCalled();
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("[QR CODE]");
+  });
+
+  test("throws when org is already on plan trial", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({
+        canTrial: false,
+        isTrial: true,
+        planDetails: { name: "Business", trialPlan: null },
+      })
+    );
+
+    const { context } = createMockContext();
+    const func = await startCommand.loader();
+
+    try {
+      await func.call(context, { json: false }, "plan");
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      expect((err as ValidationError).message).toContain("already on");
+      expect((err as ValidationError).message).toContain("Business");
+    }
+  });
+
+  test("throws when no plan trial available", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({ canTrial: false, isTrial: false })
+    );
+
+    const { context } = createMockContext();
+    const func = await startCommand.loader();
+
+    await expect(func.call(context, { json: false }, "plan")).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  test("does not call startProductTrial for plan trial", async () => {
+    const startProductTrialSpy = spyOn(
+      apiClient,
+      "startProductTrial"
+    ).mockResolvedValue(undefined);
+
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({ canTrial: true })
+    );
+
+    const { context } = createMockContext();
+    const func = await startCommand.loader();
+    await func.call(context, { json: true }, "plan");
+
+    expect(startProductTrialSpy).not.toHaveBeenCalled();
+    startProductTrialSpy.mockRestore();
+  });
+
+  test("shows plan name in context message", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({
+        canTrial: true,
+        planDetails: { name: "Team", trialPlan: "am3_t" },
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await startCommand.loader();
+    await func.call(context, { json: false }, "plan");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    // The log.info message goes to stderr via consola, but the URL goes to stdout
+    expect(output).toContain("billing");
   });
 });

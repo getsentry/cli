@@ -2,24 +2,26 @@
  * sentry trial list
  *
  * List product trials available to an organization, including
- * active trials with time remaining and expired trials.
+ * active trials with time remaining, expired trials, and
+ * plan-level upgrade trials.
  */
 
 import type { SentryContext } from "../../context.js";
-import { getProductTrials } from "../../lib/api-client.js";
+import { getCustomerTrialInfo } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
+  daysRemainingFromDate,
   getDaysRemaining,
   getTrialDisplayName,
   getTrialFriendlyName,
   getTrialStatus,
   type TrialStatus,
 } from "../../lib/trials.js";
-import type { Writer } from "../../types/index.js";
+import type { CustomerTrialInfo, Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly json: boolean;
@@ -31,11 +33,11 @@ type ListFlags = {
  * Adds derived fields (name, displayName, status, daysRemaining) to the raw API data.
  */
 type TrialListEntry = {
-  /** CLI-friendly name (e.g., "seer") */
+  /** CLI-friendly name (e.g., "seer") or "plan" for plan-level trials */
   name: string;
-  /** Human-readable product name (e.g., "Seer") */
+  /** Human-readable product name (e.g., "Seer") or plan upgrade name */
   displayName: string;
-  /** API category name (e.g., "seerUsers") */
+  /** API category name (e.g., "seerUsers"), or "plan" for plan-level trials */
   category: string;
   /** Derived status */
   status: TrialStatus;
@@ -58,17 +60,115 @@ const STATUS_LABELS: Record<TrialStatus, string> = {
   expired: `${colorTag("muted", "−")} Expired`,
 };
 
+/** Status priority for deduplication: active > available > expired */
+const STATUS_PRIORITY: Record<TrialStatus, number> = {
+  active: 2,
+  available: 1,
+  expired: 0,
+};
+
+/**
+ * Deduplicate trial entries that map to the same CLI name.
+ *
+ * Multiple API categories can map to a single trial name (e.g., both
+ * `profileDuration` and `profileDurationUI` map to "profiling"). When
+ * that happens, keep the entry with the best status (active > available >
+ * expired), breaking ties by latest end date.
+ */
+function deduplicateTrials(entries: TrialListEntry[]): TrialListEntry[] {
+  const byName = new Map<string, TrialListEntry>();
+  for (const entry of entries) {
+    const existing = byName.get(entry.name);
+    if (!existing || isBetterTrial(entry, existing)) {
+      byName.set(entry.name, entry);
+    }
+  }
+  return [...byName.values()];
+}
+
+/**
+ * Compare two trial entries — returns true if `a` should replace `b`.
+ * Prefers active over available over expired, then latest end date.
+ */
+function isBetterTrial(a: TrialListEntry, b: TrialListEntry): boolean {
+  const aPriority = STATUS_PRIORITY[a.status];
+  const bPriority = STATUS_PRIORITY[b.status];
+  if (aPriority !== bPriority) {
+    return aPriority > bPriority;
+  }
+  // Same status — prefer the one with a later end date
+  if (a.endDate && b.endDate) {
+    return a.endDate > b.endDate;
+  }
+  return a.endDate !== null;
+}
+
+/**
+ * Build a synthetic trial entry for a plan-level trial.
+ *
+ * The Sentry billing API exposes plan-level trials (e.g., "Try Business")
+ * separately from product trials. This creates a unified entry so both
+ * appear in the same list.
+ *
+ * @param info - Customer trial info from the API
+ * @returns A TrialListEntry for the plan trial, or null if not applicable
+ */
+function buildPlanTrialEntry(info: CustomerTrialInfo): TrialListEntry | null {
+  if (info.isTrial) {
+    // Currently on a plan trial
+    const planName = info.planDetails?.name ?? "Business";
+    const endDate = info.trialEnd ?? null;
+    const daysRemaining = endDate ? daysRemainingFromDate(endDate) : null;
+    return {
+      name: "plan",
+      displayName: `${planName} Plan`,
+      category: "plan",
+      status: "active",
+      daysRemaining,
+      isStarted: true,
+      lengthDays: null,
+      startDate: null,
+      endDate,
+    };
+  }
+
+  if (info.canTrial) {
+    // Plan trial available but not started
+    const currentPlan = info.planDetails?.name ?? "current plan";
+    return {
+      name: "plan",
+      displayName: `${currentPlan} -> Business`,
+      category: "plan",
+      status: "available",
+      daysRemaining: null,
+      isStarted: false,
+      lengthDays: null,
+      startDate: null,
+      endDate: null,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Format trial list as a human-readable table.
  */
 function formatTrialListHuman(entries: TrialListEntry[]): string {
   if (entries.length === 0) {
-    return "No product trials found for this organization.";
+    return "No trials found for this organization.";
   }
 
   const columns: Column<TrialListEntry>[] = [
-    { header: "NAME", value: (t) => t.name },
-    { header: "PRODUCT", value: (t) => t.displayName },
+    {
+      header: "TRIAL",
+      value: (t) =>
+        // Show CLI name in parentheses so users know the argument
+        // for `sentry trial start <name>`
+        t.name !== t.displayName
+          ? `${t.displayName} ${colorTag("muted", `(${t.name})`)}`
+          : t.displayName,
+    },
     { header: "STATUS", value: (t) => STATUS_LABELS[t.status] ?? t.status },
     {
       header: "DAYS LEFT",
@@ -81,10 +181,6 @@ function formatTrialListHuman(entries: TrialListEntry[]): string {
         return colorTag("muted", "—");
       },
       align: "right",
-    },
-    {
-      header: "CATEGORY",
-      value: (t) => colorTag("muted", t.category),
     },
   ];
 
@@ -130,29 +226,43 @@ export const listCommand = buildCommand({
     });
 
     if (!resolved) {
-      throw new ContextError("Organization", "sentry trial list", [
-        "sentry trial list <org>",
-      ]);
+      throw new ContextError("Organization", "sentry trial list <org>");
     }
 
-    const trials = await getProductTrials(resolved.org);
+    const info = await getCustomerTrialInfo(resolved.org);
+    const productTrials = info.productTrials ?? [];
 
-    const entries: TrialListEntry[] = trials.map((t) => ({
-      name: getTrialFriendlyName(t.category),
-      displayName: getTrialDisplayName(t.category),
-      category: t.category,
-      status: getTrialStatus(t),
-      daysRemaining: getDaysRemaining(t),
-      isStarted: t.isStarted,
-      lengthDays: t.lengthDays,
-      startDate: t.startDate,
-      endDate: t.endDate,
-    }));
+    const entries: TrialListEntry[] = deduplicateTrials(
+      productTrials.map((t) => ({
+        name: getTrialFriendlyName(t.category),
+        displayName: getTrialDisplayName(t.category),
+        category: t.category,
+        status: getTrialStatus(t),
+        daysRemaining: getDaysRemaining(t),
+        isStarted: t.isStarted,
+        lengthDays: t.lengthDays,
+        startDate: t.startDate,
+        endDate: t.endDate,
+      }))
+    );
+
+    // Add plan-level trial entry (available or active) at the top
+    const planEntry = buildPlanTrialEntry(info);
+    if (planEntry) {
+      entries.unshift(planEntry);
+    }
 
     const hints: string[] = [];
-    const hasAvailable = entries.some((e) => e.status === "available");
-    if (hasAvailable) {
+    const hasAvailableProduct = entries.some(
+      (e) => e.status === "available" && e.category !== "plan"
+    );
+    if (hasAvailableProduct) {
       hints.push("Tip: Use 'sentry trial start <name>' to start a trial");
+    }
+    if (planEntry?.status === "available") {
+      hints.push(
+        "Tip: Use 'sentry trial start plan' to start a Business plan trial"
+      );
     }
 
     return { data: entries, hint: hints.join("\n") || undefined };

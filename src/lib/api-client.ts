@@ -93,6 +93,7 @@ export {
 } from "./api/traces.js";
 
 export {
+  getCustomerTrialInfo,
   getProductTrials,
   startProductTrial,
 } from "./api/trials.js";
