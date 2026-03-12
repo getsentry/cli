@@ -422,4 +422,76 @@ describe("trial list command", () => {
     expect(parsed[0].name).toBe("monitors");
     expect(parsed[1].name).toBe("profiling");
   });
+
+  test("deduplicates categories that map to the same trial name", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({
+        productTrials: [
+          { ...EXPIRED_TRIAL, category: "profileDuration" },
+          { ...EXPIRED_TRIAL, category: "profileDurationUI" },
+        ],
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { json: true }, undefined);
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    // Should show only one "profiling" entry, not two
+    const profilingEntries = parsed.filter(
+      (e: { name: string }) => e.name === "profiling"
+    );
+    expect(profilingEntries).toHaveLength(1);
+  });
+
+  test("dedup prefers active over expired for same trial name", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({
+        productTrials: [
+          { ...EXPIRED_TRIAL, category: "profileDuration" },
+          {
+            ...ACTIVE_TRIAL,
+            category: "profileDurationUI",
+            endDate: daysFromNow(5),
+          },
+        ],
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { json: true }, undefined);
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    const profiling = parsed.find(
+      (e: { name: string }) => e.name === "profiling"
+    );
+    expect(profiling.status).toBe("active");
+  });
+
+  test("dedup in human output shows single row for duplicated categories", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    getCustomerTrialInfoSpy.mockResolvedValue(
+      makeCustomerInfo({
+        productTrials: [
+          { ...EXPIRED_TRIAL, category: "profileDuration" },
+          { ...EXPIRED_TRIAL, category: "profileDurationUI" },
+        ],
+      })
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, { json: false }, undefined);
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    // Count occurrences of "Profiling" — should be exactly one row
+    const matches = output.match(/Profiling/g);
+    expect(matches).toHaveLength(1);
+  });
 });

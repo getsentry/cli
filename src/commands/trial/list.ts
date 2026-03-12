@@ -60,6 +60,49 @@ const STATUS_LABELS: Record<TrialStatus, string> = {
   expired: `${colorTag("muted", "−")} Expired`,
 };
 
+/** Status priority for deduplication: active > available > expired */
+const STATUS_PRIORITY: Record<TrialStatus, number> = {
+  active: 2,
+  available: 1,
+  expired: 0,
+};
+
+/**
+ * Deduplicate trial entries that map to the same CLI name.
+ *
+ * Multiple API categories can map to a single trial name (e.g., both
+ * `profileDuration` and `profileDurationUI` map to "profiling"). When
+ * that happens, keep the entry with the best status (active > available >
+ * expired), breaking ties by latest end date.
+ */
+function deduplicateTrials(entries: TrialListEntry[]): TrialListEntry[] {
+  const byName = new Map<string, TrialListEntry>();
+  for (const entry of entries) {
+    const existing = byName.get(entry.name);
+    if (!existing || isBetterTrial(entry, existing)) {
+      byName.set(entry.name, entry);
+    }
+  }
+  return [...byName.values()];
+}
+
+/**
+ * Compare two trial entries — returns true if `a` should replace `b`.
+ * Prefers active over available over expired, then latest end date.
+ */
+function isBetterTrial(a: TrialListEntry, b: TrialListEntry): boolean {
+  const aPriority = STATUS_PRIORITY[a.status];
+  const bPriority = STATUS_PRIORITY[b.status];
+  if (aPriority !== bPriority) {
+    return aPriority > bPriority;
+  }
+  // Same status — prefer the one with a later end date
+  if (a.endDate && b.endDate) {
+    return a.endDate > b.endDate;
+  }
+  return a.endDate !== null;
+}
+
 /**
  * Build a synthetic trial entry for a plan-level trial.
  *
@@ -197,17 +240,19 @@ export const listCommand = buildCommand({
     const info = await getCustomerTrialInfo(resolved.org);
     const productTrials = info.productTrials ?? [];
 
-    const entries: TrialListEntry[] = productTrials.map((t) => ({
-      name: getTrialFriendlyName(t.category),
-      displayName: getTrialDisplayName(t.category),
-      category: t.category,
-      status: getTrialStatus(t),
-      daysRemaining: getDaysRemaining(t),
-      isStarted: t.isStarted,
-      lengthDays: t.lengthDays,
-      startDate: t.startDate,
-      endDate: t.endDate,
-    }));
+    const entries: TrialListEntry[] = deduplicateTrials(
+      productTrials.map((t) => ({
+        name: getTrialFriendlyName(t.category),
+        displayName: getTrialDisplayName(t.category),
+        category: t.category,
+        status: getTrialStatus(t),
+        daysRemaining: getDaysRemaining(t),
+        isStarted: t.isStarted,
+        lengthDays: t.lengthDays,
+        startDate: t.startDate,
+        endDate: t.endDate,
+      }))
+    );
 
     // Add plan-level trial entry (available or active) at the top
     const planEntry = buildPlanTrialEntry(info);
