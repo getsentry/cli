@@ -37,6 +37,29 @@ export async function getProductTrials(
 }
 
 /**
+ * Fetch full customer trial info including plan trial status.
+ *
+ * Returns the complete {@link CustomerTrialInfo} including both product trials
+ * and plan-level trial info (`canTrial`, `isTrial`, `trialEnd`, `planDetails`),
+ * which needs to display plan trials alongside product trials.
+ *
+ * For simpler use cases that only need product trials, use {@link getProductTrials}.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Customer trial info with product trials, plan trial status, and plan details
+ */
+export async function getCustomerTrialInfo(
+  orgSlug: string
+): Promise<CustomerTrialInfo> {
+  const { data } = await apiRequestToRegion<CustomerTrialInfo>(
+    getControlSiloUrl(),
+    `/customers/${orgSlug}/`,
+    { schema: CustomerTrialInfoSchema }
+  );
+  return data;
+}
+
+/**
  * Start a product trial for the organization.
  *
  * Sends a PUT to the internal `/customers/{org}/product-trial/` endpoint.

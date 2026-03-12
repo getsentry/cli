@@ -34,10 +34,15 @@ const TRIAL_NAMES: Record<string, TrialNameEntry> = {
   },
   spans: { categories: ["spans"], displayName: "Spans" },
   profiling: {
-    categories: ["profileDuration"],
+    categories: ["profileDuration", "profileDurationUI"],
     displayName: "Profiling",
   },
   logs: { categories: ["logBytes"], displayName: "Logs" },
+  monitors: {
+    categories: ["monitorSeats"],
+    displayName: "Cron Monitors",
+  },
+  uptime: { categories: ["uptime"], displayName: "Uptime Monitoring" },
 };
 
 /** Reverse map: API category → CLI-friendly name */
@@ -90,13 +95,36 @@ export function findAvailableTrial(
 }
 
 /**
+ * Convert a camelCase API category name to a human-readable title.
+ *
+ * Splits on camelCase boundaries, capitalizes the first word, and joins with spaces.
+ * Used as a fallback when a category isn't in the known mapping.
+ *
+ * @example "monitorSeats" → "Monitor Seats"
+ * @example "profileDurationUI" → "Profile Duration UI"
+ * @example "spans" → "Spans"
+ */
+export function humanizeCategory(category: string): string {
+  // Split on camelCase boundaries and uppercase runs (e.g., "UI" stays together)
+  const words = category.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+  return words
+    .map((w) =>
+      // Preserve all-caps words like "UI", "API"; title-case the rest
+      w === w.toUpperCase() && w.length > 1
+        ? w
+        : w.charAt(0).toUpperCase() + w.slice(1)
+    )
+    .join(" ");
+}
+
+/**
  * Get the human-readable display name for an API category.
  *
  * @param category - API category name (e.g., "seerUsers", "transactions")
- * @returns Display name (e.g., "Seer", "Performance"), or the raw category if unknown
+ * @returns Display name (e.g., "Seer", "Performance"), or a humanized fallback for unknown categories
  */
 export function getTrialDisplayName(category: string): string {
-  return CATEGORY_TO_DISPLAY[category] ?? category;
+  return CATEGORY_TO_DISPLAY[category] ?? humanizeCategory(category);
 }
 
 /**
@@ -113,13 +141,25 @@ export function getDisplayNameForTrialName(name: string): string {
 }
 
 /**
+ * Convert a camelCase API category name to a kebab-case CLI-friendly name.
+ *
+ * Used as a fallback when a category isn't in the known mapping.
+ *
+ * @example "monitorSeats" → "monitor-seats"
+ * @example "profileDurationUI" → "profile-duration-ui"
+ */
+function kebabizeCategory(category: string): string {
+  return category.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+/**
  * Get the CLI-friendly name for an API category.
  *
  * @param category - API category name (e.g., "seerUsers", "transactions")
- * @returns Friendly name (e.g., "seer", "performance"), or the raw category if unknown
+ * @returns Friendly name (e.g., "seer", "performance"), or a kebab-case fallback for unknown categories
  */
 export function getTrialFriendlyName(category: string): string {
-  return CATEGORY_TO_FRIENDLY[category] ?? category;
+  return CATEGORY_TO_FRIENDLY[category] ?? kebabizeCategory(category);
 }
 
 /** Trial status derived from API fields */

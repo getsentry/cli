@@ -2,16 +2,18 @@
  * sentry trial list
  *
  * List product trials available to an organization, including
- * active trials with time remaining and expired trials.
+ * active trials with time remaining, expired trials, and
+ * plan-level upgrade trials.
  */
 
 import type { SentryContext } from "../../context.js";
-import { getProductTrials } from "../../lib/api-client.js";
+import { getCustomerTrialInfo } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
+import { buildBillingUrl } from "../../lib/sentry-urls.js";
 import {
   getDaysRemaining,
   getTrialDisplayName,
@@ -19,7 +21,7 @@ import {
   getTrialStatus,
   type TrialStatus,
 } from "../../lib/trials.js";
-import type { Writer } from "../../types/index.js";
+import type { CustomerTrialInfo, Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly json: boolean;
@@ -31,11 +33,11 @@ type ListFlags = {
  * Adds derived fields (name, displayName, status, daysRemaining) to the raw API data.
  */
 type TrialListEntry = {
-  /** CLI-friendly name (e.g., "seer") */
+  /** CLI-friendly name (e.g., "seer") or "plan" for plan-level trials */
   name: string;
-  /** Human-readable product name (e.g., "Seer") */
+  /** Human-readable product name (e.g., "Seer") or plan upgrade name */
   displayName: string;
-  /** API category name (e.g., "seerUsers") */
+  /** API category name (e.g., "seerUsers"), or "plan" for plan-level trials */
   category: string;
   /** Derived status */
   status: TrialStatus;
@@ -59,11 +61,65 @@ const STATUS_LABELS: Record<TrialStatus, string> = {
 };
 
 /**
+ * Build a synthetic trial entry for a plan-level trial.
+ *
+ * The Sentry billing API exposes plan-level trials (e.g., "Try Business")
+ * separately from product trials. This creates a unified entry so both
+ * appear in the same list.
+ *
+ * @param info - Customer trial info from the API
+ * @returns A TrialListEntry for the plan trial, or null if not applicable
+ */
+function buildPlanTrialEntry(info: CustomerTrialInfo): TrialListEntry | null {
+  if (info.isTrial) {
+    // Currently on a plan trial
+    const planName = info.planDetails?.name ?? "Business";
+    const endDate = info.trialEnd ?? null;
+    let daysRemaining: number | null = null;
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setUTCHours(23, 59, 59, 999);
+      const diffMs = end.getTime() - Date.now();
+      daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    }
+    return {
+      name: "plan",
+      displayName: `${planName} Plan`,
+      category: "plan",
+      status: "active",
+      daysRemaining,
+      isStarted: true,
+      lengthDays: null,
+      startDate: null,
+      endDate,
+    };
+  }
+
+  if (info.canTrial) {
+    // Plan trial available but not started
+    const currentPlan = info.planDetails?.name ?? "current plan";
+    return {
+      name: "plan",
+      displayName: `${currentPlan} → Business`,
+      category: "plan",
+      status: "available",
+      daysRemaining: null,
+      isStarted: false,
+      lengthDays: null,
+      startDate: null,
+      endDate: null,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Format trial list as a human-readable table.
  */
 function formatTrialListHuman(entries: TrialListEntry[]): string {
   if (entries.length === 0) {
-    return "No product trials found for this organization.";
+    return "No trials found for this organization.";
   }
 
   const columns: Column<TrialListEntry>[] = [
@@ -135,9 +191,10 @@ export const listCommand = buildCommand({
       ]);
     }
 
-    const trials = await getProductTrials(resolved.org);
+    const info = await getCustomerTrialInfo(resolved.org);
+    const productTrials = info.productTrials ?? [];
 
-    const entries: TrialListEntry[] = trials.map((t) => ({
+    const entries: TrialListEntry[] = productTrials.map((t) => ({
       name: getTrialFriendlyName(t.category),
       displayName: getTrialDisplayName(t.category),
       category: t.category,
@@ -149,10 +206,23 @@ export const listCommand = buildCommand({
       endDate: t.endDate,
     }));
 
+    // Add plan-level trial entry (available or active) at the top
+    const planEntry = buildPlanTrialEntry(info);
+    if (planEntry) {
+      entries.unshift(planEntry);
+    }
+
     const hints: string[] = [];
-    const hasAvailable = entries.some((e) => e.status === "available");
-    if (hasAvailable) {
+    const hasAvailableProduct = entries.some(
+      (e) => e.status === "available" && e.category !== "plan"
+    );
+    if (hasAvailableProduct) {
       hints.push("Tip: Use 'sentry trial start <name>' to start a trial");
+    }
+    if (planEntry?.status === "available") {
+      hints.push(
+        `Tip: Start a free Business plan trial at ${buildBillingUrl(resolved.org)}`
+      );
     }
 
     return { data: entries, hint: hints.join("\n") || undefined };
