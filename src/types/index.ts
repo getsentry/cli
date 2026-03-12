@@ -19,6 +19,23 @@ export {
   ProjectAliasesSchema,
   SentryConfigSchema,
 } from "./config.js";
+// Dashboard types
+export type {
+  DashboardDetail,
+  DashboardListItem,
+  DashboardWidget,
+  DashboardWidgetLayout,
+  DashboardWidgetQuery,
+} from "./dashboard.js";
+export {
+  DashboardDetailSchema,
+  DashboardListItemSchema,
+  DashboardWidgetLayoutSchema,
+  DashboardWidgetQuerySchema,
+  DashboardWidgetSchema,
+  prepareDashboardForUpdate,
+  stripWidgetServerFields,
+} from "./dashboard.js";
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,

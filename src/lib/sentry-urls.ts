@@ -158,6 +158,38 @@ export function buildLogsUrl(orgSlug: string, logId?: string): string {
   return logId ? `${base}?query=sentry.item_id:${logId}` : base;
 }
 
+// Dashboard URLs
+
+/**
+ * Build URL to the dashboards list page.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Full URL to the dashboards list page
+ */
+export function buildDashboardsListUrl(orgSlug: string): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/dashboards/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/dashboards/`;
+}
+
+/**
+ * Build URL to view a specific dashboard.
+ *
+ * @param orgSlug - Organization slug
+ * @param dashboardId - Dashboard ID
+ * @returns Full URL to the dashboard view page
+ */
+export function buildDashboardUrl(
+  orgSlug: string,
+  dashboardId: string
+): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/dashboard/${dashboardId}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/dashboard/${dashboardId}/`;
+}
+
 /**
  * Build URL to view a trace in Sentry.
  *

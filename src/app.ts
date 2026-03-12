@@ -11,6 +11,8 @@ import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
 import { cliRoute } from "./commands/cli/index.js";
+import { dashboardRoute } from "./commands/dashboard/index.js";
+import { listCommand as dashboardListCommand } from "./commands/dashboard/list.js";
 import { eventRoute } from "./commands/event/index.js";
 import { helpCommand } from "./commands/help.js";
 import { initCommand } from "./commands/init.js";
@@ -42,6 +44,7 @@ import { error as errorColor, warning } from "./lib/formatters/colors.js";
  * Used to suggest the correct command when users type e.g. `sentry projects view cli`.
  */
 const PLURAL_TO_SINGULAR: Record<string, string> = {
+  dashboards: "dashboard",
   issues: "issue",
   orgs: "org",
   projects: "project",
@@ -57,6 +60,7 @@ export const routes = buildRouteMap({
     help: helpCommand,
     auth: authRoute,
     cli: cliRoute,
+    dashboard: dashboardRoute,
     org: orgRoute,
     project: projectRoute,
     repo: repoRoute,
@@ -67,6 +71,7 @@ export const routes = buildRouteMap({
     trace: traceRoute,
     init: initCommand,
     api: apiCommand,
+    dashboards: dashboardListCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
     projects: projectListCommand,
