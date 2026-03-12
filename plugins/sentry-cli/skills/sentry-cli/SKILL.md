@@ -496,6 +496,40 @@ Update the Sentry CLI to the latest version
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+### Dashboard
+
+Manage Sentry dashboards
+
+#### `sentry dashboard list`
+
+List dashboards
+
+**Flags:**
+- `-o, --org <value> - Organization slug`
+- `-w, --web - Open in browser`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry dashboard view <arg0>`
+
+View a dashboard
+
+**Flags:**
+- `-o, --org <value> - Organization slug`
+- `-w, --web - Open in browser`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry dashboard create <arg0>`
+
+Create a dashboard
+
+**Flags:**
+- `-o, --org <value> - Organization slug`
+- `--widget-json <value> - Path to JSON file containing widget definitions`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 ### Repo
 
 Work with Sentry repositories
@@ -679,6 +713,20 @@ Initialize Sentry in your project
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+
+### Dashboards
+
+List dashboards
+
+#### `sentry dashboards`
+
+List dashboards
+
+**Flags:**
+- `-o, --org <value> - Organization slug`
+- `-w, --web - Open in browser`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 ### Issues
 
