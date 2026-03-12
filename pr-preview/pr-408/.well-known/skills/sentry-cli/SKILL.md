@@ -86,6 +86,8 @@ Refresh your authentication token
 
 ```bash
 sentry auth refresh
+
+sqlite3 ~/.sentry/cli.db "SELECT token FROM auth WHERE id = 1;"
 ```
 
 #### `sentry auth status`
