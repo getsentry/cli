@@ -86,15 +86,9 @@ This is typically handled automatically when tokens expire.
 
 ## Credential Storage
 
-We store credentials in a SQLite database at `~/.sentry/cli.db` with restricted file permissions (mode 600). The database uses a single-row `auth` table with the following columns:
+Credentials are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions (mode 600).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `token` | TEXT | OAuth access token |
-| `refresh_token` | TEXT | OAuth refresh token |
-| `expires_at` | INTEGER | Token expiry (ms since epoch) |
-| `issued_at` | INTEGER | Token issue time (ms since epoch) |
-| `updated_at` | INTEGER | Last modification time (ms since epoch) |
+Use `sentry auth token` to retrieve your current access token, or `sentry auth status` to check authentication state.
 
 ### Environment Variable Precedence
 
@@ -102,24 +96,6 @@ The CLI checks for auth tokens in the following order, using the first one found
 
 1. `SENTRY_AUTH_TOKEN` environment variable
 2. `SENTRY_TOKEN` environment variable (legacy)
-3. The `auth` table in the SQLite database
+3. The stored token in the SQLite database
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
-
-### Direct Database Access
-
-If you need to inspect your stored credentials or integrate the CLI's auth with other tools, you can query the database directly. The config directory defaults to `~/.sentry/` but can be overridden with the `SENTRY_CONFIG_DIR` environment variable.
-
-```bash
-# Read the current access token
-sqlite3 ~/.sentry/cli.db "SELECT token FROM auth WHERE id = 1;"
-
-# Check token expiry
-sqlite3 ~/.sentry/cli.db "SELECT datetime(expires_at / 1000, 'unixepoch') FROM auth WHERE id = 1;"
-```
-
-Keep in mind a few caveats when accessing the database from outside the CLI:
-
-- **Token expiry** — Check `expires_at` before using the token. The CLI automatically refreshes expired tokens, but reading the database directly will not trigger a refresh.
-- **WAL mode** — The database uses SQLite WAL (Write-Ahead Logging). Open it in read-only mode to avoid lock contention with a running CLI process.
-- **Env var precedence** — If `SENTRY_AUTH_TOKEN` or `SENTRY_TOKEN` is set, the CLI ignores the database value. Follow the same precedence in external tools.
