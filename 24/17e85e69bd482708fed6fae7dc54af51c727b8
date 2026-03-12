@@ -1,0 +1,28 @@
+# Plan: Split api-client.ts into domain modules
+
+## Status: Already Done ✅
+
+This refactoring has already been completed in commit `0f0a5932` on the current branch (`feat/seer-trial-prompt`).
+
+## What was done
+
+The original 1,977-line `src/lib/api-client.ts` was split into 12 focused domain modules under `src/lib/api/`:
+
+| Module | Purpose |
+|--------|---------|
+| `infrastructure.ts` | Shared helpers, types, constants, raw request functions |
+| `organizations.ts` | Org CRUD and region discovery |
+| `projects.ts` | Project CRUD, search by slug/pattern/DSN key |
+| `teams.ts` | Team CRUD, project teams |
+| `repositories.ts` | Repository listing |
+| `issues.ts` | Issue listing, lookup, status updates |
+| `events.ts` | Event retrieval and resolution |
+| `traces.ts` | Trace details and transactions |
+| `logs.ts` | Log listing, detailed fetch, trace-logs |
+| `seer.ts` | Seer AI root cause analysis and planning |
+| `trials.ts` | Product trial management |
+| `users.ts` | Current user info |
+
+The original `api-client.ts` was converted to a 100-line barrel re-export file, preserving all existing import paths. The `biome.jsonc` override for `noBarrelFile` already includes `api-client.ts`.
+
+No action needed.
