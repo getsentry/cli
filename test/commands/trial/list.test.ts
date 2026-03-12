@@ -174,10 +174,13 @@ describe("trial list command", () => {
     expect(output).toContain("TRIAL");
     expect(output).toContain("STATUS");
     expect(output).toContain("DAYS LEFT");
-    // Human table shows displayName, not CLI name
+    // Human table shows displayName with CLI name in parentheses
     expect(output).toContain("Seer");
+    expect(output).toContain("(seer)");
     expect(output).toContain("Session Replay");
+    expect(output).toContain("(replays)");
     expect(output).toContain("Performance");
+    expect(output).toContain("(performance)");
   });
 
   test("shows empty state message when no trials and no plan trial", async () => {

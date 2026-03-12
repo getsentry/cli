@@ -123,7 +123,15 @@ function formatTrialListHuman(entries: TrialListEntry[]): string {
   }
 
   const columns: Column<TrialListEntry>[] = [
-    { header: "TRIAL", value: (t) => t.displayName },
+    {
+      header: "TRIAL",
+      value: (t) =>
+        // Show CLI name in parentheses for product trials so users know
+        // the argument for `sentry trial start <name>`
+        t.name !== t.displayName && t.category !== "plan"
+          ? `${t.displayName} ${colorTag("muted", `(${t.name})`)}`
+          : t.displayName,
+    },
     { header: "STATUS", value: (t) => STATUS_LABELS[t.status] ?? t.status },
     {
       header: "DAYS LEFT",
