@@ -14,6 +14,7 @@ import { colorTag } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
+  daysRemainingFromDate,
   getDaysRemaining,
   getTrialDisplayName,
   getTrialFriendlyName,
@@ -117,13 +118,7 @@ function buildPlanTrialEntry(info: CustomerTrialInfo): TrialListEntry | null {
     // Currently on a plan trial
     const planName = info.planDetails?.name ?? "Business";
     const endDate = info.trialEnd ?? null;
-    let daysRemaining: number | null = null;
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setUTCHours(23, 59, 59, 999);
-      const diffMs = end.getTime() - Date.now();
-      daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-    }
+    const daysRemaining = endDate ? daysRemainingFromDate(endDate) : null;
     return {
       name: "plan",
       displayName: `${planName} Plan`,

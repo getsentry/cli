@@ -250,7 +250,8 @@ async function handlePlanTrial(
     );
   }
 
-  if (!info.canTrial) {
+  // canTrial is optional in the schema — only reject when explicitly false
+  if (info.canTrial === false) {
     throw new ValidationError(
       `No plan trial available for organization '${orgSlug}'.`,
       "name"

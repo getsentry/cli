@@ -194,6 +194,22 @@ export function getTrialStatus(trial: ProductTrial): TrialStatus {
 }
 
 /**
+ * Calculate days remaining from an end date string.
+ *
+ * Treats the end date as end-of-day UTC (23:59:59.999) and returns
+ * the number of calendar days until expiry, clamped to 0.
+ *
+ * @param endDate - ISO date string (e.g., "2026-04-15T00:00:00Z")
+ * @returns Number of days remaining (0+)
+ */
+export function daysRemainingFromDate(endDate: string): number {
+  const end = new Date(endDate);
+  end.setUTCHours(23, 59, 59, 999);
+  const diffMs = end.getTime() - Date.now();
+  return Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+/**
  * Calculate days remaining for an active trial.
  *
  * @param trial - Product trial from the API
@@ -203,14 +219,7 @@ export function getDaysRemaining(trial: ProductTrial): number | null {
   if (!(trial.isStarted && trial.endDate)) {
     return null;
   }
-
-  const end = new Date(trial.endDate);
-  // Match getTrialStatus: treat endDate as end-of-day UTC
-  end.setUTCHours(23, 59, 59, 999);
-  const now = new Date();
-  const diffMs = end.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return Math.max(0, diffDays);
+  return daysRemainingFromDate(trial.endDate);
 }
 
 /**
