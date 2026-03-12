@@ -293,7 +293,7 @@ describe("trial list command", () => {
     await func.call(context, { json: false }, undefined);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Developer → Business");
+    expect(output).toContain("Developer -> Business");
   });
 
   test("shows active plan trial with days remaining", async () => {
@@ -342,7 +342,7 @@ describe("trial list command", () => {
     expect(parsed[1].name).toBe("seer");
   });
 
-  test("includes billing URL hint when plan trial is available", async () => {
+  test("includes start command hint when plan trial is available", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     getCustomerTrialInfoSpy.mockResolvedValue(
       makeCustomerInfo({
@@ -357,8 +357,7 @@ describe("trial list command", () => {
     await func.call(context, { json: false }, undefined);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("Business plan trial");
-    expect(output).toContain("billing");
+    expect(output).toContain("sentry trial start plan");
   });
 
   test("handles null productTrials from API", async () => {

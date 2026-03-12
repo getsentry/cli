@@ -13,7 +13,6 @@ import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { buildBillingUrl } from "../../lib/sentry-urls.js";
 import {
   getDaysRemaining,
   getTrialDisplayName,
@@ -143,7 +142,7 @@ function buildPlanTrialEntry(info: CustomerTrialInfo): TrialListEntry | null {
     const currentPlan = info.planDetails?.name ?? "current plan";
     return {
       name: "plan",
-      displayName: `${currentPlan} → Business`,
+      displayName: `${currentPlan} -> Business`,
       category: "plan",
       status: "available",
       daysRemaining: null,
@@ -169,9 +168,9 @@ function formatTrialListHuman(entries: TrialListEntry[]): string {
     {
       header: "TRIAL",
       value: (t) =>
-        // Show CLI name in parentheses for product trials so users know
-        // the argument for `sentry trial start <name>`
-        t.name !== t.displayName && t.category !== "plan"
+        // Show CLI name in parentheses so users know the argument
+        // for `sentry trial start <name>`
+        t.name !== t.displayName
           ? `${t.displayName} ${colorTag("muted", `(${t.name})`)}`
           : t.displayName,
     },
@@ -269,7 +268,7 @@ export const listCommand = buildCommand({
     }
     if (planEntry?.status === "available") {
       hints.push(
-        `Tip: Start a free Business plan trial at ${buildBillingUrl(resolved.org)}`
+        "Tip: Use 'sentry trial start plan' to start a Business plan trial"
       );
     }
 
