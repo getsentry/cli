@@ -211,7 +211,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, targetArg?: string) {
+  async *func(this: SentryContext, flags: ViewFlags, targetArg?: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -294,6 +294,7 @@ export const viewCommand = buildCommand({
       detectedFrom: targets[i]?.detectedFrom,
     }));
 
-    return { data: entries, hint: footer };
+    yield { data: entries, hint: footer };
+    return;
   },
 });

@@ -69,7 +69,7 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       t: "team",
     },
   },
-  async func(this: SentryContext, flags: InitFlags, directory?: string) {
+  async *func(this: SentryContext, flags: InitFlags, directory?: string) {
     const targetDir = directory ? path.resolve(this.cwd, directory) : this.cwd;
     const featuresList = flags.features
       ?.flatMap((f) => f.split(FEATURE_DELIMITER))

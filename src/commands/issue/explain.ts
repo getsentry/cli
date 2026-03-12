@@ -71,7 +71,7 @@ export const explainCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -104,10 +104,11 @@ export const explainCommand = buildCommand({
         );
       }
 
-      return {
+      yield {
         data: causes,
         hint: `To create a plan, run: sentry issue plan ${issueArg}`,
       };
+      return;
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -20,7 +20,9 @@ export const tokenCommand = buildCommand({
       "when stdout is not a TTY (e.g., when piped).",
   },
   parameters: {},
-  func(this: SentryContext): void {
+  // biome-ignore lint/correctness/useYield: void generator — writes to stdout directly
+  // biome-ignore lint/suspicious/useAwait: sync body but async generator required by buildCommand
+  async *func(this: SentryContext) {
     const { stdout } = this;
 
     const token = getAuthToken();

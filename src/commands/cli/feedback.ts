@@ -42,12 +42,12 @@ export const feedbackCommand = buildCommand({
       },
     },
   },
-  async func(
+  async *func(
     this: SentryContext,
     // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
     _flags: {},
     ...messageParts: string[]
-  ): Promise<{ data: FeedbackResult }> {
+  ) {
     const message = messageParts.join(" ");
 
     if (!message.trim()) {
@@ -66,11 +66,12 @@ export const feedbackCommand = buildCommand({
     // Flush to ensure feedback is sent before process exits
     const sent = await Sentry.flush(3000);
 
-    return {
+    yield {
       data: {
         sent,
         message,
       },
     };
+    return;
   },
 });

@@ -32,10 +32,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import type {
-  CommandOutput,
-  OutputConfig,
-} from "../../lib/formatters/output.js";
+import type { OutputConfig } from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -592,11 +589,7 @@ export const listCommand = buildListCommand("project", {
     },
     aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES, p: "platform" },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<ListResult<ProjectWithOrg>>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
@@ -640,6 +633,6 @@ export const listCommand = buildListCommand("project", {
     // Only forward hint to the footer when items exist — empty results
     // already render hint text inside the human formatter.
     const hint = result.items.length > 0 ? result.hint : undefined;
-    return { data: result, hint };
+    yield { data: result, hint };
   },
 });

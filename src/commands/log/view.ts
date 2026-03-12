@@ -347,7 +347,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
     const cmdLog = logger.withTag("log.view");
@@ -389,6 +389,7 @@ export const viewCommand = buildCommand({
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    return { data: { logs, orgSlug: target.org }, hint };
+    yield { data: { logs, orgSlug: target.org }, hint };
+    return;
   },
 });

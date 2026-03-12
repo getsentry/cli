@@ -1155,7 +1155,7 @@ export const apiCommand = buildCommand({
       n: "dry-run",
     },
   },
-  async func(this: SentryContext, flags: ApiFlags, endpoint: string) {
+  async *func(this: SentryContext, flags: ApiFlags, endpoint: string) {
     const { stdin } = this;
 
     const normalizedEndpoint = normalizeEndpoint(endpoint);
@@ -1168,7 +1168,7 @@ export const apiCommand = buildCommand({
 
     // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
-      return {
+      yield {
         data: {
           method: flags.method,
           url: resolveRequestUrl(normalizedEndpoint, params),
@@ -1176,6 +1176,7 @@ export const apiCommand = buildCommand({
           body: body ?? null,
         },
       };
+      return;
     }
 
     const verbose = flags.verbose && !flags.silent;
@@ -1210,6 +1211,7 @@ export const apiCommand = buildCommand({
       throw new OutputError(response.body);
     }
 
-    return { data: response.body };
+    yield { data: response.body };
+    return;
   },
 });

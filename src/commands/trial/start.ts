@@ -107,7 +107,7 @@ export const startCommand = buildCommand({
       ],
     },
   },
-  async func(
+  async *func(
     this: SentryContext,
     flags: { json?: boolean },
     first: string,
@@ -142,7 +142,8 @@ export const startCommand = buildCommand({
 
     // Plan trial: no API to start it — open billing page instead
     if (parsed.name === "plan") {
-      return handlePlanTrial(orgSlug, this.stdout, flags.json ?? false);
+      yield await handlePlanTrial(orgSlug, this.stdout, flags.json ?? false);
+      return;
     }
 
     // Fetch trials and find an available one
@@ -160,7 +161,7 @@ export const startCommand = buildCommand({
     // Start the trial
     await startProductTrial(orgSlug, trial.category);
 
-    return {
+    yield {
       data: {
         name: parsed.name,
         category: trial.category,
@@ -170,6 +171,7 @@ export const startCommand = buildCommand({
       },
       hint: undefined,
     };
+    return;
   },
 });
 

@@ -70,25 +70,15 @@ type CommandDocumentation = {
 };
 
 /**
- * Return value from a command with `output` config.
- *
- * Commands can return:
- * - `void` — no automatic output (e.g. `--web` early exit)
- * - `Error` — Stricli error handling
- * - `CommandOutput<T>` — `{ data, hint? }` rendered by the output config
- */
-// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
-type SyncCommandReturn = void | Error | unknown;
-
-// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
-type AsyncCommandReturn = Promise<void | Error | unknown>;
-
-/**
  * Command function type for Sentry CLI commands.
  *
- * When the command has an `output` config, it can return a
- * `{ data, hint? }` object — the wrapper renders it automatically.
- * Without `output`, it behaves like a standard Stricli command function.
+ * ALL command functions are async generators. The framework iterates
+ * each yielded value and renders it through the output config.
+ *
+ * - **Non-streaming**: yield a single `CommandOutput<T>` and return.
+ * - **Streaming**: yield multiple values; each is rendered immediately
+ *   (JSONL in `--json` mode, human text otherwise).
+ * - **Void**: return without yielding for early exits (e.g. `--web`).
  */
 type SentryCommandFunction<
   FLAGS extends BaseFlags,
@@ -98,7 +88,7 @@ type SentryCommandFunction<
   this: CONTEXT,
   flags: FLAGS,
   ...args: ARGS
-) => SyncCommandReturn | AsyncCommandReturn;
+) => AsyncGenerator<unknown, void, undefined>;
 
 /**
  * Arguments for building a command with a local function.
@@ -366,9 +356,15 @@ export function buildCommand<
     return clean;
   }
 
-  // Wrap func to intercept logging flags, capture telemetry, then call original
-  // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
-  const wrappedFunc = function (this: CONTEXT, flags: any, ...args: any[]) {
+  // Wrap func to intercept logging flags, capture telemetry, then call original.
+  // The wrapper is an async function that iterates the generator returned by func.
+  const wrappedFunc = async function (
+    this: CONTEXT,
+    // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
+    flags: any,
+    // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
+    ...args: any[]
+  ) {
     applyLoggingFlags(
       flags[LOG_LEVEL_KEY] as LogLevelName | undefined,
       flags.verbose as boolean
@@ -400,31 +396,22 @@ export function buildCommand<
       throw err;
     };
 
-    // Call original and intercept data returns.
-    // Commands with output config return { data, hint? };
-    // the wrapper renders automatically. Void returns are ignored.
-    let result: ReturnType<typeof originalFunc>;
+    // Iterate the generator. Each yielded value is rendered through
+    // the output config (if present). The generator itself never
+    // touches stdout — all rendering is done here.
     try {
-      result = originalFunc.call(
+      const generator = originalFunc.call(
         this,
         cleanFlags as FLAGS,
         ...(args as unknown as ARGS)
       );
+      for await (const value of generator) {
+        handleReturnValue(this, value, cleanFlags);
+      }
     } catch (err) {
       handleOutputError(err);
     }
-
-    if (result instanceof Promise) {
-      return result
-        .then((resolved) => {
-          handleReturnValue(this, resolved, cleanFlags);
-        })
-        .catch(handleOutputError) as ReturnType<typeof originalFunc>;
-    }
-
-    handleReturnValue(this, result, cleanFlags);
-    return result as ReturnType<typeof originalFunc>;
-  } as typeof originalFunc;
+  };
 
   // Build the command with the wrapped function via Stricli
   return stricliCommand({

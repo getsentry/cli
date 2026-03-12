@@ -191,7 +191,7 @@ export const planCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: PlanFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: PlanFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -225,7 +225,8 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          return { data: buildPlanData(state) };
+          yield { data: buildPlanData(state) };
+          return;
         }
       }
 
@@ -260,7 +261,8 @@ export const planCommand = buildCommand({
         throw new Error("Plan creation was cancelled.");
       }
 
-      return { data: buildPlanData(finalState) };
+      yield { data: buildPlanData(finalState) };
+      return;
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {
