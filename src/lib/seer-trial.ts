@@ -73,7 +73,7 @@ export async function promptAndStartTrial(
   const log = logger.withTag("seer");
 
   // 1. Check trial availability (graceful failure → return false)
-  let trial: ReturnType<typeof findAvailableTrial> extends infer T ? T : never;
+  let trial: ReturnType<typeof findAvailableTrial>;
   try {
     const trials = await getProductTrials(orgSlug);
     trial = findAvailableTrial(trials, "seer");
@@ -120,6 +120,7 @@ export async function promptAndStartTrial(
       "Failed to start trial. Please try again or visit your Sentry settings:"
     );
     log.warn(`  ${buildBillingUrl(orgSlug, "seer")}`);
+    log.warn("If the problem persists, contact support@sentry.io for help.");
     return false;
   }
 }

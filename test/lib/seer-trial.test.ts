@@ -242,6 +242,10 @@ describe("promptAndStartTrial", () => {
     );
     // Should include a link to billing/settings
     expect(logWarnCalls.some((m) => m.includes("sentry.io"))).toBe(true);
+    // Should mention support contact
+    expect(logWarnCalls.some((m) => m.includes("support@sentry.io"))).toBe(
+      true
+    );
   });
 
   test("shows correct context message for not_enabled reason", async () => {
