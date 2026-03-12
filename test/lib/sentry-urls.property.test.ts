@@ -30,10 +30,13 @@ import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 // Save original env
 let originalSentryUrl: string | undefined;
+let originalSentryHost: string | undefined;
 
 beforeEach(() => {
   originalSentryUrl = process.env.SENTRY_URL;
-  // Clear SENTRY_URL for consistent base URL in tests
+  originalSentryHost = process.env.SENTRY_HOST;
+  // Clear SENTRY_HOST/SENTRY_URL for consistent base URL in tests
+  delete process.env.SENTRY_HOST;
   delete process.env.SENTRY_URL;
 });
 
@@ -42,6 +45,11 @@ afterEach(() => {
     process.env.SENTRY_URL = originalSentryUrl;
   } else {
     delete process.env.SENTRY_URL;
+  }
+  if (originalSentryHost !== undefined) {
+    process.env.SENTRY_HOST = originalSentryHost;
+  } else {
+    delete process.env.SENTRY_HOST;
   }
 });
 
@@ -452,6 +460,23 @@ describe("buildTraceUrl properties", () => {
         expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("SENTRY_HOST precedence", () => {
+  test("SENTRY_HOST takes precedence over SENTRY_URL for URL builders", () => {
+    process.env.SENTRY_HOST = "https://host.company.com";
+    process.env.SENTRY_URL = "https://url.company.com";
+    expect(buildOrgUrl("my-org")).toContain("host.company.com");
+    expect(buildOrgUrl("my-org")).not.toContain("url.company.com");
+  });
+
+  test("SENTRY_HOST alone configures self-hosted URL builders", () => {
+    process.env.SENTRY_HOST = "https://sentry.company.com";
+    expect(getOrgBaseUrl("my-org")).toBe("https://sentry.company.com");
+    expect(buildOrgUrl("my-org")).toBe(
+      "https://sentry.company.com/organizations/my-org/"
     );
   });
 });

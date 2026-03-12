@@ -17,6 +17,7 @@ describe("Code Scanner", () => {
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
+    delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
   });
 
@@ -211,8 +212,29 @@ describe("Code Scanner", () => {
 
       // Invalid SENTRY_URL should throw immediately since nothing will work
       expect(() => extractDsnsFromContent(content)).toThrow(
-        /SENTRY_URL.*not a valid URL/
+        /SENTRY_HOST\/SENTRY_URL.*not a valid URL/
       );
+    });
+
+    test("accepts self-hosted DSNs when SENTRY_HOST is set", () => {
+      process.env.SENTRY_HOST = "https://sentry.mycompany.com:9000";
+      const content = `
+        const DSN = "https://abc@sentry.mycompany.com:9000/123";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toEqual(["https://abc@sentry.mycompany.com:9000/123"]);
+    });
+
+    test("SENTRY_HOST takes precedence over SENTRY_URL for DSN validation", () => {
+      process.env.SENTRY_HOST = "https://sentry.mycompany.com:9000";
+      process.env.SENTRY_URL = "https://sentry.other.com";
+      const content = `
+        const DSN1 = "https://abc@sentry.mycompany.com:9000/123";
+        const DSN2 = "https://def@sentry.other.com/456";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      // Only the SENTRY_HOST DSN should be accepted
+      expect(dsns).toEqual(["https://abc@sentry.mycompany.com:9000/123"]);
     });
   });
 

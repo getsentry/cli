@@ -8,7 +8,11 @@
  * through the SDK function options (baseUrl, fetch, headers).
  */
 
-import { DEFAULT_SENTRY_URL, getUserAgent } from "./constants.js";
+import {
+  DEFAULT_SENTRY_URL,
+  getConfiguredSentryUrl,
+  getUserAgent,
+} from "./constants.js";
 import { getAuthToken, isEnvTokenActive, refreshToken } from "./db/auth.js";
 import { getCachedResponse, storeCachedResponse } from "./response-cache.js";
 import { withHttpSpan } from "./telemetry.js";
@@ -391,7 +395,7 @@ function getAuthenticatedFetch(): typeof fetch {
  * Supports self-hosted instances via SENTRY_URL env var.
  */
 export function getApiBaseUrl(): string {
-  return process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
+  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
 }
 
 /**
@@ -402,7 +406,7 @@ export function getApiBaseUrl(): string {
  * (e.g., from URL argument parsing for self-hosted instances) is respected.
  */
 export function getControlSiloUrl(): string {
-  return process.env.SENTRY_URL || DEFAULT_SENTRY_URL;
+  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
 }
 
 /**

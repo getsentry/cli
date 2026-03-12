@@ -109,13 +109,16 @@ describe("parseOrgProjectArg", () => {
     });
   });
 
-  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
   describe("Sentry URL inputs", () => {
     let savedSentryUrl: string | undefined;
+    let savedSentryHost: string | undefined;
 
     beforeEach(() => {
       savedSentryUrl = process.env.SENTRY_URL;
+      savedSentryHost = process.env.SENTRY_HOST;
       delete process.env.SENTRY_URL;
+      delete process.env.SENTRY_HOST;
     });
 
     afterEach(() => {
@@ -123,6 +126,11 @@ describe("parseOrgProjectArg", () => {
         process.env.SENTRY_URL = savedSentryUrl;
       } else {
         delete process.env.SENTRY_URL;
+      }
+      if (savedSentryHost !== undefined) {
+        process.env.SENTRY_HOST = savedSentryHost;
+      } else {
+        delete process.env.SENTRY_HOST;
       }
     });
 
@@ -228,13 +236,16 @@ describe("parseIssueArg", () => {
     });
   });
 
-  // URL integration tests — applySentryUrlContext may set SENTRY_URL as a side effect
+  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
   describe("Sentry URL inputs", () => {
     let savedSentryUrl: string | undefined;
+    let savedSentryHost: string | undefined;
 
     beforeEach(() => {
       savedSentryUrl = process.env.SENTRY_URL;
+      savedSentryHost = process.env.SENTRY_HOST;
       delete process.env.SENTRY_URL;
+      delete process.env.SENTRY_HOST;
     });
 
     afterEach(() => {
@@ -242,6 +253,11 @@ describe("parseIssueArg", () => {
         process.env.SENTRY_URL = savedSentryUrl;
       } else {
         delete process.env.SENTRY_URL;
+      }
+      if (savedSentryHost !== undefined) {
+        process.env.SENTRY_HOST = savedSentryHost;
+      } else {
+        delete process.env.SENTRY_HOST;
       }
     });
 
