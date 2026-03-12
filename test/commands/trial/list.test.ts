@@ -171,13 +171,13 @@ describe("trial list command", () => {
     await func.call(context, { json: false }, undefined);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("NAME");
-    expect(output).toContain("PRODUCT");
+    expect(output).toContain("TRIAL");
     expect(output).toContain("STATUS");
     expect(output).toContain("DAYS LEFT");
-    expect(output).toContain("seer");
-    expect(output).toContain("replays");
-    expect(output).toContain("performance");
+    // Human table shows displayName, not CLI name
+    expect(output).toContain("Seer");
+    expect(output).toContain("Session Replay");
+    expect(output).toContain("Performance");
   });
 
   test("shows empty state message when no trials and no plan trial", async () => {

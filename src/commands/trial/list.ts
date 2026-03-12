@@ -123,8 +123,7 @@ function formatTrialListHuman(entries: TrialListEntry[]): string {
   }
 
   const columns: Column<TrialListEntry>[] = [
-    { header: "NAME", value: (t) => t.name },
-    { header: "PRODUCT", value: (t) => t.displayName },
+    { header: "TRIAL", value: (t) => t.displayName },
     { header: "STATUS", value: (t) => STATUS_LABELS[t.status] ?? t.status },
     {
       header: "DAYS LEFT",
@@ -137,10 +136,6 @@ function formatTrialListHuman(entries: TrialListEntry[]): string {
         return colorTag("muted", "—");
       },
       align: "right",
-    },
-    {
-      header: "CATEGORY",
-      value: (t) => colorTag("muted", t.category),
     },
   ];
 
