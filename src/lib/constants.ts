@@ -16,7 +16,7 @@ export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
  * Checks SENTRY_HOST first, then SENTRY_URL, then falls back to undefined.
  */
 export function getConfiguredSentryUrl(): string | undefined {
-  return process.env.SENTRY_HOST ?? process.env.SENTRY_URL;
+  return process.env.SENTRY_HOST || process.env.SENTRY_URL || undefined;
 }
 
 /** CLI version string, available for help output and other uses */
