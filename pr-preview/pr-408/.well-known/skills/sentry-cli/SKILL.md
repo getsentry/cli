@@ -86,12 +86,6 @@ Refresh your authentication token
 
 ```bash
 sentry auth refresh
-
-# Read the current access token
-sqlite3 ~/.sentry/cli.db "SELECT token FROM auth WHERE id = 1;"
-
-# Check token expiry
-sqlite3 ~/.sentry/cli.db "SELECT datetime(expires_at / 1000, 'unixepoch') FROM auth WHERE id = 1;"
 ```
 
 #### `sentry auth status`
