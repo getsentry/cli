@@ -209,6 +209,30 @@ describe("trial start command", () => {
     expect(getProductTrialsSpy).toHaveBeenCalledWith("my-org");
   });
 
+  test("detects swapped arguments for plan pseudo-trial", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    const getInfoSpy = spyOn(
+      apiClient,
+      "getCustomerTrialInfo"
+    ).mockResolvedValue({
+      productTrials: [],
+      canTrial: true,
+      isTrial: false,
+      planDetails: { name: "Developer" },
+    } as CustomerTrialInfo);
+
+    const { context } = createMockContext();
+    const func = await startCommand.loader();
+    // Swapped: org first, "plan" second
+    await func.call(context, { json: true }, "my-org", "plan");
+
+    // Should resolve correctly despite swap
+    expect(resolveOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ org: "my-org" })
+    );
+    getInfoSpy.mockRestore();
+  });
+
   test("starts replays trial", async () => {
     const replaysTrial: ProductTrial = {
       ...MOCK_TRIAL,

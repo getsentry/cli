@@ -45,6 +45,16 @@ const NAMES_LIST = `${VALID_NAMES.join(", ")}, plan`;
  *
  * @returns Parsed name and optional org, plus any warning message
  */
+/**
+ * Check if a string is a valid trial name, including the "plan" pseudo-trial.
+ *
+ * Used for swap detection so `sentry trial start my-org plan` is auto-corrected
+ * to `sentry trial start plan my-org`.
+ */
+function isValidTrialArg(name: string): boolean {
+  return name === "plan" || isTrialName(name);
+}
+
 function parseTrialStartArgs(
   first: string,
   second?: string
@@ -54,8 +64,8 @@ function parseTrialStartArgs(
     return { name: first };
   }
 
-  // Two args — check for swapped order
-  const swapped = detectSwappedTrialArgs(first, second, isTrialName);
+  // Two args — check for swapped order (includes "plan" pseudo-trial)
+  const swapped = detectSwappedTrialArgs(first, second, isValidTrialArg);
   if (swapped) {
     return { name: swapped.name, org: swapped.org, warning: swapped.warning };
   }

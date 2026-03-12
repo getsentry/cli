@@ -15,35 +15,10 @@ import { getControlSiloUrl } from "../sentry-client.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 /**
- * Fetch all product trials for an organization.
- *
- * Fetches customer data from the internal `/customers/{org}/` endpoint
- * and returns the `productTrials` array. This is a getsentry SaaS-only
- * endpoint — self-hosted instances will 404, which callers should handle.
- *
- * @param orgSlug - Organization slug
- * @returns Array of product trials (may be empty)
- */
-export async function getProductTrials(
-  orgSlug: string
-): Promise<ProductTrial[]> {
-  // /customers/ is a control silo endpoint (billing), not region-scoped
-  const { data } = await apiRequestToRegion<CustomerTrialInfo>(
-    getControlSiloUrl(),
-    `/customers/${orgSlug}/`,
-    { schema: CustomerTrialInfoSchema }
-  );
-  return data.productTrials ?? [];
-}
-
-/**
  * Fetch full customer trial info including plan trial status.
  *
  * Returns the complete {@link CustomerTrialInfo} including both product trials
- * and plan-level trial info (`canTrial`, `isTrial`, `trialEnd`, `planDetails`),
- * which needs to display plan trials alongside product trials.
- *
- * For simpler use cases that only need product trials, use {@link getProductTrials}.
+ * and plan-level trial info (`canTrial`, `isTrial`, `trialEnd`, `planDetails`).
  *
  * @param orgSlug - Organization slug
  * @returns Customer trial info with product trials, plan trial status, and plan details
@@ -51,12 +26,30 @@ export async function getProductTrials(
 export async function getCustomerTrialInfo(
   orgSlug: string
 ): Promise<CustomerTrialInfo> {
+  // /customers/ is a control silo endpoint (billing), not region-scoped
   const { data } = await apiRequestToRegion<CustomerTrialInfo>(
     getControlSiloUrl(),
     `/customers/${orgSlug}/`,
     { schema: CustomerTrialInfoSchema }
   );
   return data;
+}
+
+/**
+ * Fetch all product trials for an organization.
+ *
+ * Convenience wrapper around {@link getCustomerTrialInfo} that returns
+ * just the `productTrials` array. This is a getsentry SaaS-only endpoint —
+ * self-hosted instances will 404, which callers should handle.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Array of product trials (may be empty)
+ */
+export async function getProductTrials(
+  orgSlug: string
+): Promise<ProductTrial[]> {
+  const info = await getCustomerTrialInfo(orgSlug);
+  return info.productTrials ?? [];
 }
 
 /**
