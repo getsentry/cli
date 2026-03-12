@@ -52,8 +52,10 @@ const subdomainPartArb = stringMatching(
   /^[a-z][a-z0-9-]{0,10}[a-z0-9]$/
 ).filter((s) => !s.includes("--") && s.length >= 2);
 
-/** Valid org/project slugs */
-const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
+/** Valid org/project slugs (exclude xn-- punycode prefix — invalid IDN breaks URL parser) */
+const slugArb = stringMatching(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/).filter(
+  (s) => !s.startsWith("xn--")
+);
 
 /** Valid event IDs (32-char hex) */
 const eventIdArb = stringMatching(/^[a-f0-9]{32}$/);
