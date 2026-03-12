@@ -653,6 +653,26 @@ View logs associated with a trace
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+### Trial
+
+Manage product trials
+
+#### `sentry trial list <org>`
+
+List product trials
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry trial start <name> <org>`
+
+Start a product trial
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 ### Init
 
 Initialize Sentry in your project
@@ -776,6 +796,18 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+### Trials
+
+List product trials
+
+#### `sentry trials <org>`
+
+List product trials
+
+**Flags:**
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
