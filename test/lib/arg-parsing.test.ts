@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  detectSwappedTrialArgs,
   detectSwappedViewArgs,
   looksLikeIssueShortId,
   normalizeSlug,
@@ -629,6 +630,31 @@ describe("detectSwappedViewArgs", () => {
 
   test("returns null when both have slashes", () => {
     expect(detectSwappedViewArgs("org/project", "other/thing")).toBeNull();
+  });
+});
+
+describe("detectSwappedTrialArgs", () => {
+  const isKnown = (v: string) => ["seer", "replays", "performance"].includes(v);
+
+  test("returns null when first arg is a known name (correct order)", () => {
+    expect(detectSwappedTrialArgs("seer", "my-org", isKnown)).toBeNull();
+  });
+
+  test("returns swap result when second is known but first is not", () => {
+    const result = detectSwappedTrialArgs("my-org", "seer", isKnown);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("seer");
+    expect(result!.org).toBe("my-org");
+    expect(result!.warning).toContain("reversed");
+  });
+
+  test("returns null when neither is a known name", () => {
+    expect(detectSwappedTrialArgs("my-org", "other-org", isKnown)).toBeNull();
+  });
+
+  test("returns null when both are known names", () => {
+    // If both are trial names, first is treated as the name (correct order)
+    expect(detectSwappedTrialArgs("seer", "replays", isKnown)).toBeNull();
   });
 });
 
