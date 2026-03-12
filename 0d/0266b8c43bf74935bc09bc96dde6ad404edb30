@@ -1,0 +1,81 @@
+# Fix #411: Process exits silently when DSN auto-detection is slow
+
+## Problem
+Commands using `resolveOrg()` without explicit org exit with code 0 and no output when DSN cache is empty. Two root causes:
+
+1. **`main()` called without `await`** in `bin.ts:130` — bare `main()` call means the process can exit before the returned Promise settles
+2. **`Bun.Glob.scan()` async iterators don't ref-count the event loop** — used in two DSN detection paths, these iterators let the event loop drain while they're still running
+
+## Changes
+
+### 1. `src/bin.ts` — Keep event loop alive with `setInterval` + `.finally()`
+**Line ~207**: Replace bare `main()` with keepalive pattern.
+
+Can't use top-level `await` because the npm bundle uses esbuild CJS format which doesn't support it. Instead, use a `setInterval` keepalive that's cleared when `main()` settles:
+```typescript
+const keepalive = setInterval(() => {}, KEEPALIVE_MS);
+main().finally(() => clearInterval(keepalive));
+```
+
+### 2. `src/lib/dsn/project-root.ts` — Replace `Bun.Glob` with `readdir`
+**Function `anyGlobMatches()`** (~line 201): Replace `Bun.Glob.scan()` with `readdir()` + manual glob matching.
+
+The function checks 7 patterns (`*.sln`, `*.csproj`, `*.fsproj`, `*.vbproj`, `*.cabal`, `*.opam`, `*.nimble`) in a single directory (non-recursive). A `readdir()` call + `Bun.Glob.match()` (synchronous string matching, no I/O) is simpler and event-loop safe.
+
+```typescript
+import { readdir, stat } from "node:fs/promises";  // add readdir
+
+async function anyGlobMatches(
+  dir: string,
+  patterns: readonly string[]
+): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return false;
+  }
+  return entries.some((entry) =>
+    patterns.some((pattern) => new Bun.Glob(pattern).match(entry))
+  );
+}
+```
+
+Key change: `Bun.Glob` is only used for synchronous `.match()` (string pattern matching), not `.scan()` (async I/O). The `anyTrue()` parallel-fire pattern is no longer needed here since a single `readdir()` gets all entries.
+
+### 3. `src/lib/dsn/env-file.ts` — Replace `Bun.Glob` with `readdir`
+**Function `detectFromMonorepoEnvFiles()`** (~line 166): Replace `Bun.Glob.scan("*")` with `readdir()`.
+
+The function just lists entries in monorepo root dirs (`packages/`, `apps/`, etc.). `readdir()` is the natural API for this:
+
+```typescript
+import { readdir, stat } from "node:fs/promises";  // add readdir
+
+// In detectFromMonorepoEnvFiles, replace:
+//   const pkgGlob = new Bun.Glob("*");
+//   for await (const pkgName of pkgGlob.scan({ cwd: rootDir, onlyFiles: false })) {
+// With:
+    const entries = await readdir(rootDir);
+    for (const pkgName of entries) {
+```
+
+The `try/catch` around the loop already handles the case where the directory doesn't exist.
+
+## Files Modified
+| File | Change |
+|------|--------|
+| `src/bin.ts` | `main()` → `await main()` |
+| `src/lib/dsn/project-root.ts` | Replace `anyGlobMatches` to use `readdir` + `Bun.Glob.match()` |
+| `src/lib/dsn/env-file.ts` | Replace `Bun.Glob.scan("*")` with `readdir()` in `detectFromMonorepoEnvFiles` |
+
+## What We're NOT Doing
+- **No timeout on DSN detection** — The real problem is the event loop draining, not slowness. Once `await main()` keeps the process alive, the existing scan completes normally. A timeout could be a future UX improvement but isn't needed to fix this bug.
+- **No changes to `anyTrue()`** — The utility itself is fine. We're just not using it for glob matching anymore since `readdir` + sync match is simpler.
+- **No changes to `code-scanner.ts`** — It already uses `readdir()` from `node:fs/promises`, which is event-loop safe.
+
+## Verification
+1. **Typecheck**: `bun run typecheck`
+2. **Lint**: `bun run lint`
+3. **Unit tests**: `bun test test/lib/dsn/project-root.test.ts test/lib/dsn/env-file.test.ts test/lib/dsn/detector.test.ts`
+4. **All tests**: `bun test`
+5. **Manual test**: Clear DSN cache (`sqlite3 ~/.sentry/cli.db "DELETE FROM dsn_cache"`) → run `sentry issues` without org → should either complete or show a helpful error, not exit silently
