@@ -7,15 +7,21 @@ The Sentry CLI can be configured through environment variables and a local datab
 
 ## Environment Variables
 
-### `SENTRY_URL`
+### `SENTRY_HOST`
 
 Base URL of your Sentry instance. **Only needed for [self-hosted Sentry](./self-hosted/).** SaaS users (sentry.io) should not set this.
 
 ```bash
-export SENTRY_URL=https://sentry.example.com
+export SENTRY_HOST=https://sentry.example.com
 ```
 
 When set, all API requests (including OAuth login) are directed to this URL instead of `https://sentry.io`. The CLI also sets this automatically when you pass a self-hosted Sentry URL as a command argument.
+
+`SENTRY_HOST` takes precedence over `SENTRY_URL`. Both work identically — use whichever you prefer.
+
+### `SENTRY_URL`
+
+Alias for `SENTRY_HOST`. If both are set, `SENTRY_HOST` takes precedence.
 
 ### `SENTRY_ORG`
 

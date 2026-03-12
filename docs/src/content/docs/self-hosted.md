@@ -3,10 +3,10 @@ title: Self-Hosted Sentry
 description: Using the Sentry CLI with a self-hosted Sentry instance
 ---
 
-The CLI works with self-hosted Sentry instances. Set the `SENTRY_URL` environment variable to point at your instance:
+The CLI works with self-hosted Sentry instances. Set the `SENTRY_HOST` (or `SENTRY_URL`) environment variable to point at your instance:
 
 ```bash
-export SENTRY_URL=https://sentry.example.com
+export SENTRY_HOST=https://sentry.example.com
 ```
 
 ## Authenticating
@@ -27,14 +27,14 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 Pass your instance URL and the client ID:
 
 ```bash
-SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
+SENTRY_HOST=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
 ```
 
 :::tip
 You can export both variables in your shell profile so every CLI invocation picks them up:
 
 ```bash
-export SENTRY_URL=https://sentry.example.com
+export SENTRY_HOST=https://sentry.example.com
 export SENTRY_CLIENT_ID=your-client-id
 ```
 :::
@@ -48,7 +48,7 @@ If your instance is on an older version or you prefer not to create an OAuth app
 3. Pass it to the CLI:
 
 ```bash
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+SENTRY_HOST=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
 ## After Login
@@ -66,7 +66,8 @@ If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or ev
 
 | Variable | Description |
 |----------|-------------|
-| `SENTRY_URL` | Base URL of your Sentry instance |
+| `SENTRY_HOST` | Base URL of your Sentry instance (takes precedence over `SENTRY_URL`) |
+| `SENTRY_URL` | Alias for `SENTRY_HOST` |
 | `SENTRY_CLIENT_ID` | Client ID of your public OAuth application |
 | `SENTRY_ORG` | Default organization slug |
 | `SENTRY_PROJECT` | Default project slug (supports `org/project` format) |

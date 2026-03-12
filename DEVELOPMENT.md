@@ -67,10 +67,11 @@ When creating your Sentry OAuth application:
 
 ## Environment Variables
 
-| Variable           | Description                          | Default              |
-| ------------------ | ------------------------------------ | -------------------- |
-| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID           | (required)           |
-| `SENTRY_URL`       | Sentry instance URL (for self-hosted)| `https://sentry.io`  |
+| Variable           | Description                                           | Default              |
+| ------------------ | ----------------------------------------------------- | -------------------- |
+| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID                            | (required)           |
+| `SENTRY_HOST`      | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io`  |
+| `SENTRY_URL`       | Alias for `SENTRY_HOST`                               | `https://sentry.io`  |
 
 ## Building
 
