@@ -17,18 +17,21 @@ import { useTestConfigDir } from "../helpers.js";
 useTestConfigDir("region-resolve-");
 
 beforeEach(async () => {
-  // Clear any SENTRY_URL override for most tests
+  // Clear any SENTRY_HOST/SENTRY_URL override for most tests
+  delete process.env.SENTRY_HOST;
   delete process.env.SENTRY_URL;
   // Set up auth token for API tests
   await setAuthToken("test-token");
 });
 
 afterEach(() => {
+  delete process.env.SENTRY_HOST;
   delete process.env.SENTRY_URL;
 });
 
 describe("getSentryBaseUrl", () => {
   test("returns sentry.io by default", () => {
+    delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
     expect(getSentryBaseUrl()).toBe("https://sentry.io");
   });
@@ -36,6 +39,17 @@ describe("getSentryBaseUrl", () => {
   test("respects SENTRY_URL env var", () => {
     process.env.SENTRY_URL = "https://sentry.mycompany.com";
     expect(getSentryBaseUrl()).toBe("https://sentry.mycompany.com");
+  });
+
+  test("respects SENTRY_HOST env var", () => {
+    process.env.SENTRY_HOST = "https://sentry.mycompany.com";
+    expect(getSentryBaseUrl()).toBe("https://sentry.mycompany.com");
+  });
+
+  test("SENTRY_HOST takes precedence over SENTRY_URL", () => {
+    process.env.SENTRY_HOST = "https://host.example.com";
+    process.env.SENTRY_URL = "https://url.example.com";
+    expect(getSentryBaseUrl()).toBe("https://host.example.com");
   });
 });
 
@@ -83,6 +97,17 @@ describe("isMultiRegionEnabled", () => {
 
   test("returns false for invalid URL", () => {
     process.env.SENTRY_URL = "not-a-valid-url";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  test("respects SENTRY_HOST for self-hosted", () => {
+    process.env.SENTRY_HOST = "https://sentry.mycompany.com";
+    expect(isMultiRegionEnabled()).toBe(false);
+  });
+
+  test("SENTRY_HOST takes precedence over SENTRY_URL", () => {
+    process.env.SENTRY_HOST = "https://sentry.mycompany.com";
+    process.env.SENTRY_URL = "https://us.sentry.io";
     expect(isMultiRegionEnabled()).toBe(false);
   });
 });

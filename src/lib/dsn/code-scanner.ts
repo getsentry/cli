@@ -19,7 +19,7 @@ import path from "node:path";
 import * as Sentry from "@sentry/bun";
 import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
-import { DEFAULT_SENTRY_HOST } from "../constants.js";
+import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
 import { withTracingSpan } from "../telemetry.js";
@@ -316,7 +316,7 @@ function isCommentedLine(trimmedLine: string): boolean {
  * @returns The expected host domain for DSN validation
  */
 function getExpectedHost(): string {
-  const sentryUrl = process.env.SENTRY_URL;
+  const sentryUrl = getConfiguredSentryUrl();
 
   if (sentryUrl) {
     // Self-hosted: only accept DSNs matching the configured host
@@ -324,10 +324,10 @@ function getExpectedHost(): string {
       const url = new URL(sentryUrl);
       return url.host;
     } catch {
-      // Invalid SENTRY_URL - throw immediately since nothing will work
+      // Invalid SENTRY_HOST/SENTRY_URL - throw immediately since nothing will work
       throw new ConfigError(
-        `SENTRY_URL "${sentryUrl}" is not a valid URL`,
-        "Set SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
+        `SENTRY_HOST/SENTRY_URL "${sentryUrl}" is not a valid URL`,
+        "Set SENTRY_HOST/SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
       );
     }
   }

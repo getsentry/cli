@@ -11,6 +11,14 @@ export const DEFAULT_SENTRY_HOST = "sentry.io";
 /** Default Sentry SaaS URL (control silo for OAuth and region discovery) */
 export const DEFAULT_SENTRY_URL = `https://${DEFAULT_SENTRY_HOST}`;
 
+/**
+ * Resolve the Sentry instance URL from environment variables.
+ * Checks SENTRY_HOST first, then SENTRY_URL, then falls back to undefined.
+ */
+export function getConfiguredSentryUrl(): string | undefined {
+  return process.env.SENTRY_HOST ?? process.env.SENTRY_URL;
+}
+
 /** CLI version string, available for help output and other uses */
 export const CLI_VERSION =
   typeof SENTRY_CLI_VERSION !== "undefined" ? SENTRY_CLI_VERSION : "0.0.0-dev";

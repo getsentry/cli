@@ -11,6 +11,7 @@ import {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "../types/index.js";
+import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
 import { setAuthToken } from "./db/auth.js";
 import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
 import { withHttpSpan } from "./telemetry.js";
@@ -23,7 +24,7 @@ import { withHttpSpan } from "./telemetry.js";
  * by the device flow and token refresh.
  */
 function getSentryUrl(): string {
-  return process.env.SENTRY_URL ?? "https://sentry.io";
+  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
 }
 
 /**

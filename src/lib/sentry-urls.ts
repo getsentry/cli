@@ -5,14 +5,18 @@
  * Supports self-hosted instances via SENTRY_URL environment variable.
  */
 
-import { DEFAULT_SENTRY_HOST, DEFAULT_SENTRY_URL } from "./constants.js";
+import {
+  DEFAULT_SENTRY_HOST,
+  DEFAULT_SENTRY_URL,
+  getConfiguredSentryUrl,
+} from "./constants.js";
 
 /**
  * Get the Sentry web base URL.
  * Supports self-hosted instances via SENTRY_URL env var.
  */
 export function getSentryBaseUrl(): string {
-  return process.env.SENTRY_URL ?? DEFAULT_SENTRY_URL;
+  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
 }
 
 /**
