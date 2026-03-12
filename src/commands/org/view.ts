@@ -58,7 +58,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, orgSlug?: string) {
+  async *func(this: SentryContext, flags: ViewFlags, orgSlug?: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -78,6 +78,7 @@ export const viewCommand = buildCommand({
     const hint = resolved.detectedFrom
       ? `Detected from ${resolved.detectedFrom}`
       : undefined;
-    return { data: org, hint };
+    yield { data: org, hint };
+    return;
   },
 });

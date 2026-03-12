@@ -30,7 +30,8 @@ export const helpCommand = buildCommand({
     },
   },
   // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
-  async func(this: SentryContext, _flags: {}, ...commandPath: string[]) {
+  // biome-ignore lint/correctness/useYield: void generator — delegates to Stricli help system
+  async *func(this: SentryContext, _flags: {}, ...commandPath: string[]) {
     const { stdout } = this;
 
     // No args: show branded help

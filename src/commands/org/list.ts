@@ -125,7 +125,7 @@ export const listCommand = buildCommand({
     // Only -n for --limit; no -c since org list has no --cursor flag
     aliases: { ...FRESH_ALIASES, n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags) {
+  async *func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
 
     const orgs = await listOrganizations();
@@ -151,6 +151,7 @@ export const listCommand = buildCommand({
       hints.push("Tip: Use 'sentry org view <slug>' for details");
     }
 
-    return { data: entries, hint: hints.join("\n") || undefined };
+    yield { data: entries, hint: hints.join("\n") || undefined };
+    return;
   },
 });

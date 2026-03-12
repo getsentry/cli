@@ -15,7 +15,6 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import type { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -226,11 +225,7 @@ export const listCommand = buildListCommand("trace", {
       c: "cursor",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<TraceListResult>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -276,7 +271,7 @@ export const listCommand = buildListCommand("trace", {
         : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    return {
+    yield {
       data: { traces, hasMore, nextCursor, org, project },
       hint,
     };
