@@ -241,7 +241,9 @@ describe("promptAndStartTrial", () => {
       true
     );
     // Should include a link to billing/settings
-    expect(logWarnCalls.some((m) => m.includes("sentry.io"))).toBe(true);
+    expect(
+      logWarnCalls.some((m) => m.includes("settings/billing/overview"))
+    ).toBe(true);
     // Should mention support contact
     expect(logWarnCalls.some((m) => m.includes("support@sentry.io"))).toBe(
       true
