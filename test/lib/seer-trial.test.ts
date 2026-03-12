@@ -41,12 +41,21 @@ describe("isTrialEligible", () => {
 });
 
 describe("promptAndStartTrial", () => {
-  let getSeerTrialStatusSpy: ReturnType<typeof spyOn>;
-  let startSeerTrialSpy: ReturnType<typeof spyOn>;
+  let getProductTrialsSpy: ReturnType<typeof spyOn>;
+  let startProductTrialSpy: ReturnType<typeof spyOn>;
   let loggerPromptSpy: ReturnType<typeof spyOn>;
   let loggerWithTagSpy: ReturnType<typeof spyOn>;
   let stderrOutput: string;
   let mockStderr: NodeJS.WriteStream;
+
+  const MOCK_SEER_TRIAL = {
+    category: "seerUsers",
+    startDate: null,
+    endDate: null,
+    reasonCode: 0,
+    isStarted: false,
+    lengthDays: 14,
+  };
 
   beforeEach(() => {
     stderrOutput = "";
@@ -56,13 +65,14 @@ describe("promptAndStartTrial", () => {
       },
     } as unknown as NodeJS.WriteStream;
 
-    getSeerTrialStatusSpy = spyOn(
+    getProductTrialsSpy = spyOn(
       apiClient,
-      "getSeerTrialStatus"
-    ).mockResolvedValue(null);
-    startSeerTrialSpy = spyOn(apiClient, "startSeerTrial").mockResolvedValue(
-      undefined
-    );
+      "getProductTrials"
+    ).mockResolvedValue([]);
+    startProductTrialSpy = spyOn(
+      apiClient,
+      "startProductTrial"
+    ).mockResolvedValue(undefined);
 
     // Mock the logger's withTag to return an object with a mock prompt
     loggerPromptSpy = spyOn({ prompt: async () => false }, "prompt");
@@ -73,22 +83,13 @@ describe("promptAndStartTrial", () => {
   });
 
   afterEach(() => {
-    getSeerTrialStatusSpy.mockRestore();
-    startSeerTrialSpy.mockRestore();
+    getProductTrialsSpy.mockRestore();
+    startProductTrialSpy.mockRestore();
     loggerWithTagSpy.mockRestore();
   });
 
-  const MOCK_TRIAL = {
-    category: "seerUsers",
-    startDate: null,
-    endDate: null,
-    reasonCode: 0,
-    isStarted: false,
-    lengthDays: 14,
-  };
-
   test("returns false when no trial is available", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(null);
+    getProductTrialsSpy.mockResolvedValue([]);
 
     const result = await promptAndStartTrial(
       "test-org",
@@ -97,13 +98,43 @@ describe("promptAndStartTrial", () => {
     );
 
     expect(result).toBe(false);
-    expect(getSeerTrialStatusSpy).toHaveBeenCalledWith("test-org");
+    expect(getProductTrialsSpy).toHaveBeenCalledWith("test-org");
     // Should not prompt if no trial available
     expect(loggerPromptSpy).not.toHaveBeenCalled();
   });
 
+  test("returns false when only non-seer trials exist", async () => {
+    getProductTrialsSpy.mockResolvedValue([
+      { ...MOCK_SEER_TRIAL, category: "replays" },
+    ]);
+
+    const result = await promptAndStartTrial(
+      "test-org",
+      "no_budget",
+      mockStderr
+    );
+
+    expect(result).toBe(false);
+    expect(loggerPromptSpy).not.toHaveBeenCalled();
+  });
+
+  test("returns false when seer trial is already started", async () => {
+    getProductTrialsSpy.mockResolvedValue([
+      { ...MOCK_SEER_TRIAL, isStarted: true },
+    ]);
+
+    const result = await promptAndStartTrial(
+      "test-org",
+      "no_budget",
+      mockStderr
+    );
+
+    expect(result).toBe(false);
+    expect(loggerPromptSpy).not.toHaveBeenCalled();
+  });
+
   test("returns false when trial check throws (graceful degradation)", async () => {
-    getSeerTrialStatusSpy.mockRejectedValue(new Error("Network error"));
+    getProductTrialsSpy.mockRejectedValue(new Error("Network error"));
 
     const result = await promptAndStartTrial(
       "test-org",
@@ -116,7 +147,7 @@ describe("promptAndStartTrial", () => {
   });
 
   test("returns false when user declines the prompt", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(false);
 
     const result = await promptAndStartTrial(
@@ -127,11 +158,11 @@ describe("promptAndStartTrial", () => {
 
     expect(result).toBe(false);
     expect(stderrOutput).toContain("run out of Seer quota");
-    expect(startSeerTrialSpy).not.toHaveBeenCalled();
+    expect(startProductTrialSpy).not.toHaveBeenCalled();
   });
 
   test("returns false when user cancels with Ctrl+C (Symbol)", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     // consola returns Symbol(clack:cancel) on Ctrl+C
     loggerPromptSpy.mockResolvedValue(Symbol("clack:cancel"));
 
@@ -142,13 +173,13 @@ describe("promptAndStartTrial", () => {
     );
 
     expect(result).toBe(false);
-    expect(startSeerTrialSpy).not.toHaveBeenCalled();
+    expect(startProductTrialSpy).not.toHaveBeenCalled();
   });
 
   test("starts trial and returns true on confirmation", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(true);
-    startSeerTrialSpy.mockResolvedValue(undefined);
+    startProductTrialSpy.mockResolvedValue(undefined);
 
     const result = await promptAndStartTrial(
       "test-org",
@@ -157,16 +188,18 @@ describe("promptAndStartTrial", () => {
     );
 
     expect(result).toBe(true);
-    expect(startSeerTrialSpy).toHaveBeenCalledWith("test-org", "seerUsers");
+    expect(startProductTrialSpy).toHaveBeenCalledWith("test-org", "seerUsers");
     expect(stderrOutput).toContain("Starting Seer trial...");
     expect(stderrOutput).toContain("Seer trial activated!");
   });
 
-  test("passes correct category to startSeerTrial for seerAutofix", async () => {
-    const autofixTrial = { ...MOCK_TRIAL, category: "seerAutofix" };
-    getSeerTrialStatusSpy.mockResolvedValue(autofixTrial);
+  test("prefers seerUsers over seerAutofix", async () => {
+    getProductTrialsSpy.mockResolvedValue([
+      { ...MOCK_SEER_TRIAL, category: "seerAutofix" },
+      MOCK_SEER_TRIAL,
+    ]);
     loggerPromptSpy.mockResolvedValue(true);
-    startSeerTrialSpy.mockResolvedValue(undefined);
+    startProductTrialSpy.mockResolvedValue(undefined);
 
     const result = await promptAndStartTrial(
       "test-org",
@@ -175,13 +208,33 @@ describe("promptAndStartTrial", () => {
     );
 
     expect(result).toBe(true);
-    expect(startSeerTrialSpy).toHaveBeenCalledWith("test-org", "seerAutofix");
+    expect(startProductTrialSpy).toHaveBeenCalledWith("test-org", "seerUsers");
+  });
+
+  test("falls back to seerAutofix when seerUsers is not available", async () => {
+    getProductTrialsSpy.mockResolvedValue([
+      { ...MOCK_SEER_TRIAL, category: "seerAutofix" },
+    ]);
+    loggerPromptSpy.mockResolvedValue(true);
+    startProductTrialSpy.mockResolvedValue(undefined);
+
+    const result = await promptAndStartTrial(
+      "test-org",
+      "no_budget",
+      mockStderr
+    );
+
+    expect(result).toBe(true);
+    expect(startProductTrialSpy).toHaveBeenCalledWith(
+      "test-org",
+      "seerAutofix"
+    );
   });
 
   test("returns false when trial start fails", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(true);
-    startSeerTrialSpy.mockRejectedValue(new Error("API error"));
+    startProductTrialSpy.mockRejectedValue(new Error("API error"));
 
     const result = await promptAndStartTrial(
       "test-org",
@@ -194,7 +247,7 @@ describe("promptAndStartTrial", () => {
   });
 
   test("shows correct context message for not_enabled reason", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(false);
 
     await promptAndStartTrial("test-org", "not_enabled", mockStderr);
@@ -203,7 +256,7 @@ describe("promptAndStartTrial", () => {
   });
 
   test("shows correct context message for no_budget reason", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(false);
 
     await promptAndStartTrial("test-org", "no_budget", mockStderr);
@@ -212,7 +265,7 @@ describe("promptAndStartTrial", () => {
   });
 
   test("includes trial length in prompt message", async () => {
-    getSeerTrialStatusSpy.mockResolvedValue(MOCK_TRIAL);
+    getProductTrialsSpy.mockResolvedValue([MOCK_SEER_TRIAL]);
     loggerPromptSpy.mockResolvedValue(false);
 
     await promptAndStartTrial("test-org", "no_budget", mockStderr);
@@ -220,5 +273,19 @@ describe("promptAndStartTrial", () => {
     expect(loggerPromptSpy).toHaveBeenCalled();
     const promptMessage = loggerPromptSpy.mock.calls[0]?.[0] as string;
     expect(promptMessage).toContain("14-day");
+  });
+
+  test("omits trial length when null", async () => {
+    getProductTrialsSpy.mockResolvedValue([
+      { ...MOCK_SEER_TRIAL, lengthDays: null },
+    ]);
+    loggerPromptSpy.mockResolvedValue(false);
+
+    await promptAndStartTrial("test-org", "no_budget", mockStderr);
+
+    expect(loggerPromptSpy).toHaveBeenCalled();
+    const promptMessage = loggerPromptSpy.mock.calls[0]?.[0] as string;
+    expect(promptMessage).not.toContain("day");
+    expect(promptMessage).toContain("free Seer trial");
   });
 });

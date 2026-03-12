@@ -12,10 +12,11 @@
 
 import { isatty } from "node:tty";
 
-import { getSeerTrialStatus, startSeerTrial } from "./api-client.js";
+import { getProductTrials, startProductTrial } from "./api-client.js";
 import type { SeerError, SeerErrorReason } from "./errors.js";
 import { success } from "./formatters/colors.js";
 import { logger } from "./logger.js";
+import { findAvailableTrial } from "./trials.js";
 
 /** Seer error reasons eligible for trial prompt */
 const TRIAL_ELIGIBLE_REASONS: ReadonlySet<SeerErrorReason> = new Set([
@@ -66,9 +67,10 @@ export async function promptAndStartTrial(
   stderr: NodeJS.WriteStream
 ): Promise<boolean> {
   // 1. Check trial availability (graceful failure → return false)
-  let trial: Awaited<ReturnType<typeof getSeerTrialStatus>>;
+  let trial: ReturnType<typeof findAvailableTrial> extends infer T ? T : never;
   try {
-    trial = await getSeerTrialStatus(orgSlug);
+    const trials = await getProductTrials(orgSlug);
+    trial = findAvailableTrial(trials, "seer");
   } catch {
     // Can't check trial status — degrade gracefully
     return false;
@@ -100,7 +102,7 @@ export async function promptAndStartTrial(
   // 3. Start trial using the category from the available trial
   try {
     stderr.write("\nStarting Seer trial...\n");
-    await startSeerTrial(orgSlug, trial.category);
+    await startProductTrial(orgSlug, trial.category);
     stderr.write(`${success("✓")} Seer trial activated!\n`);
     return true;
   } catch {

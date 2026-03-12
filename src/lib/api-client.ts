@@ -1692,48 +1692,41 @@ export async function triggerSolutionPlanning(
   return data;
 }
 
-// Seer Trial functions
+// Product Trial functions
 
 /**
- * Check if a Seer product trial is available for the organization.
+ * Fetch all product trials for an organization.
  *
- * Fetches customer data from the internal `/customers/{org}/` endpoint and
- * looks for an unstarted `seerUsers` trial. Returns the trial object if
- * available, or null if no trial exists or it's already started.
+ * Fetches customer data from the internal `/customers/{org}/` endpoint
+ * and returns the `productTrials` array. This is a getsentry SaaS-only
+ * endpoint — self-hosted instances will 404, which callers should handle.
  *
  * @param orgSlug - Organization slug
- * @returns The unstarted trial if available, null otherwise
+ * @returns Array of product trials (may be empty)
  */
-export async function getSeerTrialStatus(
+export async function getProductTrials(
   orgSlug: string
-): Promise<ProductTrial | null> {
+): Promise<ProductTrial[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<CustomerTrialInfo>(
     regionUrl,
     `/customers/${orgSlug}/`,
     { schema: CustomerTrialInfoSchema }
   );
-  const trials = data.productTrials ?? [];
-  // Prefer seat-based seerUsers, fall back to legacy seerAutofix
-  return (
-    trials.find((t) => t.category === "seerUsers" && !t.isStarted) ??
-    trials.find((t) => t.category === "seerAutofix" && !t.isStarted) ??
-    null
-  );
+  return data.productTrials ?? [];
 }
 
 /**
- * Start a Seer product trial for the organization.
+ * Start a product trial for the organization.
  *
- * Sends a PUT to the internal `/customers/{org}/product-trial/` endpoint
- * to activate a 14-day Seer trial. Any org member with `org:read` or higher
- * permission can start a trial.
+ * Sends a PUT to the internal `/customers/{org}/product-trial/` endpoint.
+ * Any org member with `org:read` or higher permission can start a trial.
  *
  * @param orgSlug - Organization slug
- * @param category - Trial category from getSeerTrialStatus (e.g., "seerUsers", "seerAutofix")
+ * @param category - API category name (e.g., "seerUsers", "replays", "transactions")
  * @throws {ApiError} On API errors (e.g., trial already active, permissions)
  */
-export async function startSeerTrial(
+export async function startProductTrial(
   orgSlug: string,
   category: string
 ): Promise<void> {

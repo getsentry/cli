@@ -643,6 +643,9 @@ mock.module("./some-module", () => ({
 <!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
 * **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. \`parseSentryUrl\` handles path-based (\`/organizations/{org}/...\`) and subdomain-style URLs. \`matchSubdomainOrg()\` filters region subdomains by requiring slug length > 2. Self-hosted uses path-based only.
 
+<!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
+* **Seer trial prompt uses middleware layering in bin.ts error handling chain**: The CLI's error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\` errors) are caught by the inner wrapper; auth errors bubble up to the outer wrapper. After successful auth login retry, the retry also goes through \`executeWithSeerTrialPrompt\` (not \`runCommand\` directly) so the full middleware chain applies. Trial check API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start trial: \`PUT /api/0/customers/{org}/product-trial/\`. The \`/customers/\` endpoint is getsentry SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` errors are excluded (admin's explicit choice). \`startSeerTrial\` accepts \`category\` from the trial object — don't hardcode it.
+
 ### Decision
 
 <!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->

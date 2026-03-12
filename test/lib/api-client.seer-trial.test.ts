@@ -1,14 +1,14 @@
 /**
- * Seer Trial API Client Tests
+ * Product Trial API Client Tests
  *
- * Tests for getSeerTrialStatus and startSeerTrial by mocking fetch.
+ * Tests for getProductTrials and startProductTrial by mocking fetch.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import {
-  getSeerTrialStatus,
-  startSeerTrial,
+  getProductTrials,
+  startProductTrial,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
@@ -19,7 +19,7 @@ let testConfigDir: string;
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-seer-trial-api-");
+  testConfigDir = await createTestConfigDir("test-product-trial-api-");
   process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
 
   originalFetch = globalThis.fetch;
@@ -33,8 +33,8 @@ afterEach(async () => {
   await cleanupTestDir(testConfigDir);
 });
 
-describe("getSeerTrialStatus", () => {
-  test("returns unstarted seerUsers trial when available", async () => {
+describe("getProductTrials", () => {
+  test("returns all trials from the API", async () => {
     globalThis.fetch = mockFetch(
       async () =>
         new Response(
@@ -48,111 +48,8 @@ describe("getSeerTrialStatus", () => {
                 isStarted: false,
                 lengthDays: 14,
               },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-    );
-
-    const trial = await getSeerTrialStatus("test-org");
-
-    expect(trial).not.toBeNull();
-    expect(trial?.category).toBe("seerUsers");
-    expect(trial?.isStarted).toBe(false);
-    expect(trial?.lengthDays).toBe(14);
-  });
-
-  test("prefers seerUsers over seerAutofix when both available", async () => {
-    globalThis.fetch = mockFetch(
-      async () =>
-        new Response(
-          JSON.stringify({
-            productTrials: [
               {
-                category: "seerAutofix",
-                startDate: null,
-                endDate: null,
-                reasonCode: 0,
-                isStarted: false,
-                lengthDays: 14,
-              },
-              {
-                category: "seerUsers",
-                startDate: null,
-                endDate: null,
-                reasonCode: 0,
-                isStarted: false,
-                lengthDays: 14,
-              },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-    );
-
-    const trial = await getSeerTrialStatus("test-org");
-
-    expect(trial).not.toBeNull();
-    expect(trial?.category).toBe("seerUsers");
-  });
-
-  test("falls back to seerAutofix when seerUsers is not available", async () => {
-    globalThis.fetch = mockFetch(
-      async () =>
-        new Response(
-          JSON.stringify({
-            productTrials: [
-              {
-                category: "seerAutofix",
-                startDate: null,
-                endDate: null,
-                reasonCode: 0,
-                isStarted: false,
-                lengthDays: 14,
-              },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-    );
-
-    const trial = await getSeerTrialStatus("test-org");
-
-    expect(trial).not.toBeNull();
-    expect(trial?.category).toBe("seerAutofix");
-  });
-
-  test("returns null when no trials exist", async () => {
-    globalThis.fetch = mockFetch(
-      async () =>
-        new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
-
-    const trial = await getSeerTrialStatus("test-org");
-
-    expect(trial).toBeNull();
-  });
-
-  test("returns null when trial is already started", async () => {
-    globalThis.fetch = mockFetch(
-      async () =>
-        new Response(
-          JSON.stringify({
-            productTrials: [
-              {
-                category: "seerUsers",
+                category: "replays",
                 startDate: "2025-01-01",
                 endDate: "2025-01-15",
                 reasonCode: 0,
@@ -168,37 +65,41 @@ describe("getSeerTrialStatus", () => {
         )
     );
 
-    const trial = await getSeerTrialStatus("test-org");
+    const trials = await getProductTrials("test-org");
 
-    expect(trial).toBeNull();
+    expect(trials).toHaveLength(2);
+    expect(trials[0]?.category).toBe("seerUsers");
+    expect(trials[0]?.isStarted).toBe(false);
+    expect(trials[1]?.category).toBe("replays");
+    expect(trials[1]?.isStarted).toBe(true);
   });
 
-  test("returns null when only non-seer trials exist", async () => {
+  test("returns empty array when no productTrials field", async () => {
     globalThis.fetch = mockFetch(
       async () =>
-        new Response(
-          JSON.stringify({
-            productTrials: [
-              {
-                category: "replays",
-                startDate: null,
-                endDate: null,
-                reasonCode: 0,
-                isStarted: false,
-                lengthDays: 14,
-              },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
     );
 
-    const trial = await getSeerTrialStatus("test-org");
+    const trials = await getProductTrials("test-org");
 
-    expect(trial).toBeNull();
+    expect(trials).toEqual([]);
+  });
+
+  test("returns empty array when productTrials is empty", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ productTrials: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    const trials = await getProductTrials("test-org");
+
+    expect(trials).toEqual([]);
   });
 
   test("sends GET request to customer endpoint", async () => {
@@ -214,7 +115,7 @@ describe("getSeerTrialStatus", () => {
       }
     );
 
-    await getSeerTrialStatus("test-org");
+    await getProductTrials("test-org");
 
     expect(capturedRequest?.method).toBe("GET");
     expect(capturedRequest?.url).toContain("/customers/test-org/");
@@ -229,11 +130,11 @@ describe("getSeerTrialStatus", () => {
         })
     );
 
-    await expect(getSeerTrialStatus("test-org")).rejects.toThrow();
+    await expect(getProductTrials("test-org")).rejects.toThrow();
   });
 });
 
-describe("startSeerTrial", () => {
+describe("startProductTrial", () => {
   test("sends PUT request with correct body for seerUsers", async () => {
     let capturedBody: unknown;
 
@@ -247,7 +148,7 @@ describe("startSeerTrial", () => {
       }
     );
 
-    await startSeerTrial("test-org", "seerUsers");
+    await startProductTrial("test-org", "seerUsers");
 
     expect(capturedBody).toEqual({
       referrer: "sentry-cli",
@@ -268,11 +169,32 @@ describe("startSeerTrial", () => {
       }
     );
 
-    await startSeerTrial("test-org", "seerAutofix");
+    await startProductTrial("test-org", "seerAutofix");
 
     expect(capturedBody).toEqual({
       referrer: "sentry-cli",
       productTrial: { category: "seerAutofix", reasonCode: 0 },
+    });
+  });
+
+  test("sends PUT request with any category", async () => {
+    let capturedBody: unknown;
+
+    globalThis.fetch = mockFetch(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedBody = JSON.parse(init?.body as string);
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    );
+
+    await startProductTrial("test-org", "replays");
+
+    expect(capturedBody).toEqual({
+      referrer: "sentry-cli",
+      productTrial: { category: "replays", reasonCode: 0 },
     });
   });
 
@@ -291,7 +213,7 @@ describe("startSeerTrial", () => {
       }
     );
 
-    await startSeerTrial("test-org", "seerUsers");
+    await startProductTrial("test-org", "seerUsers");
 
     expect(capturedMethod).toBe("PUT");
     expect(capturedUrl).toContain("/customers/test-org/product-trial/");
@@ -306,6 +228,6 @@ describe("startSeerTrial", () => {
         })
     );
 
-    await expect(startSeerTrial("test-org", "seerUsers")).rejects.toThrow();
+    await expect(startProductTrial("test-org", "seerUsers")).rejects.toThrow();
   });
 });
