@@ -1,0 +1,326 @@
+# Seer Trial Prompt on "No Budget" / "Not Enabled" Errors
+
+## Goal
+When a Seer command (`issue explain` / `issue plan`) fails because the org lacks Seer budget or doesn't have the AI feature flag, check if the org has an available product trial and interactively prompt the user to start it — then retry the command.
+
+## Context
+
+### Error Scenarios
+| HTTP | Detail | SeerError reason | Meaning | Trial-eligible? |
+|------|--------|-----------------|---------|----------------|
+| 402 | "No budget for Seer Autofix." | `no_budget` | Org has `gen-ai-features` but no quota | ✅ Yes |
+| 403 | "AI Autofix is not enabled..." | `not_enabled` | Org plan lacks `gen-ai-features` flag | ✅ Yes (trial grants the feature) |
+| 403 | "AI features are disabled..." | `ai_disabled` | Admin toggled AI off in settings | ❌ No (user decision) |
+
+### Backend APIs
+- **Check trial availability**: `GET /api/0/customers/{org_slug}/` → `productTrials[]` array. Each entry: `{ category, isStarted, lengthDays, startDate, endDate }`. Look for `isStarted: false` with category `seerUsers` (preferred) or `seerAutofix` (fallback).
+- **Start trial**: `PUT /api/0/customers/{org_slug}/product-trial/` with body `{ referrer: "sentry-cli", productTrial: { category: "<category>", reasonCode: 0 } }`. Any org member can call this (`org:read` or higher).
+- Both require region-scoped requests via `apiRequestToRegion`.
+
+### Pattern to Follow
+Mirror `executeWithAutoAuth()` in `bin.ts`:
+1. Catch `SeerError` (like `AuthError`)
+2. Gate on `isatty(0)` for interactive check
+3. Prompt user with `consola` confirm
+4. On success, retry the original command
+
+---
+
+## Implementation Plan
+
+### 1. Add Types — `src/types/sentry.ts`
+
+Add Zod schemas and types for product trial data:
+
+```typescript
+/** A single product trial entry from the customer endpoint */
+export const ProductTrialSchema = z.object({
+  category: z.string(),
+  isStarted: z.boolean(),
+  lengthDays: z.number().nullable(),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  reasonCode: z.number(),
+});
+export type ProductTrial = z.infer<typeof ProductTrialSchema>;
+
+/** Partial customer response — only the fields we need */
+export const CustomerTrialInfoSchema = z.object({
+  productTrials: z.array(ProductTrialSchema).optional(),
+});
+export type CustomerTrialInfo = z.infer<typeof CustomerTrialInfoSchema>;
+```
+
+Re-export from `src/types/index.ts`.
+
+### 2. Add API Functions — `src/lib/api-client.ts`
+
+Two new functions using `apiRequestToRegion`:
+
+```typescript
+/**
+ * Fetch available Seer product trials for an organization.
+ * Returns the matching unstarted trial if one exists, null otherwise.
+ */
+export async function getSeerTrialStatus(
+  orgSlug: string
+): Promise<ProductTrial | null> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<CustomerTrialInfo>(
+    regionUrl,
+    `/customers/${orgSlug}/`,
+    { schema: CustomerTrialInfoSchema }
+  );
+  const trials = data.productTrials ?? [];
+  // Prefer seat-based seerUsers, fall back to legacy seerAutofix
+  return (
+    trials.find((t) => !t.isStarted && t.category === "seerUsers") ??
+    trials.find((t) => !t.isStarted && t.category === "seerAutofix") ??
+    null
+  );
+}
+
+/**
+ * Start a Seer product trial for an organization.
+ * @param orgSlug - Organization slug
+ * @param category - Trial category (from getSeerTrialStatus result)
+ */
+export async function startSeerTrial(
+  orgSlug: string,
+  category: string
+): Promise<void> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  await apiRequestToRegion(
+    regionUrl,
+    `/customers/${orgSlug}/product-trial/`,
+    {
+      method: "PUT",
+      body: {
+        referrer: "sentry-cli",
+        productTrial: { category, reasonCode: 0 },
+      },
+    }
+  );
+}
+```
+
+### 3. Create Trial Prompt Module — `src/lib/seer-trial.ts`
+
+New module handling the trial check + interactive prompt + trial activation:
+
+```typescript
+/**
+ * Seer Trial Prompt
+ *
+ * Checks if an organization has an available Seer product trial
+ * and interactively prompts the user to start it.
+ */
+
+import { isatty } from "node:tty";
+import { SeerError } from "./errors.js";
+import { getSeerTrialStatus, startSeerTrial } from "./api-client.js";
+import { success, muted } from "./formatters/colors.js";
+import log from "./logger.js";
+
+/** Reasons that could be resolved by starting a trial */
+const TRIAL_ELIGIBLE_REASONS: Set<string> = new Set(["no_budget", "not_enabled"]);
+
+/**
+ * Check if a SeerError could potentially be resolved by a product trial.
+ *
+ * Returns false for:
+ * - Non-SeerError errors
+ * - ai_disabled (admin choice, not a plan issue)
+ * - Missing orgSlug (can't check trial status)
+ * - Non-interactive terminals
+ */
+export function isTrialEligibleError(err: unknown): err is SeerError & { orgSlug: string } {
+  return (
+    err instanceof SeerError &&
+    TRIAL_ELIGIBLE_REASONS.has(err.reason) &&
+    err.orgSlug !== undefined &&
+    isatty(0)
+  );
+}
+
+/**
+ * Attempt to offer and start a Seer trial for the user.
+ *
+ * Flow:
+ * 1. Check if org has an available (unstarted) Seer trial
+ * 2. If yes, prompt user to start it
+ * 3. If user confirms, start the trial via API
+ * 4. Return true if trial was started (caller should retry command)
+ *
+ * Returns false (and falls through to normal error) if:
+ * - No trial available
+ * - User declines
+ * - API call fails (degrades gracefully)
+ *
+ * @param orgSlug - Organization slug (must be defined)
+ * @param stderr - Writer for user messages
+ * @returns true if trial was started successfully
+ */
+export async function promptAndStartSeerTrial(
+  orgSlug: string,
+  stderr: NodeJS.WritableStream,
+): Promise<boolean> {
+  // Step 1: Check trial availability (may fail — degrade gracefully)
+  let trial: Awaited<ReturnType<typeof getSeerTrialStatus>>;
+  try {
+    trial = await getSeerTrialStatus(orgSlug);
+  } catch {
+    // Can't check trial status (network error, permissions, etc.)
+    // Fall through to normal error display
+    return false;
+  }
+
+  if (!trial) {
+    // No trial available — fall through to normal error
+    return false;
+  }
+
+  // Step 2: Prompt user
+  const daysText = trial.lengthDays ? `${trial.lengthDays}-day` : "";
+  stderr.write(
+    `\nA free ${daysText} Seer trial is available for your organization.\n`
+  );
+
+  const confirmed = await log.prompt(
+    "Would you like to start your free Seer trial?",
+    { type: "confirm", initial: true }
+  );
+
+  // Symbol(clack:cancel) on Ctrl+C is truthy — use strict equality
+  if (confirmed !== true) {
+    return false;
+  }
+
+  // Step 3: Start the trial
+  try {
+    await startSeerTrial(orgSlug, trial.category);
+  } catch (err) {
+    log.warn("Failed to start trial. Please try again or visit your billing settings.");
+    return false;
+  }
+
+  stderr.write(`\n${success("✓")} Seer trial started! Retrying command...\n\n`);
+  return true;
+}
+```
+
+### 4. Add Trial Middleware to `bin.ts`
+
+Add a `executeWithSeerTrial` wrapper between `executeWithAutoAuth` and `runCommand`, following the same pattern as the auth auto-login:
+
+```typescript
+import { SeerError } from "./lib/errors.js";
+import { isTrialEligibleError, promptAndStartSeerTrial } from "./lib/seer-trial.js";
+
+/**
+ * Execute command with automatic Seer trial prompt.
+ *
+ * If a Seer command fails with no_budget or not_enabled, check for available
+ * trials and prompt the user to start one, then retry the command.
+ */
+async function executeWithSeerTrial(args: string[]): Promise<void> {
+  try {
+    await runCommand(args);
+  } catch (err) {
+    if (isTrialEligibleError(err)) {
+      const trialStarted = await promptAndStartSeerTrial(
+        err.orgSlug,
+        process.stderr,
+      );
+      if (trialStarted) {
+        await runCommand(args);
+        return;
+      }
+    }
+    throw err;
+  }
+}
+```
+
+Then update `executeWithAutoAuth` to call `executeWithSeerTrial` instead of `runCommand` directly:
+
+```typescript
+async function executeWithAutoAuth(args: string[]): Promise<void> {
+  try {
+    await executeWithSeerTrial(args);  // was: runCommand(args)
+  } catch (err) {
+    if (/* auth error check */) {
+      // ... existing auth flow ...
+      if (loginSuccess) {
+        process.stderr.write("\nRetrying command...\n\n");
+        await executeWithSeerTrial(args);  // was: runCommand(args)
+        return;
+      }
+      // ...
+    }
+    throw err;
+  }
+}
+```
+
+**Layering**: `main() → executeWithAutoAuth() → executeWithSeerTrial() → runCommand()`
+
+This ensures:
+- Auth errors from the trial API calls themselves bubble up to the auth layer
+- Seer errors are caught before generic error display
+- The retry after auth login also goes through the Seer trial wrapper
+
+### 5. Files Modified Summary
+
+| File | Change |
+|------|--------|
+| `src/types/sentry.ts` | Add `ProductTrialSchema`, `CustomerTrialInfoSchema` + types |
+| `src/types/index.ts` | Re-export new types |
+| `src/lib/api-client.ts` | Add `getSeerTrialStatus()`, `startSeerTrial()` |
+| `src/lib/seer-trial.ts` | **New file** — `isTrialEligibleError()`, `promptAndStartSeerTrial()` |
+| `src/bin.ts` | Add `executeWithSeerTrial()` wrapper, update call chain |
+
+### 6. Non-goals / Out of scope
+- **Promotions system** (legacy credits) — only product trials for now
+- **Self-hosted Sentry** — the `/customers/` endpoint is getsentry-specific (SaaS); self-hosted won't have it. The `getSeerTrialStatus` call will 404 gracefully → falls through to normal error.
+- **Caching trial status** — Keep it simple; check fresh each time (these errors are rare).
+
+---
+
+## Testing Strategy
+
+### Unit Tests — `test/lib/seer-trial.test.ts`
+- `isTrialEligibleError`: returns true for `no_budget`/`not_enabled` with orgSlug + TTY, false for `ai_disabled`, false without orgSlug, false for non-SeerError
+- `promptAndStartSeerTrial`: mock `getSeerTrialStatus` + `startSeerTrial` + `log.prompt`
+  - Trial available + user confirms → starts trial, returns true
+  - Trial available + user declines → returns false, no API call
+  - Trial available + user cancels (Ctrl+C Symbol) → returns false
+  - No trial available → returns false immediately (no prompt)
+  - `getSeerTrialStatus` throws → returns false (graceful degradation)
+  - `startSeerTrial` throws → returns false, warns user
+
+### Unit Tests — `test/lib/api-client.seer-trial.test.ts`
+- `getSeerTrialStatus`: mock fetch for customer endpoint
+  - Returns seerUsers trial when available (unstarted)
+  - Prefers seerUsers over seerAutofix
+  - Returns null when no trials
+  - Returns null when all trials started
+- `startSeerTrial`: mock fetch for product-trial endpoint
+  - Sends correct PUT request body
+  - Throws on API error
+
+### Integration Smoke Test
+- `bun run typecheck` — passes
+- `bun run lint` — passes
+- `bun test` — all existing tests pass (no regressions)
+- Manual: run `sentry issue explain @latest` against an org with available trial → verify prompt appears
+
+---
+
+## Verification Steps
+1. `bun run typecheck` — no type errors
+2. `bun run lint` — no lint errors
+3. `bun test test/lib/seer-trial.test.ts` — new tests pass
+4. `bun test test/lib/api-client.seer-trial.test.ts` — new tests pass
+5. `bun test` — full suite passes (no regressions)
+6. Manual test: set up an org with Seer trial available, run `sentry issue explain @latest`, verify the prompt flow works end-to-end
