@@ -628,6 +628,9 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
+<!-- lore:019ce2be-39f1-7ad9-a4c5-4506b62f689c -->
+* **api-client.ts split into domain modules under src/lib/api/**: The original monolithic \`src/lib/api-client.ts\` (1,977 lines) was split into 12 focused domain modules under \`src/lib/api/\`: infrastructure.ts (shared helpers, types, raw requests), organizations.ts, projects.ts, teams.ts, repositories.ts, issues.ts, events.ts, traces.ts, logs.ts, seer.ts, trials.ts, users.ts. The original \`api-client.ts\` was converted to a ~100-line barrel re-export file preserving all existing import paths. The \`biome.jsonc\` override for \`noBarrelFile\` already includes \`api-client.ts\`. When adding new API functions, place them in the appropriate domain module under \`src/lib/api/\`, not in the barrel file.
+
 <!-- lore:019cb8ea-c6f0-75d8-bda7-e32b4e217f92 -->
 * **CLI telemetry DSN is public write-only — safe to embed in install script**: The CLI's Sentry DSN (\`SENTRY\_CLI\_DSN\` in \`src/lib/constants.ts\`) is a public write-only ingest key already baked into every binary. Safe to hardcode in install scripts. Opt-out: \`SENTRY\_CLI\_NO\_TELEMETRY=1\`.
 
@@ -677,7 +680,7 @@ mock.module("./some-module", () => ({
 ### Pattern
 
 <!-- lore:019c972c-9f11-7c0d-96ce-3f8cc2641175 -->
-* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls in src/lib/api-client.ts: (1) call \`getOrgSdkConfig(orgSlug)\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
+* **Org-scoped SDK calls follow getOrgSdkConfig + unwrapResult pattern**: All org-scoped API calls live in domain modules under \`src/lib/api/\` (not the barrel \`api-client.ts\`). Pattern: (1) call \`getOrgSdkConfig(orgSlug)\` from \`infrastructure.ts\` for regional URL + SDK config, (2) spread into SDK function: \`{ ...config, path: { organization\_id\_or\_slug: orgSlug, ... } }\`, (3) pass to \`unwrapResult(result, errorContext)\`. Shared helpers \`resolveAllTargets\`/\`resolveOrgAndProject\` must NOT call \`fetchProjectId\` — commands that need it enrich targets themselves.
 
 <!-- lore:5ac4e219-ea1f-41cb-8e97-7e946f5848c0 -->
 * **PR workflow: wait for Seer and Cursor BugBot before resolving**: After pushing a PR in the getsentry/cli repo, the CI pipeline includes Seer Code Review and Cursor Bugbot as advisory checks. Both typically take 2-3 minutes but may not trigger on draft PRs — only ready-for-review PRs reliably get bot reviews. The workflow is: push → wait for all CI (including npm build jobs which test the actual bundle) → check for inline review comments from Seer/BugBot → fix if needed → repeat. Use \`gh pr checks \<PR> --watch\` to monitor. Review comments are fetched via \`gh api repos/OWNER/REPO/pulls/NUM/comments\` and \`gh api repos/OWNER/REPO/pulls/NUM/reviews\`.
