@@ -31,13 +31,12 @@ import {
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
-import {
-  writeFooter,
-  writeJson,
-  writeJsonList,
-} from "../../lib/formatters/index.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import { type Column, writeTable } from "../../lib/formatters/table.js";
+import type {
+  CommandOutput,
+  OutputConfig,
+} from "../../lib/formatters/output.js";
+import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -51,14 +50,16 @@ import {
 } from "../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
+  jsonTransformListResult,
   type ListCommandMeta,
+  type ListResult,
 } from "../../lib/org-list.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
 import { getApiBaseUrl } from "../../lib/sentry-client.js";
-import type { SentryProject, Writer } from "../../types/index.js";
+import type { SentryProject } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "project-list";
@@ -231,12 +232,9 @@ const PROJECT_COLUMNS: Column<ProjectWithOrg>[] = [
   { header: "PLATFORM", value: (p) => p.platform || "" },
 ];
 
-/** Display projects in table format. */
-export function displayProjectTable(
-  stdout: Writer,
-  projects: ProjectWithOrg[]
-): void {
-  writeTable(stdout, projects, PROJECT_COLUMNS);
+/** Format projects as a table string. */
+export function displayProjectTable(projects: ProjectWithOrg[]): string {
+  return formatTable(projects, PROJECT_COLUMNS);
 }
 
 /**
@@ -288,16 +286,47 @@ function autoDetectPaginationHint(orgs: string[]): string {
     : "sentry project list <org>/ --json";
 }
 
+/** Build the truncation header for auto-detect mode. */
+function autoDetectHeader(
+  count: number,
+  hasMore: boolean,
+  nextCursor: string | undefined,
+  orgs: string[]
+): string | undefined {
+  if (!hasMore) {
+    return;
+  }
+  if (nextCursor && orgs.length === 1) {
+    const org = orgs[0] as string;
+    return (
+      `Showing ${count} projects (more available). ` +
+      `Use 'sentry project list ${org}/' for paginated results.`
+    );
+  }
+  return `Showing ${count} projects (more available). Use --limit to show more.`;
+}
+
+/** Build self-hosted DSN warning text, or undefined if none skipped. */
+function selfHostedWarning(
+  skippedSelfHosted: number | undefined
+): string | undefined {
+  if (!skippedSelfHosted) {
+    return;
+  }
+  return (
+    `Note: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
+    "Specify the organization explicitly: sentry project list <org>/"
+  );
+}
+
 /**
  * Handle auto-detect mode: resolve orgs from config/DSN, fetch all projects,
  * apply client-side filtering and limiting.
  */
 export async function handleAutoDetect(
-  stdout: Writer,
   cwd: string,
   flags: ListFlags
-): Promise<void> {
-  const parsedFields = flags.fields;
+): Promise<ListResult<ProjectWithOrg>> {
   const {
     orgs: orgsToFetch,
     footer,
@@ -315,48 +344,41 @@ export async function handleAutoDetect(
   const limited = filtered.slice(0, limitCount);
 
   const hasMore = filtered.length > limited.length || !!nextCursor;
+  const header = autoDetectHeader(
+    limited.length,
+    hasMore,
+    nextCursor,
+    orgsToFetch
+  );
 
-  if (flags.json) {
-    writeJsonList(stdout, limited, {
-      hasMore,
-      fields: parsedFields,
-      extra: hasMore
-        ? { hint: autoDetectPaginationHint(orgsToFetch) }
-        : undefined,
-    });
-    return;
-  }
+  const hintParts: string[] = [];
 
   if (limited.length === 0) {
-    stdout.write("No projects found.\n");
-    writeSelfHostedWarning(stdout, skippedSelfHosted);
-    return;
-  }
-
-  displayProjectTable(stdout, limited);
-
-  if (hasMore) {
-    if (nextCursor && orgsToFetch.length === 1) {
-      const org = orgsToFetch[0] as string;
-      stdout.write(
-        `\nShowing ${limited.length} projects (more available). ` +
-          `Use 'sentry project list ${org}/' for paginated results.\n`
-      );
-    } else {
-      stdout.write(
-        `\nShowing ${limited.length} projects (more available). Use --limit to show more.\n`
-      );
+    hintParts.push("No projects found.");
+  } else {
+    // header is rendered inline by the human formatter — don't duplicate here
+    if (footer) {
+      hintParts.push(footer);
     }
+    hintParts.push(
+      "Tip: Use 'sentry project view <org>/<project>' for details"
+    );
   }
 
-  if (footer) {
-    stdout.write(`\n${footer}\n`);
+  const warning = selfHostedWarning(skippedSelfHosted);
+  if (warning) {
+    hintParts.push(warning);
   }
-  writeSelfHostedWarning(stdout, skippedSelfHosted);
-  writeFooter(
-    stdout,
-    "Tip: Use 'sentry project view <org>/<project>' for details"
-  );
+
+  return {
+    items: limited,
+    hasMore,
+    header,
+    hint: hintParts.length > 0 ? hintParts.join("\n") : undefined,
+    jsonExtra: hasMore
+      ? { hint: autoDetectPaginationHint(orgsToFetch) }
+      : undefined,
+  };
 }
 
 /**
@@ -364,52 +386,37 @@ export async function handleAutoDetect(
  * Fetches the specific project directly via the API.
  */
 export async function handleExplicit(
-  stdout: Writer,
   org: string,
   projectSlug: string,
   flags: ListFlags
-): Promise<void> {
-  const parsedFields = flags.fields;
+): Promise<ListResult<ProjectWithOrg>> {
   const projectResult = await withAuthGuard(() => getProject(org, projectSlug));
   if (!projectResult.ok) {
-    if (flags.json) {
-      writeJson(stdout, [], parsedFields);
-      return;
-    }
-    stdout.write(
-      `No project '${projectSlug}' found in organization '${org}'.\n`
-    );
-    writeFooter(
-      stdout,
-      `Tip: Use 'sentry project list ${org}/' to see all projects`
-    );
-    return;
+    return {
+      items: [],
+      hint:
+        `No project '${projectSlug}' found in organization '${org}'.\n` +
+        `Tip: Use 'sentry project list ${org}/' to see all projects`,
+    };
   }
   const project: ProjectWithOrg = { ...projectResult.value, orgSlug: org };
 
   const filtered = filterByPlatform([project], flags.platform);
 
-  if (flags.json) {
-    writeJson(stdout, filtered, parsedFields);
-    return;
-  }
-
   if (filtered.length === 0) {
-    stdout.write(
-      `No project '${projectSlug}' found matching platform '${flags.platform}'.\n`
-    );
-    return;
+    return {
+      items: [],
+      hint: `No project '${projectSlug}' found matching platform '${flags.platform}'.`,
+    };
   }
 
-  displayProjectTable(stdout, filtered);
-  writeFooter(
-    stdout,
-    `Tip: Use 'sentry project view ${org}/${projectSlug}' for details`
-  );
+  return {
+    items: filtered,
+    hint: `Tip: Use 'sentry project view ${org}/${projectSlug}' for details`,
+  };
 }
 
 export type OrgAllOptions = {
-  stdout: Writer;
   org: string;
   flags: ListFlags;
   contextKey: string;
@@ -426,9 +433,10 @@ function nextPageHint(org: string, platform?: string): string {
  * Handle org-all mode (e.g., sentry/).
  * Uses cursor pagination for efficient page-by-page listing.
  */
-export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
-  const { stdout, org, flags, contextKey, cursor } = options;
-  const parsedFields = flags.fields;
+export async function handleOrgAll(
+  options: OrgAllOptions
+): Promise<ListResult<ProjectWithOrg>> {
+  const { org, flags, contextKey, cursor } = options;
   const response: PaginatedResponse<SentryProject[]> =
     await listProjectsPaginated(org, {
       cursor,
@@ -451,43 +459,35 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
     clearPaginationCursor(PAGINATION_KEY, contextKey);
   }
 
-  if (flags.json) {
-    writeJsonList(stdout, filtered, {
-      hasMore,
-      nextCursor: response.nextCursor,
-      fields: parsedFields,
-    });
-    return;
-  }
+  let hint: string | undefined;
+  let header: string | undefined;
 
   if (filtered.length === 0) {
     if (hasMore) {
-      stdout.write(
-        `No matching projects on this page. Try the next page: ${nextPageHint(org, flags.platform)}\n`
-      );
+      hint = `No matching projects on this page. Try the next page: ${nextPageHint(org, flags.platform)}`;
     } else if (flags.platform) {
-      stdout.write(
-        `No projects matching platform '${flags.platform}' in organization '${org}'.\n`
-      );
+      hint = `No projects matching platform '${flags.platform}' in organization '${org}'.`;
     } else {
-      stdout.write(`No projects found in organization '${org}'.\n`);
+      hint = `No projects found in organization '${org}'.`;
     }
-    return;
-  }
-
-  displayProjectTable(stdout, filtered);
-
-  if (hasMore) {
-    stdout.write(`\nShowing ${filtered.length} projects (more available)\n`);
-    stdout.write(`Next page: ${nextPageHint(org, flags.platform)}\n`);
   } else {
-    stdout.write(`\nShowing ${filtered.length} projects\n`);
+    header = hasMore
+      ? `Showing ${filtered.length} projects (more available)`
+      : `Showing ${filtered.length} projects`;
+    if (hasMore) {
+      hint = `Next page: ${nextPageHint(org, flags.platform)}`;
+    }
+    const tip = "Tip: Use 'sentry project view <org>/<project>' for details";
+    hint = hint ? `${hint}\n${tip}` : tip;
   }
 
-  writeFooter(
-    stdout,
-    "Tip: Use 'sentry project view <org>/<project>' for details"
-  );
+  return {
+    items: filtered,
+    hasMore,
+    nextCursor: response.nextCursor ?? null,
+    header,
+    hint,
+  };
 }
 
 /**
@@ -495,24 +495,22 @@ export async function handleOrgAll(options: OrgAllOptions): Promise<void> {
  * Searches for the project across all accessible organizations.
  */
 export async function handleProjectSearch(
-  stdout: Writer,
   projectSlug: string,
   flags: ListFlags
-): Promise<void> {
-  const parsedFields = flags.fields;
+): Promise<ListResult<ProjectWithOrg>> {
   const { projects } = await findProjectsBySlug(projectSlug);
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (filtered.length === 0) {
-    if (flags.json) {
-      writeJson(stdout, [], parsedFields);
-      return;
-    }
     if (projects.length > 0 && flags.platform) {
-      stdout.write(
-        `No project '${projectSlug}' found matching platform '${flags.platform}'.\n`
-      );
-      return;
+      return {
+        items: [],
+        hint: `No project '${projectSlug}' found matching platform '${flags.platform}'.`,
+      };
+    }
+    // JSON mode returns empty array; human mode throws a helpful error
+    if (flags.json) {
+      return { items: [] };
     }
     throw new ContextError(
       "Project",
@@ -523,40 +521,19 @@ export async function handleProjectSearch(
 
   const limited = filtered.slice(0, flags.limit);
 
-  if (flags.json) {
-    writeJson(stdout, limited, parsedFields);
-    return;
-  }
-
-  displayProjectTable(stdout, limited);
+  let header: string | undefined;
 
   if (filtered.length > limited.length) {
-    stdout.write(
-      `\nShowing ${limited.length} of ${filtered.length} matches. Use --limit to show more.\n`
-    );
+    header = `Showing ${limited.length} of ${filtered.length} matches. Use --limit to show more.`;
   } else if (limited.length > 1) {
-    stdout.write(
-      `\nFound '${projectSlug}' in ${limited.length} organizations\n`
-    );
+    header = `Found '${projectSlug}' in ${limited.length} organizations`;
   }
 
-  writeFooter(
-    stdout,
-    "Tip: Use 'sentry project view <org>/<project>' for details"
-  );
-}
-
-/** Write self-hosted DSN warning if applicable */
-export function writeSelfHostedWarning(
-  stdout: Writer,
-  skippedSelfHosted: number | undefined
-): void {
-  if (skippedSelfHosted) {
-    stdout.write(
-      `\nNote: ${skippedSelfHosted} DSN(s) could not be resolved. ` +
-        "Specify the organization explicitly: sentry project list <org>/\n"
-    );
-  }
+  return {
+    items: limited,
+    header,
+    hint: "Tip: Use 'sentry project view <org>/<project>' for details",
+  };
 }
 
 /** Metadata used by the shared dispatch infrastructure for error messages and cursor keys. */
@@ -586,7 +563,20 @@ export const listCommand = buildListCommand("project", {
       "  sentry project list --limit 50              # show more results\n" +
       "  sentry project list --json                  # output as JSON",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: (result: ListResult<ProjectWithOrg>) => {
+      if (result.items.length === 0) {
+        return result.hint ?? "No projects found.";
+      }
+      const parts: string[] = [displayProjectTable(result.items)];
+      if (result.header) {
+        parts.push(`\n${result.header}`);
+      }
+      return parts.join("");
+    },
+    jsonTransform: jsonTransformListResult,
+  } satisfies OutputConfig<ListResult<ProjectWithOrg>>,
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
     flags: {
@@ -606,22 +596,22 @@ export const listCommand = buildListCommand("project", {
     this: SentryContext,
     flags: ListFlags,
     target?: string
-  ): Promise<void> {
+  ): Promise<CommandOutput<ListResult<ProjectWithOrg>>> {
     applyFreshFlag(flags);
     const { stdout, cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
 
-    await dispatchOrgScopedList({
+    const result = await dispatchOrgScopedList({
       config: projectListMeta,
       stdout,
       cwd,
       flags,
       parsed,
       overrides: {
-        "auto-detect": (ctx) => handleAutoDetect(ctx.stdout, ctx.cwd, flags),
+        "auto-detect": (ctx) => handleAutoDetect(ctx.cwd, flags),
         explicit: (ctx) =>
-          handleExplicit(ctx.stdout, ctx.parsed.org, ctx.parsed.project, flags),
+          handleExplicit(ctx.parsed.org, ctx.parsed.project, flags),
         "org-all": (ctx) => {
           // Build context key and resolve cursor only in org-all mode, after
           // dispatchOrgScopedList has already validated --cursor is allowed here.
@@ -636,7 +626,6 @@ export const listCommand = buildListCommand("project", {
             contextKey
           );
           return handleOrgAll({
-            stdout: ctx.stdout,
             org: ctx.parsed.org,
             flags,
             contextKey,
@@ -644,8 +633,13 @@ export const listCommand = buildListCommand("project", {
           });
         },
         "project-search": (ctx) =>
-          handleProjectSearch(ctx.stdout, ctx.parsed.projectSlug, flags),
+          handleProjectSearch(ctx.parsed.projectSlug, flags),
       },
     });
+
+    // Only forward hint to the footer when items exist — empty results
+    // already render hint text inside the human formatter.
+    const hint = result.items.length > 0 ? result.hint : undefined;
+    return { data: result, hint };
   },
 });

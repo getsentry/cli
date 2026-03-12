@@ -16,13 +16,13 @@ import {
   listTeamsPaginated,
 } from "../../lib/api-client.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import { type Column, writeTable } from "../../lib/formatters/table.js";
+import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
   buildOrgListCommand,
   type OrgListCommandDocs,
 } from "../../lib/list-command.js";
 import type { OrgListConfig } from "../../lib/org-list.js";
-import type { SentryTeam, Writer } from "../../types/index.js";
+import type { SentryTeam } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "team-list";
@@ -51,8 +51,7 @@ const teamListConfig: OrgListConfig<SentryTeam, TeamWithOrg> = {
   listForOrg: (org) => listTeams(org),
   listPaginated: (org, opts) => listTeamsPaginated(org, opts),
   withOrg: (team, orgSlug) => ({ ...team, orgSlug }),
-  displayTable: (stdout: Writer, teams: TeamWithOrg[]) =>
-    writeTable(stdout, teams, TEAM_COLUMNS),
+  displayTable: (teams: TeamWithOrg[]) => formatTable(teams, TEAM_COLUMNS),
   listForProject: (org, project) => listProjectTeams(org, project),
 };
 

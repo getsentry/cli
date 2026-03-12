@@ -132,9 +132,7 @@ function makeFakeConfig(
       Promise.resolve({ data: [] as FakeEntity[], nextCursor: undefined })
     ),
     withOrg: (entity, orgSlug) => ({ ...entity, orgSlug }),
-    displayTable: mock(() => {
-      // no-op for test
-    }),
+    displayTable: mock(() => ""),
     ...overrides,
   };
 }
@@ -164,7 +162,7 @@ describe("buildOrgListCommand", () => {
   test("returns a command object with a loader", () => {
     const config = makeFakeConfig();
     const docs: OrgListCommandDocs = { brief: "List widgets" };
-    const cmd = buildOrgListCommand(config, docs);
+    const cmd = buildOrgListCommand(config, docs, "widget");
     expect(typeof cmd.loader).toBe("function");
   });
 
@@ -172,15 +170,21 @@ describe("buildOrgListCommand", () => {
     dispatchSpy = spyOn(
       orgListModule,
       "dispatchOrgScopedList"
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
     const docs: OrgListCommandDocs = { brief: "List widgets" };
-    const cmd = buildOrgListCommand(config, docs);
+    const cmd = buildOrgListCommand(config, docs, "widget");
     const func = await cmd.loader();
     const { context } = createContext();
 
-    await func.call(context, { limit: 5, json: true, cursor: undefined });
+    // Stricli loader returns CommandModule | CommandFunction union;
+    // .call() exists on the function variant used at runtime.
+    await (func as any).call(context, {
+      limit: 5,
+      json: true,
+      cursor: undefined,
+    });
 
     expect(dispatchSpy).toHaveBeenCalledTimes(1);
     const callArgs = dispatchSpy.mock.calls[0]?.[0];
@@ -196,14 +200,18 @@ describe("buildOrgListCommand", () => {
     dispatchSpy = spyOn(
       orgListModule,
       "dispatchOrgScopedList"
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
-    const cmd = buildOrgListCommand(config, { brief: "List widgets" });
+    const cmd = buildOrgListCommand(
+      config,
+      { brief: "List widgets" },
+      "widget"
+    );
     const func = await cmd.loader();
     const { context } = createContext();
 
-    await func.call(context, { limit: 30, json: false }, "my-org/");
+    await (func as any).call(context, { limit: 30, json: false }, "my-org/");
 
     const callArgs = dispatchSpy.mock.calls[0]?.[0];
     expect(callArgs?.parsed).toMatchObject({ type: "org-all", org: "my-org" });
@@ -213,14 +221,18 @@ describe("buildOrgListCommand", () => {
     dispatchSpy = spyOn(
       orgListModule,
       "dispatchOrgScopedList"
-    ).mockResolvedValue(undefined);
+    ).mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
-    const cmd = buildOrgListCommand(config, { brief: "List widgets" });
+    const cmd = buildOrgListCommand(
+      config,
+      { brief: "List widgets" },
+      "widget"
+    );
     const func = await cmd.loader();
     const { context } = createContext();
 
-    await func.call(context, { limit: 30, json: false });
+    await (func as any).call(context, { limit: 30, json: false });
 
     const callArgs = dispatchSpy.mock.calls[0]?.[0];
     expect(callArgs?.parsed).toMatchObject({ type: "auto-detect" });
