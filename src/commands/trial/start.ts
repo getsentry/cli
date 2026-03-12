@@ -250,8 +250,8 @@ async function handlePlanTrial(
     );
   }
 
-  // canTrial is optional in the schema — only reject when explicitly false
-  if (info.canTrial === false) {
+  // Consistent with list.ts: only proceed when canTrial is explicitly true
+  if (info.canTrial !== true) {
     throw new ValidationError(
       `No plan trial available for organization '${orgSlug}'.`,
       "name"
