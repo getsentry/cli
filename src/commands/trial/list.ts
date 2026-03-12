@@ -123,7 +123,7 @@ export const listCommand = buildCommand({
       ],
     },
   },
-  async func(this: SentryContext, _flags: ListFlags, org?: string) {
+  async *func(this: SentryContext, _flags: ListFlags, org?: string) {
     const resolved = await resolveOrg({
       org,
       cwd: this.cwd,
@@ -155,6 +155,7 @@ export const listCommand = buildCommand({
       hints.push("Tip: Use 'sentry trial start <name>' to start a trial");
     }
 
-    return { data: entries, hint: hints.join("\n") || undefined };
+    yield { data: entries, hint: hints.join("\n") || undefined };
+    return;
   },
 });

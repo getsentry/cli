@@ -83,9 +83,9 @@ export const startCommand = buildCommand({
       ],
     },
   },
-  async func(
+  async *func(
     this: SentryContext,
-    _flags: unknown,
+    _flags: { readonly json?: boolean },
     first: string,
     second?: string
   ) {
@@ -133,7 +133,7 @@ export const startCommand = buildCommand({
     // Start the trial
     await startProductTrial(orgSlug, trial.category);
 
-    return {
+    yield {
       data: {
         name: parsed.name,
         category: trial.category,
@@ -143,6 +143,7 @@ export const startCommand = buildCommand({
       },
       hint: undefined,
     };
+    return;
   },
 });
 

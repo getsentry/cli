@@ -678,7 +678,7 @@ export const fixCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: FixFlags) {
+  async *func(this: SentryContext, flags: FixFlags) {
     const dbPath = getDbPath();
     const dryRun = flags["dry-run"];
 
@@ -734,6 +734,7 @@ export const fixCommand = buildCommand({
       throw new OutputError(result);
     }
 
-    return { data: result };
+    yield { data: result };
+    return;
   },
 });

@@ -176,11 +176,8 @@ export const logsCommand = buildCommand({
       q: "query",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: LogsFlags,
-    ...args: string[]
-  ): Promise<void> {
+  // biome-ignore lint/correctness/useYield: void generator — writes to stdout directly, will be migrated to yield pattern later
+  async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { stdout, cwd, setContext } = this;
 

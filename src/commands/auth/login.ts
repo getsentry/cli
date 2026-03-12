@@ -48,7 +48,8 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: LoginFlags): Promise<void> {
+  // biome-ignore lint/correctness/useYield: void generator — writes to stdout directly, will be migrated to yield pattern later
+  async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated
     if (await isAuthenticated()) {
       if (isEnvTokenActive()) {

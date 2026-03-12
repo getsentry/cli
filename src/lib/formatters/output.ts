@@ -135,14 +135,63 @@ type RenderContext = {
 };
 
 /**
- * Render a command's return value using an {@link OutputConfig}.
+ * Apply `jsonExclude` keys to data, stripping excluded fields from
+ * objects or from each element of an array. Returns the data unchanged
+ * when no exclusions are configured.
+ */
+function applyJsonExclude(
+  data: unknown,
+  excludeKeys: readonly string[] | undefined
+): unknown {
+  if (!excludeKeys || excludeKeys.length === 0) {
+    return data;
+  }
+  if (typeof data !== "object" || data === null) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item: unknown) => {
+      if (typeof item !== "object" || item === null) {
+        return item;
+      }
+      const copy = { ...item } as Record<string, unknown>;
+      for (const key of excludeKeys) {
+        delete copy[key];
+      }
+      return copy;
+    });
+  }
+  const copy = { ...data } as Record<string, unknown>;
+  for (const key of excludeKeys) {
+    delete copy[key];
+  }
+  return copy;
+}
+
+/**
+ * Write a JSON-transformed value to stdout.
+ *
+ * `undefined` suppresses the chunk entirely (e.g. streaming text-only
+ * chunks in JSON mode).
+ */
+function writeTransformedJson(stdout: Writer, transformed: unknown): void {
+  if (transformed !== undefined) {
+    stdout.write(`${formatJson(transformed)}\n`);
+  }
+}
+
+/**
+ * Render a `CommandOutput<T>` via an output config.
  *
  * Called by the `buildCommand` wrapper when a command with `output: { ... }`
- * returns data. In JSON mode the data is serialized as-is (with optional
+ * yields data. In JSON mode the data is serialized as-is (with optional
  * field filtering); in human mode the config's `human` formatter is called.
  *
+ * For streaming commands that yield multiple times, this function is called
+ * once per yielded value. Each call appends to stdout independently.
+ *
  * @param stdout - Writer to output to
- * @param data - The data returned by the command
+ * @param data - The data yielded by the command
  * @param config - The output config declared on buildCommand
  * @param ctx - Merged rendering context (command hints + runtime flags)
  */
@@ -154,47 +203,18 @@ export function renderCommandOutput(
   ctx: RenderContext
 ): void {
   if (ctx.json) {
-    // Custom transform: the function handles both shaping and field filtering
     if (config.jsonTransform) {
-      const transformed = config.jsonTransform(data, ctx.fields);
-      stdout.write(`${formatJson(transformed)}\n`);
+      writeTransformedJson(stdout, config.jsonTransform(data, ctx.fields));
       return;
     }
-
-    let jsonData = data;
-    if (
-      config.jsonExclude &&
-      config.jsonExclude.length > 0 &&
-      typeof data === "object" &&
-      data !== null
-    ) {
-      const keys = config.jsonExclude;
-      if (Array.isArray(data)) {
-        // Strip excluded keys from each element in the array
-        jsonData = data.map((item: unknown) => {
-          if (typeof item !== "object" || item === null) {
-            return item;
-          }
-          const copy = { ...item } as Record<string, unknown>;
-          for (const key of keys) {
-            delete copy[key];
-          }
-          return copy;
-        });
-      } else {
-        const copy = { ...data } as Record<string, unknown>;
-        for (const key of keys) {
-          delete copy[key];
-        }
-        jsonData = copy;
-      }
-    }
-    writeJson(stdout, jsonData, ctx.fields);
+    writeJson(stdout, applyJsonExclude(data, config.jsonExclude), ctx.fields);
     return;
   }
 
   const text = config.human(data);
-  stdout.write(`${text}\n`);
+  if (text) {
+    stdout.write(`${text}\n`);
+  }
 
   if (ctx.hint) {
     writeFooter(stdout, ctx.hint);

@@ -328,7 +328,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -380,11 +380,12 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
-    return {
+    yield {
       data: { event, trace, spanTreeLines: spanTreeResult?.lines },
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`
         : undefined,
     };
+    return;
   },
 });
