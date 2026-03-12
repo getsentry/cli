@@ -18,7 +18,7 @@ import {
 import { deleteCommand } from "../../../src/commands/project/delete.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ApiError, ContextError } from "../../../src/lib/errors.js";
+import { ApiError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject } from "../../../src/types/index.js";
@@ -54,17 +54,20 @@ function createMockContext() {
 describe("project delete", () => {
   let getProjectSpy: ReturnType<typeof spyOn>;
   let deleteProjectSpy: ReturnType<typeof spyOn>;
-  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+  let resolveOrgProjectTargetSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getProjectSpy = spyOn(apiClient, "getProject");
     deleteProjectSpy = spyOn(apiClient, "deleteProject");
-    resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
+    resolveOrgProjectTargetSpy = spyOn(
+      resolveTarget,
+      "resolveOrgProjectTarget"
+    );
 
     // Default mocks
     getProjectSpy.mockResolvedValue(sampleProject);
     deleteProjectSpy.mockResolvedValue(undefined);
-    resolveProjectBySlugSpy.mockResolvedValue({
+    resolveOrgProjectTargetSpy.mockResolvedValue({
       org: "acme-corp",
       project: "my-app",
     });
@@ -73,7 +76,7 @@ describe("project delete", () => {
   afterEach(() => {
     getProjectSpy.mockRestore();
     deleteProjectSpy.mockRestore();
-    resolveProjectBySlugSpy.mockRestore();
+    resolveOrgProjectTargetSpy.mockRestore();
   });
 
   test("deletes project with explicit org/project and --yes", async () => {
@@ -89,28 +92,36 @@ describe("project delete", () => {
     expect(output).toContain("acme-corp/my-app");
   });
 
-  test("deletes project with bare slug and --yes", async () => {
+  test("delegates to resolveOrgProjectTarget for resolution", async () => {
+    const { context } = createMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(context, defaultFlags, "acme-corp/my-app");
+
+    expect(resolveOrgProjectTargetSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "explicit",
+        org: "acme-corp",
+        project: "my-app",
+      }),
+      "/tmp",
+      "project delete"
+    );
+  });
+
+  test("resolves bare slug via resolveOrgProjectTarget", async () => {
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
     await func.call(context, defaultFlags, "my-app");
 
-    expect(resolveProjectBySlugSpy).toHaveBeenCalledWith(
-      "my-app",
-      "sentry project delete <org>/<project>",
-      "sentry project delete <org>/my-app"
+    expect(resolveOrgProjectTargetSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "project-search",
+        projectSlug: "my-app",
+      }),
+      "/tmp",
+      "project delete"
     );
     expect(deleteProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
-  });
-
-  test("errors when only org is provided (org-all)", async () => {
-    const { context } = createMockContext();
-    const func = await deleteCommand.loader();
-
-    await expect(
-      func.call(context, defaultFlags, "acme-corp/")
-    ).rejects.toThrow(ContextError);
-
-    expect(deleteProjectSpy).not.toHaveBeenCalled();
   });
 
   test("errors in non-interactive mode without --yes", async () => {

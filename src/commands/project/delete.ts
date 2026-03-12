@@ -20,20 +20,73 @@
 import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { deleteProject, getProject } from "../../lib/api-client.js";
-import {
-  ProjectSpecificationType,
-  parseOrgProjectArg,
-} from "../../lib/arg-parsing.js";
+import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
-import { resolveProjectBySlug } from "../../lib/resolve-target.js";
+import { resolveOrgProjectTarget } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
 
 const log = logger.withTag("project.delete");
 
-/** Usage hint for error messages */
-const USAGE_HINT = "sentry project delete <org>/<project>";
+/** Command name used in error messages and resolution hints */
+const COMMAND_NAME = "project delete";
+
+/**
+ * Prompt for confirmation before deleting a project.
+ *
+ * Throws in non-interactive mode without --yes. Returns true if confirmed,
+ * false if the user cancels.
+ *
+ * @param orgSlug - Organization slug for display
+ * @param project - Project with slug and name for display
+ * @returns true if confirmed, false if cancelled
+ */
+async function confirmDeletion(
+  orgSlug: string,
+  project: { slug: string; name: string }
+): Promise<boolean> {
+  if (!isatty(0)) {
+    throw new CliError(
+      `Refusing to delete '${orgSlug}/${project.slug}' in non-interactive mode. Use --yes to confirm.`
+    );
+  }
+
+  const confirmed = await log.prompt(
+    `Delete project '${project.name}' (${orgSlug}/${project.slug})? This cannot be undone.`,
+    { type: "confirm", initial: false }
+  );
+
+  // consola prompt returns Symbol(clack:cancel) on Ctrl+C — a truthy value.
+  // Strictly check for `true` to avoid deleting on cancel.
+  return confirmed === true;
+}
+
+/**
+ * Write dry-run output describing what would be deleted.
+ *
+ * @param stdout - Output stream
+ * @param orgSlug - Organization slug
+ * @param project - Project details
+ * @param json - Whether to output JSON
+ */
+function writeDryRunOutput(
+  stdout: { write: (s: string) => unknown },
+  orgSlug: string,
+  project: { slug: string; name: string },
+  json: boolean
+): void {
+  if (json) {
+    stdout.write(
+      `${JSON.stringify({ dryRun: true, org: orgSlug, project: project.slug, name: project.name, url: buildProjectUrl(orgSlug, project.slug) })}\n`
+    );
+  } else {
+    stdout.write(
+      `Would delete project '${project.name}' (${orgSlug}/${project.slug}).\n` +
+        `  URL: ${buildProjectUrl(orgSlug, project.slug)}\n`
+    );
+  }
+}
 
 type DeleteFlags = {
   readonly yes: boolean;
@@ -41,50 +94,6 @@ type DeleteFlags = {
   readonly json: boolean;
   readonly fields?: string[];
 };
-
-/**
- * Resolve the target argument into an org/project pair.
- *
- * Only explicit (`org/project`) and project-search (`project`) modes are
- * supported — auto-detect and org-all are rejected for safety.
- *
- * @param target - Raw positional argument from the CLI
- * @returns Resolved org and project slugs
- */
-function resolveDeleteTarget(
-  target: string
-): Promise<{ org: string; project: string }> {
-  const parsed = parseOrgProjectArg(target);
-
-  switch (parsed.type) {
-    case ProjectSpecificationType.Explicit:
-      return Promise.resolve({ org: parsed.org, project: parsed.project });
-
-    case ProjectSpecificationType.ProjectSearch:
-      return resolveProjectBySlug(
-        parsed.projectSlug,
-        USAGE_HINT,
-        `sentry project delete <org>/${parsed.projectSlug}`
-      );
-
-    case ProjectSpecificationType.OrgAll:
-      throw new ContextError(
-        "Specific project",
-        `${USAGE_HINT}\n\n` +
-          "Specify the full org/project target, not just the organization."
-      );
-
-    case ProjectSpecificationType.AutoDetect:
-      throw new ContextError("Project target", USAGE_HINT, [
-        "Auto-detection is disabled for delete — specify the target explicitly",
-      ]);
-
-    default: {
-      const _exhaustive: never = parsed;
-      throw new ContextError("Project", String(_exhaustive));
-    }
-  }
-}
 
 export const deleteCommand = buildCommand({
   docs: {
@@ -126,44 +135,36 @@ export const deleteCommand = buildCommand({
     aliases: { y: "yes", n: "dry-run" },
   },
   async func(this: SentryContext, flags: DeleteFlags, target: string) {
-    const { stdout } = this;
+    const { stdout, cwd } = this;
+
+    // Block auto-detect for safety — destructive commands require explicit targets
+    const parsed = parseOrgProjectArg(target);
+    if (parsed.type === "auto-detect") {
+      throw new ContextError(
+        "Project target",
+        `sentry ${COMMAND_NAME} <org>/<project>`,
+        [
+          "Auto-detection is disabled for delete — specify the target explicitly",
+        ]
+      );
+    }
+
     const { org: orgSlug, project: projectSlug } =
-      await resolveDeleteTarget(target);
+      await resolveOrgProjectTarget(parsed, cwd, COMMAND_NAME);
 
     // Verify project exists before prompting — also used to display the project name
     const project = await getProject(orgSlug, projectSlug);
 
     // Dry-run mode: show what would be deleted without deleting it
     if (flags["dry-run"]) {
-      if (flags.json) {
-        stdout.write(
-          `${JSON.stringify({ dryRun: true, org: orgSlug, project: project.slug, name: project.name, url: buildProjectUrl(orgSlug, project.slug) })}\n`
-        );
-      } else {
-        stdout.write(
-          `Would delete project '${project.name}' (${orgSlug}/${project.slug}).\n` +
-            `  URL: ${buildProjectUrl(orgSlug, project.slug)}\n`
-        );
-      }
+      writeDryRunOutput(stdout, orgSlug, project, flags.json);
       return;
     }
 
     // Confirmation gate
     if (!flags.yes) {
-      if (!isatty(0)) {
-        throw new CliError(
-          `Refusing to delete '${orgSlug}/${project.slug}' in non-interactive mode. Use --yes to confirm.`
-        );
-      }
-
-      const confirmed = await log.prompt(
-        `Delete project '${project.name}' (${orgSlug}/${project.slug})? This cannot be undone.`,
-        { type: "confirm", initial: false }
-      );
-
-      // consola prompt returns Symbol(clack:cancel) on Ctrl+C — a truthy value.
-      // Strictly check for `true` to avoid deleting on cancel.
-      if (confirmed !== true) {
+      const confirmed = await confirmDeletion(orgSlug, project);
+      if (!confirmed) {
         stdout.write("Cancelled.\n");
         return;
       }
