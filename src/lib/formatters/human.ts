@@ -2203,3 +2203,53 @@ export function formatDashboardView(result: {
 
   return renderMarkdown(lines.join("\n"));
 }
+
+/**
+ * Format a widget add result for human-readable output.
+ */
+export function formatWidgetAdded(result: {
+  dashboard: { id: string; widgets?: unknown[] };
+  widget: { title: string };
+  url: string;
+}): string {
+  const widgetCount = result.dashboard.widgets?.length ?? 0;
+  const lines: string[] = [
+    `Added widget '${escapeMarkdownInline(result.widget.title)}' to dashboard (now ${widgetCount} widgets)`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget deletion result for human-readable output.
+ */
+export function formatWidgetDeleted(result: {
+  dashboard: { id: string; widgets?: unknown[] };
+  widgetTitle: string;
+  url: string;
+}): string {
+  const widgetCount = result.dashboard.widgets?.length ?? 0;
+  const lines: string[] = [
+    `Removed widget '${escapeMarkdownInline(result.widgetTitle)}' from dashboard (now ${widgetCount} widgets)`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a widget edit result for human-readable output.
+ */
+export function formatWidgetEdited(result: {
+  dashboard: { id: string };
+  widget: { title: string };
+  url: string;
+}): string {
+  const lines: string[] = [
+    `Updated widget '${escapeMarkdownInline(result.widget.title)}' in dashboard ${result.dashboard.id}`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
