@@ -1503,7 +1503,24 @@ export async function getDetailedTrace(
       },
     }
   );
-  return data;
+  return data.map(normalizeTraceSpan);
+}
+
+/**
+ * The trace detail API (`/trace/{id}/`) returns each span's unique identifier
+ * as `event_id` rather than `span_id`. The value is the same 16-hex-char span
+ * ID that `parent_span_id` references on child spans. We copy it to `span_id`
+ * so the rest of the codebase can use a single, predictable field name.
+ */
+function normalizeTraceSpan(span: TraceSpan): TraceSpan {
+  const normalized = { ...span };
+  if (!normalized.span_id && normalized.event_id) {
+    normalized.span_id = normalized.event_id;
+  }
+  if (normalized.children) {
+    normalized.children = normalized.children.map(normalizeTraceSpan);
+  }
+  return normalized;
 }
 
 /** Fields to request from the transactions API */
