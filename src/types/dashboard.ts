@@ -115,13 +115,13 @@ const DEFAULT_WIDGET_SIZE: Record<
   { w: number; h: number; minH: number }
 > = {
   big_number: { w: 2, h: 1, minH: 1 },
-  line: { w: 4, h: 2, minH: 2 },
-  area: { w: 4, h: 2, minH: 2 },
-  bar: { w: 4, h: 2, minH: 2 },
+  line: { w: 3, h: 2, minH: 2 },
+  area: { w: 3, h: 2, minH: 2 },
+  bar: { w: 3, h: 2, minH: 2 },
   table: { w: 6, h: 2, minH: 2 },
   world_map: { w: 4, h: 2, minH: 2 },
 };
-const FALLBACK_SIZE = { w: 4, h: 2, minH: 2 };
+const FALLBACK_SIZE = { w: 3, h: 2, minH: 2 };
 
 /** Build a set of occupied grid cells and the max bottom edge from existing layouts. */
 function buildOccupiedGrid(widgets: DashboardWidget[]): {
