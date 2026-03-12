@@ -155,7 +155,7 @@ export const statusCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: StatusFlags) {
+  async *func(this: SentryContext, flags: StatusFlags) {
     applyFreshFlag(flags);
 
     const auth = getAuthConfig();
@@ -189,6 +189,7 @@ export const statusCommand = buildCommand({
       verification: await verifyCredentials(),
     };
 
-    return { data };
+    yield { data };
+    return;
   },
 });

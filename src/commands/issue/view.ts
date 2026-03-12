@@ -118,7 +118,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ViewFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -170,9 +170,10 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
-    return {
+    yield {
       data: { issue, event: event ?? null, trace, spanTreeLines },
       hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
     };
+    return;
   },
 });

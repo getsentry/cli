@@ -318,7 +318,7 @@ export const createCommand = buildCommand({
     },
     aliases: { t: "team", n: "dry-run" },
   },
-  async func(
+  async *func(
     this: SentryContext,
     flags: CreateFlags,
     nameArg?: string,
@@ -405,7 +405,8 @@ export const createCommand = buildCommand({
         expectedSlug,
         dryRun: true,
       };
-      return { data: result };
+      yield { data: result };
+      return;
     }
 
     // Create the project
@@ -432,6 +433,7 @@ export const createCommand = buildCommand({
       expectedSlug,
     };
 
-    return { data: result };
+    yield { data: result };
+    return;
   },
 });

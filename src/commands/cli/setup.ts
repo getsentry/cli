@@ -105,7 +105,7 @@ async function handlePathModification(
   shell: ShellInfo,
   env: NodeJS.ProcessEnv,
   emit: Logger
-): Promise<void> {
+) {
   const alreadyInPath = isInPath(binaryDir, env.PATH);
 
   if (alreadyInPath) {
@@ -235,7 +235,7 @@ async function handleCompletions(
  * Only produces output when the skill file is freshly created. Subsequent
  * runs (e.g. after upgrade) silently update without printing.
  */
-async function handleAgentSkills(homeDir: string, emit: Logger): Promise<void> {
+async function handleAgentSkills(homeDir: string, emit: Logger) {
   const location = await installAgentSkills(homeDir, CLI_VERSION);
 
   if (location?.created) {
@@ -276,7 +276,7 @@ async function bestEffort(
   stepName: string,
   fn: () => void | Promise<void>,
   warn: WarnLogger
-): Promise<void> {
+) {
   try {
     await fn();
   } catch (error) {
@@ -301,7 +301,7 @@ type ConfigStepOptions = {
  * Each step is independently guarded so a failure in one (e.g. DB permission
  * error) doesn't prevent the others from running.
  */
-async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
+async function runConfigurationSteps(opts: ConfigStepOptions) {
   const { flags, binaryPath, binaryDir, homeDir, env, emit, warn } = opts;
   const shell = detectShell(env.SHELL, homeDir, env.XDG_CONFIG_HOME);
 
@@ -441,7 +441,7 @@ export const setupCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: SetupFlags): Promise<void> {
+  async *func(this: SentryContext, flags: SetupFlags) {
     const { process, homeDir } = this;
 
     const emit: Logger = (msg: string) => {

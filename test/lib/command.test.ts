@@ -79,7 +79,7 @@ describe("buildCommand", () => {
           verbose: { kind: "boolean", brief: "Verbose", default: false },
         },
       },
-      func(_flags: { verbose: boolean }) {
+      async *func(_flags: { verbose: boolean }) {
         // no-op
       },
     });
@@ -90,7 +90,7 @@ describe("buildCommand", () => {
     const command = buildCommand({
       docs: { brief: "Simple command" },
       parameters: {},
-      func() {
+      async *func() {
         // no-op
       },
     });
@@ -137,7 +137,11 @@ describe("buildCommand telemetry integration", () => {
           },
         },
       },
-      func(this: TestContext, flags: { verbose: boolean; limit: number }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { verbose: boolean; limit: number }
+      ) {
         calledWith = flags;
       },
     });
@@ -167,7 +171,7 @@ describe("buildCommand telemetry integration", () => {
           json: { kind: "boolean", brief: "JSON output", default: false },
         },
       },
-      func(_flags: { json: boolean }) {
+      async *func(_flags: { json: boolean }) {
         // no-op
       },
     });
@@ -199,7 +203,12 @@ describe("buildCommand telemetry integration", () => {
           parameters: [{ brief: "Issue ID", parse: String }],
         },
       },
-      func(this: TestContext, _flags: Record<string, never>, issueId: string) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        _flags: Record<string, never>,
+        issueId: string
+      ) {
         calledArgs = issueId;
       },
     });
@@ -226,7 +235,8 @@ describe("buildCommand telemetry integration", () => {
     const command = buildCommand<Record<string, never>, [], TestContext>({
       docs: { brief: "Test" },
       parameters: {},
-      func(this: TestContext) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
         // Verify 'this' is correctly bound to context
         capturedStdout = typeof this.process.stdout.write === "function";
       },
@@ -259,7 +269,8 @@ describe("buildCommand telemetry integration", () => {
           },
         },
       },
-      async func(_flags: { delay: number }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(_flags: { delay: number }) {
         await Bun.sleep(1);
         executed = true;
       },
@@ -363,7 +374,7 @@ describe("buildCommand", () => {
           json: { kind: "boolean", brief: "JSON output", default: false },
         },
       },
-      func(_flags: { json: boolean }) {
+      async *func(_flags: { json: boolean }) {
         // no-op
       },
     });
@@ -380,7 +391,8 @@ describe("buildCommand", () => {
           json: { kind: "boolean", brief: "JSON output", default: false },
         },
       },
-      func(this: TestContext, flags: { json: boolean }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext, flags: { json: boolean }) {
         calledFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -408,7 +420,7 @@ describe("buildCommand", () => {
       const command = buildCommand<Record<string, never>, [], TestContext>({
         docs: { brief: "Test" },
         parameters: {},
-        func() {
+        async *func() {
           // no-op
         },
       });
@@ -434,7 +446,7 @@ describe("buildCommand", () => {
       const command = buildCommand<Record<string, never>, [], TestContext>({
         docs: { brief: "Test" },
         parameters: {},
-        func() {
+        async *func() {
           // no-op
         },
       });
@@ -460,7 +472,7 @@ describe("buildCommand", () => {
       const command = buildCommand<Record<string, never>, [], TestContext>({
         docs: { brief: "Test" },
         parameters: {},
-        func() {
+        async *func() {
           // no-op
         },
       });
@@ -495,7 +507,8 @@ describe("buildCommand", () => {
           },
         },
       },
-      func(this: TestContext, flags: { limit: number }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext, flags: { limit: number }) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -546,7 +559,11 @@ describe("buildCommand", () => {
             },
           },
         },
-        func(this: TestContext, flags: { verbose: boolean; silent: boolean }) {
+        // biome-ignore lint/correctness/useYield: test command — no output to yield
+        async *func(
+          this: TestContext,
+          flags: { verbose: boolean; silent: boolean }
+        ) {
           receivedFlags = flags as unknown as Record<string, unknown>;
         },
       });
@@ -593,7 +610,7 @@ describe("buildCommand", () => {
             },
           },
         },
-        func() {
+        async *func() {
           // no-op
         },
       });
@@ -666,7 +683,11 @@ describe("buildCommand output: json", () => {
           },
         },
       },
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -696,7 +717,11 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test" },
       output: "json",
       parameters: {},
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -731,7 +756,11 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test" },
       output: "json",
       parameters: {},
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -765,7 +794,11 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test" },
       output: "json",
       parameters: {},
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -791,7 +824,8 @@ describe("buildCommand output: json", () => {
     const command = buildCommand<Record<string, never>, [], TestContext>({
       docs: { brief: "Test" },
       parameters: {},
-      func() {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func() {
         funcCalled = true;
       },
     });
@@ -832,7 +866,11 @@ describe("buildCommand output: json", () => {
           },
         },
       },
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -863,7 +901,11 @@ describe("buildCommand output: json", () => {
       docs: { brief: "Test" },
       output: "json",
       parameters: {},
-      func(this: TestContext, flags: { json: boolean; fields?: string[] }) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
+        this: TestContext,
+        flags: { json: boolean; fields?: string[] }
+      ) {
         receivedFlags = flags as unknown as Record<string, unknown>;
       },
     });
@@ -909,7 +951,8 @@ describe("buildCommand output: json", () => {
           },
         },
       },
-      func(
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(
         this: TestContext,
         flags: { json: boolean; fields?: string[]; limit: number }
       ) {
@@ -956,8 +999,8 @@ describe("buildCommand return-based output", () => {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
       parameters: {},
-      func(this: TestContext) {
-        return { data: { name: "Alice", role: "admin" } };
+      async *func(this: TestContext) {
+        yield { data: { name: "Alice", role: "admin" } };
       },
     });
 
@@ -985,8 +1028,8 @@ describe("buildCommand return-based output", () => {
         human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
       parameters: {},
-      func(this: TestContext) {
-        return { data: { name: "Alice", role: "admin" } };
+      async *func(this: TestContext) {
+        yield { data: { name: "Alice", role: "admin" } };
       },
     });
 
@@ -1015,8 +1058,8 @@ describe("buildCommand return-based output", () => {
         human: (d: { id: number; name: string; role: string }) => `${d.name}`,
       },
       parameters: {},
-      func(this: TestContext) {
-        return { data: { id: 1, name: "Alice", role: "admin" } };
+      async *func(this: TestContext) {
+        yield { data: { id: 1, name: "Alice", role: "admin" } };
       },
     });
 
@@ -1047,8 +1090,8 @@ describe("buildCommand return-based output", () => {
           human: (d: { value: number }) => `Value: ${d.value}`,
         },
         parameters: {},
-        func(this: TestContext) {
-          return {
+        async *func(this: TestContext) {
+          yield {
             data: { value: 42 },
             hint: "Run 'sentry help' for more info",
           };
@@ -1097,7 +1140,8 @@ describe("buildCommand return-based output", () => {
         human: () => "unused",
       },
       parameters: {},
-      func(this: TestContext) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
         executed = true;
         // Void return — simulates --web early exit
       },
@@ -1122,10 +1166,10 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       // Deliberately no output config
       parameters: {},
-      func(this: TestContext) {
+      async *func(this: TestContext) {
         // This returns data, but without output config
         // the wrapper should NOT render it
-        return { value: 42 };
+        yield { value: 42 };
       },
     });
 
@@ -1154,9 +1198,9 @@ describe("buildCommand return-based output", () => {
         human: (d: { name: string }) => `Hello, ${d.name}!`,
       },
       parameters: {},
-      async func(this: TestContext) {
+      async *func(this: TestContext) {
         await Bun.sleep(1);
-        return { data: { name: "Bob" } };
+        yield { data: { name: "Bob" } };
       },
     });
 
@@ -1185,8 +1229,8 @@ describe("buildCommand return-based output", () => {
         human: (d: Array<{ id: number }>) => d.map((x) => x.id).join(", "),
       },
       parameters: {},
-      func(this: TestContext) {
-        return { data: [{ id: 1 }, { id: 2 }] };
+      async *func(this: TestContext) {
+        yield { data: [{ id: 1 }, { id: 2 }] };
       },
     });
 
@@ -1215,8 +1259,8 @@ describe("buildCommand return-based output", () => {
           human: (d: { org: string }) => `Org: ${d.org}`,
         },
         parameters: {},
-        func(this: TestContext) {
-          return { data: { org: "sentry" }, hint: "Detected from .env file" };
+        async *func(this: TestContext) {
+          yield { data: { org: "sentry" }, hint: "Detected from .env file" };
         },
       });
 
@@ -1256,7 +1300,8 @@ describe("buildCommand return-based output", () => {
         human: (d: { error: string }) => `Error: ${d.error}`,
       },
       parameters: {},
-      async func(this: TestContext) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
         throw new OutputError({ error: "not found" });
       },
     });
@@ -1307,7 +1352,8 @@ describe("buildCommand return-based output", () => {
         human: (d: { error: string }) => `Error: ${d.error}`,
       },
       parameters: {},
-      async func(this: TestContext) {
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
         throw new OutputError({ error: "not found" });
       },
     });

@@ -43,7 +43,7 @@ export const whoamiCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: WhoamiFlags) {
+  async *func(this: SentryContext, flags: WhoamiFlags) {
     applyFreshFlag(flags);
 
     if (!(await isAuthenticated())) {
@@ -65,6 +65,7 @@ export const whoamiCommand = buildCommand({
       // Cache update failure is non-essential — user identity was already fetched.
     }
 
-    return { data: user };
+    yield { data: user };
+    return;
   },
 });

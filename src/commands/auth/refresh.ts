@@ -68,7 +68,7 @@ Examples:
       },
     },
   },
-  async func(this: SentryContext, flags: RefreshFlags) {
+  async *func(this: SentryContext, flags: RefreshFlags) {
     // Env var tokens can't be refreshed
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
@@ -104,6 +104,7 @@ Examples:
         : undefined,
     };
 
-    return { data: payload };
+    yield { data: payload };
+    return;
   },
 });

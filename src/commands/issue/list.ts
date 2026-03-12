@@ -42,10 +42,7 @@ import {
   shouldAutoCompact,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
-import type {
-  CommandOutput,
-  OutputConfig,
-} from "../../lib/formatters/output.js";
+import type { OutputConfig } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -1316,11 +1313,7 @@ export const listCommand = buildListCommand("issue", {
       t: "period",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<IssueListResult>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
@@ -1385,6 +1378,7 @@ export const listCommand = buildListCommand("issue", {
       combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
     }
 
-    return { data: result, hint: combinedHint };
+    yield { data: result, hint: combinedHint };
+    return;
   },
 });

@@ -451,7 +451,7 @@ export const upgradeCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: UpgradeFlags, version?: string) {
+  async *func(this: SentryContext, flags: UpgradeFlags, version?: string) {
     // Resolve effective channel and version from positional
     const { channel, versionArg } = resolveChannelAndVersion(version);
 
@@ -493,7 +493,8 @@ export const upgradeCommand = buildCommand({
       flags,
     });
     if (resolved.kind === "done") {
-      return { data: resolved.result };
+      yield { data: resolved.result };
+      return;
     }
 
     const { target } = resolved;
@@ -509,7 +510,7 @@ export const upgradeCommand = buildCommand({
         target,
         versionArg
       );
-      return {
+      yield {
         data: {
           action: downgrade ? "downgraded" : "upgraded",
           currentVersion: CLI_VERSION,
@@ -520,6 +521,7 @@ export const upgradeCommand = buildCommand({
           warnings,
         } satisfies UpgradeResult,
       };
+      return;
     }
 
     await executeStandardUpgrade({
@@ -530,7 +532,7 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    return {
+    yield {
       data: {
         action: downgrade ? "downgraded" : "upgraded",
         currentVersion: CLI_VERSION,
@@ -540,5 +542,6 @@ export const upgradeCommand = buildCommand({
         forced: flags.force,
       } satisfies UpgradeResult,
     };
+    return;
   },
 });
