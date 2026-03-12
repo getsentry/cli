@@ -30,32 +30,38 @@ function handleStreamError(err: NodeJS.ErrnoException): void {
 process.stdout.on("error", handleStreamError);
 process.stderr.on("error", handleStreamError);
 
-/** Run CLI command with telemetry wrapper */
-async function runCommand(args: string[]): Promise<void> {
-  await withTelemetry(async (span) =>
-    run(app, args, buildContext(process, span))
-  );
-}
+/**
+ * Error-recovery middleware for the CLI.
+ *
+ * Each middleware wraps command execution and may intercept specific errors
+ * to perform recovery actions (e.g., login, start trial) then retry.
+ *
+ * Middlewares are applied innermost-first: the last middleware in the array
+ * wraps the outermost layer, so it gets first crack at errors. This means
+ * auth recovery (outermost) can catch errors from both the command AND
+ * the trial prompt retry.
+ *
+ * @param next - The next function in the chain (command or inner middleware)
+ * @param args - CLI arguments for retry
+ * @returns A function with the same signature, with error recovery added
+ */
+type ErrorMiddleware = (
+  next: (argv: string[]) => Promise<void>,
+  args: string[]
+) => Promise<void>;
 
 /**
- * Execute command with automatic Seer trial prompt.
+ * Seer trial prompt middleware.
  *
- * If the command fails with a trial-eligible SeerError in an interactive TTY,
- * checks for available trial, prompts user, starts trial, and retries.
- *
- * Shows a brief context message (not the full error format with URLs) before
- * the trial prompt. If the trial isn't available or the user declines, the
- * full error is re-thrown so the outer handler in main() displays it normally.
- *
- * @throws Re-throws the original error when trial is unavailable or declined
+ * Catches trial-eligible SeerErrors and offers to start a free trial.
+ * On success, retries the original command. On failure/decline, re-throws
+ * so the outer error handler displays the full error with upgrade URL.
  */
-async function executeWithSeerTrialPrompt(args: string[]): Promise<void> {
+const seerTrialMiddleware: ErrorMiddleware = async (next, args) => {
   try {
-    await runCommand(args);
+    await next(args);
   } catch (err) {
-    // isTrialEligible handles instanceof SeerError check + reason + orgSlug + TTY
     if (isTrialEligible(err)) {
-      // isTrialEligible narrows err to SeerError with defined orgSlug
       const started = await promptAndStartTrial(
         // biome-ignore lint/style/noNonNullAssertion: isTrialEligible guarantees orgSlug is defined
         err.orgSlug!,
@@ -64,31 +70,25 @@ async function executeWithSeerTrialPrompt(args: string[]): Promise<void> {
 
       if (started) {
         process.stderr.write("\nRetrying command...\n\n");
-        await runCommand(args);
+        await next(args);
         return;
       }
-
-      // Trial not started (unavailable, declined, or failed) — re-throw
-      // so the outer error handler in main() displays the full error
-      // with the upgrade/settings URL
     }
     throw err;
   }
-}
+};
 
 /**
- * Execute command with automatic authentication.
+ * Auto-authentication middleware.
  *
- * If the command fails due to missing authentication and we're in a TTY,
- * automatically run the interactive login flow and retry the command.
- *
- * @throws Re-throws any non-authentication errors from the command
+ * Catches auth errors (not_authenticated, expired) in interactive TTYs
+ * and runs the login flow. On success, retries through the full middleware
+ * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
  */
-async function executeWithAutoAuth(args: string[]): Promise<void> {
+const autoAuthMiddleware: ErrorMiddleware = async (next, args) => {
   try {
-    await executeWithSeerTrialPrompt(args);
+    await next(args);
   } catch (err) {
-    // Auto-login for auth errors in interactive TTY environments
     // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
     // Errors can opt-out via skipAutoAuth (e.g., auth status command)
     if (
@@ -111,20 +111,57 @@ async function executeWithAutoAuth(args: string[]): Promise<void> {
 
       if (loginSuccess) {
         process.stderr.write("\nRetrying command...\n\n");
-        await executeWithSeerTrialPrompt(args);
+        await next(args);
         return;
       }
 
-      // Login failed or was cancelled - set exit code and return
-      // (don't call process.exit() directly to allow finally blocks to run)
+      // Login failed or was cancelled
       process.exitCode = 1;
       return;
     }
 
-    // Re-throw non-auth errors to be handled by main
     throw err;
   }
+};
+
+/**
+ * Error-recovery middlewares applied around command execution.
+ *
+ * Order matters: applied innermost-first, so the last entry wraps the
+ * outermost layer. Auth middleware is outermost so it catches errors
+ * from both the command and any inner middleware retries.
+ *
+ * To add a new middleware, append it to this array.
+ */
+const errorMiddlewares: ErrorMiddleware[] = [
+  seerTrialMiddleware,
+  autoAuthMiddleware,
+];
+
+/** Run CLI command with telemetry wrapper */
+async function runCommand(args: string[]): Promise<void> {
+  await withTelemetry(async (span) =>
+    run(app, args, buildContext(process, span))
+  );
 }
+
+/**
+ * Build the command executor by composing error-recovery middlewares.
+ *
+ * Wraps `runCommand` with each middleware in order (innermost-first),
+ * producing a single function that handles all error recovery.
+ */
+function buildExecutor(): (args: string[]) => Promise<void> {
+  let executor = runCommand;
+  for (const mw of errorMiddlewares) {
+    const next = executor;
+    executor = (args) => mw(next, args);
+  }
+  return executor;
+}
+
+/** Command executor with all error-recovery middlewares applied */
+const executeCommand = buildExecutor();
 
 async function main(): Promise<void> {
   // Clean up old binary from previous Windows upgrade (no-op if file doesn't exist)
@@ -148,7 +185,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    await executeWithAutoAuth(args);
+    await executeCommand(args);
   } catch (err) {
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);

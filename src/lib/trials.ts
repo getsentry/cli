@@ -165,6 +165,8 @@ export function getDaysRemaining(trial: ProductTrial): number | null {
   }
 
   const end = new Date(trial.endDate);
+  // Match getTrialStatus: treat endDate as end-of-day UTC
+  end.setUTCHours(23, 59, 59, 999);
   const now = new Date();
   const diffMs = end.getTime() - now.getTime();
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
@@ -187,5 +189,5 @@ export function getValidTrialNames(): string[] {
  * @returns true if it's a valid trial name
  */
 export function isTrialName(value: string): boolean {
-  return value in TRIAL_NAMES;
+  return Object.hasOwn(TRIAL_NAMES, value);
 }
