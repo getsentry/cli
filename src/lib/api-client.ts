@@ -1512,7 +1512,7 @@ export async function getDetailedTrace(
  * ID that `parent_span_id` references on child spans. We copy it to `span_id`
  * so the rest of the codebase can use a single, predictable field name.
  */
-function normalizeTraceSpan(span: TraceSpan): TraceSpan {
+export function normalizeTraceSpan(span: TraceSpan): TraceSpan {
   const normalized = { ...span };
   if (!normalized.span_id && normalized.event_id) {
     normalized.span_id = normalized.event_id;
