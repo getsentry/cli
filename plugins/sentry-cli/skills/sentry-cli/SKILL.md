@@ -500,32 +500,29 @@ Update the Sentry CLI to the latest version
 
 Manage Sentry dashboards
 
-#### `sentry dashboard list`
+#### `sentry dashboard list <org/project>`
 
 List dashboards
 
 **Flags:**
-- `-o, --org <value> - Organization slug`
 - `-w, --web - Open in browser`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
-#### `sentry dashboard view <arg0>`
+#### `sentry dashboard view <args...>`
 
 View a dashboard
 
 **Flags:**
-- `-o, --org <value> - Organization slug`
 - `-w, --web - Open in browser`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
-#### `sentry dashboard create <arg0>`
+#### `sentry dashboard create <args...>`
 
 Create a dashboard
 
 **Flags:**
-- `-o, --org <value> - Organization slug`
 - `--widget-json <value> - Path to JSON file containing widget definitions`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
@@ -718,12 +715,11 @@ Initialize Sentry in your project
 
 List dashboards
 
-#### `sentry dashboards`
+#### `sentry dashboards <org/project>`
 
 List dashboards
 
 **Flags:**
-- `-o, --org <value> - Organization slug`
 - `-w, --web - Open in browser`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
