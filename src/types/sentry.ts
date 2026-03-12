@@ -667,6 +667,36 @@ export const TransactionsResponseSchema = z.object({
 
 export type TransactionsResponse = z.infer<typeof TransactionsResponseSchema>;
 
+/** A single span item from the EAP spans search endpoint */
+export const SpanListItemSchema = z
+  .object({
+    id: z.string(),
+    parent_span: z.string().nullable().optional(),
+    "span.op": z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    "span.duration": z.number().nullable().optional(),
+    timestamp: z.string(),
+    project: z.string(),
+    transaction: z.string().nullable().optional(),
+    trace: z.string(),
+  })
+  .passthrough();
+
+export type SpanListItem = z.infer<typeof SpanListItemSchema>;
+
+/** Response from the spans events endpoint */
+export const SpansResponseSchema = z.object({
+  data: z.array(SpanListItemSchema),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+export type SpansResponse = z.infer<typeof SpansResponseSchema>;
+
 // Repository
 
 /** Repository provider (e.g., GitHub, GitLab) */

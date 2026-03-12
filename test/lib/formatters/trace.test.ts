@@ -3,7 +3,7 @@
  *
  * Tests for formatTraceDuration, formatTraceTable,
   formatTracesHeader, formatTraceRow,
- * computeTraceSummary, and formatTraceSummary.
+ * computeTraceSummary, formatTraceSummary, and translateSpanQuery.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -14,6 +14,7 @@ import {
   formatTraceSummary,
   formatTracesHeader,
   formatTraceTable,
+  translateSpanQuery,
 } from "../../../src/lib/formatters/trace.js";
 import type {
   TraceSpan,
@@ -110,11 +111,8 @@ describe("formatTraceDuration", () => {
   });
 
   test("handles seconds rollover (never produces '60s')", () => {
-    // 119500ms = 1m 59.5s, rounds to 2m 0s (not 1m 60s)
     expect(formatTraceDuration(119_500)).toBe("2m 0s");
-    // 179500ms = 2m 59.5s, rounds to 3m 0s (not 2m 60s)
     expect(formatTraceDuration(179_500)).toBe("3m 0s");
-    // 59500ms is < 60000 so uses seconds format
     expect(formatTraceDuration(59_500)).toBe("59.50s");
   });
 
@@ -169,7 +167,6 @@ describe("formatTraceRow (rendered mode)", () => {
   test("includes full transaction name in markdown row", () => {
     const longName = "A".repeat(50);
     const row = formatTraceRow(makeTransaction({ transaction: longName }));
-    // Full name preserved in markdown table cell
     expect(row).toContain(longName);
   });
 
@@ -189,9 +186,7 @@ describe("formatTracesHeader (plain mode)", () => {
 
   test("emits markdown table header and separator", () => {
     const result = formatTracesHeader();
-    // Plain mode produces mdTableHeader output (no bold markup), with separator
     expect(result).toContain("| Trace ID | Transaction | Duration | When |");
-    // Duration column is right-aligned (`:` suffix in TRACE_TABLE_COLS)
     expect(result).toContain("| --- | --- | ---: | --- |");
   });
 
@@ -256,7 +251,6 @@ describe("computeTraceSummary", () => {
       makeSpan({ start_timestamp: 1000.0, timestamp: 1002.5 }),
     ];
     const summary = computeTraceSummary("trace-id", spans);
-    // (1002.5 - 1000.0) * 1000 = 2500ms
     expect(summary.duration).toBe(2500);
   });
 
@@ -266,7 +260,6 @@ describe("computeTraceSummary", () => {
       makeSpan({ start_timestamp: 999.5, timestamp: 1003.0 }),
     ];
     const summary = computeTraceSummary("trace-id", spans);
-    // (1003.0 - 999.5) * 1000 = 3500ms
     expect(summary.duration).toBe(3500);
   });
 
@@ -322,7 +315,6 @@ describe("computeTraceSummary", () => {
       makeSpan({ start_timestamp: 1000.0, timestamp: 1002.0 }),
     ];
     const summary = computeTraceSummary("trace-id", spans);
-    // Only the valid span should contribute: (1002.0 - 1000.0) * 1000 = 2000ms
     expect(summary.duration).toBe(2000);
   });
 
@@ -333,7 +325,6 @@ describe("computeTraceSummary", () => {
   });
 
   test("falls back to timestamp when end_timestamp is 0", () => {
-    // end_timestamp: 0 should be treated as missing, falling back to timestamp
     const spans: TraceSpan[] = [
       makeSpan({
         start_timestamp: 1000.0,
@@ -342,8 +333,6 @@ describe("computeTraceSummary", () => {
       }),
     ];
     const summary = computeTraceSummary("trace-id", spans);
-    // Should use timestamp (1002.5), not end_timestamp (0)
-    // Duration: (1002.5 - 1000.0) * 1000 = 2500ms
     expect(summary.duration).toBe(2500);
   });
 });
@@ -461,5 +450,56 @@ describe("formatTraceTable", () => {
       formatTraceTable([makeTransaction({ transaction: "" })])
     );
     expect(result).toContain("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// translateSpanQuery
+// ---------------------------------------------------------------------------
+
+describe("translateSpanQuery", () => {
+  test("translates op: to span.op:", () => {
+    expect(translateSpanQuery("op:db")).toBe("span.op:db");
+  });
+
+  test("translates duration: to span.duration:", () => {
+    expect(translateSpanQuery("duration:>100ms")).toBe("span.duration:>100ms");
+  });
+
+  test("bare words pass through unchanged", () => {
+    expect(translateSpanQuery("GET users")).toBe("GET users");
+  });
+
+  test("mixed shorthand and bare words", () => {
+    expect(translateSpanQuery("op:http GET duration:>50ms")).toBe(
+      "span.op:http GET span.duration:>50ms"
+    );
+  });
+
+  test("native keys pass through unchanged", () => {
+    expect(translateSpanQuery("description:fetch project:backend")).toBe(
+      "description:fetch project:backend"
+    );
+  });
+
+  test("transaction: passes through unchanged", () => {
+    expect(translateSpanQuery("transaction:checkout")).toBe(
+      "transaction:checkout"
+    );
+  });
+
+  test("key translation is case-insensitive", () => {
+    expect(translateSpanQuery("Op:db")).toBe("span.op:db");
+    expect(translateSpanQuery("DURATION:>1s")).toBe("span.duration:>1s");
+  });
+
+  test("empty query returns empty string", () => {
+    expect(translateSpanQuery("")).toBe("");
+  });
+
+  test("quoted values are preserved", () => {
+    expect(translateSpanQuery('description:"GET /api"')).toBe(
+      'description:"GET /api"'
+    );
   });
 });

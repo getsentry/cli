@@ -5,7 +5,11 @@
  * Includes flat span utilities for `span list` and `span view` commands.
  */
 
-import type { TraceSpan, TransactionListItem } from "../../types/index.js";
+import type {
+  SpanListItem,
+  TraceSpan,
+  TransactionListItem,
+} from "../../types/index.js";
 import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
 import {
@@ -315,8 +319,8 @@ export type FlatSpan = {
   start_timestamp: number;
   project_slug?: string;
   transaction?: string;
-  depth: number;
-  child_count: number;
+  depth?: number;
+  child_count?: number;
 };
 
 /**
@@ -397,203 +401,51 @@ export function findSpanById(
   return null;
 }
 
-/** Parsed span filter from a query string */
-export type SpanFilter = {
-  op?: string;
-  project?: string;
-  description?: string;
-  minDuration?: number;
-  maxDuration?: number;
-  /** When true, minDuration comparison is strict `>` (default). When false, `>=`. */
-  minExclusive?: boolean;
-  /** When true, maxDuration comparison is strict `<` (default). When false, `<=`. */
-  maxExclusive?: boolean;
+/** Map of CLI shorthand keys to Sentry API span attribute names */
+const SPAN_KEY_ALIASES: Record<string, string> = {
+  op: "span.op",
+  duration: "span.duration",
 };
 
 /**
- * Parse a "-q" filter string into structured filters.
+ * Translate CLI shorthand query keys to Sentry API span attribute names.
+ * Bare words pass through unchanged (server treats them as free-text search).
  *
- * Unlike issue/log/trace list (which pass --query to Sentry's search API for
- * server-side filtering), the trace detail API returns the full span tree with
- * no query parameter — so span filtering must be done client-side.
- *
- * Supports: `op:db`, `project:backend`, `description:fetch`,
- * `duration:>100ms`, `duration:<500ms`
- *
- * Bare words without a `:` prefix are treated as description filters.
- *
- * @param query - Raw query string
- * @returns Parsed filter
+ * @param query - Raw query string from --query flag
+ * @returns Translated query for the spans API
  */
-export function parseSpanQuery(query: string): SpanFilter {
-  const filter: SpanFilter = {};
+export function translateSpanQuery(query: string): string {
   const tokens = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
-
-  for (const token of tokens) {
-    applyQueryToken(filter, token);
-  }
-  return filter;
-}
-
-/**
- * Apply a single query token to a filter.
- * Bare words (no colon) are treated as description filters.
- */
-function applyQueryToken(filter: SpanFilter, token: string): void {
-  const colonIdx = token.indexOf(":");
-  if (colonIdx === -1) {
-    filter.description = token;
-    return;
-  }
-  const key = token.slice(0, colonIdx).toLowerCase();
-  let value = token.slice(colonIdx + 1);
-  // Strip quotes
-  if (value.startsWith('"') && value.endsWith('"')) {
-    value = value.slice(1, -1);
-  }
-
-  switch (key) {
-    case "op":
-      filter.op = value.toLowerCase();
-      break;
-    case "project":
-      filter.project = value.toLowerCase();
-      break;
-    case "description":
-      filter.description = value;
-      break;
-    case "duration": {
-      const ms = parseDurationValue(value);
-      if (ms !== null) {
-        if (value.startsWith(">")) {
-          filter.minDuration = ms;
-          filter.minExclusive = !value.startsWith(">=");
-        } else if (value.startsWith("<")) {
-          filter.maxDuration = ms;
-          filter.maxExclusive = !value.startsWith("<=");
-        }
+  return tokens
+    .map((token) => {
+      const colonIdx = token.indexOf(":");
+      if (colonIdx === -1) {
+        return token;
       }
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-/** Regex to strip comparison operators from duration values */
-const COMPARISON_OP_RE = /^[><]=?/;
-
-/** Regex to parse a numeric duration with optional unit */
-const DURATION_RE = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/i;
-
-/**
- * Parse a duration filter value like ">100ms", "<2s", ">500".
- * Returns the numeric milliseconds, or null if unparseable.
- */
-function parseDurationValue(value: string): number | null {
-  // Strip comparison operator
-  const numStr = value.replace(COMPARISON_OP_RE, "");
-  const match = numStr.match(DURATION_RE);
-  if (!match || match[1] === undefined) {
-    return null;
-  }
-  const num = Number(match[1]);
-  const unit = (match[2] ?? "ms").toLowerCase();
-  switch (unit) {
-    case "s":
-      return num * 1000;
-    case "m":
-      return num * 60_000;
-    default:
-      return num;
-  }
-}
-
-/** Check whether a duration value passes a single bound (min or max). */
-function passesDurationBound(
-  durationMs: number,
-  bound: number,
-  exclusive: boolean,
-  isMin: boolean
-): boolean {
-  if (isMin) {
-    return exclusive ? durationMs > bound : durationMs >= bound;
-  }
-  return exclusive ? durationMs < bound : durationMs <= bound;
-}
-
-/** Check if a span's duration passes the min/max filter bounds. */
-function matchesDurationFilter(
-  durationMs: number | undefined,
-  filter: SpanFilter
-): boolean {
-  if (filter.minDuration !== undefined) {
-    if (durationMs === undefined) {
-      return false;
-    }
-    if (
-      !passesDurationBound(
-        durationMs,
-        filter.minDuration,
-        filter.minExclusive !== false,
-        true
-      )
-    ) {
-      return false;
-    }
-  }
-  if (filter.maxDuration !== undefined) {
-    if (durationMs === undefined) {
-      return false;
-    }
-    if (
-      !passesDurationBound(
-        durationMs,
-        filter.maxDuration,
-        filter.maxExclusive !== false,
-        false
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
+      const key = token.slice(0, colonIdx).toLowerCase();
+      const rest = token.slice(colonIdx);
+      return (SPAN_KEY_ALIASES[key] ?? key) + rest;
+    })
+    .join(" ");
 }
 
 /**
- * Test whether a single span matches all active filter criteria.
- */
-function matchesFilter(span: FlatSpan, filter: SpanFilter): boolean {
-  if (filter.op && !span.op?.toLowerCase().includes(filter.op)) {
-    return false;
-  }
-  if (
-    filter.project &&
-    !span.project_slug?.toLowerCase().includes(filter.project)
-  ) {
-    return false;
-  }
-  if (filter.description) {
-    const desc = (span.description || "").toLowerCase();
-    if (!desc.includes(filter.description.toLowerCase())) {
-      return false;
-    }
-  }
-  return matchesDurationFilter(span.duration_ms, filter);
-}
-
-/**
- * Apply a parsed filter to a flat span list.
+ * Map a SpanListItem from the EAP spans endpoint to a FlatSpan for display.
  *
- * @param spans - Flat span array
- * @param filter - Parsed span filter
- * @returns Filtered array (does not mutate input)
+ * @param item - Span item from the spans search API
+ * @returns FlatSpan suitable for table display
  */
-export function applySpanFilter(
-  spans: FlatSpan[],
-  filter: SpanFilter
-): FlatSpan[] {
-  return spans.filter((span) => matchesFilter(span, filter));
+export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
+  return {
+    span_id: item.id,
+    parent_span_id: item.parent_span ?? undefined,
+    op: item["span.op"] ?? undefined,
+    description: item.description ?? undefined,
+    duration_ms: item["span.duration"] ?? undefined,
+    start_timestamp: new Date(item.timestamp).getTime() / 1000,
+    project_slug: item.project,
+    transaction: item.transaction ?? undefined,
+  };
 }
 
 /** Column definitions for the flat span table */
@@ -620,13 +472,6 @@ const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
       s.duration_ms !== undefined ? formatTraceDuration(s.duration_ms) : "—",
     align: "right",
     minWidth: 8,
-    shrinkable: false,
-  },
-  {
-    header: "Depth",
-    value: (s) => String(s.depth),
-    align: "right",
-    minWidth: 5,
     shrinkable: false,
   },
 ];

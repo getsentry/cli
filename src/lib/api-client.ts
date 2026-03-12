@@ -50,6 +50,9 @@ import {
   type SentryTeam,
   type SentryUser,
   SentryUserSchema,
+  type SpanListItem,
+  type SpansResponse,
+  SpansResponseSchema,
   type TraceLog,
   TraceLogsResponseSchema,
   type TraceSpan,
@@ -1503,7 +1506,24 @@ export async function getDetailedTrace(
       },
     }
   );
-  return data;
+  return data.map(normalizeTraceSpan);
+}
+
+/**
+ * The trace detail API (`/trace/{id}/`) returns each span's unique identifier
+ * as `event_id` rather than `span_id`. The value is the same 16-hex-char span
+ * ID that `parent_span_id` references on child spans. We copy it to `span_id`
+ * so the rest of the codebase can use a single, predictable field name.
+ */
+function normalizeTraceSpan(span: TraceSpan): TraceSpan {
+  const normalized = { ...span };
+  if (!normalized.span_id && normalized.event_id) {
+    normalized.span_id = normalized.event_id;
+  }
+  if (normalized.children) {
+    normalized.children = normalized.children.map(normalizeTraceSpan);
+  }
+  return normalized;
 }
 
 /** Fields to request from the transactions API */
@@ -1578,6 +1598,74 @@ export async function listTransactions(
         schema: TransactionsResponseSchema,
       }
     );
+
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data: response.data, nextCursor };
+}
+
+/** Fields to request from the spans API */
+const SPAN_FIELDS = [
+  "id",
+  "parent_span",
+  "span.op",
+  "description",
+  "span.duration",
+  "timestamp",
+  "project",
+  "transaction",
+  "trace",
+];
+
+type ListSpansOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of spans to return */
+  limit?: number;
+  /** Sort order: "time" (newest first) or "duration" (slowest first) */
+  sort?: "time" | "duration";
+  /** Time period for spans (e.g., "7d", "24h") */
+  statsPeriod?: string;
+  /** Pagination cursor to resume from a previous page */
+  cursor?: string;
+};
+
+/**
+ * List spans using the EAP spans search endpoint.
+ * Uses the Explore/Events API with dataset=spans.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with span items and optional next cursor
+ */
+export async function listSpans(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListSpansOptions = {}
+): Promise<PaginatedResponse<SpanListItem[]>> {
+  const isNumericProject = isAllDigits(projectSlug);
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
+    regionUrl,
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "spans",
+        field: SPAN_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit || 10,
+        statsPeriod: options.statsPeriod ?? "7d",
+        sort: options.sort === "duration" ? "-span.duration" : "-timestamp",
+        cursor: options.cursor,
+      },
+      schema: SpansResponseSchema,
+    }
+  );
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };

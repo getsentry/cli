@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getDetailedTrace } from "../../lib/api-client.js";
+import { listSpans } from "../../lib/api-client.js";
 import {
   parseOrgProjectArg,
   parseSlashSeparatedArg,
@@ -14,9 +14,8 @@ import {
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
-  applySpanFilter,
-  flattenSpanTree,
-  parseSpanQuery,
+  spanListItemToFlatSpan,
+  translateSpanQuery,
   writeFooter,
   writeJsonList,
   writeSpanTable,
@@ -230,42 +229,31 @@ export const listCommand = buildCommand({
 
     setContext([target.org], [target.project]);
 
-    // Fetch trace data
-    const timestamp = Math.floor(Date.now() / 1000);
-    const spans = await getDetailedTrace(target.org, traceId, timestamp);
-
-    if (spans.length === 0) {
-      throw new ValidationError(
-        `No trace found with ID "${traceId}".\n\n` +
-          "Make sure the trace ID is correct and the trace was sent recently."
-      );
-    }
-
-    // Flatten and filter
-    let flatSpans = flattenSpanTree(spans);
-    const totalSpans = flatSpans.length;
-
+    // Build server-side query
+    const queryParts = [`trace:${traceId}`];
     if (flags.query) {
-      const filter = parseSpanQuery(flags.query);
-      flatSpans = applySpanFilter(flatSpans, filter);
+      queryParts.push(translateSpanQuery(flags.query));
     }
-    const matchedSpans = flatSpans.length;
+    const apiQuery = queryParts.join(" ");
 
-    // Sort
-    if (flags.sort === "duration") {
-      flatSpans.sort((a, b) => (b.duration_ms ?? -1) - (a.duration_ms ?? -1));
-    }
-    // "time" is already in depth-first (start_timestamp) order from flattenSpanTree
+    // Fetch spans from EAP endpoint
+    const { data: spanItems, nextCursor } = await listSpans(
+      target.org,
+      target.project,
+      {
+        query: apiQuery,
+        sort: flags.sort,
+        limit: flags.limit,
+      }
+    );
 
-    // Apply limit
-    const hasMore = flatSpans.length > flags.limit;
-    flatSpans = flatSpans.slice(0, flags.limit);
+    const flatSpans = spanItems.map(spanListItemToFlatSpan);
+    const hasMore = nextCursor !== undefined;
 
     if (flags.json) {
       writeJsonList(stdout, flatSpans, {
         hasMore,
         fields: flags.fields,
-        extra: { totalSpans, matchedSpans },
       });
       return;
     }
@@ -279,11 +267,7 @@ export const listCommand = buildCommand({
     writeSpanTable(stdout, flatSpans);
 
     // Footer
-    const filterNote =
-      matchedSpans < totalSpans
-        ? ` (${matchedSpans} matched, ${totalSpans} total)`
-        : ` (${totalSpans} total)`;
-    const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}${filterNote}.`;
+    const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
 
     if (hasMore) {
       writeFooter(stdout, `${countText} Use --limit to see more.`);
