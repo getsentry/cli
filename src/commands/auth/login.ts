@@ -17,7 +17,7 @@ import {
   formatDuration,
   formatUserIdentity,
 } from "../../lib/formatters/human.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import type { LoginResult } from "../../lib/interactive-login.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
@@ -129,7 +129,7 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  output: { json: true, human: formatLoginResult },
+  output: { json: true, human: stateless(formatLoginResult) },
   async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {

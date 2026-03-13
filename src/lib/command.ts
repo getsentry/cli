@@ -44,6 +44,7 @@ import {
   type CommandOutput,
   type CommandReturn,
   commandOutput,
+  type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
   writeFooter,
@@ -342,10 +343,12 @@ export function buildCommand<
   function handleYieldedValue(
     stdout: Writer,
     value: unknown,
-    flags: Record<string, unknown>
+    flags: Record<string, unknown>,
+    // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
+    renderer?: HumanRenderer<any>
   ): void {
     if (
-      !outputConfig ||
+      !(outputConfig && renderer) ||
       value === null ||
       value === undefined ||
       value instanceof Error ||
@@ -354,7 +357,7 @@ export function buildCommand<
       return;
     }
 
-    renderCommandOutput(stdout, value.data, outputConfig, {
+    renderCommandOutput(stdout, value.data, outputConfig, renderer, {
       json: Boolean(flags.json),
       fields: flags.fields as string[] | undefined,
     });
@@ -385,6 +388,32 @@ export function buildCommand<
     return clean;
   }
 
+  /**
+   * Write post-generator output: either the renderer's `finalize()` result
+   * or the default `writeFooter(hint)`. Suppressed in JSON mode.
+   */
+  function writeFinalization(
+    stdout: Writer,
+    hint: string | undefined,
+    json: unknown,
+    // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
+    renderer?: HumanRenderer<any>
+  ): void {
+    if (json) {
+      return;
+    }
+    if (renderer?.finalize) {
+      const text = renderer.finalize(hint);
+      if (text) {
+        stdout.write(text);
+      }
+      return;
+    }
+    if (hint) {
+      writeFooter(stdout, hint);
+    }
+  }
+
   // Wrap func to intercept logging flags, capture telemetry, then call original.
   // The wrapper is an async function that iterates the generator returned by func.
   const wrappedFunc = async function (
@@ -405,6 +434,10 @@ export function buildCommand<
 
     const stdout = (this as unknown as { stdout: Writer }).stdout;
 
+    // Resolve the human renderer once per invocation. Factory creates
+    // fresh per-invocation state for streaming commands.
+    const renderer = outputConfig ? outputConfig.human() : undefined;
+
     // OutputError handler: render data through the output system, then
     // exit with the error's code. Stricli overwrites process.exitCode = 0
     // after successful returns, so process.exit() is the only way to
@@ -414,7 +447,12 @@ export function buildCommand<
       if (err instanceof OutputError && outputConfig) {
         // Only render if there's actual data to show
         if (err.data !== null && err.data !== undefined) {
-          handleYieldedValue(stdout, commandOutput(err.data), cleanFlags);
+          handleYieldedValue(
+            stdout,
+            commandOutput(err.data),
+            cleanFlags,
+            renderer
+          );
         }
         process.exit(err.exitCode);
       }
@@ -432,16 +470,14 @@ export function buildCommand<
       );
       let result = await generator.next();
       while (!result.done) {
-        handleYieldedValue(stdout, result.value, cleanFlags);
+        handleYieldedValue(stdout, result.value, cleanFlags, renderer);
         result = await generator.next();
       }
 
-      // Render post-output hint from the generator's return value.
-      // Only rendered in human mode — JSON output is self-contained.
+      // Finalize: let the renderer close streaming state (e.g., table
+      // footer), or fall back to the default writeFooter for the hint.
       const returned = result.value as CommandReturn | undefined;
-      if (returned?.hint && !cleanFlags.json) {
-        writeFooter(stdout, returned.hint);
-      }
+      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
     } catch (err) {
       handleOutputError(err);
     }

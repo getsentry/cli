@@ -22,7 +22,7 @@ import { openBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -89,7 +89,7 @@ export const startCommand = buildCommand({
       "  sentry trial start plan\n" +
       "  sentry trial start --json seer",
   },
-  output: { json: true, human: formatStartResult },
+  output: { json: true, human: stateless(formatStartResult) },
   parameters: {
     positional: {
       kind: "tuple" as const,

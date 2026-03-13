@@ -44,6 +44,7 @@ import {
 import {
   commandOutput,
   type OutputConfig,
+  stateless,
 } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -1241,7 +1242,7 @@ const jsonTransformIssueList = jsonTransformListResult;
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
   json: true,
-  human: formatIssueListHuman,
+  human: stateless(formatIssueListHuman),
   jsonTransform: jsonTransformIssueList,
 };
 

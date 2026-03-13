@@ -14,7 +14,7 @@ import {
   formatIssueDetails,
   muted,
 } from "../../lib/formatters/index.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -103,7 +103,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatIssueView,
+    human: stateless(formatIssueView),
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

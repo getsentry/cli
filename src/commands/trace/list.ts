@@ -15,7 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -181,7 +181,7 @@ export const listCommand = buildListCommand("trace", {
   },
   output: {
     json: true,
-    human: formatTraceListHuman,
+    human: stateless(formatTraceListHuman),
     jsonTransform: jsonTransformTraceList,
   },
   parameters: {

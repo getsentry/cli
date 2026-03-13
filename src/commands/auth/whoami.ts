@@ -13,7 +13,7 @@ import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/index.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -36,7 +36,7 @@ export const whoamiCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatUserIdentity,
+    human: stateless(formatUserIdentity),
   },
   parameters: {
     flags: {

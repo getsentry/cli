@@ -9,7 +9,7 @@ import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   formatSolution,
   handleSeerApiError,
@@ -172,7 +172,7 @@ export const planCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatPlanOutput,
+    human: stateless(formatPlanOutput),
   },
   parameters: {
     positional: issueIdPositional,
