@@ -153,7 +153,6 @@ describe("parsePositionalArgs properties", () => {
         const uuid = toUuidFormat(hex);
         const result = parsePositionalArgs([uuid]);
         expect(result.traceId).toBe(hex);
-        expect(result.warning).toContain("Auto-corrected");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -166,7 +165,6 @@ describe("parsePositionalArgs properties", () => {
         const result = parsePositionalArgs([target, uuid]);
         expect(result.traceId).toBe(hex);
         expect(result.targetArg).toBe(target);
-        expect(result.warning).toContain("Auto-corrected");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

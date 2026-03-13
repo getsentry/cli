@@ -89,6 +89,7 @@ export {
 } from "./api/teams.js";
 export {
   getDetailedTrace,
+  listSpans,
   listTransactions,
   normalizeTraceSpan,
 } from "./api/traces.js";

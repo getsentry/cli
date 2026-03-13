@@ -1,10 +1,13 @@
 /**
- * Trace and Transaction API functions
+ * Trace, Transaction, and Span API functions
  *
- * Functions for retrieving detailed traces and listing transactions.
+ * Functions for retrieving detailed traces, listing transactions, and listing spans.
  */
 
 import {
+  type SpanListItem,
+  type SpansResponse,
+  SpansResponseSchema,
   type TraceSpan,
   type TransactionListItem,
   type TransactionsResponse,
@@ -140,6 +143,76 @@ export async function listTransactions(
         schema: TransactionsResponseSchema,
       }
     );
+
+  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
+  return { data: response.data, nextCursor };
+}
+
+// Span listing
+
+/** Fields to request from the spans API */
+const SPAN_FIELDS = [
+  "id",
+  "parent_span",
+  "span.op",
+  "description",
+  "span.duration",
+  "timestamp",
+  "project",
+  "transaction",
+  "trace",
+];
+
+type ListSpansOptions = {
+  /** Search query using Sentry query syntax */
+  query?: string;
+  /** Maximum number of spans to return */
+  limit?: number;
+  /** Sort order: "date"/"time" (newest first) or "duration" (slowest first) */
+  sort?: "date" | "time" | "duration";
+  /** Time period for spans (e.g., "7d", "24h") */
+  statsPeriod?: string;
+  /** Pagination cursor to resume from a previous page */
+  cursor?: string;
+};
+
+/**
+ * List spans using the EAP spans search endpoint.
+ * Uses the Explore/Events API with dataset=spans.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with span items and optional next cursor
+ */
+export async function listSpans(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListSpansOptions = {}
+): Promise<PaginatedResponse<SpanListItem[]>> {
+  const isNumericProject = isAllDigits(projectSlug);
+  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
+
+  const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
+    regionUrl,
+    `/organizations/${orgSlug}/events/`,
+    {
+      params: {
+        dataset: "spans",
+        field: SPAN_FIELDS,
+        project: isNumericProject ? projectSlug : undefined,
+        query: fullQuery || undefined,
+        per_page: options.limit || 10,
+        statsPeriod: options.statsPeriod ?? "7d",
+        sort: options.sort === "duration" ? "-span.duration" : "-timestamp",
+        cursor: options.cursor,
+      },
+      schema: SpansResponseSchema,
+    }
+  );
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };

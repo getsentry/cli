@@ -46,40 +46,11 @@ type ViewFlags = {
 const USAGE_HINT = "sentry trace view <org>/<project> <trace-id>";
 
 /**
- * Validate a trace ID and detect UUID auto-correction.
- *
- * Returns the validated trace ID and an optional warning when dashes were
- * stripped from a UUID-format input (e.g., `ed29abc8-71c4-475b-...`).
- */
-function validateAndWarn(raw: string): {
-  traceId: string;
-  uuidWarning?: string;
-} {
-  const traceId = validateTraceId(raw);
-  const trimmedRaw = raw.trim().toLowerCase();
-  const uuidWarning =
-    trimmedRaw.includes("-") && trimmedRaw !== traceId
-      ? `Auto-corrected trace ID: stripped dashes → ${traceId}`
-      : undefined;
-  return { traceId, uuidWarning };
-}
-
-/**
- * Merge multiple optional warning strings into a single warning, or undefined.
- */
-function mergeWarnings(
-  ...warnings: (string | undefined)[]
-): string | undefined {
-  const filtered = warnings.filter(Boolean);
-  return filtered.length > 0 ? filtered.join("\n") : undefined;
-}
-
-/**
  * Parse positional arguments for trace view.
  * Handles: `<trace-id>` or `<target> <trace-id>`
  *
- * Validates the trace ID format (32-character hex) and auto-corrects
- * UUID-format inputs by stripping dashes.
+ * Validates the trace ID format (32-character hex) and silently strips
+ * dashes from UUID-format inputs.
  *
  * @param args - Positional arguments from CLI
  * @returns Parsed trace ID and optional target arg
@@ -89,7 +60,7 @@ function mergeWarnings(
 export function parsePositionalArgs(args: string[]): {
   traceId: string;
   targetArg: string | undefined;
-  /** Warning message if arguments appear to be in the wrong order or UUID was auto-corrected */
+  /** Warning message if arguments appear to be in the wrong order */
   warning?: string;
   /** Suggestion when first arg looks like an issue short ID */
   suggestion?: string;
@@ -109,32 +80,21 @@ export function parsePositionalArgs(args: string[]): {
       "Trace ID",
       USAGE_HINT
     );
-    const validated = validateAndWarn(id);
-    return {
-      traceId: validated.traceId,
-      targetArg,
-      warning: validated.uuidWarning,
-    };
+    return { traceId: validateTraceId(id), targetArg };
   }
 
   const second = args[1];
   if (second === undefined) {
-    const validated = validateAndWarn(first);
-    return {
-      traceId: validated.traceId,
-      targetArg: undefined,
-      warning: validated.uuidWarning,
-    };
+    return { traceId: validateTraceId(first), targetArg: undefined };
   }
 
   // Detect swapped args: user put ID first and target second
   const swapWarning = detectSwappedViewArgs(first, second);
   if (swapWarning) {
-    const validated = validateAndWarn(first);
     return {
-      traceId: validated.traceId,
+      traceId: validateTraceId(first),
       targetArg: second,
-      warning: mergeWarnings(swapWarning, validated.uuidWarning),
+      warning: swapWarning,
     };
   }
 
@@ -144,11 +104,9 @@ export function parsePositionalArgs(args: string[]): {
     : undefined;
 
   // Two or more args - first is target, second is trace ID
-  const validated = validateAndWarn(second);
   return {
-    traceId: validated.traceId,
+    traceId: validateTraceId(second),
     targetArg: first,
-    warning: validated.uuidWarning,
     suggestion,
   };
 }
