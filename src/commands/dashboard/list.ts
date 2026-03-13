@@ -9,7 +9,7 @@ import { listDashboards } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -56,11 +56,14 @@ function formatDashboardListHuman(result: DashboardListResult): string {
     widgets: string;
   };
 
-  const rows: DashboardRow[] = result.dashboards.map((d) => ({
-    id: d.id,
-    title: `[${escapeMarkdownCell(d.title)}](${buildDashboardUrl(result.orgSlug, d.id)})`,
-    widgets: String(d.widgetDisplay?.length ?? 0),
-  }));
+  const rows: DashboardRow[] = result.dashboards.map((d) => {
+    const url = buildDashboardUrl(result.orgSlug, d.id);
+    return {
+      id: d.id,
+      title: `${escapeMarkdownCell(d.title)}\n${colorTag("muted", url)}`,
+      widgets: String(d.widgetDisplay?.length ?? 0),
+    };
+  });
 
   const columns: Column<DashboardRow>[] = [
     { header: "ID", value: (r) => r.id },
