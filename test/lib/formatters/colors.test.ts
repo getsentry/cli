@@ -127,4 +127,13 @@ describe("terminalLink", () => {
     const stripped = result.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
     expect(stripped).toBe("display");
   });
+
+  test("uses text as URL when url is omitted", () => {
+    const result = terminalLink("https://example.com");
+    expect(result).toContain("]8;;https://example.com");
+    expect(result).toContain("https://example.com");
+    expect(result).toBe(
+      terminalLink("https://example.com", "https://example.com")
+    );
+  });
 });

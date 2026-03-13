@@ -5,6 +5,7 @@
  */
 
 import { cancel, log, note, outro } from "@clack/prompts";
+import { terminalLink } from "../formatters/colors.js";
 import { featureLabel } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -41,10 +42,13 @@ function buildSummaryLines(output: WizardOutput): string[] {
     lines.push(`Commands:    ${output.commands.join("; ")}`);
   }
   if (output.sentryProjectUrl) {
-    lines.push(`Project:     ${output.sentryProjectUrl}`);
+    lines.push(`Project:     ${terminalLink(output.sentryProjectUrl)}`);
   }
   if (output.docsUrl) {
-    lines.push(`Docs:        ${output.docsUrl}`);
+    lines.push(`Docs:        ${terminalLink(output.docsUrl)}`);
+  }
+  if (output.docsUrl) {
+    lines.push(`Docs:        ${terminalLink(output.docsUrl, output.docsUrl)}`);
   }
 
   const changedFiles = output.changedFiles;
@@ -103,7 +107,7 @@ export function formatError(result: WorkflowRunResult): void {
 
   const docsUrl = inner?.docsUrl;
   if (docsUrl) {
-    log.info(`Docs: ${docsUrl}`);
+    log.info(`Docs: ${terminalLink(docsUrl)}`);
   }
 
   cancel("Setup failed");
