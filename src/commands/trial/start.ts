@@ -143,7 +143,8 @@ export const startCommand = buildCommand({
 
     // Plan trial: no API to start it — open billing page instead
     if (parsed.name === "plan") {
-      yield await handlePlanTrial(orgSlug, this.stdout, flags.json ?? false);
+      const result = await handlePlanTrial(orgSlug, this.stdout, flags.json ?? false);
+      yield commandOutput(result.data);
       return;
     }
 
