@@ -92,7 +92,11 @@ describe("dashboard list command", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, web: false }, undefined);
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false },
+      undefined
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -109,7 +113,11 @@ describe("dashboard list command", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, web: false }, undefined);
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false },
+      undefined
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(JSON.parse(output)).toEqual([]);
@@ -121,7 +129,11 @@ describe("dashboard list command", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, web: false }, undefined);
+    await func.call(
+      context,
+      { json: false, web: false, fresh: false },
+      undefined
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("ID");
@@ -137,7 +149,11 @@ describe("dashboard list command", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, web: false }, undefined);
+    await func.call(
+      context,
+      { json: false, web: false, fresh: false },
+      undefined
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No dashboards found.");
@@ -149,7 +165,11 @@ describe("dashboard list command", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, web: false }, undefined);
+    await func.call(
+      context,
+      { json: false, web: false, fresh: false },
+      undefined
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("dashboards");
@@ -162,7 +182,11 @@ describe("dashboard list command", () => {
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, web: false }, "my-org/");
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false },
+      "my-org/"
+    );
 
     expect(listDashboardsSpy).toHaveBeenCalledWith("my-org");
   });
@@ -174,7 +198,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
 
     await expect(
-      func.call(context, { json: false, web: false }, undefined)
+      func.call(context, { json: false, web: false, fresh: false }, undefined)
     ).rejects.toThrow("Organization");
   });
 
@@ -183,7 +207,11 @@ describe("dashboard list command", () => {
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, web: true }, undefined);
+    await func.call(
+      context,
+      { json: false, web: true, fresh: false },
+      undefined
+    );
 
     expect(openInBrowserSpy).toHaveBeenCalled();
     expect(listDashboardsSpy).not.toHaveBeenCalled();
