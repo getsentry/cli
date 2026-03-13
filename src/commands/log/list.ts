@@ -25,6 +25,7 @@ import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
   type CommandOutput,
   commandOutput,
+  jsonlLines,
 } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
@@ -51,13 +52,18 @@ type ListFlags = {
   readonly fields?: string[];
 };
 
-/** Result for non-follow log list operations. */
+/** Result yielded by the log list command — one per batch. */
 type LogListResult = {
   logs: LogLike[];
   /** Human-readable hint (e.g., "Showing 100 logs. Use --limit to show more.") */
   hint?: string;
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
+  /**
+   * When true, this result is one batch in a follow-mode stream.
+   * Formatters use this to switch between full-table and incremental rendering.
+   */
+  streaming?: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -154,50 +160,6 @@ async function executeSingleFetch(
 // ---------------------------------------------------------------------------
 
 /**
- * A chunk yielded by the follow-mode generator.
- *
- * Two kinds:
- * - `text` — pre-rendered human content (header, table rows, footer).
- *   Written to stdout in human mode, skipped in JSON mode.
- * - `data` — raw log entries for JSONL output. Skipped in human mode
- *   (the text chunk handles rendering).
- */
-type LogStreamChunk =
-  | { kind: "text"; content: string }
-  | { kind: "data"; logs: LogLike[] };
-
-/**
- * Yield `CommandOutput` values from a streaming log chunk.
- *
- * - **Human mode**: yields the chunk as-is (text is rendered, data is skipped
- *   by the human formatter).
- * - **JSON mode**: expands `data` chunks into one yield per log entry (JSONL).
- *   Text chunks yield a suppressed-in-JSON marker so the framework skips them.
- *
- * @param chunk - A streaming chunk from `generateFollowLogs`
- * @param json - Whether JSON output mode is active
- * @param fields - Optional field filter list
- */
-function* yieldStreamChunks(
-  chunk: LogStreamChunk,
-  json: boolean
-): Generator<CommandOutput<LogListOutput>, void, undefined> {
-  if (json) {
-    // In JSON mode, expand data chunks into one yield per log for JSONL
-    if (chunk.kind === "data") {
-      for (const log of chunk.logs) {
-        // Yield a single-log data chunk so jsonTransform emits one line
-        yield commandOutput({ kind: "data", logs: [log] } as LogListOutput);
-      }
-    }
-    // Text chunks suppressed in JSON mode (jsonTransform returns undefined)
-    return;
-  }
-  // Human mode: yield the chunk directly for the human formatter
-  yield commandOutput(chunk);
-}
-
-/**
  * Sleep that resolves early when an AbortSignal fires.
  * Resolves (not rejects) on abort for clean generator shutdown.
  */
@@ -231,8 +193,6 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
  */
 type FollowGeneratorConfig<T extends LogLike> = {
   flags: ListFlags;
-  /** Whether to show the trace-ID column in table output */
-  includeTrace: boolean;
   /** Report diagnostic/error messages (caller logs via logger) */
   onDiagnostic: (message: string) => void;
   /**
@@ -316,27 +276,23 @@ async function fetchPoll<T extends LogLike>(
 /**
  * Async generator that streams log entries via follow-mode polling.
  *
- * Yields typed {@link LogStreamChunk} values:
- * - `text` chunks contain pre-rendered human output (header, rows, footer)
- * - `data` chunks contain raw log arrays for JSONL serialization
+ * Yields batches of log entries (chronological order). The command wraps
+ * each batch in a `LogListResult` with `streaming: true` so the OutputConfig
+ * formatters can handle incremental rendering vs JSONL expansion.
  *
  * The generator handles SIGINT via AbortController for clean shutdown.
- * It never touches stdout directly — all data output flows through
- * yielded chunks and diagnostics use the `onDiagnostic` callback.
+ * It never touches stdout — all data output flows through yielded batches
+ * and diagnostics use the `onDiagnostic` callback.
  *
  * @throws {AuthError} if the API returns an authentication error
  */
 async function* generateFollowLogs<T extends LogLike>(
   config: FollowGeneratorConfig<T>
-): AsyncGenerator<LogStreamChunk, void, undefined> {
+): AsyncGenerator<T[], void, undefined> {
   const { flags } = config;
   const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
   const pollIntervalMs = pollInterval * 1000;
 
-  const plain = flags.json || isPlainOutput();
-  const table = plain ? undefined : createLogStreamingTable();
-
-  let headerPrinted = false;
   // timestamp_precise is nanoseconds; Date.now() is milliseconds → convert
   let lastTimestamp = Date.now() * 1_000_000;
 
@@ -345,42 +301,12 @@ async function* generateFollowLogs<T extends LogLike>(
   const stop = () => controller.abort();
   process.once("SIGINT", stop);
 
-  /**
-   * Yield header + data + rendered-text chunks for a batch of logs.
-   * Implemented as a sync sub-generator to use `yield*` from the caller.
-   */
-  function* yieldBatch(logs: T[]): Generator<LogStreamChunk, void, undefined> {
-    if (logs.length === 0) {
-      return;
-    }
-
-    // Header on first non-empty batch (human mode only)
-    if (!(flags.json || headerPrinted)) {
-      yield {
-        kind: "text",
-        content: table ? table.header() : formatLogsHeader(),
-      };
-      headerPrinted = true;
-    }
-
-    const chronological = [...logs].reverse();
-
-    // Data chunk for JSONL
-    yield { kind: "data", logs: chronological };
-
-    // Rendered text chunk for human mode
-    if (!flags.json) {
-      yield {
-        kind: "text",
-        content: renderLogRows(chronological, config.includeTrace, table),
-      };
-    }
-  }
-
   try {
     // Initial fetch
     const initialLogs = await config.fetch("1m");
-    yield* yieldBatch(initialLogs);
+    if (initialLogs.length > 0) {
+      yield [...initialLogs].reverse();
+    }
     lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
     config.onInitialLogs?.(initialLogs);
 
@@ -392,21 +318,30 @@ async function* generateFollowLogs<T extends LogLike>(
       }
 
       const newLogs = await fetchPoll(config, lastTimestamp);
-      if (newLogs) {
-        yield* yieldBatch(newLogs);
+      if (newLogs && newLogs.length > 0) {
+        yield [...newLogs].reverse();
         lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
       }
-    }
-
-    // Table footer — yielded after clean shutdown so the consumer can
-    // render it. Placed inside `try` (not `finally`) because a yield in
-    // `finally` is discarded when the consumer terminates via error.
-    if (table && headerPrinted) {
-      yield { kind: "text", content: table.footer() };
     }
   } finally {
     process.removeListener("SIGINT", stop);
   }
+}
+
+/**
+ * Consume a follow-mode generator, yielding `LogListResult` batches
+ * with `streaming: true`. Emits a final empty batch so the human
+ * formatter can close the streaming table.
+ */
+async function* yieldFollowBatches<T extends LogLike>(
+  generator: AsyncGenerator<T[], void, undefined>,
+  extra?: Partial<LogListResult>
+): AsyncGenerator<CommandOutput<LogListResult>, void, undefined> {
+  for await (const batch of generator) {
+    yield commandOutput({ logs: batch, streaming: true, ...extra });
+  }
+  // Final empty batch signals end-of-stream to the human formatter
+  yield commandOutput({ logs: [], streaming: true, ...extra });
 }
 
 /** Default time period for trace-logs queries */
@@ -458,11 +393,18 @@ async function executeTraceSingleFetch(
  * Write the follow-mode banner via logger. Suppressed in JSON mode.
  * Includes poll interval, Ctrl+C hint, and update notification.
  */
-function writeFollowBanner(flags: ListFlags, bannerText: string): void {
-  if (flags.json) {
+/**
+ * Write the follow-mode banner via logger. Suppressed in JSON mode
+ * to avoid stderr noise when agents consume JSONL output.
+ */
+function writeFollowBanner(
+  pollInterval: number,
+  bannerText: string,
+  json: boolean
+): void {
+  if (json) {
     return;
   }
-  const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
   logger.info(`${bannerText} (poll interval: ${pollInterval}s)`);
   logger.info("Press Ctrl+C to stop.");
   const notification = getUpdateNotification();
@@ -475,22 +417,57 @@ function writeFollowBanner(flags: ListFlags, bannerText: string): void {
 // Output formatting
 // ---------------------------------------------------------------------------
 
-/** Data yielded by the log list command — either a batch result or a stream chunk. */
-type LogListOutput = LogListResult | LogStreamChunk;
+// ---------------------------------------------------------------------------
+// Stateful streaming table — module-level singleton, reset per follow run.
+// Safe because CLI processes are single-use (one invocation per process).
+// ---------------------------------------------------------------------------
+
+let streamingTable: StreamingTable | undefined;
+let streamingHeaderEmitted = false;
+
+/**
+ * Reset the streaming table state. Called at the start of each follow-mode run.
+ */
+function resetStreamingState(): void {
+  const plain = isPlainOutput();
+  streamingTable = plain ? undefined : createLogStreamingTable();
+  streamingHeaderEmitted = false;
+}
 
 /**
  * Format log output as human-readable terminal text.
  *
- * Handles both batch results ({@link LogListResult}) and streaming
- * chunks ({@link LogStreamChunk}). The returned string omits a trailing
- * newline — the output framework appends one automatically.
+ * - **Batch mode** (`streaming` absent/false): renders a complete table.
+ * - **Streaming mode** (`streaming: true`): renders incremental rows using
+ *   a stateful {@link StreamingTable}, including the header on first call.
+ *
+ * The returned string omits a trailing newline — the output framework
+ * appends one automatically.
  */
-function formatLogOutput(result: LogListOutput): string {
-  if ("kind" in result) {
-    // Streaming chunk — text is pre-rendered, data is skipped (handled by JSON)
-    return result.kind === "text" ? result.content.trimEnd() : "";
+function formatLogOutput(result: LogListResult): string {
+  if (result.streaming) {
+    const includeTrace = !result.traceId;
+    let text = "";
+
+    if (result.logs.length === 0) {
+      // Empty batch signals end of stream — emit table footer
+      if (streamingTable && streamingHeaderEmitted) {
+        text += streamingTable.footer();
+      }
+      return text.trimEnd();
+    }
+
+    // Emit header on first non-empty batch
+    if (!streamingHeaderEmitted) {
+      text += streamingTable ? streamingTable.header() : formatLogsHeader();
+      streamingHeaderEmitted = true;
+    }
+
+    text += renderLogRows(result.logs, includeTrace, streamingTable);
+    return text.trimEnd();
   }
-  // Batch result
+
+  // Batch: complete table
   if (result.logs.length === 0) {
     return result.hint ?? "No logs found.";
   }
@@ -501,35 +478,31 @@ function formatLogOutput(result: LogListOutput): string {
 /**
  * Transform log output into the JSON shape.
  *
- * - Batch: returns the logs array (no envelope).
- * - Streaming text: returns `undefined` (suppressed in JSON mode).
- * - Streaming data: returns individual log objects for JSONL expansion.
+ * - **Batch mode** (`streaming` absent/false): returns the full logs array.
+ * - **Streaming mode** (`streaming: true`): returns individual log objects
+ *   so the framework writes one JSON object per line (JSONL).
+ *
+ * When the result contains a single log entry in streaming mode, it's
+ * returned unwrapped. Multiple entries return an array (each call from
+ * the wrapper writes one line to stdout).
  */
 function jsonTransformLogOutput(
-  result: LogListOutput,
+  result: LogListResult,
   fields?: string[]
 ): unknown {
-  if ("kind" in result) {
-    // Streaming: text chunks are suppressed, data chunks return bare log
-    // objects for JSONL (one JSON object per line, not wrapped in an array).
-    // yieldStreamChunks already fans out to one log per chunk.
-    if (result.kind === "text") {
+  const applyFields = (log: LogLike) =>
+    fields && fields.length > 0 ? filterFields(log, fields) : log;
+
+  if (result.streaming) {
+    // Streaming: expand to JSONL (one JSON object per line)
+    if (result.logs.length === 0) {
       return;
     }
-    const log = result.logs[0];
-    if (log === undefined) {
-      return;
-    }
-    if (fields && fields.length > 0) {
-      return filterFields(log, fields);
-    }
-    return log;
+    return jsonlLines(result.logs.map(applyFields));
   }
-  // Batch result
-  if (fields && fields.length > 0) {
-    return result.logs.map((log) => filterFields(log, fields));
-  }
-  return result.logs;
+
+  // Batch: return full array
+  return result.logs.map(applyFields);
 }
 
 export const listCommand = buildListCommand("log", {
@@ -628,15 +601,19 @@ export const listCommand = buildListCommand("log", {
       if (flags.follow) {
         const traceId = flags.trace;
 
+        resetStreamingState();
         // Banner (suppressed in JSON mode)
-        writeFollowBanner(flags, `Streaming logs for trace ${traceId}...`);
+        writeFollowBanner(
+          flags.follow ?? DEFAULT_POLL_INTERVAL,
+          `Streaming logs for trace ${traceId}...`,
+          flags.json
+        );
 
         // Track IDs of logs seen without timestamp_precise so they are
         // shown once but not duplicated on subsequent polls.
         const seenWithoutTs = new Set<string>();
         const generator = generateFollowLogs({
           flags,
-          includeTrace: false,
           onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
@@ -665,9 +642,7 @@ export const listCommand = buildListCommand("log", {
           },
         });
 
-        for await (const chunk of generator) {
-          yield* yieldStreamChunks(chunk, flags.json);
-        }
+        yield* yieldFollowBatches(generator, { traceId });
         return;
       }
 
@@ -694,11 +669,15 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
-        writeFollowBanner(flags, "Streaming logs...");
+        resetStreamingState();
+        writeFollowBanner(
+          flags.follow ?? DEFAULT_POLL_INTERVAL,
+          "Streaming logs...",
+          flags.json
+        );
 
         const generator = generateFollowLogs({
           flags,
-          includeTrace: true,
           onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
@@ -710,9 +689,7 @@ export const listCommand = buildListCommand("log", {
           extractNew: (logs) => logs,
         });
 
-        for await (const chunk of generator) {
-          yield* yieldStreamChunks(chunk, flags.json);
-        }
+        yield* yieldFollowBatches(generator);
         return;
       }
 
