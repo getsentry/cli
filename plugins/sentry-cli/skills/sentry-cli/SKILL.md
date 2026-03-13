@@ -506,6 +506,7 @@ List dashboards
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
 - `-f, --fresh - Bypass cache and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
@@ -751,6 +752,7 @@ List dashboards
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
 - `-f, --fresh - Bypass cache and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
