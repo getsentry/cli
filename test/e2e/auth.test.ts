@@ -56,7 +56,9 @@ describe("sentry auth status", () => {
 
     const result = await ctx.run(["auth", "status"]);
 
-    expect(result.stdout).toContain("Authenticated");
+    // Status messages go to stderr via consola
+    const output = result.stdout + result.stderr;
+    expect(output).toContain("Authenticated");
     expect(result.exitCode).toBe(0);
   });
 
@@ -66,8 +68,10 @@ describe("sentry auth status", () => {
     const result = await ctx.run(["auth", "status"]);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("Authenticated");
-    expect(result.stdout).toContain("Access verified");
+    // Status messages go to stderr via consola
+    const output = result.stdout + result.stderr;
+    expect(output).toContain("Authenticated");
+    expect(output).toContain("Access verified");
   });
 });
 
@@ -77,12 +81,15 @@ describe("sentry auth login --token", () => {
     async () => {
       const result = await ctx.run(["auth", "login", "--token", TEST_TOKEN]);
 
-      expect(result.stdout).toContain("Authenticated");
+      // Login messages go to stderr via consola
+      const output = result.stdout + result.stderr;
+      expect(output).toContain("Authenticated");
       expect(result.exitCode).toBe(0);
 
       // Verify token was stored
       const statusResult = await ctx.run(["auth", "status"]);
-      expect(statusResult.stdout).toContain("Authenticated");
+      const statusOutput = statusResult.stdout + statusResult.stderr;
+      expect(statusOutput).toContain("Authenticated");
     },
     { timeout: 10_000 }
   );
@@ -159,7 +166,9 @@ describe("sentry auth logout", () => {
       const result = await ctx.run(["auth", "logout"]);
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toMatch(/logged out/i);
+      // Logout messages go to stderr via consola
+      const logoutOutput = result.stdout + result.stderr;
+      expect(logoutOutput).toMatch(/logged out/i);
 
       // Verify we're logged out
       const statusResult = await ctx.run(["auth", "status"]);

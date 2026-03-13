@@ -85,17 +85,20 @@ sentry api /organizations/ \
   --header "X-Custom-Header:value"
 ```
 
-### Show Response Headers
+### Verbose Mode
 
 ```bash
-sentry api /organizations/ --include
+sentry api /organizations/ --verbose
 ```
 
-```
-HTTP/2 200
-content-type: application/json
-x-sentry-rate-limit-remaining: 95
+Request and response metadata is logged to stderr:
 
+```
+> GET /api/0/organizations/
+>
+< HTTP 200
+< content-type: application/json
+<
 [{"slug": "my-org", ...}]
 ```
 

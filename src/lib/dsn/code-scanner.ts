@@ -19,12 +19,13 @@ import path from "node:path";
 import * as Sentry from "@sentry/bun";
 import ignore, { type Ignore } from "ignore";
 import pLimit from "p-limit";
-import { DEFAULT_SENTRY_HOST } from "../constants.js";
+import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
+import { MONOREPO_ROOTS } from "./types.js";
 
 /** Scoped logger for DSN code scanning */
 const log = logger.withTag("dsn-scan");
@@ -61,9 +62,12 @@ const CONCURRENCY_LIMIT = 50;
 /**
  * Maximum depth to scan from project root.
  * Depth 0 = files in root directory
- * Depth 2 = files in second-level subdirectories (e.g., src/lib/file.ts)
+ * Depth 3 = files in third-level subdirectories (e.g., src/lib/config/sentry.ts)
+ *
+ * In monorepos, depth resets to 0 when entering a package directory
+ * (e.g., packages/spotlight/), giving each package its own depth budget.
  */
-const MAX_SCAN_DEPTH = 2;
+const MAX_SCAN_DEPTH = 3;
 
 /**
  * Directories that are always skipped regardless of .gitignore.
@@ -183,6 +187,19 @@ const normalizePath: (p: string) => string =
   path.sep === path.posix.sep
     ? (x) => x
     : (x) => x.replaceAll(path.sep, path.posix.sep);
+
+/**
+ * Check if a relative path is a monorepo package directory.
+ * Returns true for paths like "packages/frontend", "apps/server", etc.
+ * (exactly 2 segments where the first matches a MONOREPO_ROOTS entry)
+ */
+function isMonorepoPackageDir(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  return (
+    segments.length === 2 &&
+    MONOREPO_ROOTS.includes(segments[0] as (typeof MONOREPO_ROOTS)[number])
+  );
+}
 
 /**
  * Pattern to match Sentry DSN URLs.
@@ -316,7 +333,7 @@ function isCommentedLine(trimmedLine: string): boolean {
  * @returns The expected host domain for DSN validation
  */
 function getExpectedHost(): string {
-  const sentryUrl = process.env.SENTRY_URL;
+  const sentryUrl = getConfiguredSentryUrl();
 
   if (sentryUrl) {
     // Self-hosted: only accept DSNs matching the configured host
@@ -324,10 +341,10 @@ function getExpectedHost(): string {
       const url = new URL(sentryUrl);
       return url.host;
     } catch {
-      // Invalid SENTRY_URL - throw immediately since nothing will work
+      // Invalid SENTRY_HOST/SENTRY_URL - throw immediately since nothing will work
       throw new ConfigError(
-        `SENTRY_URL "${sentryUrl}" is not a valid URL`,
-        "Set SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
+        `SENTRY_HOST/SENTRY_URL "${sentryUrl}" is not a valid URL`,
+        "Set SENTRY_HOST/SENTRY_URL to a valid URL (e.g., https://sentry.example.com) or unset it to use sentry.io"
       );
     }
   }
@@ -441,6 +458,7 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
   const files: string[] = [];
   const dirMtimes: Record<string, number> = {};
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: recursive directory walk is inherently complex but straightforward
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > MAX_SCAN_DEPTH) {
       return;
@@ -462,7 +480,8 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
       }
 
       if (entry.isDirectory()) {
-        await walk(fullPath, depth + 1);
+        const nextDepth = isMonorepoPackageDir(relativePath) ? 0 : depth + 1;
+        await walk(fullPath, nextDepth);
       } else if (entry.isFile() && shouldScanFile(entry.name)) {
         files.push(relativePath);
       }
@@ -608,7 +627,10 @@ async function scanFilesForDsns(
     earlyExit: false,
   };
 
-  // Create a rate-limited processor that handles early exit
+  // Create a rate-limited processor that handles early exit.
+  // Note: we intentionally do NOT use limit.clearQueue() because it causes
+  // the promises for cleared items to never settle, hanging Promise.all forever.
+  // Instead, queued tasks check state.earlyExit and return immediately.
   const processWithLimit = (file: string) =>
     limit(async () => {
       if (state.earlyExit) {
@@ -624,7 +646,6 @@ async function scanFilesForDsns(
 
       if (shouldExit) {
         state.earlyExit = true;
-        limit.clearQueue();
       }
     });
 

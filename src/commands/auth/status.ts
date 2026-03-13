@@ -21,122 +21,118 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
-import { error, muted, success } from "../../lib/formatters/colors.js";
-import {
-  formatExpiration,
-  formatUserIdentity,
-  maskToken,
-} from "../../lib/formatters/human.js";
+import { formatAuthStatus, maskToken } from "../../lib/formatters/human.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import type { Writer } from "../../types/index.js";
 
 type StatusFlags = {
   readonly "show-token": boolean;
+  readonly json: boolean;
   readonly fresh: boolean;
+  readonly fields?: string[];
 };
-
-/**
- * Write user identity information
- */
-function writeUserInfo(stdout: Writer): void {
-  const user = getUserInfo();
-  if (!user) {
-    return;
-  }
-  stdout.write(`User: ${muted(formatUserIdentity(user))}\n`);
-}
 
 /** Check if the auth source is an environment variable */
 function isEnvSource(source: AuthSource): boolean {
   return source.startsWith(ENV_SOURCE_PREFIX);
 }
 
-/** Extract the env var name from an env-based AuthSource (e.g. "env:SENTRY_AUTH_TOKEN" → "SENTRY_AUTH_TOKEN") */
-function envVarName(source: AuthSource): string {
-  return source.slice(ENV_SOURCE_PREFIX.length);
-}
+/**
+ * Structured data representing the full auth status.
+ * Serves as both the JSON output shape and input to the human formatter.
+ */
+export type AuthStatusData = {
+  /** Whether the user is currently authenticated */
+  authenticated: boolean;
+  /** Auth source: "oauth" or "env:SENTRY_AUTH_TOKEN" etc. */
+  source: string;
+  /** Path to the SQLite config database (only for non-env tokens) */
+  configPath?: string;
+  /** User identity from cached user info */
+  user?: { name?: string; email?: string; username?: string };
+  /** Token display and metadata */
+  token?: {
+    /** Masked or full token string depending on --show-token */
+    display: string;
+    /** Expiration timestamp (ms since epoch), if available */
+    expiresAt?: number;
+    /** Whether auto-refresh via refresh token is enabled */
+    refreshEnabled: boolean;
+  };
+  /** Default org/project settings */
+  defaults?: {
+    organization?: string;
+    project?: string;
+  };
+  /** Credential verification results */
+  verification?: {
+    /** Whether the API call succeeded */
+    success: boolean;
+    /** Organizations accessible with the current token */
+    organizations?: Array<{ name: string; slug: string }>;
+    /** Error message if verification failed */
+    error?: string;
+  };
+};
 
 /**
- * Write token information
+ * Collect token information into the data structure.
  */
-function writeTokenInfo(
-  stdout: Writer,
+function collectTokenInfo(
   auth: AuthConfig | undefined,
   showToken: boolean
-): void {
+): AuthStatusData["token"] | undefined {
   if (!auth?.token) {
     return;
   }
 
-  const tokenDisplay = showToken ? auth.token : maskToken(auth.token);
-  stdout.write(`Token: ${tokenDisplay}\n`);
+  const display = showToken ? auth.token : maskToken(auth.token);
+  const fromEnv = isEnvSource(auth.source);
 
-  // Env var tokens have no expiry or refresh — skip those sections
-  if (isEnvSource(auth.source)) {
-    return;
-  }
-
-  if (auth.expiresAt) {
-    stdout.write(`Expires: ${formatExpiration(auth.expiresAt)}\n`);
-  }
-
-  // Show refresh token status
-  if (auth.refreshToken) {
-    stdout.write(`Auto-refresh: ${success("enabled")}\n`);
-  } else {
-    stdout.write("Auto-refresh: disabled (no refresh token)\n");
-  }
+  return {
+    display,
+    // Env var tokens have no expiry or refresh
+    expiresAt: fromEnv ? undefined : auth.expiresAt,
+    refreshEnabled: fromEnv ? false : Boolean(auth.refreshToken),
+  };
 }
 
 /**
- * Write default settings
+ * Collect default org/project into the data structure.
  */
-async function writeDefaults(stdout: Writer): Promise<void> {
-  const defaultOrg = await getDefaultOrganization();
-  const defaultProject = await getDefaultProject();
+async function collectDefaults(): Promise<AuthStatusData["defaults"]> {
+  const org = await getDefaultOrganization();
+  const project = await getDefaultProject();
 
-  if (!(defaultOrg || defaultProject)) {
+  if (!(org || project)) {
     return;
   }
 
-  stdout.write("\nDefaults:\n");
-  if (defaultOrg) {
-    stdout.write(`  Organization: ${defaultOrg}\n`);
-  }
-  if (defaultProject) {
-    stdout.write(`  Project: ${defaultProject}\n`);
-  }
+  return {
+    organization: org ?? undefined,
+    project: project ?? undefined,
+  };
 }
 
 /**
- * Verify credentials by fetching organizations
+ * Verify credentials by fetching organizations.
+ * Captures success/failure into data rather than throwing.
  */
-async function verifyCredentials(
-  stdout: Writer,
-  stderr: Writer
-): Promise<void> {
-  stdout.write("\nVerifying credentials...\n");
-
+async function verifyCredentials(): Promise<AuthStatusData["verification"]> {
   try {
     const orgs = await listOrganizations();
-    stdout.write(
-      `\n${success("✓")} Access verified. You have access to ${orgs.length} organization(s):\n`
-    );
-
-    const maxDisplay = 5;
-    for (const org of orgs.slice(0, maxDisplay)) {
-      stdout.write(`  - ${org.name} (${org.slug})\n`);
-    }
-    if (orgs.length > maxDisplay) {
-      stdout.write(`  ... and ${orgs.length - maxDisplay} more\n`);
-    }
+    return {
+      success: true,
+      organizations: orgs.map((o) => ({ name: o.name, slug: o.slug })),
+    };
   } catch (err) {
-    const message = stringifyUnknown(err);
-    stderr.write(`\n${error("✗")} Could not verify credentials: ${message}\n`);
+    return {
+      success: false,
+      error: stringifyUnknown(err),
+    };
   }
 }
 
@@ -147,6 +143,7 @@ export const statusCommand = buildCommand({
       "Display information about your current authentication status, " +
       "including whether you're logged in and your default organization/project settings.",
   },
+  output: { json: true, human: formatAuthStatus },
   parameters: {
     flags: {
       "show-token": {
@@ -158,18 +155,12 @@ export const statusCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: StatusFlags): Promise<void> {
+  async func(this: SentryContext, flags: StatusFlags) {
     applyFreshFlag(flags);
-    const { stdout, stderr } = this;
 
-    const auth = await getAuthConfig();
+    const auth = getAuthConfig();
     const authenticated = await isAuthenticated();
-    const fromEnv = auth && isEnvSource(auth.source);
-
-    // Show config path only for stored (OAuth) tokens — irrelevant for env vars
-    if (!fromEnv) {
-      stdout.write(`Config: ${getDbPath()}\n`);
-    }
+    const fromEnv = auth ? isEnvSource(auth.source) : false;
 
     if (!authenticated) {
       // Skip auto-login - user explicitly ran status to check auth state
@@ -178,18 +169,26 @@ export const statusCommand = buildCommand({
       });
     }
 
-    if (fromEnv) {
-      stdout.write(
-        `Status: Authenticated via ${envVarName(auth.source)} environment variable ${success("✓")}\n`
-      );
-    } else {
-      stdout.write(`Status: Authenticated ${success("✓")}\n`);
-    }
-    writeUserInfo(stdout);
-    stdout.write("\n");
+    // Build the user info
+    const userInfo = getUserInfo();
+    const user = userInfo
+      ? {
+          name: userInfo.name,
+          email: userInfo.email,
+          username: userInfo.username,
+        }
+      : undefined;
 
-    writeTokenInfo(stdout, auth, flags["show-token"]);
-    await writeDefaults(stdout);
-    await verifyCredentials(stdout, stderr);
+    const data: AuthStatusData = {
+      authenticated: true,
+      source: auth?.source ?? "oauth",
+      configPath: fromEnv ? undefined : getDbPath(),
+      user,
+      token: collectTokenInfo(auth, flags["show-token"]),
+      defaults: await collectDefaults(),
+      verification: await verifyCredentials(),
+    };
+
+    return { data };
   },
 });

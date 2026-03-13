@@ -9,6 +9,8 @@ export type WizardOptions = {
   yes: boolean;
   dryRun: boolean;
   features?: string[];
+  /** Explicit team slug to create the project under. Skips team resolution. */
+  team?: string;
 };
 
 // Local-op suspend payloads

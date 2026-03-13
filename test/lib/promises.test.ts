@@ -1,75 +1,15 @@
 /**
  * Promise Utilities Tests
+ *
+ * Note: Core behavior invariants (true/false results, error handling, empty arrays)
+ * are tested via property-based tests in promises.property.test.ts. These tests
+ * focus on concurrency and timing behavior that property tests cannot easily verify.
  */
 
 import { describe, expect, test } from "bun:test";
 import { anyTrue } from "../../src/lib/promises.js";
 
-describe("anyTrue", () => {
-  test("returns false for empty array", async () => {
-    const result = await anyTrue([], async () => true);
-    expect(result).toBe(false);
-  });
-
-  test("returns true when single item passes", async () => {
-    const result = await anyTrue([1], async () => true);
-    expect(result).toBe(true);
-  });
-
-  test("returns false when single item fails", async () => {
-    const result = await anyTrue([1], async () => false);
-    expect(result).toBe(false);
-  });
-
-  test("returns true when first item passes quickly", async () => {
-    const calls: number[] = [];
-
-    const result = await anyTrue([1, 2, 3], async (n) => {
-      calls.push(n);
-      if (n === 1) {
-        return true; // First item passes immediately
-      }
-      await Bun.sleep(100); // Others are slow
-      return false;
-    });
-
-    expect(result).toBe(true);
-    // First item should have been called
-    expect(calls).toContain(1);
-  });
-
-  test("returns true when last item passes", async () => {
-    const result = await anyTrue([1, 2, 3], async (n) => {
-      return n === 3; // Only last item passes
-    });
-
-    expect(result).toBe(true);
-  });
-
-  test("returns false when all items fail", async () => {
-    const result = await anyTrue([1, 2, 3], async () => false);
-    expect(result).toBe(false);
-  });
-
-  test("treats errors as false", async () => {
-    const result = await anyTrue([1, 2, 3], async (n) => {
-      if (n === 1) {
-        throw new Error("test error");
-      }
-      return n === 2; // Second item passes
-    });
-
-    expect(result).toBe(true);
-  });
-
-  test("returns false when all predicates error", async () => {
-    const result = await anyTrue([1, 2, 3], async () => {
-      throw new Error("test error");
-    });
-
-    expect(result).toBe(false);
-  });
-
+describe("anyTrue concurrency", () => {
   test("starts all predicates concurrently", async () => {
     const startTimes: number[] = [];
     const startTime = Date.now();
@@ -102,18 +42,6 @@ describe("anyTrue", () => {
 
     expect(result).toBe(true);
     expect(resolveCount).toBe(1);
-  });
-
-  test("works with complex async predicates", async () => {
-    const files = ["exists.txt", "missing.txt", "also-missing.txt"];
-
-    const result = await anyTrue(files, async (filename) => {
-      // Simulate async file check
-      await Bun.sleep(5);
-      return filename === "exists.txt";
-    });
-
-    expect(result).toBe(true);
   });
 
   test("does not wait for slow false predicates after finding true", async () => {

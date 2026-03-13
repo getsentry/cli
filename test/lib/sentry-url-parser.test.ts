@@ -311,10 +311,13 @@ describe("parseSentryUrl", () => {
 
 describe("applySentryUrlContext", () => {
   let originalSentryUrl: string | undefined;
+  let originalSentryHost: string | undefined;
 
   beforeEach(() => {
     originalSentryUrl = process.env.SENTRY_URL;
+    originalSentryHost = process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
   });
 
   afterEach(() => {
@@ -323,43 +326,58 @@ describe("applySentryUrlContext", () => {
     } else {
       delete process.env.SENTRY_URL;
     }
+    if (originalSentryHost !== undefined) {
+      process.env.SENTRY_HOST = originalSentryHost;
+    } else {
+      delete process.env.SENTRY_HOST;
+    }
   });
 
-  test("sets SENTRY_URL for self-hosted instance", () => {
+  test("sets both SENTRY_HOST and SENTRY_URL for self-hosted instance", () => {
     applySentryUrlContext("https://sentry.example.com");
+    expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
     expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
   });
 
-  test("does not set SENTRY_URL for SaaS (sentry.io)", () => {
+  test("does not set SENTRY_HOST or SENTRY_URL for SaaS (sentry.io)", () => {
     applySentryUrlContext("https://sentry.io");
+    expect(process.env.SENTRY_HOST).toBeUndefined();
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("does not set SENTRY_URL for SaaS subdomain (us.sentry.io)", () => {
+  test("does not set SENTRY_HOST or SENTRY_URL for SaaS subdomain (us.sentry.io)", () => {
     applySentryUrlContext("https://us.sentry.io");
+    expect(process.env.SENTRY_HOST).toBeUndefined();
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("overrides existing SENTRY_URL (parsed URL takes precedence)", () => {
+  test("overrides existing env vars (parsed URL takes precedence)", () => {
+    process.env.SENTRY_HOST = "https://existing.example.com";
     process.env.SENTRY_URL = "https://existing.example.com";
     applySentryUrlContext("https://sentry.other.com");
+    expect(process.env.SENTRY_HOST).toBe("https://sentry.other.com");
     expect(process.env.SENTRY_URL).toBe("https://sentry.other.com");
   });
 
-  test("sets SENTRY_URL for self-hosted with port", () => {
+  test("sets both env vars for self-hosted with port", () => {
     applySentryUrlContext("https://sentry.acme.internal:9000");
+    expect(process.env.SENTRY_HOST).toBe("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_URL).toBe("https://sentry.acme.internal:9000");
   });
 
-  test("clears existing SENTRY_URL when SaaS URL is detected", () => {
+  test("clears both env vars when SaaS URL is detected", () => {
+    process.env.SENTRY_HOST = "https://sentry.example.com";
     process.env.SENTRY_URL = "https://sentry.example.com";
     applySentryUrlContext("https://sentry.io");
+    expect(process.env.SENTRY_HOST).toBeUndefined();
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("clears existing SENTRY_URL when SaaS subdomain is detected", () => {
+  test("clears both env vars when SaaS subdomain is detected", () => {
+    process.env.SENTRY_HOST = "https://sentry.example.com";
     process.env.SENTRY_URL = "https://sentry.example.com";
     applySentryUrlContext("https://us.sentry.io");
+    expect(process.env.SENTRY_HOST).toBeUndefined();
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 });

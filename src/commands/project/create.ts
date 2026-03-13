@@ -60,6 +60,7 @@ const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type CreateFlags = {
   readonly team?: string;
+  readonly "dry-run": boolean;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -308,8 +309,14 @@ export const createCommand = buildCommand({
         brief: "Team to create the project under",
         optional: true,
       },
+      "dry-run": {
+        kind: "boolean",
+        brief:
+          "Validate inputs and show what would be created without creating it",
+        default: false,
+      },
     },
-    aliases: { t: "team" },
+    aliases: { t: "team", n: "dry-run" },
   },
   async func(
     this: SentryContext,
@@ -379,7 +386,27 @@ export const createCommand = buildCommand({
       detectedFrom: resolved.detectedFrom,
       usageHint: USAGE_HINT,
       autoCreateSlug: slugify(name),
+      dryRun: flags["dry-run"],
     });
+
+    const expectedSlug = slugify(name);
+
+    // Dry-run mode: show what would be created without creating it
+    if (flags["dry-run"]) {
+      const result: ProjectCreatedResult = {
+        project: { id: "", slug: expectedSlug, name, platform },
+        orgSlug,
+        teamSlug: team.slug,
+        teamSource: team.source,
+        requestedPlatform: platform,
+        dsn: null,
+        url: "",
+        slugDiverged: false,
+        expectedSlug,
+        dryRun: true,
+      };
+      return { data: result };
+    }
 
     // Create the project
     const project = await createProjectWithErrors({
@@ -392,8 +419,6 @@ export const createCommand = buildCommand({
 
     // Fetch DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
-
-    const expectedSlug = slugify(name);
 
     const result: ProjectCreatedResult = {
       project,

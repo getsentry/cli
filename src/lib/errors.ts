@@ -130,6 +130,26 @@ export class ConfigError extends CliError {
   }
 }
 
+/**
+ * Thrown when a command produces valid output but should exit non-zero.
+ *
+ * Unlike other errors, the output data is rendered to stdout (not stderr)
+ * through the normal output system — the `buildCommand` wrapper catches
+ * this before it reaches the global error handler. Think "HTTP 404 body":
+ * useful data, but the operation itself failed.
+ *
+ * @param data - The output data to render (same type as CommandOutput.data)
+ */
+export class OutputError extends CliError {
+  readonly data: unknown;
+
+  constructor(data: unknown) {
+    super("", 1);
+    this.name = "OutputError";
+    this.data = data;
+  }
+}
+
 const DEFAULT_CONTEXT_ALTERNATIVES = [
   "Run from a directory with a Sentry-configured project",
   "Set SENTRY_ORG and SENTRY_PROJECT (or SENTRY_DSN) environment variables",
@@ -351,11 +371,18 @@ export class SeerError extends CliError {
   }
 
   override format(): string {
+    // Soften trial hint — we can't check availability synchronously,
+    // so use "check" language rather than "start" to avoid misleading
+    // users whose trial is already expired
+    const trialHint =
+      "\n\nYou may be eligible for a free trial:\n  sentry trial list";
+
     // When org slug is known, provide direct URLs to settings
     if (this.orgSlug) {
       const suggestions: Record<SeerErrorReason, string> = {
-        not_enabled: `To enable Seer:\n  ${buildSeerSettingsUrl(this.orgSlug)}`,
-        no_budget: `To use Seer features, upgrade your plan:\n  ${buildBillingUrl(this.orgSlug, "seer")}`,
+        not_enabled: `To enable Seer:\n  ${buildSeerSettingsUrl(this.orgSlug)}${trialHint}`,
+        no_budget: `To use Seer features, upgrade your plan:\n  ${buildBillingUrl(this.orgSlug, "seer")}${trialHint}`,
+        // ai_disabled is an admin decision — don't suggest trial
         ai_disabled: `To enable AI features:\n  ${buildOrgSettingsUrl(this.orgSlug, "hideAiFeatures")}`,
       };
       return `${this.message}\n\n${suggestions[this.reason]}`;
@@ -363,10 +390,9 @@ export class SeerError extends CliError {
 
     // Fallback when org slug is unknown - give generic guidance
     const fallbackSuggestions: Record<SeerErrorReason, string> = {
-      not_enabled:
-        "To enable Seer, visit your organization's Seer settings in Sentry.",
-      no_budget:
-        "To use Seer features, upgrade your plan in your organization's billing settings.",
+      not_enabled: `To enable Seer, visit your organization's Seer settings in Sentry.${trialHint}`,
+      no_budget: `To use Seer features, upgrade your plan in your organization's billing settings.${trialHint}`,
+      // ai_disabled is an admin decision — don't suggest trial
       ai_disabled:
         "To enable AI features, check the 'Hide AI Features' setting in your organization settings.",
     };

@@ -6,11 +6,14 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { rawApiRequest } from "../lib/api-client.js";
+import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
-import { ValidationError } from "../lib/errors.js";
+import { OutputError, ValidationError } from "../lib/errors.js";
 import { validateEndpoint } from "../lib/input-validation.js";
-import type { Writer } from "../types/index.js";
+import { logger } from "../lib/logger.js";
+import { getDefaultSdkConfig } from "../lib/sentry-client.js";
+
+const log = logger.withTag("api");
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -21,9 +24,13 @@ type ApiFlags = {
   readonly "raw-field"?: string[];
   readonly header?: string[];
   readonly input?: string;
-  readonly include: boolean;
   readonly silent: boolean;
   readonly verbose: boolean;
+  readonly "dry-run": boolean;
+  /** Injected by buildCommand via output config */
+  readonly json: boolean;
+  /** Injected by buildCommand via output config */
+  readonly fields?: string[];
 };
 
 // Request Parsing
@@ -303,7 +310,7 @@ export function setNestedValue(
 
 /**
  * Auto-correct fields that use ':' instead of '=' as the separator, and warn
- * the user on stderr.
+ * the user via the module logger.
  *
  * This recovers from a common mistake where users write Sentry search-query
  * style syntax (`-F status:resolved`) instead of the required key=value form
@@ -319,14 +326,12 @@ export function setNestedValue(
  * downstream parser can throw its normal error.
  *
  * @param fields - Raw field strings from --field or --raw-field flags
- * @param stderr - Writer to emit warnings on (command's stderr)
  * @returns New array with corrected field strings (or the original array if no
  *   corrections were needed)
  * @internal Exported for testing
  */
 export function normalizeFields(
-  fields: string[] | undefined,
-  stderr: Writer
+  fields: string[] | undefined
 ): string[] | undefined {
   if (!fields || fields.length === 0) {
     return fields;
@@ -352,8 +357,8 @@ export function normalizeFields(
       const key = field.substring(0, colonIndex);
       const value = field.substring(colonIndex + 1);
       const corrected = `${key}=${value}`;
-      stderr.write(
-        `warning: field '${field}' looks like it uses ':' instead of '=' — interpreting as '${corrected}'\n`
+      log.warn(
+        `field '${field}' looks like it uses ':' instead of '=' — interpreting as '${corrected}'`
       );
       return corrected;
     }
@@ -736,10 +741,10 @@ function tryParseJsonField(
  *   was empty/undefined.
  * @internal Exported for testing
  */
-export function extractJsonBody(
-  fields: string[] | undefined,
-  stderr: Writer
-): { body?: Record<string, unknown> | unknown[]; remaining?: string[] } {
+export function extractJsonBody(fields: string[] | undefined): {
+  body?: Record<string, unknown> | unknown[];
+  remaining?: string[];
+} {
   if (!fields || fields.length === 0) {
     return {};
   }
@@ -765,9 +770,8 @@ export function extractJsonBody(
 
     jsonBody = parsed;
     const preview = field.length > 60 ? `${field.substring(0, 57)}...` : field;
-    stderr.write(
-      `hint: '${preview}' was used as the request body. ` +
-        "Use --data/-d to pass inline JSON next time.\n"
+    log.info(
+      `'${preview}' was used as the request body. Use --data/-d to pass inline JSON next time.`
     );
   }
 
@@ -842,133 +846,92 @@ export function buildBodyFromFields(
 // Response Output
 
 /**
- * Write response headers to stdout (standard format)
+ * Format a raw response body value for human-readable output.
+ * Objects are pretty-printed as JSON, strings pass through, null/undefined → empty.
  * @internal Exported for testing
  */
-export function writeResponseHeaders(
-  stdout: Writer,
-  status: number,
-  headers: Headers
-): void {
-  stdout.write(`HTTP ${status}\n`);
-  headers.forEach((value, key) => {
-    stdout.write(`${key}: ${value}\n`);
-  });
-  stdout.write("\n");
+export function formatApiResponse(data: unknown): string {
+  if (data === null || data === undefined) {
+    return "";
+  }
+  if (typeof data === "object") {
+    return JSON.stringify(data, null, 2);
+  }
+  return String(data);
 }
 
 /**
- * Write response body to stdout
+ * Resolve the full URL that rawApiRequest would use for a request.
+ *
+ * Mirrors the URL construction in rawApiRequest:
+ * `${baseUrl}/api/0/${endpoint}?${queryString}`
  * @internal Exported for testing
  */
-export function writeResponseBody(stdout: Writer, body: unknown): void {
-  if (body === null || body === undefined) {
-    return;
-  }
-
-  if (typeof body === "object") {
-    stdout.write(`${JSON.stringify(body, null, 2)}\n`);
-  } else {
-    stdout.write(`${String(body)}\n`);
-  }
-}
-
-/**
- * Write verbose request output (curl-style format)
- * @internal Exported for testing
- */
-export function writeVerboseRequest(
-  stdout: Writer,
-  method: string,
+export function resolveRequestUrl(
   endpoint: string,
-  headers: Record<string, string> | undefined
-): void {
-  stdout.write(`> ${method} /api/0/${endpoint}\n`);
-  if (headers) {
-    for (const [key, value] of Object.entries(headers)) {
-      stdout.write(`> ${key}: ${value}\n`);
-    }
-  }
-  stdout.write(">\n");
+  params?: Record<string, string | string[]>
+): string {
+  // Use getDefaultSdkConfig().baseUrl — same as rawApiRequest — to ensure
+  // trailing slashes are stripped and the URL matches what would be sent.
+  const { baseUrl } = getDefaultSdkConfig();
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const searchParams = buildSearchParams(params);
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  return `${baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
 }
 
 /**
- * Write verbose response output (curl-style format)
+ * Resolve effective request headers, mirroring rawApiRequest logic.
+ *
+ * Auto-adds Content-Type: application/json for non-string object bodies
+ * when no Content-Type was explicitly provided.
+ *
  * @internal Exported for testing
  */
-export function writeVerboseResponse(
-  stdout: Writer,
-  status: number,
-  headers: Headers
-): void {
-  stdout.write(`< HTTP ${status}\n`);
-  headers.forEach((value, key) => {
-    stdout.write(`< ${key}: ${value}\n`);
-  });
-  stdout.write("<\n");
-}
-
-/**
- * Handle response output based on flags
- * @internal Exported for testing
- */
-export function handleResponse(
-  stdout: Writer,
-  response: { status: number; headers: Headers; body: unknown },
-  flags: { silent: boolean; verbose: boolean; include: boolean }
-): void {
-  const isError = response.status >= 400;
-
-  // Silent mode - only set exit code
-  if (flags.silent) {
-    if (isError) {
-      process.exit(1);
-    }
-    return;
+export function resolveEffectiveHeaders(
+  customHeaders: Record<string, string> | undefined,
+  body: unknown
+): Record<string, string> {
+  // Mirror rawApiRequest exactly: auto-add Content-Type for any non-string,
+  // non-undefined body when no Content-Type was explicitly provided.
+  const isStringBody = typeof body === "string";
+  const headers = { ...(customHeaders ?? {}) };
+  const hasContentType = Object.keys(headers).some(
+    (k) => k.toLowerCase() === "content-type"
+  );
+  if (!(isStringBody || hasContentType) && body !== undefined) {
+    headers["Content-Type"] = "application/json";
   }
-
-  // Output headers (verbose or include mode)
-  if (flags.verbose) {
-    writeVerboseResponse(stdout, response.status, response.headers);
-  } else if (flags.include) {
-    writeResponseHeaders(stdout, response.status, response.headers);
-  }
-
-  // Output body
-  writeResponseBody(stdout, response.body);
-
-  // Exit with error code for error responses
-  if (isError) {
-    process.exit(1);
-  }
+  return headers;
 }
 
 /**
  * Build body and params from field flags, auto-detecting bare JSON bodies.
  *
  * Runs colon-to-equals normalization, extracts any JSON body passed as a
- * field value (with a stderr hint about `--data`), and routes the remaining
+ * field value (with a logged hint about `--data`), and routes the remaining
  * fields to body or query params based on the HTTP method.
  *
  * @internal Exported for testing
  */
 export function buildFromFields(
   method: HttpMethod,
-  flags: Pick<ApiFlags, "field" | "raw-field">,
-  stderr: Writer
+  flags: Pick<ApiFlags, "field" | "raw-field">
 ): {
   body?: Record<string, unknown> | unknown[];
   params?: Record<string, string | string[]>;
 } {
-  const field = normalizeFields(flags.field, stderr);
-  let rawField = normalizeFields(flags["raw-field"], stderr);
+  const field = normalizeFields(flags.field);
+  let rawField = normalizeFields(flags["raw-field"]);
 
   // Auto-detect bare JSON passed as a field value (common mistake).
   // GET requests don't have a body — skip detection so JSON-shaped values
   // fall through to query-param routing (which will throw a clear error).
   let body: Record<string, unknown> | unknown[] | undefined;
   if (method !== "GET") {
-    const extracted = extractJsonBody(rawField, stderr);
+    const extracted = extractJsonBody(rawField);
     body = extracted.body;
     rawField = extracted.remaining;
   }
@@ -1020,8 +983,7 @@ export function buildFromFields(
  */
 export async function resolveBody(
   flags: Pick<ApiFlags, "method" | "data" | "input" | "field" | "raw-field">,
-  stdin: NodeJS.ReadStream & { fd: 0 },
-  stderr: Writer
+  stdin: NodeJS.ReadStream & { fd: 0 }
 ): Promise<{
   body?: Record<string, unknown> | unknown[] | string;
   params?: Record<string, string | string[]>;
@@ -1060,12 +1022,37 @@ export async function resolveBody(
     return { body: await buildBodyFromInput(flags.input, stdin) };
   }
 
-  return buildFromFields(flags.method, flags, stderr);
+  return buildFromFields(flags.method, flags);
 }
 
 // Command Definition
 
+/** Log outgoing request details in `> ` curl-verbose style. */
+function logRequest(
+  method: string,
+  endpoint: string,
+  headers: Record<string, string> | undefined
+): void {
+  log.debug(`> ${method} /api/0/${endpoint}`);
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      log.debug(`> ${key}: ${value}`);
+    }
+  }
+  log.debug(">");
+}
+
+/** Log incoming response details in `< ` curl-verbose style. */
+function logResponse(response: { status: number; headers: Headers }): void {
+  log.debug(`< HTTP ${response.status}`);
+  response.headers.forEach((value, key) => {
+    log.debug(`< ${key}: ${value}`);
+  });
+  log.debug("<");
+}
+
 export const apiCommand = buildCommand({
+  output: { json: true, human: formatApiResponse },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:
@@ -1143,11 +1130,6 @@ export const apiCommand = buildCommand({
         optional: true,
         placeholder: "file",
       },
-      include: {
-        kind: "boolean",
-        brief: "Include HTTP response status line and headers in the output",
-        default: false,
-      },
       silent: {
         kind: "boolean",
         brief: "Do not print the response body",
@@ -1158,6 +1140,11 @@ export const apiCommand = buildCommand({
         brief: "Include full HTTP request and response in the output",
         default: false,
       },
+      "dry-run": {
+        kind: "boolean",
+        brief: "Show the resolved request without sending it",
+        default: false,
+      },
     },
     aliases: {
       X: "method",
@@ -1165,30 +1152,36 @@ export const apiCommand = buildCommand({
       F: "field",
       f: "raw-field",
       H: "header",
-      i: "include",
+      n: "dry-run",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ApiFlags,
-    endpoint: string
-  ): Promise<void> {
-    const { stdout, stderr, stdin } = this;
+  async func(this: SentryContext, flags: ApiFlags, endpoint: string) {
+    const { stdin } = this;
 
-    // Normalize endpoint to ensure trailing slash (Sentry API requirement)
     const normalizedEndpoint = normalizeEndpoint(endpoint);
-
-    // Resolve body and query params from flags (--data, --input, or fields)
-    const { body, params } = await resolveBody(flags, stdin, stderr);
+    const { body, params } = await resolveBody(flags, stdin);
 
     const headers =
       flags.header && flags.header.length > 0
         ? parseHeaders(flags.header)
         : undefined;
 
-    // Verbose mode: show request details (unless silent)
-    if (flags.verbose && !flags.silent) {
-      writeVerboseRequest(stdout, flags.method, normalizedEndpoint, headers);
+    // Dry-run mode: preview the request that would be sent
+    if (flags["dry-run"]) {
+      return {
+        data: {
+          method: flags.method,
+          url: resolveRequestUrl(normalizedEndpoint, params),
+          headers: resolveEffectiveHeaders(headers, body),
+          body: body ?? null,
+        },
+      };
+    }
+
+    const verbose = flags.verbose && !flags.silent;
+
+    if (verbose) {
+      logRequest(flags.method, normalizedEndpoint, headers);
     }
 
     const response = await rawApiRequest(normalizedEndpoint, {
@@ -1198,6 +1191,25 @@ export const apiCommand = buildCommand({
       headers,
     });
 
-    handleResponse(stdout, response, flags);
+    const isError = response.status >= 400;
+
+    if (verbose) {
+      logResponse(response);
+    }
+
+    // Silent mode — no output, just exit code
+    if (flags.silent) {
+      if (isError) {
+        throw new OutputError(null);
+      }
+      return;
+    }
+
+    // Always return raw body — --fields filters it directly
+    if (isError) {
+      throw new OutputError(response.body);
+    }
+
+    return { data: response.body };
   },
 });

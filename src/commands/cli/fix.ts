@@ -15,10 +15,51 @@ import {
   repairSchema,
   type SchemaIssue,
 } from "../../lib/db/schema.js";
+import { OutputError } from "../../lib/errors.js";
+import { formatFixResult } from "../../lib/formatters/human.js";
 import { getRealUsername } from "../../lib/utils.js";
 
 type FixFlags = {
   readonly "dry-run": boolean;
+  readonly json: boolean;
+  readonly fields?: string[];
+};
+
+/**
+ * A single diagnosed issue with optional repair outcome.
+ *
+ * Each issue represents one problem found during diagnosis. The `repaired`
+ * field indicates the repair outcome: `true` = fixed, `false` = failed,
+ * `undefined` = not attempted (dry-run or skipped).
+ */
+export type FixIssue = {
+  /** Which diagnostic category this issue belongs to */
+  category: "ownership" | "permission" | "schema";
+  /** Human-readable description of the problem */
+  description: string;
+  /** Repair outcome: true=fixed, false=failed, undefined=not attempted */
+  repaired?: boolean;
+  /** Detail message for the repair success or failure */
+  repairMessage?: string;
+};
+
+/**
+ * Complete result of the fix command, collecting all diagnosed issues
+ * across ownership, permission, and schema categories.
+ */
+export type FixResult = {
+  /** Absolute path to the database file */
+  dbPath: string;
+  /** Expected schema version */
+  schemaVersion: number;
+  /** Whether this was a dry-run (no repairs attempted) */
+  dryRun: boolean;
+  /** All diagnosed issues across all categories */
+  issues: FixIssue[];
+  /** True when at least one issue couldn't be repaired */
+  repairFailed: boolean;
+  /** Manual instructions when automatic repair isn't possible */
+  instructions?: string;
 };
 
 /** Format a schema issue as a human-readable string for display. */
@@ -222,39 +263,76 @@ function resolveUid(username: string): number | null {
   }
 }
 
+/** Per-issue repair outcome, aligned by index with the input issues array */
+type RepairOutcome = {
+  /** Whether the repair succeeded */
+  success: boolean;
+  /** Human-readable repair message */
+  message: string;
+};
+
 /**
  * Perform chown on the given ownership issues, transferring files to
  * `username`. Called only when the current process is already root.
  *
- * @returns Object with lists of human-readable success and failure messages
+ * @returns Per-issue outcomes aligned by index with the input issues array
  */
 async function repairOwnership(
   issues: OwnershipIssue[],
   username: string,
   targetUid: number
-): Promise<{ fixed: string[]; failed: string[] }> {
-  const fixed: string[] = [];
-  const failed: string[] = [];
-
+): Promise<RepairOutcome[]> {
   const results = await Promise.allSettled(
     issues.map((issue) => chown(issue.path, targetUid, -1))
   );
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i] as PromiseSettledResult<void>;
+  return results.map((result, i) => {
     const issue = issues[i] as OwnershipIssue;
     if (result.status === "fulfilled") {
-      fixed.push(`${issue.kind} ${issue.path}: transferred to ${username}`);
-    } else {
-      const reason =
-        result.reason instanceof Error
-          ? result.reason.message
-          : "unknown error";
-      failed.push(`${issue.kind} ${issue.path}: ${reason}`);
+      return {
+        success: true,
+        message: `${issue.kind} ${issue.path}: transferred to ${username}`,
+      };
     }
-  }
+    const reason =
+      result.reason instanceof Error ? result.reason.message : "unknown error";
+    return {
+      success: false,
+      message: `${issue.kind} ${issue.path}: ${reason}`,
+    };
+  });
+}
 
-  return { fixed, failed };
+/** Result of diagnosing a category of issues (used internally) */
+type HandlerResult = {
+  issues: FixIssue[];
+  instructions?: string;
+  repairFailed: boolean;
+};
+
+/**
+ * Return the ownership fix instructions string.
+ *
+ * @param currentUid - UID of the running process
+ * @param username - The real user's login name
+ * @param configDir - The config directory path
+ * @param dryRun - Whether this is a dry-run preview
+ */
+function ownershipInstructions(
+  currentUid: number,
+  username: string,
+  configDir: string,
+  dryRun: boolean
+): string {
+  if (dryRun && currentUid === 0) {
+    return `Would transfer ownership of "${configDir}" to ${username}.`;
+  }
+  return (
+    "To fix ownership, run one of:\n\n" +
+    `  sudo chown -R ${username} "${configDir}"\n\n` +
+    "Or let sentry fix it automatically:\n\n" +
+    "  sudo sentry cli fix"
+  );
 }
 
 /**
@@ -264,20 +342,18 @@ async function repairOwnership(
  * to transfer ownership back to the real user. The real username is inferred
  * from `SUDO_USER` / `USER` / `USERNAME` env vars (set by sudo).
  *
- * When not root, we print the exact `sudo chown` command the user must run.
+ * When not root, we return manual instructions for the user.
  *
  * @param dbPath - Absolute path to the database file
  * @param currentUid - UID of the running process
  * @param dryRun - If true, report issues without repairing
- * @param output - Streams for user-facing output
- * @returns Count of issues found and whether any repairs failed
+ * @returns Issues found, instructions, and whether repairs failed
  */
 async function handleOwnershipIssues(
   dbPath: string,
   currentUid: number,
-  dryRun: boolean,
-  { stdout, stderr }: Output
-): Promise<DiagnoseResult> {
+  dryRun: boolean
+): Promise<HandlerResult> {
   const configDir = getConfigDir();
   const username = getRealUsername();
 
@@ -291,93 +367,75 @@ async function handleOwnershipIssues(
   if (currentUid === 0) {
     const uid = resolveUid(username);
     if (uid === null || uid === 0) {
-      stderr.write(
-        `Warning: Could not determine a non-root UID for user "${username}".\n` +
-          "Run the following command manually:\n" +
-          `  chown -R ${username} "${configDir}"\n\n`
-      );
-      return { found: 0, repairFailed: true };
+      return {
+        issues: [],
+        instructions: `Could not determine a non-root UID for user "${username}".\nRun the following command manually:\n  chown -R ${username} "${configDir}"`,
+        repairFailed: true,
+      };
     }
     resolvedTargetUid = uid;
     comparisonUid = uid;
   }
 
-  const issues = await checkOwnership(dbPath, comparisonUid);
-  if (issues.length === 0) {
-    return { found: 0, repairFailed: false };
+  const rawIssues = await checkOwnership(dbPath, comparisonUid);
+  if (rawIssues.length === 0) {
+    return { issues: [], repairFailed: false };
   }
 
-  stdout.write(`Found ${issues.length} ownership issue(s):\n`);
-  for (const issue of issues) {
-    stdout.write(
-      `  - ${issue.kind} ${issue.path}: owned by uid ${issue.ownerUid}\n`
-    );
-  }
-  stdout.write("\n");
+  // Convert raw ownership issues to FixIssue objects
+  const fixIssues: FixIssue[] = rawIssues.map((issue) => ({
+    category: "ownership" as const,
+    description: `${issue.kind} ${issue.path}: owned by uid ${issue.ownerUid}`,
+  }));
 
   if (dryRun) {
-    stdout.write(
-      printOwnershipInstructions(currentUid, username, configDir, true)
-    );
-    return { found: issues.length, repairFailed: false };
+    return {
+      issues: fixIssues,
+      instructions: ownershipInstructions(
+        currentUid,
+        username,
+        configDir,
+        true
+      ),
+      repairFailed: false,
+    };
   }
 
   if (currentUid !== 0) {
-    // Not root — can't chown, print instructions.
-    stderr.write(
-      printOwnershipInstructions(currentUid, username, configDir, false)
-    );
-    return { found: issues.length, repairFailed: true };
+    // Not root — can't chown, return instructions.
+    return {
+      issues: fixIssues,
+      instructions: ownershipInstructions(
+        currentUid,
+        username,
+        configDir,
+        false
+      ),
+      repairFailed: true,
+    };
   }
 
   // Running as root — perform chown. resolvedTargetUid is guaranteed non-null
   // and non-zero here (we bailed out above if it couldn't be resolved).
   const resolvedUid = resolvedTargetUid as number;
-  stdout.write(
-    `Transferring ownership to ${username} (uid ${resolvedUid})...\n`
-  );
-  const { fixed, failed } = await repairOwnership(
-    issues,
-    username,
-    resolvedUid
-  );
-  for (const fix of fixed) {
-    stdout.write(`  + ${fix}\n`);
-  }
-  if (failed.length > 0) {
-    stderr.write("\nSome ownership repairs failed:\n");
-    for (const fail of failed) {
-      stderr.write(`  ! ${fail}\n`);
-    }
-    return { found: issues.length, repairFailed: true };
-  }
-  stdout.write("\n");
-  return { found: issues.length, repairFailed: false };
-}
+  const outcomes = await repairOwnership(rawIssues, username, resolvedUid);
 
-/**
- * Return the ownership fix instructions string.
- *
- * @param currentUid - UID of the running process
- * @param username - The real user's login name
- * @param configDir - The config directory path
- * @param dryRun - Whether this is a dry-run preview
- */
-function printOwnershipInstructions(
-  currentUid: number,
-  username: string,
-  configDir: string,
-  dryRun: boolean
-): string {
-  if (dryRun && currentUid === 0) {
-    return `Would transfer ownership of "${configDir}" to ${username}.\n`;
+  // Mark each issue with its repair outcome (aligned by index)
+  let anyFailed = false;
+  for (let i = 0; i < fixIssues.length; i++) {
+    const issue = fixIssues[i] as FixIssue;
+    const outcome = outcomes[i] as RepairOutcome;
+    issue.repaired = outcome.success;
+    issue.repairMessage = outcome.message;
+    if (!outcome.success) {
+      anyFailed = true;
+    }
   }
-  return (
-    "To fix ownership, run one of:\n\n" +
-    `  sudo chown -R ${username} "${configDir}"\n\n` +
-    "Or let sentry fix it automatically:\n\n" +
-    "  sudo sentry cli fix\n\n"
-  );
+
+  return {
+    issues: fixIssues,
+    repairFailed: anyFailed,
+  };
 }
 
 /**
@@ -398,37 +456,44 @@ function formatMode(mode: number): string {
  * @param issues - Permission issues to repair
  * @returns Separate lists of human-readable repair successes and failures
  */
-async function repairPermissions(issues: PermissionIssue[]): Promise<{
-  fixed: string[];
-  failed: string[];
-}> {
-  const fixed: string[] = [];
-  const failed: string[] = [];
+/**
+ * Repair permissions, returning outcomes aligned by index with input.
+ *
+ * Repairs directories before files to avoid EACCES on child chmod calls.
+ */
+async function repairPermissions(
+  issues: PermissionIssue[]
+): Promise<RepairOutcome[]> {
+  const outcomes = new Array<RepairOutcome>(issues.length);
 
-  // Repair directories first so child file chmod calls don't fail with EACCES
-  const dirIssues = issues.filter((i) => i.kind === "directory");
-  const fileIssues = issues.filter((i) => i.kind !== "directory");
+  // Build index maps for dirs and files
+  const dirEntries: Array<{ idx: number; issue: PermissionIssue }> = [];
+  const fileEntries: Array<{ idx: number; issue: PermissionIssue }> = [];
+  for (let i = 0; i < issues.length; i++) {
+    const issue = issues[i] as PermissionIssue;
+    if (issue.kind === "directory") {
+      dirEntries.push({ idx: i, issue });
+    } else {
+      fileEntries.push({ idx: i, issue });
+    }
+  }
 
-  await collectResults(dirIssues, fixed, failed);
-  await collectResults(fileIssues, fixed, failed);
+  // Repair directories first, then files
+  await collectPermResults(dirEntries, outcomes);
+  await collectPermResults(fileEntries, outcomes);
 
-  return { fixed, failed };
+  return outcomes;
 }
 
 /**
- * Run chmod for each issue in parallel, collecting successes and failures.
- *
- * @param issues - Permission issues to repair
- * @param fixed - Accumulator for successful repair messages
- * @param failed - Accumulator for failed repair messages
+ * Run chmod for each entry in parallel, writing outcomes by original index.
  */
-async function collectResults(
-  issues: PermissionIssue[],
-  fixed: string[],
-  failed: string[]
+async function collectPermResults(
+  entries: Array<{ idx: number; issue: PermissionIssue }>,
+  outcomes: RepairOutcome[]
 ): Promise<void> {
   const results = await Promise.allSettled(
-    issues.map(async (issue) => {
+    entries.map(async ({ issue }) => {
       await chmod(issue.path, issue.expectedMode);
       return `${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} -> ${formatMode(issue.expectedMode)}`;
     })
@@ -436,131 +501,115 @@ async function collectResults(
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i] as PromiseSettledResult<string>;
+    const entry = entries[i] as { idx: number; issue: PermissionIssue };
     if (result.status === "fulfilled") {
-      fixed.push(result.value);
+      outcomes[entry.idx] = { success: true, message: result.value };
     } else {
-      const issue = issues[i] as PermissionIssue;
       const reason =
         result.reason instanceof Error
           ? result.reason.message
-          : "permission denied";
-      failed.push(`${issue.kind} ${issue.path}: ${reason}`);
+          : "unknown error";
+      outcomes[entry.idx] = {
+        success: false,
+        message: `${entry.issue.kind} ${entry.issue.path}: ${reason}`,
+      };
     }
   }
 }
 
-type Output = {
-  stdout: { write(s: string): void };
-  stderr: { write(s: string): void };
-};
-
-/** Result of diagnosing a category of issues */
-type DiagnoseResult = {
-  /** Number of issues found */
-  found: number;
-  /** Whether any repairs failed (only meaningful when not dry-run) */
-  repairFailed: boolean;
-};
-
 /**
  * Diagnose permission issues and optionally repair them.
- * Writes findings and repair results to stdout/stderr as a side effect.
  *
  * @param dbPath - Absolute path to the database file
  * @param dryRun - If true, report issues without repairing
- * @param output - Streams for user-facing output
- * @returns Count of issues found and whether any repairs failed
+ * @returns Issues found and whether any repairs failed
  */
 async function handlePermissionIssues(
   dbPath: string,
-  dryRun: boolean,
-  { stdout, stderr }: Output
-): Promise<DiagnoseResult> {
+  dryRun: boolean
+): Promise<HandlerResult> {
   const permIssues = await checkPermissions(dbPath);
   if (permIssues.length === 0) {
-    return { found: 0, repairFailed: false };
+    return { issues: [], repairFailed: false };
   }
 
-  stdout.write(`Found ${permIssues.length} permission issue(s):\n`);
-  for (const issue of permIssues) {
-    stdout.write(
-      `  - ${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} (expected ${formatMode(issue.expectedMode)})\n`
-    );
-  }
-  stdout.write("\n");
+  // Convert to FixIssue objects
+  const fixIssues: FixIssue[] = permIssues.map((issue) => ({
+    category: "permission" as const,
+    description: `${issue.kind} ${issue.path}: ${formatMode(issue.currentMode)} (expected ${formatMode(issue.expectedMode)})`,
+  }));
 
   if (dryRun) {
-    return { found: permIssues.length, repairFailed: false };
+    return { issues: fixIssues, repairFailed: false };
   }
 
-  stdout.write("Repairing permissions...\n");
-  const { fixed, failed } = await repairPermissions(permIssues);
-  for (const fix of fixed) {
-    stdout.write(`  + ${fix}\n`);
-  }
-  if (failed.length > 0) {
-    stderr.write("\nSome permission repairs failed:\n");
-    for (const fail of failed) {
-      stderr.write(`  ! ${fail}\n`);
+  const outcomes = await repairPermissions(permIssues);
+
+  // Mark each issue with its repair outcome (aligned by index)
+  let anyFailed = false;
+  for (let i = 0; i < fixIssues.length; i++) {
+    const issue = fixIssues[i] as FixIssue;
+    const outcome = outcomes[i] as RepairOutcome;
+    issue.repaired = outcome.success;
+    issue.repairMessage = outcome.message;
+    if (!outcome.success) {
+      anyFailed = true;
     }
-    stderr.write(
-      "\nYou may need to fix permissions manually:\n" +
-        `  chmod 700 "${getConfigDir()}"\n` +
-        `  chmod 600 "${dbPath}"\n`
-    );
   }
-  stdout.write("\n");
 
-  return { found: permIssues.length, repairFailed: failed.length > 0 };
+  return {
+    issues: fixIssues,
+    instructions: anyFailed
+      ? `You may need to fix permissions manually:\n  chmod 700 "${getConfigDir()}"\n  chmod 600 "${dbPath}"`
+      : undefined,
+    repairFailed: anyFailed,
+  };
 }
 
 /**
  * Diagnose schema issues (missing tables/columns) and optionally repair them.
- * Writes findings and repair results to stdout/stderr as a side effect.
  *
  * @param dbPath - Absolute path to the database file (used in error messages)
  * @param dryRun - If true, report issues without repairing
- * @param output - Streams for user-facing output
- * @returns Count of issues found and whether any repairs failed
+ * @returns Issues found and whether any repairs failed
  */
-function handleSchemaIssues(
-  dbPath: string,
-  dryRun: boolean,
-  { stdout, stderr }: Output
-): DiagnoseResult {
+function handleSchemaIssues(dbPath: string, dryRun: boolean): HandlerResult {
   const db = getRawDatabase();
   const issues = getSchemaIssues(db);
   if (issues.length === 0) {
-    return { found: 0, repairFailed: false };
+    return { issues: [], repairFailed: false };
   }
 
-  stdout.write(`Found ${issues.length} schema issue(s):\n`);
-  for (const issue of issues) {
-    stdout.write(`  - ${formatIssue(issue)}\n`);
-  }
-  stdout.write("\n");
+  // Convert to FixIssue objects
+  const fixIssues: FixIssue[] = issues.map((issue) => ({
+    category: "schema" as const,
+    description: formatIssue(issue),
+  }));
 
   if (dryRun) {
-    return { found: issues.length, repairFailed: false };
+    return { issues: fixIssues, repairFailed: false };
   }
 
-  stdout.write("Repairing schema...\n");
   const { fixed, failed } = repairSchema(db);
-  for (const fix of fixed) {
-    stdout.write(`  + ${fix}\n`);
-  }
-  if (failed.length > 0) {
-    stderr.write("\nSome schema repairs failed:\n");
-    for (const fail of failed) {
-      stderr.write(`  ! ${fail}\n`);
-    }
-    stderr.write(
-      `\nTry deleting the database and restarting: rm "${dbPath}"\n`
-    );
-  }
-  stdout.write("\n");
+  const anyFailed = failed.length > 0;
 
-  return { found: issues.length, repairFailed: failed.length > 0 };
+  // Mark original issues with repair outcomes.
+  // Schema repair runs independently of detection — mark all issues based
+  // on overall success/failure. Attach repair messages for diagnostics.
+  for (const issue of fixIssues) {
+    issue.repaired = !anyFailed;
+    issue.repairMessage = anyFailed
+      ? failed.join("; ")
+      : fixed.join("; ") || "Schema repaired";
+  }
+
+  return {
+    issues: fixIssues,
+    instructions: anyFailed
+      ? `Try deleting the database and restarting: rm "${dbPath}"`
+      : undefined,
+    repairFailed: anyFailed,
+  };
 }
 
 /**
@@ -576,19 +625,26 @@ function handleSchemaIssues(
 function safeHandleSchemaIssues(
   dbPath: string,
   dryRun: boolean,
-  out: Output,
   priorIssuesFound: number
-): DiagnoseResult {
+): HandlerResult {
   try {
-    return handleSchemaIssues(dbPath, dryRun, out);
+    return handleSchemaIssues(dbPath, dryRun);
   } catch {
     if (priorIssuesFound === 0) {
-      out.stderr.write("Could not open database to check schema.\n");
-      out.stderr.write(
-        `Try deleting the database and restarting: rm "${dbPath}"\n`
-      );
+      return {
+        issues: [
+          {
+            category: "schema",
+            description: "Could not open database to check schema",
+            repaired: false,
+            repairMessage: `Try deleting the database and restarting: rm "${dbPath}"`,
+          },
+        ],
+        instructions: `Try deleting the database and restarting: rm "${dbPath}"`,
+        repairFailed: true,
+      };
     }
-    return { found: 0, repairFailed: true };
+    return { issues: [], repairFailed: true };
   }
 }
 
@@ -612,6 +668,7 @@ export const fixCommand = buildCommand({
       "  sudo sentry cli fix         # Fix root-owned files\n" +
       "  sentry cli fix --dry-run    # Show what would be fixed without making changes",
   },
+  output: { json: true, human: formatFixResult },
   parameters: {
     flags: {
       "dry-run": {
@@ -621,66 +678,62 @@ export const fixCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: FixFlags): Promise<void> {
-    const { stdout, process: proc } = this;
+  async func(this: SentryContext, flags: FixFlags) {
     const dbPath = getDbPath();
     const dryRun = flags["dry-run"];
-    const out = { stdout, stderr: this.stderr };
 
     // process.getuid() is undefined on Windows
     const currentUid =
       typeof process.getuid === "function" ? process.getuid() : -1;
 
-    stdout.write(`Database: ${dbPath}\n`);
-    stdout.write(`Expected schema version: ${CURRENT_SCHEMA_VERSION}\n\n`);
-
     // 1. Check ownership first — if files are root-owned, chmod will fail anyway.
     //    On Windows (currentUid === -1), skip the ownership check entirely.
-    const ownership: DiagnoseResult =
+    const ownership: HandlerResult =
       currentUid >= 0
-        ? await handleOwnershipIssues(dbPath, currentUid, dryRun, out)
-        : { found: 0, repairFailed: false };
+        ? await handleOwnershipIssues(dbPath, currentUid, dryRun)
+        : { issues: [], repairFailed: false };
 
     // 2. Check permissions (skip if ownership issues already reported failures —
     //    chmod will fail on root-owned files so the output would be misleading).
     const skipPerm = !dryRun && ownership.repairFailed;
-    const perm: DiagnoseResult = skipPerm
-      ? { found: 0, repairFailed: false }
-      : await handlePermissionIssues(dbPath, dryRun, out);
+    const perm: HandlerResult = skipPerm
+      ? { issues: [], repairFailed: false }
+      : await handlePermissionIssues(dbPath, dryRun);
 
     // 3. Schema check — guarded so filesystem errors don't hide earlier reports.
     const schema = safeHandleSchemaIssues(
       dbPath,
       dryRun,
-      out,
-      ownership.found + perm.found
+      ownership.issues.length + perm.issues.length
     );
 
-    const totalFound = ownership.found + perm.found + schema.found;
+    const allIssues = [...ownership.issues, ...perm.issues, ...schema.issues];
     const anyFailed =
       ownership.repairFailed || perm.repairFailed || schema.repairFailed;
 
-    if (totalFound === 0 && !anyFailed) {
-      stdout.write(
-        "No issues found. Database schema and permissions are correct.\n"
-      );
-      return;
-    }
+    // Merge instructions from all handlers
+    const instructions = [
+      ownership.instructions,
+      perm.instructions,
+      schema.instructions,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
-    if (dryRun) {
-      if (totalFound > 0) {
-        stdout.write("Run 'sentry cli fix' to apply fixes.\n");
-      }
-      if (anyFailed) {
-        proc.exitCode = 1;
-      }
-      return;
-    }
+    const result: FixResult = {
+      dbPath,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      dryRun,
+      issues: allIssues,
+      repairFailed: anyFailed,
+      instructions: instructions || undefined,
+    };
 
+    // Non-zero exit when there are unfixed failures
     if (anyFailed) {
-      proc.exitCode = 1;
-    } else {
-      stdout.write("All issues repaired successfully.\n");
+      throw new OutputError(result);
     }
+
+    return { data: result };
   },
 });

@@ -30,6 +30,8 @@ import { teamRoute } from "./commands/team/index.js";
 import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
 import { listCommand as traceListCommand } from "./commands/trace/list.js";
+import { trialRoute } from "./commands/trial/index.js";
+import { listCommand as trialListCommand } from "./commands/trial/list.js";
 import { CLI_VERSION } from "./lib/constants.js";
 import {
   AuthError,
@@ -52,6 +54,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   logs: "log",
   spans: "span",
   traces: "trace",
+  trials: "trial",
 };
 
 /** Top-level route map containing all CLI commands */
@@ -69,6 +72,7 @@ export const routes = buildRouteMap({
     log: logRoute,
     span: spanRoute,
     trace: traceRoute,
+    trial: trialRoute,
     init: initCommand,
     api: apiCommand,
     issues: issueListCommand,
@@ -79,6 +83,7 @@ export const routes = buildRouteMap({
     logs: logListCommand,
     spans: spanListCommand,
     traces: traceListCommand,
+    trials: trialListCommand,
     whoami: whoamiCommand,
   },
   defaultCommand: "help",

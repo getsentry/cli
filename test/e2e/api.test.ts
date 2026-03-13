@@ -67,21 +67,6 @@ describe("sentry api", () => {
   );
 
   test(
-    "--include flag shows response headers",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
-
-      const result = await ctx.run(["api", "organizations/", "--include"]);
-
-      expect(result.exitCode).toBe(0);
-      // Should include HTTP status and headers before JSON body
-      expect(result.stdout).toMatch(/^HTTP \d{3}/);
-      expect(result.stdout).toMatch(/content-type:/i);
-    },
-    { timeout: 15_000 }
-  );
-
-  test(
     "invalid endpoint returns non-zero exit code",
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
@@ -180,19 +165,6 @@ describe("sentry api", () => {
   );
 
   test(
-    "-i alias for --include works",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
-
-      const result = await ctx.run(["api", "organizations/", "-i"]);
-
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toMatch(/^HTTP \d{3}/);
-    },
-    { timeout: 15_000 }
-  );
-
-  test(
     "-H alias for --header works",
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
@@ -225,12 +197,14 @@ describe("sentry api", () => {
       const result = await ctx.run(["api", "organizations/", "--verbose"]);
 
       expect(result.exitCode).toBe(0);
-      // Should show request line with > prefix
-      expect(result.stdout).toMatch(/^> GET \/api\/0\/organizations\//m);
-      // Should show response status with < prefix
-      expect(result.stdout).toMatch(/^< HTTP \d{3}/m);
-      // Should show response headers with < prefix
-      expect(result.stdout).toMatch(/^< content-type:/im);
+      // Verbose output goes to stderr via logger.debug()
+      // consola formats as: [debug] [api] > GET /api/0/organizations/
+      expect(result.stderr).toMatch(/> GET \/api\/0\/organizations\//);
+      expect(result.stderr).toMatch(/< HTTP \d{3}/);
+      expect(result.stderr).toMatch(/< content-type:/i);
+      // stdout should still contain the response body
+      const data = JSON.parse(result.stdout);
+      expect(Array.isArray(data)).toBe(true);
     },
     { timeout: 15_000 }
   );

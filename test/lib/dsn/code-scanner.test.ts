@@ -17,6 +17,7 @@ describe("Code Scanner", () => {
 
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
+    delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
   });
 
@@ -211,8 +212,29 @@ describe("Code Scanner", () => {
 
       // Invalid SENTRY_URL should throw immediately since nothing will work
       expect(() => extractDsnsFromContent(content)).toThrow(
-        /SENTRY_URL.*not a valid URL/
+        /SENTRY_HOST\/SENTRY_URL.*not a valid URL/
       );
+    });
+
+    test("accepts self-hosted DSNs when SENTRY_HOST is set", () => {
+      process.env.SENTRY_HOST = "https://sentry.mycompany.com:9000";
+      const content = `
+        const DSN = "https://abc@sentry.mycompany.com:9000/123";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      expect(dsns).toEqual(["https://abc@sentry.mycompany.com:9000/123"]);
+    });
+
+    test("SENTRY_HOST takes precedence over SENTRY_URL for DSN validation", () => {
+      process.env.SENTRY_HOST = "https://sentry.mycompany.com:9000";
+      process.env.SENTRY_URL = "https://sentry.other.com";
+      const content = `
+        const DSN1 = "https://abc@sentry.mycompany.com:9000/123";
+        const DSN2 = "https://def@sentry.other.com/456";
+      `;
+      const dsns = extractDsnsFromContent(content);
+      // Only the SENTRY_HOST DSN should be accepted
+      expect(dsns).toEqual(["https://abc@sentry.mycompany.com:9000/123"]);
     });
   });
 
@@ -391,6 +413,84 @@ describe("Code Scanner", () => {
       const largePadding = "x".repeat(256 * 1024 + 1);
       const content = `const DSN = "https://abc@o123.ingest.sentry.io/456";\n${largePadding}`;
       writeFileSync(join(testDir, "large.ts"), content);
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toEqual([]);
+    });
+
+    test("finds DSNs in monorepo packages deeper than MAX_SCAN_DEPTH", async () => {
+      // packages/spotlight/src/instrument.ts is depth 3 from root,
+      // but with monorepo depth reset, packages/spotlight/ resets to 0
+      // so src/instrument.ts is only depth 1 from the package root
+      mkdirSync(join(testDir, "packages/spotlight/src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "packages/spotlight/src/instrument.ts"),
+        'Sentry.init({ dsn: "https://spotlight@o123.ingest.sentry.io/111" });'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0]?.raw).toBe(
+        "https://spotlight@o123.ingest.sentry.io/111"
+      );
+      expect(result.dsns[0]?.packagePath).toBe("packages/spotlight");
+    });
+
+    test("finds DSNs from multiple monorepo packages", async () => {
+      mkdirSync(join(testDir, "packages/frontend/src"), { recursive: true });
+      mkdirSync(join(testDir, "packages/backend/src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "packages/frontend/src/sentry.ts"),
+        'const DSN = "https://fe@o123.ingest.sentry.io/111";'
+      );
+      writeFileSync(
+        join(testDir, "packages/backend/src/sentry.ts"),
+        'const DSN = "https://be@o456.ingest.sentry.io/222";'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(2);
+
+      const dsns = result.dsns.map((d) => d.raw);
+      expect(dsns).toContain("https://fe@o123.ingest.sentry.io/111");
+      expect(dsns).toContain("https://be@o456.ingest.sentry.io/222");
+
+      // Verify packagePath is set correctly for each
+      const feResult = result.dsns.find((d) => d.raw.includes("fe@"));
+      const beResult = result.dsns.find((d) => d.raw.includes("be@"));
+      expect(feResult?.packagePath).toBe("packages/frontend");
+      expect(beResult?.packagePath).toBe("packages/backend");
+    });
+
+    test("finds DSNs deeply nested in monorepo packages", async () => {
+      // packages/spotlight/src/electron/main/index.ts is depth 5 from root,
+      // but after monorepo reset at packages/spotlight/, it's depth 3 —
+      // exactly at MAX_SCAN_DEPTH. This was a specific failing case.
+      mkdirSync(join(testDir, "packages/spotlight/src/electron/main"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(testDir, "packages/spotlight/src/electron/main/index.ts"),
+        'Sentry.init({ dsn: "https://electron@o123.ingest.sentry.io/333" });'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0]?.raw).toBe(
+        "https://electron@o123.ingest.sentry.io/333"
+      );
+      expect(result.dsns[0]?.packagePath).toBe("packages/spotlight");
+    });
+
+    test("respects depth limit for non-monorepo directories", async () => {
+      // src/very/deeply/nested/config.ts is depth 4 — beyond MAX_SCAN_DEPTH (3).
+      // Should NOT be found. This confirms the depth reset only applies to
+      // monorepo package directories, not arbitrary subdirectories.
+      mkdirSync(join(testDir, "src/very/deeply/nested"), { recursive: true });
+      writeFileSync(
+        join(testDir, "src/very/deeply/nested/config.ts"),
+        'const DSN = "https://deep@o123.ingest.sentry.io/999";'
+      );
 
       const result = await scanCodeForDsns(testDir);
       expect(result.dsns).toEqual([]);

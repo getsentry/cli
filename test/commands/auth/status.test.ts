@@ -2,8 +2,12 @@
  * Status Command Tests
  *
  * Tests for the statusCommand func() in src/commands/auth/status.ts.
- * Focuses on the env-token-aware branches added for headless auth support.
+ * Focuses on the env-token-aware branches and the structured data output.
  * Uses spyOn to mock db/auth, db/defaults, db/user, and api-client.
+ *
+ * The command returns { data: AuthStatusData } which is rendered to stdout
+ * by the buildCommand wrapper. Tests assert on stdout content for human
+ * output and parse JSON for --json output.
  */
 
 import {
@@ -28,32 +32,35 @@ import * as dbIndex from "../../../src/lib/db/index.js";
 import * as dbUser from "../../../src/lib/db/user.js";
 import { AuthError } from "../../../src/lib/errors.js";
 
-type StatusFlags = { readonly "show-token": boolean };
+type StatusFlags = {
+  readonly "show-token": boolean;
+  readonly json: boolean;
+};
 type StatusFunc = (this: unknown, flags: StatusFlags) => Promise<void>;
 
+/**
+ * Create a mock Stricli context with stdout capture.
+ */
 function createContext() {
-  const stdoutLines: string[] = [];
-  const stderrLines: string[] = [];
-  const context = {
-    stdout: {
-      write: mock((s: string) => {
-        stdoutLines.push(s);
-      }),
-    },
-    stderr: {
-      write: mock((s: string) => {
-        stderrLines.push(s);
-      }),
-    },
-    cwd: "/tmp",
-    setContext: mock((_k: string, _v: unknown) => {
-      /* no-op */
-    }),
-  };
+  const stdoutChunks: string[] = [];
   return {
-    context,
-    getStdout: () => stdoutLines.join(""),
-    getStderr: () => stderrLines.join(""),
+    context: {
+      stdout: {
+        write: mock((s: string) => {
+          stdoutChunks.push(s);
+        }),
+      },
+      stderr: {
+        write: mock((_s: string) => {
+          /* unused */
+        }),
+      },
+      cwd: "/tmp",
+      setContext: mock((_k: string, _v: unknown) => {
+        /* no-op */
+      }),
+    },
+    getOutput: () => stdoutChunks.join(""),
   };
 }
 
@@ -96,6 +103,11 @@ describe("statusCommand.func", () => {
     listOrgsSpy.mockRestore();
   });
 
+  /** Default flags for most tests (human output) */
+  const humanFlags: StatusFlags = { "show-token": false, json: false };
+  /** JSON output flags */
+  const jsonFlags: StatusFlags = { "show-token": false, json: true };
+
   describe("not authenticated", () => {
     test("throws AuthError with skipAutoAuth when not authenticated", async () => {
       getAuthConfigSpy.mockReturnValue(undefined);
@@ -104,7 +116,7 @@ describe("statusCommand.func", () => {
       const { context } = createContext();
 
       try {
-        await func.call(context, { "show-token": false });
+        await func.call(context, humanFlags);
         expect.unreachable("should have thrown");
       } catch (err) {
         expect(err).toBeInstanceOf(AuthError);
@@ -123,11 +135,10 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Config:");
-      expect(getStdout()).toContain("/fake/db/path");
+      expect(getOutput()).toContain("/fake/db/path");
     });
 
     test("shows 'Authenticated' without env var mention for OAuth", async () => {
@@ -137,11 +148,11 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Authenticated");
-      expect(getStdout()).not.toContain("environment variable");
+      expect(getOutput()).toContain("Authenticated");
+      expect(getOutput()).not.toContain("environment variable");
     });
 
     test("shows expiration for OAuth token with expiresAt", async () => {
@@ -152,10 +163,10 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Expires:");
+      expect(getOutput()).toContain("Expires");
     });
 
     test("shows auto-refresh enabled with refresh token", async () => {
@@ -166,11 +177,11 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Auto-refresh:");
-      expect(getStdout()).toContain("enabled");
+      expect(getOutput()).toContain("Auto-refresh");
+      expect(getOutput()).toContain("enabled");
     });
 
     test("shows auto-refresh disabled without refresh token", async () => {
@@ -180,10 +191,11 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Auto-refresh: disabled");
+      expect(getOutput()).toContain("Auto-refresh");
+      expect(getOutput()).toContain("disabled");
     });
   });
 
@@ -195,11 +207,10 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).not.toContain("Config:");
-      expect(getStdout()).not.toContain("/fake/db/path");
+      expect(getOutput()).not.toContain("/fake/db/path");
     });
 
     test("shows 'Authenticated via SENTRY_AUTH_TOKEN environment variable'", async () => {
@@ -209,11 +220,12 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("SENTRY_AUTH_TOKEN");
-      expect(getStdout()).toContain("environment variable");
+      // Markdown escapes underscores: SENTRY\_AUTH\_TOKEN
+      expect(getOutput()).toContain("SENTRY\\_AUTH\\_TOKEN");
+      expect(getOutput()).toContain("environment variable");
     });
 
     test("does not show expiration or auto-refresh for env tokens", async () => {
@@ -223,11 +235,11 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).not.toContain("Expires:");
-      expect(getStdout()).not.toContain("Auto-refresh");
+      expect(getOutput()).not.toContain("Expires");
+      expect(getOutput()).not.toContain("Auto-refresh");
     });
 
     test("masks token by default for env tokens", async () => {
@@ -237,11 +249,12 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Token:");
-      expect(getStdout()).not.toContain("sntrys_env_token_123_long_enough");
+      const out = getOutput();
+      expect(out).toContain("Token");
+      expect(out).not.toContain("sntrys_env_token_123_long_enough");
     });
 
     test("shows full token with --show-token for env tokens", async () => {
@@ -251,10 +264,10 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": true });
+      const { context, getOutput } = createContext();
+      await func.call(context, { ...humanFlags, "show-token": true });
 
-      expect(getStdout()).toContain("sntrys_env_token_123_long_enough");
+      expect(getOutput()).toContain("sntrys_env_token_123_long_enough");
     });
   });
 
@@ -266,13 +279,14 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("SENTRY_TOKEN");
-      expect(getStdout()).toContain("environment variable");
-      // Should NOT say SENTRY_AUTH_TOKEN
-      expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+      // Markdown escapes underscores: SENTRY\_TOKEN
+      expect(getOutput()).toContain("SENTRY\\_TOKEN");
+      expect(getOutput()).toContain("environment variable");
+      // Should NOT say SENTRY_AUTH_TOKEN (escaped form)
+      expect(getOutput()).not.toContain("SENTRY\\_AUTH\\_TOKEN");
     });
   });
 
@@ -285,10 +299,10 @@ describe("statusCommand.func", () => {
       isAuthenticatedSpy.mockResolvedValue(true);
       listOrgsSpy.mockRejectedValue(new Error("Network error"));
 
-      const { context, getStderr } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStderr()).toContain("Could not verify credentials");
+      expect(getOutput()).toContain("Could not verify credentials");
     });
 
     test("shows org list on successful verification", async () => {
@@ -299,12 +313,12 @@ describe("statusCommand.func", () => {
       isAuthenticatedSpy.mockResolvedValue(true);
       listOrgsSpy.mockResolvedValue([{ name: "My Org", slug: "my-org" }]);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Access verified");
-      expect(getStdout()).toContain("My Org");
-      expect(getStdout()).toContain("my-org");
+      expect(getOutput()).toContain("Access verified");
+      expect(getOutput()).toContain("My Org");
+      expect(getOutput()).toContain("my-org");
     });
   });
 
@@ -318,12 +332,12 @@ describe("statusCommand.func", () => {
       getDefaultOrgSpy.mockResolvedValue("my-org");
       getDefaultProjectSpy.mockResolvedValue("my-project");
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("Defaults:");
-      expect(getStdout()).toContain("my-org");
-      expect(getStdout()).toContain("my-project");
+      expect(getOutput()).toContain("Defaults");
+      expect(getOutput()).toContain("my-org");
+      expect(getOutput()).toContain("my-project");
     });
 
     test("hides defaults section when none set", async () => {
@@ -333,10 +347,10 @@ describe("statusCommand.func", () => {
       });
       isAuthenticatedSpy.mockResolvedValue(true);
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).not.toContain("Defaults:");
+      expect(getOutput()).not.toContain("Defaults");
     });
   });
 
@@ -352,11 +366,77 @@ describe("statusCommand.func", () => {
         email: "jane@example.com",
       });
 
-      const { context, getStdout } = createContext();
-      await func.call(context, { "show-token": false });
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
 
-      expect(getStdout()).toContain("User:");
-      expect(getStdout()).toContain("Jane Doe");
+      expect(getOutput()).toContain("User");
+      expect(getOutput()).toContain("Jane Doe");
+    });
+  });
+
+  describe("JSON output", () => {
+    test("outputs valid JSON with all fields", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_abc123def456",
+        source: "oauth",
+        expiresAt: Date.now() + 3_600_000,
+        refreshToken: "refresh_xyz",
+      });
+      isAuthenticatedSpy.mockResolvedValue(true);
+      getUserInfoSpy.mockReturnValue({
+        name: "Jane Doe",
+        email: "jane@example.com",
+        username: "janedoe",
+      });
+      getDefaultOrgSpy.mockResolvedValue("my-org");
+      getDefaultProjectSpy.mockResolvedValue("my-project");
+      listOrgsSpy.mockResolvedValue([{ name: "My Org", slug: "my-org" }]);
+
+      const { context, getOutput } = createContext();
+      await func.call(context, jsonFlags);
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.authenticated).toBe(true);
+      expect(parsed.source).toBe("oauth");
+      expect(parsed.configPath).toBe("/fake/db/path");
+      expect(parsed.user.name).toBe("Jane Doe");
+      expect(parsed.token.display).toContain("...");
+      expect(parsed.token.refreshEnabled).toBe(true);
+      expect(parsed.defaults.organization).toBe("my-org");
+      expect(parsed.defaults.project).toBe("my-project");
+      expect(parsed.verification.success).toBe(true);
+      expect(parsed.verification.organizations).toHaveLength(1);
+    });
+
+    test("JSON token is masked by default", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_abc123def456",
+        source: "oauth",
+      });
+      isAuthenticatedSpy.mockResolvedValue(true);
+
+      const { context, getOutput } = createContext();
+      await func.call(context, jsonFlags);
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.token.display).not.toBe("sntrys_abc123def456");
+      expect(parsed.token.display).toContain("...");
+    });
+
+    test("JSON includes verification error on failure", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_abc",
+        source: "oauth",
+      });
+      isAuthenticatedSpy.mockResolvedValue(true);
+      listOrgsSpy.mockRejectedValue(new Error("Network error"));
+
+      const { context, getOutput } = createContext();
+      await func.call(context, jsonFlags);
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.verification.success).toBe(false);
+      expect(parsed.verification.error).toContain("Network error");
     });
   });
 });

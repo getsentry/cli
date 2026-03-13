@@ -16,6 +16,7 @@ import {
   oneof,
   property,
   record,
+  string,
   stringMatching,
   tuple,
   uniqueArray,
@@ -30,23 +31,12 @@ import {
   parseFieldValue,
   parseMethod,
   resolveBody,
+  resolveEffectiveHeaders,
+  resolveRequestUrl,
   setNestedValue,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
-import type { Writer } from "../../src/types/index.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
-
-/** Mock stderr writer that collects output */
-function createMockWriter(): Writer & { output: string } {
-  const w = {
-    output: "",
-    write(data: string): boolean {
-      w.output += data;
-      return true;
-    },
-  };
-  return w;
-}
 
 // Arbitraries for generating valid inputs
 
@@ -516,14 +506,35 @@ const bareFieldArb = stringMatching(/^[a-zA-Z][a-zA-Z0-9]{1,15}$/).filter(
   (s) => !(s.includes("=") || s.startsWith("{") || s.startsWith("["))
 );
 
+/**
+ * Capture stderr output during a synchronous callback.
+ * Used inside property() callbacks where beforeEach/afterEach aren't available.
+ */
+function captureStderr(fn: () => void): string {
+  let output = "";
+  const original = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    output +=
+      typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return output;
+}
+
 describe("property: normalizeFields JSON guard", () => {
   test("JSON objects pass through unchanged — no colon mangling", async () => {
     await fcAssert(
       property(jsonObjectStringArb, (json) => {
-        const stderr = createMockWriter();
-        const result = normalizeFields([json], stderr);
-        expect(result).toEqual([json]);
-        expect(stderr.output).toBe("");
+        const output = captureStderr(() => {
+          const result = normalizeFields([json]);
+          expect(result).toEqual([json]);
+        });
+        expect(output).toBe("");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -532,10 +543,11 @@ describe("property: normalizeFields JSON guard", () => {
   test("JSON arrays pass through unchanged", async () => {
     await fcAssert(
       property(jsonArrayStringArb, (json) => {
-        const stderr = createMockWriter();
-        const result = normalizeFields([json], stderr);
-        expect(result).toEqual([json]);
-        expect(stderr.output).toBe("");
+        const output = captureStderr(() => {
+          const result = normalizeFields([json]);
+          expect(result).toEqual([json]);
+        });
+        expect(output).toBe("");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -570,11 +582,12 @@ describe("property: extractJsonBody", () => {
       property(
         array(keyValueFieldArb, { minLength: 1, maxLength: 5 }),
         (fields) => {
-          const stderr = createMockWriter();
-          const result = extractJsonBody(fields, stderr);
-          expect(result.body).toBeUndefined();
-          expect(result.remaining).toEqual(fields);
-          expect(stderr.output).toBe("");
+          const output = captureStderr(() => {
+            const result = extractJsonBody(fields);
+            expect(result.body).toBeUndefined();
+            expect(result.remaining).toEqual(fields);
+          });
+          expect(output).toBe("");
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -584,11 +597,12 @@ describe("property: extractJsonBody", () => {
   test("single JSON object is always extracted as body", async () => {
     await fcAssert(
       property(jsonObjectStringArb, (json) => {
-        const stderr = createMockWriter();
-        const result = extractJsonBody([json], stderr);
-        expect(result.body).toEqual(JSON.parse(json));
-        expect(result.remaining).toBeUndefined();
-        expect(stderr.output).toContain("hint:");
+        const output = captureStderr(() => {
+          const result = extractJsonBody([json]);
+          expect(result.body).toEqual(JSON.parse(json));
+          expect(result.remaining).toBeUndefined();
+        });
+        expect(output).toContain("request body");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -603,11 +617,12 @@ describe("property: extractJsonBody", () => {
         ),
         ([first, rest]) => {
           const fields = [first, ...rest];
-          const stderr = createMockWriter();
-          const result = extractJsonBody(fields, stderr);
-          const remainingCount = result.remaining?.length ?? 0;
-          const bodyCount = result.body !== undefined ? 1 : 0;
-          expect(remainingCount + bodyCount).toBe(fields.length);
+          captureStderr(() => {
+            const result = extractJsonBody(fields);
+            const remainingCount = result.remaining?.length ?? 0;
+            const bodyCount = result.body !== undefined ? 1 : 0;
+            expect(remainingCount + bodyCount).toBe(fields.length);
+          });
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -617,8 +632,7 @@ describe("property: extractJsonBody", () => {
   test("two JSON objects always throws ValidationError", async () => {
     await fcAssert(
       property(jsonObjectStringArb, jsonObjectStringArb, (a, b) => {
-        const stderr = createMockWriter();
-        expect(() => extractJsonBody([a, b], stderr)).toThrow(ValidationError);
+        expect(() => extractJsonBody([a, b])).toThrow(ValidationError);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -629,13 +643,14 @@ describe("property: buildFromFields", () => {
   test("GET never produces a body from JSON extraction", async () => {
     await fcAssert(
       property(jsonObjectStringArb, (json) => {
-        const stderr = createMockWriter();
-        // GET with a JSON field: should NOT extract body (throws instead)
-        expect(() =>
-          buildFromFields("GET", { "raw-field": [json] }, stderr)
-        ).toThrow(ValidationError);
+        const output = captureStderr(() => {
+          // GET with a JSON field: should NOT extract body (throws instead)
+          expect(() => buildFromFields("GET", { "raw-field": [json] })).toThrow(
+            ValidationError
+          );
+        });
         // No hint emitted (extraction skipped for GET)
-        expect(stderr.output).toBe("");
+        expect(output).toBe("");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -644,10 +659,11 @@ describe("property: buildFromFields", () => {
   test("PUT with only JSON body returns that body exactly", async () => {
     await fcAssert(
       property(jsonObjectStringArb, (json) => {
-        const stderr = createMockWriter();
-        const result = buildFromFields("PUT", { "raw-field": [json] }, stderr);
-        expect(result.body).toEqual(JSON.parse(json));
-        expect(result.params).toBeUndefined();
+        captureStderr(() => {
+          const result = buildFromFields("PUT", { "raw-field": [json] });
+          expect(result.body).toEqual(JSON.parse(json));
+          expect(result.params).toBeUndefined();
+        });
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -671,21 +687,21 @@ describe("property: buildFromFields", () => {
 
           const fields = fieldKeys.map((k) => `${k}=field_val`);
 
-          const stderr = createMockWriter();
-          const result = buildFromFields(
-            "PUT",
-            { "raw-field": [jsonStr], field: fields },
-            stderr
-          );
+          captureStderr(() => {
+            const result = buildFromFields("PUT", {
+              "raw-field": [jsonStr],
+              field: fields,
+            });
 
-          // All keys from both sources should be present
-          const body = result.body as Record<string, unknown>;
-          for (const k of jsonKeys) {
-            expect(body).toHaveProperty(k);
-          }
-          for (const k of fieldKeys) {
-            expect(body).toHaveProperty(k);
-          }
+            // All keys from both sources should be present
+            const body = result.body as Record<string, unknown>;
+            for (const k of jsonKeys) {
+              expect(body).toHaveProperty(k);
+            }
+            for (const k of fieldKeys) {
+              expect(body).toHaveProperty(k);
+            }
+          });
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -702,14 +718,14 @@ describe("property: buildFromFields", () => {
         }),
         ({ key, jsonVal, fieldVal }) => {
           const jsonStr = JSON.stringify({ [key]: jsonVal });
-          const stderr = createMockWriter();
-          expect(() =>
-            buildFromFields(
-              "PUT",
-              { "raw-field": [jsonStr], field: [`${key}=${fieldVal}`] },
-              stderr
-            )
-          ).toThrow(ValidationError);
+          captureStderr(() => {
+            expect(() =>
+              buildFromFields("PUT", {
+                "raw-field": [jsonStr],
+                field: [`${key}=${fieldVal}`],
+              })
+            ).toThrow(ValidationError);
+          });
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -721,11 +737,12 @@ describe("property: buildFromFields", () => {
       property(
         array(keyValueFieldArb, { minLength: 1, maxLength: 5 }),
         (fields) => {
-          const stderr = createMockWriter();
-          const result = buildFromFields("PUT", { field: fields }, stderr);
-          expect(result.body).toBeDefined();
+          const output = captureStderr(() => {
+            const result = buildFromFields("PUT", { field: fields });
+            expect(result.body).toBeDefined();
+          });
           // No JSON hint — only colon-correction warnings might appear
-          expect(stderr.output).not.toContain("hint:");
+          expect(output).not.toContain("request body");
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -739,11 +756,9 @@ describe("property: resolveBody", () => {
   test("--data always returns a body (no params)", async () => {
     await fcAssert(
       asyncProperty(jsonObjectStringArb, async (json) => {
-        const stderr = createMockWriter();
         const result = await resolveBody(
           { method: "PUT", data: json },
-          MOCK_STDIN,
-          stderr
+          MOCK_STDIN
         );
         expect(result.body).toBeDefined();
         expect(result.params).toBeUndefined();
@@ -755,12 +770,10 @@ describe("property: resolveBody", () => {
   test("--data + --input always throws", async () => {
     await fcAssert(
       asyncProperty(jsonObjectStringArb, async (json) => {
-        const stderr = createMockWriter();
         await expect(
           resolveBody(
             { method: "PUT", data: json, input: "file.json" },
-            MOCK_STDIN,
-            stderr
+            MOCK_STDIN
           )
         ).rejects.toThrow(ValidationError);
       }),
@@ -774,16 +787,141 @@ describe("property: resolveBody", () => {
         jsonObjectStringArb,
         keyValueFieldArb,
         async (json, field) => {
-          const stderr = createMockWriter();
           await expect(
             resolveBody(
               { method: "PUT", data: json, field: [field] },
-              MOCK_STDIN,
-              stderr
+              MOCK_STDIN
             )
           ).rejects.toThrow(ValidationError);
         }
       ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+// Dry-run property tests
+
+/** Arbitrary for HTTP methods */
+
+/** Arbitrary for clean API endpoint paths (no query string, for dry-run tests) */
+const dryRunEndpointArb = stringMatching(
+  /^[a-z][a-z0-9-]*\/[a-z0-9-]*\/$/
+).filter((s) => s.length > 3 && s.length < 80);
+
+/** Arbitrary for query param values */
+const paramValueArb = stringMatching(/^[a-zA-Z0-9_-]+$/).filter(
+  (s) => s.length > 0 && s.length < 40
+);
+
+/** Arbitrary for query param maps */
+const paramsArb = dictionary(
+  stringMatching(/^[a-zA-Z][a-zA-Z0-9_]*$/).filter(
+    (s) => s.length > 0 && s.length < 20
+  ),
+  paramValueArb,
+  { minKeys: 0, maxKeys: 3 }
+);
+
+describe("property: resolveRequestUrl", () => {
+  test("always contains /api/0/ prefix", () => {
+    fcAssert(
+      property(dryRunEndpointArb, (endpoint) => {
+        const url = resolveRequestUrl(endpoint);
+        expect(url).toContain("/api/0/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("always contains the endpoint path", () => {
+    fcAssert(
+      property(dryRunEndpointArb, (endpoint) => {
+        const url = resolveRequestUrl(endpoint);
+        const normalized = endpoint.startsWith("/")
+          ? endpoint.slice(1)
+          : endpoint;
+        expect(url).toContain(normalized);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("includes query string when params provided", () => {
+    fcAssert(
+      property(dryRunEndpointArb, paramsArb, (endpoint, params) => {
+        const url = resolveRequestUrl(endpoint, params);
+        if (Object.keys(params).length > 0) {
+          expect(url).toContain("?");
+          for (const key of Object.keys(params)) {
+            expect(url).toContain(key);
+          }
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("property: resolveEffectiveHeaders", () => {
+  /** Arbitrary for custom header entries (non-content-type keys) */
+  const headerKeyArb = stringMatching(/^X-[A-Za-z]{1,10}$/);
+  const headerValueArb = string({ minLength: 1, maxLength: 20 });
+  const customHeadersArb = dictionary(headerKeyArb, headerValueArb, {
+    minKeys: 0,
+    maxKeys: 3,
+  });
+
+  test("preserves all custom headers", () => {
+    fcAssert(
+      property(customHeadersArb, (custom) => {
+        const result = resolveEffectiveHeaders(custom, undefined);
+        for (const [key, value] of Object.entries(custom)) {
+          expect(result[key]).toBe(value);
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("auto-adds Content-Type for object bodies without it", () => {
+    fcAssert(
+      property(customHeadersArb, jsonValue(), (custom, body) => {
+        // Ensure body is a non-null object (not string/number/boolean/null)
+        if (body === null || body === undefined || typeof body !== "object") {
+          return;
+        }
+        const result = resolveEffectiveHeaders(custom, body);
+        expect(result["Content-Type"]).toBe("application/json");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("never adds Content-Type for string bodies", () => {
+    fcAssert(
+      property(customHeadersArb, string(), (custom, body) => {
+        const result = resolveEffectiveHeaders(custom, body);
+        // Should not have auto-added Content-Type (only custom headers)
+        if (!custom["Content-Type"]) {
+          expect(result["Content-Type"]).toBeUndefined();
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("does not override explicit Content-Type", () => {
+    const contentTypeArb = constantFrom(
+      "text/plain",
+      "text/xml",
+      "application/x-www-form-urlencoded"
+    );
+    fcAssert(
+      property(contentTypeArb, jsonValue(), (ct, body) => {
+        const result = resolveEffectiveHeaders({ "Content-Type": ct }, body);
+        expect(result["Content-Type"]).toBe(ct);
+      }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });

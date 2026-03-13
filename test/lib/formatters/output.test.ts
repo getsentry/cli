@@ -311,4 +311,130 @@ describe("renderCommandOutput", () => {
     const parsed = JSON.parse(w.output);
     expect(parsed).toEqual({ id: 1, extra: "keep" });
   });
+
+  test("jsonExclude strips fields from array elements", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<any> = {
+      json: true,
+      human: (d: { id: number; name: string }[]) =>
+        d.map((e) => e.name).join(", "),
+      jsonExclude: ["detectedFrom"],
+    };
+    renderCommandOutput(
+      w,
+      [
+        { id: 1, name: "a", detectedFrom: "dsn" },
+        { id: 2, name: "b" },
+      ],
+      config,
+      { json: true }
+    );
+    const parsed = JSON.parse(w.output);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toEqual([
+      { id: 1, name: "a" },
+      { id: 2, name: "b" },
+    ]);
+  });
+
+  test("jsonTransform reshapes data for JSON output", () => {
+    const w = createTestWriter();
+    type ListResult = {
+      items: { id: number; name: string }[];
+      hasMore: boolean;
+      org: string;
+    };
+    const config: OutputConfig<ListResult> = {
+      json: true,
+      human: (d) => d.items.map((i) => i.name).join(", "),
+      jsonTransform: (data) => ({
+        data: data.items,
+        hasMore: data.hasMore,
+      }),
+    };
+    renderCommandOutput(
+      w,
+      { items: [{ id: 1, name: "Alice" }], hasMore: true, org: "test-org" },
+      config,
+      { json: true }
+    );
+    const parsed = JSON.parse(w.output);
+    expect(parsed).toEqual({
+      data: [{ id: 1, name: "Alice" }],
+      hasMore: true,
+    });
+    // org should not appear (transform omits it)
+    expect(parsed).not.toHaveProperty("org");
+  });
+
+  test("jsonTransform receives fields for per-element filtering", () => {
+    const w = createTestWriter();
+    type ListResult = {
+      items: { id: number; name: string; secret: string }[];
+      hasMore: boolean;
+    };
+    const config: OutputConfig<ListResult> = {
+      json: true,
+      human: () => "unused",
+      jsonTransform: (data, fields) => ({
+        data:
+          fields && fields.length > 0
+            ? data.items.map((item) => {
+                const filtered: Record<string, unknown> = {};
+                for (const f of fields) {
+                  if (f in item) {
+                    filtered[f] = (item as Record<string, unknown>)[f];
+                  }
+                }
+                return filtered;
+              })
+            : data.items,
+        hasMore: data.hasMore,
+      }),
+    };
+    renderCommandOutput(
+      w,
+      {
+        items: [{ id: 1, name: "Alice", secret: "x" }],
+        hasMore: false,
+      },
+      config,
+      { json: true, fields: ["id", "name"] }
+    );
+    const parsed = JSON.parse(w.output);
+    expect(parsed.data[0]).toEqual({ id: 1, name: "Alice" });
+    expect(parsed.data[0]).not.toHaveProperty("secret");
+  });
+
+  test("jsonTransform is ignored in human mode", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ items: string[]; org: string }> = {
+      json: true,
+      human: (d) => `${d.org}: ${d.items.join(", ")}`,
+      jsonTransform: (data) => ({ data: data.items }),
+    };
+    renderCommandOutput(w, { items: ["a", "b"], org: "test-org" }, config, {
+      json: false,
+    });
+    expect(w.output).toBe("test-org: a, b\n");
+  });
+
+  test("jsonTransform takes precedence over jsonExclude", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ id: number; name: string; extra: string }> = {
+      json: true,
+      human: () => "unused",
+      jsonExclude: ["extra"],
+      jsonTransform: (data) => ({ transformed: true, id: data.id }),
+    };
+    renderCommandOutput(
+      w,
+      { id: 1, name: "Alice", extra: "kept-by-transform" },
+      config,
+      { json: true }
+    );
+    const parsed = JSON.parse(w.output);
+    // jsonTransform output, not jsonExclude
+    expect(parsed).toEqual({ transformed: true, id: 1 });
+  });
 });

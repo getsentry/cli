@@ -1,9 +1,9 @@
 /**
  * Generic column-based table renderer.
  *
- * Provides `writeTable()` for rendering structured data as Unicode-bordered
- * tables directly via the text-table renderer, and `buildMarkdownTable()`
- * for producing raw CommonMark table syntax (used in plain/non-TTY mode).
+ * - {@link formatTable} returns a table string (for return-based commands)
+ * - {@link writeTable} writes the table directly to a stream (legacy path)
+ * - {@link buildMarkdownTable} returns raw CommonMark syntax
  *
  * ANSI escape codes in cell values are preserved — `string-width` correctly
  * treats them as zero-width for column sizing.
@@ -89,15 +89,20 @@ export type WriteTableOptions = {
   rowSeparator?: boolean | string;
 };
 
-export function writeTable<T>(
-  stdout: Writer,
+/**
+ * Format items as a table string.
+ *
+ * Returns the rendered table instead of writing to a stream.
+ * In plain/non-TTY mode emits CommonMark; in TTY mode emits a
+ * Unicode-bordered table with ANSI styling.
+ */
+export function formatTable<T>(
   items: T[],
   columns: Column<T>[],
   options?: WriteTableOptions
-): void {
+): string {
   if (isPlainOutput()) {
-    stdout.write(`${buildMarkdownTable(items, columns)}\n`);
-    return;
+    return `${buildMarkdownTable(items, columns)}\n`;
   }
 
   const headers = columns.map((c) => c.header);
@@ -109,13 +114,26 @@ export function writeTable<T>(
   const minWidths = columns.map((c) => c.minWidth ?? 0);
   const shrinkable = columns.map((c) => c.shrinkable ?? true);
 
-  stdout.write(
-    renderTextTable(headers, rows, {
-      alignments,
-      minWidths,
-      shrinkable,
-      truncate: options?.truncate,
-      rowSeparator: options?.rowSeparator,
-    })
-  );
+  return renderTextTable(headers, rows, {
+    alignments,
+    minWidths,
+    shrinkable,
+    truncate: options?.truncate,
+    rowSeparator: options?.rowSeparator,
+  });
+}
+
+/**
+ * Render items as a formatted table, writing directly to a stream.
+ *
+ * Delegates to {@link formatTable} and writes the result. Prefer
+ * `formatTable` in return-based command output pipelines.
+ */
+export function writeTable<T>(
+  stdout: Writer,
+  items: T[],
+  columns: Column<T>[],
+  options?: WriteTableOptions
+): void {
+  stdout.write(formatTable(items, columns, options));
 }

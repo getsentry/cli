@@ -39,9 +39,13 @@ import {
 import {
   type IssueTableRow,
   muted,
+  shouldAutoCompact,
   writeIssueTable,
-  writeJsonList,
 } from "../../lib/formatters/index.js";
+import type {
+  CommandOutput,
+  OutputConfig,
+} from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -55,7 +59,9 @@ import {
 } from "../../lib/list-command.js";
 import {
   dispatchOrgScopedList,
+  jsonTransformListResult,
   type ListCommandMeta,
+  type ListResult,
   type ModeHandler,
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
@@ -83,8 +89,32 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
-  readonly compact: boolean;
+  readonly compact?: boolean;
   readonly fields?: string[];
+};
+
+/**
+ * Extended result type for issue list with display context.
+ *
+ * Extends {@link ListResult} with rendering metadata needed by the human
+ * formatter (pre-built display rows, table options) and by the JSON
+ * transform (raw issue data for serialization).
+ *
+ * Handlers return this type; the `OutputConfig` decides how to render it.
+ */
+export type IssueListResult = ListResult<SentryIssue> & {
+  /** Pre-formatted display rows for the human issue table */
+  displayRows?: IssueTableRow[];
+  /** Title shown above the table in human output (e.g. "Issues in sentry/cli") */
+  title?: string;
+  /** Footer mode controlling which usage tip to show after the table */
+  footerMode?: "single" | "multi" | "none";
+  /** Whether to use compact (single-line) table rendering */
+  compact?: boolean;
+  /** "More issues available" hint with actionable flags */
+  moreHint?: string;
+  /** DSN detection or multi-project summary footer */
+  footer?: string;
 };
 
 /** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
@@ -100,6 +130,19 @@ const USAGE_HINT = "sentry issue list <org>/<project>";
  */
 const MAX_LIMIT = 1000;
 
+/**
+ * Resolve the effective compact mode from the flag tri-state and issue count.
+ *
+ * - `true` / `false` — explicit user override, returned as-is
+ * - `undefined` — auto-detect based on terminal height vs estimated table height
+ */
+function resolveCompact(flag: boolean | undefined, rowCount: number): boolean {
+  if (flag !== undefined) {
+    return flag;
+  }
+  return shouldAutoCompact(rowCount);
+}
+
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
     throw new Error(
@@ -110,45 +153,32 @@ function parseSort(value: string): SortValue {
 }
 
 /**
- * Write the issue list header with column titles.
+ * Format the issue list header with column titles.
  *
- * @param stdout - Output writer
  * @param title - Section title
  */
-function writeListHeader(stdout: Writer, title: string): void {
-  stdout.write(`${title}:\n\n`);
+function formatListHeader(title: string): string {
+  return `${title}:\n\n`;
 }
 
 /**
- * Write footer with usage tip.
+ * Format footer with usage tip.
  *
- * @param stdout - Output writer
  * @param mode - Display mode: 'single' (one project), 'multi' (multiple projects), or 'none'
  */
-function writeListFooter(
-  stdout: Writer,
-  mode: "single" | "multi" | "none"
-): void {
+function formatListFooter(mode: "single" | "multi" | "none"): string {
   switch (mode) {
     case "single":
-      stdout.write(
-        "\nTip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).\n"
-      );
-      break;
+      return "\nTip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).";
     case "multi":
-      stdout.write(
-        "\nTip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).\n"
-      );
-      break;
+      return "\nTip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).";
     default:
-      stdout.write(
-        "\nTip: Use 'sentry issue view <SHORT_ID>' to view issue details.\n"
-      );
+      return "\nTip: Use 'sentry issue view <SHORT_ID>' to view issue details.";
   }
 }
 
 /** Issue list with target context */
-/** @internal */ export type IssueListResult = {
+/** @internal */ export type IssueListFetchResult = {
   target: ResolvedTarget;
   issues: SentryIssue[];
   /** Whether the project has more issues beyond what was fetched. */
@@ -175,7 +205,7 @@ function writeListFooter(
  * Cross-org collision example:
  *   org1/dashboard, org2/dashboard → o1/d, o2/d
  */
-function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
+function buildProjectAliasMap(results: IssueListFetchResult[]): AliasMapResult {
   const entries: Record<string, ProjectAliasEntry> = {};
 
   // Build org-aware aliases that handle cross-org collisions
@@ -208,7 +238,7 @@ function buildProjectAliasMap(results: IssueListResult[]): AliasMapResult {
  * @param isMultiProject - Whether in multi-project mode (shows ALIAS column)
  */
 function attachFormatOptions(
-  results: IssueListResult[],
+  results: IssueListFetchResult[],
   aliasMap: Map<string, string>,
   isMultiProject: boolean
 ): IssueTableRow[] {
@@ -264,7 +294,7 @@ function getComparator(
 }
 
 type FetchResult =
-  | { success: true; data: IssueListResult }
+  | { success: true; data: IssueListFetchResult }
   | { success: false; error: Error };
 
 /** Result of resolving targets from parsed argument */
@@ -475,7 +505,7 @@ async function runPhase2(
       // expandableIndices only contains indices where r.success && r.data.nextCursor
       // biome-ignore lint/style/noNonNullAssertion: guaranteed by expandableIndices filter
       const target = targets[i]!;
-      const r = phase1[i] as { success: true; data: IssueListResult };
+      const r = phase1[i] as { success: true; data: IssueListFetchResult };
       // biome-ignore lint/style/noNonNullAssertion: same guarantee
       const cursor = r.data.nextCursor!;
       return fetchIssuesForTarget(target, {
@@ -755,7 +785,6 @@ async function fetchOrgAllIssues(
 
 /** Options for {@link handleOrgAllIssues}. */
 type OrgAllIssuesOptions = {
-  stdout: Writer;
   org: string;
   flags: ListFlags;
   setContext: (orgs: string[], projects: string[]) => void;
@@ -765,10 +794,13 @@ type OrgAllIssuesOptions = {
  * Handle org-all mode for issues: cursor-paginated listing of all issues in an org.
  *
  * Uses a sort+query-aware context key so cursors from different searches are
- * never accidentally reused.
+ * never accidentally reused. Returns an {@link IssueListResult} — the caller
+ * is responsible for rendering (JSON or human output).
  */
-async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
-  const { stdout, org, flags, setContext } = options;
+async function handleOrgAllIssues(
+  options: OrgAllIssuesOptions
+): Promise<IssueListResult> {
+  const { org, flags, setContext } = options;
   // Encode sort + query in context key so cursors from different searches don't collide.
   const contextKey = buildPaginationContextKey("org", org, {
     sort: flags.sort,
@@ -797,30 +829,16 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
 
   const hasMore = !!nextCursor;
 
-  if (flags.json) {
-    writeJsonList(stdout, issues, {
-      hasMore,
-      nextCursor,
-      fields: flags.fields,
-    });
-    return;
-  }
-
   if (issues.length === 0) {
-    if (hasMore) {
-      stdout.write(
-        `No issues on this page. Try the next page: ${nextPageHint(org, flags)}\n`
-      );
-    } else {
-      stdout.write(`No issues found in organization '${org}'.\n`);
-    }
-    return;
+    const hint = hasMore
+      ? `No issues on this page. Try the next page: ${nextPageHint(org, flags)}`
+      : `No issues found in organization '${org}'.`;
+    return { items: [], hasMore, nextCursor, hint };
   }
 
   // isMultiProject=true: org-all shows issues from every project, so the ALIAS
   // column is needed to identify which project each issue belongs to.
-  writeListHeader(stdout, `Issues in ${org}`);
-  const issuesWithOpts: IssueTableRow[] = issues.map((issue) => ({
+  const displayRows: IssueTableRow[] = issues.map((issue) => ({
     issue,
     // org-all: org context comes from the `org` param; issue.organization may be absent
     orgSlug: org,
@@ -829,19 +847,30 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
       isMultiProject: true,
     },
   }));
-  writeIssueTable(stdout, issuesWithOpts, { compact: flags.compact });
 
+  const hintParts: string[] = [];
   if (hasMore) {
-    stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
-    stdout.write(`Next page: ${nextPageHint(org, flags)}\n`);
+    hintParts.push(
+      `Showing ${issues.length} issues (more available)`,
+      `Next page: ${nextPageHint(org, flags)}`
+    );
   } else {
-    stdout.write(`\nShowing ${issues.length} issues\n`);
+    hintParts.push(`Showing ${issues.length} issues`);
   }
+
+  return {
+    items: issues,
+    hasMore,
+    nextCursor,
+    hint: hintParts.join("\n"),
+    displayRows,
+    title: `Issues in ${org}`,
+    compact: resolveCompact(flags.compact, displayRows.length),
+  };
 }
 
 /** Options for {@link handleResolvedTargets}. */
 type ResolvedTargetsOptions = {
-  stdout: Writer;
   stderr: Writer;
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
@@ -860,8 +889,8 @@ type ResolvedTargetsOptions = {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target resolution, compound cursor, error handling, and display logic
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
-): Promise<void> {
-  const { stdout, stderr, parsed, flags, cwd, setContext } = options;
+): Promise<IssueListResult> {
+  const { stderr, parsed, flags, cwd, setContext } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -979,7 +1008,7 @@ async function handleResolvedTargets(
     clearPaginationCursor(PAGINATION_KEY, contextKey);
   }
 
-  const validResults: IssueListResult[] = [];
+  const validResults: IssueListFetchResult[] = [];
   const failures: { target: ResolvedTarget; error: Error }[] = [];
 
   for (let i = 0; i < results.length; i++) {
@@ -1045,28 +1074,22 @@ async function handleResolvedTargets(
   const hasMoreToShow = hasMore || hasAnyCursor || trimmed;
   const canPaginate = hasAnyCursor;
 
-  if (flags.json) {
-    const allIssues = issuesWithOptions.map((i) => i.issue);
-    const errors =
-      failures.length > 0
-        ? failures.map(({ target: t, error: e }) =>
-            e instanceof ApiError
-              ? {
-                  project: `${t.org}/${t.project}`,
-                  status: e.status,
-                  message: e.message,
-                }
-              : { project: `${t.org}/${t.project}`, message: e.message }
-          )
-        : undefined;
-    writeJsonList(stdout, allIssues, {
-      hasMore: hasMoreToShow,
-      errors,
-      fields: flags.fields,
-    });
-    return;
-  }
+  const allIssues = issuesWithOptions.map((i) => i.issue);
 
+  const errors =
+    failures.length > 0
+      ? failures.map(({ target: t, error: e }) =>
+          e instanceof ApiError
+            ? {
+                project: `${t.org}/${t.project}`,
+                status: e.status,
+                message: e.message,
+              }
+            : { project: `${t.org}/${t.project}`, message: e.message }
+        )
+      : undefined;
+
+  // Write partial-failure note to stderr (side effect for progress/warnings)
   if (failures.length > 0) {
     const failedNames = failures
       .map(({ target: t }) => `${t.org}/${t.project}`)
@@ -1079,11 +1102,8 @@ async function handleResolvedTargets(
   }
 
   if (issuesWithOptions.length === 0) {
-    stdout.write("No issues found.\n");
-    if (footer) {
-      stdout.write(`\n${footer}\n`);
-    }
-    return;
+    const hint = footer ? `No issues found.\n\n${footer}` : "No issues found.";
+    return { items: [], hint, hasMore: false, errors };
   }
 
   const title =
@@ -1091,40 +1111,41 @@ async function handleResolvedTargets(
       ? `Issues in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
       : `Issues from ${validResults.length} projects`;
 
-  writeListHeader(stdout, title);
-  writeIssueTable(stdout, issuesWithOptions, { compact: flags.compact });
-
   let footerMode: "single" | "multi" | "none" = "none";
   if (isMultiProject) {
     footerMode = "multi";
   } else if (isSingleProject) {
     footerMode = "single";
   }
-  writeListFooter(stdout, footerMode);
 
+  let moreHint: string | undefined;
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
     const canIncreaseLimit = higherLimit > flags.limit;
-    const hintParts: string[] = [];
+    const actionParts: string[] = [];
     if (canIncreaseLimit) {
-      hintParts.push(`-n ${higherLimit}`);
+      actionParts.push(`-n ${higherLimit}`);
     }
     if (canPaginate) {
-      hintParts.push("-c last");
+      actionParts.push("-c last");
     }
-    // Only print the hint when there is at least one actionable option
-    if (hintParts.length > 0) {
-      stdout.write(
-        muted(
-          `\nMore issues available — use ${hintParts.join(" or ")} for more.\n`
-        )
-      );
+    // Only set the hint when there is at least one actionable option
+    if (actionParts.length > 0) {
+      moreHint = `More issues available — use ${actionParts.join(" or ")} for more.`;
     }
   }
 
-  if (footer) {
-    stdout.write(`\n${footer}\n`);
-  }
+  return {
+    items: allIssues,
+    hasMore: hasMoreToShow,
+    errors,
+    displayRows: issuesWithOptions,
+    title,
+    footerMode,
+    compact: resolveCompact(flags.compact, issuesWithOptions.length),
+    moreHint,
+    footer,
+  };
 }
 
 /** Metadata for the shared dispatch infrastructure. */
@@ -1152,6 +1173,85 @@ export const __testing = {
   VALID_SORT_VALUES,
 };
 
+// ---------------------------------------------------------------------------
+// Output rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Render an issue table to a string by buffering `writeIssueTable` output.
+ *
+ * This bridges the existing `writeIssueTable` (Writer-based) API to the
+ * return-based `OutputConfig` pattern without duplicating the table logic.
+ */
+function renderIssueTable(rows: IssueTableRow[], compact: boolean): string {
+  const parts: string[] = [];
+  const buffer: Writer = {
+    write: (s: string) => {
+      parts.push(s);
+    },
+  };
+  writeIssueTable(buffer, rows, { compact });
+  return parts.join("");
+}
+
+/**
+ * Format an {@link IssueListResult} as human-readable terminal output.
+ *
+ * Renders the title, issue table (via {@link writeIssueTable}), footer tip,
+ * and "more available" hint. Empty results show the hint message only.
+ */
+function formatIssueListHuman(result: IssueListResult): string {
+  const parts: string[] = [];
+
+  if (result.items.length === 0) {
+    // Empty result — hint contains "No issues found" or similar
+    if (result.hint) {
+      parts.push(result.hint);
+    }
+    return parts.join("\n");
+  }
+
+  // Title above the table (e.g. "Issues in sentry/cli:")
+  if (result.title) {
+    parts.push(formatListHeader(result.title));
+  }
+
+  // Render the issue table
+  if (result.displayRows && result.displayRows.length > 0) {
+    parts.push(renderIssueTable(result.displayRows, result.compact ?? false));
+  }
+
+  // Footer tip (e.g. "Tip: Use 'sentry issue view <ID>' ...")
+  if (result.footerMode) {
+    parts.push(formatListFooter(result.footerMode));
+  }
+
+  return parts.join("");
+}
+
+/**
+ * Transform an {@link IssueListResult} into the JSON output format.
+ *
+ * Paginated responses produce a `{ data, hasMore, nextCursor?, errors? }` envelope.
+ * Non-paginated responses produce a flat `[...]` array.
+ * Field filtering is applied per-element inside `data`, not to the wrapper.
+ */
+// JSON transform delegates to the shared jsonTransformListResult in org-list.ts.
+// IssueListResult extends ListResult<SentryIssue>, so the shared function handles
+// all envelope fields (hasMore, nextCursor, errors, jsonExtra) uniformly.
+const jsonTransformIssueList = jsonTransformListResult;
+
+/** Output configuration for the issue list command. */
+const issueListOutput: OutputConfig<IssueListResult> = {
+  json: true,
+  human: formatIssueListHuman,
+  jsonTransform: jsonTransformIssueList,
+};
+
+// ---------------------------------------------------------------------------
+// Command definition
+// ---------------------------------------------------------------------------
+
 export const listCommand = buildListCommand("issue", {
   docs: {
     brief: "List issues in a project",
@@ -1171,7 +1271,7 @@ export const listCommand = buildListCommand("issue", {
       "By default, only issues with activity in the last 90 days are shown. " +
       "Use --period to adjust (e.g. --period 24h, --period 14d).",
   },
-  output: "json",
+  output: issueListOutput,
   parameters: {
     positional: LIST_TARGET_POSITIONAL,
     flags: {
@@ -1204,8 +1304,8 @@ export const listCommand = buildListCommand("issue", {
       fresh: FRESH_FLAG,
       compact: {
         kind: "boolean",
-        brief: "Single-line rows for compact output",
-        default: false,
+        brief: "Single-line rows for compact output (auto-detects if omitted)",
+        optional: true,
       },
     },
     aliases: {
@@ -1220,7 +1320,7 @@ export const listCommand = buildListCommand("issue", {
     this: SentryContext,
     flags: ListFlags,
     target?: string
-  ): Promise<void> {
+  ): Promise<CommandOutput<IssueListResult>> {
     applyFreshFlag(flags);
     const { stdout, stderr, cwd, setContext } = this;
 
@@ -1249,7 +1349,7 @@ export const listCommand = buildListCommand("issue", {
         setContext,
       });
 
-    await dispatchOrgScopedList({
+    const result = (await dispatchOrgScopedList({
       config: issueListMeta,
       stdout,
       cwd,
@@ -1264,12 +1364,27 @@ export const listCommand = buildListCommand("issue", {
         "project-search": resolveAndHandle,
         "org-all": (ctx) =>
           handleOrgAllIssues({
-            stdout: ctx.stdout,
             org: ctx.parsed.org,
             flags,
             setContext,
           }),
       },
-    });
+    })) as IssueListResult;
+
+    // Only forward hints to the framework footer when items exist — empty
+    // results already render hint text inside formatIssueListHuman.
+    let combinedHint: string | undefined;
+    if (result.items.length > 0) {
+      const hintParts: string[] = [];
+      if (result.moreHint) {
+        hintParts.push(result.moreHint);
+      }
+      if (result.footer) {
+        hintParts.push(result.footer);
+      }
+      combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
+    }
+
+    return { data: result, hint: combinedHint };
   },
 });

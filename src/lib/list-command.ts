@@ -13,17 +13,19 @@
  *   buildOrgListCommand
  */
 
-import type {
-  Aliases,
-  Command,
-  CommandContext,
-  CommandFunction,
-} from "@stricli/core";
+import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
+import { disableDsnCache } from "./dsn/index.js";
 import { warning } from "./formatters/colors.js";
-import { dispatchOrgScopedList, type OrgListConfig } from "./org-list.js";
+import type { CommandOutput, OutputConfig } from "./formatters/output.js";
+import {
+  dispatchOrgScopedList,
+  jsonTransformListResult,
+  type ListResult,
+  type OrgListConfig,
+} from "./org-list.js";
 import { disableResponseCache } from "./response-cache.js";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +111,7 @@ export const LIST_JSON_FLAG = {
  */
 export const FRESH_FLAG = {
   kind: "boolean" as const,
-  brief: "Bypass cache and fetch fresh data",
+  brief: "Bypass cache, re-detect projects, and fetch fresh data",
   default: false,
 } as const;
 
@@ -139,6 +141,7 @@ export const FRESH_ALIASES = { f: "fresh" } as const;
 export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
   if (flags.fresh) {
     disableResponseCache();
+    disableDsnCache();
   }
 }
 
@@ -303,6 +306,28 @@ export function interceptSubcommand(
 /** Base flags type (mirrors command.ts) */
 type BaseFlags = Readonly<Partial<Record<string, unknown>>>;
 
+/** Base args type (mirrors command.ts) */
+type BaseArgs = readonly unknown[];
+
+/**
+ * Wider command function type that allows returning `CommandOutput<T>`.
+ *
+ * Mirrors `SentryCommandFunction` from `command.ts`. The Stricli
+ * `CommandFunction` type constrains returns to `void | Error`, which is
+ * too narrow for the return-based output pattern. This type adds `unknown`
+ * to the return union so `{ data, hint }` objects pass through.
+ */
+type ListCommandFunction<
+  FLAGS extends BaseFlags,
+  ARGS extends BaseArgs,
+  CONTEXT extends CommandContext,
+> = (
+  this: CONTEXT,
+  flags: FLAGS,
+  ...args: ARGS
+  // biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
+) => void | Error | unknown | Promise<void | Error | unknown>;
+
 /**
  * Build a Stricli command for a list endpoint with automatic plural-alias
  * interception.
@@ -340,8 +365,9 @@ export function buildListCommand<
       readonly brief: string;
       readonly fullDescription?: string;
     };
-    readonly func: CommandFunction<FLAGS, ARGS, CONTEXT>;
-    readonly output?: "json";
+    readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
+    // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
+    readonly output?: "json" | OutputConfig<any>;
   }
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
@@ -385,19 +411,57 @@ export type OrgListCommandDocs = {
 };
 
 /**
+ * Format a {@link ListResult} as human-readable output using the config's
+ * `displayTable` function. Handles empty results, headers, table body, and hints.
+ *
+ * @param result - The list result from a dispatch handler
+ * @param config - The OrgListConfig providing the `displayTable` renderer
+ * @returns Formatted string for terminal output
+ */
+function formatListHuman<TEntity, TWithOrg>(
+  result: ListResult<TWithOrg>,
+  config: OrgListConfig<TEntity, TWithOrg>
+): string {
+  const parts: string[] = [];
+
+  if (result.items.length === 0) {
+    // Empty result — show the hint (which contains the "No X found" message)
+    if (result.hint) {
+      parts.push(result.hint);
+    }
+    return parts.join("\n");
+  }
+
+  // Table body
+  parts.push(config.displayTable(result.items));
+
+  // Header contains count info like "Showing N items (more available)"
+  if (result.header) {
+    parts.push(`\n${result.header}`);
+  }
+
+  return parts.join("");
+}
+
+// JSON transform is shared via jsonTransformListResult in org-list.ts
+
+/**
  * Build a complete Stricli command whose entire `func` body delegates to
  * `dispatchOrgScopedList`.
  *
  * This covers the team and repo list commands, where all runtime behaviour is
- * encapsulated in the shared org-list framework.  The resulting command has:
+ * encapsulated in the shared org-list framework. The resulting command has:
  * - An optional positional `target` argument
  * - `--limit` / `-n`, `--json`, `--fields`, `--cursor` / `-c` flags
  * - A `func` that calls `parseOrgProjectArg` then `dispatchOrgScopedList`
  *
- * `--json` and `--fields` are injected via `output: "json"` on `buildCommand`.
+ * Rendering is handled automatically via `OutputConfig`:
+ * - JSON mode produces paginated envelopes or flat arrays
+ * - Human mode uses the config's `displayTable` function
  *
  * @param config - The `OrgListConfig` that drives fetching and display
  * @param docs   - Brief and optional full description for `--help`
+ * @param routeName - Singular route name for subcommand interception
  */
 export function buildOrgListCommand<TEntity, TWithOrg>(
   config: OrgListConfig<TEntity, TWithOrg>,
@@ -406,7 +470,12 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
 ): Command<SentryContext> {
   return buildListCommand(routeName, {
     docs,
-    output: "json",
+    output: {
+      json: true,
+      human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
+      jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
+        jsonTransformListResult(result, fields),
+    } satisfies OutputConfig<ListResult<TWithOrg>>,
     parameters: {
       positional: LIST_TARGET_POSITIONAL,
       flags: {
@@ -426,11 +495,21 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly fields?: string[];
       },
       target?: string
-    ): Promise<void> {
+    ): Promise<CommandOutput<ListResult<TWithOrg>>> {
       applyFreshFlag(flags);
       const { stdout, cwd } = this;
       const parsed = parseOrgProjectArg(target);
-      await dispatchOrgScopedList({ config, stdout, cwd, flags, parsed });
+      const result = await dispatchOrgScopedList({
+        config,
+        stdout,
+        cwd,
+        flags,
+        parsed,
+      });
+      // Only forward hint to the footer when items exist — empty results
+      // already render hint text inside the human formatter.
+      const hint = result.items.length > 0 ? result.hint : undefined;
+      return { data: result, hint };
     },
   });
 }

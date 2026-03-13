@@ -394,6 +394,41 @@ function computeAliasShorthand(shortId: string, projectAlias?: string): string {
 /** Minimum terminal width to show the TREND sparkline column. */
 const TREND_MIN_TERM_WIDTH = 100;
 
+/** Lines per issue row in non-compact mode (2-line content + separator). */
+const LINES_PER_DEFAULT_ROW = 3;
+
+/**
+ * Fixed line overhead for the rendered table.
+ *
+ * Top border (1) + header row (1) + header separator (1) + bottom border (1) = 4,
+ * minus 1 because the last data row has no trailing separator (row separators
+ * are drawn between data rows only: `r > 0 && r < allRows.length - 1`).
+ * Net overhead = 3.
+ */
+const TABLE_LINE_OVERHEAD = 3;
+
+/**
+ * Determine whether auto-compact should activate based on terminal height.
+ *
+ * Returns `true` when the estimated non-compact table height exceeds the
+ * terminal's row count, meaning compact mode would keep output on-screen.
+ *
+ * Returns `false` when terminal height is unknown (non-TTY/piped output)
+ * to prefer full output for downstream parsing.
+ *
+ * @param rowCount - Number of issue rows to render
+ * @returns Whether compact mode should be used
+ */
+export function shouldAutoCompact(rowCount: number): boolean {
+  const termHeight = process.stdout.rows;
+  if (!termHeight) {
+    return false;
+  }
+  const estimatedHeight =
+    rowCount * LINES_PER_DEFAULT_ROW + TABLE_LINE_OVERHEAD;
+  return estimatedHeight > termHeight;
+}
+
 /**
  * Substatus label for the TREND column's second line.
  * Matches Sentry web UI visual indicators.
@@ -575,6 +610,9 @@ function formatTrendCell(issue: SentryIssue, compact = false): string {
  *
  * Compact mode (`--compact`): single-line rows for quick scanning. All cells
  * collapsed to one line, long titles truncated with "…".
+ *
+ * Callers should resolve auto-compact (via {@link shouldAutoCompact}) before
+ * passing `compact` — this function treats `undefined` as `false`.
  *
  * @param stdout - Output writer
  * @param rows - Issues with formatting options
@@ -1594,6 +1632,186 @@ export function formatExpiration(expiresAt: number): string {
   return `${expiresDate.toLocaleString()} (${formatDuration(secondsRemaining)} remaining)`;
 }
 
+// Feedback Formatting
+
+/** Structured feedback result (imported from the command module) */
+type FeedbackResult = import("../../commands/cli/feedback.js").FeedbackResult;
+
+/**
+ * Format feedback submission result as rendered markdown.
+ *
+ * @param data - Structured feedback result from the command
+ * @returns Rendered terminal string
+ */
+export function formatFeedbackResult(data: FeedbackResult): string {
+  if (data.sent) {
+    return renderMarkdown(
+      `${colorTag("green", "✓")} Feedback submitted. Thank you!`
+    );
+  }
+  return renderMarkdown(
+    `${colorTag("yellow", "⚠")} Feedback may not have been sent (network timeout).`
+  );
+}
+
+// Auth Logout Formatting
+
+/** Structured logout result data (imported from the command module) */
+type LogoutResult = import("../../commands/auth/logout.js").LogoutResult;
+
+/**
+ * Format logout result as rendered markdown.
+ *
+ * @param data - Structured logout result from the command
+ * @returns Rendered terminal string
+ */
+export function formatLogoutResult(data: LogoutResult): string {
+  if (!data.loggedOut) {
+    return renderMarkdown(data.message ?? "Not currently authenticated.");
+  }
+  const lines: string[] = [];
+  lines.push(`${colorTag("green", "✓")} Logged out successfully.`);
+  if (data.configPath) {
+    lines.push(`Credentials removed from: ${safeCodeSpan(data.configPath)}`);
+  }
+  return renderMarkdown(lines.join("\n\n"));
+}
+
+// Auth Status Formatting
+
+/** Structured auth status data shape (re-imported from the command module) */
+type AuthStatusData = import("../../commands/auth/status.js").AuthStatusData;
+
+/**
+ * Build the markdown header line based on auth source.
+ */
+function formatAuthHeader(source: string): string {
+  if (source.startsWith("env:")) {
+    const varName = source.slice("env:".length);
+    return `## ${colorTag("green", "✓")} Authenticated via ${escapeMarkdownInline(varName)} environment variable`;
+  }
+  return `## ${colorTag("green", "✓")} Authenticated`;
+}
+
+/**
+ * Build the key-value rows for the main auth details section.
+ */
+function buildAuthDetailRows(data: AuthStatusData): [string, string][] {
+  const rows: [string, string][] = [];
+  const isEnv = data.source.startsWith("env:");
+
+  if (data.configPath) {
+    rows.push(["Config", safeCodeSpan(data.configPath)]);
+  }
+  if (data.user) {
+    rows.push(["User", formatUserIdentity(data.user)]);
+  }
+  if (data.token) {
+    rows.push(["Token", safeCodeSpan(data.token.display)]);
+    if (data.token.expiresAt) {
+      rows.push(["Expires", formatExpiration(data.token.expiresAt)]);
+    }
+    // Only show auto-refresh for non-env tokens
+    if (!isEnv) {
+      rows.push([
+        "Auto-refresh",
+        data.token.refreshEnabled ? "enabled" : "disabled (no refresh token)",
+      ]);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Build the defaults section markdown (heading + kv table).
+ * Returns empty string when no defaults are set.
+ */
+function formatDefaultsSection(
+  defaults: NonNullable<AuthStatusData["defaults"]>
+): string {
+  const rows: [string, string][] = [];
+  if (defaults.organization) {
+    rows.push(["Organization", safeCodeSpan(defaults.organization)]);
+  }
+  if (defaults.project) {
+    rows.push(["Project", safeCodeSpan(defaults.project)]);
+  }
+  if (rows.length === 0) {
+    return "";
+  }
+  return `\n${mdKvTable(rows, "Defaults")}`;
+}
+
+/** Maximum orgs to display in the verification list before truncating */
+const MAX_VERIFY_DISPLAY = 5;
+
+/**
+ * Build the credential verification section markdown.
+ */
+function formatVerificationSection(
+  verification: NonNullable<AuthStatusData["verification"]>
+): string {
+  const lines: string[] = [""];
+
+  if (verification.success) {
+    const orgs = verification.organizations ?? [];
+    lines.push(
+      `### ${colorTag("green", "✓")} Access verified — ${orgs.length} organization(s)`
+    );
+    if (orgs.length > 0) {
+      lines.push("");
+      for (const org of orgs.slice(0, MAX_VERIFY_DISPLAY)) {
+        lines.push(
+          `- ${escapeMarkdownInline(org.name)} (${safeCodeSpan(org.slug)})`
+        );
+      }
+      if (orgs.length > MAX_VERIFY_DISPLAY) {
+        lines.push(`- *… and ${orgs.length - MAX_VERIFY_DISPLAY} more*`);
+      }
+    }
+  } else {
+    lines.push(`### ${colorTag("red", "✗")} Could not verify credentials`);
+    if (verification.error) {
+      lines.push("");
+      lines.push(escapeMarkdownInline(verification.error));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format auth status data as rendered markdown.
+ *
+ * Produces sections for authentication source, user identity, token info,
+ * defaults, and credential verification. Designed as the `human` formatter
+ * for the `auth status` command's {@link OutputConfig}.
+ *
+ * @param data - Structured auth status data collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatAuthStatus(data: AuthStatusData): string {
+  const lines: string[] = [];
+
+  lines.push(formatAuthHeader(data.source));
+  lines.push("");
+
+  const authRows = buildAuthDetailRows(data);
+  if (authRows.length > 0) {
+    lines.push(mdKvTable(authRows));
+  }
+
+  if (data.defaults) {
+    lines.push(formatDefaultsSection(data.defaults));
+  }
+
+  if (data.verification) {
+    lines.push(formatVerificationSection(data.verification));
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
+
 // Project Creation Formatting
 
 /** Input for the project-created success formatter */
@@ -1616,6 +1834,8 @@ export type ProjectCreatedResult = {
   slugDiverged: boolean;
   /** The slug the user expected (derived from the project name) */
   expectedSlug: string;
+  /** When true, nothing was actually created — output uses tentative wording */
+  dryRun?: boolean;
 };
 
 /**
@@ -1629,13 +1849,19 @@ export type ProjectCreatedResult = {
  */
 export function formatProjectCreated(result: ProjectCreatedResult): string {
   const lines: string[] = [];
+  const dry = result.dryRun === true;
+  const nameEsc = escapeMarkdownInline(result.project.name);
+  const orgEsc = escapeMarkdownInline(result.orgSlug);
 
-  lines.push(
-    `## Created project '${escapeMarkdownInline(result.project.name)}' in ${escapeMarkdownInline(result.orgSlug)}`
-  );
+  // Heading
+  if (dry) {
+    lines.push(`## <muted>Dry run</muted> — project '${nameEsc}' in ${orgEsc}`);
+  } else {
+    lines.push(`## Created project '${nameEsc}' in ${orgEsc}`);
+  }
   lines.push("");
 
-  // Slug divergence note
+  // Slug divergence note (never applies in dry-run — we can't predict server renames)
   if (result.slugDiverged) {
     lines.push(
       `> **Note:** Slug \`${result.project.slug}\` was assigned because \`${result.expectedSlug}\` is already taken.`
@@ -1643,21 +1869,25 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
     lines.push("");
   }
 
-  // Team source notes
+  // Team source notes — tentative wording in dry-run
   if (result.teamSource === "auto-created") {
     lines.push(
-      `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
+      dry
+        ? `> **Note:** Would create team '${escapeMarkdownInline(result.teamSlug)}' (org has no teams).`
+        : `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
     );
     lines.push("");
   } else if (result.teamSource === "auto-selected") {
     lines.push(
-      `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+      dry
+        ? `> **Note:** Would use team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
+        : `> **Note:** Using team '${escapeMarkdownInline(result.teamSlug)}'. See all teams: \`sentry team list\``
     );
     lines.push("");
   }
 
   const kvRows: [string, string][] = [
-    ["Project", escapeMarkdownInline(result.project.name)],
+    ["Project", nameEsc],
     ["Slug", safeCodeSpan(result.project.slug)],
     ["Org", safeCodeSpan(result.orgSlug)],
     ["Team", safeCodeSpan(result.teamSlug)],
@@ -1666,13 +1896,214 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
   if (result.dsn) {
     kvRows.push(["DSN", safeCodeSpan(result.dsn)]);
   }
-  kvRows.push(["URL", result.url]);
+  if (result.url) {
+    kvRows.push(["URL", result.url]);
+  }
 
   lines.push(mdKvTable(kvRows));
+
+  // Tip footer — only when a real project exists to view
+  if (!dry) {
+    lines.push("");
+    lines.push(
+      `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
+    );
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
+
+// CLI Fix Formatting
+
+/** Structured fix result (imported from the command module) */
+type FixResult = import("../../commands/cli/fix.js").FixResult;
+
+/** Structured fix issue (imported from the command module) */
+type FixIssue = import("../../commands/cli/fix.js").FixIssue;
+
+/** Status marker for a fix issue bullet point */
+function issueMarker(issue: FixIssue): string {
+  if (issue.repaired === true) {
+    return colorTag("green", "✓");
+  }
+  if (issue.repaired === false) {
+    return colorTag("red", "✗");
+  }
+  return "•";
+}
+
+/**
+ * Build a section for a specific issue category.
+ * Returns empty string if there are no issues in this category.
+ */
+function formatFixCategory(issues: FixIssue[], heading: string): string {
+  if (issues.length === 0) {
+    return "";
+  }
+
+  const lines: string[] = [];
+  lines.push(`### ${heading}`);
   lines.push("");
-  lines.push(
-    `*Tip: Use \`sentry project view ${result.orgSlug}/${result.project.slug}\` for details*`
+  lines.push(`Found ${issues.length} issue(s):`);
+  lines.push("");
+
+  for (const issue of issues) {
+    const marker = issueMarker(issue);
+    const desc = escapeMarkdownInline(issue.description);
+    if (issue.repairMessage && issue.repaired !== undefined) {
+      lines.push(`- ${marker} ${escapeMarkdownInline(issue.repairMessage)}`);
+    } else {
+      lines.push(`- ${marker} ${desc}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format fix command result as rendered markdown.
+ *
+ * Produces sections for each issue category (ownership, permissions, schema)
+ * with status markers for each issue. Designed as the `human` formatter
+ * for the `cli fix` command's {@link OutputConfig}.
+ *
+ * @param data - Structured fix result collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatFixResult(data: FixResult): string {
+  const lines: string[] = [];
+
+  // Header
+  lines.push(`## Database: ${safeCodeSpan(data.dbPath)}`);
+  lines.push("");
+  lines.push(`Schema version: ${data.schemaVersion}`);
+
+  if (data.dryRun) {
+    lines.push("");
+    lines.push(`*${colorTag("muted", "Dry run — no changes will be made")}*`);
+  }
+
+  // Category sections
+  const ownershipIssues = data.issues.filter((i) => i.category === "ownership");
+  const permissionIssues = data.issues.filter(
+    (i) => i.category === "permission"
   );
+  const schemaIssues = data.issues.filter((i) => i.category === "schema");
+
+  const ownershipSection = formatFixCategory(ownershipIssues, "Ownership");
+  const permissionSection = formatFixCategory(permissionIssues, "Permissions");
+  const schemaSection = formatFixCategory(schemaIssues, "Schema");
+
+  if (ownershipSection) {
+    lines.push("");
+    lines.push(ownershipSection);
+  }
+  if (permissionSection) {
+    lines.push("");
+    lines.push(permissionSection);
+  }
+  if (schemaSection) {
+    lines.push("");
+    lines.push(schemaSection);
+  }
+
+  // Instructions block (manual steps when automatic repair isn't possible)
+  if (data.instructions) {
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+    lines.push(escapeMarkdownInline(data.instructions));
+  }
+
+  // Summary
+  lines.push("");
+  if (data.issues.length === 0 && !data.repairFailed) {
+    lines.push(
+      `${colorTag("green", "✓")} No issues found. Database schema and permissions are correct.`
+    );
+  } else if (data.dryRun && data.issues.length > 0 && !data.repairFailed) {
+    lines.push("Run `sentry cli fix` to apply fixes.");
+  } else if (!data.repairFailed) {
+    lines.push(`${colorTag("green", "✓")} All issues repaired successfully.`);
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
+
+// CLI Upgrade Formatting
+
+/** Structured upgrade result (imported from the command module) */
+type UpgradeResult = import("../../commands/cli/upgrade.js").UpgradeResult;
+
+/** Action descriptions for human-readable output */
+const ACTION_DESCRIPTIONS: Record<UpgradeResult["action"], string> = {
+  upgraded: "Upgraded",
+  downgraded: "Downgraded",
+  "up-to-date": "Already up to date",
+  checked: "Update check complete",
+};
+
+/**
+ * Format upgrade result as rendered markdown.
+ *
+ * Produces a concise summary line with the action taken, version info,
+ * and any warnings (e.g., PATH shadowing from old package manager install).
+ * Designed as the `human` formatter for the `cli upgrade` command's
+ * {@link OutputConfig}.
+ *
+ * @param data - Structured upgrade result collected by the command
+ * @returns Rendered terminal string
+ */
+export function formatUpgradeResult(data: UpgradeResult): string {
+  const lines: string[] = [];
+
+  switch (data.action) {
+    case "upgraded":
+    case "downgraded": {
+      const verb = ACTION_DESCRIPTIONS[data.action];
+      lines.push(
+        `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}`
+      );
+      if (data.currentVersion !== data.targetVersion) {
+        lines.push(
+          `${escapeMarkdownInline(data.currentVersion)} → ${escapeMarkdownInline(data.targetVersion)}`
+        );
+      }
+      break;
+    }
+    case "up-to-date":
+      lines.push(
+        `${colorTag("green", "✓")} Already up to date (${safeCodeSpan(data.currentVersion)})`
+      );
+      break;
+    case "checked": {
+      if (data.currentVersion === data.targetVersion) {
+        lines.push(
+          `${colorTag("green", "✓")} You are already on the target version (${safeCodeSpan(data.currentVersion)})`
+        );
+      } else {
+        lines.push(
+          `Latest: ${safeCodeSpan(data.targetVersion)} (current: ${safeCodeSpan(data.currentVersion)})`
+        );
+      }
+      break;
+    }
+    default: {
+      // Exhaustive check — all action types should be handled above
+      const _: never = data.action;
+      lines.push(
+        `${ACTION_DESCRIPTIONS[_ as UpgradeResult["action"]] ?? "Done"}`
+      );
+    }
+  }
+
+  // Append warnings with ⚠ markers
+  if (data.warnings && data.warnings.length > 0) {
+    lines.push("");
+    for (const warning of data.warnings) {
+      lines.push(`${colorTag("yellow", "⚠")} ${escapeMarkdownInline(warning)}`);
+    }
+  }
 
   return renderMarkdown(lines.join("\n"));
 }

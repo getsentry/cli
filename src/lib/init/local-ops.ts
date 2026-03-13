@@ -37,6 +37,61 @@ import type {
   WizardOptions,
 } from "./types.js";
 
+/** Whitespace characters used for JSON indentation. */
+const Indenter = {
+  SPACE: " ",
+  TAB: "\t",
+} as const;
+
+/** Describes the indentation style of a JSON file. */
+type JsonIndent = {
+  /** The whitespace character used for indentation. */
+  replacer: (typeof Indenter)[keyof typeof Indenter];
+  /** How many times the replacer is repeated per indent level. */
+  length: number;
+};
+
+const DEFAULT_JSON_INDENT: JsonIndent = {
+  replacer: Indenter.SPACE,
+  length: 2,
+};
+
+/** Matches the first indented line in a string to detect whitespace style. */
+const INDENT_PATTERN = /^(\s+)/m;
+
+/**
+ * Detect the indentation style of a JSON string by inspecting the first
+ * indented line. Returns a default of 2 spaces if no indentation is found.
+ */
+function detectJsonIndent(content: string): JsonIndent {
+  const match = content.match(INDENT_PATTERN);
+  if (!match?.[1]) {
+    return DEFAULT_JSON_INDENT;
+  }
+  const indent = match[1];
+  if (indent.includes("\t")) {
+    return { replacer: Indenter.TAB, length: indent.length };
+  }
+  return { replacer: Indenter.SPACE, length: indent.length };
+}
+
+/** Build the third argument for `JSON.stringify` from a `JsonIndent`. */
+function jsonIndentArg(indent: JsonIndent): string {
+  return indent.replacer.repeat(indent.length);
+}
+
+/**
+ * Pretty-print a JSON string using the given indentation style.
+ * Returns the original string if it cannot be parsed as valid JSON.
+ */
+function prettyPrintJson(content: string, indent: JsonIndent): string {
+  try {
+    return `${JSON.stringify(JSON.parse(content), null, jsonIndentArg(indent))}\n`;
+  } catch {
+    return content;
+  }
+}
+
 /**
  * Shell metacharacters that enable chaining, piping, substitution, or redirection.
  * All legitimate install commands are simple single commands that don't need these.
@@ -336,6 +391,7 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
     try {
       const absPath = safePath(cwd, filePath);
       const stat = fs.statSync(absPath);
+      let content: string;
       if (stat.size > maxBytes) {
         // Read only up to maxBytes
         const buffer = Buffer.alloc(maxBytes);
@@ -345,10 +401,21 @@ function readFiles(payload: ReadFilesPayload): LocalOpResult {
         } finally {
           fs.closeSync(fd);
         }
-        files[filePath] = buffer.toString("utf-8");
+        content = buffer.toString("utf-8");
       } else {
-        files[filePath] = fs.readFileSync(absPath, "utf-8");
+        content = fs.readFileSync(absPath, "utf-8");
       }
+
+      // Minify JSON files by stripping whitespace/formatting
+      if (filePath.endsWith(".json")) {
+        try {
+          content = JSON.stringify(JSON.parse(content));
+        } catch {
+          // Not valid JSON (truncated, JSONC, etc.) — send as-is
+        }
+      }
+
+      files[filePath] = content;
     } catch {
       files[filePath] = null;
     }
@@ -499,6 +566,26 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): LocalOpResult {
   return { ok: true, data: { applied } };
 }
 
+/**
+ * Resolve the final file content for a patch, pretty-printing JSON files
+ * to preserve readable formatting. For `modify` actions, the existing file's
+ * indentation style is detected and preserved. For `create` actions, a default
+ * of 2-space indentation is used.
+ */
+function resolvePatchContent(
+  absPath: string,
+  patch: ApplyPatchsetPayload["params"]["patches"][number]
+): string {
+  if (!patch.path.endsWith(".json")) {
+    return patch.patch;
+  }
+  if (patch.action === "modify") {
+    const existing = fs.readFileSync(absPath, "utf-8");
+    return prettyPrintJson(patch.patch, detectJsonIndent(existing));
+  }
+  return prettyPrintJson(patch.patch, DEFAULT_JSON_INDENT);
+}
+
 function applyPatchset(
   payload: ApplyPatchsetPayload,
   dryRun?: boolean
@@ -530,7 +617,8 @@ function applyPatchset(
       case "create": {
         const dir = path.dirname(absPath);
         fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(absPath, patch.patch, "utf-8");
+        const content = resolvePatchContent(absPath, patch);
+        fs.writeFileSync(absPath, content, "utf-8");
         applied.push({ path: patch.path, action: "create" });
         break;
       }
@@ -542,7 +630,8 @@ function applyPatchset(
             data: { applied },
           };
         }
-        fs.writeFileSync(absPath, patch.patch, "utf-8");
+        const content = resolvePatchContent(absPath, patch);
+        fs.writeFileSync(absPath, content, "utf-8");
         applied.push({ path: patch.path, action: "modify" });
         break;
       }
@@ -650,6 +739,7 @@ async function createSentryProject(
 
     // 2. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
+      team: options.team,
       autoCreateSlug: slug,
       usageHint: "sentry init",
     });

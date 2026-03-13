@@ -65,6 +65,12 @@ export type ResolveTeamOptions = {
    * If not provided and the org has zero teams, an error is thrown instead.
    */
   autoCreateSlug?: string;
+  /**
+   * When true, skip the actual team creation API call and return what
+   * would be created. The returned ResolvedTeam has source "auto-created"
+   * with the autoCreateSlug value.
+   */
+  dryRun?: boolean;
 };
 
 /** Result of team resolution, including how the team was determined */
@@ -116,14 +122,7 @@ export async function resolveOrCreateTeam(
 
   // No teams — auto-create one if a slug was provided
   if (teams.length === 0) {
-    if (options.autoCreateSlug) {
-      return await autoCreateTeam(orgSlug, options.autoCreateSlug);
-    }
-    const teamsUrl = `${getSentryBaseUrl()}/settings/${orgSlug}/teams/`;
-    throw new ContextError("Team", `${options.usageHint} --team <team-slug>`, [
-      `No teams found in org '${orgSlug}'`,
-      `Create a team at ${teamsUrl}`,
-    ]);
+    return resolveEmptyTeams(orgSlug, options);
   }
 
   // Single team — auto-select
@@ -153,6 +152,27 @@ export async function resolveOrCreateTeam(
     `${options.usageHint} --team ${(candidates[0] as SentryTeam).slug}`,
     [`${label}. Specify one with --team:\n\n${teamList}`]
   );
+}
+
+/**
+ * Handle the case when an org has zero teams.
+ * Either auto-creates a team, returns a dry-run preview, or throws.
+ */
+function resolveEmptyTeams(
+  orgSlug: string,
+  options: ResolveTeamOptions
+): Promise<ResolvedTeam> | ResolvedTeam {
+  if (!options.autoCreateSlug) {
+    const teamsUrl = `${getSentryBaseUrl()}/settings/${orgSlug}/teams/`;
+    throw new ContextError("Team", `${options.usageHint} --team <team-slug>`, [
+      `No teams found in org '${orgSlug}'`,
+      `Create a team at ${teamsUrl}`,
+    ]);
+  }
+  if (options.dryRun) {
+    return { slug: options.autoCreateSlug, source: "auto-created" };
+  }
+  return autoCreateTeam(orgSlug, options.autoCreateSlug);
 }
 
 /**

@@ -49,6 +49,7 @@ export type {
   Breadcrumb,
   BreadcrumbsEntry,
   BrowserContext,
+  CustomerTrialInfo,
   DetailedLogsResponse,
   DetailedSentryLog,
   DeviceContext,
@@ -59,6 +60,7 @@ export type {
   LogsResponse,
   Mechanism,
   OsContext,
+  ProductTrial,
   ProjectKey,
   Region,
   RepositoryProvider,
@@ -85,11 +87,13 @@ export type {
 } from "./sentry.js";
 
 export {
+  CustomerTrialInfoSchema,
   DetailedLogsResponseSchema,
   DetailedSentryLogSchema,
   ISSUE_LEVELS,
   ISSUE_STATUSES,
   LogsResponseSchema,
+  ProductTrialSchema,
   RegionSchema,
   RepositoryProviderSchema,
   SentryLogSchema,

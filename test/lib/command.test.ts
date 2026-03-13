@@ -24,6 +24,7 @@ import {
   numberParser,
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
+import { OutputError } from "../../src/lib/errors.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
@@ -42,10 +43,11 @@ type TestContext = CommandContext & {
  * Access collected output via `ctx.output`.
  */
 function createTestContext() {
-  const collected: string[] = [];
+  const stdoutCollected: string[] = [];
+  const stderrCollected: string[] = [];
   const stdoutWriter = {
     write: (s: string) => {
-      collected.push(s);
+      stdoutCollected.push(s);
       return true;
     },
   };
@@ -54,15 +56,17 @@ function createTestContext() {
       stdout: stdoutWriter,
       stderr: {
         write: (s: string) => {
-          collected.push(s);
+          stderrCollected.push(s);
           return true;
         },
       },
     },
     /** stdout on context — used by buildCommand's return-based output handler */
     stdout: stdoutWriter,
-    /** All collected output chunks */
-    output: collected,
+    /** stdout output chunks only */
+    output: stdoutCollected,
+    /** stderr output chunks only */
+    errors: stderrCollected,
   };
 }
 
@@ -804,7 +808,7 @@ describe("buildCommand output: json", () => {
 
     expect(funcCalled).toBe(false);
     expect(
-      ctx.output.some((s) => s.includes("No flag registered for --json"))
+      ctx.errors.some((s) => s.includes("No flag registered for --json"))
     ).toBe(true);
   });
 
@@ -1235,5 +1239,105 @@ describe("buildCommand return-based output", () => {
     const jsonRaw = ctx2.output.join("");
     expect(jsonRaw).not.toContain("Detected from");
     expect(JSON.parse(jsonRaw)).toEqual({ org: "sentry" });
+  });
+
+  test("OutputError renders data and exits with error code", async () => {
+    let exitCalledWith: number | undefined;
+    const originalExit = process.exit;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { error: string }) => `Error: ${d.error}`,
+      },
+      parameters: {},
+      async func(this: TestContext) {
+        throw new OutputError({ error: "not found" });
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    // Mock process.exit — must throw to prevent fall-through since
+    // the real process.exit() is typed as `never`
+    class MockExit extends Error {
+      code: number;
+      constructor(code: number) {
+        super(`process.exit(${code})`);
+        this.code = code;
+      }
+    }
+    process.exit = ((code?: number) => {
+      exitCalledWith = code;
+      throw new MockExit(code ?? 0);
+    }) as typeof process.exit;
+
+    try {
+      await run(app, ["test"], ctx as TestContext);
+    } finally {
+      process.exit = originalExit;
+    }
+    expect(exitCalledWith).toBe(1);
+    // Output was rendered BEFORE exit
+    expect(ctx.output.join("")).toContain("Error: not found");
+  });
+
+  test("OutputError renders JSON in --json mode", async () => {
+    let exitCalledWith: number | undefined;
+    const originalExit = process.exit;
+
+    const command = buildCommand<
+      { json: boolean; fields?: string[] },
+      [],
+      TestContext
+    >({
+      docs: { brief: "Test" },
+      output: {
+        json: true,
+        human: (d: { error: string }) => `Error: ${d.error}`,
+      },
+      parameters: {},
+      async func(this: TestContext) {
+        throw new OutputError({ error: "not found" });
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    class MockExit extends Error {
+      code: number;
+      constructor(code: number) {
+        super(`process.exit(${code})`);
+        this.code = code;
+      }
+    }
+    process.exit = ((code?: number) => {
+      exitCalledWith = code;
+      throw new MockExit(code ?? 0);
+    }) as typeof process.exit;
+
+    try {
+      await run(app, ["test", "--json"], ctx as TestContext);
+    } finally {
+      process.exit = originalExit;
+    }
+    expect(exitCalledWith).toBe(1);
+    const jsonOutput = JSON.parse(ctx.output.join(""));
+    expect(jsonOutput).toEqual({ error: "not found" });
   });
 });
