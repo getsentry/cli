@@ -17,6 +17,7 @@ import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
+import { disableDsnCache } from "./dsn/index.js";
 import { warning } from "./formatters/colors.js";
 import type { CommandOutput, OutputConfig } from "./formatters/output.js";
 import {
@@ -110,7 +111,7 @@ export const LIST_JSON_FLAG = {
  */
 export const FRESH_FLAG = {
   kind: "boolean" as const,
-  brief: "Bypass cache and fetch fresh data",
+  brief: "Bypass cache, re-detect projects, and fetch fresh data",
   default: false,
 } as const;
 
@@ -140,6 +141,7 @@ export const FRESH_ALIASES = { f: "fresh" } as const;
 export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
   if (flags.fresh) {
     disableResponseCache();
+    disableDsnCache();
   }
 }
 
