@@ -23,7 +23,6 @@ import {
   prepareWidgetQueries,
   SPAN_AGGREGATE_FUNCTIONS,
   SpanAggregateFunctionSchema,
-  stripWidgetServerFields,
   WIDGET_TYPES,
   type WidgetType,
 } from "../../src/types/dashboard.js";
@@ -598,76 +597,5 @@ describe("assignDefaultLayout", () => {
     // Should be placed after the existing widget, not overlapping
     expect(result.layout!.x).toBe(2);
     expect(result.layout!.y).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// stripWidgetServerFields
-// ---------------------------------------------------------------------------
-
-describe("stripWidgetServerFields", () => {
-  test("strips id, dashboardId, dateCreated from widget", () => {
-    const widget: DashboardWidget = {
-      id: "100",
-      dashboardId: "42",
-      dateCreated: "2026-01-01T00:00:00Z",
-      title: "Test",
-      displayType: "line",
-      widgetType: "spans",
-    };
-    const result = stripWidgetServerFields(widget);
-    expect(result).not.toHaveProperty("id");
-    expect(result).not.toHaveProperty("dashboardId");
-    expect(result).not.toHaveProperty("dateCreated");
-    expect(result.title).toBe("Test");
-    expect(result.displayType).toBe("line");
-    expect(result.widgetType).toBe("spans");
-  });
-
-  test("strips server fields from queries", () => {
-    const widget: DashboardWidget = {
-      title: "Test",
-      displayType: "line",
-      queries: [
-        {
-          id: "q1",
-          widgetId: "w1",
-          dateCreated: "2026-01-01T00:00:00Z",
-          aggregates: ["count()"],
-          conditions: "",
-          name: "Query 1",
-        },
-      ],
-    };
-    const result = stripWidgetServerFields(widget);
-    const query = result.queries![0]!;
-    expect(query).not.toHaveProperty("id");
-    expect(query).not.toHaveProperty("widgetId");
-    expect(query).not.toHaveProperty("dateCreated");
-    expect(query.aggregates).toEqual(["count()"]);
-    expect(query.name).toBe("Query 1");
-  });
-
-  test("preserves user-facing fields", () => {
-    const widget: DashboardWidget = {
-      title: "My Widget",
-      displayType: "table",
-      widgetType: "spans",
-      layout: { x: 0, y: 0, w: 6, h: 2 },
-      queries: [
-        {
-          aggregates: ["count()"],
-          columns: ["browser.name"],
-          conditions: "is:unresolved",
-          name: "",
-        },
-      ],
-    };
-    const result = stripWidgetServerFields(widget);
-    expect(result.title).toBe("My Widget");
-    expect(result.displayType).toBe("table");
-    expect(result.widgetType).toBe("spans");
-    expect(result.layout).toBeDefined();
-    expect(result.queries![0]!.conditions).toBe("is:unresolved");
   });
 });
