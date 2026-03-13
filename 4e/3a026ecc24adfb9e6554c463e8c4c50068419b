@@ -1,0 +1,28 @@
+## Implementation Plan
+
+### Goal
+Allow re-authentication without manual logout by adding --force flag
+and an interactive confirmation prompt to 'sentry auth login'.
+
+### Design Decisions
+1. Three-tier behavior when already authenticated:
+   - Env var auth (SENTRY_AUTH_TOKEN/SENTRY_TOKEN): always blocks, unchanged
+   - --force flag: clears auth silently via clearAuth() and proceeds
+   - No --force on interactive TTY: prompts with cached user identity
+   - No --force on non-interactive: prints message with --force hint
+
+2. Extracted handleExistingAuth() as standalone function to keep
+   cognitive complexity under biome's max-15 threshold.
+
+3. Uses `confirmed !== true` (strict equality) to handle
+   Symbol(clack:cancel) from Ctrl+C — which is truthy but not true.
+
+4. getUserInfo() provides cached identity for the prompt; falls back
+   to 'current user' if no cached info.
+
+### Test Strategy
+- Unit tests (test/commands/auth/login.test.ts): --force with OAuth,
+  --force with --token, --force with env token, non-TTY message
+- Isolated tests (test/isolated/login-reauth.test.ts): TTY prompt
+  paths using mock.module for node:tty and logger — confirm, decline,
+  Ctrl+C cancel, --force skip, user identity display, fallback text
