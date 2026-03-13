@@ -15,6 +15,7 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 
 type RefreshFlags = {
   readonly json: boolean;
@@ -104,7 +105,7 @@ Examples:
         : undefined,
     };
 
-    yield { data: payload };
+    yield commandOutput(payload);
     return;
   },
 });

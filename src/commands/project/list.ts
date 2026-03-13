@@ -32,7 +32,10 @@ import {
 } from "../../lib/db/pagination.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import type { OutputConfig } from "../../lib/formatters/output.js";
+import {
+  commandOutput,
+  type OutputConfig,
+} from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -633,6 +636,7 @@ export const listCommand = buildListCommand("project", {
     // Only forward hint to the footer when items exist — empty results
     // already render hint text inside the human formatter.
     const hint = result.items.length > 0 ? result.hint : undefined;
-    yield { data: result, hint };
+    yield commandOutput(result);
+    return { hint };
   },
 });

@@ -15,6 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -271,9 +272,7 @@ export const listCommand = buildListCommand("trace", {
         : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    yield {
-      data: { traces, hasMore, nextCursor, org, project },
-      hint,
-    };
+    yield commandOutput({ traces, hasMore, nextCursor, org, project });
+    return { hint };
   },
 });

@@ -18,6 +18,7 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
@@ -389,7 +390,7 @@ export const viewCommand = buildCommand({
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    yield { data: { logs, orgSlug: target.org }, hint };
-    return;
+    yield commandOutput({ logs, orgSlug: target.org });
+    return { hint };
   },
 });

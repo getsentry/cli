@@ -21,6 +21,7 @@ import {
   formatSimpleSpanTree,
   formatTraceSummary,
 } from "../../lib/formatters/index.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -314,10 +315,9 @@ export const viewCommand = buildCommand({
         ? formatSimpleSpanTree(traceId, spans, flags.spans)
         : undefined;
 
-    yield {
-      data: { summary, spans, spanTreeLines },
+    yield commandOutput({ summary, spans, spanTreeLines });
+    return {
       hint: `Tip: Open in browser with 'sentry trace view --web ${traceId}'`,
     };
-    return;
   },
 });

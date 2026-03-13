@@ -22,6 +22,7 @@ import { openBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -142,7 +143,12 @@ export const startCommand = buildCommand({
 
     // Plan trial: no API to start it — open billing page instead
     if (parsed.name === "plan") {
-      yield await handlePlanTrial(orgSlug, this.stdout, flags.json ?? false);
+      const planResult = await handlePlanTrial(
+        orgSlug,
+        this.stdout,
+        flags.json ?? false
+      );
+      yield commandOutput(planResult);
       return;
     }
 
@@ -161,16 +167,13 @@ export const startCommand = buildCommand({
     // Start the trial
     await startProductTrial(orgSlug, trial.category);
 
-    yield {
-      data: {
-        name: parsed.name,
-        category: trial.category,
-        organization: orgSlug,
-        lengthDays: trial.lengthDays,
-        started: true,
-      },
-      hint: undefined,
-    };
+    yield commandOutput({
+      name: parsed.name,
+      category: trial.category,
+      organization: orgSlug,
+      lengthDays: trial.lengthDays,
+      started: true,
+    });
     return;
   },
 });
@@ -216,14 +219,11 @@ async function promptOpenBillingUrl(
 
 /** Return type for the plan trial handler */
 type PlanTrialResult = {
-  data: {
-    name: string;
-    category: string;
-    organization: string;
-    url: string;
-    opened: boolean;
-  };
-  hint: undefined;
+  name: string;
+  category: string;
+  organization: string;
+  url: string;
+  opened: boolean;
 };
 
 /**
@@ -273,14 +273,11 @@ async function handlePlanTrial(
   }
 
   return {
-    data: {
-      name: "plan",
-      category: "plan",
-      organization: orgSlug,
-      url,
-      opened,
-    },
-    hint: undefined,
+    name: "plan",
+    category: "plan",
+    organization: orgSlug,
+    url,
+    opened,
   };
 }
 
