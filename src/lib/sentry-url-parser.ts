@@ -191,10 +191,13 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 export function applySentryUrlContext(baseUrl: string): void {
   if (isSentrySaasUrl(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
-    // Without this, a stale SENTRY_URL would route SaaS requests to the wrong host.
+    // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
+    // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
+    delete process.env.SENTRY_HOST;
     // biome-ignore lint/performance/noDelete: process.env requires delete to truly unset; assignment coerces to string in Node.js
     delete process.env.SENTRY_URL;
     return;
   }
+  process.env.SENTRY_HOST = baseUrl;
   process.env.SENTRY_URL = baseUrl;
 }

@@ -56,7 +56,9 @@
     },
     {
       // db/index.ts exports db connection utilities - not a barrel file but triggers the rule
-      "includes": ["src/lib/db/index.ts"],
+      // api-client.ts is a barrel that re-exports from src/lib/api/ domain modules
+      // to preserve the existing import path for all consumers
+      "includes": ["src/lib/db/index.ts", "src/lib/api-client.ts"],
       "linter": {
         "rules": {
           "performance": {

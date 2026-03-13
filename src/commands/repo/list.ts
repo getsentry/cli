@@ -15,13 +15,13 @@ import {
   listRepositoriesPaginated,
 } from "../../lib/api-client.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import { type Column, writeTable } from "../../lib/formatters/table.js";
+import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
   buildOrgListCommand,
   type OrgListCommandDocs,
 } from "../../lib/list-command.js";
 import type { OrgListConfig } from "../../lib/org-list.js";
-import type { SentryRepository, Writer } from "../../types/index.js";
+import type { SentryRepository } from "../../types/index.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "repo-list";
@@ -47,8 +47,8 @@ const repoListConfig: OrgListConfig<SentryRepository, RepositoryWithOrg> = {
   listForOrg: (org) => listRepositories(org),
   listPaginated: (org, opts) => listRepositoriesPaginated(org, opts),
   withOrg: (repo, orgSlug) => ({ ...repo, orgSlug }),
-  displayTable: (stdout: Writer, repos: RepositoryWithOrg[]) =>
-    writeTable(stdout, repos, REPO_COLUMNS),
+  displayTable: (repos: RepositoryWithOrg[]) =>
+    formatTable(repos, REPO_COLUMNS),
 };
 
 const docs: OrgListCommandDocs = {

@@ -13,6 +13,7 @@ import {
   getTrialFriendlyName,
   getTrialStatus,
   getValidTrialNames,
+  humanizeCategory,
   isTrialName,
 } from "../../src/lib/trials.js";
 import type { ProductTrial } from "../../src/types/index.js";
@@ -92,6 +93,37 @@ describe("findAvailableTrial", () => {
     expect(result?.category).toBe("transactions");
   });
 
+  test("finds monitors trial by 'monitorSeats' category", () => {
+    const trials = [makeTrial({ category: "monitorSeats" })];
+    const result = findAvailableTrial(trials, "monitors");
+
+    expect(result?.category).toBe("monitorSeats");
+  });
+
+  test("finds uptime trial", () => {
+    const trials = [makeTrial({ category: "uptime" })];
+    const result = findAvailableTrial(trials, "uptime");
+
+    expect(result?.category).toBe("uptime");
+  });
+
+  test("finds profiling trial by 'profileDurationUI' category", () => {
+    const trials = [makeTrial({ category: "profileDurationUI" })];
+    const result = findAvailableTrial(trials, "profiling");
+
+    expect(result?.category).toBe("profileDurationUI");
+  });
+
+  test("prefers profileDuration over profileDurationUI for profiling", () => {
+    const trials = [
+      makeTrial({ category: "profileDurationUI" }),
+      makeTrial({ category: "profileDuration" }),
+    ];
+    const result = findAvailableTrial(trials, "profiling");
+
+    expect(result?.category).toBe("profileDuration");
+  });
+
   test("ignores non-matching categories", () => {
     const trials = [
       makeTrial({ category: "replays" }),
@@ -132,8 +164,24 @@ describe("getTrialDisplayName", () => {
     expect(getTrialDisplayName("spans")).toBe("Spans");
   });
 
-  test("returns raw category for unknown", () => {
-    expect(getTrialDisplayName("unknownCategory")).toBe("unknownCategory");
+  test("maps monitorSeats to Cron Monitors", () => {
+    expect(getTrialDisplayName("monitorSeats")).toBe("Cron Monitors");
+  });
+
+  test("maps uptime to Uptime Monitoring", () => {
+    expect(getTrialDisplayName("uptime")).toBe("Uptime Monitoring");
+  });
+
+  test("maps profileDurationUI to Profiling", () => {
+    expect(getTrialDisplayName("profileDurationUI")).toBe("Profiling");
+  });
+
+  test("humanizes unknown camelCase category", () => {
+    expect(getTrialDisplayName("unknownCategory")).toBe("Unknown Category");
+  });
+
+  test("humanizes single-word unknown category", () => {
+    expect(getTrialDisplayName("widgets")).toBe("Widgets");
   });
 });
 
@@ -154,7 +202,23 @@ describe("getTrialFriendlyName", () => {
     expect(getTrialFriendlyName("logBytes")).toBe("logs");
   });
 
-  test("returns raw category for unknown", () => {
+  test("maps monitorSeats to monitors", () => {
+    expect(getTrialFriendlyName("monitorSeats")).toBe("monitors");
+  });
+
+  test("maps uptime to uptime", () => {
+    expect(getTrialFriendlyName("uptime")).toBe("uptime");
+  });
+
+  test("maps profileDurationUI to profiling", () => {
+    expect(getTrialFriendlyName("profileDurationUI")).toBe("profiling");
+  });
+
+  test("kebab-cases unknown camelCase category", () => {
+    expect(getTrialFriendlyName("somethingNew")).toBe("something-new");
+  });
+
+  test("lowercases unknown single-word category", () => {
     expect(getTrialFriendlyName("something")).toBe("something");
   });
 });
@@ -247,10 +311,12 @@ describe("getValidTrialNames", () => {
     expect(names).toContain("spans");
     expect(names).toContain("profiling");
     expect(names).toContain("logs");
+    expect(names).toContain("monitors");
+    expect(names).toContain("uptime");
   });
 
-  test("returns exactly 6 names", () => {
-    expect(getValidTrialNames()).toHaveLength(6);
+  test("returns exactly 8 names", () => {
+    expect(getValidTrialNames()).toHaveLength(8);
   });
 });
 
@@ -262,6 +328,8 @@ describe("isTrialName", () => {
     expect(isTrialName("spans")).toBe(true);
     expect(isTrialName("profiling")).toBe(true);
     expect(isTrialName("logs")).toBe(true);
+    expect(isTrialName("monitors")).toBe(true);
+    expect(isTrialName("uptime")).toBe(true);
   });
 
   test("returns false for invalid names", () => {
@@ -269,5 +337,33 @@ describe("isTrialName", () => {
     expect(isTrialName("")).toBe(false);
     expect(isTrialName("seerUsers")).toBe(false);
     expect(isTrialName("SEER")).toBe(false);
+  });
+});
+
+describe("humanizeCategory", () => {
+  test("splits camelCase into title-cased words", () => {
+    expect(humanizeCategory("monitorSeats")).toBe("Monitor Seats");
+  });
+
+  test("preserves all-caps abbreviations", () => {
+    expect(humanizeCategory("profileDurationUI")).toBe("Profile Duration UI");
+  });
+
+  test("capitalizes single-word categories", () => {
+    expect(humanizeCategory("spans")).toBe("Spans");
+  });
+
+  test("handles already-capitalized input", () => {
+    expect(humanizeCategory("Seer")).toBe("Seer");
+  });
+
+  test("handles multi-segment camelCase", () => {
+    expect(humanizeCategory("myLongCategoryName")).toBe(
+      "My Long Category Name"
+    );
+  });
+
+  test("handles single character words", () => {
+    expect(humanizeCategory("a")).toBe("A");
   });
 });

@@ -84,18 +84,18 @@ sentry auth refresh
 
 This is typically handled automatically when tokens expire.
 
-## Configuration
+## Credential Storage
 
-Credentials are stored in `~/.sentry/config.json` with restricted file permissions (mode 600).
+Credentials are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions (mode 600).
 
-**Config structure:**
+Use `sentry auth token` to retrieve your current access token, or `sentry auth status` to check authentication state.
 
-```json
-{
-  "auth": {
-    "token": "...",
-    "refreshToken": "...",
-    "expiresAt": "2024-12-31T00:00:00Z"
-  }
-}
-```
+### Environment Variable Precedence
+
+The CLI checks for auth tokens in the following order, using the first one found:
+
+1. `SENTRY_AUTH_TOKEN` environment variable (legacy)
+2. `SENTRY_TOKEN` environment variable
+3. The stored token in the SQLite database
+
+When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.

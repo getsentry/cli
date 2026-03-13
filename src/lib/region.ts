@@ -6,6 +6,7 @@
  */
 
 import { retrieveAnOrganization } from "@sentry/api";
+import { getConfiguredSentryUrl } from "./constants.js";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { withAuthGuard } from "./errors.js";
@@ -66,8 +67,8 @@ export async function resolveOrgRegion(orgSlug: string): Promise<string> {
  * Returns false for self-hosted instances that don't have regional URLs.
  */
 export function isMultiRegionEnabled(): boolean {
-  // Self-hosted instances (custom SENTRY_URL) typically don't have multi-region
-  const baseUrl = process.env.SENTRY_URL;
+  // Self-hosted instances (custom SENTRY_HOST/SENTRY_URL) typically don't have multi-region
+  const baseUrl = getConfiguredSentryUrl();
   if (baseUrl && !isSentrySaasUrl(baseUrl)) {
     return false;
   }
