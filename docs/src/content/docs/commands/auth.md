@@ -94,8 +94,8 @@ Use `sentry auth token` to retrieve your current access token, or `sentry auth s
 
 The CLI checks for auth tokens in the following order, using the first one found:
 
-1. `SENTRY_AUTH_TOKEN` environment variable
-2. `SENTRY_TOKEN` environment variable (legacy)
+1. `SENTRY_AUTH_TOKEN` environment variable (legacy)
+2. `SENTRY_TOKEN` environment variable
 3. The stored token in the SQLite database
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
