@@ -54,11 +54,13 @@ function createMockContext() {
 describe("project delete", () => {
   let getProjectSpy: ReturnType<typeof spyOn>;
   let deleteProjectSpy: ReturnType<typeof spyOn>;
+  let getOrganizationSpy: ReturnType<typeof spyOn>;
   let resolveOrgProjectTargetSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getProjectSpy = spyOn(apiClient, "getProject");
     deleteProjectSpy = spyOn(apiClient, "deleteProject");
+    getOrganizationSpy = spyOn(apiClient, "getOrganization");
     resolveOrgProjectTargetSpy = spyOn(
       resolveTarget,
       "resolveOrgProjectTarget"
@@ -67,6 +69,11 @@ describe("project delete", () => {
     // Default mocks
     getProjectSpy.mockResolvedValue(sampleProject);
     deleteProjectSpy.mockResolvedValue(undefined);
+    getOrganizationSpy.mockResolvedValue({
+      id: "1",
+      slug: "acme-corp",
+      name: "Acme Corp",
+    });
     resolveOrgProjectTargetSpy.mockResolvedValue({
       org: "acme-corp",
       project: "my-app",
@@ -76,6 +83,7 @@ describe("project delete", () => {
   afterEach(() => {
     getProjectSpy.mockRestore();
     deleteProjectSpy.mockRestore();
+    getOrganizationSpy.mockRestore();
     resolveOrgProjectTargetSpy.mockRestore();
   });
 
@@ -169,10 +177,16 @@ describe("project delete", () => {
     expect(deleteProjectSpy).not.toHaveBeenCalled();
   });
 
-  test("shows actionable ApiError on 403 from deleteProject", async () => {
+  test("403 with member role suggests asking an admin", async () => {
     deleteProjectSpy.mockRejectedValue(
       new ApiError("Forbidden", 403, "You do not have permission")
     );
+    getOrganizationSpy.mockResolvedValue({
+      id: "1",
+      slug: "acme-corp",
+      name: "Acme Corp",
+      orgRole: "member",
+    });
 
     const { context } = createMockContext();
     const func = await deleteCommand.loader();
@@ -184,8 +198,57 @@ describe("project delete", () => {
       expect(error).toBeInstanceOf(ApiError);
       const apiErr = error as ApiError;
       expect(apiErr.status).toBe(403);
-      expect(apiErr.message).toContain("project:admin");
+      expect(apiErr.message).toContain("role is 'member'");
+      expect(apiErr.message).toContain("Ask an org admin");
+      expect(apiErr.message).not.toContain("sentry auth login");
+    }
+  });
+
+  test("403 with owner role suggests re-authenticating", async () => {
+    deleteProjectSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    getOrganizationSpy.mockResolvedValue({
+      id: "1",
+      slug: "acme-corp",
+      name: "Acme Corp",
+      orgRole: "owner",
+    });
+
+    const { context } = createMockContext();
+    const func = await deleteCommand.loader();
+
+    try {
+      await func.call(context, defaultFlags, "acme-corp/my-app");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiErr = error as ApiError;
+      expect(apiErr.status).toBe(403);
+      expect(apiErr.message).toContain("('owner') should allow this");
       expect(apiErr.message).toContain("sentry auth login");
+    }
+  });
+
+  test("403 with role fetch failure shows fallback message", async () => {
+    deleteProjectSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    getOrganizationSpy.mockRejectedValue(new Error("network error"));
+
+    const { context } = createMockContext();
+    const func = await deleteCommand.loader();
+
+    try {
+      await func.call(context, defaultFlags, "acme-corp/my-app");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiErr = error as ApiError;
+      expect(apiErr.status).toBe(403);
+      expect(apiErr.message).toContain("Manager, Owner, or Team Admin");
+      expect(apiErr.message).toContain("sentry auth login");
+      expect(apiErr.message).toContain("sentry org view");
     }
   });
 

@@ -19,10 +19,18 @@
 
 import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
-import { deleteProject, getProject } from "../../lib/api-client.js";
+import {
+  deleteProject,
+  getOrganization,
+  getProject,
+} from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError, CliError, ContextError } from "../../lib/errors.js";
+import {
+  formatProjectDeleted,
+  type ProjectDeleteResult,
+} from "../../lib/formatters/human.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrgProjectTarget } from "../../lib/resolve-target.js";
 import { buildProjectUrl } from "../../lib/sentry-urls.js";
@@ -63,29 +71,69 @@ async function confirmDeletion(
 }
 
 /**
- * Write dry-run output describing what would be deleted.
+ * Build an actionable 403 error by checking the user's org role.
  *
- * @param stdout - Output stream
- * @param orgSlug - Organization slug
- * @param project - Project details
- * @param json - Whether to output JSON
+ * - member/billing → tell them they need a higher role
+ * - manager/owner/admin → suggest re-authenticating (likely token scope)
+ * - unknown/fetch failure → generic message covering both cases
  */
-function writeDryRunOutput(
-  stdout: { write: (s: string) => unknown },
+async function buildPermissionError(
   orgSlug: string,
-  project: { slug: string; name: string },
-  json: boolean
-): void {
-  if (json) {
-    stdout.write(
-      `${JSON.stringify({ dryRun: true, org: orgSlug, project: project.slug, name: project.name, url: buildProjectUrl(orgSlug, project.slug) })}\n`
-    );
-  } else {
-    stdout.write(
-      `Would delete project '${project.name}' (${orgSlug}/${project.slug}).\n` +
-        `  URL: ${buildProjectUrl(orgSlug, project.slug)}\n`
+  projectSlug: string
+): Promise<ApiError> {
+  const label = `'${orgSlug}/${projectSlug}'`;
+  const rolesWithAccess = "Manager, Owner, or Team Admin";
+
+  let orgRole: string | undefined;
+  try {
+    const org = await getOrganization(orgSlug);
+    orgRole = (org as Record<string, unknown>).orgRole as string | undefined;
+  } catch {
+    // Best-effort — fall through to generic message
+  }
+
+  if (orgRole && ["member", "billing"].includes(orgRole)) {
+    return new ApiError(
+      `Permission denied: You don't have permission to delete ${label}.\n\n` +
+        `Your organization role is '${orgRole}'. ` +
+        `Project deletion requires ${rolesWithAccess} role.\n` +
+        "  Ask an org admin to change your role or delete the project for you.",
+      403
     );
   }
+
+  if (orgRole && ["manager", "owner", "admin"].includes(orgRole)) {
+    return new ApiError(
+      `Permission denied: You don't have permission to delete ${label}.\n\n` +
+        `Your org role ('${orgRole}') should allow this. ` +
+        "Your auth token may be missing the 'project:admin' scope.\n" +
+        "  Re-authenticate:  sentry auth login",
+      403
+    );
+  }
+
+  return new ApiError(
+    `Permission denied: You don't have permission to delete ${label}.\n\n` +
+      `This requires ${rolesWithAccess} role, or a token with the 'project:admin' scope.\n` +
+      `  Check your role:   sentry org view ${orgSlug}\n` +
+      "  Re-authenticate:   sentry auth login",
+    403
+  );
+}
+
+/** Build a result object for both dry-run and actual deletion */
+function buildResult(
+  orgSlug: string,
+  project: { slug: string; name: string },
+  dryRun?: boolean
+): ProjectDeleteResult {
+  return {
+    orgSlug,
+    projectSlug: project.slug,
+    projectName: project.name,
+    url: buildProjectUrl(orgSlug, project.slug),
+    dryRun,
+  };
 }
 
 type DeleteFlags = {
@@ -107,7 +155,26 @@ export const deleteCommand = buildCommand({
       "  sentry project delete acme-corp/my-app --yes\n" +
       "  sentry project delete acme-corp/my-app --dry-run",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatProjectDeleted,
+    jsonTransform: (result: ProjectDeleteResult) => {
+      if (result.dryRun) {
+        return {
+          dryRun: true,
+          org: result.orgSlug,
+          project: result.projectSlug,
+          name: result.projectName,
+          url: result.url,
+        };
+      }
+      return {
+        deleted: true,
+        org: result.orgSlug,
+        project: result.projectSlug,
+      };
+    },
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -157,8 +224,7 @@ export const deleteCommand = buildCommand({
 
     // Dry-run mode: show what would be deleted without deleting it
     if (flags["dry-run"]) {
-      writeDryRunOutput(stdout, orgSlug, project, flags.json);
-      return;
+      return { data: buildResult(orgSlug, project, true) };
     }
 
     // Confirmation gate
@@ -174,26 +240,11 @@ export const deleteCommand = buildCommand({
       await deleteProject(orgSlug, project.slug);
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {
-        throw new ApiError(
-          `Permission denied: You don't have permission to delete '${orgSlug}/${project.slug}'.\n\n` +
-            "Project deletion requires the 'project:admin' scope.\n" +
-            "  Re-authenticate:  sentry auth login",
-          403,
-          error.detail,
-          error.endpoint
-        );
+        throw await buildPermissionError(orgSlug, project.slug);
       }
       throw error;
     }
 
-    if (flags.json) {
-      stdout.write(
-        `${JSON.stringify({ deleted: true, org: orgSlug, project: project.slug })}\n`
-      );
-    } else {
-      stdout.write(
-        `Deleted project '${project.name}' (${orgSlug}/${project.slug}).\n`
-      );
-    }
+    return { data: buildResult(orgSlug, project) };
   },
 });

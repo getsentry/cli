@@ -1928,6 +1928,44 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
   return renderMarkdown(lines.join("\n"));
 }
 
+// Project Deletion Formatting
+
+/** Result of a project deletion (or dry-run). */
+export type ProjectDeleteResult = {
+  /** Organization slug */
+  orgSlug: string;
+  /** Project slug */
+  projectSlug: string;
+  /** Human-readable project name */
+  projectName: string;
+  /** Sentry web URL for the project */
+  url: string;
+  /** When true, nothing was actually deleted — output uses tentative wording */
+  dryRun?: boolean;
+};
+
+/**
+ * Format a project deletion result as rendered markdown.
+ *
+ * @param result - Deletion context
+ * @returns Rendered terminal string
+ */
+export function formatProjectDeleted(result: ProjectDeleteResult): string {
+  const nameEsc = escapeMarkdownInline(result.projectName);
+  const qualifiedSlug = `${result.orgSlug}/${result.projectSlug}`;
+
+  if (result.dryRun) {
+    return renderMarkdown(
+      `Would delete project '${nameEsc}' (${safeCodeSpan(qualifiedSlug)}).\n\n` +
+        `URL: ${result.url}`
+    );
+  }
+
+  return renderMarkdown(
+    `Deleted project '${nameEsc}' (${safeCodeSpan(qualifiedSlug)}).`
+  );
+}
+
 // CLI Fix Formatting
 
 /** Structured fix result (imported from the command module) */
