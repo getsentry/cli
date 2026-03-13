@@ -25,6 +25,7 @@ import { logger } from "../logger.js";
 import { withTracingSpan } from "../telemetry.js";
 import { createDetectedDsn, inferPackagePath, parseDsn } from "./parser.js";
 import type { DetectedDsn } from "./types.js";
+import { MONOREPO_ROOTS } from "./types.js";
 
 /** Scoped logger for DSN code scanning */
 const log = logger.withTag("dsn-scan");
@@ -61,9 +62,12 @@ const CONCURRENCY_LIMIT = 50;
 /**
  * Maximum depth to scan from project root.
  * Depth 0 = files in root directory
- * Depth 2 = files in second-level subdirectories (e.g., src/lib/file.ts)
+ * Depth 3 = files in third-level subdirectories (e.g., src/lib/config/sentry.ts)
+ *
+ * In monorepos, depth resets to 0 when entering a package directory
+ * (e.g., packages/spotlight/), giving each package its own depth budget.
  */
-const MAX_SCAN_DEPTH = 2;
+const MAX_SCAN_DEPTH = 3;
 
 /**
  * Directories that are always skipped regardless of .gitignore.
@@ -183,6 +187,19 @@ const normalizePath: (p: string) => string =
   path.sep === path.posix.sep
     ? (x) => x
     : (x) => x.replaceAll(path.sep, path.posix.sep);
+
+/**
+ * Check if a relative path is a monorepo package directory.
+ * Returns true for paths like "packages/frontend", "apps/server", etc.
+ * (exactly 2 segments where the first matches a MONOREPO_ROOTS entry)
+ */
+function isMonorepoPackageDir(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  return (
+    segments.length === 2 &&
+    MONOREPO_ROOTS.includes(segments[0] as (typeof MONOREPO_ROOTS)[number])
+  );
+}
 
 /**
  * Pattern to match Sentry DSN URLs.
@@ -441,6 +458,7 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
   const files: string[] = [];
   const dirMtimes: Record<string, number> = {};
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: recursive directory walk is inherently complex but straightforward
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > MAX_SCAN_DEPTH) {
       return;
@@ -462,7 +480,8 @@ async function collectFiles(cwd: string, ig: Ignore): Promise<CollectResult> {
       }
 
       if (entry.isDirectory()) {
-        await walk(fullPath, depth + 1);
+        const nextDepth = isMonorepoPackageDir(relativePath) ? 0 : depth + 1;
+        await walk(fullPath, nextDepth);
       } else if (entry.isFile() && shouldScanFile(entry.name)) {
         files.push(relativePath);
       }

@@ -418,6 +418,50 @@ describe("Code Scanner", () => {
       expect(result.dsns).toEqual([]);
     });
 
+    test("finds DSNs in monorepo packages deeper than MAX_SCAN_DEPTH", async () => {
+      // packages/spotlight/src/instrument.ts is depth 3 from root,
+      // but with monorepo depth reset, packages/spotlight/ resets to 0
+      // so src/instrument.ts is only depth 1 from the package root
+      mkdirSync(join(testDir, "packages/spotlight/src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "packages/spotlight/src/instrument.ts"),
+        'Sentry.init({ dsn: "https://spotlight@o123.ingest.sentry.io/111" });'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0]?.raw).toBe(
+        "https://spotlight@o123.ingest.sentry.io/111"
+      );
+      expect(result.dsns[0]?.packagePath).toBe("packages/spotlight");
+    });
+
+    test("finds DSNs from multiple monorepo packages", async () => {
+      mkdirSync(join(testDir, "packages/frontend/src"), { recursive: true });
+      mkdirSync(join(testDir, "packages/backend/src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "packages/frontend/src/sentry.ts"),
+        'const DSN = "https://fe@o123.ingest.sentry.io/111";'
+      );
+      writeFileSync(
+        join(testDir, "packages/backend/src/sentry.ts"),
+        'const DSN = "https://be@o456.ingest.sentry.io/222";'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(2);
+
+      const dsns = result.dsns.map((d) => d.raw);
+      expect(dsns).toContain("https://fe@o123.ingest.sentry.io/111");
+      expect(dsns).toContain("https://be@o456.ingest.sentry.io/222");
+
+      // Verify packagePath is set correctly for each
+      const feResult = result.dsns.find((d) => d.raw.includes("fe@"));
+      const beResult = result.dsns.find((d) => d.raw.includes("be@"));
+      expect(feResult?.packagePath).toBe("packages/frontend");
+      expect(beResult?.packagePath).toBe("packages/backend");
+    });
+
     test("gracefully handles unreadable files", async () => {
       const { chmodSync } = require("node:fs") as typeof import("node:fs");
       const filePath = join(testDir, "secret.ts");
