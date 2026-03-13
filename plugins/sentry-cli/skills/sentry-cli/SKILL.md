@@ -45,6 +45,8 @@ Authenticate with Sentry
 - `--token <value> - Authenticate using an API token instead of OAuth`
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
 - `--force - Re-authenticate without prompting`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 **Examples:**
 
