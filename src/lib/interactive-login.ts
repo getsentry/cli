@@ -13,12 +13,23 @@ import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
 import { formatError } from "./errors.js";
 import { muted } from "./formatters/colors.js";
-import { formatDuration, formatUserIdentity } from "./formatters/human.js";
 import { logger } from "./logger.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
 
 const log = logger.withTag("auth.login");
+
+/** Structured result returned on successful authentication. */
+export type LoginResult = {
+  /** Authentication method used. */
+  method: "oauth" | "token";
+  /** User identity if available. */
+  user?: { name?: string; email?: string; username?: string; id?: string };
+  /** Path where credentials are stored. */
+  configPath: string;
+  /** Token lifetime in seconds, if known. */
+  expiresIn?: number;
+};
 
 /** Options for the interactive login flow */
 export type InteractiveLoginOptions = {
@@ -40,12 +51,12 @@ export type InteractiveLoginOptions = {
  *
  * @param stdin - Input stream for keyboard listener (must be TTY)
  * @param options - Optional configuration
- * @returns true on successful authentication, false on failure/cancellation
+ * @returns Structured login result on success, or null on failure/cancellation
  */
 export async function runInteractiveLogin(
   stdin: NodeJS.ReadStream & { fd: 0 },
   options?: InteractiveLoginOptions
-): Promise<boolean> {
+): Promise<LoginResult | null> {
   const timeout = options?.timeout ?? 900_000; // 15 minutes default
 
   log.info("Starting authentication...");
@@ -116,21 +127,23 @@ export async function runInteractiveLogin(
       }
     }
 
-    log.success("Authentication successful!");
+    const result: LoginResult = {
+      method: "oauth",
+      configPath: getDbPath(),
+      expiresIn: tokenResponse.expires_in,
+    };
     if (user) {
-      log.info(`Logged in as: ${muted(formatUserIdentity(user))}`);
+      result.user = {
+        name: user.name,
+        email: user.email,
+        id: user.id,
+      };
     }
-    log.info(`Config saved to: ${getDbPath()}`);
-
-    if (tokenResponse.expires_in) {
-      log.info(`Token expires in: ${formatDuration(tokenResponse.expires_in)}`);
-    }
-
-    return true;
+    return result;
   } catch (err) {
     process.stderr.write("\n");
     log.error(formatError(err));
-    return false;
+    return null;
   } finally {
     // Always cleanup keyboard listener
     keyListener.cleanup?.();
