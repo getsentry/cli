@@ -21,6 +21,8 @@ import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as polling from "../../../src/lib/polling.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DashboardListItem } from "../../../src/types/dashboard.js";
 
@@ -71,6 +73,7 @@ describe("dashboard list command", () => {
   let listDashboardsSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listDashboardsSpy = spyOn(apiClient, "listDashboards");
@@ -78,12 +81,20 @@ describe("dashboard list command", () => {
     openInBrowserSpy = spyOn(browser, "openInBrowser").mockResolvedValue(
       undefined as never
     );
+    // Bypass spinner — just run the callback directly
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      (_opts, fn) =>
+        fn(() => {
+          /* no-op setMessage */
+        })
+    );
   });
 
   afterEach(() => {
     listDashboardsSpy.mockRestore();
     resolveOrgSpy.mockRestore();
     openInBrowserSpy.mockRestore();
+    withProgressSpy.mockRestore();
   });
 
   test("outputs JSON array of dashboards with --json", async () => {
@@ -94,7 +105,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, web: false, fresh: false },
+      { json: true, web: false, fresh: false, limit: 30 },
       undefined
     );
 
@@ -115,7 +126,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, web: false, fresh: false },
+      { json: true, web: false, fresh: false, limit: 30 },
       undefined
     );
 
@@ -131,7 +142,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, web: false, fresh: false },
+      { json: false, web: false, fresh: false, limit: 30 },
       undefined
     );
 
@@ -151,7 +162,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, web: false, fresh: false },
+      { json: false, web: false, fresh: false, limit: 30 },
       undefined
     );
 
@@ -167,7 +178,7 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, web: false, fresh: false },
+      { json: false, web: false, fresh: false, limit: 30 },
       undefined
     );
 
@@ -184,11 +195,11 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, web: false, fresh: false },
+      { json: true, web: false, fresh: false, limit: 30 },
       "my-org/"
     );
 
-    expect(listDashboardsSpy).toHaveBeenCalledWith("my-org");
+    expect(listDashboardsSpy).toHaveBeenCalledWith("my-org", { perPage: 30 });
   });
 
   test("throws ContextError when org cannot be resolved", async () => {
@@ -198,7 +209,11 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
 
     await expect(
-      func.call(context, { json: false, web: false, fresh: false }, undefined)
+      func.call(
+        context,
+        { json: false, web: false, fresh: false, limit: 30 },
+        undefined
+      )
     ).rejects.toThrow("Organization");
   });
 
@@ -209,11 +224,29 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, web: true, fresh: false },
+      { json: false, web: true, fresh: false, limit: 30 },
       undefined
     );
 
     expect(openInBrowserSpy).toHaveBeenCalled();
     expect(listDashboardsSpy).not.toHaveBeenCalled();
+  });
+
+  test("passes limit to API via withProgress", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    listDashboardsSpy.mockResolvedValue([DASHBOARD_A]);
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, fresh: false, limit: 10 },
+      undefined
+    );
+
+    expect(withProgressSpy).toHaveBeenCalled();
+    expect(listDashboardsSpy).toHaveBeenCalledWith("test-org", {
+      perPage: 10,
+    });
   });
 });
