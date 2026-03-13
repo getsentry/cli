@@ -191,8 +191,8 @@ async function promptOpenBillingUrl(url: string): Promise<boolean> {
   const qr = await generateQRCode(url);
   log.log(qr);
 
-  // Prompt to open browser if interactive TTY
-  if (isatty(0) && isatty(1)) {
+  // Prompt to open browser if interactive TTY (stdin for input, stderr for display)
+  if (isatty(0) && isatty(2)) {
     const confirmed = await log.prompt("Open in browser?", {
       type: "confirm",
       initial: true,

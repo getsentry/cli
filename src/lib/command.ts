@@ -462,6 +462,7 @@ export function buildCommand<
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return
     // value carries the final `hint` — for-await-of discards it.
+    let hint: string | undefined;
     try {
       const generator = originalFunc.call(
         this,
@@ -474,12 +475,15 @@ export function buildCommand<
         result = await generator.next();
       }
 
-      // Finalize: let the renderer close streaming state (e.g., table
-      // footer), or fall back to the default writeFooter for the hint.
       const returned = result.value as CommandReturn | undefined;
-      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+      hint = returned?.hint;
     } catch (err) {
       handleOutputError(err);
+    } finally {
+      // Always finalize: close streaming state (e.g., table footer)
+      // even if the generator threw. Without this, a mid-stream error
+      // leaves partial output (e.g., table without bottom border).
+      writeFinalization(stdout, hint, cleanFlags.json, renderer);
     }
   };
 
