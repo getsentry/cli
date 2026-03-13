@@ -47,9 +47,6 @@ function buildSummaryLines(output: WizardOutput): string[] {
   if (output.docsUrl) {
     lines.push(`Docs:        ${terminalLink(output.docsUrl)}`);
   }
-  if (output.docsUrl) {
-    lines.push(`Docs:        ${terminalLink(output.docsUrl, output.docsUrl)}`);
-  }
 
   const changedFiles = output.changedFiles;
   if (changedFiles?.length) {
