@@ -608,7 +608,10 @@ async function scanFilesForDsns(
     earlyExit: false,
   };
 
-  // Create a rate-limited processor that handles early exit
+  // Create a rate-limited processor that handles early exit.
+  // Note: we intentionally do NOT use limit.clearQueue() because it causes
+  // the promises for cleared items to never settle, hanging Promise.all forever.
+  // Instead, queued tasks check state.earlyExit and return immediately.
   const processWithLimit = (file: string) =>
     limit(async () => {
       if (state.earlyExit) {
@@ -624,7 +627,6 @@ async function scanFilesForDsns(
 
       if (shouldExit) {
         state.earlyExit = true;
-        limit.clearQueue();
       }
     });
 

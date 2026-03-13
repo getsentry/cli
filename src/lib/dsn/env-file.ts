@@ -8,7 +8,7 @@
  * to find DSNs in individual packages/apps.
  */
 
-import { stat } from "node:fs/promises";
+import { opendir } from "node:fs/promises";
 import { join } from "node:path";
 import { createDetectedDsn } from "./parser.js";
 import { scanSpecificFiles } from "./scanner.js";
@@ -168,30 +168,28 @@ export async function detectFromMonorepoEnvFiles(
 ): Promise<EnvFileScanResult> {
   const dsns: DetectedDsn[] = [];
   const sourceMtimes: Record<string, number> = {};
-  const pkgGlob = new Bun.Glob("*");
 
   for (const monorepoRoot of MONOREPO_ROOTS) {
     const rootDir = join(cwd, monorepoRoot);
 
+    // Bun's opendir() may not throw on a missing directory — the error
+    // surfaces when iterating. Wrap the full open+iterate in one try/catch.
+    // No explicit handle.close() needed: for-await-of auto-closes the Dir
+    // handle when the loop exits (including early return or break).
     try {
-      // Scan for subdirectories (each is a potential package/app)
-      for await (const pkgName of pkgGlob.scan({
-        cwd: rootDir,
-        onlyFiles: false,
-      })) {
-        const pkgDir = join(rootDir, pkgName);
-
-        // Only process directories, not files
-        try {
-          const stats = await stat(pkgDir);
-          if (!stats.isDirectory()) {
-            continue;
-          }
-        } catch {
+      for await (const entry of await opendir(rootDir)) {
+        // Skip hidden dirs (.git, .cache) and non-directories. Accept
+        // symlinks too — pnpm/Yarn workspaces can symlink packages, and
+        // detectDsnInPackage gracefully handles non-directory targets.
+        if (
+          entry.name.startsWith(".") ||
+          !(entry.isDirectory() || entry.isSymbolicLink())
+        ) {
           continue;
         }
 
-        const packagePath = `${monorepoRoot}/${pkgName}`;
+        const pkgDir = join(rootDir, entry.name);
+        const packagePath = `${monorepoRoot}/${entry.name}`;
 
         const result = await detectDsnInPackage(pkgDir, packagePath);
         if (result.dsn) {
