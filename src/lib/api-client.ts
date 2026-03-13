@@ -20,6 +20,12 @@
  */
 
 export {
+  createDashboard,
+  getDashboard,
+  listDashboards,
+  updateDashboard,
+} from "./api/dashboards.js";
+export {
   findEventAcrossOrgs,
   getEvent,
   getLatestEvent,
@@ -93,11 +99,9 @@ export {
   listTransactions,
   normalizeTraceSpan,
 } from "./api/traces.js";
-
 export {
   getCustomerTrialInfo,
   getProductTrials,
   startProductTrial,
 } from "./api/trials.js";
-
 export { getCurrentUser } from "./api/users.js";
