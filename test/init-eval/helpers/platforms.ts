@@ -134,6 +134,18 @@ export const PLATFORMS: Platform[] = [
     initPattern: /Sentry\.init/,
     timeout: 300_000,
   },
+  {
+    id: "cloudflare-workers",
+    name: "Cloudflare Workers",
+    templateDir: join(TEMPLATES_DIR, "cloudflare-workers-app"),
+    sdkPackage: "@sentry/cloudflare",
+    depFile: "package.json",
+    docs: getDocs("cloudflare-workers"),
+    installCmd: "npm install",
+    buildCmd: "npx tsc --noEmit",
+    initPattern: /Sentry\.withSentry/,
+    timeout: 300_000,
+  },
 ];
 
 export function getPlatform(id: string): Platform {

@@ -141,5 +141,17 @@
     "profiling": [
       "https://docs.sentry.io/platforms/javascript/guides/react/profiling/"
     ]
+  },
+
+  "cloudflare-workers": {
+    "getting-started": [
+      "https://docs.sentry.io/platforms/javascript/guides/cloudflare/"
+    ],
+    "errors": [
+      "https://docs.sentry.io/platforms/javascript/guides/cloudflare/"
+    ],
+    "tracing": [
+      "https://docs.sentry.io/platforms/javascript/guides/cloudflare/tracing/"
+    ]
   }
 }
