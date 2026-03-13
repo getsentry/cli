@@ -460,9 +460,14 @@ function createLogRenderer(): HumanRenderer<LogListResult> {
         text += table.footer();
       }
 
-      // Append hint (count, pagination, empty-state message)
       if (hint) {
-        text += `${text ? "\n" : ""}${formatFooter(hint)}`;
+        if (headerEmitted) {
+          // Logs were rendered — show hint as a muted footer
+          text += `${text ? "\n" : ""}${formatFooter(hint)}`;
+        } else {
+          // No logs rendered — show hint as primary output (e.g., "No logs found.")
+          text += `${hint}\n`;
+        }
       }
 
       return text;

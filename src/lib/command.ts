@@ -462,7 +462,6 @@ export function buildCommand<
     // Iterate the generator using manual .next() instead of for-await-of
     // so we can capture the return value (done: true result). The return
     // value carries the final `hint` — for-await-of discards it.
-    let hint: string | undefined;
     try {
       const generator = originalFunc.call(
         this,
@@ -475,15 +474,17 @@ export function buildCommand<
         result = await generator.next();
       }
 
+      // Generator completed successfully — finalize with hint.
       const returned = result.value as CommandReturn | undefined;
-      hint = returned?.hint;
+      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
     } catch (err) {
+      // Finalize before error handling to close streaming state
+      // (e.g., table footer). No hint since the generator didn't
+      // complete. Only in human mode — JSON must not be corrupted.
+      if (!cleanFlags.json) {
+        writeFinalization(stdout, undefined, false, renderer);
+      }
       handleOutputError(err);
-    } finally {
-      // Always finalize: close streaming state (e.g., table footer)
-      // even if the generator threw. Without this, a mid-stream error
-      // leaves partial output (e.g., table without bottom border).
-      writeFinalization(stdout, hint, cleanFlags.json, renderer);
     }
   };
 
