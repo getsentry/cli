@@ -220,31 +220,16 @@ describe("renderCommandOutput", () => {
     expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
   });
 
-  test("renders hint in human mode", () => {
+  test("does not render hints (hints are rendered by the wrapper after generator completes)", () => {
     const w = createTestWriter();
     const config: OutputConfig<string> = {
       json: true,
       human: () => "Result",
     };
-    renderCommandOutput(w, "data", config, {
-      json: false,
-      hint: "Detected from .env.local",
-    });
-    expect(w.output).toContain("Result\n");
-    expect(w.output).toContain("Detected from .env.local");
-  });
-
-  test("suppresses hint in JSON mode", () => {
-    const w = createTestWriter();
-    const config: OutputConfig<string> = {
-      json: true,
-      human: () => "Result",
-    };
-    renderCommandOutput(w, "data", config, {
-      json: true,
-      hint: "Detected from .env.local",
-    });
-    expect(w.output).not.toContain(".env.local");
+    // renderCommandOutput only renders data — hints are handled by
+    // buildCommand's wrapper via the generator return value
+    renderCommandOutput(w, "data", config, { json: false });
+    expect(w.output).toBe("Result\n");
   });
 
   test("works without hint", () => {

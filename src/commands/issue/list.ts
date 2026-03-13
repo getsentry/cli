@@ -42,7 +42,10 @@ import {
   shouldAutoCompact,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
-import type { OutputConfig } from "../../lib/formatters/output.js";
+import {
+  commandOutput,
+  type OutputConfig,
+} from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -1378,7 +1381,7 @@ export const listCommand = buildListCommand("issue", {
       combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
     }
 
-    yield { data: result, hint: combinedHint };
-    return;
+    yield commandOutput(result);
+    return { hint: combinedHint };
   },
 });

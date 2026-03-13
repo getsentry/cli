@@ -14,6 +14,7 @@ import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ConfigError, ValidationError } from "../../lib/errors.js";
 import { formatFeedbackResult } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 
 /** Structured result of the feedback submission */
 export type FeedbackResult = {
@@ -66,12 +67,10 @@ export const feedbackCommand = buildCommand({
     // Flush to ensure feedback is sent before process exits
     const sent = await Sentry.flush(3000);
 
-    yield {
-      data: {
-        sent,
-        message,
-      },
-    };
+    yield commandOutput({
+      sent,
+      message,
+    });
     return;
   },
 });

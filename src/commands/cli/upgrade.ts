@@ -31,6 +31,7 @@ import {
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
@@ -493,7 +494,7 @@ export const upgradeCommand = buildCommand({
       flags,
     });
     if (resolved.kind === "done") {
-      yield { data: resolved.result };
+      yield commandOutput(resolved.result);
       return;
     }
 
@@ -510,17 +511,15 @@ export const upgradeCommand = buildCommand({
         target,
         versionArg
       );
-      yield {
-        data: {
-          action: downgrade ? "downgraded" : "upgraded",
-          currentVersion: CLI_VERSION,
-          targetVersion: target,
-          channel,
-          method,
-          forced: flags.force,
-          warnings,
-        } satisfies UpgradeResult,
-      };
+      yield commandOutput({
+        action: downgrade ? "downgraded" : "upgraded",
+        currentVersion: CLI_VERSION,
+        targetVersion: target,
+        channel,
+        method,
+        forced: flags.force,
+        warnings,
+      } satisfies UpgradeResult);
       return;
     }
 
@@ -532,16 +531,14 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    yield {
-      data: {
-        action: downgrade ? "downgraded" : "upgraded",
-        currentVersion: CLI_VERSION,
-        targetVersion: target,
-        channel,
-        method,
-        forced: flags.force,
-      } satisfies UpgradeResult,
-    };
+    yield commandOutput({
+      action: downgrade ? "downgraded" : "upgraded",
+      currentVersion: CLI_VERSION,
+      targetVersion: target,
+      channel,
+      method,
+      forced: flags.force,
+    } satisfies UpgradeResult);
     return;
   },
 });

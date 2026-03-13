@@ -15,6 +15,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -294,7 +295,7 @@ export const viewCommand = buildCommand({
       detectedFrom: targets[i]?.detectedFrom,
     }));
 
-    yield { data: entries, hint: footer };
-    return;
+    yield commandOutput(entries);
+    return { hint: footer };
   },
 });

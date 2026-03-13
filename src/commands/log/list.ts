@@ -22,6 +22,10 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
+import {
+  type CommandOutput,
+  commandOutput,
+} from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   applyFreshFlag,
@@ -177,20 +181,20 @@ type LogStreamChunk =
 function* yieldStreamChunks(
   chunk: LogStreamChunk,
   json: boolean
-): Generator<{ data: LogListOutput }, void, undefined> {
+): Generator<CommandOutput<LogListOutput>, void, undefined> {
   if (json) {
     // In JSON mode, expand data chunks into one yield per log for JSONL
     if (chunk.kind === "data") {
       for (const log of chunk.logs) {
         // Yield a single-log data chunk so jsonTransform emits one line
-        yield { data: { kind: "data", logs: [log] } };
+        yield commandOutput({ kind: "data", logs: [log] } as LogListOutput);
       }
     }
     // Text chunks suppressed in JSON mode (jsonTransform returns undefined)
     return;
   }
   // Human mode: yield the chunk directly for the human formatter
-  yield { data: chunk };
+  yield commandOutput(chunk);
 }
 
 /**
@@ -685,8 +689,8 @@ export const listCommand = buildListCommand("log", {
       // Only forward hint to the footer when items exist — empty results
       // already render hint text inside the human formatter.
       const hint = result.logs.length > 0 ? result.hint : undefined;
-      yield { data: result, hint };
-      return;
+      yield commandOutput(result);
+      return { hint };
     }
 
     // Standard project-scoped mode — kept in else-like block to avoid
@@ -732,7 +736,8 @@ export const listCommand = buildListCommand("log", {
       // Only forward hint to the footer when items exist — empty results
       // already render hint text inside the human formatter.
       const hint = result.logs.length > 0 ? result.hint : undefined;
-      yield { data: result, hint };
+      yield commandOutput(result);
+      return { hint };
     }
   },
 });

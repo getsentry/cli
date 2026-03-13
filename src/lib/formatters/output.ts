@@ -105,33 +105,75 @@ export type OutputConfig<T> = {
 };
 
 /**
- * Return type for commands with {@link OutputConfig}.
+ * Unique brand for {@link CommandOutput} objects.
  *
- * Commands wrap their return value in this object so the `buildCommand` wrapper
- * can unambiguously detect data vs void returns. The optional `hint` provides
- * rendering metadata that depends on execution-time values (e.g. auto-detection
- * source). Hints are shown in human mode and suppressed in JSON mode.
+ * Using a Symbol instead of duck-typing (`"data" in v`) prevents false
+ * positives when a command accidentally yields a raw API response that
+ * happens to have a `data` property.
+ */
+export const COMMAND_OUTPUT_BRAND: unique symbol = Symbol.for(
+  "sentry-cli:command-output"
+);
+
+/**
+ * Yield type for commands with {@link OutputConfig}.
+ *
+ * Commands wrap each yielded value in this object so the `buildCommand`
+ * wrapper can unambiguously detect data vs void/raw yields. The brand
+ * symbol provides a runtime discriminant that cannot collide with
+ * arbitrary data shapes.
+ *
+ * Hints are NOT carried on yielded values — they belong on the generator's
+ * return value ({@link CommandReturn}) so the framework renders them once
+ * after the generator completes.
  *
  * @typeParam T - The data type (matches the `OutputConfig<T>` type parameter)
  */
 export type CommandOutput<T> = {
+  /** Runtime brand — set automatically by {@link commandOutput} */
+  [COMMAND_OUTPUT_BRAND]: true;
   /** The data to render (serialized as-is to JSON, passed to `human` formatter) */
   data: T;
-  /** Hint line appended after human output (suppressed in JSON mode) */
+};
+
+/**
+ * Create a branded {@link CommandOutput} value.
+ *
+ * Commands should use this helper instead of constructing `{ data }` literals
+ * directly, so the brand is always present.
+ *
+ * @example
+ * ```ts
+ * yield commandOutput(myData);
+ * ```
+ */
+export function commandOutput<T>(data: T): CommandOutput<T> {
+  return { [COMMAND_OUTPUT_BRAND]: true, data };
+}
+
+/**
+ * Return type for command generators.
+ *
+ * Carries metadata that applies to the entire command invocation — not to
+ * individual yielded chunks. The `buildCommand` wrapper captures this from
+ * the generator's return value (the `done: true` result of `.next()`).
+ *
+ * `hint` is shown in human mode and suppressed in JSON mode.
+ */
+export type CommandReturn = {
+  /** Hint line appended after all output (suppressed in JSON mode) */
   hint?: string;
 };
 
 /**
- * Full rendering context passed to {@link renderCommandOutput}.
- * Combines the command's runtime hints with wrapper-injected flags.
+ * Rendering context passed to {@link renderCommandOutput}.
+ * Contains the wrapper-injected flag values needed for output mode selection.
  */
 type RenderContext = {
   /** Whether `--json` was passed */
   json: boolean;
   /** Pre-parsed `--fields` value */
   fields?: string[];
-  /** Hint line appended after human output (suppressed in JSON mode) */
-  hint?: string;
 };
 
 /**
@@ -181,7 +223,7 @@ function writeTransformedJson(stdout: Writer, transformed: unknown): void {
 }
 
 /**
- * Render a `CommandOutput<T>` via an output config.
+ * Render a single yielded `CommandOutput<T>` chunk via an output config.
  *
  * Called by the `buildCommand` wrapper when a command with `output: { ... }`
  * yields data. In JSON mode the data is serialized as-is (with optional
@@ -190,15 +232,18 @@ function writeTransformedJson(stdout: Writer, transformed: unknown): void {
  * For streaming commands that yield multiple times, this function is called
  * once per yielded value. Each call appends to stdout independently.
  *
+ * Hints are NOT rendered here — the wrapper renders them once after the
+ * generator completes, using the generator's return value.
+ *
  * @param stdout - Writer to output to
  * @param data - The data yielded by the command
  * @param config - The output config declared on buildCommand
- * @param ctx - Merged rendering context (command hints + runtime flags)
+ * @param ctx - Rendering context with flag values
  */
 export function renderCommandOutput(
   stdout: Writer,
   data: unknown,
-  // biome-ignore lint/suspicious/noExplicitAny: Variance — human is contravariant in T; safe because data and config are paired at build time.
+  // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — config.human is contravariant in T but data/config are paired at build time. Using `any` lets the framework call human(unknownData) without requiring every OutputConfig to accept unknown.
   config: OutputConfig<any>,
   ctx: RenderContext
 ): void {
@@ -214,10 +259,6 @@ export function renderCommandOutput(
   const text = config.human(data);
   if (text) {
     stdout.write(`${text}\n`);
-  }
-
-  if (ctx.hint) {
-    writeFooter(stdout, ctx.hint);
   }
 }
 
