@@ -14,6 +14,7 @@ import {
   formatIssueDetails,
   muted,
 } from "../../lib/formatters/index.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -170,10 +171,9 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
-    yield {
-      data: { issue, event: event ?? null, trace, spanTreeLines },
+    yield commandOutput({ issue, event: event ?? null, trace, spanTreeLines });
+    return {
       hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
     };
-    return;
   },
 });

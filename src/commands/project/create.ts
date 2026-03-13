@@ -35,6 +35,7 @@ import {
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
@@ -405,7 +406,7 @@ export const createCommand = buildCommand({
         expectedSlug,
         dryRun: true,
       };
-      yield { data: result };
+      yield commandOutput(result);
       return;
     }
 
@@ -433,7 +434,7 @@ export const createCommand = buildCommand({
       expectedSlug,
     };
 
-    yield { data: result };
+    yield commandOutput(result);
     return;
   },
 });

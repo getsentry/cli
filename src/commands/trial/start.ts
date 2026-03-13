@@ -22,6 +22,7 @@ import { openBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -161,16 +162,13 @@ export const startCommand = buildCommand({
     // Start the trial
     await startProductTrial(orgSlug, trial.category);
 
-    yield {
-      data: {
-        name: parsed.name,
-        category: trial.category,
-        organization: orgSlug,
-        lengthDays: trial.lengthDays,
-        started: true,
-      },
-      hint: undefined,
-    };
+    yield commandOutput({
+      name: parsed.name,
+      category: trial.category,
+      organization: orgSlug,
+      lengthDays: trial.lengthDays,
+      started: true,
+    });
     return;
   },
 });

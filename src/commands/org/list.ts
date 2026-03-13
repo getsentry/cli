@@ -10,6 +10,7 @@ import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -151,7 +152,7 @@ export const listCommand = buildCommand({
       hints.push("Tip: Use 'sentry org view <slug>' for details");
     }
 
-    yield { data: entries, hint: hints.join("\n") || undefined };
-    return;
+    yield commandOutput(entries);
+    return { hint: hints.join("\n") || undefined };
   },
 });

@@ -25,6 +25,7 @@ import {
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
 import { OutputError } from "../../src/lib/errors.js";
+import { commandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
@@ -1000,7 +1001,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield { data: { name: "Alice", role: "admin" } };
+        yield commandOutput({ name: "Alice", role: "admin" });
       },
     });
 
@@ -1029,7 +1030,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield { data: { name: "Alice", role: "admin" } };
+        yield commandOutput({ name: "Alice", role: "admin" });
       },
     });
 
@@ -1059,7 +1060,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield { data: { id: 1, name: "Alice", role: "admin" } };
+        yield commandOutput({ id: 1, name: "Alice", role: "admin" });
       },
     });
 
@@ -1091,10 +1092,8 @@ describe("buildCommand return-based output", () => {
         },
         parameters: {},
         async *func(this: TestContext) {
-          yield {
-            data: { value: 42 },
-            hint: "Run 'sentry help' for more info",
-          };
+          yield commandOutput({ value: 42 });
+          return { hint: "Run 'sentry help' for more info" };
         },
       });
 
@@ -1200,7 +1199,7 @@ describe("buildCommand return-based output", () => {
       parameters: {},
       async *func(this: TestContext) {
         await Bun.sleep(1);
-        yield { data: { name: "Bob" } };
+        yield commandOutput({ name: "Bob" });
       },
     });
 
@@ -1217,7 +1216,7 @@ describe("buildCommand return-based output", () => {
     expect(jsonOutput).toEqual({ name: "Bob" });
   });
 
-  test("array data works correctly via { data } wrapper", async () => {
+  test("array data works correctly via commandOutput wrapper", async () => {
     const command = buildCommand<
       { json: boolean; fields?: string[] },
       [],
@@ -1230,7 +1229,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield { data: [{ id: 1 }, { id: 2 }] };
+        yield commandOutput([{ id: 1 }, { id: 2 }]);
       },
     });
 
@@ -1260,7 +1259,8 @@ describe("buildCommand return-based output", () => {
         },
         parameters: {},
         async *func(this: TestContext) {
-          yield { data: { org: "sentry" }, hint: "Detected from .env file" };
+          yield commandOutput({ org: "sentry" });
+          return { hint: "Detected from .env file" };
         },
       });
 

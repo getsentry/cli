@@ -18,7 +18,11 @@ import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { warning } from "./formatters/colors.js";
-import type { OutputConfig } from "./formatters/output.js";
+import {
+  type CommandReturn,
+  commandOutput,
+  type OutputConfig,
+} from "./formatters/output.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -321,7 +325,8 @@ type ListCommandFunction<
   this: CONTEXT,
   flags: FLAGS,
   ...args: ARGS
-) => AsyncGenerator<unknown, void, undefined>;
+  // biome-ignore lint/suspicious/noConfusingVoidType: void is required here — generators that don't return a value have implicit void return, which is distinct from undefined in TypeScript's type system
+) => AsyncGenerator<unknown, CommandReturn | void, undefined>;
 
 /**
  * Build a Stricli command for a list endpoint with automatic plural-alias
@@ -501,10 +506,11 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         flags,
         parsed,
       });
+      yield commandOutput(result);
       // Only forward hint to the footer when items exist — empty results
       // already render hint text inside the human formatter.
       const hint = result.items.length > 0 ? result.hint : undefined;
-      yield { data: result, hint };
+      return { hint };
     },
   });
 }

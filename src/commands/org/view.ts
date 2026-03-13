@@ -10,6 +10,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails } from "../../lib/formatters/index.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -78,7 +79,7 @@ export const viewCommand = buildCommand({
     const hint = resolved.detectedFrom
       ? `Detected from ${resolved.detectedFrom}`
       : undefined;
-    yield { data: org, hint };
-    return;
+    yield commandOutput(org);
+    return { hint };
   },
 });

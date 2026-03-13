@@ -9,6 +9,7 @@ import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { OutputError, ValidationError } from "../lib/errors.js";
+import { commandOutput } from "../lib/formatters/output.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
@@ -1168,14 +1169,12 @@ export const apiCommand = buildCommand({
 
     // Dry-run mode: preview the request that would be sent
     if (flags["dry-run"]) {
-      yield {
-        data: {
-          method: flags.method,
-          url: resolveRequestUrl(normalizedEndpoint, params),
-          headers: resolveEffectiveHeaders(headers, body),
-          body: body ?? null,
-        },
-      };
+      yield commandOutput({
+        method: flags.method,
+        url: resolveRequestUrl(normalizedEndpoint, params),
+        headers: resolveEffectiveHeaders(headers, body),
+        body: body ?? null,
+      });
       return;
     }
 
@@ -1211,7 +1210,7 @@ export const apiCommand = buildCommand({
       throw new OutputError(response.body);
     }
 
-    yield { data: response.body };
+    yield commandOutput(response.body);
     return;
   },
 });

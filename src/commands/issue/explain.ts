@@ -7,6 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
@@ -104,11 +105,8 @@ export const explainCommand = buildCommand({
         );
       }
 
-      yield {
-        data: causes,
-        hint: `To create a plan, run: sentry issue plan ${issueArg}`,
-      };
-      return;
+      yield commandOutput(causes);
+      return { hint: `To create a plan, run: sentry issue plan ${issueArg}` };
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -11,6 +11,7 @@ import { getCustomerTrialInfo } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
@@ -265,7 +266,7 @@ export const listCommand = buildCommand({
       );
     }
 
-    yield { data: entries, hint: hints.join("\n") || undefined };
-    return;
+    yield commandOutput(entries);
+    return { hint: hints.join("\n") || undefined };
   },
 });

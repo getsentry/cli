@@ -22,6 +22,7 @@ import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import { formatAuthStatus, maskToken } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -189,7 +190,7 @@ export const statusCommand = buildCommand({
       verification: await verifyCredentials(),
     };
 
-    yield { data };
+    yield commandOutput(data);
     return;
   },
 });

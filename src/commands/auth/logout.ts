@@ -15,6 +15,7 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatLogoutResult } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 
 /** Structured result of the logout operation */
 export type LogoutResult = {
@@ -38,9 +39,10 @@ export const logoutCommand = buildCommand({
   },
   async *func(this: SentryContext) {
     if (!(await isAuthenticated())) {
-      yield {
-        data: { loggedOut: false, message: "Not currently authenticated." },
-      };
+      yield commandOutput({
+        loggedOut: false,
+        message: "Not currently authenticated.",
+      });
       return;
     }
 
@@ -56,12 +58,10 @@ export const logoutCommand = buildCommand({
     const configPath = getDbPath();
     await clearAuth();
 
-    yield {
-      data: {
-        loggedOut: true,
-        configPath,
-      },
-    };
+    yield commandOutput({
+      loggedOut: true,
+      configPath,
+    });
     return;
   },
 });

@@ -17,6 +17,7 @@ import {
 } from "../../lib/db/schema.js";
 import { OutputError } from "../../lib/errors.js";
 import { formatFixResult } from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
 import { getRealUsername } from "../../lib/utils.js";
 
 type FixFlags = {
@@ -734,7 +735,7 @@ export const fixCommand = buildCommand({
       throw new OutputError(result);
     }
 
-    yield { data: result };
+    yield commandOutput(result);
     return;
   },
 });
