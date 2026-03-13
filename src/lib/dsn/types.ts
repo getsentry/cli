@@ -136,4 +136,9 @@ export const MONOREPO_ROOTS = [
   "libs",
   "services",
   "modules",
+  "projects",
+  "plugins",
+  "sites",
+  "workers",
+  "functions",
 ] as const;
