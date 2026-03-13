@@ -143,11 +143,7 @@ export const startCommand = buildCommand({
 
     // Plan trial: no API to start it — open billing page instead
     if (parsed.name === "plan") {
-      const planResult = await handlePlanTrial(
-        orgSlug,
-        this.stdout,
-        flags.json ?? false
-      );
+      const planResult = await handlePlanTrial(orgSlug, flags.json ?? false);
       yield commandOutput(planResult);
       return;
     }
@@ -181,19 +177,19 @@ export const startCommand = buildCommand({
 /**
  * Show URL + QR code and prompt to open browser if interactive.
  *
+ * Display text goes to stderr via consola — stdout is reserved for
+ * structured command output.
+ *
  * @returns true if browser was opened, false otherwise
  */
-async function promptOpenBillingUrl(
-  url: string,
-  stdout: { write: (s: string) => unknown }
-): Promise<boolean> {
+async function promptOpenBillingUrl(url: string): Promise<boolean> {
   const log = logger.withTag("trial");
 
-  stdout.write(`\n  ${url}\n\n`);
+  log.log(`\n  ${url}\n`);
 
   // Show QR code so mobile/remote users can scan
   const qr = await generateQRCode(url);
-  stdout.write(`${qr}\n`);
+  log.log(qr);
 
   // Prompt to open browser if interactive TTY
   if (isatty(0) && isatty(1)) {
@@ -236,7 +232,6 @@ type PlanTrialResult = {
  */
 async function handlePlanTrial(
   orgSlug: string,
-  stdout: { write: (s: string) => unknown },
   json: boolean
 ): Promise<PlanTrialResult> {
   const log = logger.withTag("trial");
@@ -269,7 +264,7 @@ async function handlePlanTrial(
     log.info(
       `The ${currentPlan} → Business plan trial must be activated in the Sentry UI.`
     );
-    opened = await promptOpenBillingUrl(url, stdout);
+    opened = await promptOpenBillingUrl(url);
   }
 
   return {

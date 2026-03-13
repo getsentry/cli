@@ -38,7 +38,6 @@ import {
 } from "../../lib/errors.js";
 import {
   type IssueTableRow,
-  muted,
   shouldAutoCompact,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
@@ -57,6 +56,7 @@ import {
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -871,7 +871,6 @@ async function handleOrgAllIssues(
 
 /** Options for {@link handleResolvedTargets}. */
 type ResolvedTargetsOptions = {
-  stderr: Writer;
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
@@ -890,7 +889,7 @@ type ResolvedTargetsOptions = {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { stderr, parsed, flags, cwd, setContext } = options;
+  const { parsed, flags, cwd, setContext } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -1094,10 +1093,8 @@ async function handleResolvedTargets(
     const failedNames = failures
       .map(({ target: t }) => `${t.org}/${t.project}`)
       .join(", ");
-    stderr.write(
-      muted(
-        `\nNote: Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).\n`
-      )
+    logger.warn(
+      `Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).`
     );
   }
 
@@ -1318,7 +1315,7 @@ export const listCommand = buildListCommand("issue", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
-    const { stdout, stderr, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1341,13 +1338,11 @@ export const listCommand = buildListCommand("issue", {
       handleResolvedTargets({
         ...ctx,
         flags,
-        stderr,
         setContext,
       });
 
     const result = (await dispatchOrgScopedList({
       config: issueListMeta,
-      stdout,
       cwd,
       flags,
       parsed,

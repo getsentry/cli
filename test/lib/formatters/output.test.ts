@@ -174,11 +174,10 @@ describe("writeFooter", () => {
   test("writes empty line followed by muted text", () => {
     const w = createTestWriter();
     writeFooter(w, "Some hint");
-    // First chunk is the empty line separator
-    expect(w.chunks[0]).toBe("\n");
-    // Second chunk contains the hint text with trailing newline
-    expect(w.chunks[1]).toContain("Some hint");
-    expect(w.chunks[1]).toEndWith("\n");
+    const output = w.chunks.join("");
+    expect(output).toStartWith("\n");
+    expect(output).toContain("Some hint");
+    expect(output).toEndWith("\n");
   });
 });
 

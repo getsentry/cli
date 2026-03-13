@@ -4,13 +4,9 @@
  * Provides formatting utilities for displaying Sentry logs in the CLI.
  */
 
-import type {
-  DetailedSentryLog,
-  SentryLog,
-  Writer,
-} from "../../types/index.js";
+import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
-import { writeJson } from "./json.js";
+import { filterFields, formatJson } from "./json.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -23,7 +19,7 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
-import { writeFooter } from "./output.js";
+import { formatFooter } from "./output.js";
 import {
   renderTextTable,
   StreamingTable,
@@ -325,11 +321,9 @@ export function formatLogDetails(
 }
 
 /**
- * Options for {@link displayTraceLogs}.
+ * Options for {@link formatTraceLogs}.
  */
-type DisplayTraceLogsOptions = {
-  /** Writer for output */
-  stdout: Writer;
+type FormatTraceLogsOptions = {
   /** Already-fetched logs (API order: newest-first) */
   logs: LogLike[];
   /** The trace ID being queried */
@@ -345,30 +339,30 @@ type DisplayTraceLogsOptions = {
 };
 
 /**
- * Shared display logic for trace-filtered log results.
+ * Format trace-filtered log results into a string.
  *
  * Handles JSON output, empty state, and human-readable table formatting.
  * Used by both `sentry log list --trace` and `sentry trace logs`.
  */
-export function displayTraceLogs(options: DisplayTraceLogsOptions): void {
-  const { stdout, logs, traceId, limit, asJson, emptyMessage, fields } =
-    options;
+export function formatTraceLogs(options: FormatTraceLogsOptions): string {
+  const { logs, traceId, limit, asJson, emptyMessage, fields } = options;
 
   if (asJson) {
-    writeJson(stdout, [...logs].reverse(), fields);
-    return;
+    const reversed = [...logs].reverse();
+    return formatJson(fields ? filterFields(reversed, fields) : reversed);
   }
 
   if (logs.length === 0) {
-    stdout.write(emptyMessage);
-    return;
+    return emptyMessage;
   }
 
   const chronological = [...logs].reverse();
-  stdout.write(formatLogTable(chronological, false));
+  const parts = [formatLogTable(chronological, false)];
 
   const hasMore = logs.length >= limit;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
-  writeFooter(stdout, `${countText}${tip}`);
+  parts.push(formatFooter(`${countText}${tip}`));
+
+  return parts.join("");
 }

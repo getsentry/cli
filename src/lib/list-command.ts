@@ -499,11 +499,10 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       target?: string
     ) {
       applyFreshFlag(flags);
-      const { stdout, cwd } = this;
+      const { cwd } = this;
       const parsed = parseOrgProjectArg(target);
       const result = await dispatchOrgScopedList({
         config,
-        stdout,
         cwd,
         flags,
         parsed,

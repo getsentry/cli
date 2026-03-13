@@ -7,16 +7,18 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
-import type { Writer } from "../types/index.js";
 import { openBrowser } from "./browser.js";
 import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
 import { formatError } from "./errors.js";
-import { error as errorColor, muted, success } from "./formatters/colors.js";
+import { muted } from "./formatters/colors.js";
 import { formatDuration, formatUserIdentity } from "./formatters/human.js";
+import { logger } from "./logger.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
+
+const log = logger.withTag("auth.login");
 
 /** Options for the interactive login flow */
 export type InteractiveLoginOptions = {
@@ -33,21 +35,20 @@ export type InteractiveLoginOptions = {
  * - Setting up keyboard listener for copying URL
  * - Storing the token and user info on success
  *
- * @param stdout - Output stream for displaying UI messages
- * @param stderr - Error stream for error messages
+ * All UI output goes to stderr via the logger, keeping stdout clean for
+ * structured command output.
+ *
  * @param stdin - Input stream for keyboard listener (must be TTY)
  * @param options - Optional configuration
  * @returns true on successful authentication, false on failure/cancellation
  */
 export async function runInteractiveLogin(
-  stdout: Writer,
-  stderr: Writer,
   stdin: NodeJS.ReadStream & { fd: 0 },
   options?: InteractiveLoginOptions
 ): Promise<boolean> {
   const timeout = options?.timeout ?? 900_000; // 15 minutes default
 
-  stdout.write("Starting authentication...\n\n");
+  log.info("Starting authentication...");
 
   let urlToCopy = "";
   // Object wrapper needed for TypeScript control flow analysis with async callbacks
@@ -67,39 +68,35 @@ export async function runInteractiveLogin(
           const browserOpened = await openBrowser(verificationUriComplete);
 
           if (browserOpened) {
-            stdout.write("Opening in browser...\n\n");
+            log.info("Opening in browser...");
           } else {
             // Show QR code as fallback when browser can't open
-            stdout.write("Scan this QR code or visit the URL below:\n\n");
+            log.info("Scan this QR code or visit the URL below:");
             const qr = await generateQRCode(verificationUriComplete);
-            stdout.write(qr);
-            stdout.write("\n");
+            log.log(qr);
           }
 
-          stdout.write(`URL: ${verificationUri}\n`);
-          stdout.write(`Code: ${userCode}\n\n`);
+          log.info(`URL: ${verificationUri}`);
+          log.info(`Code: ${userCode}`);
           const copyHint = stdin.isTTY ? ` ${muted("(c to copy)")}` : "";
-          stdout.write(
-            `Browser didn't open? Use the url above to sign in${copyHint}\n\n`
+          log.info(
+            `Browser didn't open? Use the url above to sign in${copyHint}`
           );
-          stdout.write("Waiting for authorization...\n");
+          log.info("Waiting for authorization...");
 
           // Setup keyboard listener for 'c' to copy URL
-          keyListener.cleanup = setupCopyKeyListener(
-            stdin,
-            () => urlToCopy,
-            stdout
-          );
+          keyListener.cleanup = setupCopyKeyListener(stdin, () => urlToCopy);
         },
         onPolling: () => {
-          stdout.write(".");
+          // Dots append on the same line without newlines — logger can't do this
+          process.stderr.write(".");
         },
       },
       timeout
     );
 
     // Clear the polling dots
-    stdout.write("\n");
+    process.stderr.write("\n");
 
     // Store the token
     await completeOAuthFlow(tokenResponse);
@@ -119,22 +116,20 @@ export async function runInteractiveLogin(
       }
     }
 
-    stdout.write(`${success("✓")} Authentication successful!\n`);
+    log.success("Authentication successful!");
     if (user) {
-      stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
+      log.info(`Logged in as: ${muted(formatUserIdentity(user))}`);
     }
-    stdout.write(`  Config saved to: ${getDbPath()}\n`);
+    log.info(`Config saved to: ${getDbPath()}`);
 
     if (tokenResponse.expires_in) {
-      stdout.write(
-        `  Token expires in: ${formatDuration(tokenResponse.expires_in)}\n`
-      );
+      log.info(`Token expires in: ${formatDuration(tokenResponse.expires_in)}`);
     }
 
     return true;
   } catch (err) {
-    stdout.write("\n");
-    stderr.write(`${errorColor("Error:")} ${formatError(err)}\n`);
+    process.stderr.write("\n");
+    log.error(formatError(err));
     return false;
   } finally {
     // Always cleanup keyboard listener

@@ -594,13 +594,12 @@ export const listCommand = buildListCommand("project", {
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
-    const { stdout, cwd } = this;
+    const { cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
 
     const result = await dispatchOrgScopedList({
       config: projectListMeta,
-      stdout,
       cwd,
       flags,
       parsed,
