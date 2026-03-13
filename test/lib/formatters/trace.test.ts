@@ -1,9 +1,10 @@
 /**
  * Unit Tests for Trace Formatters
  *
- * Tests for formatTraceDuration, formatTraceTable,
-  formatTracesHeader, formatTraceRow,
- * computeTraceSummary, and formatTraceSummary.
+ * Note: Core invariants (duration formatting, trace ID containment, row newline
+ * termination, determinism, span counting) are tested via property-based tests
+ * in trace.property.test.ts. These tests focus on specific format output values,
+ * rendered vs plain mode behavior, header newline termination, and edge cases.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -138,19 +139,13 @@ describe("formatTracesHeader (rendered mode)", () => {
   });
 
   test("ends with newline", () => {
-    const header = formatTracesHeader();
-    expect(header.endsWith("\n")).toBe(true);
+    // Property test only checks Row newlines, not Header
+    expect(formatTracesHeader().endsWith("\n")).toBe(true);
   });
 });
 
 describe("formatTraceRow (rendered mode)", () => {
   useRenderedMode();
-
-  test("includes trace ID", () => {
-    const traceId = "a".repeat(32);
-    const row = formatTraceRow(makeTransaction({ trace: traceId }));
-    expect(row).toContain(traceId);
-  });
 
   test("includes transaction name", () => {
     const row = formatTraceRow(
@@ -169,18 +164,12 @@ describe("formatTraceRow (rendered mode)", () => {
   test("includes full transaction name in markdown row", () => {
     const longName = "A".repeat(50);
     const row = formatTraceRow(makeTransaction({ transaction: longName }));
-    // Full name preserved in markdown table cell
     expect(row).toContain(longName);
   });
 
   test("shows 'unknown' for empty transaction", () => {
     const row = formatTraceRow(makeTransaction({ transaction: "" }));
     expect(row).toContain("unknown");
-  });
-
-  test("ends with newline", () => {
-    const row = formatTraceRow(makeTransaction());
-    expect(row.endsWith("\n")).toBe(true);
   });
 });
 
@@ -189,7 +178,6 @@ describe("formatTracesHeader (plain mode)", () => {
 
   test("emits markdown table header and separator", () => {
     const result = formatTracesHeader();
-    // Plain mode produces mdTableHeader output (no bold markup), with separator
     expect(result).toContain("| Trace ID | Transaction | Duration | When |");
     // Duration column is right-aligned (`:` suffix in TRACE_TABLE_COLS)
     expect(result).toContain("| --- | --- | ---: | --- |");
@@ -206,12 +194,6 @@ describe("formatTraceRow (plain mode)", () => {
   test("emits a markdown table row", () => {
     const row = formatTraceRow(makeTransaction());
     expect(row).toMatch(/^\|.+\|.+\|.+\|.+\|\n$/);
-  });
-
-  test("includes trace ID", () => {
-    const traceId = "a".repeat(32);
-    const row = formatTraceRow(makeTransaction({ trace: traceId }));
-    expect(row).toContain(traceId);
   });
 
   test("includes transaction name", () => {
@@ -242,11 +224,6 @@ describe("formatTraceRow (plain mode)", () => {
   test("shows 'unknown' for empty transaction", () => {
     const row = formatTraceRow(makeTransaction({ transaction: "" }));
     expect(row).toContain("unknown");
-  });
-
-  test("ends with newline", () => {
-    const row = formatTraceRow(makeTransaction());
-    expect(row).toEndWith("\n");
   });
 });
 
@@ -316,6 +293,13 @@ describe("computeTraceSummary", () => {
     expect(Number.isNaN(summary.duration)).toBe(true);
   });
 
+  test("returns NaN duration for empty spans array", () => {
+    // Property generator uses minLength:1, so empty array is never tested there
+    const summary = computeTraceSummary("trace-id", []);
+    expect(Number.isNaN(summary.duration)).toBe(true);
+    expect(summary.spanCount).toBe(0);
+  });
+
   test("ignores zero timestamps in min/max calculations", () => {
     const spans: TraceSpan[] = [
       makeSpan({ start_timestamp: 0, timestamp: 0 }),
@@ -324,12 +308,6 @@ describe("computeTraceSummary", () => {
     const summary = computeTraceSummary("trace-id", spans);
     // Only the valid span should contribute: (1002.0 - 1000.0) * 1000 = 2000ms
     expect(summary.duration).toBe(2000);
-  });
-
-  test("returns NaN duration for empty spans array", () => {
-    const summary = computeTraceSummary("trace-id", []);
-    expect(Number.isNaN(summary.duration)).toBe(true);
-    expect(summary.spanCount).toBe(0);
   });
 
   test("falls back to timestamp when end_timestamp is 0", () => {
@@ -426,11 +404,6 @@ describe("formatTraceSummary", () => {
 });
 
 describe("formatTraceTable", () => {
-  test("returns a string", () => {
-    const result = formatTraceTable([makeTransaction()]);
-    expect(typeof result).toBe("string");
-  });
-
   test("includes all transaction names", () => {
     const items = [
       makeTransaction({ transaction: "GET /api/users" }),
