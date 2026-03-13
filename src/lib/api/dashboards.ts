@@ -69,26 +69,3 @@ export async function createDashboard(
   );
   return data;
 }
-
-/**
- * Update a dashboard (full PUT — replaces all widgets).
- * Always GET first, modify, then PUT the full widget list.
- *
- * @param orgSlug - Organization slug
- * @param dashboardId - Dashboard ID
- * @param body - Dashboard update body (title, widgets)
- * @returns Updated dashboard detail
- */
-export async function updateDashboard(
-  orgSlug: string,
-  dashboardId: string,
-  body: { title: string; widgets: DashboardWidget[]; projects?: number[] }
-): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/${dashboardId}/`,
-    { method: "PUT", body }
-  );
-  return data;
-}
