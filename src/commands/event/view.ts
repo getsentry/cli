@@ -23,7 +23,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -305,7 +305,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatEventView,
+    human: stateless(formatEventView),
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

@@ -21,7 +21,7 @@ import {
   formatSimpleSpanTree,
   formatTraceSummary,
 } from "../../lib/formatters/index.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -206,7 +206,7 @@ export const viewCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatTraceView,
+    human: stateless(formatTraceView),
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

@@ -11,7 +11,7 @@ import { getCustomerTrialInfo } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
@@ -204,7 +204,7 @@ export const listCommand = buildCommand({
   },
   output: {
     json: true,
-    human: formatTrialListHuman,
+    human: stateless(formatTrialListHuman),
     jsonExclude: ["displayName"],
   },
   parameters: {

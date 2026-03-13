@@ -7,7 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
@@ -59,7 +59,7 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
-  output: { json: true, human: formatRootCauseList },
+  output: { json: true, human: stateless(formatRootCauseList) },
   parameters: {
     positional: issueIdPositional,
     flags: {

@@ -10,7 +10,7 @@ import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import { commandOutput } from "../../lib/formatters/output.js";
+import { commandOutput, stateless } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -117,7 +117,7 @@ export const listCommand = buildCommand({
       "  sentry org list --limit 10\n" +
       "  sentry org list --json",
   },
-  output: { json: true, human: formatOrgListHuman },
+  output: { json: true, human: stateless(formatOrgListHuman) },
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),

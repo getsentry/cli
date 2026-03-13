@@ -35,6 +35,7 @@ import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import {
   commandOutput,
   type OutputConfig,
+  stateless,
 } from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
@@ -565,7 +566,7 @@ export const listCommand = buildListCommand("project", {
   },
   output: {
     json: true,
-    human: (result: ListResult<ProjectWithOrg>) => {
+    human: stateless((result: ListResult<ProjectWithOrg>) => {
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
       }
@@ -574,7 +575,7 @@ export const listCommand = buildListCommand("project", {
         parts.push(`\n${result.header}`);
       }
       return parts.join("");
-    },
+    }),
     jsonTransform: jsonTransformListResult,
   } satisfies OutputConfig<ListResult<ProjectWithOrg>>,
   parameters: {

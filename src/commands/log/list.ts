@@ -26,6 +26,7 @@ import {
   type CommandOutput,
   commandOutput,
   jsonlLines,
+  stateless,
 } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
@@ -529,7 +530,7 @@ export const listCommand = buildListCommand("log", {
   },
   output: {
     json: true,
-    human: formatLogOutput,
+    human: stateless(formatLogOutput),
     jsonTransform: jsonTransformLogOutput,
   },
   parameters: {
