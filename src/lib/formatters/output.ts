@@ -210,16 +210,75 @@ function applyJsonExclude(
   return copy;
 }
 
+// ---------------------------------------------------------------------------
+// JSONL (JSON Lines) support for streaming commands
+// ---------------------------------------------------------------------------
+
+/** Brand symbol for {@link JsonlLines} values. */
+const JSONL_BRAND: unique symbol = Symbol.for("sentry-cli:jsonl-lines");
+
+/**
+ * Wrapper that tells the output framework to write each element as a
+ * separate JSON line (JSONL format) instead of serializing the array
+ * as a single JSON value.
+ *
+ * Use this in `jsonTransform` when a streaming command yields batches
+ * that should be expanded to one line per item.
+ */
+type JsonlLines = {
+  readonly [JSONL_BRAND]: true;
+  readonly items: readonly unknown[];
+};
+
+/**
+ * Create a JSONL marker for use in `jsonTransform`.
+ *
+ * Each item in the array is serialized as a separate JSON line.
+ * Empty arrays produce no output.
+ *
+ * @example
+ * ```ts
+ * jsonTransform(result) {
+ *   if (result.streaming) {
+ *     return jsonlLines(result.logs);
+ *   }
+ *   return result.logs;
+ * }
+ * ```
+ */
+export function jsonlLines(items: readonly unknown[]): JsonlLines {
+  return { [JSONL_BRAND]: true, items };
+}
+
+/** Type guard for JSONL marker values. */
+function isJsonlLines(v: unknown): v is JsonlLines {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    JSONL_BRAND in v &&
+    (v as Record<symbol, unknown>)[JSONL_BRAND] === true
+  );
+}
+
 /**
  * Write a JSON-transformed value to stdout.
  *
- * `undefined` suppresses the chunk entirely (e.g. streaming text-only
- * chunks in JSON mode).
+ * - `undefined` suppresses the chunk entirely (e.g. streaming text-only
+ *   chunks in JSON mode).
+ * - {@link JsonlLines} expands to one line per item (JSONL format).
+ * - All other values are serialized as a single JSON value.
  */
 function writeTransformedJson(stdout: Writer, transformed: unknown): void {
-  if (transformed !== undefined) {
-    stdout.write(`${formatJson(transformed)}\n`);
+  if (transformed === undefined) {
+    return;
   }
+  if (isJsonlLines(transformed)) {
+    for (const item of transformed.items) {
+      stdout.write(`${formatJson(item)}\n`);
+    }
+    return;
+  }
+  stdout.write(`${formatJson(transformed)}\n`);
 }
 
 /**
