@@ -639,7 +639,7 @@ List spans in a trace
 - `-n, --limit <value> - Number of spans (1-1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort by: time (default), duration - (default: "time")`
-- `-f, --fresh - Bypass cache and fetch fresh data`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -650,7 +650,7 @@ View details of specific spans
 **Flags:**
 - `-t, --trace <value> - Trace ID containing the span(s) (required)`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache and fetch fresh data`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -837,7 +837,7 @@ List spans in a trace
 - `-n, --limit <value> - Number of spans (1-1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort by: time (default), duration - (default: "time")`
-- `-f, --fresh - Bypass cache and fetch fresh data`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
