@@ -419,18 +419,15 @@ export function writeOutput<T>(
   }
 }
 
-/**
- * Write a formatted footer hint to stdout.
- * Adds empty line separator and applies muted styling.
- *
- * @param stdout - Writer to output to
- * @param text - Footer text to display
- */
 /** Format footer text (muted, with surrounding newlines). */
 export function formatFooter(text: string): string {
   return `\n${muted(text)}\n`;
 }
 
+/**
+ * Write a formatted footer hint to stdout.
+ * Adds empty line separator and applies muted styling.
+ */
 export function writeFooter(stdout: Writer, text: string): void {
   stdout.write(formatFooter(text));
 }

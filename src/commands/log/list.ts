@@ -462,7 +462,7 @@ function createLogRenderer(): HumanRenderer<LogListResult> {
 
       // Append hint (count, pagination, empty-state message)
       if (hint) {
-        text += `${text ? "\n" : ""}${formatFooter(hint)}\n`;
+        text += `${text ? "\n" : ""}${formatFooter(hint)}`;
       }
 
       return text;
@@ -485,7 +485,9 @@ function jsonTransformLogOutput(
     fields && fields.length > 0 ? filterFields(log, fields) : log;
 
   if (result.logs.length === 0) {
-    return;
+    // Follow mode: suppress empty batches (no JSONL output)
+    // Single-fetch: return empty array for valid JSON
+    return result.jsonl ? undefined : [];
   }
 
   const mapped = result.logs.map(applyFields);
