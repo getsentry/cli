@@ -317,13 +317,18 @@ describe("trial start plan", () => {
       makeCustomerInfo({ canTrial: true })
     );
 
-    const { context, stdoutWrite } = createMockContext();
-    const func = await startCommand.loader();
-    await func.call(context, { json: false }, "plan");
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createMockContext();
+      const func = await startCommand.loader();
+      await func.call(context, { json: false }, "plan");
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("billing");
-    expect(output).toContain("test-org");
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(output).toContain("billing");
+      expect(output).toContain("test-org");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   test("generates QR code for billing URL", async () => {
@@ -332,13 +337,18 @@ describe("trial start plan", () => {
       makeCustomerInfo({ canTrial: true })
     );
 
-    const { context, stdoutWrite } = createMockContext();
-    const func = await startCommand.loader();
-    await func.call(context, { json: false }, "plan");
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createMockContext();
+      const func = await startCommand.loader();
+      await func.call(context, { json: false }, "plan");
 
-    expect(generateQRCodeSpy).toHaveBeenCalled();
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("[QR CODE]");
+      expect(generateQRCodeSpy).toHaveBeenCalled();
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(output).toContain("[QR CODE]");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   test("throws when org is already on plan trial", async () => {
@@ -406,12 +416,17 @@ describe("trial start plan", () => {
       })
     );
 
-    const { context, stdoutWrite } = createMockContext();
-    const func = await startCommand.loader();
-    await func.call(context, { json: false }, "plan");
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createMockContext();
+      const func = await startCommand.loader();
+      await func.call(context, { json: false }, "plan");
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    // The log.info message goes to stderr via consola, but the URL goes to stdout
-    expect(output).toContain("billing");
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      // The log.info message and URL both go through consola → stderr
+      expect(output).toContain("billing");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 });

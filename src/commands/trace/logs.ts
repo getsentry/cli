@@ -10,7 +10,7 @@ import { validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
-import { displayTraceLogs } from "../../lib/formatters/index.js";
+import { formatTraceLogs } from "../../lib/formatters/index.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -176,10 +176,10 @@ export const logsCommand = buildCommand({
       q: "query",
     },
   },
-  // biome-ignore lint/correctness/useYield: void generator — writes to stdout directly, will be migrated to yield pattern later
+  // biome-ignore lint/correctness/useYield: void generator — early returns for web mode
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     const { traceId, orgArg } = parsePositionalArgs(args);
 
@@ -206,16 +206,17 @@ export const logsCommand = buildCommand({
       query: flags.query,
     });
 
-    displayTraceLogs({
-      stdout,
-      logs,
-      traceId,
-      limit: flags.limit,
-      asJson: flags.json,
-      fields: flags.fields,
-      emptyMessage:
-        `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
-        `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,
-    });
+    process.stdout.write(
+      formatTraceLogs({
+        logs,
+        traceId,
+        limit: flags.limit,
+        asJson: flags.json,
+        fields: flags.fields,
+        emptyMessage:
+          `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
+          `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,
+      })
+    );
   },
 });

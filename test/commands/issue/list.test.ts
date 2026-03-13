@@ -429,19 +429,24 @@ describe("issue list: partial failure handling", () => {
       });
     });
 
-    const { context, stderr } = createContext();
+    const stderrSpy = spyOn(process.stderr, "write");
+    try {
+      const { context } = createContext();
 
-    // project-search for "myproj" — org-one succeeds, org-two gets 403 → partial failure
-    await func.call(
-      context,
-      { limit: 10, sort: "date", json: false },
-      "myproj"
-    );
+      // project-search for "myproj" — org-one succeeds, org-two gets 403 → partial failure
+      await func.call(
+        context,
+        { limit: 10, sort: "date", json: false },
+        "myproj"
+      );
 
-    expect(stderr.output).toContain(
-      "Failed to fetch issues from org-two/myproj"
-    );
-    expect(stderr.output).toContain("Showing results from 1 project(s)");
+      // Partial failures are logged as warnings via logger (→ process.stderr)
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(output).toContain("Failed to fetch issues from org-two/myproj");
+      expect(output).toContain("Showing results from 1 project(s)");
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   test("JSON output wraps in {data, hasMore} object", async () => {

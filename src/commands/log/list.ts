@@ -33,13 +33,13 @@ import {
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   resolveOrg,
   resolveOrgProjectFromArg,
 } from "../../lib/resolve-target.js";
 import { validateTraceId } from "../../lib/trace-id.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
-import type { Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -227,13 +227,13 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
  *
  * Unlike the old callback-based approach, this does NOT include
  * stdout/stderr. All stdout output flows through yielded chunks;
- * stderr diagnostics use the `onDiagnostic` callback.
+ * diagnostics are reported via the `onDiagnostic` callback.
  */
 type FollowGeneratorConfig<T extends LogLike> = {
   flags: ListFlags;
   /** Whether to show the trace-ID column in table output */
   includeTrace: boolean;
-  /** Report diagnostic/error messages (caller writes to stderr) */
+  /** Report diagnostic/error messages (caller logs via logger) */
   onDiagnostic: (message: string) => void;
   /**
    * Fetch logs with the given time window.
@@ -321,8 +321,8 @@ async function fetchPoll<T extends LogLike>(
  * - `data` chunks contain raw log arrays for JSONL serialization
  *
  * The generator handles SIGINT via AbortController for clean shutdown.
- * It never touches stdout/stderr directly — all output flows through
- * yielded chunks and the `onDiagnostic` callback.
+ * It never touches stdout directly — all data output flows through
+ * yielded chunks and diagnostics use the `onDiagnostic` callback.
  *
  * @throws {AuthError} if the API returns an authentication error
  */
@@ -455,25 +455,20 @@ async function executeTraceSingleFetch(
 }
 
 /**
- * Write the follow-mode banner to stderr. Suppressed in JSON mode.
+ * Write the follow-mode banner via logger. Suppressed in JSON mode.
  * Includes poll interval, Ctrl+C hint, and update notification.
  */
-function writeFollowBanner(
-  stderr: Writer,
-  flags: ListFlags,
-  bannerText: string
-): void {
+function writeFollowBanner(flags: ListFlags, bannerText: string): void {
   if (flags.json) {
     return;
   }
   const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
-  stderr.write(`${bannerText} (poll interval: ${pollInterval}s)\n`);
-  stderr.write("Press Ctrl+C to stop.\n");
+  logger.info(`${bannerText} (poll interval: ${pollInterval}s)`);
+  logger.info("Press Ctrl+C to stop.");
   const notification = getUpdateNotification();
   if (notification) {
-    stderr.write(notification);
+    logger.info(notification);
   }
-  stderr.write("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -631,15 +626,10 @@ export const listCommand = buildListCommand("log", {
       setContext([org], []);
 
       if (flags.follow) {
-        const { stderr } = this;
         const traceId = flags.trace;
 
-        // Banner (stderr, suppressed in JSON mode)
-        writeFollowBanner(
-          stderr,
-          flags,
-          `Streaming logs for trace ${traceId}...`
-        );
+        // Banner (suppressed in JSON mode)
+        writeFollowBanner(flags, `Streaming logs for trace ${traceId}...`);
 
         // Track IDs of logs seen without timestamp_precise so they are
         // shown once but not duplicated on subsequent polls.
@@ -647,7 +637,7 @@ export const listCommand = buildListCommand("log", {
         const generator = generateFollowLogs({
           flags,
           includeTrace: false,
-          onDiagnostic: (msg) => stderr.write(msg),
+          onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
               query: flags.query,
@@ -704,14 +694,12 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
-        const { stderr } = this;
-
-        writeFollowBanner(stderr, flags, "Streaming logs...");
+        writeFollowBanner(flags, "Streaming logs...");
 
         const generator = generateFollowLogs({
           flags,
           includeTrace: true,
-          onDiagnostic: (msg) => stderr.write(msg),
+          onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
               query: flags.query,

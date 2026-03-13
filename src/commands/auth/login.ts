@@ -104,7 +104,7 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  // biome-ignore lint/correctness/useYield: void generator — writes to stdout directly, will be migrated to yield pattern later
+  // biome-ignore lint/correctness/useYield: void generator — all output goes to stderr via logger, will be migrated to yield pattern later
   async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {
@@ -168,15 +168,9 @@ export const loginCommand = buildCommand({
       // Non-fatal: cache directory may not exist
     }
 
-    const { stdout, stderr } = this;
-    const loginSuccess = await runInteractiveLogin(
-      stdout,
-      stderr,
-      process.stdin,
-      {
-        timeout: flags.timeout * 1000,
-      }
-    );
+    const loginSuccess = await runInteractiveLogin(process.stdin, {
+      timeout: flags.timeout * 1000,
+    });
 
     if (!loginSuccess) {
       // Error already displayed by runInteractiveLogin - just set exit code
