@@ -3,16 +3,17 @@
  *
  * Property-based and unit tests for the shared hex ID validation
  * in src/lib/hex-id.ts.
+ *
+ * Regex patterns (HEX_ID_RE, UUID_DASH_RE) are covered by the property tests
+ * at the bottom of this file which generate random valid/invalid hex strings.
+ * The unit tests here focus on `validateHexId` behavior: error messages,
+ * whitespace handling, UUID normalization, and edge cases.
  */
 
 import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { ValidationError } from "../../src/lib/errors.js";
-import {
-  HEX_ID_RE,
-  UUID_DASH_RE,
-  validateHexId,
-} from "../../src/lib/hex-id.js";
+import { validateHexId } from "../../src/lib/hex-id.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 const HEX_CHARS = "0123456789abcdefABCDEF".split("");
@@ -23,97 +24,6 @@ const validIdArb = array(constantFrom(...HEX_CHARS), {
   minLength: 32,
   maxLength: 32,
 }).map((chars) => chars.join(""));
-
-describe("HEX_ID_RE", () => {
-  test("matches a valid 32-char lowercase hex string", () => {
-    expect(HEX_ID_RE.test("aaaa1111bbbb2222cccc3333dddd4444")).toBe(true);
-  });
-
-  test("matches a valid 32-char uppercase hex string", () => {
-    expect(HEX_ID_RE.test("AAAA1111BBBB2222CCCC3333DDDD4444")).toBe(true);
-  });
-
-  test("matches mixed-case hex", () => {
-    expect(HEX_ID_RE.test("AaAa1111BbBb2222CcCc3333DdDd4444")).toBe(true);
-  });
-
-  test("rejects shorter strings", () => {
-    expect(HEX_ID_RE.test("abc123")).toBe(false);
-  });
-
-  test("rejects longer strings", () => {
-    expect(HEX_ID_RE.test(`${VALID_ID}extra`)).toBe(false);
-  });
-
-  test("rejects non-hex characters", () => {
-    expect(HEX_ID_RE.test("gggg1111bbbb2222cccc3333dddd4444")).toBe(false);
-  });
-
-  test("rejects empty string", () => {
-    expect(HEX_ID_RE.test("")).toBe(false);
-  });
-
-  test("rejects strings with whitespace", () => {
-    expect(HEX_ID_RE.test(" aaaa1111bbbb2222cccc3333dddd4444")).toBe(false);
-    expect(HEX_ID_RE.test("aaaa1111bbbb2222cccc3333dddd4444 ")).toBe(false);
-  });
-
-  test("rejects strings with newlines", () => {
-    expect(HEX_ID_RE.test("aaaa1111bbbb2222cccc3333dddd4444\n")).toBe(false);
-  });
-});
-
-describe("UUID_DASH_RE", () => {
-  test("matches a valid UUID with dashes (lowercase)", () => {
-    expect(UUID_DASH_RE.test("aaaa1111-bbbb-2222-cccc-3333dddd4444")).toBe(
-      true
-    );
-  });
-
-  test("matches a valid UUID with dashes (uppercase)", () => {
-    expect(UUID_DASH_RE.test("AAAA1111-BBBB-2222-CCCC-3333DDDD4444")).toBe(
-      true
-    );
-  });
-
-  test("matches mixed-case UUID", () => {
-    expect(UUID_DASH_RE.test("AaAa1111-BbBb-2222-CcCc-3333DdDd4444")).toBe(
-      true
-    );
-  });
-
-  test("rejects plain 32-char hex (no dashes)", () => {
-    expect(UUID_DASH_RE.test("aaaa1111bbbb2222cccc3333dddd4444")).toBe(false);
-  });
-
-  test("rejects dashes in wrong positions", () => {
-    expect(UUID_DASH_RE.test("aaaa-1111bbbb-2222cccc-3333dddd-444444444")).toBe(
-      false
-    );
-  });
-
-  test("rejects too few hex chars between dashes", () => {
-    expect(UUID_DASH_RE.test("aaa-1111-bbbb-2222-cccc3333dddd4444")).toBe(
-      false
-    );
-  });
-
-  test("rejects empty string", () => {
-    expect(UUID_DASH_RE.test("")).toBe(false);
-  });
-
-  test("rejects non-hex chars in UUID format", () => {
-    expect(UUID_DASH_RE.test("gggg1111-bbbb-2222-cccc-3333dddd4444")).toBe(
-      false
-    );
-  });
-
-  test("matches real user input from CLI-7Z", () => {
-    expect(UUID_DASH_RE.test("ed29abc8-71c4-475b-9675-4655ef1a02d0")).toBe(
-      true
-    );
-  });
-});
 
 describe("validateHexId", () => {
   test("returns the ID for valid input", () => {

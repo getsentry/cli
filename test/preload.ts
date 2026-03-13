@@ -58,6 +58,7 @@ delete process.env.SENTRY_AUTH_TOKEN;
 delete process.env.SENTRY_TOKEN;
 delete process.env.SENTRY_CLIENT_ID;
 delete process.env.SENTRY_URL;
+delete process.env.SENTRY_HOST;
 delete process.env.SENTRY_ORG;
 delete process.env.SENTRY_PROJECT;
 

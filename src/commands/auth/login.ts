@@ -1,3 +1,4 @@
+import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { getCurrentUser, getUserRegions } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
@@ -9,7 +10,7 @@ import {
   setAuthToken,
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
-import { setUserInfo } from "../../lib/db/user.js";
+import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/human.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
@@ -21,7 +22,57 @@ const log = logger.withTag("auth.login");
 type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
+  readonly force: boolean;
 };
+
+/**
+ * Handle the case where the user is already authenticated.
+ *
+ * Returns `true` if the login flow should proceed (credentials cleared),
+ * or `false` if the command should exit early.
+ *
+ * - Env-var auth: always blocks re-auth (user must unset the var).
+ * - `--force`: clears auth silently and proceeds.
+ * - Interactive TTY: prompts user to confirm re-authentication.
+ * - Non-interactive without `--force`: prints a message and blocks.
+ */
+async function handleExistingAuth(force: boolean): Promise<boolean> {
+  if (isEnvTokenActive()) {
+    const envVar = getActiveEnvVarName();
+    log.info(
+      `Authentication is provided via ${envVar} environment variable. ` +
+        `Unset ${envVar} to use OAuth-based login instead.`
+    );
+    return false;
+  }
+
+  if (!force) {
+    // Non-interactive (piped, CI): print message and block
+    if (!isatty(0)) {
+      log.info(
+        "You are already authenticated. Use '--force' or 'sentry auth logout' first to re-authenticate."
+      );
+      return false;
+    }
+
+    // Interactive TTY: prompt user to confirm re-authentication
+    const userInfo = getUserInfo();
+    const identity = userInfo ? formatUserIdentity(userInfo) : "current user";
+    const confirmed = await log.prompt(
+      `Already authenticated as ${identity}. Re-authenticate?`,
+      { type: "confirm", initial: false }
+    );
+
+    // Symbol(clack:cancel) is truthy — strict equality check
+    if (confirmed !== true) {
+      return false;
+    }
+  }
+
+  // Clear existing credentials and caches before re-authenticating
+  await clearAuth();
+  return true;
+}
 
 export const loginCommand = buildCommand({
   docs: {
@@ -46,23 +97,20 @@ export const loginCommand = buildCommand({
         // Stricli requires string defaults (raw CLI input); numberParser converts to number
         default: "900",
       },
+      force: {
+        kind: "boolean",
+        brief: "Re-authenticate without prompting",
+        default: false,
+      },
     },
   },
   async func(this: SentryContext, flags: LoginFlags): Promise<void> {
-    // Check if already authenticated
+    // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {
-      if (isEnvTokenActive()) {
-        const envVar = getActiveEnvVarName();
-        log.info(
-          `Authentication is provided via ${envVar} environment variable. ` +
-            `Unset ${envVar} to use OAuth-based login instead.`
-        );
-      } else {
-        log.info(
-          "You are already authenticated. Use 'sentry auth logout' first to re-authenticate."
-        );
+      const shouldProceed = await handleExistingAuth(flags.force);
+      if (!shouldProceed) {
+        return;
       }
-      return;
     }
 
     // Token-based authentication

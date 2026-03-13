@@ -44,6 +44,7 @@ Authenticate with Sentry
 **Flags:**
 - `--token <value> - Authenticate using an API token instead of OAuth`
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
+- `--force - Re-authenticate without prompting`
 
 **Examples:**
 
@@ -667,6 +668,26 @@ View logs associated with a trace
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+### Trial
+
+Manage product trials
+
+#### `sentry trial list <org>`
+
+List product trials
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry trial start <name> <org>`
+
+Start a product trial
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 ### Init
 
 Initialize Sentry in your project
@@ -679,6 +700,7 @@ Initialize Sentry in your project
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+- `-t, --team <value> - Team slug to create the project under`
 
 ### Issues
 
@@ -790,6 +812,18 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+### Trials
+
+List product trials
+
+#### `sentry trials <org>`
+
+List product trials
+
+**Flags:**
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 

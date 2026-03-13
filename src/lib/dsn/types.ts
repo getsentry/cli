@@ -66,7 +66,7 @@ export type ResolvedProject = ResolvedProjectInfo & {
 /**
  * Cached DSN entry with full resolution info
  *
- * Stored in ~/.sentry/config.json under dsnCache[directory]
+ * Stored in ~/.sentry/cli.db in the dsn_cache table
  */
 export type CachedDsnEntry = {
   /** The raw DSN string */

@@ -7,15 +7,21 @@ The Sentry CLI can be configured through environment variables and a local datab
 
 ## Environment Variables
 
-### `SENTRY_URL`
+### `SENTRY_HOST`
 
 Base URL of your Sentry instance. **Only needed for [self-hosted Sentry](./self-hosted/).** SaaS users (sentry.io) should not set this.
 
 ```bash
-export SENTRY_URL=https://sentry.example.com
+export SENTRY_HOST=https://sentry.example.com
 ```
 
 When set, all API requests (including OAuth login) are directed to this URL instead of `https://sentry.io`. The CLI also sets this automatically when you pass a self-hosted Sentry URL as a command argument.
+
+`SENTRY_HOST` takes precedence over `SENTRY_URL`. Both work identically — use whichever you prefer.
+
+### `SENTRY_URL`
+
+Alias for `SENTRY_HOST`. If both are set, `SENTRY_HOST` takes precedence.
 
 ### `SENTRY_ORG`
 
@@ -138,9 +144,11 @@ The `sentry api` command also uses `--verbose` to show full HTTP request/respons
 
 ## Credential Storage
 
-Credentials are stored in a SQLite database at `~/.sentry/` (or the path set by `SENTRY_CONFIG_DIR`) with restricted file permissions (mode 600) for security. The database also caches:
+We store credentials and caches in a SQLite database (`cli.db`) inside the config directory (`~/.sentry/` by default, overridable via `SENTRY_CONFIG_DIR`). The database file and its WAL side-files are created with restricted permissions (mode 600) so that only the current user can read them. The database also caches:
 
 - Organization and project defaults
 - DSN resolution results
 - Region URL mappings
 - Project aliases (for monorepo support)
+
+See [Credential Storage](./commands/auth/#credential-storage) in the auth command docs for more details.

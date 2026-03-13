@@ -714,3 +714,47 @@ export const SentryTeamSchema = z
   .passthrough();
 
 export type SentryTeam = z.infer<typeof SentryTeamSchema>;
+
+// Product Trials
+
+/** A product trial from the customer endpoint */
+export const ProductTrialSchema = z.object({
+  /** Trial category (e.g., "seerUsers", "seerAutofix") */
+  category: z.string(),
+  /** ISO date when the trial started, null if not started */
+  startDate: z.string().nullable(),
+  /** ISO date when the trial ends, null if not started */
+  endDate: z.string().nullable(),
+  /** Reason code for the trial */
+  reasonCode: z.number(),
+  /** Whether the trial has been activated */
+  isStarted: z.boolean(),
+  /** Duration of the trial in days, null if unknown */
+  lengthDays: z.number().nullable(),
+});
+
+export type ProductTrial = z.infer<typeof ProductTrialSchema>;
+
+/** Subset of plan details needed for plan trial display */
+export const PlanDetailsSubsetSchema = z.object({
+  /** Human-readable plan name (e.g., "Developer", "Business") */
+  name: z.string(),
+  /** Plan ID of the trial plan (e.g., "am3_t"), null if no trial plan */
+  trialPlan: z.string().nullable().optional(),
+});
+
+/** Subset of customer data needed for trial availability checks */
+export const CustomerTrialInfoSchema = z.object({
+  /** Available and active product trials for the organization */
+  productTrials: z.array(ProductTrialSchema).nullable().optional(),
+  /** Whether the organization can start a plan-level trial */
+  canTrial: z.boolean().optional(),
+  /** Whether the organization is currently on a plan trial */
+  isTrial: z.boolean().optional(),
+  /** ISO date when the plan trial ends, null if not on trial */
+  trialEnd: z.string().nullable().optional(),
+  /** Plan details with trial plan info */
+  planDetails: PlanDetailsSubsetSchema.optional(),
+});
+
+export type CustomerTrialInfo = z.infer<typeof CustomerTrialInfoSchema>;

@@ -27,7 +27,6 @@ import {
   handleOrgAll,
   handleProjectSearch,
   PAGINATION_KEY,
-  writeSelfHostedWarning,
 } from "../../../src/commands/project/list.js";
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -41,7 +40,7 @@ import {
 } from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { AuthError, ContextError } from "../../../src/lib/errors.js";
-import type { SentryProject, Writer } from "../../../src/types/index.js";
+import type { SentryProject } from "../../../src/types/index.js";
 import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
@@ -58,20 +57,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await cleanupTestDir(testConfigDir);
 });
-
-/** Capture stdout writes */
-function createCapture(): { writer: Writer; output: () => string } {
-  const chunks: string[] = [];
-  return {
-    writer: {
-      write: (s: string) => {
-        chunks.push(s);
-        return true;
-      },
-    } as Writer,
-    output: () => chunks.join(""),
-  };
-}
 
 /** Create a minimal project for testing */
 function makeProject(
@@ -297,28 +282,6 @@ describe("resolveOrgCursor", () => {
   });
 });
 
-describe("writeSelfHostedWarning", () => {
-  test("writes nothing when skippedSelfHosted is undefined", () => {
-    const { writer, output } = createCapture();
-    writeSelfHostedWarning(writer, undefined);
-    expect(output()).toBe("");
-  });
-
-  test("writes nothing when skippedSelfHosted is 0", () => {
-    const { writer, output } = createCapture();
-    writeSelfHostedWarning(writer, 0);
-    expect(output()).toBe("");
-  });
-
-  test("writes warning when skippedSelfHosted > 0", () => {
-    const { writer, output } = createCapture();
-    writeSelfHostedWarning(writer, 3);
-    const text = output();
-    expect(text).toContain("3 DSN(s)");
-    expect(text).toContain("could not be resolved");
-  });
-});
-
 // Handler tests with fetch mocking
 
 let originalFetch: typeof globalThis.fetch;
@@ -419,96 +382,62 @@ describe("handleExplicit", () => {
     globalThis.fetch = originalFetch;
   });
 
-  test("displays single project", async () => {
+  test("returns single project", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleExplicit(writer, "test-org", "frontend", {
+    const result = await handleExplicit("test-org", "frontend", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("ORG");
-    expect(text).toContain("frontend");
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.slug).toBe("frontend");
+    expect(result.items[0]?.orgSlug).toBe("test-org");
   });
 
-  test("--json outputs JSON array", async () => {
-    globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
-
-    await handleExplicit(writer, "test-org", "frontend", {
-      limit: 30,
-      json: true,
-      fresh: false,
-    });
-
-    const parsed = JSON.parse(output());
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(1);
-  });
-
-  test("not found shows message", async () => {
+  test("not found returns empty with hint", async () => {
     globalThis.fetch = mockProjectFetch([]);
-    const { writer, output } = createCapture();
 
-    await handleExplicit(writer, "test-org", "nonexistent", {
+    const result = await handleExplicit("test-org", "nonexistent", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("No project");
-    expect(text).toContain("nonexistent");
-    expect(text).toContain("Tip:");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("No project");
+    expect(result.hint).toContain("nonexistent");
+    expect(result.hint).toContain("Tip:");
   });
 
-  test("not found with --json outputs empty array", async () => {
-    globalThis.fetch = mockProjectFetch([]);
-    const { writer, output } = createCapture();
-
-    await handleExplicit(writer, "test-org", "nonexistent", {
-      limit: 30,
-      json: true,
-      fresh: false,
-    });
-
-    const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(0);
-  });
-
-  test("platform filter with no match shows message", async () => {
+  test("platform filter with no match returns empty with hint", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleExplicit(writer, "test-org", "frontend", {
+    const result = await handleExplicit("test-org", "frontend", {
       limit: 30,
       json: false,
       platform: "ruby",
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("No project");
-    expect(text).toContain("platform");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("No project");
+    expect(result.hint).toContain("platform");
   });
 
-  test("platform filter match shows project", async () => {
+  test("platform filter match returns project", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleExplicit(writer, "test-org", "frontend", {
+    const result = await handleExplicit("test-org", "frontend", {
       limit: 30,
       json: false,
       platform: "javascript",
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("frontend");
-    expect(text).toContain("ORG");
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.slug).toBe("frontend");
   });
 });
 
@@ -523,61 +452,52 @@ describe("handleOrgAll", () => {
     globalThis.fetch = originalFetch;
   });
 
-  test("displays paginated project list", async () => {
+  test("returns paginated project list", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("ORG");
-    expect(text).toContain("frontend");
-    expect(text).toContain("backend");
-    expect(text).toContain("Showing 2 projects");
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.slug).toBe("frontend");
+    expect(result.items[1]?.slug).toBe("backend");
+    expect(result.header).toContain("Showing 2 projects");
   });
 
-  test("--json with hasMore includes nextCursor", async () => {
+  test("hasMore includes nextCursor in result", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.hasMore).toBe(true);
-    expect(parsed.nextCursor).toBe("1735689600000:100:0");
-    expect(parsed.data).toHaveLength(2);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBe("1735689600000:100:0");
+    expect(result.items).toHaveLength(2);
   });
 
-  test("--json without hasMore shows hasMore: false", async () => {
+  test("no hasMore returns hasMore: false", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: true, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.hasMore).toBe(false);
-    expect(parsed.data).toHaveLength(2);
+    expect(result.hasMore).toBe(false);
+    expect(result.items).toHaveLength(2);
   });
 
   test("hasMore saves cursor for --cursor last", async () => {
@@ -585,10 +505,8 @@ describe("handleOrgAll", () => {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
     });
-    const { writer } = createCapture();
 
     await handleOrgAll({
-      stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
@@ -608,10 +526,8 @@ describe("handleOrgAll", () => {
     );
 
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer } = createCapture();
 
     await handleOrgAll({
-      stdout: writer,
       org: "test-org",
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
@@ -627,53 +543,46 @@ describe("handleOrgAll", () => {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("No matching projects on this page");
-    expect(text).toContain("-c last");
-    expect(text).toContain("--platform rust");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("No matching projects on this page");
+    expect(result.hint).toContain("-c last");
+    expect(result.hint).toContain("--platform rust");
   });
 
   test("empty page without hasMore shows no projects", async () => {
     globalThis.fetch = mockProjectFetch([]);
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("No projects found");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("No projects found");
   });
 
   test("empty page without hasMore and platform filter shows platform message", async () => {
     globalThis.fetch = mockProjectFetch([]);
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, platform: "rust", fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("matching platform 'rust'");
-    expect(text).not.toContain("No projects found in organization");
+    expect(result.hint).toContain("matching platform 'rust'");
+    expect(result.hint).not.toContain("No projects found in organization");
   });
 
   test("hasMore shows next page hint", async () => {
@@ -681,20 +590,17 @@ describe("handleOrgAll", () => {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, fresh: false },
       contextKey: "type:org:test-org",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("more available");
-    expect(text).toContain("-c last");
-    expect(text).not.toContain("--platform");
+    expect(result.header).toContain("more available");
+    expect(result.hint).toContain("-c last");
+    expect(result.hint).not.toContain("--platform");
   });
 
   test("hasMore with platform includes --platform in hint", async () => {
@@ -702,19 +608,16 @@ describe("handleOrgAll", () => {
       hasMore: true,
       nextCursor: "1735689600000:100:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleOrgAll({
-      stdout: writer,
+    const result = await handleOrgAll({
       org: "test-org",
       flags: { limit: 30, json: false, platform: "python", fresh: false },
       contextKey: "type:org:test-org:platform:python",
       cursor: undefined,
     });
 
-    const text = output();
-    expect(text).toContain("--platform python");
-    expect(text).toContain("-c last");
+    expect(result.hint).toContain("--platform python");
+    expect(result.hint).toContain("-c last");
   });
 });
 
@@ -731,30 +634,15 @@ describe("handleProjectSearch", () => {
 
   test("finds project across orgs", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleProjectSearch(writer, "frontend", {
+    const result = await handleProjectSearch("frontend", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("frontend");
-  });
-
-  test("--json outputs JSON array", async () => {
-    globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
-
-    await handleProjectSearch(writer, "frontend", {
-      limit: 30,
-      json: true,
-      fresh: false,
-    });
-
-    const parsed = JSON.parse(output());
-    expect(Array.isArray(parsed)).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items[0]?.slug).toBe("frontend");
   });
 
   test("not found throws ContextError", async () => {
@@ -781,10 +669,8 @@ describe("handleProjectSearch", () => {
       });
     };
 
-    const { writer } = createCapture();
-
     await expect(
-      handleProjectSearch(writer, "nonexistent", {
+      handleProjectSearch("nonexistent", {
         limit: 30,
         json: false,
         fresh: false,
@@ -792,7 +678,7 @@ describe("handleProjectSearch", () => {
     ).rejects.toThrow(ContextError);
   });
 
-  test("not found with --json outputs empty array", async () => {
+  test("not found with --json returns empty items", async () => {
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
@@ -808,53 +694,44 @@ describe("handleProjectSearch", () => {
         );
       }
 
-      // getProject (SDK retrieveAProject) hits /projects/{org}/{slug}/
-      // Return 404 to simulate project not found
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,
       });
     };
 
-    const { writer, output } = createCapture();
-
-    await handleProjectSearch(writer, "nonexistent", {
+    // With --json, project-search returns empty array instead of throwing
+    const result = await handleProjectSearch("nonexistent", {
       limit: 30,
       json: true,
       fresh: false,
     });
-
-    const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(0);
+    expect(result.items).toEqual([]);
   });
 
-  test("multiple results shows count", async () => {
+  test("multiple results returns items", async () => {
     globalThis.fetch = mockProjectFetch([...sampleProjects, ...sampleProjects]);
-    const { writer, output } = createCapture();
 
-    await handleProjectSearch(writer, "frontend", {
+    const result = await handleProjectSearch("frontend", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("frontend");
+    expect(result.items.length).toBeGreaterThan(0);
   });
 
-  test("found but filtered by platform shows platform message, not 'not found'", async () => {
+  test("found but filtered by platform returns hint with platform message", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleProjectSearch(writer, "frontend", {
+    const result = await handleProjectSearch("frontend", {
       limit: 30,
       json: false,
       platform: "rust",
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("matching platform 'rust'");
-    expect(text).not.toContain("not found");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("matching platform 'rust'");
   });
 
   test("respects --limit flag", async () => {
@@ -901,21 +778,18 @@ describe("handleProjectSearch", () => {
       });
     };
 
-    const { writer, output } = createCapture();
-
-    await handleProjectSearch(writer, "frontend", {
+    const result = await handleProjectSearch("frontend", {
       limit: 1,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    // Should show truncation message since 2 matches but limit is 1
-    expect(text).toContain("Showing 1 of 2 matches");
-    expect(text).toContain("--limit");
+    expect(result.items).toHaveLength(1);
+    expect(result.header).toContain("Showing 1 of 2 matches");
+    expect(result.header).toContain("--limit");
   });
 
-  test("--limit also applies to JSON output", async () => {
+  test("--limit also applies to result items", async () => {
     await setOrgRegion("org-a", DEFAULT_SENTRY_URL);
     await setOrgRegion("org-b", DEFAULT_SENTRY_URL);
 
@@ -958,24 +832,20 @@ describe("handleProjectSearch", () => {
       });
     };
 
-    const { writer, output } = createCapture();
-
-    await handleProjectSearch(writer, "frontend", {
+    const result = await handleProjectSearch("frontend", {
       limit: 1,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed).toHaveLength(1);
+    expect(result.items).toHaveLength(1);
   });
 });
 
 // ─── displayProjectTable ────────────────────────────────────────
 
 describe("displayProjectTable", () => {
-  test("outputs header and rows", () => {
-    const { writer, output } = createCapture();
+  test("returns string with header and rows", () => {
     const projects = [
       makeProject({
         slug: "web",
@@ -991,8 +861,7 @@ describe("displayProjectTable", () => {
       }),
     ];
 
-    displayProjectTable(writer, projects);
-    const text = output();
+    const text = displayProjectTable(projects);
 
     // Header row
     expect(text).toContain("ORG");
@@ -1008,11 +877,10 @@ describe("displayProjectTable", () => {
   });
 
   test("handles single project", () => {
-    const { writer, output } = createCapture();
-    displayProjectTable(writer, [
+    const text = displayProjectTable([
       makeProject({ slug: "solo", orgSlug: "org" }),
     ]);
-    expect(output()).toContain("solo");
+    expect(text).toContain("solo");
   });
 });
 
@@ -1170,50 +1038,44 @@ describe("handleAutoDetect", () => {
     globalThis.fetch = originalFetch;
   });
 
-  test("shows projects from all orgs when no default org", async () => {
+  test("returns projects from all orgs when no default org", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    // Should display table with projects
-    expect(text).toContain("ORG");
-    expect(text).toContain("frontend");
-    expect(text).toContain("backend");
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.slug).toBe("frontend");
+    expect(result.items[1]?.slug).toBe("backend");
   });
 
-  test("--json outputs envelope with hasMore", async () => {
+  test("returns hasMore: false when all projects fit", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed).toHaveProperty("data");
-    expect(parsed).toHaveProperty("hasMore", false);
-    expect(parsed.data).toHaveLength(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.hasMore).toBe(false);
   });
 
-  test("empty results shows no projects message", async () => {
+  test("empty results returns hint with no projects message", async () => {
     globalThis.fetch = mockProjectFetch([]);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    expect(output()).toContain("No projects found");
+    expect(result.items).toHaveLength(0);
+    expect(result.hint).toContain("No projects found");
   });
 
   test("respects --limit flag and indicates truncation", async () => {
@@ -1221,35 +1083,32 @@ describe("handleAutoDetect", () => {
       makeProject({ id: String(i), slug: `proj-${i}`, name: `Project ${i}` })
     );
     globalThis.fetch = mockProjectFetch(manyProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 2,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.data).toHaveLength(2);
-    expect(parsed.hasMore).toBe(true);
-    expect(parsed.hint).toBeString();
+    expect(result.items).toHaveLength(2);
+    expect(result.hasMore).toBe(true);
+    expect(result.jsonExtra).toBeDefined();
+    expect((result.jsonExtra as Record<string, unknown>)?.hint).toBeString();
   });
 
   test("respects --platform flag", async () => {
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       platform: "python",
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].platform).toBe("python");
-    expect(parsed.hasMore).toBe(false);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.platform).toBe("python");
+    expect(result.hasMore).toBe(false);
   });
 
   test("shows limit message when more projects exist", async () => {
@@ -1257,36 +1116,31 @@ describe("handleAutoDetect", () => {
       makeProject({ id: String(i), slug: `proj-${i}`, name: `Project ${i}` })
     );
     globalThis.fetch = mockProjectFetch(manyProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 2,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("Showing 2 projects (more available)");
-    expect(text).toContain("--limit");
+    expect(result.header).toContain("Showing 2 projects (more available)");
+    expect(result.header).toContain("--limit");
   });
 
   test("fast path: uses single-page fetch for single org without platform filter", async () => {
     // Set default org to trigger single-org resolution
     await setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.data).toHaveLength(2);
-    // Verify orgSlug is attached
-    expect(parsed.data[0].orgSlug).toBe("test-org");
-    expect(parsed.hasMore).toBe(false);
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.orgSlug).toBe("test-org");
+    expect(result.hasMore).toBe(false);
   });
 
   test("fast path: shows truncation message when server has more results", async () => {
@@ -1295,39 +1149,37 @@ describe("handleAutoDetect", () => {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: false,
       fresh: false,
     });
 
-    const text = output();
-    expect(text).toContain("Showing 2 projects (more available)");
-    expect(text).toContain("sentry project list test-org/");
-    expect(text).not.toContain("--limit");
+    expect(result.header).toContain("Showing 2 projects (more available)");
+    expect(result.header).toContain("sentry project list test-org/");
+    expect(result.header).not.toContain("--limit");
   });
 
-  test("fast path: JSON includes hasMore and hint when server has more results", async () => {
+  test("fast path: includes hasMore and jsonExtra hint when server has more results", async () => {
     await setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects, {
       hasMore: true,
       nextCursor: "1735689600000:0:0",
     });
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.hasMore).toBe(true);
-    expect(parsed.data).toHaveLength(2);
-    expect(parsed.hint).toContain("test-org/");
-    expect(parsed.hint).toContain("--json");
+    expect(result.hasMore).toBe(true);
+    expect(result.items).toHaveLength(2);
+    expect(result.jsonExtra).toBeDefined();
+    const jsonHint = (result.jsonExtra as Record<string, unknown>)?.hint;
+    expect(jsonHint).toContain("test-org/");
+    expect(jsonHint).toContain("--json");
   });
 
   test("fast path: non-auth API errors return empty results instead of throwing", async () => {
@@ -1343,27 +1195,24 @@ describe("handleAutoDetect", () => {
       }
       return new Response(JSON.stringify([]), { status: 200 });
     };
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.data).toEqual([]);
-    expect(parsed.hasMore).toBe(false);
+    expect(result.items).toEqual([]);
+    expect(result.hasMore).toBe(false);
   });
 
   test("fast path: AuthError still propagates", async () => {
     await setDefaults("test-org");
     // Clear auth so getAuthToken() throws AuthError before any fetch
     await clearAuth();
-    const { writer } = createCapture();
 
     await expect(
-      handleAutoDetect(writer, "/tmp/test-project", {
+      handleAutoDetect("/tmp/test-project", {
         limit: 30,
         json: true,
         fresh: false,
@@ -1375,18 +1224,16 @@ describe("handleAutoDetect", () => {
     // Set default org — but platform filter forces slow path
     await setDefaults("test-org");
     globalThis.fetch = mockProjectFetch(sampleProjects);
-    const { writer, output } = createCapture();
 
-    await handleAutoDetect(writer, "/tmp/test-project", {
+    const result = await handleAutoDetect("/tmp/test-project", {
       limit: 30,
       json: true,
       platform: "python",
       fresh: false,
     });
 
-    const parsed = JSON.parse(output());
-    expect(parsed.data).toHaveLength(1);
-    expect(parsed.data[0].platform).toBe("python");
-    expect(parsed.hasMore).toBe(false);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.platform).toBe("python");
+    expect(result.hasMore).toBe(false);
   });
 });

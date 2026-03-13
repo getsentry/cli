@@ -628,6 +628,9 @@ mock.module("./some-module", () => ({
 
 ### Architecture
 
+<!-- lore:019ce2be-39f1-7ad9-a4c5-4506b62f689c -->
+* **api-client.ts split into domain modules under src/lib/api/**: The original monolithic \`src/lib/api-client.ts\` (1,977 lines) was split into 12 focused domain modules under \`src/lib/api/\`: infrastructure.ts (shared helpers, types, raw requests), organizations.ts, projects.ts, teams.ts, repositories.ts, issues.ts, events.ts, traces.ts, logs.ts, seer.ts, trials.ts, users.ts. The original \`api-client.ts\` was converted to a ~100-line barrel re-export file preserving all existing import paths. The \`biome.jsonc\` override for \`noBarrelFile\` already includes \`api-client.ts\`. When adding new API functions, place them in the appropriate domain module under \`src/lib/api/\`, not in the barrel file.
+
 <!-- lore:019cb8ea-c6f0-75d8-bda7-e32b4e217f92 -->
 * **CLI telemetry DSN is public write-only — safe to embed in install script**: The CLI's Sentry DSN (\`SENTRY\_CLI\_DSN\` in \`src/lib/constants.ts\`) is a public write-only ingest key already baked into every binary. Safe to hardcode in install scripts. Opt-out: \`SENTRY\_CLI\_NO\_TELEMETRY=1\`.
 
@@ -643,10 +646,10 @@ mock.module("./some-module", () => ({
 <!-- lore:019c972c-9f0f-75cd-9e24-9bdbb1ac03d6 -->
 * **Numeric issue ID resolution returns org:undefined despite API success**: Numeric issue ID resolution in \`resolveNumericIssue()\`: (1) try DSN/env/config for org, (2) if found use \`getIssueInOrg(org, id)\` with region routing, (3) else fall back to unscoped \`getIssue(id)\`, (4) extract org from \`issue.permalink\` via \`parseSentryUrl\` as final fallback. \`parseSentryUrl\` handles path-based (\`/organizations/{org}/...\`) and subdomain-style URLs. \`matchSubdomainOrg()\` filters region subdomains by requiring slug length > 2. Self-hosted uses path-based only.
 
-### Decision
+<!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
+* **Seer trial prompt uses middleware layering in bin.ts error handling chain**: The CLI's error recovery middlewares in \`bin.ts\` are layered: \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (for \`no\_budget\`/\`not\_enabled\` errors) are caught by the inner wrapper; auth errors bubble up to the outer wrapper. After successful auth login retry, the retry also goes through \`executeWithSeerTrialPrompt\` (not \`runCommand\` directly) so the full middleware chain applies. Trial check API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start trial: \`PUT /api/0/customers/{org}/product-trial/\`. The \`/customers/\` endpoint is getsentry SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` errors are excluded (admin's explicit choice). \`startSeerTrial\` accepts \`category\` from the trial object — don't hardcode it.
 
-<!-- lore:019cc2ef-9be5-722d-bc9f-b07a8197eeed -->
-* **All view subcommands should use \<target> \<id> positional pattern**: All \`\* view\` subcommands should follow a consistent \`\<target> \<id>\` positional argument pattern where target is the optional \`org/project\` specifier. During migration, use opportunistic argument swapping with a stderr warning when args are in wrong order. This is an instance of the broader CLI UX auto-correction pattern: safe when input is already invalid, correction is unambiguous, warning goes to stderr. Normalize at command level, keep parsers pure. Model after \`gh\` CLI conventions.
+### Decision
 
 <!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
 * **Raw markdown output for non-interactive terminals, rendered for TTY**: Markdown-first output pipeline: custom renderer in \`src/lib/formatters/markdown.ts\` walks \`marked\` tokens to produce ANSI-styled output. Commands build CommonMark using helpers (\`mdKvTable()\`, \`mdRow()\`, \`colorTag()\`, \`escapeMarkdownCell()\`, \`safeCodeSpan()\`) and pass through \`renderMarkdown()\`. \`isPlainOutput()\` precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`FORCE\_COLOR\` > \`!isTTY\`. \`--json\` always outputs JSON. Colors defined in \`COLORS\` object in \`colors.ts\`. Tests run non-TTY so assertions match raw CommonMark; use \`stripAnsi()\` helper for rendered-mode assertions.
@@ -659,14 +662,8 @@ mock.module("./some-module", () => ({
 <!-- lore:019c8ab6-d119-7365-9359-98ecf464b704 -->
 * **@sentry/api SDK passes Request object to custom fetch — headers lost on Node.js**: @sentry/api SDK calls \`\_fetch(request)\` with no init object. In \`authenticatedFetch\`, \`init\` is undefined so \`prepareHeaders\` creates empty headers — on Node.js this strips Content-Type (HTTP 415). Fix: fall back to \`input.headers\` when \`init\` is undefined. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) to access the Response's Link header for pagination. \`per\_page\` is not in SDK types; cast query to pass it at runtime.
 
-<!-- lore:019cc484-f0e1-7016-a851-177fb9ad2cc4 -->
-* **AGENTS.md must be excluded from markdown linters**: AGENTS.md is auto-managed by lore and uses \`\*\` list markers and long lines that violate typical remark-lint rules (unordered-list-marker-style, maximum-line-length). When a project uses remark with \`--frail\` (warnings become errors), AGENTS.md will fail CI. Fix: add \`AGENTS.md\` to \`.remarkignore\`. This applies to any lore-managed project with markdown linting.
-
 <!-- lore:019c9e98-7af4-7e25-95f4-fc06f7abf564 -->
 * **Bun binary build requires SENTRY\_CLIENT\_ID env var**: The build script (\`script/bundle.ts\`) requires \`SENTRY\_CLIENT\_ID\` environment variable and exits with code 1 if missing. When building locally, use \`bun run --env-file=.env.local build\` or set the env var explicitly. The binary build (\`bun run build\`) also needs it. Without it you get: \`Error: SENTRY\_CLIENT\_ID environment variable is required.\`
-
-<!-- lore:019cc40e-e56e-71e9-bc5d-545f97df732b -->
-* **Consola prompt cancel returns truthy Symbol, not false**: When a user cancels a \`consola\` / \`@clack/prompts\` confirmation prompt (Ctrl+C), the return value is \`Symbol(clack:cancel)\`, not \`false\`. Since Symbols are truthy in JavaScript, checking \`!confirmed\` will be \`false\` and the code falls through as if the user confirmed. Fix: use \`confirmed !== true\` (strict equality) instead of \`!confirmed\` to correctly handle cancel, false, and any other non-true values.
 
 <!-- lore:019c9776-e3dd-7632-88b8-358a19506218 -->
 * **GitHub immutable releases prevent rolling nightly tag pattern**: getsentry/cli has immutable GitHub releases — assets can't be modified and tags can NEVER be reused. Nightly builds publish to GHCR with versioned tags like \`nightly-0.14.0-dev.1772661724\`, not GitHub Releases or npm. \`fetchManifest()\` throws \`UpgradeError("network\_error")\` for both network failures and non-200 — callers must check message for HTTP 404/403. Craft with no \`preReleaseCommand\` silently skips \`bump-version.sh\` if only target is \`github\`.
@@ -679,9 +676,6 @@ mock.module("./some-module", () => ({
 
 <!-- lore:019c9741-d78e-73b1-87c2-e360ef6c7475 -->
 * **useTestConfigDir without isolateProjectRoot causes DSN scanning of repo tree**: \`useTestConfigDir()\` creates temp dirs under \`.test-tmp/\` in the repo tree. Without \`{ isolateProjectRoot: true }\`, \`findProjectRoot\` walks up and finds the repo's \`.git\`, causing DSN detection to scan real source code and trigger network calls against test mocks (timeouts). Always pass \`isolateProjectRoot: true\` when tests exercise \`resolveOrg\`, \`detectDsn\`, or \`findProjectRoot\`.
-
-<!-- lore:019cc303-e397-75b9-9762-6f6ad108f50a -->
-* **Zod z.coerce.number() converts null to 0 silently**: Zod gotchas in this codebase: (1) \`z.coerce.number()\` passes input through \`Number()\`, so \`null\` silently becomes \`0\`. Be aware if \`null\` vs \`0\` distinction matters. (2) Zod v4 \`.default({})\` short-circuits — it returns the default value without parsing through inner schema defaults. So \`.object({ enabled: z.boolean().default(true) }).default({})\` returns \`{}\`, not \`{ enabled: true }\`. Fix: provide fully-populated default objects. This affected nested config sections in src/config.ts during the v3→v4 upgrade.
 
 ### Pattern
 

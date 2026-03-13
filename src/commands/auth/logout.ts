@@ -30,7 +30,7 @@ export const logoutCommand = buildCommand({
   docs: {
     brief: "Log out of Sentry",
     fullDescription:
-      "Remove stored authentication credentials from the configuration file.",
+      "Remove stored authentication credentials from the local database.",
   },
   output: { json: true, human: formatLogoutResult },
   parameters: {
