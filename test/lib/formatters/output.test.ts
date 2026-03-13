@@ -432,4 +432,58 @@ describe("renderCommandOutput", () => {
     // jsonTransform output, not jsonExclude
     expect(parsed).toEqual({ transformed: true, id: 1 });
   });
+
+  test("human factory creates fresh renderer per resolve", () => {
+    const calls: number[] = [];
+    const config: OutputConfig<{ n: number }> = {
+      json: true,
+      human: () => ({
+        render: (d) => {
+          calls.push(d.n);
+          return `#${d.n}`;
+        },
+      }),
+    };
+
+    // First resolve + render
+    const r1 = config.human();
+    r1.render({ n: 1 });
+
+    // Second resolve = fresh renderer
+    const r2 = config.human();
+    r2.render({ n: 2 });
+
+    expect(calls).toEqual([1, 2]);
+  });
+
+  test("finalize is called with hint and output is written", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ value: string }> = {
+      json: true,
+      human: () => ({
+        render: (d) => `[${d.value}]`,
+        finalize: (hint) => `=== END ===${hint ? `\n${hint}` : ""}`,
+      }),
+    };
+
+    const renderer = config.human();
+    renderCommandOutput(w, { value: "test" }, config, renderer, {
+      json: false,
+    });
+    expect(w.output).toBe("[test]\n");
+
+    // Simulate finalize
+    const footer = renderer.finalize?.("Done.");
+    expect(footer).toBe("=== END ===\nDone.");
+  });
+
+  test("stateless renderer has no finalize method", () => {
+    const config: OutputConfig<string> = {
+      json: true,
+      human: stateless((s) => s.toUpperCase()),
+    };
+    const renderer = config.human();
+    expect(renderer.render("hello")).toBe("HELLO");
+    expect(renderer.finalize).toBeUndefined();
+  });
 });
