@@ -77,7 +77,7 @@ export function parseDashboardPositionalArgs(args: string[]): {
     };
   }
   return {
-    dashboardRef: args.at(-1) as string,
+    dashboardRef: args[1] as string,
     targetArg: args[0] as string,
   };
 }
