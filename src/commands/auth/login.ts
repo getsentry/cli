@@ -12,12 +12,37 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { formatUserIdentity } from "../../lib/formatters/human.js";
+import { success } from "../../lib/formatters/colors.js";
+import {
+  formatDuration,
+  formatUserIdentity,
+} from "../../lib/formatters/human.js";
+import { commandOutput } from "../../lib/formatters/output.js";
+import type { LoginResult } from "../../lib/interactive-login.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 
 const log = logger.withTag("auth.login");
+
+/** Format a {@link LoginResult} for human-readable terminal output. */
+function formatLoginResult(result: LoginResult): string {
+  const lines: string[] = [];
+  lines.push(
+    success(
+      `✔ ${result.method === "token" ? "Authenticated with API token" : "Authentication successful!"}`
+    )
+  );
+  if (result.user) {
+    lines.push(`  Logged in as: ${formatUserIdentity(result.user)}`);
+  }
+  lines.push(`  Config saved to: ${result.configPath}`);
+  if (result.expiresIn) {
+    lines.push(`  Token expires in: ${formatDuration(result.expiresIn)}`);
+  }
+  lines.push(""); // trailing newline
+  return lines.join("\n");
+}
 
 type LoginFlags = {
   readonly token?: string;
@@ -104,7 +129,7 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  // biome-ignore lint/correctness/useYield: void generator — all output goes to stderr via logger, will be migrated to yield pattern later
+  output: { json: true, human: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {
@@ -114,15 +139,15 @@ export const loginCommand = buildCommand({
       }
     }
 
+    // Clear stale cached responses from a previous session
+    try {
+      await clearResponseCache();
+    } catch {
+      // Non-fatal: cache directory may not exist
+    }
+
     // Token-based authentication
     if (flags.token) {
-      // Clear stale cached responses from a previous session
-      try {
-        await clearResponseCache();
-      } catch {
-        // Non-fatal: cache directory may not exist
-      }
-
       // Save token first, then validate by fetching user regions
       await setAuthToken(flags.token);
 
@@ -140,40 +165,41 @@ export const loginCommand = buildCommand({
 
       // Fetch and cache user info via /auth/ (works with all token types).
       // A transient failure here must not block login — the token is already valid.
-      let user: Awaited<ReturnType<typeof getCurrentUser>> | undefined;
+      const result: LoginResult = {
+        method: "token",
+        configPath: getDbPath(),
+      };
       try {
-        user = await getCurrentUser();
+        const user = await getCurrentUser();
         setUserInfo({
           userId: user.id,
           email: user.email,
           username: user.username,
           name: user.name,
         });
+        result.user = {
+          name: user.name,
+          email: user.email,
+          username: user.username,
+          id: user.id,
+        };
       } catch {
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
-      log.success("Authenticated with API token");
-      if (user) {
-        log.info(`Logged in as: ${formatUserIdentity(user)}`);
-      }
-      log.info(`Config saved to: ${getDbPath()}`);
+      yield commandOutput(result);
       return;
     }
 
-    // Clear stale cached responses from a previous session
-    try {
-      await clearResponseCache();
-    } catch {
-      // Non-fatal: cache directory may not exist
-    }
-
-    const loginSuccess = await runInteractiveLogin(process.stdin, {
+    // OAuth device flow
+    const result = await runInteractiveLogin(process.stdin, {
       timeout: flags.timeout * 1000,
     });
 
-    if (!loginSuccess) {
-      // Error already displayed by runInteractiveLogin - just set exit code
+    if (result) {
+      yield commandOutput(result);
+    } else {
+      // Error already displayed by runInteractiveLogin
       process.exitCode = 1;
     }
   },
