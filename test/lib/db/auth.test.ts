@@ -1,13 +1,14 @@
 /**
  * Auth Environment Variable Tests
  *
- * Tests for SENTRY_AUTH_TOKEN and SENTRY_TOKEN env var support.
- * Verifies priority, source tracking, and interaction with stored tokens.
+ * Note: Core invariants (priority, source tracking, refresh skip, isEnvTokenActive)
+ * are tested via property-based tests in auth.property.test.ts. These tests focus on
+ * edge cases (whitespace, empty strings), shape assertions, and functions not covered
+ * by property tests (isAuthenticated, getActiveEnvVarName).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  type AuthSource,
   getActiveEnvVarName,
   getAuthConfig,
   getAuthToken,
@@ -20,7 +21,6 @@ import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("auth-env-");
 
-/** Save and restore env vars around each test */
 let savedAuthToken: string | undefined;
 let savedSentryToken: string | undefined;
 
@@ -32,7 +32,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Restore — never leave env vars dangling
   if (savedAuthToken !== undefined) {
     process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
   } else {
@@ -45,34 +44,7 @@ afterEach(() => {
   }
 });
 
-describe("env var auth: getAuthToken", () => {
-  test("returns SENTRY_AUTH_TOKEN when set", () => {
-    process.env.SENTRY_AUTH_TOKEN = "sntrys_token_abc";
-    expect(getAuthToken()).toBe("sntrys_token_abc");
-  });
-
-  test("returns SENTRY_TOKEN when set", () => {
-    process.env.SENTRY_TOKEN = "sntrys_token_xyz";
-    expect(getAuthToken()).toBe("sntrys_token_xyz");
-  });
-
-  test("SENTRY_AUTH_TOKEN takes priority over SENTRY_TOKEN", () => {
-    process.env.SENTRY_AUTH_TOKEN = "auth_token";
-    process.env.SENTRY_TOKEN = "sentry_token";
-    expect(getAuthToken()).toBe("auth_token");
-  });
-
-  test("env var takes priority over stored token", () => {
-    setAuthToken("stored_token");
-    process.env.SENTRY_AUTH_TOKEN = "env_token";
-    expect(getAuthToken()).toBe("env_token");
-  });
-
-  test("falls back to stored token when no env var", () => {
-    setAuthToken("stored_token");
-    expect(getAuthToken()).toBe("stored_token");
-  });
-
+describe("env var auth: getAuthToken edge cases", () => {
   test("ignores empty SENTRY_AUTH_TOKEN", () => {
     process.env.SENTRY_AUTH_TOKEN = "";
     setAuthToken("stored_token");
@@ -91,30 +63,7 @@ describe("env var auth: getAuthToken", () => {
   });
 });
 
-describe("env var auth: getAuthConfig", () => {
-  test("returns env source for SENTRY_AUTH_TOKEN", () => {
-    process.env.SENTRY_AUTH_TOKEN = "test_token";
-    const config = getAuthConfig();
-    expect(config).toBeDefined();
-    expect(config?.token).toBe("test_token");
-    expect(config?.source).toBe("env:SENTRY_AUTH_TOKEN" satisfies AuthSource);
-  });
-
-  test("returns env source for SENTRY_TOKEN", () => {
-    process.env.SENTRY_TOKEN = "test_token";
-    const config = getAuthConfig();
-    expect(config).toBeDefined();
-    expect(config?.token).toBe("test_token");
-    expect(config?.source).toBe("env:SENTRY_TOKEN" satisfies AuthSource);
-  });
-
-  test("returns oauth source for stored token", () => {
-    setAuthToken("stored_token");
-    const config = getAuthConfig();
-    expect(config).toBeDefined();
-    expect(config?.source).toBe("oauth" satisfies AuthSource);
-  });
-
+describe("env var auth: getAuthConfig shape", () => {
   test("env config has no refreshToken or expiry", () => {
     process.env.SENTRY_AUTH_TOKEN = "test_token";
     const config = getAuthConfig();
@@ -135,21 +84,7 @@ describe("env var auth: isAuthenticated", () => {
   });
 });
 
-describe("env var auth: isEnvTokenActive", () => {
-  test("returns true for SENTRY_AUTH_TOKEN", () => {
-    process.env.SENTRY_AUTH_TOKEN = "test_token";
-    expect(isEnvTokenActive()).toBe(true);
-  });
-
-  test("returns true for SENTRY_TOKEN", () => {
-    process.env.SENTRY_TOKEN = "test_token";
-    expect(isEnvTokenActive()).toBe(true);
-  });
-
-  test("returns false when no env var set", () => {
-    expect(isEnvTokenActive()).toBe(false);
-  });
-
+describe("env var auth: isEnvTokenActive edge case", () => {
   test("returns false for empty env var", () => {
     process.env.SENTRY_AUTH_TOKEN = "";
     expect(isEnvTokenActive()).toBe(false);
@@ -178,23 +113,8 @@ describe("env var auth: getActiveEnvVarName", () => {
   });
 });
 
-describe("env var auth: refreshToken", () => {
-  test("returns env token without refreshing", async () => {
-    process.env.SENTRY_AUTH_TOKEN = "env_token";
-    const result = await refreshToken();
-    expect(result.token).toBe("env_token");
-    expect(result.refreshed).toBe(false);
-  });
-
-  test("returns env token even with force=true", async () => {
-    process.env.SENTRY_AUTH_TOKEN = "env_token";
-    const result = await refreshToken({ force: true });
-    expect(result.token).toBe("env_token");
-    expect(result.refreshed).toBe(false);
-  });
-
+describe("env var auth: refreshToken edge cases", () => {
   test("env token skips stored token entirely", async () => {
-    // Store a token that would require refresh (expired)
     setAuthToken("stored_token", -1, "refresh_token");
     process.env.SENTRY_AUTH_TOKEN = "env_token";
     const result = await refreshToken();

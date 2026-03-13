@@ -589,6 +589,31 @@ Use traditional unit tests only when:
 - Testing error messages or specific output formatting
 - Integration with external systems (E2E tests)
 
+### Avoiding Unit/Property Test Duplication
+
+When a `*.property.test.ts` file exists for a module, **do not add unit tests that re-check the same invariants** with hardcoded examples. Before adding a unit test, check whether the companion property file already generates random inputs for that invariant.
+
+**Unit tests that belong alongside property tests:**
+- Edge cases outside the property generator's range (e.g., self-hosted DSNs when the arbitrary only produces SaaS ones)
+- Specific output format documentation (exact strings, column layouts, rendered vs plain mode)
+- Concurrency/timing behavior that property tests cannot express
+- Integration tests exercising multiple functions together (e.g., `writeJsonList` envelope shape)
+
+**Unit tests to avoid when property tests exist:**
+- "returns true for valid input" / "returns false for invalid input" — the property test already covers this with random inputs
+- Basic round-trip assertions — property tests check `decode(encode(x)) === x` for all `x`
+- Hardcoded examples of invariants like idempotency, symmetry, or subset relationships
+
+When adding property tests for a function that already has unit tests, **remove the unit tests that become redundant**. Add a header comment to the unit test file noting which invariants live in the property file:
+
+```typescript
+/**
+ * Note: Core invariants (round-trips, validation, ordering) are tested via
+ * property-based tests in foo.property.test.ts. These tests focus on edge
+ * cases and specific output formatting not covered by property generators.
+ */
+```
+
 ```typescript
 import { describe, expect, test, mock } from "bun:test";
 
