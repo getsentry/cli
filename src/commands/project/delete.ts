@@ -176,8 +176,8 @@ export const deleteCommand = buildCommand({
       if (error instanceof ApiError && error.status === 403) {
         throw new ApiError(
           `Permission denied: You don't have permission to delete '${orgSlug}/${project.slug}'.\n\n` +
-            "Project deletion requires the 'project:admin' scope.\n" +
-            "  Re-authenticate:  sentry auth login",
+            "Project deletion requires the 'project:admin' permission.\n" +
+            "Contact your organization admin to grant you project admin access.",
           403,
           error.detail,
           error.endpoint

@@ -185,7 +185,7 @@ describe("project delete", () => {
       const apiErr = error as ApiError;
       expect(apiErr.status).toBe(403);
       expect(apiErr.message).toContain("project:admin");
-      expect(apiErr.message).toContain("sentry auth login");
+      expect(apiErr.message).toContain("organization admin");
     }
   });
 
