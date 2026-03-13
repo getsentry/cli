@@ -506,6 +506,7 @@ List dashboards
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -515,6 +516,7 @@ View a dashboard
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -749,6 +751,7 @@ List dashboards
 
 **Flags:**
 - `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
