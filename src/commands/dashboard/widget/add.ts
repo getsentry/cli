@@ -15,18 +15,17 @@ import {
   assignDefaultLayout,
   type DashboardDetail,
   type DashboardWidget,
-  DISPLAY_TYPES,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
   prepareDashboardForUpdate,
   prepareWidgetQueries,
-  WIDGET_TYPES,
 } from "../../../types/dashboard.js";
 import {
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  validateWidgetEnums,
 } from "../resolve.js";
 
 type AddFlags = {
@@ -171,24 +170,7 @@ export const addCommand = buildCommand({
     );
     const dashboardId = await resolveDashboardId(orgSlug, dashboardRef);
 
-    // Validate --display value early for better error messages
-    if (
-      !DISPLAY_TYPES.includes(flags.display as (typeof DISPLAY_TYPES)[number])
-    ) {
-      throw new ValidationError(
-        `Invalid --display value "${flags.display}".\nValid display types: ${DISPLAY_TYPES.join(", ")}`,
-        "display"
-      );
-    }
-    if (
-      flags.dataset &&
-      !WIDGET_TYPES.includes(flags.dataset as (typeof WIDGET_TYPES)[number])
-    ) {
-      throw new ValidationError(
-        `Invalid --dataset value "${flags.dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
-        "dataset"
-      );
-    }
+    validateWidgetEnums(flags.display, flags.dataset);
 
     const aggregates = (flags.query ?? ["count"]).map(parseAggregate);
     const columns = flags["group-by"] ?? [];

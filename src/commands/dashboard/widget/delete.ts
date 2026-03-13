@@ -19,6 +19,7 @@ import {
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  resolveWidgetIndex,
 } from "../resolve.js";
 
 type DeleteFlags = {
@@ -96,25 +97,7 @@ export const deleteCommand = buildCommand({
     const current = await getDashboard(orgSlug, dashboardId);
     const widgets = current.widgets ?? [];
 
-    let widgetIndex: number;
-    if (flags.index !== undefined) {
-      if (flags.index < 0 || flags.index >= widgets.length) {
-        throw new ValidationError(
-          `Widget index ${flags.index} out of range (dashboard has ${widgets.length} widgets).`,
-          "index"
-        );
-      }
-      widgetIndex = flags.index;
-    } else {
-      const matchIndex = widgets.findIndex((w) => w.title === flags.title);
-      if (matchIndex === -1) {
-        throw new ValidationError(
-          `No widget with title '${flags.title}' found in dashboard.`,
-          "title"
-        );
-      }
-      widgetIndex = matchIndex;
-    }
+    const widgetIndex = resolveWidgetIndex(widgets, flags.index, flags.title);
 
     const widgetTitle = widgets[widgetIndex]?.title;
     const updateBody = prepareDashboardForUpdate(current);

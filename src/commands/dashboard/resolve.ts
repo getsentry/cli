@@ -10,6 +10,11 @@ import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import { isAllDigits } from "../../lib/utils.js";
+import {
+  type DashboardWidget,
+  DISPLAY_TYPES,
+  WIDGET_TYPES,
+} from "../../types/dashboard.js";
 
 /**
  * Resolve org slug from a parsed org/project target argument.
@@ -118,4 +123,63 @@ export async function resolveDashboardId(
   }
 
   return match.id;
+}
+
+/**
+ * Resolve widget index from --index or --title flags.
+ *
+ * @param widgets - Array of widgets in the dashboard
+ * @param index - Explicit 0-based widget index
+ * @param title - Widget title to match
+ * @returns Resolved widget index
+ */
+export function resolveWidgetIndex(
+  widgets: DashboardWidget[],
+  index: number | undefined,
+  title: string | undefined
+): number {
+  if (index !== undefined) {
+    if (index < 0 || index >= widgets.length) {
+      throw new ValidationError(
+        `Widget index ${index} out of range (dashboard has ${widgets.length} widgets).`,
+        "index"
+      );
+    }
+    return index;
+  }
+  const matchIndex = widgets.findIndex((w) => w.title === title);
+  if (matchIndex === -1) {
+    throw new ValidationError(
+      `No widget with title '${title}' found in dashboard.`,
+      "title"
+    );
+  }
+  return matchIndex;
+}
+
+/**
+ * Validate --display and --dataset flag values against known enums.
+ *
+ * @param display - Display type flag value
+ * @param dataset - Dataset flag value
+ */
+export function validateWidgetEnums(display?: string, dataset?: string): void {
+  if (
+    display &&
+    !DISPLAY_TYPES.includes(display as (typeof DISPLAY_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --display value "${display}".\nValid display types: ${DISPLAY_TYPES.join(", ")}`,
+      "display"
+    );
+  }
+  if (
+    dataset &&
+    !WIDGET_TYPES.includes(dataset as (typeof WIDGET_TYPES)[number])
+  ) {
+    throw new ValidationError(
+      `Invalid --dataset value "${dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
+      "dataset"
+    );
+  }
 }

@@ -15,18 +15,18 @@ import {
   type DashboardDetail,
   type DashboardWidget,
   type DashboardWidgetQuery,
-  DISPLAY_TYPES,
   parseAggregate,
   parseSortExpression,
   parseWidgetInput,
   prepareDashboardForUpdate,
   prepareWidgetQueries,
-  WIDGET_TYPES,
 } from "../../../types/dashboard.js";
 import {
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  resolveWidgetIndex,
+  validateWidgetEnums,
 } from "../resolve.js";
 
 type EditFlags = {
@@ -49,53 +49,6 @@ type EditResult = {
   widget: DashboardWidget;
   url: string;
 };
-
-/** Resolve widget index from --index or --title flags */
-function resolveWidgetIndex(
-  widgets: DashboardWidget[],
-  index: number | undefined,
-  title: string | undefined
-): number {
-  if (index !== undefined) {
-    if (index < 0 || index >= widgets.length) {
-      throw new ValidationError(
-        `Widget index ${index} out of range (dashboard has ${widgets.length} widgets).`,
-        "index"
-      );
-    }
-    return index;
-  }
-  const matchIndex = widgets.findIndex((w) => w.title === title);
-  if (matchIndex === -1) {
-    throw new ValidationError(
-      `No widget with title '${title}' found in dashboard.`,
-      "title"
-    );
-  }
-  return matchIndex;
-}
-
-/** Validate enum flag values */
-function validateEditEnums(flags: EditFlags): void {
-  if (
-    flags.display &&
-    !DISPLAY_TYPES.includes(flags.display as (typeof DISPLAY_TYPES)[number])
-  ) {
-    throw new ValidationError(
-      `Invalid --display value "${flags.display}".\nValid display types: ${DISPLAY_TYPES.join(", ")}`,
-      "display"
-    );
-  }
-  if (
-    flags.dataset &&
-    !WIDGET_TYPES.includes(flags.dataset as (typeof WIDGET_TYPES)[number])
-  ) {
-    throw new ValidationError(
-      `Invalid --dataset value "${flags.dataset}".\nValid datasets: ${WIDGET_TYPES.join(", ")}`,
-      "dataset"
-    );
-  }
-}
 
 /** Merge query-level flags over existing widget query */
 function mergeQueries(
@@ -258,7 +211,7 @@ export const editCommand = buildCommand({
       );
     }
 
-    validateEditEnums(flags);
+    validateWidgetEnums(flags.display, flags.dataset);
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
