@@ -349,7 +349,10 @@ export function formatTraceLogs(options: FormatTraceLogsOptions): string {
 
   if (asJson) {
     const reversed = [...logs].reverse();
-    return `${formatJson(fields ? filterFields(reversed, fields) : reversed)}\n`;
+    const data = fields
+      ? reversed.map((entry) => filterFields(entry, fields))
+      : reversed;
+    return `${formatJson(data)}\n`;
   }
 
   if (logs.length === 0) {
