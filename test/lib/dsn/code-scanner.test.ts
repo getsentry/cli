@@ -462,6 +462,40 @@ describe("Code Scanner", () => {
       expect(beResult?.packagePath).toBe("packages/backend");
     });
 
+    test("finds DSNs deeply nested in monorepo packages", async () => {
+      // packages/spotlight/src/electron/main/index.ts is depth 5 from root,
+      // but after monorepo reset at packages/spotlight/, it's depth 3 —
+      // exactly at MAX_SCAN_DEPTH. This was a specific failing case.
+      mkdirSync(join(testDir, "packages/spotlight/src/electron/main"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(testDir, "packages/spotlight/src/electron/main/index.ts"),
+        'Sentry.init({ dsn: "https://electron@o123.ingest.sentry.io/333" });'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0]?.raw).toBe(
+        "https://electron@o123.ingest.sentry.io/333"
+      );
+      expect(result.dsns[0]?.packagePath).toBe("packages/spotlight");
+    });
+
+    test("respects depth limit for non-monorepo directories", async () => {
+      // src/very/deeply/nested/config.ts is depth 4 — beyond MAX_SCAN_DEPTH (3).
+      // Should NOT be found. This confirms the depth reset only applies to
+      // monorepo package directories, not arbitrary subdirectories.
+      mkdirSync(join(testDir, "src/very/deeply/nested"), { recursive: true });
+      writeFileSync(
+        join(testDir, "src/very/deeply/nested/config.ts"),
+        'const DSN = "https://deep@o123.ingest.sentry.io/999";'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toEqual([]);
+    });
+
     test("gracefully handles unreadable files", async () => {
       const { chmodSync } = require("node:fs") as typeof import("node:fs");
       const filePath = join(testDir, "secret.ts");
