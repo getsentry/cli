@@ -1,0 +1,78 @@
+# Test Cleanup: Remove Redundant and Low-Value Tests
+
+## Summary
+Remove ~490 lines of low-value tests across 8 files. Delete 5 files entirely, trim 3 files.
+
+## Changes
+
+### 1. Delete `test/lib/utils.test.ts` (22 lines)
+**Reason**: Tests `isAllDigits()` — a one-liner regex wrapper (`/^\d+$/.test(str)`). Trivially correct, never changes, and the function has JSDoc examples that serve as documentation.
+
+### 2. Delete `test/lib/seer-trial.property.test.ts` (65 lines)
+**Reason**: Fake property tests. Uses `constantFrom` over 3 fixed `SeerErrorReason` values. In the test environment (non-TTY), `isTrialEligible` always returns `false`, so all 3 tests just assert "returns false" in different combinations. The 4th test asserts a constant Set has 2 members. Zero regression value.
+
+### 3. Delete `test/lib/errors.property.test.ts` (69 lines)
+**Reason**: Fully redundant with existing `test/lib/errors.test.ts` which already has comprehensive `withAuthGuard` tests covering:
+- Success returns `{ ok: true, value }` ✓
+- AuthError propagates (all 3 reasons) ✓
+- Non-AuthError returns `{ ok: false, error }` ✓
+- Non-Error thrown values ✓
+- ApiError wrapped ✓
+- Error identity preserved ✓
+
+The property file's only non-trivial test (`anything()` arbitrary) is already covered by the unit test's explicit cases including `"string error"`, `Error`, and `ApiError`.
+
+### 4. Delete `test/lib/logger.property.test.ts` (117 lines)
+**Reason**: Fully redundant with `test/lib/logger.test.ts` which already covers:
+- All 6 level mappings explicitly (lines 21-26)
+- Case insensitivity (lines 29-33)
+- Default for unrecognized inputs (lines 42-45)
+- All names valid (line 61)
+- `setLogLevel` propagation to children (lines 140+)
+- Trim handling (lines 37-38)
+
+The property test uses `constantFrom(...LOG_LEVEL_NAMES)` which just picks from 6 fixed values — fast-check adds nothing.
+
+### 5. Delete `test/lib/db/schema-migration-v8.test.ts` (62 lines)
+**Reason**: Snapshot-in-time test for a specific migration that's already deployed. The main `test/lib/db/schema.test.ts` tests schema repair comprehensively, and the model-based DB tests exercise the full schema. This will never catch a regression — the v7→v8 migration code won't change. Additionally, test line 22 hardcodes `expect(row.version).toBe(8)` which will break when schema v9 is added.
+
+### 6. Trim `test/lib/list-command.test.ts` — remove lines 28-87 (~60 lines)
+**Reason**: Tests that Stricli constant objects have the right `kind` property, `default` value, etc. TypeScript already validates these at compile time. For example:
+```ts
+// This is what TypeScript does:
+expect(LIST_JSON_FLAG.kind).toBe("boolean");
+expect(LIST_JSON_FLAG.default).toBe(false);
+```
+
+**Keep**: `parseCursorFlag` tests (lines 93-113) and `buildOrgListCommand` tests (lines 155-240) — these test real behavior.
+
+Specifically remove these `describe` blocks:
+- `LIST_TARGET_POSITIONAL` (lines 28-37)
+- `LIST_JSON_FLAG` (lines 39-44)
+- `LIST_CURSOR_FLAG` (lines 46-55) — note: this one DOES test parse behavior, but it duplicates `parseCursorFlag` tests below. Remove it.
+- `buildListLimitFlag` (lines 57-73) — tests the brief string and default. Borderline, but the behavior is so simple TS covers the types. Remove.
+- `LIST_BASE_ALIASES` (lines 75-87) — tests `n → limit` and `c → cursor` mappings. Pure constant shape. Remove.
+
+### 7. Trim `test/lib/hex-id.test.ts` — remove lines 27-116 (~90 lines)
+**Reason**: Lines 27-64 (`HEX_ID_RE` unit tests) and lines 66-116 (`UUID_DASH_RE` unit tests) test regex matching with hardcoded examples. The property tests at lines 253-330 in the same file generate random valid hex IDs and test the same invariants more thoroughly. The `validateHexId` unit tests (lines 118-251) are NOT redundant — they test error messages, truncation, whitespace handling, and UUID stripping with specific expected values.
+
+### 8. Trim `test/lib/platforms.test.ts` — remove lines 90-93 (~4 lines)
+**Reason**: `expect(VALID_PLATFORMS.length).toBe(109)` is a fragile count assertion that breaks whenever a platform is added or removed. It doesn't test behavior — just counts a constant array.
+
+## Files Modified
+| File | Action |
+|------|--------|
+| `test/lib/utils.test.ts` | Delete |
+| `test/lib/seer-trial.property.test.ts` | Delete |
+| `test/lib/errors.property.test.ts` | Delete |
+| `test/lib/logger.property.test.ts` | Delete |
+| `test/lib/db/schema-migration-v8.test.ts` | Delete |
+| `test/lib/list-command.test.ts` | Remove 5 describe blocks (lines 28-87) |
+| `test/lib/hex-id.test.ts` | Remove HEX_ID_RE and UUID_DASH_RE describe blocks (lines 27-116) |
+| `test/lib/platforms.test.ts` | Remove the VALID_PLATFORMS count describe block (lines 90-93) |
+
+## Verification
+1. `bun test` — all remaining tests pass
+2. `bun run typecheck` — no type errors introduced
+3. `bun run lint` — no lint issues
+4. Verify no other test files import from deleted files: `grep -r "seer-trial.property\|errors.property\|logger.property\|utils.test\|schema-migration-v8" test/`
