@@ -189,9 +189,9 @@ export function buildDashboardUrl(
   dashboardId: string
 ): string {
   if (isSaaS()) {
-    return `${getOrgBaseUrl(orgSlug)}/dashboard/${dashboardId}/`;
+    return `${getOrgBaseUrl(orgSlug)}/dashboards/${dashboardId}/`;
   }
-  return `${getSentryBaseUrl()}/organizations/${orgSlug}/dashboard/${dashboardId}/`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/dashboards/${dashboardId}/`;
 }
 
 /**
