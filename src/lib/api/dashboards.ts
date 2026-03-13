@@ -18,15 +18,18 @@ import { apiRequestToRegion } from "./infrastructure.js";
  * List dashboards in an organization.
  *
  * @param orgSlug - Organization slug
+ * @param options - Optional pagination parameters
  * @returns Array of dashboard list items
  */
 export async function listDashboards(
-  orgSlug: string
+  orgSlug: string,
+  options: { perPage?: number } = {}
 ): Promise<DashboardListItem[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<DashboardListItem[]>(
     regionUrl,
-    `/organizations/${orgSlug}/dashboards/`
+    `/organizations/${orgSlug}/dashboards/`,
+    { params: { per_page: options.perPage } }
   );
   return data;
 }
