@@ -13,7 +13,18 @@ import {
   isEnvTokenActive,
 } from "../../lib/db/auth.js";
 import { getDbPath } from "../../lib/db/index.js";
-import { success } from "../../lib/formatters/colors.js";
+import { AuthError } from "../../lib/errors.js";
+import { formatLogoutResult } from "../../lib/formatters/human.js";
+
+/** Structured result of the logout operation */
+export type LogoutResult = {
+  /** Whether logout actually cleared credentials */
+  loggedOut: boolean;
+  /** Informational message when no action was taken */
+  message?: string;
+  /** Path where credentials were stored (when loggedOut is true) */
+  configPath?: string;
+};
 
 export const logoutCommand = buildCommand({
   docs: {
@@ -21,28 +32,34 @@ export const logoutCommand = buildCommand({
     fullDescription:
       "Remove stored authentication credentials from the configuration file.",
   },
+  output: { json: true, human: formatLogoutResult },
   parameters: {
     flags: {},
   },
-  async func(this: SentryContext): Promise<void> {
-    const { stdout } = this;
-
+  async func(this: SentryContext): Promise<{ data: LogoutResult }> {
     if (!(await isAuthenticated())) {
-      stdout.write("Not currently authenticated.\n");
-      return;
+      return {
+        data: { loggedOut: false, message: "Not currently authenticated." },
+      };
     }
 
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
-      stdout.write(
-        `Authentication is provided via ${envVar} environment variable.\n` +
-          `Unset ${envVar} to log out.\n`
+      throw new AuthError(
+        "invalid",
+        `Authentication is provided via ${envVar} environment variable. ` +
+          `Unset ${envVar} to log out.`
       );
-      return;
     }
 
+    const configPath = getDbPath();
     await clearAuth();
-    stdout.write(`${success("✓")} Logged out successfully.\n`);
-    stdout.write(`  Credentials removed from: ${getDbPath()}\n`);
+
+    return {
+      data: {
+        loggedOut: true,
+        configPath,
+      },
+    };
   },
 });

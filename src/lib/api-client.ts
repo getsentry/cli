@@ -37,9 +37,12 @@ import * as Sentry from "@sentry/bun";
 import type { z } from "zod";
 
 import {
+  type CustomerTrialInfo,
+  CustomerTrialInfoSchema,
   DetailedLogsResponseSchema,
   type DetailedSentryLog,
   LogsResponseSchema,
+  type ProductTrial,
   type ProjectKey,
   type Region,
   type SentryEvent,
@@ -1712,6 +1715,58 @@ export async function triggerSolutionPlanning(
     }
   );
   return data;
+}
+
+// Product Trial functions
+
+/**
+ * Fetch all product trials for an organization.
+ *
+ * Fetches customer data from the internal `/customers/{org}/` endpoint
+ * and returns the `productTrials` array. This is a getsentry SaaS-only
+ * endpoint — self-hosted instances will 404, which callers should handle.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Array of product trials (may be empty)
+ */
+export async function getProductTrials(
+  orgSlug: string
+): Promise<ProductTrial[]> {
+  // /customers/ is a control silo endpoint (billing), not region-scoped
+  const { data } = await apiRequestToRegion<CustomerTrialInfo>(
+    getControlSiloUrl(),
+    `/customers/${orgSlug}/`,
+    { schema: CustomerTrialInfoSchema }
+  );
+  return data.productTrials ?? [];
+}
+
+/**
+ * Start a product trial for the organization.
+ *
+ * Sends a PUT to the internal `/customers/{org}/product-trial/` endpoint.
+ * Any org member with `org:read` or higher permission can start a trial.
+ *
+ * @param orgSlug - Organization slug
+ * @param category - API category name (e.g., "seerUsers", "replays", "transactions")
+ * @throws {ApiError} On API errors (e.g., trial already active, permissions)
+ */
+export async function startProductTrial(
+  orgSlug: string,
+  category: string
+): Promise<void> {
+  // /customers/ is a control silo endpoint (billing), not region-scoped
+  await apiRequestToRegion(
+    getControlSiloUrl(),
+    `/customers/${orgSlug}/product-trial/`,
+    {
+      method: "PUT",
+      body: {
+        referrer: "sentry-cli",
+        productTrial: { category, reasonCode: 0 },
+      },
+    }
+  );
 }
 
 // User functions

@@ -17,6 +17,7 @@ type InitFlags = {
   readonly yes: boolean;
   readonly "dry-run": boolean;
   readonly features?: string[];
+  readonly team?: string;
 };
 
 export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
@@ -56,9 +57,16 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
         variadic: true,
         optional: true,
       },
+      team: {
+        kind: "parsed",
+        parse: String,
+        brief: "Team slug to create the project under",
+        optional: true,
+      },
     },
     aliases: {
       y: "yes",
+      t: "team",
     },
   },
   async func(this: SentryContext, flags: InitFlags, directory?: string) {
@@ -73,6 +81,7 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       yes: flags.yes,
       dryRun: flags["dry-run"],
       features: featuresList,
+      team: flags.team,
     });
   },
 });

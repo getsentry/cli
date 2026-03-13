@@ -16,7 +16,8 @@ import {
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
-import { formatLogDetails, writeJson } from "../../lib/formatters/index.js";
+import { formatLogDetails } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import { validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
@@ -273,31 +274,34 @@ function throwNotFoundError(
 }
 
 /**
- * Write human-readable output for one or more logs to stdout.
- *
- * @param stdout - Output stream
- * @param logs - Log entries to display
- * @param orgSlug - Organization slug for trace URLs
- * @param detectedFrom - Optional context detection source to display
+ * Data returned by the log view command.
+ * Used by both JSON and human output paths.
  */
-function writeHumanOutput(
-  stdout: { write(s: string): void },
-  logs: DetailedSentryLog[],
-  orgSlug: string,
-  detectedFrom?: string
-): void {
-  let first = true;
-  for (const entry of logs) {
-    if (!first) {
-      stdout.write("\n---\n\n");
-    }
-    stdout.write(`${formatLogDetails(entry, orgSlug)}\n`);
-    first = false;
-  }
+type LogViewData = {
+  /** Retrieved log entries */
+  logs: DetailedSentryLog[];
+  /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
+  orgSlug: string;
+};
 
-  if (detectedFrom) {
-    stdout.write(`\nDetected from ${detectedFrom}\n`);
+/**
+ * Format log view data as human-readable output.
+ *
+ * Each log entry is formatted with full details. Multiple entries
+ * are separated by horizontal rules.
+ *
+ * @param data - Log view data with entries and org slug
+ * @returns Formatted string for terminal output
+ */
+function formatLogViewHuman(data: LogViewData): string {
+  const parts: string[] = [];
+  for (const entry of data.logs) {
+    if (parts.length > 0) {
+      parts.push("\n---\n");
+    }
+    parts.push(formatLogDetails(entry, data.orgSlug));
   }
+  return parts.join("\n");
 }
 
 export const viewCommand = buildCommand({
@@ -313,7 +317,16 @@ export const viewCommand = buildCommand({
       "within a single argument (handy when piping from other commands).\n\n" +
       "The log ID is the 32-character hexadecimal identifier shown in log listings.",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatLogViewHuman,
+    // Preserve original JSON contract: bare array of log entries.
+    // orgSlug exists only for the human formatter (trace URLs).
+    jsonTransform: (data: LogViewData, fields) =>
+      fields && fields.length > 0
+        ? data.logs.map((entry) => filterFields(entry, fields))
+        : data.logs,
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -334,13 +347,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    ...args: string[]
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
     const cmdLog = logger.withTag("log.view");
 
     // Parse positional args
@@ -376,11 +385,10 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
-    if (flags.json) {
-      writeJson(stdout, logs, flags.fields);
-      return;
-    }
+    const hint = target.detectedFrom
+      ? `Detected from ${target.detectedFrom}`
+      : undefined;
 
-    writeHumanOutput(stdout, logs, target.org, target.detectedFrom);
+    return { data: { logs, orgSlug: target.org }, hint };
   },
 });

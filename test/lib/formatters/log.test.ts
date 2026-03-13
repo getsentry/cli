@@ -94,7 +94,7 @@ describe("formatLogRow (rendered mode)", () => {
 
   test("handles missing trace", () => {
     const log = createTestLog({ trace: null });
-    const result = formatLogRow(log);
+    const result = stripAnsi(formatLogRow(log));
 
     // Should not include trace bracket
     expect(result).not.toContain("[");

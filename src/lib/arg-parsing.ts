@@ -118,6 +118,48 @@ export function detectSwappedViewArgs(
 }
 
 /**
+ * Detect when `trial start` args are swapped: `sentry trial start my-org seer`
+ * instead of `sentry trial start seer my-org`.
+ *
+ * Since trial names are a known finite set, we can unambiguously determine
+ * which arg is the trial name and which is the org slug by checking against
+ * the valid trial names list.
+ *
+ * @param first - First positional argument
+ * @param second - Second positional argument
+ * @param isKnownName - Predicate to check if a string is a valid trial name
+ * @returns Object with resolved `name` and `org` if swapped, or `null` if order is correct
+ *
+ * @example
+ * detectSwappedTrialArgs("my-org", "seer", isTrialName)
+ * // → { name: "seer", org: "my-org", warning: "Arguments appear reversed..." }
+ *
+ * detectSwappedTrialArgs("seer", "my-org", isTrialName)
+ * // → null (correct order)
+ */
+export function detectSwappedTrialArgs(
+  first: string,
+  second: string,
+  isKnownName: (value: string) => boolean
+): { name: string; org: string; warning: string } | null {
+  // If first is already a known name, order is correct
+  if (isKnownName(first)) {
+    return null;
+  }
+
+  // If second is a known name but first isn't, they're swapped
+  if (isKnownName(second)) {
+    return {
+      name: second,
+      org: first,
+      warning: `Arguments appear reversed. Interpreting as: ${second} ${first}`,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Validate that a CLI --limit flag value is within an allowed range.
  *
  * Used by commands that need API-side limiting (trace list, log list) where

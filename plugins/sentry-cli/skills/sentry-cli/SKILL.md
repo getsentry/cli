@@ -63,6 +63,10 @@ SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 Log out of Sentry
 
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 **Examples:**
 
 ```bash
@@ -91,6 +95,8 @@ View authentication status
 **Flags:**
 - `--show-token - Show the stored token (masked by default)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 **Examples:**
 
@@ -244,7 +250,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
-- `--compact - Single-line rows for compact output`
+- `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -463,12 +469,18 @@ CLI-related commands
 
 Send feedback about the CLI
 
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry cli fix`
 
 Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 #### `sentry cli setup`
 
@@ -491,6 +503,8 @@ Update the Sentry CLI to the latest version
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 ### Repo
 
@@ -663,6 +677,26 @@ View logs associated with a trace
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+### Trial
+
+Manage product trials
+
+#### `sentry trial list <org>`
+
+List product trials
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry trial start <name> <org>`
+
+Start a product trial
+
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 ### Init
 
 Initialize Sentry in your project
@@ -675,6 +709,7 @@ Initialize Sentry in your project
 - `-y, --yes - Non-interactive mode (accept defaults)`
 - `--dry-run - Preview changes without applying them`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
+- `-t, --team <value> - Team slug to create the project under`
 
 ### Issues
 
@@ -691,7 +726,7 @@ List issues in a project
 - `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
-- `--compact - Single-line rows for compact output`
+- `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
@@ -786,6 +821,18 @@ List recent traces in a project
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
 - `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-f, --fresh - Bypass cache and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+### Trials
+
+List product trials
+
+#### `sentry trials <org>`
+
+List product trials
+
+**Flags:**
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 

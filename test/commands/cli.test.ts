@@ -2,11 +2,65 @@
  * CLI Route Tests
  *
  * Tests for the sentry cli command group.
+ *
+ * Progress messages go through consola (→ process.stderr). Final results are
+ * returned as structured data and rendered to stdout by the output system.
+ * Tests capture both stderr (progress) and stdout (results) to verify behavior.
  */
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
+import type { UpgradeResult } from "../../src/commands/cli/upgrade.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
+
+/**
+ * Create a mock context with a process.stderr.write spy for capturing
+ * consola output, plus stdout capture for structured output.
+ */
+function createMockContext(overrides: Partial<{ execPath: string }> = {}): {
+  context: Record<string, unknown>;
+  getStderr: () => string;
+  getStdout: () => string;
+  errors: string[];
+  restore: () => void;
+} {
+  const stderrChunks: string[] = [];
+  const stdoutChunks: string[] = [];
+  const errors: string[] = [];
+
+  // Capture consola output (routed to process.stderr)
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+
+  const context = {
+    process: { execPath: overrides.execPath ?? "/test/path/sentry" },
+    stdout: {
+      write: (s: string) => {
+        stdoutChunks.push(s);
+        return true;
+      },
+    },
+    stderr: {
+      write: (s: string) => {
+        errors.push(s);
+        return true;
+      },
+    },
+  };
+
+  return {
+    context,
+    getStderr: () => stderrChunks.join(""),
+    getStdout: () => stdoutChunks.join(""),
+    errors,
+    restore: () => {
+      process.stderr.write = origWrite;
+    },
+  };
+}
 
 describe("feedbackCommand.func", () => {
   test("throws ValidationError for empty message", async () => {
@@ -34,35 +88,32 @@ describe("feedbackCommand.func", () => {
     );
   });
 
-  test("writes telemetry disabled message when Sentry is disabled", async () => {
+  test("throws ConfigError when Sentry is disabled", async () => {
     const func = await feedbackCommand.loader();
-    const stderrWrite = mock(() => true);
     const mockContext = {
       stdout: { write: mock(() => true) },
-      stderr: { write: stderrWrite },
+      stderr: { write: mock(() => true) },
     };
 
     // Sentry is disabled in test environment (no DSN)
-    await func.call(mockContext, {}, "test", "feedback");
-
-    expect(stderrWrite).toHaveBeenCalledWith(
-      "Feedback not sent: telemetry is disabled.\n"
-    );
-    expect(stderrWrite).toHaveBeenCalledWith(
-      "Unset SENTRY_CLI_NO_TELEMETRY to enable feedback.\n"
-    );
+    await expect(
+      func.call(mockContext, {}, "test", "feedback")
+    ).rejects.toThrow("Feedback not sent: telemetry is disabled.");
   });
 });
 
 // Test the upgrade command func
 describe("upgradeCommand.func", () => {
   let originalFetch: typeof globalThis.fetch;
+  let restoreStderr: (() => void) | undefined;
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
   });
 
   afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
     globalThis.fetch = originalFetch;
   });
 
@@ -79,21 +130,22 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      process: { execPath: "/test/path/sentry" },
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-    };
+    const { context, getStderr, getStdout, restore } = createMockContext();
+    restoreStderr = restore;
 
-    // Use method flag to bypass detection (curl uses GitHub)
-    await func.call(mockContext, { check: false, method: "curl" });
+    // Use method flag to bypass detection (curl uses GitHub).
+    // Pass json: true so the output config renders structured JSON to stdout.
+    await func.call(context, { check: false, method: "curl", json: true });
 
-    expect(stdoutWrite).toHaveBeenCalledWith("Installation method: curl\n");
-    expect(stdoutWrite).toHaveBeenCalledWith(
-      expect.stringContaining("Current version:")
-    );
-    expect(stdoutWrite).toHaveBeenCalledWith("\nAlready up to date.\n");
+    // Progress messages go to stderr
+    const stderr = getStderr();
+    expect(stderr).toContain("Installation method: curl");
+    expect(stderr).toContain("Current version:");
+
+    // Final result is rendered as JSON to stdout by the output system
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("up-to-date");
+    expect(data.method).toBe("curl");
   });
 
   test("check mode shows update available", async () => {
@@ -105,18 +157,15 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      process: { execPath: "/test/path/sentry" },
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-    };
+    const { context, getStdout, restore } = createMockContext();
+    restoreStderr = restore;
 
-    await func.call(mockContext, { check: true, method: "curl" });
+    await func.call(context, { check: true, method: "curl", json: true });
 
-    expect(stdoutWrite).toHaveBeenCalledWith(
-      "\nRun 'sentry cli upgrade' to update.\n"
-    );
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.targetVersion).toBe("99.0.0");
+    expect(data.warnings).toContain("Run 'sentry cli upgrade' to update.");
   });
 
   test("check mode with version shows versioned command", async () => {
@@ -127,18 +176,23 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      process: { execPath: "/test/path/sentry" },
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-    };
+    const { context, getStderr, getStdout, restore } = createMockContext();
+    restoreStderr = restore;
 
-    await func.call(mockContext, { check: true, method: "curl" }, "2.0.0");
+    await func.call(
+      context,
+      { check: true, method: "curl", json: true },
+      "2.0.0"
+    );
 
-    expect(stdoutWrite).toHaveBeenCalledWith("Target version: 2.0.0\n");
-    expect(stdoutWrite).toHaveBeenCalledWith(
-      "\nRun 'sentry cli upgrade 2.0.0' to update.\n"
+    // Target version is still logged as progress to stderr
+    const stderr = getStderr();
+    expect(stderr).toContain("Target version: 2.0.0");
+
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.warnings).toContain(
+      "Run 'sentry cli upgrade 2.0.0' to update."
     );
   });
 
@@ -150,18 +204,16 @@ describe("upgradeCommand.func", () => {
       })) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      process: { execPath: "/test/path/sentry" },
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-    };
+    const { context, getStdout, restore } = createMockContext();
+    restoreStderr = restore;
 
-    await func.call(mockContext, { check: true, method: "curl" });
+    await func.call(context, { check: true, method: "curl", json: true });
 
-    expect(stdoutWrite).toHaveBeenCalledWith(
-      "\nYou are already on the target version.\n"
-    );
+    const data = JSON.parse(getStdout()) as UpgradeResult;
+    expect(data.action).toBe("checked");
+    expect(data.currentVersion).toBe(data.targetVersion);
+    // No warnings when already on target
+    expect(data.warnings).toBeUndefined();
   });
 
   test("throws UpgradeError when specified version does not exist", async () => {
@@ -182,16 +234,12 @@ describe("upgradeCommand.func", () => {
     }) as typeof fetch;
 
     const func = await upgradeCommand.loader();
-    const stdoutWrite = mock(() => true);
-    const mockContext = {
-      process: { execPath: "/test/path/sentry" },
-      stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
-    };
+    const { context, restore } = createMockContext();
+    restoreStderr = restore;
 
     // Specify a version that doesn't exist
     await expect(
-      func.call(mockContext, { check: false, method: "curl" }, "999.0.0")
+      func.call(context, { check: false, method: "curl" }, "999.0.0")
     ).rejects.toThrow("Version 999.0.0 not found");
   });
 });

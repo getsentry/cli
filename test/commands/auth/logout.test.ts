@@ -3,6 +3,9 @@
  *
  * Tests for the logoutCommand func() in src/commands/auth/logout.ts.
  * Covers the env-token-aware branches added for headless auth support.
+ *
+ * Now that logout uses CommandOutput, success output goes to stdout via the
+ * rendering pipeline, and error cases throw typed errors (AuthError).
  */
 
 import {
@@ -19,6 +22,7 @@ import { logoutCommand } from "../../../src/commands/auth/logout.js";
 import * as dbAuth from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbIndex from "../../../src/lib/db/index.js";
+import { AuthError } from "../../../src/lib/errors.js";
 
 type LogoutFunc = (
   this: unknown,
@@ -26,24 +30,26 @@ type LogoutFunc = (
 ) => Promise<void>;
 
 function createContext() {
-  const stdoutLines: string[] = [];
-  const context = {
-    stdout: {
-      write: mock((s: string) => {
-        stdoutLines.push(s);
-      }),
-    },
-    stderr: {
-      write: mock((_s: string) => {
+  const stdoutChunks: string[] = [];
+  return {
+    context: {
+      stdout: {
+        write: mock((s: string) => {
+          stdoutChunks.push(s);
+        }),
+      },
+      stderr: {
+        write: mock((_s: string) => {
+          /* captured by mock */
+        }),
+      },
+      cwd: "/tmp",
+      setContext: mock((_k: string, _v: unknown) => {
         /* no-op */
       }),
     },
-    cwd: "/tmp",
-    setContext: mock((_k: string, _v: unknown) => {
-      /* no-op */
-    }),
+    getOutput: () => stdoutChunks.join(""),
   };
-  return { context, getStdout: () => stdoutLines.join("") };
 }
 
 describe("logoutCommand.func", () => {
@@ -75,63 +81,71 @@ describe("logoutCommand.func", () => {
     getDbPathSpy.mockRestore();
   });
 
-  test("not authenticated: prints message and returns", async () => {
+  test("not authenticated: returns loggedOut false with message", async () => {
     isAuthenticatedSpy.mockResolvedValue(false);
+    const { context, getOutput } = createContext();
 
-    const { context, getStdout } = createContext();
     await func.call(context, {});
 
-    expect(getStdout()).toContain("Not currently authenticated");
     expect(clearAuthSpy).not.toHaveBeenCalled();
+    expect(getOutput()).toContain("Not currently authenticated");
   });
 
-  test("OAuth token: clears auth and shows success", async () => {
+  test("OAuth token: clears auth and writes success to stdout", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(false);
+    const { context, getOutput } = createContext();
 
-    const { context, getStdout } = createContext();
     await func.call(context, {});
 
     expect(clearAuthSpy).toHaveBeenCalled();
-    expect(getStdout()).toContain("Logged out successfully");
-    expect(getStdout()).toContain("/fake/db/path");
+    expect(getOutput()).toContain("Logged out successfully");
+    expect(getOutput()).toContain("/fake/db/path");
   });
 
-  test("env token (SENTRY_AUTH_TOKEN): does not clear auth, shows env var message", async () => {
+  test("env token (SENTRY_AUTH_TOKEN): throws AuthError with env var message", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     getAuthConfigSpy.mockReturnValue({
       token: "sntrys_env_123",
       source: "env:SENTRY_AUTH_TOKEN",
     });
+    const { context } = createContext();
 
-    const { context, getStdout } = createContext();
-    await func.call(context, {});
-
+    try {
+      await func.call(context, {});
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthError);
+      const msg = (err as AuthError).message;
+      expect(msg).toContain("SENTRY_AUTH_TOKEN");
+      expect(msg).toContain("environment variable");
+      expect(msg).toContain("Unset");
+    }
     expect(clearAuthSpy).not.toHaveBeenCalled();
-    expect(getStdout()).toContain("SENTRY_AUTH_TOKEN");
-    expect(getStdout()).toContain("environment variable");
-    expect(getStdout()).toContain("Unset");
   });
 
-  test("env token (SENTRY_TOKEN): shows correct env var name", async () => {
+  test("env token (SENTRY_TOKEN): shows correct env var name in error", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Set env var directly — getActiveEnvVarName() reads env vars via getEnvToken()
     process.env.SENTRY_TOKEN = "sntrys_token_456";
+    const { context } = createContext();
 
-    const { context, getStdout } = createContext();
     try {
       await func.call(context, {});
-      expect(clearAuthSpy).not.toHaveBeenCalled();
-      expect(getStdout()).toContain("SENTRY_TOKEN");
-      expect(getStdout()).not.toContain("SENTRY_AUTH_TOKEN");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthError);
+      const msg = (err as AuthError).message;
+      expect(msg).toContain("SENTRY_TOKEN");
     } finally {
       delete process.env.SENTRY_TOKEN;
     }
+    expect(clearAuthSpy).not.toHaveBeenCalled();
   });
 
-  test("env token: falls back to SENTRY_AUTH_TOKEN if source is unexpected", async () => {
+  test("env token: error message includes env var from getActiveEnvVarName", async () => {
     isAuthenticatedSpy.mockResolvedValue(true);
     isEnvTokenActiveSpy.mockReturnValue(true);
     // Simulate edge case: source doesn't start with "env:" prefix
@@ -139,11 +153,15 @@ describe("logoutCommand.func", () => {
       token: "sntrys_token",
       source: "oauth",
     });
+    const { context } = createContext();
 
-    const { context, getStdout } = createContext();
-    await func.call(context, {});
-
-    // Falls back to "SENTRY_AUTH_TOKEN" as default
-    expect(getStdout()).toContain("SENTRY_AUTH_TOKEN");
+    try {
+      await func.call(context, {});
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(AuthError);
+      // Falls back to "SENTRY_AUTH_TOKEN" as default env var name
+      expect((err as AuthError).message).toContain("SENTRY_AUTH_TOKEN");
+    }
   });
 });

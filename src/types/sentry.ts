@@ -714,3 +714,31 @@ export const SentryTeamSchema = z
   .passthrough();
 
 export type SentryTeam = z.infer<typeof SentryTeamSchema>;
+
+// Product Trials
+
+/** A product trial from the customer endpoint */
+export const ProductTrialSchema = z.object({
+  /** Trial category (e.g., "seerUsers", "seerAutofix") */
+  category: z.string(),
+  /** ISO date when the trial started, null if not started */
+  startDate: z.string().nullable(),
+  /** ISO date when the trial ends, null if not started */
+  endDate: z.string().nullable(),
+  /** Reason code for the trial */
+  reasonCode: z.number(),
+  /** Whether the trial has been activated */
+  isStarted: z.boolean(),
+  /** Duration of the trial in days, null if unknown */
+  lengthDays: z.number().nullable(),
+});
+
+export type ProductTrial = z.infer<typeof ProductTrialSchema>;
+
+/** Subset of customer data needed for trial availability checks */
+export const CustomerTrialInfoSchema = z.object({
+  /** Available and active product trials for the organization */
+  productTrials: z.array(ProductTrialSchema).optional(),
+});
+
+export type CustomerTrialInfo = z.infer<typeof CustomerTrialInfoSchema>;

@@ -30,6 +30,8 @@ import {
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
+import { formatUpgradeResult } from "../../lib/formatters/human.js";
+import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
@@ -42,8 +44,34 @@ import {
   versionExists,
 } from "../../lib/upgrade.js";
 
+const log = logger.withTag("cli.upgrade");
+
 /** Special version strings that select a channel rather than a specific release. */
 const CHANNEL_VERSIONS = new Set(["nightly", "stable"]);
+
+/**
+ * Structured result of the upgrade command.
+ *
+ * Returned as `{ data: UpgradeResult }` and rendered via the output config.
+ * In JSON mode the object is serialized as-is; in human mode it's passed to
+ * {@link formatUpgradeResult}.
+ */
+export type UpgradeResult = {
+  /** What action was taken */
+  action: "upgraded" | "downgraded" | "up-to-date" | "checked";
+  /** Current CLI version before upgrade */
+  currentVersion: string;
+  /** Target version (the version we upgraded/downgraded to, or the latest available) */
+  targetVersion: string;
+  /** Release channel */
+  channel: "stable" | "nightly";
+  /** Installation method used */
+  method: string;
+  /** Whether the user forced the upgrade */
+  forced: boolean;
+  /** Warnings to display (e.g., PATH shadowing from old package manager install) */
+  warnings?: string[];
+};
 
 type UpgradeFlags = {
   readonly check: boolean;
@@ -85,36 +113,58 @@ type ResolveTargetOptions = {
   versionArg: string | undefined;
   channelChanged: boolean;
   flags: UpgradeFlags;
-  stdout: { write: (s: string) => void };
 };
+
+/**
+ * Result of resolving the target version.
+ *
+ * - `target`: the version string to upgrade/downgrade to (proceed with upgrade)
+ * - `UpgradeResult`: structured result when no upgrade should proceed
+ *   (check-only mode, or already up to date)
+ */
+type ResolveResult =
+  | { kind: "target"; target: string }
+  | { kind: "done"; result: UpgradeResult };
 
 /**
  * Resolve the target version and handle check-only mode.
  *
- * @returns The target version string, or null if no upgrade should proceed
- *          (check-only mode, already up to date without --force, or channel unchanged).
+ * @returns A `ResolveResult` indicating whether to proceed with the upgrade
+ *   or return a completed result immediately.
  */
 async function resolveTargetVersion(
   opts: ResolveTargetOptions
-): Promise<string | null> {
-  const { method, channel, versionArg, channelChanged, flags, stdout } = opts;
+): Promise<ResolveResult> {
+  const { method, channel, versionArg, channelChanged, flags } = opts;
   const latest = await fetchLatestVersion(method, channel);
   const target = versionArg?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
-  stdout.write(`Channel: ${channel}\n`);
-  stdout.write(`Latest version: ${latest}\n`);
+  log.info(`Channel: ${channel}`);
+  log.info(`Latest version: ${latest}`);
   if (versionArg) {
-    stdout.write(`Target version: ${target}\n`);
+    log.info(`Target version: ${target}`);
   }
 
   if (flags.check) {
-    return handleCheckMode(target, versionArg, stdout);
+    return {
+      kind: "done",
+      result: buildCheckResult({ target, versionArg, method, channel, flags }),
+    };
   }
 
   // Skip if already on target — unless forced or switching channels
   if (CLI_VERSION === target && !flags.force && !channelChanged) {
-    stdout.write("\nAlready up to date.\n");
-    return null;
+    return {
+      kind: "done",
+      result: {
+        action: "up-to-date",
+        currentVersion: CLI_VERSION,
+        targetVersion: target,
+        channel,
+        method,
+        forced: false,
+      },
+    };
   }
 
   // Validate that a specific pinned version actually exists.
@@ -131,27 +181,39 @@ async function resolveTargetVersion(
     }
   }
 
-  return target;
+  return { kind: "target", target };
 }
 
 /**
- * Print check-only output and return null (no upgrade to perform).
+ * Build the structured result for check-only mode.
  */
-function handleCheckMode(
-  target: string,
-  versionArg: string | undefined,
-  stdout: { write: (s: string) => void }
-): null {
-  if (CLI_VERSION === target) {
-    stdout.write("\nYou are already on the target version.\n");
-  } else {
+function buildCheckResult(opts: {
+  target: string;
+  versionArg: string | undefined;
+  method: InstallationMethod;
+  channel: ReleaseChannel;
+  flags: UpgradeFlags;
+}): UpgradeResult {
+  const { target, versionArg, method, channel, flags } = opts;
+  const result: UpgradeResult = {
+    action: "checked",
+    currentVersion: CLI_VERSION,
+    targetVersion: target,
+    channel,
+    method,
+    forced: flags.force,
+  };
+
+  // When already on target, no update hint needed
+  if (CLI_VERSION !== target) {
     const cmd =
       versionArg && !CHANNEL_VERSIONS.has(versionArg)
         ? `sentry cli upgrade ${target}`
         : "sentry cli upgrade";
-    stdout.write(`\nRun '${cmd}' to update.\n`);
+    result.warnings = [`Run '${cmd}' to update.`];
   }
-  return null;
+
+  return result;
 }
 
 /**
@@ -274,20 +336,20 @@ async function executeStandardUpgrade(opts: {
  *   1. Download the nightly binary to a temp path
  *   2. Install it to `determineInstallDir()` (same logic as the curl installer)
  *   3. Run setup on the new binary to update completions, PATH, and metadata
- *   4. Warn about the old package-manager installation that may still be in PATH
+ *   4. Return warnings about the old package-manager installation that may still be in PATH
  *
  * @param versionArg - Specific version requested by the user, or undefined for
  *   latest nightly. When a specific version is given, its release tag is used
  *   instead of the rolling "nightly" tag so the correct binary is downloaded.
+ * @returns Warnings about the old installation that may shadow the new one
  */
 async function migrateToStandaloneForNightly(
   method: InstallationMethod,
   target: string,
-  stdout: { write: (s: string) => void },
   versionArg: string | undefined
-): Promise<void> {
-  stdout.write("\nNightly builds are only available as standalone binaries.\n");
-  stdout.write("Migrating to standalone installation...\n\n");
+): Promise<string[]> {
+  log.info("Nightly builds are only available as standalone binaries.");
+  log.info("Migrating to standalone installation...");
 
   // Use the rolling "nightly" tag for latest nightly; use the specific version
   // tag if the user requested a pinned version.
@@ -314,7 +376,7 @@ async function migrateToStandaloneForNightly(
     releaseLock(downloadResult.lockPath);
   }
 
-  // Warn about the potentially shadowing old installation
+  // Build warnings about the potentially shadowing old installation.
   // Note: install info is already recorded by the child `setup --install`
   // process, so no redundant setInstallInfo call is needed here.
   const uninstallHints: Record<string, string> = {
@@ -324,13 +386,15 @@ async function migrateToStandaloneForNightly(
     yarn: "yarn global remove sentry",
     brew: "brew uninstall getsentry/tools/sentry",
   };
-  const hint = uninstallHints[method];
-  stdout.write(
-    `\nNote: your ${method}-installed sentry may still appear earlier in PATH.\n`
+  const warnings: string[] = [];
+  warnings.push(
+    `Your ${method}-installed sentry may still appear earlier in PATH.`
   );
+  const hint = uninstallHints[method];
   if (hint) {
-    stdout.write(`      Consider removing it: ${hint}\n`);
+    warnings.push(`Consider removing it: ${hint}`);
   }
+  return warnings;
 }
 
 export const upgradeCommand = buildCommand({
@@ -353,6 +417,7 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
       "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
+  output: { json: true, human: formatUpgradeResult },
   parameters: {
     positional: {
       kind: "tuple",
@@ -386,13 +451,7 @@ export const upgradeCommand = buildCommand({
       },
     },
   },
-  async func(
-    this: SentryContext,
-    flags: UpgradeFlags,
-    version?: string
-  ): Promise<void> {
-    const { stdout } = this;
-
+  async func(this: SentryContext, flags: UpgradeFlags, version?: string) {
     // Resolve effective channel and version from positional
     const { channel, versionArg } = resolveChannelAndVersion(version);
 
@@ -423,33 +482,44 @@ export const upgradeCommand = buildCommand({
       );
     }
 
-    stdout.write(`Installation method: ${method}\n`);
-    stdout.write(`Current version: ${CLI_VERSION}\n`);
+    log.info(`Installation method: ${method}`);
+    log.info(`Current version: ${CLI_VERSION}`);
 
-    const target = await resolveTargetVersion({
+    const resolved = await resolveTargetVersion({
       method,
       channel,
       versionArg,
       channelChanged,
       flags,
-      stdout,
     });
-    if (!target) {
-      return;
+    if (resolved.kind === "done") {
+      return { data: resolved.result };
     }
 
+    const { target } = resolved;
     const downgrade = isDowngrade(CLI_VERSION, target);
-    stdout.write(
-      `\n${downgrade ? "Downgrading" : "Upgrading"} to ${target}...\n`
-    );
+    log.info(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}...`);
 
     // Nightly is GitHub-only. If the current install method is not curl,
     // migrate to a standalone binary first then return — the migration
     // handles setup internally.
     if (channel === "nightly" && method !== "curl") {
-      await migrateToStandaloneForNightly(method, target, stdout, versionArg);
-      stdout.write(`\nSuccessfully installed nightly ${target}.\n`);
-      return;
+      const warnings = await migrateToStandaloneForNightly(
+        method,
+        target,
+        versionArg
+      );
+      return {
+        data: {
+          action: downgrade ? "downgraded" : "upgraded",
+          currentVersion: CLI_VERSION,
+          targetVersion: target,
+          channel,
+          method,
+          forced: flags.force,
+          warnings,
+        } satisfies UpgradeResult,
+      };
     }
 
     await executeStandardUpgrade({
@@ -460,8 +530,15 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    stdout.write(
-      `\nSuccessfully ${downgrade ? "downgraded" : "upgraded"} to ${target}.\n`
-    );
+    return {
+      data: {
+        action: downgrade ? "downgraded" : "upgraded",
+        currentVersion: CLI_VERSION,
+        targetVersion: target,
+        channel,
+        method,
+        forced: flags.force,
+      } satisfies UpgradeResult,
+    };
   },
 });

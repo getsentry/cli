@@ -5,7 +5,7 @@
  * Tests for parsing functions in the api command.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Readable } from "node:stream";
 import {
   buildBodyFromFields,
@@ -31,21 +31,6 @@ import {
   setNestedValue,
 } from "../../src/commands/api.js";
 import { ValidationError } from "../../src/lib/errors.js";
-import type { Writer } from "../../src/types/index.js";
-
-/**
- * Create a mock Writer that collects output into a string
- */
-function createMockWriter(): Writer & { output: string } {
-  const mockWriter = {
-    output: "",
-    write(data: string): boolean {
-      mockWriter.output += data;
-      return true;
-    },
-  };
-  return mockWriter;
-}
 
 /**
  * Create a mock stdin stream from a string
@@ -328,114 +313,117 @@ describe("parseFields", () => {
 });
 
 describe("normalizeFields", () => {
+  let stderrOutput: string;
+  let originalWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    stderrOutput = "";
+    originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput +=
+        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
   test("passes through fields that already have '='", () => {
-    const stderr = createMockWriter();
-    expect(
-      normalizeFields(["status=resolved", "project=my-proj"], stderr)
-    ).toEqual(["status=resolved", "project=my-proj"]);
-    expect(stderr.output).toBe("");
+    expect(normalizeFields(["status=resolved", "project=my-proj"])).toEqual([
+      "status=resolved",
+      "project=my-proj",
+    ]);
+    expect(stderrOutput).toBe("");
   });
 
   test("passes through empty-array syntax 'key[]' without warning", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields(["tags[]"], stderr)).toEqual(["tags[]"]);
-    expect(stderr.output).toBe("");
+    expect(normalizeFields(["tags[]"])).toEqual(["tags[]"]);
+    expect(stderrOutput).toBe("");
   });
 
   test("corrects ':' separator and emits warning — CLI-9H case", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields(["project:4510942921490432"], stderr)).toEqual([
+    expect(normalizeFields(["project:4510942921490432"])).toEqual([
       "project=4510942921490432",
     ]);
-    expect(stderr.output).toContain("project=4510942921490432");
-    expect(stderr.output).toContain("warning:");
+    expect(stderrOutput).toContain("project=4510942921490432");
+    expect(stderrOutput).toContain("warn");
   });
 
   test("corrects ':' separator on timestamp values, preserving colons in value — CLI-93 case", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields(["since:2026-02-25T11:20:00"], stderr)).toEqual([
+    expect(normalizeFields(["since:2026-02-25T11:20:00"])).toEqual([
       "since=2026-02-25T11:20:00",
     ]);
-    expect(stderr.output).toContain("since=2026-02-25T11:20:00");
+    expect(stderrOutput).toContain("since=2026-02-25T11:20:00");
   });
 
   test("corrects ':' separator on URL values, preserving colons in value", () => {
-    const stderr = createMockWriter();
-    expect(
-      normalizeFields(["url:https://example.com:8080/path"], stderr)
-    ).toEqual(["url=https://example.com:8080/path"]);
-    expect(stderr.output).toContain("url=https://example.com:8080/path");
+    expect(normalizeFields(["url:https://example.com:8080/path"])).toEqual([
+      "url=https://example.com:8080/path",
+    ]);
+    expect(stderrOutput).toContain("url=https://example.com:8080/path");
   });
 
   test("corrects ':' separator and emits one warning per field", () => {
-    const stderr = createMockWriter();
-    normalizeFields(["status:resolved", "project:my-proj"], stderr);
-    const warnings = stderr.output
-      .split("\n")
-      .filter((l) => l.includes("warning:"));
+    normalizeFields(["status:resolved", "project:my-proj"]);
+    // Each corrected field produces a separate log.warn call
+    const warnings = stderrOutput.split("\n").filter((l) => l.includes("warn"));
     expect(warnings).toHaveLength(2);
   });
 
   test("returns field unchanged when no '=' and no ':' (parser will throw)", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields(["invalid"], stderr)).toEqual(["invalid"]);
-    expect(stderr.output).toBe("");
+    expect(normalizeFields(["invalid"])).toEqual(["invalid"]);
+    expect(stderrOutput).toBe("");
   });
 
   test("returns field unchanged when ':' is the first character", () => {
     // Empty key — uncorrectable, let parser throw
-    const stderr = createMockWriter();
-    expect(normalizeFields([":value"], stderr)).toEqual([":value"]);
-    expect(stderr.output).toBe("");
+    expect(normalizeFields([":value"])).toEqual([":value"]);
+    expect(stderrOutput).toBe("");
   });
 
   test("returns undefined when given undefined", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields(undefined, stderr)).toBeUndefined();
+    expect(normalizeFields(undefined)).toBeUndefined();
   });
 
   test("returns empty array when given empty array", () => {
-    const stderr = createMockWriter();
-    expect(normalizeFields([], stderr)).toEqual([]);
+    expect(normalizeFields([])).toEqual([]);
   });
 
   test("mixes corrected and pass-through fields correctly", () => {
-    const stderr = createMockWriter();
-    expect(
-      normalizeFields(["status:resolved", "limit=10", "tags[]"], stderr)
-    ).toEqual(["status=resolved", "limit=10", "tags[]"]);
+    expect(normalizeFields(["status:resolved", "limit=10", "tags[]"])).toEqual([
+      "status=resolved",
+      "limit=10",
+      "tags[]",
+    ]);
     // Only the one corrected field emits a warning
-    const warnings = stderr.output
-      .split("\n")
-      .filter((l) => l.includes("warning:"));
+    const warnings = stderrOutput.split("\n").filter((l) => l.includes("warn"));
     expect(warnings).toHaveLength(1);
   });
 
   test("does not mangle JSON objects — passes through unchanged (CLI-AF)", () => {
-    const stderr = createMockWriter();
     const json = '{"status":"ignored","statusDetails":{"ignoreCount":1}}';
-    expect(normalizeFields([json], stderr)).toEqual([json]);
+    expect(normalizeFields([json])).toEqual([json]);
     // No colon-correction warning should be emitted for JSON
-    expect(stderr.output).toBe("");
+    expect(stderrOutput).toBe("");
   });
 
   test("does not mangle JSON arrays — passes through unchanged", () => {
-    const stderr = createMockWriter();
     const json = '["one","two","three"]';
-    expect(normalizeFields([json], stderr)).toEqual([json]);
-    expect(stderr.output).toBe("");
+    expect(normalizeFields([json])).toEqual([json]);
+    expect(stderrOutput).toBe("");
   });
 
   test("JSON-shaped fields coexist with other fields", () => {
-    const stderr = createMockWriter();
     const json = '{"key":"value"}';
-    expect(
-      normalizeFields([json, "status:resolved", "limit=10"], stderr)
-    ).toEqual([json, "status=resolved", "limit=10"]);
+    expect(normalizeFields([json, "status:resolved", "limit=10"])).toEqual([
+      json,
+      "status=resolved",
+      "limit=10",
+    ]);
     // Only the colon-separated field emits a warning, not the JSON
-    const warnings = stderr.output
-      .split("\n")
-      .filter((l) => l.includes("warning:"));
+    const warnings = stderrOutput.split("\n").filter((l) => l.includes("warn"));
     expect(warnings).toHaveLength(1);
   });
 });
@@ -1082,122 +1070,137 @@ describe("parseDataBody", () => {
 });
 
 describe("extractJsonBody", () => {
+  let stderrOutput: string;
+  let originalWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    stderrOutput = "";
+    originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput +=
+        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
   test("returns empty object for undefined input", () => {
-    const stderr = createMockWriter();
-    expect(extractJsonBody(undefined, stderr)).toEqual({});
-    expect(stderr.output).toBe("");
+    expect(extractJsonBody(undefined)).toEqual({});
+    expect(stderrOutput).toBe("");
   });
 
   test("returns empty object for empty array", () => {
-    const stderr = createMockWriter();
-    expect(extractJsonBody([], stderr)).toEqual({});
+    expect(extractJsonBody([])).toEqual({});
   });
 
   test("extracts JSON object and emits hint", () => {
-    const stderr = createMockWriter();
     const json = '{"status":"ignored"}';
-    const result = extractJsonBody([json], stderr);
+    const result = extractJsonBody([json]);
     expect(result.body).toEqual({ status: "ignored" });
     expect(result.remaining).toBeUndefined();
-    expect(stderr.output).toContain("hint:");
-    expect(stderr.output).toContain("--data/-d");
+    expect(stderrOutput).toContain("request body");
+    expect(stderrOutput).toContain("--data/-d");
   });
 
   test("extracts JSON array and emits hint", () => {
-    const stderr = createMockWriter();
-    const result = extractJsonBody(["[1,2,3]"], stderr);
+    const result = extractJsonBody(["[1,2,3]"]);
     expect(result.body).toEqual([1, 2, 3]);
     expect(result.remaining).toBeUndefined();
   });
 
   test("separates JSON body from remaining key=value fields", () => {
-    const stderr = createMockWriter();
-    const result = extractJsonBody(
-      ['{"status":"ignored"}', "extra=field", "other=value"],
-      stderr
-    );
+    const result = extractJsonBody([
+      '{"status":"ignored"}',
+      "extra=field",
+      "other=value",
+    ]);
     expect(result.body).toEqual({ status: "ignored" });
     expect(result.remaining).toEqual(["extra=field", "other=value"]);
   });
 
   test("does NOT extract JSON primitives — they stay in remaining (no TypeError risk)", () => {
-    const stderr = createMockWriter();
     // Primitives like numbers, booleans, strings are valid JSON but cannot be
     // used with the 'in' operator, which would throw a TypeError downstream.
-    expect(extractJsonBody(["42"], stderr).body).toBeUndefined();
-    expect(extractJsonBody(["true"], stderr).body).toBeUndefined();
-    expect(extractJsonBody(['"hello"'], stderr).body).toBeUndefined();
-    expect(extractJsonBody(["null"], stderr).body).toBeUndefined();
-    expect(stderr.output).toBe("");
+    expect(extractJsonBody(["42"]).body).toBeUndefined();
+    expect(extractJsonBody(["true"]).body).toBeUndefined();
+    expect(extractJsonBody(['"hello"']).body).toBeUndefined();
+    expect(extractJsonBody(["null"]).body).toBeUndefined();
+    expect(stderrOutput).toBe("");
   });
 
   test("leaves invalid JSON-looking fields in remaining", () => {
-    const stderr = createMockWriter();
-    const result = extractJsonBody(["{not-valid-json}"], stderr);
+    const result = extractJsonBody(["{not-valid-json}"]);
     expect(result.body).toBeUndefined();
     expect(result.remaining).toEqual(["{not-valid-json}"]);
-    expect(stderr.output).toBe("");
+    expect(stderrOutput).toBe("");
   });
 
   test("throws on multiple JSON bodies", () => {
-    const stderr = createMockWriter();
-    expect(() => extractJsonBody(['{"a":1}', '{"b":2}'], stderr)).toThrow(
+    expect(() => extractJsonBody(['{"a":1}', '{"b":2}'])).toThrow(
       ValidationError
     );
-    expect(() => extractJsonBody(['{"a":1}', '{"b":2}'], stderr)).toThrow(
+    expect(() => extractJsonBody(['{"a":1}', '{"b":2}'])).toThrow(
       /Multiple JSON bodies/
     );
   });
 
   test("does not extract fields that have '=' even if JSON-shaped", () => {
-    const stderr = createMockWriter();
     // This is a normal key=value where the value happens to start with {
-    const result = extractJsonBody(['data={"key":"value"}'], stderr);
+    const result = extractJsonBody(['data={"key":"value"}']);
     expect(result.body).toBeUndefined();
     expect(result.remaining).toEqual(['data={"key":"value"}']);
   });
 
   test("truncates long JSON in hint preview", () => {
-    const stderr = createMockWriter();
     const longJson = JSON.stringify({
       status: "ignored",
       statusDetails: { ignoreCount: 1 },
       longField: "a".repeat(100),
     });
-    extractJsonBody([longJson], stderr);
-    expect(stderr.output).toContain("...");
+    extractJsonBody([longJson]);
+    expect(stderrOutput).toContain("...");
     // Preview should be ~60 chars, not the full string
-    expect(stderr.output.length).toBeLessThan(longJson.length + 100);
+    expect(stderrOutput.length).toBeLessThan(longJson.length + 100);
   });
 });
 
 describe("buildFromFields", () => {
+  let stderrOutput: string;
+  let originalWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    stderrOutput = "";
+    originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput +=
+        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
   test("auto-detects JSON body in raw-field (CLI-AF scenario)", () => {
-    const stderr = createMockWriter();
-    const result = buildFromFields(
-      "PUT",
-      {
-        "raw-field": ['{"status":"ignored","statusDetails":{"ignoreCount":1}}'],
-      },
-      stderr
-    );
+    const result = buildFromFields("PUT", {
+      "raw-field": ['{"status":"ignored","statusDetails":{"ignoreCount":1}}'],
+    });
     expect(result.body).toEqual({
       status: "ignored",
       statusDetails: { ignoreCount: 1 },
     });
-    expect(stderr.output).toContain("hint:");
+    expect(stderrOutput).toContain("request body");
   });
 
   test("merges JSON body with additional key=value fields", () => {
-    const stderr = createMockWriter();
-    const result = buildFromFields(
-      "PUT",
-      {
-        "raw-field": ['{"status":"ignored"}'],
-        field: ["priority=critical"],
-      },
-      stderr
-    );
+    const result = buildFromFields("PUT", {
+      "raw-field": ['{"status":"ignored"}'],
+      field: ["priority=critical"],
+    });
     expect(result.body).toEqual({
       status: "ignored",
       priority: "critical",
@@ -1205,91 +1208,64 @@ describe("buildFromFields", () => {
   });
 
   test("routes fields to params for GET without JSON", () => {
-    const stderr = createMockWriter();
-    const result = buildFromFields(
-      "GET",
-      { field: ["status=resolved", "limit=10"] },
-      stderr
-    );
+    const result = buildFromFields("GET", {
+      field: ["status=resolved", "limit=10"],
+    });
     expect(result.body).toBeUndefined();
     expect(result.params).toEqual({ status: "resolved", limit: "10" });
   });
 
   test("passes through normal fields when no JSON present", () => {
-    const stderr = createMockWriter();
-    const result = buildFromFields(
-      "PUT",
-      { field: ["status=resolved"] },
-      stderr
-    );
+    const result = buildFromFields("PUT", { field: ["status=resolved"] });
     expect(result.body).toEqual({ status: "resolved" });
-    expect(stderr.output).toBe("");
+    expect(stderrOutput).toBe("");
   });
 
   test("throws ValidationError when JSON array body is mixed with field flags", () => {
-    const stderr = createMockWriter();
     expect(() =>
-      buildFromFields(
-        "PUT",
-        { "raw-field": ["[1,2,3]"], field: ["extra=field"] },
-        stderr
-      )
+      buildFromFields("PUT", {
+        "raw-field": ["[1,2,3]"],
+        field: ["extra=field"],
+      })
     ).toThrow(ValidationError);
     expect(() =>
-      buildFromFields(
-        "PUT",
-        { "raw-field": ["[1,2,3]"], field: ["extra=field"] },
-        stderr
-      )
+      buildFromFields("PUT", {
+        "raw-field": ["[1,2,3]"],
+        field: ["extra=field"],
+      })
     ).toThrow(/Cannot combine a JSON array/);
   });
 
   test("does NOT extract JSON body for GET — falls through to query-param routing (which throws)", () => {
-    const stderr = createMockWriter();
     // GET with a bare JSON field: no body extracted, falls to buildRawQueryParams
     // which throws "Invalid field format" since there is no '='
     expect(() =>
-      buildFromFields("GET", { "raw-field": ['{"status":"ignored"}'] }, stderr)
+      buildFromFields("GET", { "raw-field": ['{"status":"ignored"}'] })
     ).toThrow(ValidationError);
     // No hint should have been emitted (JSON extraction was skipped for GET)
-    expect(stderr.output).toBe("");
+    expect(stderrOutput).toBe("");
   });
 
   test("throws ValidationError when field flags conflict with JSON body at same top-level key", () => {
-    const stderr = createMockWriter();
     expect(() =>
-      buildFromFields(
-        "PUT",
-        {
-          "raw-field": [
-            '{"status":"ignored","statusDetails":{"ignoreCount":1}}',
-          ],
-          field: ["statusDetails[minCount]=5"],
-        },
-        stderr
-      )
+      buildFromFields("PUT", {
+        "raw-field": ['{"status":"ignored","statusDetails":{"ignoreCount":1}}'],
+        field: ["statusDetails[minCount]=5"],
+      })
     ).toThrow(ValidationError);
     expect(() =>
-      buildFromFields(
-        "PUT",
-        {
-          "raw-field": [
-            '{"status":"ignored","statusDetails":{"ignoreCount":1}}',
-          ],
-          field: ["statusDetails[minCount]=5"],
-        },
-        stderr
-      )
+      buildFromFields("PUT", {
+        "raw-field": ['{"status":"ignored","statusDetails":{"ignoreCount":1}}'],
+        field: ["statusDetails[minCount]=5"],
+      })
     ).toThrow(/conflict/i);
   });
 
   test("non-conflicting keys from JSON body and field flags merge cleanly", () => {
-    const stderr = createMockWriter();
-    const result = buildFromFields(
-      "PUT",
-      { "raw-field": ['{"status":"ignored"}'], field: ["assignee=me"] },
-      stderr
-    );
+    const result = buildFromFields("PUT", {
+      "raw-field": ['{"status":"ignored"}'],
+      field: ["assignee=me"],
+    });
     expect(result.body).toEqual({ status: "ignored", assignee: "me" });
   });
 });
@@ -1302,143 +1278,119 @@ const MOCK_STDIN = process.stdin as unknown as NodeJS.ReadStream & { fd: 0 };
 
 describe("resolveBody", () => {
   test("--data returns parsed JSON body", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "PUT", data: '{"status":"resolved"}' },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toEqual({ status: "resolved" });
     expect(result.params).toBeUndefined();
   });
 
   test("--data with non-JSON returns raw string body", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "POST", data: "hello world" },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toBe("hello world");
   });
 
   test("throws when --data and --input are both set", async () => {
-    const stderr = createMockWriter();
     await expect(
       resolveBody(
         { method: "PUT", data: '{"a":1}', input: "file.json" },
-        MOCK_STDIN,
-        stderr
+        MOCK_STDIN
       )
     ).rejects.toThrow(ValidationError);
     await expect(
       resolveBody(
         { method: "PUT", data: '{"a":1}', input: "file.json" },
-        MOCK_STDIN,
-        stderr
+        MOCK_STDIN
       )
     ).rejects.toThrow(/--data.*--input/i);
   });
 
   test("throws when --data and --field are both set", async () => {
-    const stderr = createMockWriter();
     await expect(
       resolveBody(
         { method: "PUT", data: '{"a":1}', field: ["key=value"] },
-        MOCK_STDIN,
-        stderr
+        MOCK_STDIN
       )
     ).rejects.toThrow(ValidationError);
     await expect(
       resolveBody(
         { method: "PUT", data: '{"a":1}', field: ["key=value"] },
-        MOCK_STDIN,
-        stderr
+        MOCK_STDIN
       )
     ).rejects.toThrow(/--data.*--field|--field.*--data/i);
   });
 
   test("throws when --data and --raw-field are both set", async () => {
-    const stderr = createMockWriter();
     await expect(
       resolveBody(
         { method: "PUT", data: '{"a":1}', "raw-field": ["key=value"] },
-        MOCK_STDIN,
-        stderr
+        MOCK_STDIN
       )
     ).rejects.toThrow(ValidationError);
   });
 
   test("falls through to buildFromFields when neither --data nor --input", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "PUT", field: ["status=resolved"] },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toEqual({ status: "resolved" });
     expect(result.params).toBeUndefined();
   });
 
   test("GET fields produce params, not body", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "GET", "raw-field": ["query=is:unresolved"] },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toBeUndefined();
     expect(result.params).toEqual({ query: "is:unresolved" });
   });
 
   test("GET --data converts URL-encoded string to query params", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "GET", data: "stat=received&resolution=1d" },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toBeUndefined();
     expect(result.params).toEqual({ stat: "received", resolution: "1d" });
   });
 
   test("GET --data converts JSON object to query params", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "GET", data: '{"stat":"received","resolution":"1d"}' },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toBeUndefined();
     expect(result.params).toEqual({ stat: "received", resolution: "1d" });
   });
 
   test("GET --data with JSON array throws ValidationError", async () => {
-    const stderr = createMockWriter();
     await expect(
-      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN, stderr)
+      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN)
     ).rejects.toThrow(ValidationError);
     await expect(
-      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN, stderr)
+      resolveBody({ method: "GET", data: "[1,2,3]" }, MOCK_STDIN)
     ).rejects.toThrow(/cannot.*query parameters/i);
   });
 
   test("GET --data with JSON primitive throws ValidationError", async () => {
-    const stderr = createMockWriter();
     await expect(
-      resolveBody({ method: "GET", data: "null" }, MOCK_STDIN, stderr)
+      resolveBody({ method: "GET", data: "null" }, MOCK_STDIN)
     ).rejects.toThrow(ValidationError);
     await expect(
-      resolveBody({ method: "GET", data: "42" }, MOCK_STDIN, stderr)
+      resolveBody({ method: "GET", data: "42" }, MOCK_STDIN)
     ).rejects.toThrow(ValidationError);
   });
 
   test("POST --data still returns body (regression guard)", async () => {
-    const stderr = createMockWriter();
     const result = await resolveBody(
       { method: "POST", data: '{"status":"resolved"}' },
-      MOCK_STDIN,
-      stderr
+      MOCK_STDIN
     );
     expect(result.body).toEqual({ status: "resolved" });
     expect(result.params).toBeUndefined();

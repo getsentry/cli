@@ -39,6 +39,7 @@ import {
 import {
   type IssueTableRow,
   muted,
+  shouldAutoCompact,
   writeIssueTable,
   writeJsonList,
 } from "../../lib/formatters/index.js";
@@ -83,7 +84,7 @@ type ListFlags = {
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
-  readonly compact: boolean;
+  readonly compact?: boolean;
   readonly fields?: string[];
 };
 
@@ -99,6 +100,19 @@ const USAGE_HINT = "sentry issue list <org>/<project>";
  * Auto-pagination can theoretically fetch more, but 1000 keeps responses reasonable.
  */
 const MAX_LIMIT = 1000;
+
+/**
+ * Resolve the effective compact mode from the flag tri-state and issue count.
+ *
+ * - `true` / `false` — explicit user override, returned as-is
+ * - `undefined` — auto-detect based on terminal height vs estimated table height
+ */
+function resolveCompact(flag: boolean | undefined, rowCount: number): boolean {
+  if (flag !== undefined) {
+    return flag;
+  }
+  return shouldAutoCompact(rowCount);
+}
 
 function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {
@@ -829,7 +843,9 @@ async function handleOrgAllIssues(options: OrgAllIssuesOptions): Promise<void> {
       isMultiProject: true,
     },
   }));
-  writeIssueTable(stdout, issuesWithOpts, { compact: flags.compact });
+  writeIssueTable(stdout, issuesWithOpts, {
+    compact: resolveCompact(flags.compact, issuesWithOpts.length),
+  });
 
   if (hasMore) {
     stdout.write(`\nShowing ${issues.length} issues (more available)\n`);
@@ -1092,7 +1108,9 @@ async function handleResolvedTargets(
       : `Issues from ${validResults.length} projects`;
 
   writeListHeader(stdout, title);
-  writeIssueTable(stdout, issuesWithOptions, { compact: flags.compact });
+  writeIssueTable(stdout, issuesWithOptions, {
+    compact: resolveCompact(flags.compact, issuesWithOptions.length),
+  });
 
   let footerMode: "single" | "multi" | "none" = "none";
   if (isMultiProject) {
@@ -1204,8 +1222,8 @@ export const listCommand = buildListCommand("issue", {
       fresh: FRESH_FLAG,
       compact: {
         kind: "boolean",
-        brief: "Single-line rows for compact output",
-        default: false,
+        brief: "Single-line rows for compact output (auto-detects if omitted)",
+        optional: true,
       },
     },
     aliases: {

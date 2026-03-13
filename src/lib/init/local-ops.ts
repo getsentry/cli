@@ -739,6 +739,7 @@ async function createSentryProject(
 
     // 2. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
+      team: options.team,
       autoCreateSlug: slug,
       usageHint: "sentry init",
     });

@@ -11,10 +11,12 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
-import { muted, success } from "../../lib/formatters/colors.js";
 import { formatUserIdentity } from "../../lib/formatters/human.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
+import { logger } from "../../lib/logger.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
+
+const log = logger.withTag("auth.login");
 
 type LoginFlags = {
   readonly token?: string;
@@ -47,19 +49,17 @@ export const loginCommand = buildCommand({
     },
   },
   async func(this: SentryContext, flags: LoginFlags): Promise<void> {
-    const { stdout, stderr } = this;
-
     // Check if already authenticated
     if (await isAuthenticated()) {
       if (isEnvTokenActive()) {
         const envVar = getActiveEnvVarName();
-        stdout.write(
+        log.info(
           `Authentication is provided via ${envVar} environment variable. ` +
-            `Unset ${envVar} to use OAuth-based login instead.\n`
+            `Unset ${envVar} to use OAuth-based login instead.`
         );
       } else {
-        stdout.write(
-          "You are already authenticated. Use 'sentry auth logout' first to re-authenticate.\n"
+        log.info(
+          "You are already authenticated. Use 'sentry auth logout' first to re-authenticate."
         );
       }
       return;
@@ -104,11 +104,11 @@ export const loginCommand = buildCommand({
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
-      stdout.write(`${success("✓")} Authenticated with API token\n`);
+      log.success("Authenticated with API token");
       if (user) {
-        stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
+        log.info(`Logged in as: ${formatUserIdentity(user)}`);
       }
-      stdout.write(`  Config saved to: ${getDbPath()}\n`);
+      log.info(`Config saved to: ${getDbPath()}`);
       return;
     }
 
@@ -119,7 +119,7 @@ export const loginCommand = buildCommand({
       // Non-fatal: cache directory may not exist
     }
 
-    // Device Flow OAuth
+    const { stdout, stderr } = this;
     const loginSuccess = await runInteractiveLogin(
       stdout,
       stderr,
