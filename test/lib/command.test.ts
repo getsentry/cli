@@ -25,7 +25,7 @@ import {
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
 import { OutputError } from "../../src/lib/errors.js";
-import { commandOutput } from "../../src/lib/formatters/output.js";
+import { commandOutput, stateless } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
@@ -997,7 +997,9 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
+        human: stateless(
+          (d: { name: string; role: string }) => `${d.name} (${d.role})`
+        ),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1026,7 +1028,9 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
+        human: stateless(
+          (d: { name: string; role: string }) => `${d.name} (${d.role})`
+        ),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1056,7 +1060,9 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { id: number; name: string; role: string }) => `${d.name}`,
+        human: stateless(
+          (d: { id: number; name: string; role: string }) => `${d.name}`
+        ),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1088,7 +1094,7 @@ describe("buildCommand return-based output", () => {
         docs: { brief: "Test" },
         output: {
           json: true,
-          human: (d: { value: number }) => `Value: ${d.value}`,
+          human: stateless((d: { value: number }) => `Value: ${d.value}`),
         },
         parameters: {},
         async *func(this: TestContext) {
@@ -1136,7 +1142,7 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: () => "unused",
+        human: stateless(() => "unused"),
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -1194,7 +1200,7 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { name: string }) => `Hello, ${d.name}!`,
+        human: stateless((d: { name: string }) => `Hello, ${d.name}!`),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1225,7 +1231,9 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: Array<{ id: number }>) => d.map((x) => x.id).join(", "),
+        human: stateless((d: Array<{ id: number }>) =>
+          d.map((x) => x.id).join(", ")
+        ),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1255,7 +1263,7 @@ describe("buildCommand return-based output", () => {
         docs: { brief: "Test" },
         output: {
           json: true,
-          human: (d: { org: string }) => `Org: ${d.org}`,
+          human: stateless((d: { org: string }) => `Org: ${d.org}`),
         },
         parameters: {},
         async *func(this: TestContext) {
@@ -1297,7 +1305,7 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { error: string }) => `Error: ${d.error}`,
+        human: stateless((d: { error: string }) => `Error: ${d.error}`),
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -1349,7 +1357,7 @@ describe("buildCommand return-based output", () => {
       docs: { brief: "Test" },
       output: {
         json: true,
-        human: (d: { error: string }) => `Error: ${d.error}`,
+        human: stateless((d: { error: string }) => `Error: ${d.error}`),
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
