@@ -17,7 +17,6 @@ import {
   createLogStreamingTable,
   formatLogRow,
   formatLogsHeader,
-  formatLogTable,
   isPlainOutput,
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -25,8 +24,9 @@ import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
   type CommandOutput,
   commandOutput,
+  formatFooter,
+  type HumanRenderer,
   jsonlLines,
-  stateless,
 } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
@@ -53,18 +53,23 @@ type ListFlags = {
   readonly fields?: string[];
 };
 
-/** Result yielded by the log list command — one per batch. */
+/**
+ * Result yielded by the log list command — one per batch.
+ *
+ * Both single-fetch and follow mode yield the same type. The human
+ * renderer always renders incrementally (header on first non-empty
+ * batch, rows per batch, footer via `finalize()`).
+ */
 type LogListResult = {
   logs: LogLike[];
-  /** Human-readable hint (e.g., "Showing 100 logs. Use --limit to show more.") */
-  hint?: string;
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
   /**
-   * When true, this result is one batch in a follow-mode stream.
-   * Formatters use this to switch between full-table and incremental rendering.
+   * When true, JSON output uses JSONL (one object per line) instead
+   * of a JSON array. Set for follow-mode batches where output is
+   * consumed incrementally. Does not affect human rendering.
    */
-  streaming?: boolean;
+  jsonl?: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -120,22 +125,23 @@ type LogLike = {
   trace?: string | null;
 };
 
+/** Result from a single fetch: logs to yield + hint for the footer. */
+type FetchResult = {
+  result: LogListResult;
+  hint: string;
+};
+
 /**
  * Execute a single fetch of logs (non-streaming mode).
  *
- * Returns the fetched logs and a human-readable hint. The caller
- * (via the output config) handles rendering to stdout.
+ * Returns the logs and a hint. The caller yields the result and
+ * returns the hint as a footer via `CommandReturn`.
  */
-type SingleFetchOptions = {
-  org: string;
-  project: string;
-  flags: ListFlags;
-};
-
 async function executeSingleFetch(
-  options: SingleFetchOptions
-): Promise<LogListResult> {
-  const { org, project, flags } = options;
+  org: string,
+  project: string,
+  flags: ListFlags
+): Promise<FetchResult> {
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
@@ -143,7 +149,7 @@ async function executeSingleFetch(
   });
 
   if (logs.length === 0) {
-    return { logs: [], hint: "No logs found." };
+    return { result: { logs: [] }, hint: "No logs found." };
   }
 
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
@@ -153,7 +159,7 @@ async function executeSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
-  return { logs: chronological, hint: `${countText}${tip}` };
+  return { result: { logs: chronological }, hint: `${countText}${tip}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -278,8 +284,8 @@ async function fetchPoll<T extends LogLike>(
  * Async generator that streams log entries via follow-mode polling.
  *
  * Yields batches of log entries (chronological order). The command wraps
- * each batch in a `LogListResult` with `streaming: true` so the OutputConfig
- * formatters can handle incremental rendering vs JSONL expansion.
+ * each batch in a `LogListResult` so the OutputConfig formatters can
+ * handle incremental rendering and JSONL expansion.
  *
  * The generator handles SIGINT via AbortController for clean shutdown.
  * It never touches stdout — all data output flows through yielded batches
@@ -330,19 +336,17 @@ async function* generateFollowLogs<T extends LogLike>(
 }
 
 /**
- * Consume a follow-mode generator, yielding `LogListResult` batches
- * with `streaming: true`. Emits a final empty batch so the human
- * formatter can close the streaming table.
+ * Consume a follow-mode generator, yielding `LogListResult` batches.
+ * The generator returns when SIGINT fires — the wrapper's `finalize()`
+ * callback handles closing the streaming table.
  */
 async function* yieldFollowBatches<T extends LogLike>(
   generator: AsyncGenerator<T[], void, undefined>,
   extra?: Partial<LogListResult>
 ): AsyncGenerator<CommandOutput<LogListResult>, void, undefined> {
   for await (const batch of generator) {
-    yield commandOutput({ logs: batch, streaming: true, ...extra });
+    yield commandOutput({ logs: batch, jsonl: true, ...extra });
   }
-  // Final empty batch signals end-of-stream to the human formatter
-  yield commandOutput({ logs: [], streaming: true, ...extra });
 }
 
 /** Default time period for trace-logs queries */
@@ -355,16 +359,11 @@ const DEFAULT_TRACE_PERIOD = "14d";
  * Returns the fetched logs, trace ID, and a human-readable hint.
  * The caller (via the output config) handles rendering to stdout.
  */
-type TraceSingleFetchOptions = {
-  org: string;
-  traceId: string;
-  flags: ListFlags;
-};
-
 async function executeTraceSingleFetch(
-  options: TraceSingleFetchOptions
-): Promise<LogListResult> {
-  const { org, traceId, flags } = options;
+  org: string,
+  traceId: string,
+  flags: ListFlags
+): Promise<FetchResult> {
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
@@ -373,8 +372,7 @@ async function executeTraceSingleFetch(
 
   if (logs.length === 0) {
     return {
-      logs: [],
-      traceId,
+      result: { logs: [], traceId },
       hint:
         `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
@@ -387,13 +385,12 @@ async function executeTraceSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
-  return { logs: chronological, traceId, hint: `${countText}${tip}` };
+  return {
+    result: { logs: chronological, traceId },
+    hint: `${countText}${tip}`,
+  };
 }
 
-/**
- * Write the follow-mode banner via logger. Suppressed in JSON mode.
- * Includes poll interval, Ctrl+C hint, and update notification.
- */
 /**
  * Write the follow-mode banner via logger. Suppressed in JSON mode
  * to avoid stderr noise when agents consume JSONL output.
@@ -418,74 +415,67 @@ function writeFollowBanner(
 // Output formatting
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Stateful streaming table — module-level singleton, reset per follow run.
-// Safe because CLI processes are single-use (one invocation per process).
-// ---------------------------------------------------------------------------
-
-let streamingTable: StreamingTable | undefined;
-let streamingHeaderEmitted = false;
-
 /**
- * Reset the streaming table state. Called at the start of each follow-mode run.
+ * Create a stateful human renderer for log list output.
+ *
+ * The factory is called once per command invocation. The returned renderer
+ * tracks streaming table state (header emitted, table instance) and cleans
+ * up via `finalize()`.
+ *
+ * All yields go through `render()` — both single-fetch and follow mode.
+ * The renderer emits the table header on the first non-empty batch, rows
+ * per batch, and the table footer + hint via `finalize()`.
  */
-function resetStreamingState(): void {
+function createLogRenderer(): HumanRenderer<LogListResult> {
   const plain = isPlainOutput();
-  streamingTable = plain ? undefined : createLogStreamingTable();
-  streamingHeaderEmitted = false;
-}
+  const table: StreamingTable | undefined = plain
+    ? undefined
+    : createLogStreamingTable();
+  let headerEmitted = false;
 
-/**
- * Format log output as human-readable terminal text.
- *
- * - **Batch mode** (`streaming` absent/false): renders a complete table.
- * - **Streaming mode** (`streaming: true`): renders incremental rows using
- *   a stateful {@link StreamingTable}, including the header on first call.
- *
- * The returned string omits a trailing newline — the output framework
- * appends one automatically.
- */
-function formatLogOutput(result: LogListResult): string {
-  if (result.streaming) {
-    const includeTrace = !result.traceId;
-    let text = "";
-
-    if (result.logs.length === 0) {
-      // Empty batch signals end of stream — emit table footer
-      if (streamingTable && streamingHeaderEmitted) {
-        text += streamingTable.footer();
+  return {
+    render(result: LogListResult): string {
+      if (result.logs.length === 0) {
+        return "";
       }
+
+      const includeTrace = !result.traceId;
+      let text = "";
+
+      // Emit header on first non-empty batch
+      if (!headerEmitted) {
+        text += table ? table.header() : formatLogsHeader();
+        headerEmitted = true;
+      }
+
+      text += renderLogRows(result.logs, includeTrace, table);
       return text.trimEnd();
-    }
+    },
 
-    // Emit header on first non-empty batch
-    if (!streamingHeaderEmitted) {
-      text += streamingTable ? streamingTable.header() : formatLogsHeader();
-      streamingHeaderEmitted = true;
-    }
+    finalize(hint?: string): string {
+      let text = "";
 
-    text += renderLogRows(result.logs, includeTrace, streamingTable);
-    return text.trimEnd();
-  }
+      // Close the streaming table if header was emitted
+      if (headerEmitted && table) {
+        text += table.footer();
+      }
 
-  // Batch: complete table
-  if (result.logs.length === 0) {
-    return result.hint ?? "No logs found.";
-  }
-  const includeTrace = !result.traceId;
-  return formatLogTable(result.logs, includeTrace).trimEnd();
+      // Append hint (count, pagination, empty-state message)
+      if (hint) {
+        text += `${text ? "\n" : ""}${formatFooter(hint)}\n`;
+      }
+
+      return text;
+    },
+  };
 }
 
 /**
  * Transform log output into the JSON shape.
  *
- * - **Batch mode** (`streaming` absent/false): returns the full logs array.
- * - **Streaming mode** (`streaming: true`): returns individual log objects
- *   so the framework writes one JSON object per line (JSONL).
- *
- * When the result contains a single log entry in streaming mode, it's
- * returned unwrapped. Multiple entries return an array (each call from
- * the wrapper writes one line to stdout).
+ * - **Single-fetch** (`jsonl` absent/false): returns a JSON array.
+ * - **Follow mode** (`jsonl: true`): returns JSONL-wrapped objects
+ *   so the framework writes one JSON line per log entry.
  */
 function jsonTransformLogOutput(
   result: LogListResult,
@@ -494,16 +484,12 @@ function jsonTransformLogOutput(
   const applyFields = (log: LogLike) =>
     fields && fields.length > 0 ? filterFields(log, fields) : log;
 
-  if (result.streaming) {
-    // Streaming: expand to JSONL (one JSON object per line)
-    if (result.logs.length === 0) {
-      return;
-    }
-    return jsonlLines(result.logs.map(applyFields));
+  if (result.logs.length === 0) {
+    return;
   }
 
-  // Batch: return full array
-  return result.logs.map(applyFields);
+  const mapped = result.logs.map(applyFields);
+  return result.jsonl ? jsonlLines(mapped) : mapped;
 }
 
 export const listCommand = buildListCommand("log", {
@@ -530,7 +516,7 @@ export const listCommand = buildListCommand("log", {
   },
   output: {
     json: true,
-    human: stateless(formatLogOutput),
+    human: createLogRenderer,
     jsonTransform: jsonTransformLogOutput,
   },
   parameters: {
@@ -602,7 +588,6 @@ export const listCommand = buildListCommand("log", {
       if (flags.follow) {
         const traceId = flags.trace;
 
-        resetStreamingState();
         // Banner (suppressed in JSON mode)
         writeFollowBanner(
           flags.follow ?? DEFAULT_POLL_INTERVAL,
@@ -647,14 +632,11 @@ export const listCommand = buildListCommand("log", {
         return;
       }
 
-      const result = await executeTraceSingleFetch({
+      const { result, hint } = await executeTraceSingleFetch(
         org,
-        traceId: flags.trace,
-        flags,
-      });
-      // Only forward hint to the footer when items exist — empty results
-      // already render hint text inside the human formatter.
-      const hint = result.logs.length > 0 ? result.hint : undefined;
+        flags.trace,
+        flags
+      );
       yield commandOutput(result);
       return { hint };
     }
@@ -670,7 +652,6 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
-        resetStreamingState();
         writeFollowBanner(
           flags.follow ?? DEFAULT_POLL_INTERVAL,
           "Streaming logs...",
@@ -694,14 +675,7 @@ export const listCommand = buildListCommand("log", {
         return;
       }
 
-      const result = await executeSingleFetch({
-        org,
-        project,
-        flags,
-      });
-      // Only forward hint to the footer when items exist — empty results
-      // already render hint text inside the human formatter.
-      const hint = result.logs.length > 0 ? result.hint : undefined;
+      const { result, hint } = await executeSingleFetch(org, project, flags);
       yield commandOutput(result);
       return { hint };
     }
