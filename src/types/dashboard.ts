@@ -565,23 +565,3 @@ export function stripWidgetServerFields(
 
   return cleaned;
 }
-
-/**
- * Prepare a full dashboard for PUT update.
- * Strips server-generated fields from all widgets while preserving
- * widgetType, displayType, and layout.
- *
- * @param dashboard - Dashboard detail from GET response
- * @returns Object with title and cleaned widgets, ready for PUT body
- */
-export function prepareDashboardForUpdate(dashboard: DashboardDetail): {
-  title: string;
-  widgets: DashboardWidget[];
-  projects?: number[];
-} {
-  return {
-    title: dashboard.title,
-    widgets: (dashboard.widgets ?? []).map(stripWidgetServerFields),
-    projects: dashboard.projects,
-  };
-}
