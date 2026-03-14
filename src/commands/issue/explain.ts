@@ -7,6 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ApiError } from "../../lib/errors.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   formatRootCauseList,
   handleSeerApiError,
@@ -58,7 +59,7 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
-  output: { json: true, human: formatRootCauseList },
+  output: { human: stateless(formatRootCauseList) },
   parameters: {
     positional: issueIdPositional,
     flags: {
@@ -71,7 +72,7 @@ export const explainCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ExplainFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -104,10 +105,8 @@ export const explainCommand = buildCommand({
         );
       }
 
-      return {
-        data: causes,
-        hint: `To create a plan, run: sentry issue plan ${issueArg}`,
-      };
+      yield new CommandOutput(causes);
+      return { hint: `To create a plan, run: sentry issue plan ${issueArg}` };
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -17,13 +17,15 @@ import {
   createLogStreamingTable,
   formatLogRow,
   formatLogsHeader,
-  formatLogTable,
   isPlainOutput,
-  writeJson,
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
-import type { CommandOutput } from "../../lib/formatters/output.js";
+import {
+  CommandOutput,
+  formatFooter,
+  type HumanRenderer,
+} from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
   applyFreshFlag,
@@ -31,13 +33,13 @@ import {
   FRESH_FLAG,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   resolveOrg,
   resolveOrgProjectFromArg,
 } from "../../lib/resolve-target.js";
 import { validateTraceId } from "../../lib/trace-id.js";
 import { getUpdateNotification } from "../../lib/version-check.js";
-import type { Writer } from "../../types/index.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -49,11 +51,15 @@ type ListFlags = {
   readonly fields?: string[];
 };
 
-/** Result for non-follow log list operations. */
+/**
+ * Result yielded by the log list command — one per batch.
+ *
+ * Both single-fetch and follow mode yield the same type. The human
+ * renderer always renders incrementally (header on first non-empty
+ * batch, rows per batch, footer via `finalize()`).
+ */
 type LogListResult = {
   logs: LogLike[];
-  /** Human-readable hint (e.g., "Showing 100 logs. Use --limit to show more.") */
-  hint?: string;
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
 };
@@ -102,6 +108,10 @@ function parseFollow(value: string): number {
  * needed for table rendering and follow-mode dedup tracking.
  */
 type LogLike = {
+  /** Unique log entry ID — used for dedup in trace follow mode.
+   * TraceLog uses `id`, SentryLog uses `sentry.item_id` (via passthrough).
+   * Present on TraceLog which is the only type used in follow mode dedup. */
+  id?: string;
   timestamp: string;
   /** Nanosecond-precision timestamp used for dedup in follow mode.
    * Optional because TraceLog may omit it when the API response doesn't include it. */
@@ -111,60 +121,23 @@ type LogLike = {
   trace?: string | null;
 };
 
-type WriteLogsOptions = {
-  stdout: Writer;
-  logs: LogLike[];
-  asJson: boolean;
-  table?: StreamingTable;
-  /** Whether to append a short trace-ID suffix (default: true) */
-  includeTrace?: boolean;
-  /** Optional field paths to include in JSON output */
-  fields?: string[];
+/** Result from a single fetch: logs to yield + hint for the footer. */
+type FetchResult = {
+  result: LogListResult;
+  hint: string;
 };
-
-/**
- * Write logs to output in the appropriate format.
- *
- * When a StreamingTable is provided (TTY mode), renders rows through the
- * bordered table. Otherwise falls back to plain markdown rows.
- */
-function writeLogs(options: WriteLogsOptions): void {
-  const { stdout, logs, asJson, table, includeTrace = true, fields } = options;
-  if (asJson) {
-    for (const log of logs) {
-      writeJson(stdout, log, fields);
-    }
-  } else if (table) {
-    for (const log of logs) {
-      stdout.write(
-        table.row(
-          buildLogRowCells(log, true, includeTrace).map(renderInlineMarkdown)
-        )
-      );
-    }
-  } else {
-    for (const log of logs) {
-      stdout.write(formatLogRow(log, includeTrace));
-    }
-  }
-}
 
 /**
  * Execute a single fetch of logs (non-streaming mode).
  *
- * Returns the fetched logs and a human-readable hint. The caller
- * (via the output config) handles rendering to stdout.
+ * Returns the logs and a hint. The caller yields the result and
+ * returns the hint as a footer via `CommandReturn`.
  */
-type SingleFetchOptions = {
-  org: string;
-  project: string;
-  flags: ListFlags;
-};
-
 async function executeSingleFetch(
-  options: SingleFetchOptions
-): Promise<LogListResult> {
-  const { org, project, flags } = options;
+  org: string,
+  project: string,
+  flags: ListFlags
+): Promise<FetchResult> {
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
@@ -172,7 +145,7 @@ async function executeSingleFetch(
   });
 
   if (logs.length === 0) {
-    return { logs: [], hint: "No logs found." };
+    return { result: { logs: [] }, hint: "No logs found." };
   }
 
   // Reverse for chronological order (API returns newest first, tail shows oldest first)
@@ -182,23 +155,49 @@ async function executeSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
-  return { logs: chronological, hint: `${countText}${tip}` };
+  return { result: { logs: chronological }, hint: `${countText}${tip}` };
+}
+
+// ---------------------------------------------------------------------------
+// Streaming follow-mode infrastructure
+// ---------------------------------------------------------------------------
+
+/**
+ * Sleep that resolves early when an AbortSignal fires.
+ * Resolves (not rejects) on abort for clean generator shutdown.
+ */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
- * Configuration for the unified follow-mode loop.
+ * Configuration for the follow-mode async generator.
  *
  * Parameterized over the log type to handle both project-scoped
  * (`SentryLog`) and trace-scoped (`TraceLog`) streaming.
+ *
+ * Unlike the old callback-based approach, this does NOT include
+ * stdout/stderr. All stdout output flows through yielded chunks;
+ * diagnostics are reported via the `onDiagnostic` callback.
  */
-type FollowConfig<T extends LogLike> = {
-  stdout: Writer;
-  stderr: Writer;
+type FollowGeneratorConfig<T extends LogLike> = {
   flags: ListFlags;
-  /** Text for the stderr banner (e.g., "Streaming logs…") */
-  bannerText: string;
-  /** Whether to show the trace-ID column in table output */
-  includeTrace: boolean;
+  /** Report diagnostic/error messages (caller logs via logger) */
+  onDiagnostic: (message: string) => void;
   /**
    * Fetch logs with the given time window.
    * @param statsPeriod - Time window (e.g., "1m" for initial, "10m" for polls)
@@ -215,147 +214,141 @@ type FollowConfig<T extends LogLike> = {
   onInitialLogs?: (logs: T[]) => void;
 };
 
+/** Find the highest timestamp_precise in a batch, or undefined if none have it. */
+function maxTimestamp(logs: LogLike[]): number | undefined {
+  let max: number | undefined;
+  for (const l of logs) {
+    if (l.timestamp_precise !== undefined) {
+      max =
+        max === undefined
+          ? l.timestamp_precise
+          : Math.max(max, l.timestamp_precise);
+    }
+  }
+  return max;
+}
+
 /**
- * Execute streaming mode (--follow flag).
+ * Render a batch of log rows as a human-readable string.
  *
- * Uses `setTimeout`-based recursive scheduling so that SIGINT can
- * cleanly cancel the pending timer and resolve the returned promise
- * without `process.exit()`.
+ * When a StreamingTable is provided (TTY mode), renders rows through the
+ * bordered table. Otherwise falls back to plain markdown rows.
  */
-function executeFollowMode<T extends LogLike>(
-  config: FollowConfig<T>
-): Promise<void> {
-  const { stdout, stderr, flags } = config;
+function renderLogRows(
+  logs: LogLike[],
+  includeTrace: boolean,
+  table?: StreamingTable
+): string {
+  let text = "";
+  for (const log of logs) {
+    if (table) {
+      text += table.row(
+        buildLogRowCells(log, true, includeTrace).map(renderInlineMarkdown)
+      );
+    } else {
+      text += formatLogRow(log, includeTrace);
+    }
+  }
+  return text;
+}
+
+/**
+ * Execute a single poll iteration in follow mode.
+ *
+ * Returns the new logs, or `undefined` if a transient error occurred
+ * (reported via `onDiagnostic`). Re-throws {@link AuthError}.
+ */
+async function fetchPoll<T extends LogLike>(
+  config: FollowGeneratorConfig<T>,
+  lastTimestamp: number
+): Promise<T[] | undefined> {
+  try {
+    const rawLogs = await config.fetch("10m", lastTimestamp);
+    return config.extractNew(rawLogs, lastTimestamp);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    Sentry.captureException(error);
+    const message = stringifyUnknown(error);
+    config.onDiagnostic(`Error fetching logs: ${message}\n`);
+    return;
+  }
+}
+
+/**
+ * Async generator that streams log entries via follow-mode polling.
+ *
+ * Yields batches of log entries (chronological order). The command wraps
+ * each batch in a `LogListResult` so the OutputConfig formatters can
+ * handle incremental rendering and JSONL expansion.
+ *
+ * The generator handles SIGINT via AbortController for clean shutdown.
+ * It never touches stdout — all data output flows through yielded batches
+ * and diagnostics use the `onDiagnostic` callback.
+ *
+ * @throws {AuthError} if the API returns an authentication error
+ */
+async function* generateFollowLogs<T extends LogLike>(
+  config: FollowGeneratorConfig<T>
+): AsyncGenerator<T[], void, undefined> {
+  const { flags } = config;
   const pollInterval = flags.follow ?? DEFAULT_POLL_INTERVAL;
   const pollIntervalMs = pollInterval * 1000;
 
-  if (!flags.json) {
-    stderr.write(`${config.bannerText} (poll interval: ${pollInterval}s)\n`);
-    stderr.write("Press Ctrl+C to stop.\n");
-
-    const notification = getUpdateNotification();
-    if (notification) {
-      stderr.write(notification);
-    }
-    stderr.write("\n");
-  }
-
-  const plain = flags.json || isPlainOutput();
-  const table = plain ? undefined : createLogStreamingTable();
-
-  let headerPrinted = false;
   // timestamp_precise is nanoseconds; Date.now() is milliseconds → convert
   let lastTimestamp = Date.now() * 1_000_000;
-  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
-  let stopped = false;
 
-  return new Promise<void>((resolve, reject) => {
-    function stop() {
-      stopped = true;
-      if (pendingTimer !== null) {
-        clearTimeout(pendingTimer);
-        pendingTimer = null;
-      }
-      if (table) {
-        stdout.write(table.footer());
-      }
-      resolve();
+  // AbortController for clean SIGINT handling
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once("SIGINT", stop);
+
+  try {
+    // Initial fetch
+    const initialLogs = await config.fetch("1m");
+    if (initialLogs.length > 0) {
+      yield [...initialLogs].reverse();
     }
+    lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
+    config.onInitialLogs?.(initialLogs);
 
-    process.once("SIGINT", stop);
-
-    function scheduleNextPoll() {
-      if (stopped) {
-        return;
-      }
-      pendingTimer = setTimeout(poll, pollIntervalMs);
-    }
-
-    /** Find the highest timestamp_precise in a batch, or undefined if none have it. */
-    function maxTimestamp(logs: T[]): number | undefined {
-      let max: number | undefined;
-      for (const l of logs) {
-        if (l.timestamp_precise !== undefined) {
-          max =
-            max === undefined
-              ? l.timestamp_precise
-              : Math.max(max, l.timestamp_precise);
-        }
-      }
-      return max;
-    }
-
-    function writeNewLogs(newLogs: T[]) {
-      if (newLogs.length === 0) {
-        return;
+    // Poll loop — exits when SIGINT fires
+    while (!controller.signal.aborted) {
+      await abortableSleep(pollIntervalMs, controller.signal);
+      if (controller.signal.aborted) {
+        break;
       }
 
-      if (!(flags.json || headerPrinted)) {
-        stdout.write(table ? table.header() : formatLogsHeader());
-        headerPrinted = true;
-      }
-      const chronological = [...newLogs].reverse();
-      writeLogs({
-        stdout,
-        logs: chronological,
-        asJson: flags.json,
-        table,
-        includeTrace: config.includeTrace,
-        fields: config.flags.fields,
-      });
-      lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
-    }
-
-    async function poll() {
-      pendingTimer = null;
-      if (stopped) {
-        return;
-      }
-      try {
-        const rawLogs = await config.fetch("10m", lastTimestamp);
-        const newLogs = config.extractNew(rawLogs, lastTimestamp);
-        writeNewLogs(newLogs);
-        scheduleNextPoll();
-      } catch (error) {
-        if (error instanceof AuthError) {
-          process.removeListener("SIGINT", stop);
-          reject(error);
-          return;
-        }
-        Sentry.captureException(error);
-        const message = stringifyUnknown(error);
-        stderr.write(`Error fetching logs: ${message}\n`);
-        scheduleNextPoll();
+      const newLogs = await fetchPoll(config, lastTimestamp);
+      if (newLogs && newLogs.length > 0) {
+        yield [...newLogs].reverse();
+        lastTimestamp = maxTimestamp(newLogs) ?? lastTimestamp;
       }
     }
+  } finally {
+    process.removeListener("SIGINT", stop);
+  }
+}
 
-    // Fire-and-forget: we cannot `await` here because `resolve` must
-    // remain callable by the SIGINT handler (`stop`) at any time.
-    config
-      .fetch("1m")
-      .then((initialLogs) => {
-        if (!flags.json && initialLogs.length > 0) {
-          stdout.write(table ? table.header() : formatLogsHeader());
-          headerPrinted = true;
-        }
-        const chronological = [...initialLogs].reverse();
-        writeLogs({
-          stdout,
-          logs: chronological,
-          asJson: flags.json,
-          table,
-          includeTrace: config.includeTrace,
-          fields: config.flags.fields,
-        });
-        lastTimestamp = maxTimestamp(initialLogs) ?? lastTimestamp;
-        config.onInitialLogs?.(initialLogs);
-        scheduleNextPoll();
-      })
-      .catch((error: unknown) => {
-        process.removeListener("SIGINT", stop);
-        reject(error);
-      });
-  });
+/**
+ * Consume a follow-mode generator, yielding each log individually.
+ *
+ * In JSON mode each yield becomes one JSONL line. In human mode the
+ * stateful renderer accumulates rows into the streaming table.
+ *
+ * The generator returns when SIGINT fires — the wrapper's `finalize()`
+ * callback handles closing the streaming table.
+ */
+async function* yieldFollowBatches<T extends LogLike>(
+  generator: AsyncGenerator<T[], void, undefined>,
+  extra?: Partial<LogListResult>
+): AsyncGenerator<unknown, void, undefined> {
+  for await (const batch of generator) {
+    for (const item of batch) {
+      yield new CommandOutput({ logs: [item], ...extra });
+    }
+  }
 }
 
 /** Default time period for trace-logs queries */
@@ -368,16 +361,11 @@ const DEFAULT_TRACE_PERIOD = "14d";
  * Returns the fetched logs, trace ID, and a human-readable hint.
  * The caller (via the output config) handles rendering to stdout.
  */
-type TraceSingleFetchOptions = {
-  org: string;
-  traceId: string;
-  flags: ListFlags;
-};
-
 async function executeTraceSingleFetch(
-  options: TraceSingleFetchOptions
-): Promise<LogListResult> {
-  const { org, traceId, flags } = options;
+  org: string,
+  traceId: string,
+  flags: ListFlags
+): Promise<FetchResult> {
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
     limit: flags.limit,
@@ -386,8 +374,7 @@ async function executeTraceSingleFetch(
 
   if (logs.length === 0) {
     return {
-      logs: [],
-      traceId,
+      result: { logs: [], traceId },
       hint:
         `No logs found for trace ${traceId} in the last ${DEFAULT_TRACE_PERIOD}.\n\n` +
         "Try 'sentry trace logs' for more options (e.g., --period 30d).",
@@ -400,7 +387,30 @@ async function executeTraceSingleFetch(
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
-  return { logs: chronological, traceId, hint: `${countText}${tip}` };
+  return {
+    result: { logs: chronological, traceId },
+    hint: `${countText}${tip}`,
+  };
+}
+
+/**
+ * Write the follow-mode banner via logger. Suppressed in JSON mode
+ * to avoid stderr noise when agents consume JSONL output.
+ */
+function writeFollowBanner(
+  pollInterval: number,
+  bannerText: string,
+  json: boolean
+): void {
+  if (json) {
+    return;
+  }
+  logger.info(`${bannerText} (poll interval: ${pollInterval}s)`);
+  logger.info("Press Ctrl+C to stop.");
+  const notification = getUpdateNotification();
+  if (notification) {
+    logger.info(notification);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,39 +418,83 @@ async function executeTraceSingleFetch(
 // ---------------------------------------------------------------------------
 
 /**
- * Format a {@link LogListResult} as human-readable terminal output.
+ * Create a stateful human renderer for log list output.
  *
- * Handles three cases:
- * - Empty logs → return the hint text (e.g., "No logs found.")
- * - Trace-filtered logs → table without trace-ID column
- * - Standard logs → table with trace-ID column
+ * The factory is called once per command invocation. The returned renderer
+ * tracks streaming table state (header emitted, table instance) and cleans
+ * up via `finalize()`.
  *
- * The returned string omits a trailing newline — the output framework
- * appends one automatically.
+ * All yields go through `render()` — both single-fetch and follow mode.
+ * The renderer emits the table header on the first non-empty batch, rows
+ * per batch, and the table footer + hint via `finalize()`.
  */
-function formatLogListHuman(result: LogListResult): string {
-  if (result.logs.length === 0) {
-    return result.hint ?? "No logs found.";
-  }
+function createLogRenderer(): HumanRenderer<LogListResult> {
+  const plain = isPlainOutput();
+  const table: StreamingTable | undefined = plain
+    ? undefined
+    : createLogStreamingTable();
+  let headerEmitted = false;
 
-  const includeTrace = !result.traceId;
-  return formatLogTable(result.logs, includeTrace).trimEnd();
+  return {
+    render(result: LogListResult): string {
+      if (result.logs.length === 0) {
+        return "";
+      }
+
+      const includeTrace = !result.traceId;
+      let text = "";
+
+      // Emit header on first non-empty batch
+      if (!headerEmitted) {
+        text += table ? table.header() : formatLogsHeader();
+        headerEmitted = true;
+      }
+
+      text += renderLogRows(result.logs, includeTrace, table);
+      return text.trimEnd();
+    },
+
+    finalize(hint?: string): string {
+      let text = "";
+
+      // Close the streaming table if header was emitted
+      if (headerEmitted && table) {
+        text += table.footer();
+      }
+
+      if (hint) {
+        if (headerEmitted) {
+          // Logs were rendered — show hint as a muted footer
+          text += `${text ? "\n" : ""}${formatFooter(hint)}`;
+        } else {
+          // No logs rendered — show hint as primary output (e.g., "No logs found.")
+          text += `${hint}\n`;
+        }
+      }
+
+      return text;
+    },
+  };
 }
 
 /**
- * Transform a {@link LogListResult} into the JSON output shape.
+ * Transform log output into the JSON shape.
  *
- * Returns the logs array directly (no wrapper envelope).
- * Applies per-element field filtering when `--fields` is provided.
+ * Each yielded batch is written as a JSON array. In follow mode,
+ * each batch is a short array (one poll result); in single-fetch mode
+ * it's the full result set. Empty batches are suppressed.
  */
-function jsonTransformLogList(
+function jsonTransformLogOutput(
   result: LogListResult,
   fields?: string[]
 ): unknown {
-  if (fields && fields.length > 0) {
-    return result.logs.map((log) => filterFields(log, fields));
+  if (result.logs.length === 0) {
+    return;
   }
-  return result.logs;
+
+  return fields && fields.length > 0
+    ? result.logs.map((log) => filterFields(log, fields))
+    : result.logs;
 }
 
 export const listCommand = buildListCommand("log", {
@@ -466,9 +520,8 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
   },
   output: {
-    json: true,
-    human: formatLogListHuman,
-    jsonTransform: jsonTransformLogList,
+    human: createLogRenderer,
+    jsonTransform: jsonTransformLogOutput,
   },
   parameters: {
     positional: {
@@ -516,12 +569,7 @@ export const listCommand = buildListCommand("log", {
       f: "follow",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-    // biome-ignore lint/suspicious/noConfusingVoidType: void for follow-mode paths that write directly to stdout
-  ): Promise<CommandOutput<LogListResult> | void> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -542,17 +590,21 @@ export const listCommand = buildListCommand("log", {
       setContext([org], []);
 
       if (flags.follow) {
-        const { stdout, stderr } = this;
         const traceId = flags.trace;
+
+        // Banner (suppressed in JSON mode)
+        writeFollowBanner(
+          flags.follow ?? DEFAULT_POLL_INTERVAL,
+          `Streaming logs for trace ${traceId}...`,
+          flags.json
+        );
+
         // Track IDs of logs seen without timestamp_precise so they are
         // shown once but not duplicated on subsequent polls.
         const seenWithoutTs = new Set<string>();
-        await executeFollowMode({
-          stdout,
-          stderr,
+        const generator = generateFollowLogs({
           flags,
-          bannerText: `Streaming logs for trace ${traceId}...`,
-          includeTrace: false,
+          onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod) =>
             listTraceLogs(org, traceId, {
               query: flags.query,
@@ -579,18 +631,18 @@ export const listCommand = buildListCommand("log", {
             }
           },
         });
-        return; // void — follow mode writes directly
+
+        yield* yieldFollowBatches(generator, { traceId });
+        return;
       }
 
-      const result = await executeTraceSingleFetch({
+      const { result, hint } = await executeTraceSingleFetch(
         org,
-        traceId: flags.trace,
-        flags,
-      });
-      // Only forward hint to the footer when items exist — empty results
-      // already render hint text inside the human formatter.
-      const hint = result.logs.length > 0 ? result.hint : undefined;
-      return { data: result, hint };
+        flags.trace,
+        flags
+      );
+      yield new CommandOutput(result);
+      return { hint };
     }
 
     // Standard project-scoped mode — kept in else-like block to avoid
@@ -604,13 +656,15 @@ export const listCommand = buildListCommand("log", {
       setContext([org], [project]);
 
       if (flags.follow) {
-        const { stdout, stderr } = this;
-        await executeFollowMode({
-          stdout,
-          stderr,
+        writeFollowBanner(
+          flags.follow ?? DEFAULT_POLL_INTERVAL,
+          "Streaming logs...",
+          flags.json
+        );
+
+        const generator = generateFollowLogs({
           flags,
-          bannerText: "Streaming logs...",
-          includeTrace: true,
+          onDiagnostic: (msg) => logger.warn(msg),
           fetch: (statsPeriod, afterTimestamp) =>
             listLogs(org, project, {
               query: flags.query,
@@ -620,18 +674,14 @@ export const listCommand = buildListCommand("log", {
             }),
           extractNew: (logs) => logs,
         });
-        return; // void — follow mode writes directly
+
+        yield* yieldFollowBatches(generator);
+        return;
       }
 
-      const result = await executeSingleFetch({
-        org,
-        project,
-        flags,
-      });
-      // Only forward hint to the footer when items exist — empty results
-      // already render hint text inside the human formatter.
-      const hint = result.logs.length > 0 ? result.hint : undefined;
-      return { data: result, hint };
+      const { result, hint } = await executeSingleFetch(org, project, flags);
+      yield new CommandOutput(result);
+      return { hint };
     }
   },
 });

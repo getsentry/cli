@@ -31,6 +31,7 @@ import {
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
@@ -417,7 +418,7 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
       "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
-  output: { json: true, human: formatUpgradeResult },
+  output: { human: stateless(formatUpgradeResult) },
   parameters: {
     positional: {
       kind: "tuple",
@@ -451,7 +452,7 @@ export const upgradeCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: UpgradeFlags, version?: string) {
+  async *func(this: SentryContext, flags: UpgradeFlags, version?: string) {
     // Resolve effective channel and version from positional
     const { channel, versionArg } = resolveChannelAndVersion(version);
 
@@ -493,7 +494,8 @@ export const upgradeCommand = buildCommand({
       flags,
     });
     if (resolved.kind === "done") {
-      return { data: resolved.result };
+      yield new CommandOutput(resolved.result);
+      return;
     }
 
     const { target } = resolved;
@@ -509,17 +511,16 @@ export const upgradeCommand = buildCommand({
         target,
         versionArg
       );
-      return {
-        data: {
-          action: downgrade ? "downgraded" : "upgraded",
-          currentVersion: CLI_VERSION,
-          targetVersion: target,
-          channel,
-          method,
-          forced: flags.force,
-          warnings,
-        } satisfies UpgradeResult,
-      };
+      yield new CommandOutput({
+        action: downgrade ? "downgraded" : "upgraded",
+        currentVersion: CLI_VERSION,
+        targetVersion: target,
+        channel,
+        method,
+        forced: flags.force,
+        warnings,
+      } satisfies UpgradeResult);
+      return;
     }
 
     await executeStandardUpgrade({
@@ -530,15 +531,14 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    return {
-      data: {
-        action: downgrade ? "downgraded" : "upgraded",
-        currentVersion: CLI_VERSION,
-        targetVersion: target,
-        channel,
-        method,
-        forced: flags.force,
-      } satisfies UpgradeResult,
-    };
+    yield new CommandOutput({
+      action: downgrade ? "downgraded" : "upgraded",
+      currentVersion: CLI_VERSION,
+      targetVersion: target,
+      channel,
+      method,
+      forced: flags.force,
+    } satisfies UpgradeResult);
+    return;
   },
 });

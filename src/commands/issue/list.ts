@@ -38,13 +38,13 @@ import {
 } from "../../lib/errors.js";
 import {
   type IssueTableRow,
-  muted,
   shouldAutoCompact,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
-import type {
+import {
   CommandOutput,
-  OutputConfig,
+  type OutputConfig,
+  stateless,
 } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -57,6 +57,7 @@ import {
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -871,7 +872,6 @@ async function handleOrgAllIssues(
 
 /** Options for {@link handleResolvedTargets}. */
 type ResolvedTargetsOptions = {
-  stderr: Writer;
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
@@ -890,7 +890,7 @@ type ResolvedTargetsOptions = {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { stderr, parsed, flags, cwd, setContext } = options;
+  const { parsed, flags, cwd, setContext } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, cwd);
@@ -1094,10 +1094,8 @@ async function handleResolvedTargets(
     const failedNames = failures
       .map(({ target: t }) => `${t.org}/${t.project}`)
       .join(", ");
-    stderr.write(
-      muted(
-        `\nNote: Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).\n`
-      )
+    logger.warn(
+      `Failed to fetch issues from ${failedNames}. Showing results from ${validResults.length} project(s).`
     );
   }
 
@@ -1243,8 +1241,7 @@ const jsonTransformIssueList = jsonTransformListResult;
 
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
-  json: true,
-  human: formatIssueListHuman,
+  human: stateless(formatIssueListHuman),
   jsonTransform: jsonTransformIssueList,
 };
 
@@ -1316,13 +1313,9 @@ export const listCommand = buildListCommand("issue", {
       t: "period",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<IssueListResult>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
-    const { stdout, stderr, cwd, setContext } = this;
+    const { cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);
 
@@ -1345,13 +1338,11 @@ export const listCommand = buildListCommand("issue", {
       handleResolvedTargets({
         ...ctx,
         flags,
-        stderr,
         setContext,
       });
 
     const result = (await dispatchOrgScopedList({
       config: issueListMeta,
-      stdout,
       cwd,
       flags,
       parsed,
@@ -1385,6 +1376,7 @@ export const listCommand = buildListCommand("issue", {
       combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
     }
 
-    return { data: result, hint: combinedHint };
+    yield new CommandOutput(result);
+    return { hint: combinedHint };
   },
 });

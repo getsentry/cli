@@ -9,6 +9,7 @@ import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ApiError, ValidationError } from "../../lib/errors.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   formatSolution,
   handleSeerApiError,
@@ -170,8 +171,7 @@ export const planCommand = buildCommand({
       "  sentry issue plan 123456789 --force",
   },
   output: {
-    json: true,
-    human: formatPlanOutput,
+    human: stateless(formatPlanOutput),
   },
   parameters: {
     positional: issueIdPositional,
@@ -191,7 +191,7 @@ export const planCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: PlanFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: PlanFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -225,7 +225,8 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          return { data: buildPlanData(state) };
+          yield new CommandOutput(buildPlanData(state));
+          return;
         }
       }
 
@@ -260,7 +261,8 @@ export const planCommand = buildCommand({
         throw new Error("Plan creation was cancelled.");
       }
 
-      return { data: buildPlanData(finalState) };
+      yield new CommandOutput(buildPlanData(finalState));
+      return;
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

@@ -321,7 +321,8 @@ describe("trial start plan", () => {
     const func = await startCommand.loader();
     await func.call(context, { json: false }, "plan");
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    // URL and QR code go through commandOutput → context stdout
+    const output = stdoutWrite.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("billing");
     expect(output).toContain("test-org");
   });
@@ -337,7 +338,8 @@ describe("trial start plan", () => {
     await func.call(context, { json: false }, "plan");
 
     expect(generateQRCodeSpy).toHaveBeenCalled();
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    // QR code goes through commandOutput → context stdout
+    const output = stdoutWrite.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("[QR CODE]");
   });
 
@@ -410,8 +412,8 @@ describe("trial start plan", () => {
     const func = await startCommand.loader();
     await func.call(context, { json: false }, "plan");
 
-    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    // The log.info message goes to stderr via consola, but the URL goes to stdout
+    // URL goes through commandOutput → context stdout
+    const output = stdoutWrite.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("billing");
   });
 });

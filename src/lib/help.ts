@@ -7,7 +7,6 @@
  */
 
 import { routes } from "../app.js";
-import type { Writer } from "../types/index.js";
 import { formatBanner } from "./banner.js";
 import { isAuthenticated } from "./db/auth.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
@@ -154,12 +153,10 @@ function formatCommands(commands: HelpCommand[]): string {
 }
 
 /**
- * Print the custom branded help output.
+ * Build the custom branded help output string.
  * Shows a contextual example based on authentication status.
- *
- * @param stdout - Writer to output help text
  */
-export async function printCustomHelp(stdout: Writer): Promise<void> {
+export async function printCustomHelp(): Promise<string> {
   const loggedIn = await isAuthenticated();
   const example = loggedIn ? EXAMPLE_LOGGED_IN : EXAMPLE_LOGGED_OUT;
 
@@ -187,5 +184,5 @@ export async function printCustomHelp(stdout: Writer): Promise<void> {
   lines.push("");
   lines.push("");
 
-  stdout.write(lines.join("\n"));
+  return lines.join("\n");
 }

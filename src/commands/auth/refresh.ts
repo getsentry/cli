@@ -15,6 +15,7 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 
 type RefreshFlags = {
   readonly json: boolean;
@@ -58,7 +59,7 @@ Examples:
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
     `.trim(),
   },
-  output: { json: true, human: formatRefreshResult },
+  output: { human: stateless(formatRefreshResult) },
   parameters: {
     flags: {
       force: {
@@ -68,7 +69,7 @@ Examples:
       },
     },
   },
-  async func(this: SentryContext, flags: RefreshFlags) {
+  async *func(this: SentryContext, flags: RefreshFlags) {
     // Env var tokens can't be refreshed
     if (isEnvTokenActive()) {
       const envVar = getActiveEnvVarName();
@@ -104,6 +105,7 @@ Examples:
         : undefined,
     };
 
-    return { data: payload };
+    yield new CommandOutput(payload);
+    return;
   },
 });
