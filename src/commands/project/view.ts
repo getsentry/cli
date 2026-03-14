@@ -15,7 +15,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { divider, formatProjectDetails } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -186,7 +186,6 @@ export const viewCommand = buildCommand({
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
   output: {
-    json: true,
     human: stateless(formatProjectViewHuman),
     jsonExclude: ["detectedFrom"],
   },
@@ -295,7 +294,7 @@ export const viewCommand = buildCommand({
       detectedFrom: targets[i]?.detectedFrom,
     }));
 
-    yield commandOutput(entries);
+    yield new CommandOutput(entries);
     return { hint: footer };
   },
 });

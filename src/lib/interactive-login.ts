@@ -105,9 +105,6 @@ export async function runInteractiveLogin(
             );
           }
         },
-        onPolling: () => {
-          // Spinner handles the visual feedback — no-op here
-        },
       },
       timeout
     );

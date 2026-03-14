@@ -22,7 +22,7 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
-  commandOutput,
+  CommandOutput,
   formatFooter,
   type HumanRenderer,
 } from "../../lib/formatters/output.js";
@@ -346,7 +346,7 @@ async function* yieldFollowBatches<T extends LogLike>(
 ): AsyncGenerator<unknown, void, undefined> {
   for await (const batch of generator) {
     for (const item of batch) {
-      yield commandOutput({ logs: [item], ...extra });
+      yield new CommandOutput({ logs: [item], ...extra });
     }
   }
 }
@@ -520,7 +520,6 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
   },
   output: {
-    json: true,
     human: createLogRenderer,
     jsonTransform: jsonTransformLogOutput,
   },
@@ -642,7 +641,7 @@ export const listCommand = buildListCommand("log", {
         flags.trace,
         flags
       );
-      yield commandOutput(result);
+      yield new CommandOutput(result);
       return { hint };
     }
 
@@ -681,7 +680,7 @@ export const listCommand = buildListCommand("log", {
       }
 
       const { result, hint } = await executeSingleFetch(org, project, flags);
-      yield commandOutput(result);
+      yield new CommandOutput(result);
       return { hint };
     }
   },

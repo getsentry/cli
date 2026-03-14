@@ -11,16 +11,16 @@
  *    writeOutput(stdout, data, { json, formatHuman, hint });
  *    ```
  *
- * 2. **Return-based** — declare formatting in {@link OutputConfig} on
- *    `buildCommand`, then return bare data from `func`:
+ * 2. **Yield-based** — declare formatting in {@link OutputConfig} on
+ *    `buildCommand`, then yield data from the generator:
  *    ```ts
  *    buildCommand({
- *      output: { json: true, human: fn },
- *      func() { return data; },
+ *      output: { human: stateless(formatUser) },
+ *      async *func() { yield new CommandOutput(data); },
  *    })
  *    ```
  *    The wrapper reads `json`/`fields` from flags and applies formatting
- *    automatically. Commands return `{ data }` or `{ data, hint }` objects.
+ *    automatically. Generators return `{ hint }` for footer text.
  *
  * Both modes serialize the same data object to JSON and pass it to
  * `formatHuman` — there is no divergent-data path.
@@ -94,7 +94,6 @@ export type HumanRenderer<T> = {
  * @example
  * ```ts
  * output: {
- *   json: true,
  *   human: stateless(formatMyData),
  * }
  * ```
@@ -106,27 +105,15 @@ export function stateless<T>(fn: (data: T) => string): () => HumanRenderer<T> {
 /**
  * Output configuration declared on `buildCommand` for automatic rendering.
  *
- * Two forms:
+ * When present, `--json` and `--fields` flags are injected and the wrapper
+ * auto-renders yielded {@link CommandOutput} values. The `human` field is a
+ * **factory** called once per invocation to produce a {@link HumanRenderer}.
+ * Use {@link stateless} for simple formatters.
  *
- * 1. **Flag-only** — `output: "json"` — injects `--json` and `--fields` flags
- *    but does not intercept returns. Commands handle their own output.
- *
- * 2. **Full config** — `output: { json: true, human: factory }` — injects flags
- *    AND auto-renders the command's return value. Commands return
- *    `{ data }` or `{ data, hint }` objects.
- *
- * The `human` field is a **factory** called once per invocation to produce
- * a {@link HumanRenderer}. Use {@link stateless} for simple formatters.
- *
- * @typeParam T - Type of data the command returns (used by `human` formatter
+ * @typeParam T - Type of data the command yields (used by `human` formatter
  *   and serialized as-is to JSON)
  */
 export type OutputConfig<T> = {
-  /**
-   * Enable `--json` and `--fields` flag injection.
-   * Defaults to `true` — can be omitted for brevity.
-   */
-  json?: true;
   /**
    * Factory that creates a {@link HumanRenderer} per invocation.
    *
@@ -182,21 +169,6 @@ export class CommandOutput<T> {
   constructor(data: T) {
     this.data = data;
   }
-}
-
-/**
- * Create a {@link CommandOutput} value.
- *
- * Commands should use this helper instead of constructing instances
- * directly for a concise API.
- *
- * @example
- * ```ts
- * yield commandOutput(myData);
- * ```
- */
-export function commandOutput<T>(data: T): CommandOutput<T> {
-  return new CommandOutput(data);
 }
 
 /**

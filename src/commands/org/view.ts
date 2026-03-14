@@ -10,7 +10,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { formatOrgDetails } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -36,7 +36,7 @@ export const viewCommand = buildCommand({
       "  2. Config defaults\n" +
       "  3. SENTRY_DSN environment variable or source code detection",
   },
-  output: { json: true, human: stateless(formatOrgDetails) },
+  output: { human: stateless(formatOrgDetails) },
   parameters: {
     positional: {
       kind: "tuple",
@@ -79,7 +79,7 @@ export const viewCommand = buildCommand({
     const hint = resolved.detectedFrom
       ? `Detected from ${resolved.detectedFrom}`
       : undefined;
-    yield commandOutput(org);
+    yield new CommandOutput(org);
     return { hint };
   },
 });

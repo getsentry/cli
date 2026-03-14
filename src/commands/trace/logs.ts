@@ -13,7 +13,7 @@ import { ContextError } from "../../lib/errors.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { formatLogTable } from "../../lib/formatters/log.js";
 import {
-  commandOutput,
+  CommandOutput,
   formatFooter,
   stateless,
 } from "../../lib/formatters/output.js";
@@ -169,7 +169,6 @@ export const logsCommand = buildCommand({
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
   output: {
-    json: true,
     human: stateless(formatTraceLogsHuman),
     jsonTransform: (data: TraceLogsData, fields?: string[]) => {
       if (fields && fields.length > 0) {
@@ -257,7 +256,7 @@ export const logsCommand = buildCommand({
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
       `Try a longer period: sentry trace logs --period 30d ${traceId}`;
 
-    return yield commandOutput({
+    return yield new CommandOutput({
       logs: chronological,
       traceId,
       limit: flags.limit,

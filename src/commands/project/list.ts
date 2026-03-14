@@ -33,7 +33,7 @@ import {
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
 import {
-  commandOutput,
+  CommandOutput,
   type OutputConfig,
   stateless,
 } from "../../lib/formatters/output.js";
@@ -565,7 +565,6 @@ export const listCommand = buildListCommand("project", {
       "  sentry project list --json                  # output as JSON",
   },
   output: {
-    json: true,
     human: stateless((result: ListResult<ProjectWithOrg>) => {
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
@@ -636,7 +635,7 @@ export const listCommand = buildListCommand("project", {
     // Only forward hint to the footer when items exist — empty results
     // already render hint text inside the human formatter.
     const hint = result.items.length > 0 ? result.hint : undefined;
-    yield commandOutput(result);
+    yield new CommandOutput(result);
     return { hint };
   },
 });
