@@ -52,6 +52,7 @@ function getClientId(): string {
 const SCOPES = [
   "project:read",
   "project:write",
+  "project:admin",
   "org:read",
   "event:read",
   "event:write",

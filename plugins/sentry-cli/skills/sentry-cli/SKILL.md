@@ -174,6 +174,16 @@ Create a new project
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+#### `sentry project delete <org/project>`
+
+Delete a project
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-n, --dry-run - Validate inputs and show what would be deleted without deleting it`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry project list <org/project>`
 
 List projects

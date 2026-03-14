@@ -59,6 +59,7 @@ export {
 } from "./api/organizations.js";
 export {
   createProject,
+  deleteProject,
   findProjectByDsnKey,
   findProjectsByPattern,
   findProjectsBySlug,

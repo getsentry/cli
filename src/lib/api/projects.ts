@@ -6,6 +6,7 @@
 
 import {
   createANewProject,
+  deleteAProject,
   listAnOrganization_sProjects,
   listAProject_sClientKeys,
   retrieveAProject,
@@ -150,6 +151,30 @@ export async function createProject(
   });
   const data = unwrapResult(result, "Failed to create project");
   return data as unknown as SentryProject;
+}
+
+/**
+ * Delete a project from an organization.
+ *
+ * Sends a DELETE request to the Sentry API. Returns 204 No Content on success.
+ *
+ * @param orgSlug - The organization slug
+ * @param projectSlug - The project slug to delete
+ * @throws {ApiError} 403 if the user lacks permission, 404 if the project doesn't exist
+ */
+export async function deleteProject(
+  orgSlug: string,
+  projectSlug: string
+): Promise<void> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await deleteAProject({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+    },
+  });
+  unwrapResult(result, "Failed to delete project");
 }
 
 /** Result of searching for projects by slug across all organizations. */
