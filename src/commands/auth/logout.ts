@@ -39,11 +39,10 @@ export const logoutCommand = buildCommand({
   },
   async *func(this: SentryContext) {
     if (!(await isAuthenticated())) {
-      yield commandOutput({
+      return yield commandOutput({
         loggedOut: false,
         message: "Not currently authenticated.",
       });
-      return;
     }
 
     if (isEnvTokenActive()) {
@@ -58,10 +57,9 @@ export const logoutCommand = buildCommand({
     const configPath = getDbPath();
     await clearAuth();
 
-    yield commandOutput({
+    return yield commandOutput({
       loggedOut: true,
       configPath,
     });
-    return;
   },
 });

@@ -22,11 +22,9 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { renderInlineMarkdown } from "../../lib/formatters/markdown.js";
 import {
-  type CommandOutput,
   commandOutput,
   formatFooter,
   type HumanRenderer,
-  jsonlLines,
 } from "../../lib/formatters/output.js";
 import type { StreamingTable } from "../../lib/formatters/text-table.js";
 import {
@@ -64,12 +62,6 @@ type LogListResult = {
   logs: LogLike[];
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
-  /**
-   * When true, JSON output uses JSONL (one object per line) instead
-   * of a JSON array. Set for follow-mode batches where output is
-   * consumed incrementally. Does not affect human rendering.
-   */
-  jsonl?: boolean;
 };
 
 /** Maximum allowed value for --limit flag */
@@ -336,16 +328,22 @@ async function* generateFollowLogs<T extends LogLike>(
 }
 
 /**
- * Consume a follow-mode generator, yielding `LogListResult` batches.
+ * Consume a follow-mode generator, yielding each log individually.
+ *
+ * In JSON mode each yield becomes one JSONL line. In human mode the
+ * stateful renderer accumulates rows into the streaming table.
+ *
  * The generator returns when SIGINT fires — the wrapper's `finalize()`
  * callback handles closing the streaming table.
  */
 async function* yieldFollowBatches<T extends LogLike>(
   generator: AsyncGenerator<T[], void, undefined>,
   extra?: Partial<LogListResult>
-): AsyncGenerator<CommandOutput<LogListResult>, void, undefined> {
+): AsyncGenerator<unknown, void, undefined> {
   for await (const batch of generator) {
-    yield commandOutput({ logs: batch, jsonl: true, ...extra });
+    for (const item of batch) {
+      yield commandOutput({ logs: [item], ...extra });
+    }
   }
 }
 
@@ -478,25 +476,22 @@ function createLogRenderer(): HumanRenderer<LogListResult> {
 /**
  * Transform log output into the JSON shape.
  *
- * - **Single-fetch** (`jsonl` absent/false): returns a JSON array.
- * - **Follow mode** (`jsonl: true`): returns JSONL-wrapped objects
- *   so the framework writes one JSON line per log entry.
+ * Each yielded batch is written as a JSON array. In follow mode,
+ * each batch is a short array (one poll result); in single-fetch mode
+ * it's the full result set. Empty batches are suppressed.
  */
 function jsonTransformLogOutput(
   result: LogListResult,
   fields?: string[]
 ): unknown {
+  if (result.logs.length === 0) {
+    return;
+  }
+
   const applyFields = (log: LogLike) =>
     fields && fields.length > 0 ? filterFields(log, fields) : log;
 
-  if (result.logs.length === 0) {
-    // Follow mode: suppress empty batches (no JSONL output)
-    // Single-fetch: return empty array for valid JSON
-    return result.jsonl ? undefined : [];
-  }
-
-  const mapped = result.logs.map(applyFields);
-  return result.jsonl ? jsonlLines(mapped) : mapped;
+  return result.logs.map(applyFields);
 }
 
 export const listCommand = buildListCommand("log", {

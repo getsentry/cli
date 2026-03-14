@@ -40,8 +40,7 @@ import type { Writer } from "../types/index.js";
 import { OutputError } from "./errors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
-  COMMAND_OUTPUT_BRAND,
-  type CommandOutput,
+  CommandOutput,
   type CommandReturn,
   commandOutput,
   type HumanRenderer,
@@ -286,7 +285,7 @@ export function buildCommand<
   /** Resolved output config (object form), or undefined if no auto-rendering */
   const outputConfig = typeof rawOutput === "object" ? rawOutput : undefined;
   /** Whether to inject --json/--fields flags */
-  const hasJsonOutput = rawOutput === "json" || rawOutput?.json === true;
+  const hasJsonOutput = rawOutput === "json" || typeof rawOutput === "object";
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -321,19 +320,14 @@ export function buildCommand<
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
   /**
-   * Check if a value is a branded {@link CommandOutput} object.
+   * Check if a value is a {@link CommandOutput} instance.
    *
-   * Uses the {@link COMMAND_OUTPUT_BRAND} Symbol instead of duck-typing
-   * on `"data" in v`, preventing false positives from raw API responses
-   * or other objects that happen to have a `data` property.
+   * Uses `instanceof` instead of duck-typing on `"data" in v`,
+   * preventing false positives from raw API responses or other objects
+   * that happen to have a `data` property.
    */
   function isCommandOutput(v: unknown): v is CommandOutput<unknown> {
-    return (
-      typeof v === "object" &&
-      v !== null &&
-      COMMAND_OUTPUT_BRAND in v &&
-      v[COMMAND_OUTPUT_BRAND] === true
-    );
+    return v instanceof CommandOutput;
   }
 
   /**

@@ -189,24 +189,26 @@ const sampleLogs: TraceLog[] = [
 ];
 
 function createMockContext() {
+  const stdoutWrite = mock(() => true);
   return {
     context: {
+      stdout: { write: stdoutWrite },
       cwd: "/tmp",
       setContext: mock(() => {
         // no-op for test
       }),
     },
+    stdoutWrite,
   };
 }
 
 /**
- * Collect all output written to `process.stdout.write` by the spy.
- * Handles both string and Buffer arguments.
+ * Collect all output written to a mock write function.
  */
-function collectStdout(
-  spy: ReturnType<typeof spyOn<typeof process.stdout, "write">>
+function collectMockOutput(
+  writeMock: ReturnType<typeof mock<() => boolean>>
 ): string {
-  return spy.mock.calls
+  return writeMock.mock.calls
     .map((c) => {
       const arg = c[0];
       if (typeof arg === "string") {
@@ -223,18 +225,15 @@ function collectStdout(
 describe("logsCommand.func", () => {
   let listTraceLogsSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
-  let stdoutSpy: ReturnType<typeof spyOn<typeof process.stdout, "write">>;
 
   beforeEach(() => {
     listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-    stdoutSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
     listTraceLogsSpy.mockRestore();
     resolveOrgSpy.mockRestore();
-    stdoutSpy.mockRestore();
   });
 
   describe("JSON output mode", () => {
@@ -242,7 +241,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -250,7 +249,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       const parsed = JSON.parse(output);
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed).toHaveLength(3);
@@ -262,7 +261,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue([]);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -270,7 +269,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(JSON.parse(output)).toEqual([]);
     });
   });
@@ -280,7 +279,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue([]);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -288,7 +287,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("No logs found");
       expect(output).toContain(TRACE_ID);
     });
@@ -297,7 +296,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue([]);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -305,7 +304,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("30d");
     });
 
@@ -313,7 +312,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -321,7 +320,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Request received");
       expect(output).toContain("Slow query detected");
       expect(output).toContain("Database connection failed");
@@ -331,7 +330,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -339,7 +338,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Showing 3 logs");
       expect(output).toContain(TRACE_ID);
     });
@@ -348,7 +347,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue([sampleLogs[0]]);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -356,7 +355,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Showing 1 log for trace");
       expect(output).not.toContain("Showing 1 logs");
     });
@@ -365,7 +364,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -374,7 +373,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Use --limit to show more.");
     });
 
@@ -382,7 +381,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -390,7 +389,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       expect(output).not.toContain("Use --limit to show more.");
     });
   });
@@ -538,7 +537,7 @@ describe("logsCommand.func", () => {
       listTraceLogsSpy.mockResolvedValue(newestFirst);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-      const { context } = createMockContext();
+      const { context, stdoutWrite } = createMockContext();
       const func = await logsCommand.loader();
       await func.call(
         context,
@@ -546,7 +545,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = collectStdout(stdoutSpy);
+      const output = collectMockOutput(stdoutWrite);
       // All three messages should appear in the output
       const reqIdx = output.indexOf("Request received");
       const slowIdx = output.indexOf("Slow query detected");

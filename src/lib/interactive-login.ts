@@ -47,14 +47,13 @@ export type InteractiveLoginOptions = {
  * - Storing the token and user info on success
  *
  * All UI output goes to stderr via the logger, keeping stdout clean for
- * structured command output.
+ * structured command output. A spinner replaces raw polling dots for a
+ * cleaner interactive experience.
  *
- * @param stdin - Input stream for keyboard listener (must be TTY)
  * @param options - Optional configuration
  * @returns Structured login result on success, or null on failure/cancellation
  */
 export async function runInteractiveLogin(
-  stdin: NodeJS.ReadStream & { fd: 0 },
   options?: InteractiveLoginOptions
 ): Promise<LoginResult | null> {
   const timeout = options?.timeout ?? 900_000; // 15 minutes default
@@ -89,25 +88,32 @@ export async function runInteractiveLogin(
 
           log.info(`URL: ${verificationUri}`);
           log.info(`Code: ${userCode}`);
+          const stdin = process.stdin;
           const copyHint = stdin.isTTY ? ` ${muted("(c to copy)")}` : "";
           log.info(
             `Browser didn't open? Use the url above to sign in${copyHint}`
           );
-          log.info("Waiting for authorization...");
+
+          // Use a spinner for the "waiting" state instead of raw polling dots
+          log.start("Waiting for authorization...");
 
           // Setup keyboard listener for 'c' to copy URL
-          keyListener.cleanup = setupCopyKeyListener(stdin, () => urlToCopy);
+          if (stdin.isTTY) {
+            keyListener.cleanup = setupCopyKeyListener(
+              stdin as NodeJS.ReadStream & { fd: 0 },
+              () => urlToCopy
+            );
+          }
         },
         onPolling: () => {
-          // Dots append on the same line without newlines — logger can't do this
-          process.stderr.write(".");
+          // Spinner handles the visual feedback — no-op here
         },
       },
       timeout
     );
 
-    // Clear the polling dots
-    process.stderr.write("\n");
+    // Stop the spinner
+    log.success("Authorization received!");
 
     // Store the token
     await completeOAuthFlow(tokenResponse);
@@ -133,15 +139,11 @@ export async function runInteractiveLogin(
       expiresIn: tokenResponse.expires_in,
     };
     if (user) {
-      result.user = {
-        name: user.name,
-        email: user.email,
-        id: user.id,
-      };
+      result.user = user;
     }
     return result;
   } catch (err) {
-    process.stderr.write("\n");
+    log.fail("Authorization failed");
     log.error(formatError(err));
     return null;
   } finally {

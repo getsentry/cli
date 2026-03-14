@@ -103,7 +103,7 @@ const autoAuthMiddleware: ErrorMiddleware = async (next, args) => {
           : "Authentication required. Starting login flow...\n\n"
       );
 
-      const loginSuccess = await runInteractiveLogin(process.stdin);
+      const loginSuccess = await runInteractiveLogin();
 
       if (loginSuccess) {
         process.stderr.write("\nRetrying command...\n\n");

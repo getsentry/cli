@@ -177,12 +177,7 @@ export const loginCommand = buildCommand({
           username: user.username,
           name: user.name,
         });
-        result.user = {
-          name: user.name,
-          email: user.email,
-          username: user.username,
-          id: user.id,
-        };
+        result.user = user;
       } catch {
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
@@ -192,7 +187,7 @@ export const loginCommand = buildCommand({
     }
 
     // OAuth device flow
-    const result = await runInteractiveLogin(process.stdin, {
+    const result = await runInteractiveLogin({
       timeout: flags.timeout * 1000,
     });
 

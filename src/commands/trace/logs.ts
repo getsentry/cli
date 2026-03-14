@@ -10,7 +10,13 @@ import { validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
-import { formatTraceLogs } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
+import { formatLogTable } from "../../lib/formatters/log.js";
+import {
+  commandOutput,
+  formatFooter,
+  stateless,
+} from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -29,6 +35,34 @@ type LogsFlags = {
   readonly fresh: boolean;
   readonly fields?: string[];
 };
+
+/** Minimal log shape shared with the formatters. */
+type LogLike = {
+  timestamp: string;
+  severity?: string | null;
+  message?: string | null;
+  trace?: string | null;
+};
+
+/** Data yielded by the trace logs command. */
+type TraceLogsData = {
+  logs: LogLike[];
+  traceId: string;
+  limit: number;
+};
+
+/** Format trace log results as human-readable table output. */
+function formatTraceLogsHuman(data: TraceLogsData): string {
+  if (data.logs.length === 0) {
+    return "";
+  }
+  const parts = [formatLogTable(data.logs, false)];
+  const hasMore = data.logs.length >= data.limit;
+  const countText = `Showing ${data.logs.length} log${data.logs.length === 1 ? "" : "s"} for trace ${data.traceId}.`;
+  const tip = hasMore ? " Use --limit to show more." : "";
+  parts.push(formatFooter(`${countText}${tip}`));
+  return parts.join("");
+}
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -132,7 +166,16 @@ export const logsCommand = buildCommand({
       "  sentry trace logs --period 7d abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: stateless(formatTraceLogsHuman),
+    jsonTransform: (data: TraceLogsData, fields?: string[]) => {
+      if (fields && fields.length > 0) {
+        return data.logs.map((entry) => filterFields(entry, fields));
+      }
+      return data.logs;
+    },
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -176,7 +219,6 @@ export const logsCommand = buildCommand({
       q: "query",
     },
   },
-  // biome-ignore lint/correctness/useYield: void generator — early returns for web mode
   async *func(this: SentryContext, flags: LogsFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
@@ -206,17 +248,21 @@ export const logsCommand = buildCommand({
       query: flags.query,
     });
 
-    process.stdout.write(
-      formatTraceLogs({
-        logs,
-        traceId,
-        limit: flags.limit,
-        asJson: flags.json,
-        fields: flags.fields,
-        emptyMessage:
+    // Reverse to chronological order (API returns newest-first)
+    const chronological = [...logs].reverse();
+
+    yield commandOutput({
+      logs: chronological,
+      traceId,
+      limit: flags.limit,
+    });
+
+    if (logs.length === 0) {
+      return {
+        hint:
           `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
-          `Try a longer period: sentry trace logs --period 30d ${traceId}\n`,
-      })
-    );
+          `Try a longer period: sentry trace logs --period 30d ${traceId}`,
+      };
+    }
   },
 });
