@@ -2124,3 +2124,84 @@ export function formatUpgradeResult(data: UpgradeResult): string {
 
   return renderMarkdown(lines.join("\n"));
 }
+
+// Dashboard formatters
+
+/**
+ * Format a created dashboard for human-readable output.
+ */
+export function formatDashboardCreated(result: {
+  id: string;
+  title: string;
+  url: string;
+}): string {
+  const lines: string[] = [
+    `Created dashboard '${escapeMarkdownInline(result.title)}' (ID: ${result.id})`,
+    "",
+    `URL: ${result.url}`,
+  ];
+  return renderMarkdown(lines.join("\n"));
+}
+
+/**
+ * Format a dashboard view for human-readable output.
+ */
+export function formatDashboardView(result: {
+  id: string;
+  title: string;
+  widgets?: Array<{
+    title: string;
+    displayType: string;
+    widgetType?: string;
+    layout?: { x: number; y: number; w: number; h: number };
+  }>;
+  dateCreated?: string;
+  url: string;
+}): string {
+  const lines: string[] = [];
+
+  const kvRows: [string, string][] = [
+    ["Title", escapeMarkdownInline(result.title)],
+    ["ID", result.id],
+  ];
+  if (result.dateCreated) {
+    kvRows.push(["Created", result.dateCreated]);
+  }
+  kvRows.push(["URL", result.url]);
+
+  lines.push(mdKvTable(kvRows));
+
+  const widgets = result.widgets ?? [];
+  if (widgets.length > 0) {
+    lines.push("");
+    lines.push(`**Widgets** (${widgets.length}):`);
+    lines.push("");
+
+    type WidgetRow = {
+      title: string;
+      displayType: string;
+      widgetType: string;
+      layout: string;
+    };
+    const widgetRows: WidgetRow[] = widgets.map((w) => ({
+      title: escapeMarkdownCell(w.title),
+      displayType: w.displayType,
+      widgetType: w.widgetType ?? "",
+      layout: w.layout
+        ? `(${w.layout.x},${w.layout.y}) ${w.layout.w}×${w.layout.h}`
+        : "",
+    }));
+
+    lines.push(mdTableHeader(["TITLE", "DISPLAY", "TYPE", "LAYOUT"]));
+    for (const row of widgetRows) {
+      lines.push(
+        mdRow([row.title, row.displayType, row.widgetType, row.layout])
+      );
+    }
+  } else {
+    lines.push("");
+    lines.push("No widgets.");
+  }
+
+  return renderMarkdown(lines.join("\n"));
+}
