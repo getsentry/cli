@@ -17,7 +17,7 @@ import {
   formatDuration,
   formatUserIdentity,
 } from "../../lib/formatters/human.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import type { LoginResult } from "../../lib/interactive-login.js";
 import { runInteractiveLogin } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
@@ -129,7 +129,7 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  output: { json: true, human: stateless(formatLoginResult) },
+  output: { human: stateless(formatLoginResult) },
   async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {
@@ -182,7 +182,7 @@ export const loginCommand = buildCommand({
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
-      yield commandOutput(result);
+      yield new CommandOutput(result);
       return;
     }
 
@@ -192,7 +192,7 @@ export const loginCommand = buildCommand({
     });
 
     if (result) {
-      yield commandOutput(result);
+      yield new CommandOutput(result);
     } else {
       // Error already displayed by runInteractiveLogin
       process.exitCode = 1;

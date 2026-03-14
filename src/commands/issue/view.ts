@@ -14,7 +14,7 @@ import {
   formatIssueDetails,
   muted,
 } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -102,7 +102,6 @@ export const viewCommand = buildCommand({
       "where 'f' is the project alias shown in the list).",
   },
   output: {
-    json: true,
     human: stateless(formatIssueView),
     jsonExclude: ["spanTreeLines"],
   },
@@ -171,7 +170,12 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
-    yield commandOutput({ issue, event: event ?? null, trace, spanTreeLines });
+    yield new CommandOutput({
+      issue,
+      event: event ?? null,
+      trace,
+      spanTreeLines,
+    });
     return {
       hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
     };

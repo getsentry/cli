@@ -15,7 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -180,7 +180,6 @@ export const listCommand = buildListCommand("trace", {
       '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction',
   },
   output: {
-    json: true,
     human: stateless(formatTraceListHuman),
     jsonTransform: jsonTransformTraceList,
   },
@@ -272,7 +271,7 @@ export const listCommand = buildListCommand("trace", {
         : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    yield commandOutput({ traces, hasMore, nextCursor, org, project });
+    yield new CommandOutput({ traces, hasMore, nextCursor, org, project });
     return { hint };
   },
 });

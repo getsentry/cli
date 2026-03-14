@@ -21,7 +21,7 @@ import {
   formatSimpleSpanTree,
   formatTraceSummary,
 } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -205,7 +205,6 @@ export const viewCommand = buildCommand({
       "The trace ID is the 32-character hexadecimal identifier.",
   },
   output: {
-    json: true,
     human: stateless(formatTraceView),
     jsonExclude: ["spanTreeLines"],
   },
@@ -315,7 +314,7 @@ export const viewCommand = buildCommand({
         ? formatSimpleSpanTree(traceId, spans, flags.spans)
         : undefined;
 
-    yield commandOutput({ summary, spans, spanTreeLines });
+    yield new CommandOutput({ summary, spans, spanTreeLines });
     return {
       hint: `Tip: Open in browser with 'sentry trace view --web ${traceId}'`,
     };

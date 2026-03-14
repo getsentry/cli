@@ -25,7 +25,7 @@ import {
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
 import { OutputError } from "../../src/lib/errors.js";
-import { commandOutput, stateless } from "../../src/lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
@@ -660,10 +660,10 @@ describe("FIELDS_FLAG", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildCommand output: "json" injection
+// buildCommand output config injection
 // ---------------------------------------------------------------------------
 
-describe("buildCommand output: json", () => {
+describe("buildCommand output config", () => {
   test("injects --json flag when output: 'json'", async () => {
     let receivedFlags: Record<string, unknown> | null = null;
 
@@ -673,7 +673,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {
         flags: {
           limit: {
@@ -716,7 +716,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -755,7 +755,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -793,7 +793,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -821,7 +821,7 @@ describe("buildCommand output: json", () => {
   test("does not inject --json/--fields without output: 'json'", async () => {
     let funcCalled = false;
 
-    // Command WITHOUT output: "json" — --json should be rejected by Stricli
+    // Command WITHOUT output config — --json should be rejected by Stricli
     const command = buildCommand<Record<string, never>, [], TestContext>({
       docs: { brief: "Test" },
       parameters: {},
@@ -857,7 +857,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {
         flags: {
           json: {
@@ -900,7 +900,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -941,7 +941,7 @@ describe("buildCommand output: json", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: "json",
+      output: { human: stateless(() => "unused") },
       parameters: {
         flags: {
           limit: {
@@ -1003,7 +1003,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield commandOutput({ name: "Alice", role: "admin" });
+        yield new CommandOutput({ name: "Alice", role: "admin" });
       },
     });
 
@@ -1034,7 +1034,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield commandOutput({ name: "Alice", role: "admin" });
+        yield new CommandOutput({ name: "Alice", role: "admin" });
       },
     });
 
@@ -1066,7 +1066,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield commandOutput({ id: 1, name: "Alice", role: "admin" });
+        yield new CommandOutput({ id: 1, name: "Alice", role: "admin" });
       },
     });
 
@@ -1098,7 +1098,7 @@ describe("buildCommand return-based output", () => {
         },
         parameters: {},
         async *func(this: TestContext) {
-          yield commandOutput({ value: 42 });
+          yield new CommandOutput({ value: 42 });
           return { hint: "Run 'sentry help' for more info" };
         },
       });
@@ -1205,7 +1205,7 @@ describe("buildCommand return-based output", () => {
       parameters: {},
       async *func(this: TestContext) {
         await Bun.sleep(1);
-        yield commandOutput({ name: "Bob" });
+        yield new CommandOutput({ name: "Bob" });
       },
     });
 
@@ -1237,7 +1237,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        yield commandOutput([{ id: 1 }, { id: 2 }]);
+        yield new CommandOutput([{ id: 1 }, { id: 2 }]);
       },
     });
 
@@ -1267,7 +1267,7 @@ describe("buildCommand return-based output", () => {
         },
         parameters: {},
         async *func(this: TestContext) {
-          yield commandOutput({ org: "sentry" });
+          yield new CommandOutput({ org: "sentry" });
           return { hint: "Detected from .env file" };
         },
       });

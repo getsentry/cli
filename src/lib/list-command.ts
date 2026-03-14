@@ -19,8 +19,8 @@ import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { warning } from "./formatters/colors.js";
 import {
+  CommandOutput,
   type CommandReturn,
-  commandOutput,
   type OutputConfig,
   stateless,
 } from "./formatters/output.js";
@@ -84,7 +84,7 @@ export function targetPatternExplanation(cursorNote?: string): string {
  * The `--json` flag shared by all list commands.
  * Outputs machine-readable JSON instead of a human-readable table.
  *
- * @deprecated Use `output: "json"` on `buildCommand` instead, which
+ * @deprecated Use `output: { human: ... }` on `buildCommand` instead, which
  * injects `--json` and `--fields` automatically. This constant is kept
  * for commands that define `--json` with custom brief text.
  */
@@ -368,7 +368,7 @@ export function buildListCommand<
     };
     readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
     // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
-    readonly output?: "json" | OutputConfig<any>;
+    readonly output?: OutputConfig<any>;
   }
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
@@ -472,7 +472,6 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
   return buildListCommand(routeName, {
     docs,
     output: {
-      json: true,
       human: stateless((result: ListResult<TWithOrg>) =>
         formatListHuman(result, config)
       ),
@@ -508,7 +507,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         flags,
         parsed,
       });
-      yield commandOutput(result);
+      yield new CommandOutput(result);
       // Only forward hint to the footer when items exist — empty results
       // already render hint text inside the human formatter.
       const hint = result.items.length > 0 ? result.hint : undefined;

@@ -23,7 +23,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -304,7 +304,6 @@ export const viewCommand = buildCommand({
       "  sentry event view <project> <event-id>    # find project across all orgs",
   },
   output: {
-    json: true,
     human: stateless(formatEventView),
     jsonExclude: ["spanTreeLines"],
   },
@@ -381,7 +380,11 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
-    yield commandOutput({ event, trace, spanTreeLines: spanTreeResult?.lines });
+    yield new CommandOutput({
+      event,
+      trace,
+      spanTreeLines: spanTreeResult?.lines,
+    });
     return {
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`

@@ -16,7 +16,7 @@
  *
  * 3. **Output mode injection** — when `output` has an {@link OutputConfig},
  *    `--json` and `--fields` flags are injected automatically. The command
- *    yields branded `CommandOutput` objects via {@link commandOutput} and
+ *    yields branded `CommandOutput` objects via {@link CommandOutput} and
  *    optionally returns a `{ hint }` footer via {@link CommandReturn}.
  *    Commands that define their own `json` flag keep theirs.
  *
@@ -42,7 +42,6 @@ import { parseFieldsList } from "./formatters/json.js";
 import {
   CommandOutput,
   type CommandReturn,
-  commandOutput,
   type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
@@ -129,31 +128,22 @@ type LocalCommandBuilderArguments<
   readonly docs: CommandDocumentation;
   readonly func: SentryCommandFunction<FLAGS, ARGS, CONTEXT>;
   /**
-   * Output configuration — controls flag injection and optional auto-rendering.
+   * Output configuration — controls flag injection and auto-rendering.
    *
-   * Two forms:
-   *
-   * 1. **`"json"`** — injects `--json` and `--fields` flags only. The command
-   *    handles its own output via `writeOutput` or direct writes.
-   *
-   * 2. **`{ json: true, human: fn }`** — injects flags AND auto-renders.
-   *    The command returns `{ data }` or `{ data, hint }` and the wrapper
-   *    handles JSON/human branching. Void returns are ignored.
+   * When provided, `--json` and `--fields` flags are injected automatically.
+   * The command yields `new CommandOutput(data)` and the wrapper handles
+   * JSON/human branching. Void yields are ignored.
    *
    * @example
    * ```ts
-   * // Flag injection only:
-   * buildCommand({ output: "json", func() { writeOutput(...); } })
-   *
-   * // Full auto-render:
    * buildCommand({
-   *   output: { json: true, human: formatUserIdentity },
-   *   func() { return user; },
+   *   output: { human: stateless(formatUser) },
+   *   async *func() { yield new CommandOutput(user); },
    * })
    * ```
    */
   // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T>.human is contravariant in T, but the builder erases T because it doesn't know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
-  readonly output?: "json" | OutputConfig<any>;
+  readonly output?: OutputConfig<any>;
 };
 
 // ---------------------------------------------------------------------------
@@ -264,7 +254,7 @@ export function applyLoggingFlags(
  *
  * Similarly, when a command already defines its own `json` flag (e.g. for
  * custom brief text), the injected `JSON_FLAG` is skipped. `--fields` is
- * always injected when `output: "json"` regardless.
+ * always injected when `output: { human: ... }` regardless.
  *
  * Flag keys use kebab-case because Stricli uses the literal object key as
  * the CLI flag name (e.g. `"log-level"` → `--log-level`).
@@ -281,11 +271,9 @@ export function buildCommand<
   builderArgs: LocalCommandBuilderArguments<FLAGS, ARGS, CONTEXT>
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
-  const rawOutput = builderArgs.output;
-  /** Resolved output config (object form), or undefined if no auto-rendering */
-  const outputConfig = typeof rawOutput === "object" ? rawOutput : undefined;
+  const outputConfig = builderArgs.output;
   /** Whether to inject --json/--fields flags */
-  const hasJsonOutput = rawOutput === "json" || typeof rawOutput === "object";
+  const hasJsonOutput = outputConfig !== undefined;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -319,13 +307,6 @@ export function buildCommand<
 
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
-  /**
-   * Check if a value is a {@link CommandOutput} instance.
-   *
-   * Uses `instanceof` instead of duck-typing on `"data" in v`,
-   * preventing false positives from raw API responses or other objects
-   * that happen to have a `data` property.
-   */
   function isCommandOutput(v: unknown): v is CommandOutput<unknown> {
     return v instanceof CommandOutput;
   }
@@ -361,7 +342,7 @@ export function buildCommand<
    * Strip injected flags from the raw Stricli-parsed flags object.
    * --log-level is always stripped. --verbose is stripped only when we
    * injected it (not when the command defines its own). --fields is
-   * pre-parsed from comma-string to string[] when output: "json".
+   * pre-parsed from comma-string to string[] when output: { human: ... }.
    */
   function cleanRawFlags(
     raw: Record<string, unknown>
@@ -443,7 +424,7 @@ export function buildCommand<
         if (err.data !== null && err.data !== undefined) {
           handleYieldedValue(
             stdout,
-            commandOutput(err.data),
+            new CommandOutput(err.data),
             cleanFlags,
             renderer
           );

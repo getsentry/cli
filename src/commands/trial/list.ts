@@ -11,7 +11,7 @@ import { getCustomerTrialInfo } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
@@ -203,7 +203,6 @@ export const listCommand = buildCommand({
       "  sentry trial list --json",
   },
   output: {
-    json: true,
     human: stateless(formatTrialListHuman),
     jsonExclude: ["displayName"],
   },
@@ -266,7 +265,7 @@ export const listCommand = buildCommand({
       );
     }
 
-    yield commandOutput(entries);
+    yield new CommandOutput(entries);
     return { hint: hints.join("\n") || undefined };
   },
 });

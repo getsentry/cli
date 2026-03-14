@@ -13,7 +13,7 @@ import { isAuthenticated } from "../../lib/db/auth.js";
 import { setUserInfo } from "../../lib/db/user.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatUserIdentity } from "../../lib/formatters/index.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -35,7 +35,6 @@ export const whoamiCommand = buildCommand({
       "the current token. Works with all token types: OAuth, API tokens, and OAuth App tokens.",
   },
   output: {
-    json: true,
     human: stateless(formatUserIdentity),
   },
   parameters: {
@@ -66,7 +65,7 @@ export const whoamiCommand = buildCommand({
       // Cache update failure is non-essential — user identity was already fetched.
     }
 
-    yield commandOutput(user);
+    yield new CommandOutput(user);
     return;
   },
 });

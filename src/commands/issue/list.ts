@@ -42,7 +42,7 @@ import {
   writeIssueTable,
 } from "../../lib/formatters/index.js";
 import {
-  commandOutput,
+  CommandOutput,
   type OutputConfig,
   stateless,
 } from "../../lib/formatters/output.js";
@@ -1241,7 +1241,6 @@ const jsonTransformIssueList = jsonTransformListResult;
 
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
-  json: true,
   human: stateless(formatIssueListHuman),
   jsonTransform: jsonTransformIssueList,
 };
@@ -1377,7 +1376,7 @@ export const listCommand = buildListCommand("issue", {
       combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
     }
 
-    yield commandOutput(result);
+    yield new CommandOutput(result);
     return { hint: combinedHint };
   },
 });

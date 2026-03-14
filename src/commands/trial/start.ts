@@ -22,7 +22,7 @@ import { openBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import { logger as log } from "../../lib/logger.js";
 import { generateQRCode } from "../../lib/qrcode.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -89,7 +89,7 @@ export const startCommand = buildCommand({
       "  sentry trial start plan\n" +
       "  sentry trial start --json seer",
   },
-  output: { json: true, human: stateless(formatStartResult) },
+  output: { human: stateless(formatStartResult) },
   parameters: {
     positional: {
       kind: "tuple" as const,
@@ -162,7 +162,7 @@ export const startCommand = buildCommand({
     // Start the trial
     await startProductTrial(orgSlug, trial.category);
 
-    yield commandOutput({
+    yield new CommandOutput({
       name: parsed.name,
       category: trial.category,
       organization: orgSlug,
@@ -251,12 +251,12 @@ async function* handlePlanTrial(
 
     // Show URL and QR code through the output framework
     const qr = await generateQRCode(url);
-    yield commandOutput({ url, qr });
+    yield new CommandOutput({ url, qr });
 
     opened = await promptOpenBrowser(url);
   }
 
-  yield commandOutput({
+  yield new CommandOutput({
     name: "plan",
     category: "plan",
     organization: orgSlug,

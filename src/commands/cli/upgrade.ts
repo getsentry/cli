@@ -31,7 +31,7 @@ import {
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
-import { commandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
@@ -418,7 +418,7 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
       "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
-  output: { json: true, human: stateless(formatUpgradeResult) },
+  output: { human: stateless(formatUpgradeResult) },
   parameters: {
     positional: {
       kind: "tuple",
@@ -494,7 +494,7 @@ export const upgradeCommand = buildCommand({
       flags,
     });
     if (resolved.kind === "done") {
-      yield commandOutput(resolved.result);
+      yield new CommandOutput(resolved.result);
       return;
     }
 
@@ -511,7 +511,7 @@ export const upgradeCommand = buildCommand({
         target,
         versionArg
       );
-      yield commandOutput({
+      yield new CommandOutput({
         action: downgrade ? "downgraded" : "upgraded",
         currentVersion: CLI_VERSION,
         targetVersion: target,
@@ -531,7 +531,7 @@ export const upgradeCommand = buildCommand({
       execPath: this.process.execPath,
     });
 
-    yield commandOutput({
+    yield new CommandOutput({
       action: downgrade ? "downgraded" : "upgraded",
       currentVersion: CLI_VERSION,
       targetVersion: target,
