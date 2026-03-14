@@ -9,6 +9,7 @@
 import { run } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
+import { commandOutput, stateless } from "../lib/formatters/output.js";
 import { printCustomHelp } from "../lib/help.js";
 
 export const helpCommand = buildCommand({
@@ -18,6 +19,7 @@ export const helpCommand = buildCommand({
       "Display help information. Run 'sentry help' for an overview, " +
       "or 'sentry help <command>' for detailed help on a specific command.",
   },
+  output: { json: true, human: stateless((s: string) => s) },
   parameters: {
     flags: {},
     positional: {
@@ -30,12 +32,10 @@ export const helpCommand = buildCommand({
     },
   },
   // biome-ignore lint/complexity/noBannedTypes: Stricli requires empty object for commands with no flags
-  // biome-ignore lint/correctness/useYield: void generator — delegates to Stricli help system
   async *func(this: SentryContext, _flags: {}, ...commandPath: string[]) {
     // No args: show branded help
     if (commandPath.length === 0) {
-      process.stdout.write(await printCustomHelp());
-      return;
+      return yield commandOutput(await printCustomHelp());
     }
 
     // With args: re-invoke with --helpAll to show full help including hidden items
