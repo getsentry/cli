@@ -6,7 +6,6 @@
 
 import type { DetailedSentryLog, SentryLog } from "../../types/index.js";
 import { buildTraceUrl } from "../sentry-urls.js";
-import { filterFields, formatJson } from "./json.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -19,7 +18,6 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
-import { formatFooter } from "./output.js";
 import {
   renderTextTable,
   StreamingTable,
@@ -318,54 +316,4 @@ export function formatLogDetails(
   }
 
   return renderMarkdown(lines.join("\n"));
-}
-
-/**
- * Options for {@link formatTraceLogs}.
- */
-type FormatTraceLogsOptions = {
-  /** Already-fetched logs (API order: newest-first) */
-  logs: LogLike[];
-  /** The trace ID being queried */
-  traceId: string;
-  /** The --limit value (used for "has more" hint) */
-  limit: number;
-  /** Output as JSON instead of human-readable table */
-  asJson: boolean;
-  /** Message to show when no logs are found */
-  emptyMessage: string;
-  /** Optional field paths to include in JSON output */
-  fields?: string[];
-};
-
-/**
- * Format trace-filtered log results into a string.
- *
- * Handles JSON output, empty state, and human-readable table formatting.
- * Used by both `sentry log list --trace` and `sentry trace logs`.
- */
-export function formatTraceLogs(options: FormatTraceLogsOptions): string {
-  const { logs, traceId, limit, asJson, emptyMessage, fields } = options;
-
-  if (asJson) {
-    const reversed = [...logs].reverse();
-    const data = fields
-      ? reversed.map((entry) => filterFields(entry, fields))
-      : reversed;
-    return `${formatJson(data)}\n`;
-  }
-
-  if (logs.length === 0) {
-    return emptyMessage;
-  }
-
-  const chronological = [...logs].reverse();
-  const parts = [formatLogTable(chronological, false)];
-
-  const hasMore = logs.length >= limit;
-  const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
-  const tip = hasMore ? " Use --limit to show more." : "";
-  parts.push(formatFooter(`${countText}${tip}`));
-
-  return parts.join("");
 }

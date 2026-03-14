@@ -49,12 +49,14 @@ type TraceLogsData = {
   logs: LogLike[];
   traceId: string;
   limit: number;
+  /** Message shown when no logs found */
+  emptyMessage?: string;
 };
 
 /** Format trace log results as human-readable table output. */
 function formatTraceLogsHuman(data: TraceLogsData): string {
   if (data.logs.length === 0) {
-    return "";
+    return data.emptyMessage ?? "No logs found.";
   }
   const parts = [formatLogTable(data.logs, false)];
   const hasMore = data.logs.length >= data.limit;
@@ -251,18 +253,15 @@ export const logsCommand = buildCommand({
     // Reverse to chronological order (API returns newest-first)
     const chronological = [...logs].reverse();
 
-    yield commandOutput({
+    const emptyMessage =
+      `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
+      `Try a longer period: sentry trace logs --period 30d ${traceId}`;
+
+    return yield commandOutput({
       logs: chronological,
       traceId,
       limit: flags.limit,
+      emptyMessage,
     });
-
-    if (logs.length === 0) {
-      return {
-        hint:
-          `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
-          `Try a longer period: sentry trace logs --period 30d ${traceId}`,
-      };
-    }
   },
 });

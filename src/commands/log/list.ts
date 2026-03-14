@@ -108,6 +108,10 @@ function parseFollow(value: string): number {
  * needed for table rendering and follow-mode dedup tracking.
  */
 type LogLike = {
+  /** Unique log entry ID — used for dedup in trace follow mode.
+   * TraceLog uses `id`, SentryLog uses `sentry.item_id` (via passthrough).
+   * Present on TraceLog which is the only type used in follow mode dedup. */
+  id?: string;
   timestamp: string;
   /** Nanosecond-precision timestamp used for dedup in follow mode.
    * Optional because TraceLog may omit it when the API response doesn't include it. */
@@ -488,10 +492,9 @@ function jsonTransformLogOutput(
     return;
   }
 
-  const applyFields = (log: LogLike) =>
-    fields && fields.length > 0 ? filterFields(log, fields) : log;
-
-  return result.logs.map(applyFields);
+  return fields && fields.length > 0
+    ? result.logs.map((log) => filterFields(log, fields))
+    : result.logs;
 }
 
 export const listCommand = buildListCommand("log", {
