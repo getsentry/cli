@@ -111,6 +111,10 @@ sentry auth status
 
 Print the stored authentication token
 
+**Flags:**
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry auth whoami`
 
 Show the currently authenticated user
@@ -487,6 +491,8 @@ Configure shell integration
 - `--no-completions - Skip shell completion installation`
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
 #### `sentry cli upgrade <version>`
 
