@@ -272,8 +272,6 @@ export function buildCommand<
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
-  /** Whether to inject --json/--fields flags */
-  const hasJsonOutput = outputConfig !== undefined;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -297,7 +295,7 @@ export function buildCommand<
   }
 
   // Inject --json and --fields when output config is set
-  if (hasJsonOutput) {
+  if (outputConfig) {
     if (!commandOwnsJson) {
       mergedFlags.json = JSON_FLAG;
     }
@@ -307,13 +305,9 @@ export function buildCommand<
 
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
-  function isCommandOutput(v: unknown): v is CommandOutput<unknown> {
-    return v instanceof CommandOutput;
-  }
-
   /**
-   * If the yielded value is a branded {@link CommandOutput}, render it via
-   * the output config. Void/undefined/Error/non-branded values are ignored.
+   * If the yielded value is a {@link CommandOutput}, render it via
+   * the output config. Void/undefined/Error/other values are ignored.
    */
   function handleYieldedValue(
     stdout: Writer,
@@ -322,13 +316,7 @@ export function buildCommand<
     // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
     renderer?: HumanRenderer<any>
   ): void {
-    if (
-      !(outputConfig && renderer) ||
-      value === null ||
-      value === undefined ||
-      value instanceof Error ||
-      !isCommandOutput(value)
-    ) {
+    if (!(outputConfig && renderer && value instanceof CommandOutput)) {
       return;
     }
 
@@ -357,7 +345,7 @@ export function buildCommand<
       }
       clean[key] = value;
     }
-    if (hasJsonOutput && typeof clean.fields === "string") {
+    if (outputConfig && typeof clean.fields === "string") {
       clean.fields = parseFieldsList(clean.fields);
     }
     return clean;

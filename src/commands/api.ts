@@ -1210,7 +1210,6 @@ export const apiCommand = buildCommand({
       throw new OutputError(response.body);
     }
 
-    yield new CommandOutput(response.body);
-    return;
+    return yield new CommandOutput(response.body);
   },
 });

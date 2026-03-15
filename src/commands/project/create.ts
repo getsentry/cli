@@ -405,8 +405,7 @@ export const createCommand = buildCommand({
         expectedSlug,
         dryRun: true,
       };
-      yield new CommandOutput(result);
-      return;
+      return yield new CommandOutput(result);
     }
 
     // Create the project
@@ -433,7 +432,6 @@ export const createCommand = buildCommand({
       expectedSlug,
     };
 
-    yield new CommandOutput(result);
-    return;
+    return yield new CommandOutput(result);
   },
 });

@@ -182,8 +182,7 @@ export const loginCommand = buildCommand({
         // Non-fatal: user info is supplementary. Token remains stored and valid.
       }
 
-      yield new CommandOutput(result);
-      return;
+      return yield new CommandOutput(result);
     }
 
     // OAuth device flow

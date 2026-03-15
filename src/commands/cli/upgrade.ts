@@ -494,8 +494,7 @@ export const upgradeCommand = buildCommand({
       flags,
     });
     if (resolved.kind === "done") {
-      yield new CommandOutput(resolved.result);
-      return;
+      return yield new CommandOutput(resolved.result);
     }
 
     const { target } = resolved;

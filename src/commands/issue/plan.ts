@@ -225,8 +225,7 @@ export const planCommand = buildCommand({
       if (!flags.force) {
         const existingSolution = extractSolution(state);
         if (existingSolution) {
-          yield new CommandOutput(buildPlanData(state));
-          return;
+          return yield new CommandOutput(buildPlanData(state));
         }
       }
 
@@ -261,8 +260,7 @@ export const planCommand = buildCommand({
         throw new Error("Plan creation was cancelled.");
       }
 
-      yield new CommandOutput(buildPlanData(finalState));
-      return;
+      return yield new CommandOutput(buildPlanData(finalState));
     } catch (error) {
       // Handle API errors with friendly messages
       if (error instanceof ApiError) {

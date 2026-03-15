@@ -27,7 +27,7 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
-import { logger } from "../../lib/logger.js";
+import { CommandOutput, stateless } from "../../lib/formatters/output.js";
 import {
   addToGitHubPath,
   addToPath,
@@ -42,8 +42,6 @@ import {
   parseInstallationMethod,
 } from "../../lib/upgrade.js";
 
-const log = logger.withTag("cli.setup");
-
 type SetupFlags = {
   readonly install: boolean;
   readonly method?: InstallationMethod;
@@ -55,6 +53,31 @@ type SetupFlags = {
 };
 
 type Logger = (msg: string) => void;
+
+/** Structured result of the setup operation */
+type SetupResult = {
+  /** Status messages collected during setup */
+  messages: string[];
+  /** Warning messages from best-effort steps */
+  warnings: string[];
+  /** Whether a fresh binary was installed */
+  freshInstall: boolean;
+  /** Path to the installed binary */
+  binaryPath: string;
+  /** CLI version */
+  version: string;
+};
+
+/** Format setup result for human-readable output */
+function formatSetupResult(result: SetupResult): string {
+  const lines: string[] = [...result.messages];
+  if (result.warnings.length > 0) {
+    for (const w of result.warnings) {
+      lines.push(`⚠ ${w}`);
+    }
+  }
+  return lines.join("\n");
+}
 
 /**
  * Handle binary installation from a temp location.
@@ -441,19 +464,23 @@ export const setupCommand = buildCommand({
       },
     },
   },
+  output: { human: stateless(formatSetupResult) },
   async *func(this: SentryContext, flags: SetupFlags) {
     const { process, homeDir } = this;
 
+    const messages: string[] = [];
+    const warnings: string[] = [];
+
     const emit: Logger = (msg: string) => {
       if (!flags.quiet) {
-        log.info(msg);
+        messages.push(msg);
       }
     };
 
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      log.warn(`${step} failed: ${msg}`);
+      warnings.push(`${step} failed: ${msg}`);
     };
 
     let binaryPath = process.execPath;
@@ -489,5 +516,13 @@ export const setupCommand = buildCommand({
     if (!flags.quiet && freshInstall) {
       printWelcomeMessage(emit, CLI_VERSION, binaryPath);
     }
+
+    return yield new CommandOutput<SetupResult>({
+      messages,
+      warnings,
+      freshInstall,
+      binaryPath,
+      version: CLI_VERSION,
+    });
   },
 });

@@ -105,7 +105,6 @@ Examples:
         : undefined,
     };
 
-    yield new CommandOutput(payload);
-    return;
+    return yield new CommandOutput(payload);
   },
 });

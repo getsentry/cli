@@ -190,7 +190,6 @@ export const statusCommand = buildCommand({
       verification: await verifyCredentials(),
     };
 
-    yield new CommandOutput(data);
-    return;
+    return yield new CommandOutput(data);
   },
 });

@@ -65,7 +65,6 @@ export const whoamiCommand = buildCommand({
       // Cache update failure is non-essential — user identity was already fetched.
     }
 
-    yield new CommandOutput(user);
-    return;
+    return yield new CommandOutput(user);
   },
 });

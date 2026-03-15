@@ -735,7 +735,6 @@ export const fixCommand = buildCommand({
       throw new OutputError(result);
     }
 
-    yield new CommandOutput(result);
-    return;
+    return yield new CommandOutput(result);
   },
 });
