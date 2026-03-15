@@ -617,6 +617,9 @@ export const listCommand = buildListCommand("log", {
                 return l.timestamp_precise > lastTs;
               }
               // No precise timestamp — deduplicate by id
+              if (!l.id) {
+                return true; // Can't dedup without id, include it
+              }
               if (seenWithoutTs.has(l.id)) {
                 return false;
               }
@@ -625,7 +628,7 @@ export const listCommand = buildListCommand("log", {
             }),
           onInitialLogs: (logs) => {
             for (const l of logs) {
-              if (l.timestamp_precise === undefined) {
+              if (l.timestamp_precise === undefined && l.id) {
                 seenWithoutTs.add(l.id);
               }
             }
