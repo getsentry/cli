@@ -59,6 +59,8 @@ type Logger = (msg: string) => void;
 type SetupResult = {
   /** Status messages collected during setup */
   messages: string[];
+  /** Warning messages from best-effort steps that failed non-fatally */
+  warnings: string[];
   /** Whether a fresh binary was installed */
   freshInstall: boolean;
   /** Path to the installed binary */
@@ -463,6 +465,7 @@ export const setupCommand = buildCommand({
 
     const log = logger.withTag("cli.setup");
     const messages: string[] = [];
+    const warnings: string[] = [];
 
     const emit: Logger = (msg: string) => {
       if (!flags.quiet) {
@@ -473,7 +476,9 @@ export const setupCommand = buildCommand({
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      log.warn(`${step} failed: ${msg}`);
+      const warning = `${step} failed: ${msg}`;
+      log.warn(warning);
+      warnings.push(warning);
     };
 
     let binaryPath = process.execPath;
@@ -512,6 +517,7 @@ export const setupCommand = buildCommand({
 
     return yield new CommandOutput<SetupResult>({
       messages,
+      warnings,
       freshInstall,
       binaryPath,
       version: CLI_VERSION,
