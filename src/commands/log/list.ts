@@ -482,16 +482,12 @@ function createLogRenderer(): HumanRenderer<LogListResult> {
  *
  * Each yielded batch is written as a JSON array. In follow mode,
  * each batch is a short array (one poll result); in single-fetch mode
- * it's the full result set. Empty batches are suppressed.
+ * it's the full result set.
  */
 function jsonTransformLogOutput(
   result: LogListResult,
   fields?: string[]
 ): unknown {
-  if (result.logs.length === 0) {
-    return;
-  }
-
   return fields && fields.length > 0
     ? result.logs.map((log) => filterFields(log, fields))
     : result.logs;
