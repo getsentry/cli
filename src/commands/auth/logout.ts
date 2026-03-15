@@ -15,7 +15,7 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatLogoutResult } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 
 /** Structured result of the logout operation */
 export type LogoutResult = {
@@ -33,7 +33,7 @@ export const logoutCommand = buildCommand({
     fullDescription:
       "Remove stored authentication credentials from the local database.",
   },
-  output: { human: stateless(formatLogoutResult) },
+  output: { human: formatLogoutResult },
   parameters: {
     flags: {},
   },

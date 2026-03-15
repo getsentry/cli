@@ -25,7 +25,7 @@ import {
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
 import { OutputError } from "../../src/lib/errors.js";
-import { CommandOutput, stateless } from "../../src/lib/formatters/output.js";
+import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
 
 /** Minimal context for test commands */
@@ -673,7 +673,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {
         flags: {
           limit: {
@@ -716,7 +716,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -755,7 +755,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -793,7 +793,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -857,7 +857,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {
         flags: {
           json: {
@@ -900,7 +900,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(
@@ -941,7 +941,7 @@ describe("buildCommand output config", () => {
       TestContext
     >({
       docs: { brief: "Test" },
-      output: { human: stateless(() => "unused") },
+      output: { human: () => "unused" },
       parameters: {
         flags: {
           limit: {
@@ -996,10 +996,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless(
-          (d: { name: string; role: string }) => `${d.name} (${d.role})`
-        ),
+        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1027,10 +1024,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless(
-          (d: { name: string; role: string }) => `${d.name} (${d.role})`
-        ),
+        human: (d: { name: string; role: string }) => `${d.name} (${d.role})`,
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1059,10 +1053,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless(
-          (d: { id: number; name: string; role: string }) => `${d.name}`
-        ),
+        human: (d: { id: number; name: string; role: string }) => `${d.name}`,
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1093,8 +1084,7 @@ describe("buildCommand return-based output", () => {
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
         docs: { brief: "Test" },
         output: {
-          json: true,
-          human: stateless((d: { value: number }) => `Value: ${d.value}`),
+          human: (d: { value: number }) => `Value: ${d.value}`,
         },
         parameters: {},
         async *func(this: TestContext) {
@@ -1141,8 +1131,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless(() => "unused"),
+        human: () => "unused",
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -1199,8 +1188,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless((d: { name: string }) => `Hello, ${d.name}!`),
+        human: (d: { name: string }) => `Hello, ${d.name}!`,
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1230,10 +1218,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless((d: Array<{ id: number }>) =>
-          d.map((x) => x.id).join(", ")
-        ),
+        human: (d: Array<{ id: number }>) => d.map(((x) => x.id).join(", ")),
       },
       parameters: {},
       async *func(this: TestContext) {
@@ -1262,8 +1247,7 @@ describe("buildCommand return-based output", () => {
       buildCommand<{ json: boolean; fields?: string[] }, [], TestContext>({
         docs: { brief: "Test" },
         output: {
-          json: true,
-          human: stateless((d: { org: string }) => `Org: ${d.org}`),
+          human: (d: { org: string }) => `Org: ${d.org}`,
         },
         parameters: {},
         async *func(this: TestContext) {
@@ -1304,8 +1288,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless((d: { error: string }) => `Error: ${d.error}`),
+        human: (d: { error: string }) => `Error: ${d.error}`,
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield
@@ -1356,8 +1339,7 @@ describe("buildCommand return-based output", () => {
     >({
       docs: { brief: "Test" },
       output: {
-        json: true,
-        human: stateless((d: { error: string }) => `Error: ${d.error}`),
+        human: (d: { error: string }) => `Error: ${d.error}`,
       },
       parameters: {},
       // biome-ignore lint/correctness/useYield: test command — no output to yield

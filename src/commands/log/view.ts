@@ -18,7 +18,7 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { validateHexId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
@@ -319,7 +319,7 @@ export const viewCommand = buildCommand({
       "The log ID is the 32-character hexadecimal identifier shown in log listings.",
   },
   output: {
-    human: stateless(formatLogViewHuman),
+    human: formatLogViewHuman,
     // Preserve original JSON contract: bare array of log entries.
     // orgSlug exists only for the human formatter (trace URLs).
     jsonTransform: (data: LogViewData, fields) =>

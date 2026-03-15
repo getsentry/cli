@@ -15,7 +15,7 @@
  *    `buildCommand`, then yield data from the generator:
  *    ```ts
  *    buildCommand({
- *      output: { human: stateless(formatUser) },
+ *      output: { human: formatUser },
  *      async *func() { yield new CommandOutput(data); },
  *    })
  *    ```
@@ -86,44 +86,53 @@ export type HumanRenderer<T> = {
 };
 
 /**
- * Create a stateless {@link HumanRenderer} from a plain formatter function.
+ * Resolve the `human` field of an {@link OutputConfig} into a
+ * {@link HumanRenderer}. Supports two forms:
  *
- * Most commands don't need per-invocation state — use this helper to wrap
- * a simple `(data: T) => string` function into the renderer interface.
+ * 1. **Plain function** — `(data: T) => string` — auto-wrapped into a
+ *    stateless renderer (no `finalize`).
+ * 2. **Factory** — `() => HumanRenderer<T>` — called once per invocation
+ *    to produce a renderer with optional `finalize()`.
  *
- * @example
- * ```ts
- * output: {
- *   human: stateless(formatMyData),
- * }
- * ```
+ * Disambiguation: a function with `.length === 0` is treated as a factory.
  */
-export function stateless<T>(fn: (data: T) => string): () => HumanRenderer<T> {
-  return () => ({ render: fn });
+export function resolveRenderer<T>(human: HumanOutput<T>): HumanRenderer<T> {
+  // Factory: zero-arg function that returns a renderer
+  if (human.length === 0) {
+    return (human as () => HumanRenderer<T>)();
+  }
+  // Plain formatter: wrap in a stateless renderer
+  return { render: human as (data: T) => string };
 }
+
+/**
+ * Human rendering for an {@link OutputConfig}.
+ *
+ * Two forms:
+ * - **Plain function** `(data: T) => string` — stateless, auto-wrapped.
+ * - **Factory** `() => HumanRenderer<T>` — called per invocation for
+ *   stateful renderers (e.g., streaming tables with `finalize()`).
+ */
+export type HumanOutput<T> = ((data: T) => string) | (() => HumanRenderer<T>);
 
 /**
  * Output configuration declared on `buildCommand` for automatic rendering.
  *
  * When present, `--json` and `--fields` flags are injected and the wrapper
- * auto-renders yielded {@link CommandOutput} values. The `human` field is a
- * **factory** called once per invocation to produce a {@link HumanRenderer}.
- * Use {@link stateless} for simple formatters.
+ * auto-renders yielded {@link CommandOutput} values.
  *
  * @typeParam T - Type of data the command yields (used by `human` formatter
  *   and serialized as-is to JSON)
  */
 export type OutputConfig<T> = {
   /**
-   * Factory that creates a {@link HumanRenderer} per invocation.
+   * Human-readable renderer.
    *
-   * Called once before the generator starts iterating. The returned
-   * renderer's `render()` is called per yield, and `finalize()` is
-   * called once after the generator completes.
-   *
-   * Use {@link stateless} to wrap a plain formatter function.
+   * Pass a plain `(data: T) => string` for stateless formatting, or a
+   * zero-arg factory `() => HumanRenderer<T>` for stateful rendering
+   * with `finalize()` support.
    */
-  human: () => HumanRenderer<T>;
+  human: HumanOutput<T>;
   /**
    * Top-level keys to strip from JSON output.
    *

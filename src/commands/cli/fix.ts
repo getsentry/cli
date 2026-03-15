@@ -17,7 +17,7 @@ import {
 } from "../../lib/db/schema.js";
 import { OutputError } from "../../lib/errors.js";
 import { formatFixResult } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { getRealUsername } from "../../lib/utils.js";
 
 type FixFlags = {
@@ -669,7 +669,7 @@ export const fixCommand = buildCommand({
       "  sudo sentry cli fix         # Fix root-owned files\n" +
       "  sentry cli fix --dry-run    # Show what would be fixed without making changes",
   },
-  output: { human: stateless(formatFixResult) },
+  output: { human: formatFixResult },
   parameters: {
     flags: {
       "dry-run": {

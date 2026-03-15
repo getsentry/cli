@@ -15,7 +15,7 @@ import {
 import { AuthError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 
 type RefreshFlags = {
   readonly json: boolean;
@@ -59,7 +59,7 @@ Examples:
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
     `.trim(),
   },
-  output: { human: stateless(formatRefreshResult) },
+  output: { human: formatRefreshResult },
   parameters: {
     flags: {
       force: {

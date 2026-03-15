@@ -9,7 +9,7 @@ import type { SentryContext } from "../context.js";
 import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { OutputError, ValidationError } from "../lib/errors.js";
-import { CommandOutput, stateless } from "../lib/formatters/output.js";
+import { CommandOutput } from "../lib/formatters/output.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
@@ -1053,7 +1053,7 @@ function logResponse(response: { status: number; headers: Headers }): void {
 }
 
 export const apiCommand = buildCommand({
-  output: { human: stateless(formatApiResponse) },
+  output: { human: formatApiResponse },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:

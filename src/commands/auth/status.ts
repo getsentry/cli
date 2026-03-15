@@ -22,7 +22,7 @@ import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import { formatAuthStatus, maskToken } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -144,7 +144,7 @@ export const statusCommand = buildCommand({
       "Display information about your current authentication status, " +
       "including whether you're logged in and your default organization/project settings.",
   },
-  output: { human: stateless(formatAuthStatus) },
+  output: { human: formatAuthStatus },
   parameters: {
     flags: {
       "show-token": {

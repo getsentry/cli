@@ -23,7 +23,6 @@ import {
   CommandOutput,
   type CommandReturn,
   type OutputConfig,
-  stateless,
 } from "./formatters/output.js";
 import {
   dispatchOrgScopedList,
@@ -474,9 +473,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
   return buildListCommand(routeName, {
     docs,
     output: {
-      human: stateless((result: ListResult<TWithOrg>) =>
-        formatListHuman(result, config)
-      ),
+      human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
       jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
         jsonTransformListResult(result, fields),
     } satisfies OutputConfig<ListResult<TWithOrg>>,

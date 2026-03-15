@@ -31,7 +31,7 @@ import {
 } from "../../lib/db/release-channel.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
   detectInstallationMethod,
@@ -418,7 +418,7 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
       "  sentry cli upgrade --method npm # Force using npm to upgrade",
   },
-  output: { human: stateless(formatUpgradeResult) },
+  output: { human: formatUpgradeResult },
   parameters: {
     positional: {
       kind: "tuple",

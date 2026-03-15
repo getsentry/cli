@@ -35,7 +35,7 @@ import {
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
@@ -276,7 +276,7 @@ export const createCommand = buildCommand({
       "  sentry project create my-app go --json",
   },
   output: {
-    human: stateless(formatProjectCreated),
+    human: formatProjectCreated,
     jsonExclude: [
       "slugDiverged",
       "expectedSlug",

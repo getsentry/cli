@@ -45,6 +45,7 @@ import {
   type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
+  resolveRenderer,
   writeFooter,
 } from "./formatters/output.js";
 import {
@@ -137,7 +138,7 @@ type LocalCommandBuilderArguments<
    * @example
    * ```ts
    * buildCommand({
-   *   output: { human: stateless(formatUser) },
+   *   output: { human: formatUser },
    *   async *func() { yield new CommandOutput(user); },
    * })
    * ```
@@ -399,7 +400,9 @@ export function buildCommand<
 
     // Resolve the human renderer once per invocation. Factory creates
     // fresh per-invocation state for streaming commands.
-    const renderer = outputConfig ? outputConfig.human() : undefined;
+    const renderer = outputConfig
+      ? resolveRenderer(outputConfig.human)
+      : undefined;
 
     // OutputError handler: render data through the output system, then
     // exit with the error's code. Stricli overwrites process.exitCode = 0

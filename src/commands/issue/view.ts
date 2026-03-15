@@ -14,7 +14,7 @@ import {
   formatIssueDetails,
   muted,
 } from "../../lib/formatters/index.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -102,7 +102,7 @@ export const viewCommand = buildCommand({
       "where 'f' is the project alias shown in the list).",
   },
   output: {
-    human: stateless(formatIssueView),
+    human: formatIssueView,
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

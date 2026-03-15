@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type OutputConfig,
   renderCommandOutput,
-  stateless,
+  resolveRenderer,
   writeFooter,
   writeOutput,
 } from "../../../src/lib/formatters/output.js";
@@ -33,7 +33,7 @@ function render(
   config: OutputConfig<any>,
   ctx: { json: boolean; fields?: string[] }
 ) {
-  const renderer = config.human();
+  const renderer = resolveRenderer(config.human);
   renderCommandOutput(w, data, config, renderer, ctx);
 }
 
@@ -204,8 +204,7 @@ describe("renderCommandOutput", () => {
   test("renders JSON when json=true", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string }> = {
-      json: true,
-      human: stateless((d) => `${d.name}`),
+      human: (d) => `${d.name}`,
     };
     render(w, { id: 1, name: "Alice" }, config, { json: true });
     expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
@@ -214,8 +213,7 @@ describe("renderCommandOutput", () => {
   test("renders human output when json=false", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ name: string }> = {
-      json: true,
-      human: stateless((d) => `Hello ${d.name}`),
+      human: (d) => `Hello ${d.name}`,
     };
     render(w, { name: "Alice" }, config, { json: false });
     expect(w.output).toBe("Hello Alice\n");
@@ -224,8 +222,7 @@ describe("renderCommandOutput", () => {
   test("applies fields filtering in JSON mode", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string; secret: string }> = {
-      json: true,
-      human: stateless(() => "unused"),
+      human: (_d) => "unused",
     };
     render(w, { id: 1, name: "Alice", secret: "x" }, config, {
       json: true,
@@ -237,8 +234,7 @@ describe("renderCommandOutput", () => {
   test("does not render hints (hints are rendered by the wrapper after generator completes)", () => {
     const w = createTestWriter();
     const config: OutputConfig<string> = {
-      json: true,
-      human: stateless(() => "Result"),
+      human: (_d) => "Result",
     };
     // renderCommandOutput only renders data — hints are handled by
     // buildCommand's wrapper via the generator return value
@@ -249,8 +245,7 @@ describe("renderCommandOutput", () => {
   test("works without hint", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ value: number }> = {
-      json: true,
-      human: stateless((d) => `Value: ${d.value}`),
+      human: (d) => `Value: ${d.value}`,
     };
     render(w, { value: 42 }, config, { json: false });
     expect(w.output).toBe("Value: 42\n");
@@ -263,8 +258,7 @@ describe("renderCommandOutput", () => {
       name: string;
       spanTreeLines?: string[];
     }> = {
-      json: true,
-      human: stateless((d) => `${d.id}: ${d.name}`),
+      human: (d) => `${d.id}: ${d.name}`,
       jsonExclude: ["spanTreeLines"],
     };
     render(
@@ -284,10 +278,8 @@ describe("renderCommandOutput", () => {
       id: number;
       spanTreeLines?: string[];
     }> = {
-      json: true,
-      human: stateless(
-        (d) => `${d.id}\n${d.spanTreeLines ? d.spanTreeLines.join("\n") : ""}`
-      ),
+      human: (d) =>
+        `${d.id}\n${d.spanTreeLines ? d.spanTreeLines.join("\n") : ""}`,
       jsonExclude: ["spanTreeLines"],
     };
     render(w, { id: 1, spanTreeLines: ["line1", "line2"] }, config, {
@@ -300,8 +292,7 @@ describe("renderCommandOutput", () => {
   test("jsonExclude with empty array is a no-op", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; extra: string }> = {
-      json: true,
-      human: stateless((d) => `${d.id}`),
+      human: (d) => `${d.id}`,
       jsonExclude: [],
     };
     render(w, { id: 1, extra: "keep" }, config, { json: true });
@@ -312,10 +303,8 @@ describe("renderCommandOutput", () => {
   test("jsonExclude strips fields from array elements", () => {
     const w = createTestWriter();
     const config: OutputConfig<any> = {
-      json: true,
-      human: stateless((d: { id: number; name: string }[]) =>
-        d.map((e) => e.name).join(", ")
-      ),
+      human: (d: { id: number; name: string }[]) =>
+        d.map((e) => e.name).join(", "),
       jsonExclude: ["detectedFrom"],
     };
     render(
@@ -343,8 +332,7 @@ describe("renderCommandOutput", () => {
       org: string;
     };
     const config: OutputConfig<ListResult> = {
-      json: true,
-      human: stateless((d) => d.items.map((i) => i.name).join(", ")),
+      human: (d) => d.items.map((i) => i.name).join(", "),
       jsonTransform: (data) => ({
         data: data.items,
         hasMore: data.hasMore,
@@ -372,8 +360,7 @@ describe("renderCommandOutput", () => {
       hasMore: boolean;
     };
     const config: OutputConfig<ListResult> = {
-      json: true,
-      human: stateless(() => "unused"),
+      human: (_d) => "unused",
       jsonTransform: (data, fields) => ({
         data:
           fields && fields.length > 0
@@ -407,8 +394,7 @@ describe("renderCommandOutput", () => {
   test("jsonTransform is ignored in human mode", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ items: string[]; org: string }> = {
-      json: true,
-      human: stateless((d) => `${d.org}: ${d.items.join(", ")}`),
+      human: (d) => `${d.org}: ${d.items.join(", ")}`,
       jsonTransform: (data) => ({ data: data.items }),
     };
     render(w, { items: ["a", "b"], org: "test-org" }, config, {
@@ -420,8 +406,7 @@ describe("renderCommandOutput", () => {
   test("jsonTransform takes precedence over jsonExclude", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string; extra: string }> = {
-      json: true,
-      human: stateless(() => "unused"),
+      human: (_d) => "unused",
       jsonExclude: ["extra"],
       jsonTransform: (data) => ({ transformed: true, id: data.id }),
     };
@@ -436,7 +421,6 @@ describe("renderCommandOutput", () => {
   test("human factory creates fresh renderer per resolve", () => {
     const calls: number[] = [];
     const config: OutputConfig<{ n: number }> = {
-      json: true,
       human: () => ({
         render: (d) => {
           calls.push(d.n);
@@ -446,11 +430,11 @@ describe("renderCommandOutput", () => {
     };
 
     // First resolve + render
-    const r1 = config.human();
+    const r1 = resolveRenderer(config.human);
     r1.render({ n: 1 });
 
     // Second resolve = fresh renderer
-    const r2 = config.human();
+    const r2 = resolveRenderer(config.human);
     r2.render({ n: 2 });
 
     expect(calls).toEqual([1, 2]);
@@ -459,14 +443,13 @@ describe("renderCommandOutput", () => {
   test("finalize is called with hint and output is written", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ value: string }> = {
-      json: true,
       human: () => ({
         render: (d) => `[${d.value}]`,
         finalize: (hint) => `=== END ===${hint ? `\n${hint}` : ""}`,
       }),
     };
 
-    const renderer = config.human();
+    const renderer = resolveRenderer(config.human);
     renderCommandOutput(w, { value: "test" }, config, renderer, {
       json: false,
     });
@@ -477,12 +460,11 @@ describe("renderCommandOutput", () => {
     expect(footer).toBe("=== END ===\nDone.");
   });
 
-  test("stateless renderer has no finalize method", () => {
+  test("plain function renderer has no finalize method", () => {
     const config: OutputConfig<string> = {
-      json: true,
-      human: stateless((s) => s.toUpperCase()),
+      human: (s) => s.toUpperCase(),
     };
-    const renderer = config.human();
+    const renderer = resolveRenderer(config.human);
     expect(renderer.render("hello")).toBe("HELLO");
     expect(renderer.finalize).toBeUndefined();
   });

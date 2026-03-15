@@ -14,7 +14,7 @@ import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ConfigError, ValidationError } from "../../lib/errors.js";
 import { formatFeedbackResult } from "../../lib/formatters/human.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 
 /** Structured result of the feedback submission */
 export type FeedbackResult = {
@@ -31,7 +31,7 @@ export const feedbackCommand = buildCommand({
       "Submit feedback about your experience with the Sentry CLI. " +
       "All text after 'feedback' is sent as your message.",
   },
-  output: { human: stateless(formatFeedbackResult) },
+  output: { human: formatFeedbackResult },
   parameters: {
     flags: {},
     positional: {

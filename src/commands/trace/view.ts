@@ -21,7 +21,7 @@ import {
   formatSimpleSpanTree,
   formatTraceSummary,
 } from "../../lib/formatters/index.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -205,7 +205,7 @@ export const viewCommand = buildCommand({
       "The trace ID is the 32-character hexadecimal identifier.",
   },
   output: {
-    human: stateless(formatTraceView),
+    human: formatTraceView,
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

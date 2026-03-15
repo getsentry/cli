@@ -12,11 +12,7 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { formatLogTable } from "../../lib/formatters/log.js";
-import {
-  CommandOutput,
-  formatFooter,
-  stateless,
-} from "../../lib/formatters/output.js";
+import { CommandOutput, formatFooter } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -169,7 +165,7 @@ export const logsCommand = buildCommand({
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
   output: {
-    human: stateless(formatTraceLogsHuman),
+    human: formatTraceLogsHuman,
     jsonTransform: (data: TraceLogsData, fields?: string[]) => {
       if (fields && fields.length > 0) {
         return data.logs.map((entry) => filterFields(entry, fields));

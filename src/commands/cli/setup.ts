@@ -27,7 +27,8 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
 import {
   addToGitHubPath,
   addToPath,
@@ -58,8 +59,6 @@ type Logger = (msg: string) => void;
 type SetupResult = {
   /** Status messages collected during setup */
   messages: string[];
-  /** Warning messages from best-effort steps */
-  warnings: string[];
   /** Whether a fresh binary was installed */
   freshInstall: boolean;
   /** Path to the installed binary */
@@ -70,13 +69,7 @@ type SetupResult = {
 
 /** Format setup result for human-readable output */
 function formatSetupResult(result: SetupResult): string {
-  const lines: string[] = [...result.messages];
-  if (result.warnings.length > 0) {
-    for (const w of result.warnings) {
-      lines.push(`⚠ ${w}`);
-    }
-  }
-  return lines.join("\n");
+  return result.messages.join("\n");
 }
 
 /**
@@ -464,12 +457,12 @@ export const setupCommand = buildCommand({
       },
     },
   },
-  output: { human: stateless(formatSetupResult) },
+  output: { human: formatSetupResult },
   async *func(this: SentryContext, flags: SetupFlags) {
     const { process, homeDir } = this;
 
+    const log = logger.withTag("cli.setup");
     const messages: string[] = [];
-    const warnings: string[] = [];
 
     const emit: Logger = (msg: string) => {
       if (!flags.quiet) {
@@ -480,7 +473,7 @@ export const setupCommand = buildCommand({
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      warnings.push(`${step} failed: ${msg}`);
+      log.warn(`${step} failed: ${msg}`);
     };
 
     let binaryPath = process.execPath;
@@ -519,7 +512,6 @@ export const setupCommand = buildCommand({
 
     return yield new CommandOutput<SetupResult>({
       messages,
-      warnings,
       freshInstall,
       binaryPath,
       version: CLI_VERSION,

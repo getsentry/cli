@@ -9,7 +9,7 @@
 import { run } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
-import { CommandOutput, stateless } from "../lib/formatters/output.js";
+import { CommandOutput } from "../lib/formatters/output.js";
 import { printCustomHelp } from "../lib/help.js";
 
 export const helpCommand = buildCommand({
@@ -19,7 +19,7 @@ export const helpCommand = buildCommand({
       "Display help information. Run 'sentry help' for an overview, " +
       "or 'sentry help <command>' for detailed help on a specific command.",
   },
-  output: { human: stateless((s: string) => s) },
+  output: { human: (s: string) => s },
   parameters: {
     flags: {},
     positional: {

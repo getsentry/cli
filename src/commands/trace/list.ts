@@ -15,7 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import { CommandOutput, stateless } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -180,7 +180,7 @@ export const listCommand = buildListCommand("trace", {
       '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction',
   },
   output: {
-    human: stateless(formatTraceListHuman),
+    human: formatTraceListHuman,
     jsonTransform: jsonTransformTraceList,
   },
   parameters: {
