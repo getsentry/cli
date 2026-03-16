@@ -1,169 +1,57 @@
 /**
  * Trace View Command Tests
  *
- * Tests for positional argument parsing and project resolution
- * in src/commands/trace/view.ts
+ * Tests for pre-processing (swap detection, issue ID detection)
+ * and project resolution in src/commands/trace/view.ts.
+ *
+ * Note: Core trace target parsing tests are in test/lib/trace-target.test.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { parsePositionalArgs } from "../../../src/commands/trace/view.js";
+import { preProcessArgs } from "../../../src/commands/trace/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import {
-  ContextError,
-  ResolutionError,
-  ValidationError,
-} from "../../../src/lib/errors.js";
+import { ResolutionError, ValidationError } from "../../../src/lib/errors.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
-const VALID_TRACE_ID_2 = "deadbeef12345678deadbeef12345678";
-const VALID_UUID = "ed29abc8-71c4-475b-9675-4655ef1a02d0";
-const VALID_UUID_STRIPPED = "ed29abc871c4475b96754655ef1a02d0";
 
-describe("parsePositionalArgs", () => {
-  describe("single argument (trace ID only)", () => {
-    test("parses single arg as trace ID", () => {
-      const result = parsePositionalArgs([VALID_TRACE_ID]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("parses 32-char hex trace ID", () => {
-      const result = parsePositionalArgs([VALID_TRACE_ID]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("normalizes uppercase trace ID to lowercase", () => {
-      const result = parsePositionalArgs(["AAAA1111BBBB2222CCCC3333DDDD4444"]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
+describe("preProcessArgs", () => {
+  test("returns args unchanged for single arg", () => {
+    const result = preProcessArgs([VALID_TRACE_ID]);
+    expect(result.correctedArgs).toEqual([VALID_TRACE_ID]);
+    expect(result.warning).toBeUndefined();
+    expect(result.suggestion).toBeUndefined();
   });
 
-  describe("two arguments (target + trace ID)", () => {
-    test("parses org/project target and trace ID", () => {
-      const result = parsePositionalArgs(["my-org/frontend", VALID_TRACE_ID]);
-      expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("parses project-only target and trace ID", () => {
-      const result = parsePositionalArgs(["frontend", VALID_TRACE_ID]);
-      expect(result.targetArg).toBe("frontend");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
+  test("returns args unchanged for normal two-arg order", () => {
+    const result = preProcessArgs(["my-org/frontend", VALID_TRACE_ID]);
+    expect(result.correctedArgs).toEqual(["my-org/frontend", VALID_TRACE_ID]);
+    expect(result.warning).toBeUndefined();
   });
 
-  describe("error cases", () => {
-    test("throws ContextError for empty args", () => {
-      expect(() => parsePositionalArgs([])).toThrow(ContextError);
-    });
-
-    test("throws ContextError with usage hint", () => {
-      try {
-        parsePositionalArgs([]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain("Trace ID");
-      }
-    });
-
-    test("throws ValidationError for invalid trace ID", () => {
-      expect(() => parsePositionalArgs(["not-a-valid-trace-id"])).toThrow(
-        ValidationError
-      );
-    });
-
-    test("throws ValidationError for short hex", () => {
-      expect(() => parsePositionalArgs(["abc123"])).toThrow(ValidationError);
-    });
-
-    test("throws ValidationError for empty trace ID in two-arg case", () => {
-      expect(() => parsePositionalArgs(["my-org/frontend", ""])).toThrow(
-        ValidationError
-      );
-    });
+  test("detects swapped args and corrects order", () => {
+    // User put trace-id first, org/project second
+    const result = preProcessArgs([VALID_TRACE_ID, "my-org/frontend"]);
+    expect(result.correctedArgs).toEqual(["my-org/frontend", VALID_TRACE_ID]);
+    expect(result.warning).toContain("reversed");
   });
 
-  describe("slash-separated org/project/traceId (single arg)", () => {
-    test("parses org/project/traceId as target + trace ID", () => {
-      const result = parsePositionalArgs([`sentry/cli/${VALID_TRACE_ID}`]);
-      expect(result.targetArg).toBe("sentry/cli");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("handles hyphenated org and project slugs", () => {
-      const result = parsePositionalArgs([
-        `my-org/my-project/${VALID_TRACE_ID_2}`,
-      ]);
-      expect(result.targetArg).toBe("my-org/my-project");
-      expect(result.traceId).toBe(VALID_TRACE_ID_2);
-    });
-
-    test("one slash (org/project, missing trace ID) throws ContextError", () => {
-      expect(() => parsePositionalArgs(["sentry/cli"])).toThrow(ContextError);
-    });
-
-    test("trailing slash (org/project/) throws ContextError", () => {
-      expect(() => parsePositionalArgs(["sentry/cli/"])).toThrow(ContextError);
-    });
-
-    test("one-slash ContextError mentions Trace ID", () => {
-      try {
-        parsePositionalArgs(["sentry/cli"]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain("Trace ID");
-      }
-    });
+  test("detects issue short ID and suggests issue view", () => {
+    const result = preProcessArgs(["CAM-82X", VALID_TRACE_ID]);
+    expect(result.correctedArgs).toEqual(["CAM-82X", VALID_TRACE_ID]);
+    expect(result.suggestion).toContain("sentry issue view CAM-82X");
   });
 
-  describe("edge cases", () => {
-    test("handles more than two args (ignores extras)", () => {
-      const result = parsePositionalArgs([
-        "my-org/frontend",
-        VALID_TRACE_ID,
-        "extra-arg",
-      ]);
-      expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-  });
-
-  describe("UUID auto-correction", () => {
-    test("strips dashes from UUID trace ID (single arg)", () => {
-      const result = parsePositionalArgs([VALID_UUID]);
-      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("strips dashes from UUID trace ID (two-arg case)", () => {
-      const result = parsePositionalArgs(["my-org/frontend", VALID_UUID]);
-      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
-      expect(result.targetArg).toBe("my-org/frontend");
-    });
-
-    test("strips dashes from UUID in slash-separated form", () => {
-      const result = parsePositionalArgs([`sentry/cli/${VALID_UUID}`]);
-      expect(result.traceId).toBe(VALID_UUID_STRIPPED);
-      expect(result.targetArg).toBe("sentry/cli");
-    });
-
-    test("handles real user input from CLI-7Z", () => {
-      const result = parsePositionalArgs([
-        "ed29abc8-71c4-475b-9675-4655ef1a02d0",
-      ]);
-      expect(result.traceId).toBe("ed29abc871c4475b96754655ef1a02d0");
-    });
+  test("returns empty args unchanged", () => {
+    const result = preProcessArgs([]);
+    expect(result.correctedArgs).toEqual([]);
   });
 });
 
 describe("resolveProjectBySlug", () => {
-  const HINT = "sentry trace view <org>/<project> <trace-id>";
+  const HINT = "sentry trace view [<org>/<project>/]<trace-id>";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -197,7 +85,6 @@ describe("resolveProjectBySlug", () => {
         expect((error as ResolutionError).message).toContain(
           "Check that you have access"
         );
-        // Message says "not found", not "is required"
         expect((error as ResolutionError).message).toContain("not found");
       }
     });
@@ -221,8 +108,18 @@ describe("resolveProjectBySlug", () => {
     test("includes all orgs and trace ID in error message", async () => {
       findProjectsBySlugSpy.mockResolvedValue({
         projects: [
-          { slug: "frontend", orgSlug: "acme-corp", id: "1", name: "Frontend" },
-          { slug: "frontend", orgSlug: "beta-inc", id: "2", name: "Frontend" },
+          {
+            slug: "frontend",
+            orgSlug: "acme-corp",
+            id: "1",
+            name: "Frontend",
+          },
+          {
+            slug: "frontend",
+            orgSlug: "beta-inc",
+            id: "2",
+            name: "Frontend",
+          },
         ] as ProjectWithOrg[],
         orgs: [],
       });
@@ -249,7 +146,12 @@ describe("resolveProjectBySlug", () => {
     test("returns resolved target for single match", async () => {
       findProjectsBySlugSpy.mockResolvedValue({
         projects: [
-          { slug: "backend", orgSlug: "my-company", id: "42", name: "Backend" },
+          {
+            slug: "backend",
+            orgSlug: "my-company",
+            id: "42",
+            name: "Backend",
+          },
         ] as ProjectWithOrg[],
         orgs: [],
       });
