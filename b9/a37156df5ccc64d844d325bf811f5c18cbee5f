@@ -1,0 +1,75 @@
+# Plan: Replace CI Script with GritQL Plugins
+
+## Context
+
+Testing revealed that Biome GritQL plugins DO work for file-scoped rules — the key is using `file($name, $body)` instead of bare `$filename`/`$program`. The `$name` variable contains the **full absolute path**, so regex needs `.*` anchors. Both filename- and content-based scoping work.
+
+## What Already Exists (Previous Rounds)
+
+- ✅ `biome.jsonc` override banning `chalk` in `src/commands/**/*.ts` via `noRestrictedImports`
+- ✅ `src/commands/issue/view.ts` — `muted()` replaced with `isPlainOutput()` pattern
+- ✅ `script/check-command-patterns.ts` + `check:commands` script + CI step (to be replaced)
+
+## Plan: Replace `check-command-patterns.ts` with GritQL Plugins
+
+The CI script approach works but GritQL plugins are better because they:
+- Run as part of `bun run lint` (no separate CI step needed)
+- Show inline diagnostics in the editor (IDE integration)
+- Are suppressed per-line via `biome-ignore` (standard workflow)
+
+### Files to Create
+
+#### `lint-rules/no-stdout-write-in-commands.grit`
+
+```grit
+file($name, $body) where {
+  $name <: r".*src/commands/.*",
+  $body <: contains `stdout.write($args)` as $call,
+  register_diagnostic(span=$call, message="Don't call stdout.write() in commands. Yield CommandOutput instead and let the buildCommand wrapper handle output rendering.")
+}
+```
+
+#### `lint-rules/no-process-stdout-in-commands.grit`
+
+```grit
+file($name, $body) where {
+  $name <: r".*src/commands/.*",
+  $body <: contains `process.stdout` as $access,
+  register_diagnostic(span=$access, message="Don't use process.stdout in commands. Yield CommandOutput and let the buildCommand wrapper handle output.")
+}
+```
+
+### Files to Modify
+
+#### `biome.jsonc`
+
+Add `"plugins"` array at top level (after `"extends"`):
+
+```jsonc
+"plugins": [
+  "./lint-rules/no-stdout-write-in-commands.grit",
+  "./lint-rules/no-process-stdout-in-commands.grit"
+],
+```
+
+### Files to Remove
+
+- `script/check-command-patterns.ts` — replaced by GritQL plugins
+
+#### `package.json`
+
+Remove the `"check:commands"` script.
+
+#### `.github/workflows/ci.yml`
+
+Remove `- run: bun run check:commands` from the lint job (plugins run as part of `bun run lint`).
+
+## Verification
+
+1. `bun run lint` — passes with new plugins (0 violations in commands)
+2. Smoke test: create `src/commands/_test.ts` with `stdout.write("x")` → plugin error with valid span
+3. Smoke test: create `src/commands/_test.ts` with `process.stdout` → plugin error with valid span
+4. Smoke test: create `src/lib/_test.ts` with `process.stdout` → NO error (scoped to commands)
+5. Clean up test files
+6. `bun run typecheck` still passes
+7. `bun test test/commands/issue/` still passes
