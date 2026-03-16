@@ -1,0 +1,162 @@
+# Plan: Rebase feat/help-json onto origin/main
+
+## Problem
+
+Our `feat/help-json` branch (1 commit: `19d54e6a`) has merge conflicts with `origin/main` (10 new commits since divergence). The key conflict source is `a3c6a91d` — a major refactor that converted all commands from `async func()` to `async *func()` generators with `CommandOutput` class yields.
+
+## Conflicting Files (3 of 8)
+
+| File | Our change | Main's change | Resolution |
+|------|-----------|---------------|------------|
+| `src/commands/help.ts` | Added `output: "json"`, `writeJson()` in `async func()` | Converted to `async *func()` generator, `output: { human: ... }`, `CommandOutput` class | Rewrite: adapt JSON logic into generator pattern |
+| `src/lib/help.ts` | Imported from `introspect.ts`, kept `printCustomHelp(stdout: Writer)` | Removed `Writer` param → returns `string` | Merge: take main's signature + our introspect imports |
+| `AGENTS.md` | Lore updates | Lore updates (multiple commits) | Take main's, re-add ours |
+
+**Non-conflicting files** (apply cleanly): `src/lib/introspect.ts`, `script/generate-skill.ts`, `test/commands/help.test.ts`, `test/lib/introspect.test.ts`, `test/lib/introspect.property.test.ts`
+
+## Key API Changes on Main
+
+1. **`output` field**: No longer accepts `"json"` string. Only `OutputConfig<any>` object form: `output: { human: (s: string) => s.trimEnd() }`
+2. **Command functions**: Must be `async *func()` generators, yield `new CommandOutput(data)`, optionally return `{ hint }`
+3. **`printCustomHelp()`**: Now returns `Promise<string>` instead of taking a `Writer` param
+
+## Rebase Steps
+
+### Step 1: Start interactive rebase
+```bash
+git rebase origin/main
+```
+
+### Step 2: Resolve `AGENTS.md`
+Take main's version entirely — our lore will be re-added automatically on next commit.
+```bash
+git checkout origin/main -- AGENTS.md
+```
+
+### Step 3: Resolve `src/commands/help.ts`
+Start from main's generator version, add our `--json` logic:
+
+```typescript
+import { run } from "@stricli/core";
+import type { SentryContext } from "../context.js";
+import { buildCommand } from "../lib/command.js";
+import { writeJson } from "../lib/formatters/json.js";
+import { CommandOutput } from "../lib/formatters/output.js";
+import { printCustomHelp } from "../lib/help.js";
+
+export const helpCommand = buildCommand({
+  docs: {
+    brief: "Display help for a command",
+    fullDescription:
+      "Display help information. Run 'sentry help' for an overview, " +
+      "or 'sentry help <command>' for detailed help on a specific command. " +
+      "Use --json for machine-readable output suitable for AI agents.",
+  },
+  output: { human: (s: string) => s.trimEnd() },
+  parameters: {
+    flags: {},
+    positional: {
+      kind: "array",
+      parameter: {
+        brief: "Command to get help for",
+        parse: String,
+        placeholder: "command",
+      },
+    },
+  },
+  async *func(
+    this: SentryContext,
+    flags: { json?: boolean },
+    ...commandPath: string[]
+  ) {
+    if (flags.json) {
+      // Dynamic import to avoid circular dependency
+      const { routes } = await import("../app.js");
+      const {
+        extractAllRoutes,
+        resolveCommandPath,
+        cleanCommandInfoForJson,
+        cleanRouteInfoForJson,
+      } = await import("../lib/introspect.js");
+
+      type IntrospectRouteMap = import("../lib/introspect.js").RouteMap;
+      const routeMap = routes as unknown as IntrospectRouteMap;
+
+      if (commandPath.length === 0) {
+        const allRoutes = extractAllRoutes(routeMap).map(cleanRouteInfoForJson);
+        writeJson(this.stdout, { routes: allRoutes });
+      } else {
+        const resolved = resolveCommandPath(routeMap, commandPath);
+        if (!resolved) {
+          writeJson(this.stdout, {
+            error: `Command not found: ${commandPath.join(" ")}`,
+          });
+          return;
+        }
+        if (resolved.kind === "command") {
+          writeJson(this.stdout, cleanCommandInfoForJson(resolved.info));
+        } else {
+          writeJson(this.stdout, cleanRouteInfoForJson(resolved.info));
+        }
+      }
+      return;
+    }
+
+    // No args: show branded help
+    if (commandPath.length === 0) {
+      return yield new CommandOutput(await printCustomHelp());
+    }
+
+    // With args: delegate to Stricli's --helpAll
+    const { app } = await import("../app.js");
+    const { buildContext } = await import("../context.js");
+    await run(app, [...commandPath, "--helpAll"], buildContext(this.process));
+  },
+});
+```
+
+**Key points**:
+- Uses `async *func()` generator (main's pattern)
+- Uses `output: { human: ... }` (not `"json"` string)
+- JSON path writes directly via `writeJson(this.stdout, ...)` and returns early (no yield)
+- Human path yields `CommandOutput` (main's pattern)
+- `this.stdout` is available because `SentryContext` has it as a top-level property
+
+### Step 4: Resolve `src/lib/help.ts`
+Start from main's version (returns `string`, no `Writer`), apply our introspect imports:
+
+```typescript
+import { routes } from "../app.js";
+import { formatBanner } from "./banner.js";
+import { isAuthenticated } from "./db/auth.js";
+import { cyan, magenta, muted } from "./formatters/colors.js";
+import type { RouteMap, RouteMapEntry } from "./introspect.js";
+import { getPositionalString, isCommand, isRouteMap } from "./introspect.js";
+```
+
+- Remove all local type definitions (`RouteMapEntry`, `PositionalParam`, `PositionalParams`) and type guards (`isRouteMap`, `isCommand`, `getPositionalPlaceholder`)
+- Cast `routes` as `unknown as RouteMap` before use
+- Keep main's `printCustomHelp()` signature (returns `Promise<string>`)
+- Adapt `generateCommands()` to use imported `isRouteMap`, `isCommand`, `getPositionalString`
+
+### Step 5: Update `test/commands/help.test.ts`
+Our test creates a mock `SentryContext` and runs `help --json` via `run(app, ...)`. The mock needs to match the current `SentryContext` shape. Since `printCustomHelp()` no longer takes a Writer, the integration test should still work — we just need to ensure the mock context is correct for the generator-based command.
+
+### Step 6: Continue rebase
+```bash
+git add -A
+git rebase --continue
+```
+
+### Step 7: Force push
+```bash
+git push --force-with-lease origin feat/help-json
+```
+
+## Verification
+```bash
+bun run typecheck
+bun run lint
+bun test test/lib/introspect.test.ts test/lib/introspect.property.test.ts test/commands/help.test.ts
+bun run script/generate-skill.ts
+```
