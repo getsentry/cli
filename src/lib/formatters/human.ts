@@ -1117,7 +1117,7 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
     line += `  ${plainSafeMuted(`(${prettyMs(durationMs)})`)}`;
   }
 
-  line += `  ${plainSafeMuted(span.span_id)}`;
+  line += `  ${plainSafeMuted(span.span_id ?? "")}`;
 
   lines.push(line);
 

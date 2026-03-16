@@ -416,7 +416,7 @@ export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
 }
 
 /** Column definitions for the flat span table */
-export const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
+const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
   {
     header: "Span ID",
     value: (s) => `\`${s.span_id}\``,
