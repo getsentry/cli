@@ -22,6 +22,7 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { computeSpanDurationMs } from "../../lib/formatters/trace.js";
+import { validateSpanId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -43,30 +44,9 @@ type ViewFlags = {
   readonly fields?: string[];
 };
 
-/** Regex for a 16-character hex span ID */
-const SPAN_ID_RE = /^[0-9a-f]{16}$/i;
-
 /** Usage hint for ContextError messages */
 const USAGE_HINT =
   "sentry span view [<org>/<project>/]<trace-id> <span-id> [<span-id>...]";
-
-/**
- * Validate that a string is a 16-character hexadecimal span ID.
- *
- * @param value - The string to validate
- * @returns The trimmed, lowercased span ID
- * @throws {ValidationError} If the format is invalid
- */
-export function validateSpanId(value: string): string {
-  const trimmed = value.trim().toLowerCase();
-  if (!SPAN_ID_RE.test(trimmed)) {
-    throw new ValidationError(
-      `Invalid span ID "${trimmed}". Expected a 16-character hexadecimal string.\n\n` +
-        "Example: a1b2c3d4e5f67890"
-    );
-  }
-  return trimmed;
-}
 
 /**
  * Parse positional arguments for span view.

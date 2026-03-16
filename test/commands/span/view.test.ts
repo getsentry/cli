@@ -16,12 +16,12 @@ import {
 } from "bun:test";
 import {
   parsePositionalArgs,
-  validateSpanId,
   viewCommand,
 } from "../../../src/commands/span/view.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { validateSpanId } from "../../../src/lib/hex-id.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 

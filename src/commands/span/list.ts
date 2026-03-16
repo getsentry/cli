@@ -48,21 +48,31 @@ type SortValue = "time" | "duration";
 /** Accepted values for the --sort flag */
 const VALID_SORT_VALUES: SortValue[] = ["time", "duration"];
 
-/** Maximum allowed value for --limit flag */
+/**
+ * CLI-side upper bound for --limit.
+ *
+ * The Sentry Events API (spans dataset) accepts `per_page` up to 100 per
+ * request, but the CLI allows requesting up to 1000 as a convenience —
+ * the API client paginates internally when needed. This matches the cap
+ * used by `issue list`, `trace list`, and `log list`.
+ */
 const MAX_LIMIT = 1000;
-
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
 
 /** Default number of spans to show */
 const DEFAULT_LIMIT = 25;
 
+/** Default sort order for span results */
+const DEFAULT_SORT: SortValue = "time";
+
 /** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry span list [<org>/<project>] <trace-id>";
+const USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
 
 /**
  * Parse positional arguments for span list.
- * Handles: `<trace-id>` or `<target> <trace-id>`
+ * Handles: `<trace-id>` or `<org>/<project>/<trace-id>`
+ *
+ * Uses the standard `parseSlashSeparatedArg` pattern: the last `/`-separated
+ * segment is the trace ID, and everything before it is the org/project target.
  *
  * @param args - Positional arguments from CLI
  * @returns Parsed trace ID and optional target arg
@@ -104,7 +114,7 @@ export function parsePositionalArgs(args: string[]): {
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
+  return validateLimit(value, 1, MAX_LIMIT);
 }
 
 /**
@@ -171,16 +181,16 @@ export const listCommand = buildCommand({
     fullDescription:
       "List spans in a distributed trace with optional filtering and sorting.\n\n" +
       "Target specification:\n" +
-      "  sentry span list <trace-id>              # auto-detect from DSN or config\n" +
-      "  sentry span list <org>/<proj> <trace-id> # explicit org and project\n" +
-      "  sentry span list <project> <trace-id>    # find project across all orgs\n\n" +
+      "  sentry span list <trace-id>                       # auto-detect from DSN or config\n" +
+      "  sentry span list <org>/<project>/<trace-id>       # explicit org and project\n" +
+      "  sentry span list <project> <trace-id>             # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.\n\n" +
       "Examples:\n" +
-      "  sentry span list <trace-id>                      # List spans in trace\n" +
-      "  sentry span list <trace-id> --limit 50           # Show more spans\n" +
-      '  sentry span list <trace-id> -q "op:db"           # Filter by operation\n' +
-      "  sentry span list <trace-id> --sort duration      # Sort by slowest first\n" +
-      '  sentry span list <trace-id> -q "duration:>100ms" # Spans slower than 100ms',
+      "  sentry span list <trace-id>                       # List spans in trace\n" +
+      "  sentry span list <trace-id> --limit 50            # Show more spans\n" +
+      '  sentry span list <trace-id> -q "op:db"            # Filter by operation\n' +
+      "  sentry span list <trace-id> --sort duration       # Sort by slowest first\n" +
+      '  sentry span list <trace-id> -q "duration:>100ms"  # Spans slower than 100ms',
   },
   output: {
     human: formatSpanListHuman,
@@ -200,7 +210,7 @@ export const listCommand = buildCommand({
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of spans (${MIN_LIMIT}-${MAX_LIMIT})`,
+        brief: `Number of spans (1-${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
       query: {
@@ -213,8 +223,8 @@ export const listCommand = buildCommand({
       sort: {
         kind: "parsed",
         parse: parseSort,
-        brief: "Sort by: time (default), duration",
-        default: "time" as const,
+        brief: `Sort order: ${VALID_SORT_VALUES.join(", ")}`,
+        default: DEFAULT_SORT,
       },
       fresh: FRESH_FLAG,
     },
@@ -249,7 +259,7 @@ export const listCommand = buildCommand({
         target = await resolveProjectBySlug(
           parsed.projectSlug,
           USAGE_HINT,
-          `sentry span list <org>/${parsed.projectSlug} ${traceId}`
+          `sentry span list <org>/${parsed.projectSlug}/${traceId}`
         );
         break;
 
