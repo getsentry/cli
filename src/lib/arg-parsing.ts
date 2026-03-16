@@ -79,6 +79,44 @@ export function looksLikeIssueShortId(str: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Path detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a string looks like a filesystem path rather than a slug/identifier.
+ *
+ * Uses purely syntactic checks — no filesystem I/O. Detects:
+ * - `.` (current directory)
+ * - `./foo`, `../foo` (relative paths)
+ * - `/foo` (absolute paths)
+ * - `~/foo` (home directory paths)
+ *
+ * Bare names like `my-org` or `my-project` never match, which is what makes
+ * this useful for disambiguating positional arguments that could be either
+ * a filesystem path or an org/project target.
+ *
+ * @param arg - CLI argument string to check
+ * @returns true if the string looks like a filesystem path
+ *
+ * @example
+ * looksLikePath(".")           // true
+ * looksLikePath("./subdir")    // true
+ * looksLikePath("../parent")   // true
+ * looksLikePath("/absolute")   // true
+ * looksLikePath("~/home")      // true
+ * looksLikePath("my-project")  // false
+ * looksLikePath("acme/app")    // false
+ */
+export function looksLikePath(arg: string): boolean {
+  return (
+    arg === "." ||
+    arg.startsWith("./") ||
+    arg.startsWith("../") ||
+    arg.startsWith("/") ||
+    arg.startsWith("~")
+  );
+}
+
 // Argument swap detection for view commands
 // ---------------------------------------------------------------------------
 
