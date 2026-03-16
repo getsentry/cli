@@ -10,7 +10,6 @@ import type {
   TraceSpan,
   TransactionListItem,
 } from "../../types/index.js";
-import { formatRelativeTime } from "./human.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -25,6 +24,7 @@ import {
 } from "./markdown.js";
 import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
+import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -291,24 +291,6 @@ export function formatTraceSummary(summary: TraceSummary): string {
 // ---------------------------------------------------------------------------
 // Flat span utilities (for span list / span view)
 // ---------------------------------------------------------------------------
-
-/**
- * Compute the duration of a span in milliseconds.
- * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
- *
- * @returns Duration in milliseconds, or undefined if not computable
- */
-export function computeSpanDurationMs(span: TraceSpan): number | undefined {
-  if (span.duration !== undefined && Number.isFinite(span.duration)) {
-    return span.duration;
-  }
-  const endTs = span.end_timestamp || span.timestamp;
-  if (endTs !== undefined && Number.isFinite(endTs)) {
-    const ms = (endTs - span.start_timestamp) * 1000;
-    return ms >= 0 ? ms : undefined;
-  }
-  return;
-}
 
 /** Flat span for list output — no nested children */
 export type FlatSpan = {

@@ -39,7 +39,7 @@ import {
 } from "./markdown.js";
 import { sparkline } from "./sparkline.js";
 import { type Column, writeTable } from "./table.js";
-import { computeSpanDurationMs } from "./trace.js";
+import { computeSpanDurationMs } from "./time-utils.js";
 
 // Color tag maps
 
@@ -200,42 +200,8 @@ export function formatStatusLabel(status: string | undefined): string {
   );
 }
 
-// Date Formatting
-
-/**
- * Format a date as relative time (e.g., "2h ago", "3d ago") or short date for older dates.
- *
- * - < 1 hour: "Xm ago"
- * - < 24 hours: "Xh ago"
- * - < 3 days: "Xd ago"
- * - >= 3 days: Short date (e.g., "Jan 18")
- */
-export function formatRelativeTime(dateString: string | undefined): string {
-  if (!dateString) {
-    return colorTag("muted", "—");
-  }
-
-  const date = new Date(dateString);
-  const now = Date.now();
-  const diffMs = now - date.getTime();
-  const diffMins = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-
-  let text: string;
-  if (diffMins < 60) {
-    text = `${diffMins}m ago`;
-  } else if (diffHours < 24) {
-    text = `${diffHours}h ago`;
-  } else if (diffDays < 3) {
-    text = `${diffDays}d ago`;
-  } else {
-    // Short date: "Jan 18"
-    text = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  }
-
-  return text;
-}
+// formatRelativeTime moved to time-utils.ts to break circular import
+import { formatRelativeTime } from "./time-utils.js";
 
 // Issue Formatting
 

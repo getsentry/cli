@@ -21,7 +21,7 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { computeSpanDurationMs } from "../../lib/formatters/trace.js";
+import { computeSpanDurationMs } from "../../lib/formatters/time-utils.js";
 import { validateSpanId } from "../../lib/hex-id.js";
 import {
   applyFreshFlag,

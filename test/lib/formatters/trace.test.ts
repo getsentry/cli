@@ -11,8 +11,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { computeSpanDurationMs } from "../../../src/lib/formatters/time-utils.js";
 import {
-  computeSpanDurationMs,
   computeTraceSummary,
   findSpanById,
   formatTraceDuration,
