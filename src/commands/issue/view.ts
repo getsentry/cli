@@ -14,6 +14,7 @@ import {
   formatIssueDetails,
   muted,
 } from "../../lib/formatters/index.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -101,7 +102,6 @@ export const viewCommand = buildCommand({
       "where 'f' is the project alias shown in the list).",
   },
   output: {
-    json: true,
     human: formatIssueView,
     jsonExclude: ["spanTreeLines"],
   },
@@ -118,7 +118,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ViewFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -170,8 +170,13 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
+    yield new CommandOutput({
+      issue,
+      event: event ?? null,
+      trace,
+      spanTreeLines,
+    });
     return {
-      data: { issue, event: event ?? null, trace, spanTreeLines },
       hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
     };
   },

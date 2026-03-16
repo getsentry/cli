@@ -30,7 +30,6 @@
  * how to render the result — JSON envelope, human table, or custom formatting.
  */
 
-import type { Writer } from "../types/index.js";
 import {
   findProjectsBySlug,
   listOrganizations,
@@ -224,8 +223,6 @@ export type HandlerContext<
 > = {
   /** Correctly-narrowed parsed target for this mode. */
   parsed: ParsedVariant<T>;
-  /** Standard output writer. */
-  stdout: Writer;
   /** Current working directory (for DSN auto-detection). */
   cwd: string;
   /** Shared list command flags (limit, json, cursor). */
@@ -789,7 +786,6 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
 export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
   /** Full config (for default handlers) or just metadata (all modes overridden). */
   config: ListCommandMeta | OrgListConfig<TEntity, TWithOrg>;
-  stdout: Writer;
   cwd: string;
   flags: BaseListFlags;
   parsed: ParsedOrgProject;
@@ -812,7 +808,7 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
 /**
  * Validate the cursor flag and dispatch to the correct mode handler.
  *
- * Builds a {@link HandlerContext} from the shared fields (stdout, cwd, flags,
+ * Builds a {@link HandlerContext} from the shared fields (cwd, flags,
  * parsed) and passes it to the resolved handler. Merges default handlers
  * with caller-provided overrides using `{ ...defaults, ...overrides }`.
  *
@@ -825,7 +821,7 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
   options: DispatchOptions<TEntity, TWithOrg>
   // biome-ignore lint/suspicious/noExplicitAny: TWithOrg varies per command; callers narrow the return type
 ): Promise<ListResult<any>> {
-  const { config, stdout, cwd, flags, parsed, overrides } = options;
+  const { config, cwd, flags, parsed, overrides } = options;
 
   const cursorAllowedModes: readonly ParsedOrgProject["type"][] = [
     "org-all",
@@ -859,7 +855,6 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
 
   const ctx: HandlerContext = {
     parsed: effectiveParsed,
-    stdout,
     cwd,
     flags,
   };

@@ -65,7 +65,6 @@ type DeviceFlowCallbacks = {
     verificationUri: string,
     verificationUriComplete: string
   ) => void | Promise<void>;
-  onPolling?: () => void;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -276,7 +275,6 @@ export async function performDeviceFlow(
   // Step 2: Poll for token
   while (Date.now() < timeoutAt) {
     await sleep(pollInterval * 1000);
-    callbacks.onPolling?.();
 
     const result = await attemptPoll(device_code);
 

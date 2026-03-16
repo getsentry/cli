@@ -11,16 +11,16 @@
  *    writeOutput(stdout, data, { json, formatHuman, hint });
  *    ```
  *
- * 2. **Return-based** — declare formatting in {@link OutputConfig} on
- *    `buildCommand`, then return bare data from `func`:
+ * 2. **Yield-based** — declare formatting in {@link OutputConfig} on
+ *    `buildCommand`, then yield data from the generator:
  *    ```ts
  *    buildCommand({
- *      output: { json: true, human: fn },
- *      func() { return data; },
+ *      output: { human: formatUser },
+ *      async *func() { yield new CommandOutput(data); },
  *    })
  *    ```
  *    The wrapper reads `json`/`fields` from flags and applies formatting
- *    automatically. Commands return `{ data }` or `{ data, hint }` objects.
+ *    automatically. Generators return `{ hint }` for footer text.
  *
  * Both modes serialize the same data object to JSON and pass it to
  * `formatHuman` — there is no divergent-data path.
@@ -58,25 +58,81 @@ type WriteOutputOptions<T> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Output configuration declared on `buildCommand` for automatic rendering.
+ * Stateful human renderer created once per command invocation.
+ *
+ * The wrapper calls `render()` once per yielded value and `finalize()`
+ * once after the generator completes. This enables streaming commands
+ * to maintain per-invocation rendering state (e.g., a table that needs
+ * a header on first call and a footer on last).
+ *
+ * For stateless commands, `finalize` can be omitted — the wrapper falls
+ * back to `writeFooter(hint)`.
+ *
+ * @typeParam T - The data type yielded by the command
+ */
+export type HumanRenderer<T> = {
+  /** Render a single yielded data chunk as human-readable text. */
+  render: (data: T) => string;
+  /**
+   * Called once after the generator completes. Returns the final output
+   * string (e.g., a streaming table's bottom border + formatted hint).
+   *
+   * When defined, replaces the default `writeFooter(hint)` behavior —
+   * the wrapper writes the returned string directly.
+   *
+   * When absent, the wrapper falls back to `writeFooter(hint)`.
+   */
+  finalize?: (hint?: string) => string;
+};
+
+/**
+ * Resolve the `human` field of an {@link OutputConfig} into a
+ * {@link HumanRenderer}. Supports two forms:
+ *
+ * 1. **Plain function** — `(data: T) => string` — auto-wrapped into a
+ *    stateless renderer (no `finalize`).
+ * 2. **Factory** — `() => HumanRenderer<T>` — called once per invocation
+ *    to produce a renderer with optional `finalize()`.
+ *
+ * Disambiguation: a function with `.length === 0` is treated as a factory.
+ */
+export function resolveRenderer<T>(human: HumanOutput<T>): HumanRenderer<T> {
+  // Factory: zero-arg function that returns a renderer
+  if (human.length === 0) {
+    return (human as () => HumanRenderer<T>)();
+  }
+  // Plain formatter: wrap in a stateless renderer
+  return { render: human as (data: T) => string };
+}
+
+/**
+ * Human rendering for an {@link OutputConfig}.
  *
  * Two forms:
+ * - **Plain function** `(data: T) => string` — stateless, auto-wrapped.
+ * - **Factory** `() => HumanRenderer<T>` — called per invocation for
+ *   stateful renderers (e.g., streaming tables with `finalize()`).
+ */
+export type HumanOutput<T> = ((data: T) => string) | (() => HumanRenderer<T>);
+
+/**
+ * Output configuration declared on `buildCommand` for automatic rendering.
  *
- * 1. **Flag-only** — `output: "json"` — injects `--json` and `--fields` flags
- *    but does not intercept returns. Commands handle their own output.
+ * When present, `--json` and `--fields` flags are injected and the wrapper
+ * auto-renders yielded {@link CommandOutput} values.
  *
- * 2. **Full config** — `output: { json: true, human: fn }` — injects flags
- *    AND auto-renders the command's return value. Commands return
- *    `{ data }` or `{ data, hint }` objects.
- *
- * @typeParam T - Type of data the command returns (used by `human` formatter
+ * @typeParam T - Type of data the command yields (used by `human` formatter
  *   and serialized as-is to JSON)
  */
 export type OutputConfig<T> = {
-  /** Enable `--json` and `--fields` flag injection */
-  json: true;
-  /** Format data as a human-readable string for terminal output */
-  human: (data: T) => string;
+  /**
+   * Human-readable renderer.
+   *
+   * Pass a plain `(data: T) => string` for stateless formatting, or a
+   * zero-arg factory `() => HumanRenderer<T>` for stateful rendering
+   * with `finalize()` support.
+   */
+  human: HumanOutput<T>;
   /**
    * Top-level keys to strip from JSON output.
    *
@@ -105,99 +161,143 @@ export type OutputConfig<T> = {
 };
 
 /**
- * Return type for commands with {@link OutputConfig}.
+ * Yield type for commands with {@link OutputConfig}.
  *
- * Commands wrap their return value in this object so the `buildCommand` wrapper
- * can unambiguously detect data vs void returns. The optional `hint` provides
- * rendering metadata that depends on execution-time values (e.g. auto-detection
- * source). Hints are shown in human mode and suppressed in JSON mode.
+ * Commands wrap each yielded value in this class so the `buildCommand`
+ * wrapper can unambiguously detect data vs void/raw yields via `instanceof`.
+ *
+ * Hints are NOT carried on yielded values — they belong on the generator's
+ * return value ({@link CommandReturn}) so the framework renders them once
+ * after the generator completes.
  *
  * @typeParam T - The data type (matches the `OutputConfig<T>` type parameter)
  */
-export type CommandOutput<T> = {
+export class CommandOutput<T> {
   /** The data to render (serialized as-is to JSON, passed to `human` formatter) */
-  data: T;
-  /** Hint line appended after human output (suppressed in JSON mode) */
+  readonly data: T;
+  constructor(data: T) {
+    this.data = data;
+  }
+}
+
+/**
+ * Return type for command generators.
+ *
+ * Carries metadata that applies to the entire command invocation — not to
+ * individual yielded chunks. The `buildCommand` wrapper captures this from
+ * the generator's return value (the `done: true` result of `.next()`).
+ *
+ * `hint` is shown in human mode and suppressed in JSON mode.
+ */
+export type CommandReturn = {
+  /**
+   * Hint line appended after all output (suppressed in JSON mode).
+   *
+   * When the renderer has a `finalize()` method, the hint is passed
+   * to it — the renderer decides how to render it alongside any
+   * cleanup output (e.g., table footer). Otherwise the wrapper writes
+   * it via `writeFooter()`.
+   */
   hint?: string;
 };
 
 /**
- * Full rendering context passed to {@link renderCommandOutput}.
- * Combines the command's runtime hints with wrapper-injected flags.
+ * Rendering context passed to {@link renderCommandOutput}.
+ * Contains the wrapper-injected flag values needed for output mode selection.
  */
 type RenderContext = {
   /** Whether `--json` was passed */
   json: boolean;
   /** Pre-parsed `--fields` value */
   fields?: string[];
-  /** Hint line appended after human output (suppressed in JSON mode) */
-  hint?: string;
 };
 
 /**
- * Render a command's return value using an {@link OutputConfig}.
+ * Apply `jsonExclude` keys to data, stripping excluded fields from
+ * objects or from each element of an array. Returns the data unchanged
+ * when no exclusions are configured.
+ */
+function applyJsonExclude(
+  data: unknown,
+  excludeKeys: readonly string[] | undefined
+): unknown {
+  if (!excludeKeys || excludeKeys.length === 0) {
+    return data;
+  }
+  if (typeof data !== "object" || data === null) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item: unknown) => {
+      if (typeof item !== "object" || item === null) {
+        return item;
+      }
+      const copy = { ...item } as Record<string, unknown>;
+      for (const key of excludeKeys) {
+        delete copy[key];
+      }
+      return copy;
+    });
+  }
+  const copy = { ...data } as Record<string, unknown>;
+  for (const key of excludeKeys) {
+    delete copy[key];
+  }
+  return copy;
+}
+
+/**
+ * Write a JSON-transformed value to stdout.
  *
- * Called by the `buildCommand` wrapper when a command with `output: { ... }`
- * returns data. In JSON mode the data is serialized as-is (with optional
- * field filtering); in human mode the config's `human` formatter is called.
+ * `undefined` suppresses the chunk entirely (e.g. streaming text-only
+ * chunks in JSON mode). All other values are serialized as a single
+ * JSON line.
+ */
+function writeTransformedJson(stdout: Writer, transformed: unknown): void {
+  if (transformed === undefined) {
+    return;
+  }
+  stdout.write(`${formatJson(transformed)}\n`);
+}
+
+/**
+ * Render a single yielded `CommandOutput<T>` chunk.
+ *
+ * Called by the `buildCommand` wrapper per yielded value. In JSON mode
+ * the data is serialized (with optional field filtering / transform);
+ * in human mode the resolved renderer's `render()` is called.
+ *
+ * Hints are NOT rendered here — the wrapper calls `finalize()` or
+ * `writeFooter()` once after the generator completes.
  *
  * @param stdout - Writer to output to
- * @param data - The data returned by the command
+ * @param data - The data yielded by the command
  * @param config - The output config declared on buildCommand
- * @param ctx - Merged rendering context (command hints + runtime flags)
+ * @param renderer - Per-invocation renderer (from `config.human()`)
+ * @param ctx - Rendering context with flag values
  */
+// biome-ignore lint/nursery/useMaxParams: Framework function — config/renderer/ctx are all required for JSON vs human split.
 export function renderCommandOutput(
   stdout: Writer,
   data: unknown,
-  // biome-ignore lint/suspicious/noExplicitAny: Variance — human is contravariant in T; safe because data and config are paired at build time.
+  // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — config/renderer are paired at build time, but the framework iterates over unknown yields.
   config: OutputConfig<any>,
+  // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
+  renderer: HumanRenderer<any>,
   ctx: RenderContext
 ): void {
   if (ctx.json) {
-    // Custom transform: the function handles both shaping and field filtering
     if (config.jsonTransform) {
-      const transformed = config.jsonTransform(data, ctx.fields);
-      stdout.write(`${formatJson(transformed)}\n`);
+      writeTransformedJson(stdout, config.jsonTransform(data, ctx.fields));
       return;
     }
-
-    let jsonData = data;
-    if (
-      config.jsonExclude &&
-      config.jsonExclude.length > 0 &&
-      typeof data === "object" &&
-      data !== null
-    ) {
-      const keys = config.jsonExclude;
-      if (Array.isArray(data)) {
-        // Strip excluded keys from each element in the array
-        jsonData = data.map((item: unknown) => {
-          if (typeof item !== "object" || item === null) {
-            return item;
-          }
-          const copy = { ...item } as Record<string, unknown>;
-          for (const key of keys) {
-            delete copy[key];
-          }
-          return copy;
-        });
-      } else {
-        const copy = { ...data } as Record<string, unknown>;
-        for (const key of keys) {
-          delete copy[key];
-        }
-        jsonData = copy;
-      }
-    }
-    writeJson(stdout, jsonData, ctx.fields);
+    writeJson(stdout, applyJsonExclude(data, config.jsonExclude), ctx.fields);
     return;
   }
 
-  const text = config.human(data);
-  stdout.write(`${text}\n`);
-
-  if (ctx.hint) {
-    writeFooter(stdout, ctx.hint);
+  const text = renderer.render(data);
+  if (text) {
+    stdout.write(`${text}\n`);
   }
 }
 
@@ -234,14 +334,15 @@ export function writeOutput<T>(
   }
 }
 
+/** Format footer text (muted, with surrounding newlines). */
+export function formatFooter(text: string): string {
+  return `\n${muted(text)}\n`;
+}
+
 /**
  * Write a formatted footer hint to stdout.
  * Adds empty line separator and applies muted styling.
- *
- * @param stdout - Writer to output to
- * @param text - Footer text to display
  */
 export function writeFooter(stdout: Writer, text: string): void {
-  stdout.write("\n");
-  stdout.write(`${muted(text)}\n`);
+  stdout.write(formatFooter(text));
 }

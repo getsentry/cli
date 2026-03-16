@@ -5,6 +5,10 @@
  * in src/commands/trace/logs.ts.
  *
  * Uses spyOn mocking to avoid real HTTP calls or database access.
+ *
+ * The command writes directly to `process.stdout.write()` via
+ * `formatTraceLogs()`, so tests spy on `process.stdout.write` to
+ * capture output instead of using mock context writers.
  */
 
 import {
@@ -189,7 +193,6 @@ function createMockContext() {
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
       cwd: "/tmp",
       setContext: mock(() => {
         // no-op for test
@@ -197,6 +200,26 @@ function createMockContext() {
     },
     stdoutWrite,
   };
+}
+
+/**
+ * Collect all output written to a mock write function.
+ */
+function collectMockOutput(
+  writeMock: ReturnType<typeof mock<() => boolean>>
+): string {
+  return writeMock.mock.calls
+    .map((c) => {
+      const arg = c[0];
+      if (typeof arg === "string") {
+        return arg;
+      }
+      if (arg instanceof Uint8Array) {
+        return new TextDecoder().decode(arg);
+      }
+      return String(arg);
+    })
+    .join("");
 }
 
 describe("logsCommand.func", () => {
@@ -226,11 +249,11 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       const parsed = JSON.parse(output);
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed).toHaveLength(3);
-      // displayTraceLogs reverses to chronological order for JSON output
+      // formatTraceLogs reverses to chronological order for JSON output
       expect(parsed[0].id).toBe("log003");
     });
 
@@ -246,7 +269,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(JSON.parse(output)).toEqual([]);
     });
   });
@@ -264,7 +287,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("No logs found");
       expect(output).toContain(TRACE_ID);
     });
@@ -281,7 +304,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("30d");
     });
 
@@ -297,7 +320,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Request received");
       expect(output).toContain("Slow query detected");
       expect(output).toContain("Database connection failed");
@@ -315,7 +338,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Showing 3 logs");
       expect(output).toContain(TRACE_ID);
     });
@@ -332,7 +355,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Showing 1 log for trace");
       expect(output).not.toContain("Showing 1 logs");
     });
@@ -350,7 +373,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).toContain("Use --limit to show more.");
     });
 
@@ -366,7 +389,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       expect(output).not.toContain("Use --limit to show more.");
     });
   });
@@ -522,7 +545,7 @@ describe("logsCommand.func", () => {
         TRACE_ID
       );
 
-      const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+      const output = collectMockOutput(stdoutWrite);
       // All three messages should appear in the output
       const reqIdx = output.indexOf("Request received");
       const slowIdx = output.indexOf("Slow query detected");
