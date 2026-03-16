@@ -122,6 +122,15 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Log the explicitly provided org (and project) target before the wizard starts. */
+function logExplicitTarget(options: WizardOptions): void {
+  if (!options.org) {
+    return;
+  }
+  const projectHint = options.project ? ` (project: ${options.project})` : "";
+  log.info(`Organization: ${options.org}${projectHint}`);
+}
+
 function assertWorkflowResult(raw: unknown): WorkflowRunResult {
   if (!raw || typeof raw !== "object") {
     throw new Error("Invalid workflow response: expected object");
@@ -254,6 +263,8 @@ export async function runWizard(options: WizardOptions): Promise<void> {
     "This wizard uses AI to analyze your project and configure Sentry." +
       `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
+
+  logExplicitTarget(options);
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),

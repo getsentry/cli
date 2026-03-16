@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { isCancel, select } from "@clack/prompts";
+import { isCancel, log, select } from "@clack/prompts";
 import {
   createProject,
   listOrganizations,
@@ -742,6 +742,8 @@ async function createSentryProject(
         return orgResult;
       }
       orgSlug = orgResult;
+      // Show which org was resolved (explicit org is shown at startup by wizard-runner)
+      log.info(`Organization: ${orgSlug}`);
     }
 
     // 2. Resolve or create team
