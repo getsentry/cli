@@ -213,6 +213,10 @@ export function parseSlashSeparatedTraceTarget(
  * Convert a target argument + validated trace ID into a trace target.
  * Delegates org/project parsing to {@link parseOrgProjectArg}.
  *
+ * Note: `parseOrgProjectArg` already emits slug normalization warnings
+ * internally, so `normalized` is NOT propagated here to avoid double
+ * warnings when callers also check via {@link warnIfNormalized}.
+ *
  * @internal Exported for testing
  */
 export function targetArgToTraceTarget(
@@ -228,7 +232,6 @@ export function targetArgToTraceTarget(
         traceId,
         org: parsed.org,
         project: parsed.project,
-        normalized: parsed.normalized,
       };
 
     case "org-all":
@@ -237,7 +240,6 @@ export function targetArgToTraceTarget(
         type: "org-scoped",
         traceId,
         org: parsed.org,
-        normalized: parsed.normalized,
       };
 
     case "project-search":
@@ -245,7 +247,6 @@ export function targetArgToTraceTarget(
         type: "project-search",
         traceId,
         projectSlug: parsed.projectSlug,
-        normalized: parsed.normalized,
       };
 
     case "auto-detect":
