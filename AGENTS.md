@@ -109,31 +109,13 @@ cli/
 │   │   ├── issue/          # list, view, explain, plan
 │   │   ├── org/            # list, view
 │   │   ├── project/        # list, view
-│   │   ├── span/           # list, view
-│   │   ├── trace/          # list, view, logs
-│   │   ├── log/            # list, view
-│   │   ├── trial/          # list, start
-│   │   ├── cli/            # fix, upgrade, feedback, setup
 │   │   ├── api.ts          # Direct API access command
 │   │   └── help.ts         # Help command
 │   ├── lib/                # Shared utilities
-│   │   ├── command.ts      # buildCommand wrapper (telemetry + output)
-│   │   ├── api-client.ts   # Barrel re-export for API modules
-│   │   ├── api/            # Domain API modules
-│   │   │   ├── infrastructure.ts # Shared helpers, types, raw requests
-│   │   │   ├── organizations.ts
-│   │   │   ├── projects.ts
-│   │   │   ├── issues.ts
-│   │   │   ├── events.ts
-│   │   │   ├── traces.ts      # Trace + span listing
-│   │   │   ├── logs.ts
-│   │   │   ├── seer.ts
-│   │   │   └── trials.ts
+│   │   ├── api-client.ts   # Sentry API client (ky-based)
 │   │   ├── region.ts       # Multi-region resolution
 │   │   ├── telemetry.ts    # Sentry SDK instrumentation
 │   │   ├── sentry-urls.ts  # URL builders for Sentry
-│   │   ├── hex-id.ts       # Hex ID validation (32-char + 16-char span)
-│   │   ├── trace-id.ts     # Trace ID validation wrapper
 │   │   ├── db/             # SQLite database layer
 │   │   │   ├── instance.ts     # Database singleton
 │   │   │   ├── schema.ts       # Table definitions
@@ -143,7 +125,6 @@ cli/
 │   │   │   ├── user.ts         # User info cache
 │   │   │   ├── regions.ts      # Org→region URL cache
 │   │   │   ├── defaults.ts     # Default org/project
-│   │   │   ├── pagination.ts   # Cursor pagination storage
 │   │   │   ├── dsn-cache.ts    # DSN resolution cache
 │   │   │   ├── project-cache.ts    # Project data cache
 │   │   │   ├── project-root-cache.ts # Project root cache
@@ -173,12 +154,7 @@ cli/
 │   │   │   ├── json.ts     # JSON output
 │   │   │   ├── output.ts   # Output utilities
 │   │   │   ├── seer.ts     # Seer AI response formatting
-│   │   │   ├── colors.ts   # Terminal colors
-│   │   │   ├── markdown.ts # Markdown → ANSI renderer
-│   │   │   ├── trace.ts    # Trace/span formatters
-│   │   │   ├── time-utils.ts # Shared time/duration utils
-│   │   │   ├── table.ts    # Table rendering
-│   │   │   └── log.ts      # Log entry formatting
+│   │   │   └── colors.ts   # Terminal colors
 │   │   ├── oauth.ts            # OAuth device flow
 │   │   ├── errors.ts           # Error classes
 │   │   ├── resolve-target.ts   # Org/project resolution
@@ -221,121 +197,33 @@ cli/
 
 ### CLI Commands (Stricli)
 
-Commands use [Stricli](https://bloomberg.github.io/stricli/docs/getting-started/principles) wrapped by `src/lib/command.ts`.
+Commands use `@stricli/core`. 
 
-**CRITICAL**: Import `buildCommand` from `../../lib/command.js`, **NEVER** from `@stricli/core` directly — the wrapper adds telemetry, `--json`/`--fields` injection, and output rendering.
+**Stricli Documentation**: https://bloomberg.github.io/stricli/docs/getting-started/principles
 
 Pattern:
 
 ```typescript
-import { buildCommand } from "../../lib/command.js";
+import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import { CommandOutput } from "../../lib/formatters/output.js";
 
 export const myCommand = buildCommand({
   docs: {
     brief: "Short description",
     fullDescription: "Detailed description",
   },
-  output: {
-    human: formatMyData,                // (data: T) => string
-    jsonTransform: jsonTransformMyData, // optional: (data: T, fields?) => unknown
-    jsonExclude: ["humanOnlyField"],    // optional: strip keys from JSON
-  },
   parameters: {
     flags: {
+      json: { kind: "boolean", brief: "Output as JSON", default: false },
       limit: { kind: "parsed", parse: Number, brief: "Max items", default: 10 },
     },
   },
-  async *func(this: SentryContext, flags) {
-    const data = await fetchData();
-    yield new CommandOutput(data);
-    return { hint: "Tip: use --json for machine-readable output" };
+  async func(this: SentryContext, flags) {
+    const { process } = this;
+    // Implementation - use process.stdout.write() for output
   },
 });
 ```
-
-**Key rules:**
-- Functions are `async *func()` generators — yield `new CommandOutput(data)`, return `{ hint }`.
-- `output.human` receives the same data object that gets serialized to JSON — no divergent-data paths.
-- The wrapper auto-injects `--json` and `--fields` flags. Do NOT add your own `json` flag.
-- Do NOT use `stdout.write()` or `if (flags.json)` branching — the wrapper handles it.
-
-### Positional Arguments
-
-Use `parseSlashSeparatedArg` from `src/lib/arg-parsing.ts` for the standard `[<org>/<project>/]<id>` pattern. Required identifiers (trace IDs, span IDs) should be **positional args**, not flags.
-
-```typescript
-import { parseSlashSeparatedArg, parseOrgProjectArg } from "../../lib/arg-parsing.js";
-
-// "my-org/my-project/abc123" → { id: "abc123", targetArg: "my-org/my-project" }
-const { id, targetArg } = parseSlashSeparatedArg(first, "Trace ID", USAGE_HINT);
-const parsed = parseOrgProjectArg(targetArg);
-// parsed.type: "auto-detect" | "explicit" | "project-search" | "org-all"
-```
-
-Reference: `span/list.ts`, `trace/view.ts`, `event/view.ts`
-
-### Markdown Rendering
-
-All non-trivial human output must use the markdown rendering pipeline:
-
-- Build markdown strings with helpers: `mdKvTable()`, `colorTag()`, `escapeMarkdownCell()`, `renderMarkdown()`
-- **NEVER** use raw `muted()` / chalk in output strings — use `colorTag("muted", text)` inside markdown
-- Tree-structured output (box-drawing characters) that can't go through `renderMarkdown()` should use the `plainSafeMuted` pattern: `isPlainOutput() ? text : muted(text)`
-- `isPlainOutput()` precedence: `SENTRY_PLAIN_OUTPUT` > `NO_COLOR` > `FORCE_COLOR` > `!isTTY`
-
-Reference: `formatters/trace.ts` (`formatAncestorChain`), `formatters/human.ts` (`plainSafeMuted`)
-
-### List Command Pagination
-
-All list commands with API pagination MUST use the shared cursor infrastructure:
-
-```typescript
-import { LIST_CURSOR_FLAG } from "../../lib/list-command.js";
-import {
-  buildPaginationContextKey, resolveOrgCursor,
-  setPaginationCursor, clearPaginationCursor,
-} from "../../lib/db/pagination.js";
-
-export const PAGINATION_KEY = "my-entity-list";
-
-// In buildCommand:
-flags: { cursor: LIST_CURSOR_FLAG },
-aliases: { c: "cursor" },
-
-// In func():
-const contextKey = buildPaginationContextKey("entity", `${org}/${project}`, {
-  sort: flags.sort, q: flags.query,
-});
-const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
-const { data, nextCursor } = await listEntities(org, project, { cursor, ... });
-if (nextCursor) setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
-else clearPaginationCursor(PAGINATION_KEY, contextKey);
-```
-
-Show `-c last` in the hint footer when more pages are available. Include `nextCursor` in the JSON envelope.
-
-Reference template: `trace/list.ts`, `span/list.ts`
-
-### ID Validation
-
-Use shared validators from `src/lib/hex-id.ts`:
-- `validateHexId(value, label)` — 32-char hex IDs (trace IDs, log IDs). Auto-strips UUID dashes.
-- `validateSpanId(value)` — 16-char hex span IDs. Auto-strips dashes.
-- `validateTraceId(value)` — thin wrapper around `validateHexId` in `src/lib/trace-id.ts`.
-
-All normalize to lowercase. Throw `ValidationError` on invalid input.
-
-### Sort Convention
-
-Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the API layer (e.g., `SpanSortValue` from `api/traces.ts`), import in commands. This matches `issue list`, `trace list`, and `span list`.
-
-### SKILL.md
-
-- Run `bun run generate:skill` after changing any command parameters, flags, or docs.
-- CI check `bun run check:skill` will fail if SKILL.md is stale.
-- Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
 
@@ -432,7 +320,7 @@ await setAuthToken(token, expiresIn);
 
 ```typescript
 import { z } from "zod";
-import { buildCommand } from "../../lib/command.js";
+import { buildCommand } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
 import { getAuthToken } from "../../lib/config.js";
 ```
@@ -450,8 +338,6 @@ Key rules when writing overrides:
 - Commands with extra fields (e.g., `stderr`, `setContext`) spread the context and add them: `(ctx) => handle({ ...ctx, flags, stderr, setContext })`. Override `ctx.flags` with the command-specific flags type when needed.
 - `resolveCursor()` must be called **inside** the `org-all` override closure, not before `dispatchOrgScopedList`, so that `--cursor` validation errors fire correctly for non-org-all modes.
 - `handleProjectSearch` errors must use `"Project"` as the `ContextError` resource, not `config.entityName`.
-
-3. **Standalone list commands** (e.g., `span list`, `trace list`) that don't use org-scoped dispatch wire pagination directly in `func()`. See the "List Command Pagination" section above for the pattern.
 
 ## Commenting & Documentation (JSDoc-first)
 
