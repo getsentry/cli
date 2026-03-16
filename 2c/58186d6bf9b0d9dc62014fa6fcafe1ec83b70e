@@ -1,0 +1,124 @@
+# Plan: Phase 2 — `sentry schema` command for API introspection
+
+## Goal
+
+Add `sentry schema` command that exposes Sentry API endpoint metadata at runtime, enabling AI agents to discover endpoints, parameters, and usage without pre-loaded docs.
+
+## Approach: Build-time Index Generation
+
+Parse `@sentry/api` package at build time to generate a lightweight JSON index (~50-80KB) bundled into the CLI. Three data sources:
+
+1. **`index.js`** — function name, HTTP method, URL template (regex: `var NAME = (options) => ...client.METHOD({...url: "..."`)
+2. **`sdk.gen.d.ts`** — JSDoc descriptions, deprecation status
+3. **URL templates** — path parameters extracted from `{param_name}` placeholders
+
+## Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `script/generate-api-schema.ts` | **Create** | Build script: parses `@sentry/api` to generate endpoint index |
+| `src/generated/api-schema.json` | **Generated** | Lightweight endpoint index (gittracked, CI-checked for freshness) |
+| `src/lib/api-schema.ts` | **Create** | Runtime loader and query functions for the schema index |
+| `src/commands/schema.ts` | **Create** | Single command: `sentry schema [resource] [operation]` with `--list` flag |
+| `src/app.ts` | **Modify** | Register `schema` command |
+| `package.json` | **Modify** | Add `generate:schema` and `check:schema` scripts |
+| `test/lib/api-schema.test.ts` | **Create** | Unit tests for schema query functions |
+| `test/commands/schema.test.ts` | **Create** | Integration tests for schema command |
+
+## Schema Index Shape
+
+```typescript
+interface ApiEndpoint {
+  /** SDK function name: "listAnOrganization_sIssues" */
+  fn: string;
+  /** HTTP method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" */
+  method: string;
+  /** URL template: "/api/0/organizations/{organization_id_or_slug}/issues/" */
+  path: string;
+  /** Human description from JSDoc */
+  description: string;
+  /** Path parameters: ["organization_id_or_slug"] */
+  pathParams: string[];
+  /** Whether endpoint is deprecated */
+  deprecated: boolean;
+  /** Resource category: "organizations", "projects", "teams", etc. */
+  resource: string;
+  /** Operation: "list", "retrieve", "create", "update", "delete", etc. */
+  operation: string;
+}
+```
+
+`resource` derived from URL (last non-parameter segment), `operation` from function name verb prefix:
+- `/api/0/organizations/{org}/issues/` → resource: `issues`
+- `/api/0/issues/{issue_id}/` → resource: `issues`
+- `/api/0/projects/{org}/{project}/` → resource: `projects`
+- `listAnOrganization_sIssues` → operation: `list`
+- `retrieveAnIssue` → operation: `retrieve`
+- `createANewProject` → operation: `create`
+
+Operation is the first verb token from the function name: `list`, `retrieve`, `create`, `update`, `delete`, `fetch`, `query`, `add`, `remove`, `bulk*`, `start`, `enable`, `disable`, etc.
+
+## Command Interface
+
+```
+sentry schema                    # List all resources (grouped)
+sentry schema --list             # List all endpoints (flat)
+sentry schema issues             # List endpoints for "issues" resource
+sentry schema issues list        # Show specific endpoint details
+sentry schema --json             # JSON output of all resources
+sentry schema issues list --json # JSON output of specific endpoint
+```
+
+## Implementation Steps
+
+### Step 1: Build script (`script/generate-api-schema.ts`)
+- Parse `index.js` with regex to extract function→{method, url} for all 214 endpoints
+- Parse `sdk.gen.d.ts` to extract JSDoc descriptions per function
+- Extract path params from URL templates (`{param}` → `["param"]`)
+- Derive `resource` and `operation` from function names
+- Write to `src/generated/api-schema.json`
+
+### Step 2: Runtime loader (`src/lib/api-schema.ts`)
+- Import the generated JSON
+- Provide query functions: `getAllResources()`, `getEndpointsByResource(name)`, `getEndpoint(resource, operation)`, `searchEndpoints(query)`
+- Handle fuzzy matching for resource names
+
+### Step 3: Schema command (`src/commands/schema.ts`)
+- Single command with optional positional args `[resource] [operation]`
+- `--list` flag for flat endpoint listing
+- Human renderer: formatted tables for lists, detailed view for single endpoints
+- JSON: passthrough of structured data
+- Uses `output: { human: formatSchemaHuman }` pattern (yield CommandOutput)
+
+### Step 4: Register in app.ts
+- Add `schema: schemaCommand` to routes
+
+### Step 5: Package scripts
+- `generate:schema` → runs `script/generate-api-schema.ts`
+- `check:schema` → verifies generated file is up-to-date (for CI)
+
+### Step 6: Tests
+- Unit tests for schema query functions
+- Integration tests for command output
+- Property tests for resource/operation derivation
+
+## Verification
+
+```bash
+# Generate the schema index
+bun run generate:schema
+
+# Test all modes
+bun run dev schema                     # List resources
+bun run dev schema --list              # Flat list
+bun run dev schema issues              # Endpoints for resource
+bun run dev schema issues list --json  # Specific endpoint as JSON
+
+# Tests
+bun test test/lib/api-schema.test.ts test/commands/schema.test.ts
+
+# CI checks
+bun run typecheck
+bun run lint
+bun run check:schema
+```
