@@ -644,7 +644,7 @@ View spans in distributed traces
 List spans in a trace
 
 **Flags:**
-- `-n, --limit <value> - Number of spans (1-1000) - (default: "25")`
+- `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -841,7 +841,7 @@ List spans in a trace
 List spans in a trace
 
 **Flags:**
-- `-n, --limit <value> - Number of spans (1-1000) - (default: "25")`
+- `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
