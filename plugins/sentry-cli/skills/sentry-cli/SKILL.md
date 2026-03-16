@@ -679,7 +679,7 @@ List recent traces in a project
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
-#### `sentry trace view <args...>`
+#### `sentry trace view <org/project/trace-id...>`
 
 View details of a specific trace
 
@@ -690,14 +690,14 @@ View details of a specific trace
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
-#### `sentry trace logs <args...>`
+#### `sentry trace logs <org/trace-id...>`
 
 View logs associated with a trace
 
 **Flags:**
 - `-w, --web - Open trace in browser`
 - `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
-- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
+- `-n, --limit <value> - Number of log entries (<=1000) - (default: "100")`
 - `-q, --query <value> - Additional filter query (Sentry search syntax)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`

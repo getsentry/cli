@@ -14,88 +14,15 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import {
-  listCommand,
-  parsePositionalArgs,
-  parseSort,
-} from "../../../src/commands/span/list.js";
+import { listCommand, parseSort } from "../../../src/commands/span/list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 
-describe("parsePositionalArgs", () => {
-  describe("single argument (trace ID only)", () => {
-    test("parses plain trace ID", () => {
-      const result = parsePositionalArgs([VALID_TRACE_ID]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-      expect(result.targetArg).toBeUndefined();
-    });
-
-    test("normalizes uppercase trace ID", () => {
-      const result = parsePositionalArgs(["AAAA1111BBBB2222CCCC3333DDDD4444"]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("strips dashes from UUID-format input", () => {
-      const result = parsePositionalArgs([
-        "aaaa1111-bbbb-2222-cccc-3333dddd4444",
-      ]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-  });
-
-  describe("slash-separated argument (org/project/trace-id)", () => {
-    test("parses org/project/trace-id format", () => {
-      const result = parsePositionalArgs([
-        `my-org/my-project/${VALID_TRACE_ID}`,
-      ]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-      expect(result.targetArg).toBe("my-org/my-project");
-    });
-
-    test("single slash (org/project without ID) throws ContextError", () => {
-      // "my-project/trace-id" has exactly one slash → parseSlashSeparatedArg
-      // treats it as "org/project" without an ID, which throws
-      expect(() =>
-        parsePositionalArgs([`my-project/${VALID_TRACE_ID}`])
-      ).toThrow(ContextError);
-    });
-  });
-
-  describe("two arguments (target + trace-id)", () => {
-    test("parses target and trace ID", () => {
-      const result = parsePositionalArgs(["my-org/frontend", VALID_TRACE_ID]);
-      expect(result.targetArg).toBe("my-org/frontend");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("parses project-only target", () => {
-      const result = parsePositionalArgs(["frontend", VALID_TRACE_ID]);
-      expect(result.targetArg).toBe("frontend");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-  });
-
-  describe("error cases", () => {
-    test("throws ContextError for empty args", () => {
-      expect(() => parsePositionalArgs([])).toThrow(ContextError);
-    });
-
-    test("throws ValidationError for invalid trace ID", () => {
-      expect(() => parsePositionalArgs(["not-a-trace-id"])).toThrow(
-        ValidationError
-      );
-    });
-
-    test("throws ValidationError for short hex", () => {
-      expect(() => parsePositionalArgs(["aabbccdd"])).toThrow(ValidationError);
-    });
-  });
-});
+// Note: parseTraceTarget parsing tests are in test/lib/trace-target.test.ts
 
 describe("parseSort", () => {
   test("accepts 'date'", () => {

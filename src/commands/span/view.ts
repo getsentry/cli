@@ -6,11 +6,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { getDetailedTrace } from "../../lib/api-client.js";
-import {
-  parseOrgProjectArg,
-  parseSlashSeparatedArg,
-  spansFlag,
-} from "../../lib/arg-parsing.js";
+import { spansFlag } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
@@ -30,10 +26,10 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
-  resolveOrgAndProject,
-  resolveProjectBySlug,
-} from "../../lib/resolve-target.js";
-import { validateTraceId } from "../../lib/trace-id.js";
+  parseSlashSeparatedTraceTarget,
+  resolveTraceOrgProject,
+  warnIfNormalized,
+} from "../../lib/trace-target.js";
 
 const log = logger.withTag("span.view");
 
@@ -51,23 +47,18 @@ const USAGE_HINT =
 /**
  * Parse positional arguments for span view.
  *
- * Uses the same `[<org>/<project>/]<id>` pattern as other commands.
- * The first positional is the trace ID (optionally slash-prefixed with
- * org/project), and the remaining positionals are span IDs.
- *
- * Formats:
- * - `<trace-id> <span-id> [...]` — auto-detect org/project
- * - `<org>/<project>/<trace-id> <span-id> [...]` — explicit target
+ * The first positional is the trace ID (optionally with org/project prefix),
+ * parsed via the shared `parseSlashSeparatedTraceTarget`. The remaining
+ * positionals are span IDs.
  *
  * @param args - Positional arguments from CLI
- * @returns Parsed trace ID, span IDs, and optional target arg
+ * @returns Parsed trace target and span IDs
  * @throws {ContextError} If insufficient arguments
  * @throws {ValidationError} If any ID has an invalid format
  */
 export function parsePositionalArgs(args: string[]): {
-  traceId: string;
+  traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
   spanIds: string[];
-  targetArg: string | undefined;
 } {
   if (args.length === 0) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT);
@@ -78,13 +69,8 @@ export function parsePositionalArgs(args: string[]): {
     throw new ContextError("Trace ID and span ID", USAGE_HINT);
   }
 
-  // First arg is trace ID (possibly with org/project prefix)
-  const { id, targetArg } = parseSlashSeparatedArg(
-    first,
-    "Trace ID",
-    USAGE_HINT
-  );
-  const traceId = validateTraceId(id);
+  // First arg is trace target (possibly with org/project prefix)
+  const traceTarget = parseSlashSeparatedTraceTarget(first, USAGE_HINT);
 
   // Remaining args are span IDs
   const rawSpanIds = args.slice(1);
@@ -95,7 +81,7 @@ export function parsePositionalArgs(args: string[]): {
   }
   const spanIds = rawSpanIds.map((v) => validateSpanId(v));
 
-  return { traceId, spanIds, targetArg };
+  return { traceTarget, spanIds };
 }
 
 /**
@@ -114,43 +100,6 @@ function warnMissingIds(spanIds: string[], foundIds: Set<string>): void {
     log.warn(
       `${missing.length} of ${spanIds.length} span(s) not found in trace:\n${formatIdList(missing)}`
     );
-  }
-}
-
-/** Resolved target type for span commands. */
-type ResolvedSpanTarget = { org: string; project: string };
-
-/**
- * Resolve org/project from the parsed target argument.
- */
-async function resolveTarget(
-  parsed: ReturnType<typeof parseOrgProjectArg>,
-  traceId: string,
-  cwd: string
-): Promise<ResolvedSpanTarget | null> {
-  switch (parsed.type) {
-    case "explicit":
-      return { org: parsed.org, project: parsed.project };
-
-    case "project-search":
-      return await resolveProjectBySlug(
-        parsed.projectSlug,
-        USAGE_HINT,
-        `sentry span view <org>/${parsed.projectSlug}/${traceId} <span-id>`
-      );
-
-    case "org-all":
-      throw new ContextError("Specific project", USAGE_HINT);
-
-    case "auto-detect":
-      return await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-
-    default: {
-      const _exhaustiveCheck: never = parsed;
-      throw new ValidationError(
-        `Invalid target specification: ${_exhaustiveCheck}`
-      );
-    }
   }
 }
 
@@ -285,21 +234,21 @@ export const viewCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
-    // Parse positional args: first is trace ID (with optional target), rest are span IDs
-    const { traceId, spanIds, targetArg } = parsePositionalArgs(args);
-    const parsed = parseOrgProjectArg(targetArg);
+    // Parse positional args: first is trace target, rest are span IDs
+    const { traceTarget, spanIds } = parsePositionalArgs(args);
+    warnIfNormalized(traceTarget, "span.view");
 
-    const target = await resolveTarget(parsed, traceId, cwd);
-
-    if (!target) {
-      throw new ContextError("Organization and project", USAGE_HINT);
-    }
-
-    setContext([target.org], [target.project]);
+    // Resolve org/project
+    const { traceId, org, project } = await resolveTraceOrgProject(
+      traceTarget,
+      cwd,
+      USAGE_HINT
+    );
+    setContext([org], [project]);
 
     // Fetch trace data (single fetch for all span lookups)
     const timestamp = Math.floor(Date.now() / 1000);
-    const spans = await getDetailedTrace(target.org, traceId, timestamp);
+    const spans = await getDetailedTrace(org, traceId, timestamp);
 
     if (spans.length === 0) {
       throw new ValidationError(

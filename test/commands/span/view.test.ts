@@ -74,9 +74,9 @@ describe("parsePositionalArgs", () => {
   describe("trace-id + single span-id", () => {
     test("parses trace ID and span ID as two positional args", () => {
       const result = parsePositionalArgs([VALID_TRACE_ID, VALID_SPAN_ID]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.type).toBe("auto-detect");
       expect(result.spanIds).toEqual([VALID_SPAN_ID]);
-      expect(result.targetArg).toBeUndefined();
     });
   });
 
@@ -87,9 +87,8 @@ describe("parsePositionalArgs", () => {
         VALID_SPAN_ID,
         VALID_SPAN_ID_2,
       ]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
       expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
-      expect(result.targetArg).toBeUndefined();
     });
   });
 
@@ -99,9 +98,9 @@ describe("parsePositionalArgs", () => {
         `my-org/my-project/${VALID_TRACE_ID}`,
         VALID_SPAN_ID,
       ]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.type).toBe("explicit");
       expect(result.spanIds).toEqual([VALID_SPAN_ID]);
-      expect(result.targetArg).toBe("my-org/my-project");
     });
 
     test("parses slash-separated target with multiple span IDs", () => {
@@ -110,9 +109,9 @@ describe("parsePositionalArgs", () => {
         VALID_SPAN_ID,
         VALID_SPAN_ID_2,
       ]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.traceId).toBe(VALID_TRACE_ID);
+      expect(result.traceTarget.type).toBe("explicit");
       expect(result.spanIds).toEqual([VALID_SPAN_ID, VALID_SPAN_ID_2]);
-      expect(result.targetArg).toBe("my-org/my-project");
     });
   });
 

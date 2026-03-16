@@ -20,137 +20,15 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import {
-  logsCommand,
-  parsePositionalArgs,
-} from "../../../src/commands/trace/logs.js";
+import { logsCommand } from "../../../src/commands/trace/logs.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { ContextError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceLog } from "../../../src/types/sentry.js";
 
-// ============================================================================
-// parsePositionalArgs
-// ============================================================================
-
-const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
-
-describe("parsePositionalArgs", () => {
-  describe("no arguments", () => {
-    test("throws ContextError when called with empty args", () => {
-      expect(() => parsePositionalArgs([])).toThrow(ContextError);
-    });
-
-    test("error mentions 'Trace ID'", () => {
-      try {
-        parsePositionalArgs([]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ContextError);
-        expect((error as ContextError).message).toContain("Trace ID");
-      }
-    });
-  });
-
-  describe("single argument — plain trace ID", () => {
-    test("parses 32-char hex trace ID with no org", () => {
-      const result = parsePositionalArgs([VALID_TRACE_ID]);
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-      expect(result.orgArg).toBeUndefined();
-    });
-
-    test("normalizes mixed-case hex trace ID to lowercase", () => {
-      const mixedCase = "AAAA1111bbbb2222CCCC3333dddd4444";
-      const result = parsePositionalArgs([mixedCase]);
-      expect(result.traceId).toBe(mixedCase.toLowerCase());
-      expect(result.orgArg).toBeUndefined();
-    });
-  });
-
-  describe("single argument — slash-separated org/traceId", () => {
-    test("parses 'org/traceId' as org + trace ID", () => {
-      const result = parsePositionalArgs([`my-org/${VALID_TRACE_ID}`]);
-      expect(result.orgArg).toBe("my-org");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("throws ContextError when trace ID is missing after slash", () => {
-      expect(() => parsePositionalArgs(["my-org/"])).toThrow(ContextError);
-    });
-
-    test("throws ContextError when org is missing before slash", () => {
-      expect(() => parsePositionalArgs([`/${VALID_TRACE_ID}`])).toThrow(
-        ContextError
-      );
-    });
-  });
-
-  describe("two arguments — space-separated org and trace ID", () => {
-    test("parses org and trace ID from two args", () => {
-      const result = parsePositionalArgs(["my-org", VALID_TRACE_ID]);
-      expect(result.orgArg).toBe("my-org");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-
-    test("uses first arg as org and second as trace ID", () => {
-      const result = parsePositionalArgs(["acme-corp", VALID_TRACE_ID]);
-      expect(result.orgArg).toBe("acme-corp");
-      expect(result.traceId).toBe(VALID_TRACE_ID);
-    });
-  });
-
-  describe("trace ID validation", () => {
-    test("throws ValidationError for non-hex trace ID", () => {
-      expect(() => parsePositionalArgs(["not-a-valid-trace-id"])).toThrow(
-        ValidationError
-      );
-    });
-
-    test("throws ValidationError for trace ID shorter than 32 chars", () => {
-      expect(() => parsePositionalArgs(["abc123"])).toThrow(ValidationError);
-    });
-
-    test("throws ValidationError for trace ID longer than 32 chars", () => {
-      expect(() => parsePositionalArgs([`${VALID_TRACE_ID}extra`])).toThrow(
-        ValidationError
-      );
-    });
-
-    test("throws ValidationError for trace ID with non-hex chars", () => {
-      expect(() =>
-        parsePositionalArgs(["aaaa1111bbbb2222cccc3333ddddgggg"])
-      ).toThrow(ValidationError);
-    });
-
-    test("ValidationError mentions the invalid trace ID", () => {
-      try {
-        parsePositionalArgs(["short-id"]);
-        expect.unreachable("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ValidationError);
-        expect((error as ValidationError).message).toContain("short-id");
-      }
-    });
-
-    test("validates trace ID in two-arg form as well", () => {
-      expect(() => parsePositionalArgs(["my-org", "not-valid-trace"])).toThrow(
-        ValidationError
-      );
-    });
-
-    test("validates trace ID in slash-separated form", () => {
-      expect(() => parsePositionalArgs(["my-org/short-id"])).toThrow(
-        ValidationError
-      );
-    });
-  });
-});
-
-// ============================================================================
-// logsCommand.func()
-// ============================================================================
+// Note: parseTraceTarget parsing tests are in test/lib/trace-target.test.ts
 
 const TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
 const ORG = "test-org";
@@ -195,7 +73,7 @@ function createMockContext() {
       stdout: { write: stdoutWrite },
       cwd: "/tmp",
       setContext: mock(() => {
-        // no-op for test
+        /* no-op for test */
       }),
     },
     stdoutWrite,

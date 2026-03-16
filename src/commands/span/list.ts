@@ -7,11 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import type { SpanSortValue } from "../../lib/api/traces.js";
 import { listSpans } from "../../lib/api-client.js";
-import {
-  parseOrgProjectArg,
-  parseSlashSeparatedArg,
-  validateLimit,
-} from "../../lib/arg-parsing.js";
+import { validateLimit } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   buildPaginationContextKey,
@@ -19,7 +15,6 @@ import {
   resolveOrgCursor,
   setPaginationCursor,
 } from "../../lib/db/pagination.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
   type FlatSpan,
   formatSpanTable,
@@ -36,10 +31,10 @@ import {
   LIST_CURSOR_FLAG,
 } from "../../lib/list-command.js";
 import {
-  resolveOrgAndProject,
-  resolveProjectBySlug,
-} from "../../lib/resolve-target.js";
-import { validateTraceId } from "../../lib/trace-id.js";
+  parseTraceTarget,
+  resolveTraceOrgProject,
+  warnIfNormalized,
+} from "../../lib/trace-target.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -73,49 +68,6 @@ export const PAGINATION_KEY = "span-list";
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
-
-/**
- * Parse positional arguments for span list.
- * Handles: `<trace-id>` or `<org>/<project>/<trace-id>`
- *
- * Uses the standard `parseSlashSeparatedArg` pattern: the last `/`-separated
- * segment is the trace ID, and everything before it is the org/project target.
- *
- * @param args - Positional arguments from CLI
- * @returns Parsed trace ID and optional target arg
- * @throws {ContextError} If no arguments provided
- * @throws {ValidationError} If the trace ID format is invalid
- */
-export function parsePositionalArgs(args: string[]): {
-  traceId: string;
-  targetArg: string | undefined;
-} {
-  if (args.length === 0) {
-    throw new ContextError("Trace ID", USAGE_HINT);
-  }
-
-  const first = args[0];
-  if (first === undefined) {
-    throw new ContextError("Trace ID", USAGE_HINT);
-  }
-
-  if (args.length === 1) {
-    const { id, targetArg } = parseSlashSeparatedArg(
-      first,
-      "Trace ID",
-      USAGE_HINT
-    );
-    return { traceId: validateTraceId(id), targetArg };
-  }
-
-  const second = args[1];
-  if (second === undefined) {
-    return { traceId: validateTraceId(first), targetArg: undefined };
-  }
-
-  // Two or more args — first is target, second is trace ID
-  return { traceId: validateTraceId(second), targetArg: first };
-}
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
@@ -281,46 +233,15 @@ export const listCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
-    // Parse positional args
-    const { traceId, targetArg } = parsePositionalArgs(args);
-    const parsed = parseOrgProjectArg(targetArg);
-
-    // Resolve target
-    let target: { org: string; project: string } | null = null;
-
-    switch (parsed.type) {
-      case "explicit":
-        target = { org: parsed.org, project: parsed.project };
-        break;
-
-      case "project-search":
-        target = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry span list <org>/${parsed.projectSlug}/${traceId}`
-        );
-        break;
-
-      case "org-all":
-        throw new ContextError("Specific project", USAGE_HINT);
-
-      case "auto-detect":
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        break;
-
-      default: {
-        const _exhaustiveCheck: never = parsed;
-        throw new ValidationError(
-          `Invalid target specification: ${_exhaustiveCheck}`
-        );
-      }
-    }
-
-    if (!target) {
-      throw new ContextError("Organization and project", USAGE_HINT);
-    }
-
-    setContext([target.org], [target.project]);
+    // Parse and resolve org/project/trace-id
+    const parsed = parseTraceTarget(args, USAGE_HINT);
+    warnIfNormalized(parsed, "span.list");
+    const { traceId, org, project } = await resolveTraceOrgProject(
+      parsed,
+      cwd,
+      USAGE_HINT
+    );
+    setContext([org], [project]);
 
     // Build server-side query
     const queryParts = [`trace:${traceId}`];
@@ -332,22 +253,18 @@ export const listCommand = buildCommand({
     // Build context key and resolve cursor for pagination
     const contextKey = buildPaginationContextKey(
       "span",
-      `${target.org}/${target.project}/${traceId}`,
+      `${org}/${project}/${traceId}`,
       { sort: flags.sort, q: flags.query }
     );
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
     // Fetch spans from EAP endpoint
-    const { data: spanItems, nextCursor } = await listSpans(
-      target.org,
-      target.project,
-      {
-        query: apiQuery,
-        sort: flags.sort,
-        limit: flags.limit,
-        cursor,
-      }
-    );
+    const { data: spanItems, nextCursor } = await listSpans(org, project, {
+      query: apiQuery,
+      sort: flags.sort,
+      limit: flags.limit,
+      cursor,
+    });
 
     // Store or clear pagination cursor
     if (nextCursor) {
@@ -362,11 +279,11 @@ export const listCommand = buildCommand({
     // Build hint footer
     let hint: string | undefined;
     if (flatSpans.length === 0 && hasMore) {
-      hint = `Try the next page: ${nextPageHint(target.org, target.project, traceId, flags)}`;
+      hint = `Try the next page: ${nextPageHint(org, project, traceId, flags)}`;
     } else if (flatSpans.length > 0) {
       const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
       hint = hasMore
-        ? `${countText} Next page: ${nextPageHint(target.org, target.project, traceId, flags)}`
+        ? `${countText} Next page: ${nextPageHint(org, project, traceId, flags)}`
         : `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
     }
 
