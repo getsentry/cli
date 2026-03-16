@@ -26,8 +26,8 @@ import {
 } from "./resolve-target.js";
 import { validateTraceId } from "./trace-id.js";
 
-/** Match `[<prefix>]<id>` in usageHint for generating suggestions */
-const USAGE_BRACKET_RE = /\[.*\]/;
+/** Match `[<prefix>]<trail>` in usageHint — captures bracket content + trailing placeholder */
+const USAGE_TARGET_RE = /\[.*\]<[^>]+>/;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -300,7 +300,7 @@ export async function resolveTraceOrgProject(
 
     case "org-scoped":
       throw new ContextError("Specific project", usageHint, [
-        `Use: ${usageHint.replace(USAGE_BRACKET_RE, `${parsed.org}/<project>/`)}`,
+        `Use: ${usageHint.replace(USAGE_TARGET_RE, `${parsed.org}/<project>/`)}`,
         `List projects: sentry project list ${parsed.org}/`,
       ]);
 
@@ -335,7 +335,7 @@ async function resolveProjectSearchTarget(
     parsed.projectSlug,
     usageHint,
     usageHint.replace(
-      USAGE_BRACKET_RE,
+      USAGE_TARGET_RE,
       `<org>/${parsed.projectSlug}/${parsed.traceId}`
     )
   );
