@@ -35,7 +35,6 @@ import {
   FRESH_FLAG,
   LIST_CURSOR_FLAG,
 } from "../../lib/list-command.js";
-import { logger } from "../../lib/logger.js";
 import {
   resolveOrgAndProject,
   resolveProjectBySlug,
@@ -281,14 +280,10 @@ export const listCommand = buildCommand({
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
-    const log = logger.withTag("span.list");
 
     // Parse positional args
     const { traceId, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
-    if (parsed.type !== "auto-detect" && parsed.normalized) {
-      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
-    }
 
     // Resolve target
     let target: { org: string; project: string } | null = null;

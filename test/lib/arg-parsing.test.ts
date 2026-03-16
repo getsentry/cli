@@ -6,7 +6,7 @@
  * error messages and edge cases.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,
@@ -175,6 +175,80 @@ describe("parseOrgProjectArg", () => {
         type: "org-all",
         org: "acme-corp",
       });
+    });
+  });
+
+  describe("slug normalization warning", () => {
+    let stderrSpy: ReturnType<typeof spyOn>;
+    let stderrOutput: string;
+
+    beforeEach(() => {
+      stderrOutput = "";
+      stderrSpy = spyOn(process.stderr, "write").mockImplementation(
+        (chunk: string | Uint8Array) => {
+          stderrOutput += typeof chunk === "string" ? chunk : "";
+          return true;
+        }
+      );
+    });
+
+    afterEach(() => {
+      stderrSpy.mockRestore();
+    });
+
+    test("emits warning for underscored project slug", () => {
+      const result = parseOrgProjectArg("my_project");
+      expect(result).toEqual({
+        type: "project-search",
+        projectSlug: "my-project",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my-project'");
+      expect(stderrOutput).toContain(
+        "Sentry slugs use dashes, never underscores"
+      );
+    });
+
+    test("emits warning for underscored org in explicit mode", () => {
+      const result = parseOrgProjectArg("my_org/cli");
+      expect(result).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "cli",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my-org/cli'");
+    });
+
+    test("emits warning for underscored project in explicit mode", () => {
+      const result = parseOrgProjectArg("sentry/my_project");
+      expect(result).toEqual({
+        type: "explicit",
+        org: "sentry",
+        project: "my-project",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'sentry/my-project'");
+    });
+
+    test("emits warning for underscored org in org-all mode", () => {
+      const result = parseOrgProjectArg("my_org/");
+      expect(result).toEqual({
+        type: "org-all",
+        org: "my-org",
+        normalized: true,
+      });
+      expect(stderrOutput).toContain("Normalized slug to 'my-org/'");
+    });
+
+    test("does not emit warning for auto-detect", () => {
+      parseOrgProjectArg(undefined);
+      expect(stderrOutput).not.toContain("Normalized slug");
+    });
+
+    test("does not emit warning when no underscores present", () => {
+      parseOrgProjectArg("sentry/cli");
+      expect(stderrOutput).not.toContain("Normalized slug");
     });
   });
 });

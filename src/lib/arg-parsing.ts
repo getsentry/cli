@@ -8,6 +8,7 @@
 
 import { ContextError, ValidationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
+import { logger } from "./logger.js";
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -38,6 +39,36 @@ export function normalizeSlug(slug: string): {
     return { slug: slug.replace(/_/g, "-"), normalized: true };
   }
   return { slug, normalized: false };
+}
+
+const log = logger.withTag("arg-parsing");
+
+/**
+ * Emit a warning when slug normalization replaced underscores with dashes.
+ * Called internally by {@link parseOrgProjectArg} — callers do not need to
+ * check `parsed.normalized` themselves.
+ */
+function warnNormalized(
+  parsed: Exclude<ParsedOrgProject, { type: "auto-detect" }>
+): void {
+  let slug: string;
+  switch (parsed.type) {
+    case "explicit":
+      slug = `${parsed.org}/${parsed.project}`;
+      break;
+    case "org-all":
+      slug = `${parsed.org}/`;
+      break;
+    case "project-search":
+      slug = parsed.projectSlug;
+      break;
+    default:
+      return;
+  }
+
+  log.warn(
+    `Normalized slug to '${slug}' (Sentry slugs use dashes, never underscores)`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -420,18 +451,25 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     return orgProjectFromUrl(urlParsed);
   }
 
+  let parsed: ParsedOrgProject;
   if (trimmed.includes("/")) {
-    return parseSlashOrgProject(trimmed);
+    parsed = parseSlashOrgProject(trimmed);
+  } else {
+    // No slash → search for project across all orgs
+    validateResourceId(trimmed, "project slug");
+    const np = normalizeSlug(trimmed);
+    parsed = {
+      type: "project-search",
+      projectSlug: np.slug,
+      ...(np.normalized && { normalized: true }),
+    };
   }
 
-  // No slash → search for project across all orgs
-  validateResourceId(trimmed, "project slug");
-  const np = normalizeSlug(trimmed);
-  return {
-    type: "project-search",
-    projectSlug: np.slug,
-    ...(np.normalized && { normalized: true }),
-  };
+  if (parsed.type !== "auto-detect" && parsed.normalized) {
+    warnNormalized(parsed);
+  }
+
+  return parsed;
 }
 
 /**

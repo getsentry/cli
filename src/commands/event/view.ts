@@ -344,9 +344,6 @@ export const viewCommand = buildCommand({
       log.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
-    if (parsed.type !== "auto-detect" && parsed.normalized) {
-      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
-    }
 
     const target = await resolveEventTarget({
       parsed,
