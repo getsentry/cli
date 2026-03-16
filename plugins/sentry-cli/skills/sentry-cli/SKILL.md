@@ -737,6 +737,20 @@ Initialize Sentry in your project
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
 - `-t, --team <value> - Team slug to create the project under`
 
+### Schema
+
+Browse the Sentry API schema
+
+#### `sentry schema <resource...>`
+
+Browse the Sentry API schema
+
+**Flags:**
+- `--all - Show all endpoints in a flat list`
+- `-q, --search <value> - Search endpoints by keyword`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 ## Global Options
 
 All commands support the following global options:

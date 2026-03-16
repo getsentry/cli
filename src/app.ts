@@ -24,6 +24,7 @@ import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
+import { schemaCommand } from "./commands/schema.js";
 import { spanRoute } from "./commands/span/index.js";
 import { listCommand as spanListCommand } from "./commands/span/list.js";
 import { teamRoute } from "./commands/team/index.js";
@@ -75,6 +76,7 @@ export const routes = buildRouteMap({
     trial: trialRoute,
     init: initCommand,
     api: apiCommand,
+    schema: schemaCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
     projects: projectListCommand,

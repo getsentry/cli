@@ -53,5 +53,8 @@ docs/.astro
 # Finder (MacOS) folder config
 .DS_Store
 
+# Generated files (rebuilt at build time)
+src/generated/
+
 # OpenCode
 .opencode/

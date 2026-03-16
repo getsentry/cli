@@ -110,6 +110,8 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - name: Generate API Schema
+        run: bun run generate:schema
       - name: Check SKILL.md
         id: check
         run: bun run check:skill
@@ -143,6 +145,7 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - run: bun run generate:schema
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run check:deps
@@ -167,6 +170,8 @@ jobs:
           key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bun install --frozen-lockfile
+      - name: Generate API Schema
+        run: bun run generate:schema
       - name: Unit Tests
         run: bun run test:unit
       - name: Isolated Tests
@@ -412,6 +417,8 @@ jobs:
           path: dist-bin
       - name: Make binary executable
         run: chmod +x dist-bin/sentry-linux-x64
+      - name: Generate API Schema
+        run: bun run generate:schema
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
