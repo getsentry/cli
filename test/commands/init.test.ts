@@ -15,7 +15,7 @@ import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 
-const func = (await initCommand.loader()) as (
+const func = (await initCommand.loader()) as unknown as (
   this: {
     cwd: string;
     stdout: { write: () => boolean };
@@ -23,7 +23,7 @@ const func = (await initCommand.loader()) as (
     stdin: typeof process.stdin;
   },
   flags: Record<string, unknown>,
-  directory?: string
+  target?: string
 ) => Promise<void>;
 
 function makeContext(cwd = "/projects/app") {
@@ -129,7 +129,7 @@ describe("init command func", () => {
   });
 
   describe("directory resolution", () => {
-    test("defaults to cwd when no directory provided", async () => {
+    test("defaults to cwd when no --directory flag provided", async () => {
       const ctx = makeContext("/projects/app");
       await func.call(ctx, {
         yes: true,
@@ -139,16 +139,13 @@ describe("init command func", () => {
       expect(capturedArgs?.directory).toBe("/projects/app");
     });
 
-    test("resolves relative directory against cwd", async () => {
+    test("resolves relative --directory flag against cwd", async () => {
       const ctx = makeContext("/projects/app");
-      await func.call(
-        ctx,
-        {
-          yes: true,
-          "dry-run": false,
-        },
-        "sub/dir"
-      );
+      await func.call(ctx, {
+        yes: true,
+        "dry-run": false,
+        directory: "sub/dir",
+      });
 
       expect(capturedArgs?.directory).toBe(
         path.resolve("/projects/app", "sub/dir")
@@ -166,6 +163,100 @@ describe("init command func", () => {
 
       expect(capturedArgs?.yes).toBe(true);
       expect(capturedArgs?.dryRun).toBe(true);
+    });
+  });
+
+  describe("org/project parsing", () => {
+    test("passes undefined org/project when no target provided", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, {
+        yes: true,
+        "dry-run": false,
+      });
+
+      expect(capturedArgs?.org).toBeUndefined();
+      expect(capturedArgs?.project).toBeUndefined();
+    });
+
+    test("parses org/project from explicit target", async () => {
+      const ctx = makeContext();
+      await func.call(
+        ctx,
+        {
+          yes: true,
+          "dry-run": false,
+        },
+        "acme/my-app"
+      );
+
+      expect(capturedArgs?.org).toBe("acme");
+      expect(capturedArgs?.project).toBe("my-app");
+    });
+
+    test("parses bare string as org (no project override)", async () => {
+      const ctx = makeContext();
+      await func.call(
+        ctx,
+        {
+          yes: true,
+          "dry-run": false,
+        },
+        "acme"
+      );
+
+      expect(capturedArgs?.org).toBe("acme");
+      expect(capturedArgs?.project).toBeUndefined();
+    });
+
+    test("parses org/ as org-only (no project override)", async () => {
+      const ctx = makeContext();
+      await func.call(
+        ctx,
+        {
+          yes: true,
+          "dry-run": false,
+        },
+        "acme/"
+      );
+
+      expect(capturedArgs?.org).toBe("acme");
+      expect(capturedArgs?.project).toBeUndefined();
+    });
+
+    test("combines target with --directory flag", async () => {
+      const ctx = makeContext("/projects/app");
+      await func.call(
+        ctx,
+        {
+          yes: true,
+          "dry-run": false,
+          directory: "sub/dir",
+        },
+        "acme/my-app"
+      );
+
+      expect(capturedArgs?.org).toBe("acme");
+      expect(capturedArgs?.project).toBe("my-app");
+      expect(capturedArgs?.directory).toBe(
+        path.resolve("/projects/app", "sub/dir")
+      );
+    });
+
+    test("forwards team flag alongside org/project", async () => {
+      const ctx = makeContext();
+      await func.call(
+        ctx,
+        {
+          yes: true,
+          "dry-run": false,
+          team: "backend",
+        },
+        "acme/my-app"
+      );
+
+      expect(capturedArgs?.org).toBe("acme");
+      expect(capturedArgs?.project).toBe("my-app");
+      expect(capturedArgs?.team).toBe("backend");
     });
   });
 });

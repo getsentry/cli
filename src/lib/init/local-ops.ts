@@ -706,7 +706,9 @@ async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
 ): Promise<LocalOpResult> {
-  const { name, platform } = payload.params;
+  // Use CLI-provided project name if available, otherwise use wizard-detected name
+  const name = options.project ?? payload.params.name;
+  const { platform } = payload.params;
   const slug = slugify(name);
   if (!slug) {
     return {
@@ -720,7 +722,7 @@ async function createSentryProject(
     return {
       ok: true,
       data: {
-        orgSlug: "(dry-run)",
+        orgSlug: options.org ?? "(dry-run)",
         projectSlug: slug,
         projectId: "(dry-run)",
         dsn: "(dry-run)",
@@ -730,12 +732,17 @@ async function createSentryProject(
   }
 
   try {
-    // 1. Resolve org
-    const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
-    if (typeof orgResult !== "string") {
-      return orgResult;
+    // 1. Resolve org — skip interactive resolution if explicitly provided via CLI arg
+    let orgSlug: string;
+    if (options.org) {
+      orgSlug = options.org;
+    } else {
+      const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
+      if (typeof orgResult !== "string") {
+        return orgResult;
+      }
+      orgSlug = orgResult;
     }
-    const orgSlug = orgResult;
 
     // 2. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
