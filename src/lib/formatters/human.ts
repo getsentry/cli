@@ -30,6 +30,7 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
+  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
@@ -1077,6 +1078,17 @@ function buildRequestMarkdown(requestEntry: RequestEntry): string {
 
 // Span Tree Formatting
 
+/**
+ * Apply muted styling only in TTY/colored mode.
+ *
+ * Tree output uses box-drawing characters and indentation that can't go
+ * through full `renderMarkdown()`. This helper ensures no raw ANSI escapes
+ * leak when `NO_COLOR` is set, output is piped, or `isPlainOutput()` is true.
+ */
+function plainSafeMuted(text: string): string {
+  return isPlainOutput() ? text : muted(text);
+}
+
 type FormatSpanOptions = {
   lines: string[];
   prefix: string;
@@ -1098,14 +1110,14 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  let line = `${prefix}${branch} ${muted(op)} — ${desc}`;
+  let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${desc}`;
 
   const durationMs = computeSpanDurationMs(span);
   if (durationMs !== undefined) {
-    line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
+    line += `  ${plainSafeMuted(`(${prettyMs(durationMs)})`)}`;
   }
 
-  line += `  ${muted(span.span_id)}`;
+  line += `  ${plainSafeMuted(span.span_id)}`;
 
   lines.push(line);
 
@@ -1161,9 +1173,9 @@ export function formatSimpleSpanTree(
 
     const lines: string[] = [];
     lines.push("");
-    lines.push(muted("─── Span Tree ───"));
+    lines.push(plainSafeMuted("─── Span Tree ───"));
     lines.push("");
-    lines.push(`${muted("Trace —")} ${traceId}`);
+    lines.push(`${plainSafeMuted("Trace —")} ${traceId}`);
 
     const totalRootSpans = spans.length;
     const truncated = totalRootSpans > MAX_ROOT_SPANS;
@@ -1183,7 +1195,7 @@ export function formatSimpleSpanTree(
     if (truncated) {
       const remaining = totalRootSpans - MAX_ROOT_SPANS;
       lines.push(
-        `└─ ${muted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
+        `└─ ${plainSafeMuted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
       );
     }
 

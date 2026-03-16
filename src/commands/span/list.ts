@@ -14,12 +14,13 @@ import {
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
+  type FlatSpan,
+  formatSpanTable,
   spanListItemToFlatSpan,
   translateSpanQuery,
-  writeFooter,
-  writeJsonList,
-  writeSpanTable,
 } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
+import { renderMarkdown } from "../../lib/formatters/markdown.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -119,6 +120,50 @@ export function parseSort(value: string): SortValue {
   return value as SortValue;
 }
 
+// ---------------------------------------------------------------------------
+// Output config types and formatters
+// ---------------------------------------------------------------------------
+
+/** Structured data returned by the command for both JSON and human output */
+type SpanListData = {
+  /** Flattened span items for display */
+  flatSpans: FlatSpan[];
+  /** Whether more results are available beyond the limit */
+  hasMore: boolean;
+  /** The trace ID being queried */
+  traceId: string;
+};
+
+/**
+ * Format span list data for human-readable terminal output.
+ *
+ * Uses `renderMarkdown()` for the header and `formatSpanTable()` for the table,
+ * ensuring proper rendering in both TTY and plain output modes.
+ */
+function formatSpanListHuman(data: SpanListData): string {
+  if (data.flatSpans.length === 0) {
+    return "No spans matched the query.";
+  }
+  const parts: string[] = [];
+  parts.push(renderMarkdown(`Spans in trace \`${data.traceId}\`:\n`));
+  parts.push(formatSpanTable(data.flatSpans));
+  return parts.join("\n");
+}
+
+/**
+ * Transform span list data for JSON output.
+ *
+ * Produces a `{ data: [...], hasMore }` envelope matching the standard
+ * paginated list format. Applies `--fields` filtering per element.
+ */
+function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
+  const items =
+    fields && fields.length > 0
+      ? data.flatSpans.map((item) => filterFields(item, fields))
+      : data.flatSpans;
+  return { data: items, hasMore: data.hasMore };
+}
+
 export const listCommand = buildCommand({
   docs: {
     brief: "List spans in a trace",
@@ -136,7 +181,11 @@ export const listCommand = buildCommand({
       "  sentry span list <trace-id> --sort duration      # Sort by slowest first\n" +
       '  sentry span list <trace-id> -q "duration:>100ms" # Spans slower than 100ms',
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatSpanListHuman,
+    jsonTransform: jsonTransformSpanList,
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -176,13 +225,9 @@ export const listCommand = buildCommand({
       s: "sort",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    ...args: string[]
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
     const log = logger.withTag("span.list");
 
     // Parse positional args
@@ -250,32 +295,15 @@ export const listCommand = buildCommand({
     const flatSpans = spanItems.map(spanListItemToFlatSpan);
     const hasMore = nextCursor !== undefined;
 
-    if (flags.json) {
-      writeJsonList(stdout, flatSpans, {
-        hasMore,
-        fields: flags.fields,
-      });
-      return;
+    // Build hint footer
+    let hint: string | undefined;
+    if (flatSpans.length > 0) {
+      const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
+      hint = hasMore
+        ? `${countText} Use --limit to see more.`
+        : `${countText} Use 'sentry span view <span-id> --trace ${traceId}' to view span details.`;
     }
 
-    if (flatSpans.length === 0) {
-      stdout.write("No spans matched the query.\n");
-      return;
-    }
-
-    stdout.write(`Spans in trace ${traceId}:\n\n`);
-    writeSpanTable(stdout, flatSpans);
-
-    // Footer
-    const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
-
-    if (hasMore) {
-      writeFooter(stdout, `${countText} Use --limit to see more.`);
-    } else {
-      writeFooter(
-        stdout,
-        `${countText} Use 'sentry span view <span-id> --trace ${traceId}' to view span details.`
-      );
-    }
+    return { data: { flatSpans, hasMore, traceId }, hint };
   },
 });

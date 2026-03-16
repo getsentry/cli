@@ -10,10 +10,11 @@ import type {
   TraceSpan,
   TransactionListItem,
 } from "../../types/index.js";
-import { muted } from "./colors.js";
 import { formatRelativeTime } from "./human.js";
 import {
+  colorTag,
   escapeMarkdownCell,
+  escapeMarkdownInline,
   isPlainOutput,
   mdKvTable,
   mdRow,
@@ -22,7 +23,7 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
-import { type Column, writeTable } from "./table.js";
+import { type Column, formatTable, writeTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
 
 /**
@@ -449,7 +450,7 @@ export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
 }
 
 /** Column definitions for the flat span table */
-const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
+export const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
   {
     header: "Span ID",
     value: (s) => `\`${s.span_id}\``,
@@ -475,6 +476,19 @@ const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
     shrinkable: false,
   },
 ];
+
+/**
+ * Format a flat span list as a rendered table string.
+ *
+ * Prefer this in return-based command output pipelines.
+ * Uses {@link formatTable} (return-based) internally.
+ *
+ * @param spans - Flat span array to display
+ * @returns Rendered table string
+ */
+export function formatSpanTable(spans: FlatSpan[]): string {
+  return formatTable(spans, SPAN_TABLE_COLUMNS, { truncate: true });
+}
 
 /**
  * Write a flat span list as a formatted table.
@@ -533,9 +547,12 @@ function buildSpanKvRows(span: TraceSpan, traceId: string): [string, string][] {
 
 /**
  * Format an ancestor chain as indented tree lines.
+ *
+ * Uses `colorTag()` + `renderMarkdown()` so output respects `NO_COLOR`
+ * and `isPlainOutput()` instead of leaking raw ANSI escapes.
  */
 function formatAncestorChain(ancestors: TraceSpan[]): string {
-  const lines: string[] = ["", muted("─── Ancestors ───"), ""];
+  const lines: string[] = ["", colorTag("muted", "─── Ancestors ───"), ""];
   for (let i = 0; i < ancestors.length; i++) {
     const a = ancestors[i];
     if (!a) {
@@ -544,9 +561,11 @@ function formatAncestorChain(ancestors: TraceSpan[]): string {
     const indent = "  ".repeat(i);
     const aOp = a.op || a["transaction.op"] || "unknown";
     const aDesc = a.description || a.transaction || "(no description)";
-    lines.push(`${indent}${muted(aOp)} — ${aDesc} ${muted(`(${a.span_id})`)}`);
+    lines.push(
+      `${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(aDesc)} ${colorTag("muted", `(${a.span_id})`)}`
+    );
   }
-  return `${lines.join("\n")}\n`;
+  return `${renderMarkdown(lines.join("\n"))}\n`;
 }
 
 /**

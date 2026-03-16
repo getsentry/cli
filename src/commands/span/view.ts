@@ -18,8 +18,8 @@ import {
   findSpanById,
   formatSimpleSpanTree,
   formatSpanDetails,
-  writeJson,
 } from "../../lib/formatters/index.js";
+import { filterFields } from "../../lib/formatters/json.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -187,14 +187,28 @@ async function resolveTarget(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Output config types and formatters
+// ---------------------------------------------------------------------------
+
 /** Resolved span result from tree search. */
 type SpanResult = FoundSpan & { spanId: string };
+
+/** Structured data returned by the command for both JSON and human output */
+type SpanViewData = {
+  /** Found span results with ancestors and depth */
+  results: SpanResult[];
+  /** The trace ID for context */
+  traceId: string;
+  /** Maximum child tree depth to display (from --spans flag) */
+  spansDepth: number;
+};
 
 /**
  * Serialize span results for JSON output.
  */
-function buildJsonResults(results: SpanResult[], traceId: string): unknown {
-  const mapped = results.map((r) => ({
+function buildJsonResults(results: SpanResult[], traceId: string): unknown[] {
+  return results.map((r) => ({
     span_id: r.span.span_id,
     parent_span_id: r.span.parent_span_id,
     trace_id: traceId,
@@ -217,6 +231,51 @@ function buildJsonResults(results: SpanResult[], traceId: string): unknown {
       description: c.description || c.transaction,
     })),
   }));
+}
+
+/**
+ * Format span view data for human-readable terminal output.
+ *
+ * Renders each span's details (KV table + ancestor chain) and optionally
+ * shows the child span tree. Multiple spans are separated by `---`.
+ */
+function formatSpanViewHuman(data: SpanViewData): string {
+  const parts: string[] = [];
+  for (let i = 0; i < data.results.length; i++) {
+    if (i > 0) {
+      parts.push("\n---\n");
+    }
+    const result = data.results[i];
+    if (!result) {
+      continue;
+    }
+    parts.push(formatSpanDetails(result.span, result.ancestors, data.traceId));
+
+    // Show child tree if --spans > 0 and the span has children
+    const children = result.span.children ?? [];
+    if (data.spansDepth > 0 && children.length > 0) {
+      const treeLines = formatSimpleSpanTree(
+        data.traceId,
+        [result.span],
+        data.spansDepth
+      );
+      if (treeLines.length > 0) {
+        parts.push(`${treeLines.join("\n")}\n`);
+      }
+    }
+  }
+  return parts.join("");
+}
+
+/**
+ * Transform span view data for JSON output.
+ * Applies `--fields` filtering per element.
+ */
+function jsonTransformSpanView(data: SpanViewData, fields?: string[]): unknown {
+  const mapped = buildJsonResults(data.results, data.traceId);
+  if (fields && fields.length > 0) {
+    return mapped.map((item) => filterFields(item, fields));
+  }
   return mapped;
 }
 
@@ -235,7 +294,11 @@ export const viewCommand = buildCommand({
       "  sentry span view a1b2c3d4e5f67890 --trace <trace-id>\n" +
       "  sentry span view a1b2c3d4e5f67890 b2c3d4e5f6789012 --trace <trace-id>",
   },
-  output: "json",
+  output: {
+    json: true,
+    human: formatSpanViewHuman,
+    jsonTransform: jsonTransformSpanView,
+  },
   parameters: {
     positional: {
       kind: "array",
@@ -257,14 +320,9 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, t: "trace" },
   },
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: view command with multi-span support
-  async func(
-    this: SentryContext,
-    flags: ViewFlags,
-    ...args: string[]
-  ): Promise<void> {
+  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    const { stdout, cwd, setContext } = this;
+    const { cwd, setContext } = this;
     const cmdLog = logger.withTag("span.view");
 
     const traceId = flags.trace;
@@ -323,33 +381,8 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(spanIds, foundIds);
 
-    if (flags.json) {
-      writeJson(stdout, buildJsonResults(results, traceId), flags.fields);
-      return;
-    }
-
-    // Human output
-    let first = true;
-    for (const result of results) {
-      if (!first) {
-        stdout.write("\n---\n\n");
-      }
-      stdout.write(formatSpanDetails(result.span, result.ancestors, traceId));
-
-      // Show child tree if --spans > 0 and the span has children
-      const children = result.span.children ?? [];
-      if (flags.spans > 0 && children.length > 0) {
-        const treeLines = formatSimpleSpanTree(
-          traceId,
-          [result.span],
-          flags.spans
-        );
-        if (treeLines.length > 0) {
-          stdout.write(`${treeLines.join("\n")}\n`);
-        }
-      }
-
-      first = false;
-    }
+    return {
+      data: { results, traceId, spansDepth: flags.spans },
+    };
   },
 });
