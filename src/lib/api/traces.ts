@@ -163,13 +163,16 @@ const SPAN_FIELDS = [
   "trace",
 ];
 
+/** Sort values for span listing: newest first or slowest first */
+export type SpanSortValue = "date" | "duration";
+
 type ListSpansOptions = {
   /** Search query using Sentry query syntax */
   query?: string;
   /** Maximum number of spans to return */
   limit?: number;
-  /** Sort order: "date" (newest first) or "duration" (slowest first) */
-  sort?: "date" | "duration";
+  /** Sort order */
+  sort?: SpanSortValue;
   /** Time period for spans (e.g., "7d", "24h") */
   statsPeriod?: string;
   /** Pagination cursor to resume from a previous page */

@@ -176,7 +176,7 @@ export function detectSwappedTrialArgs(
  * validateLimit("0", 1, 1000)   // throws
  * validateLimit("abc", 1, 1000) // throws
  */
-export function validateLimit(value: string, min: number, max: number): number {
+export function validateLimit(value: string, min = 1, max = 1000): number {
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < min || num > max) {
     throw new Error(`--limit must be between ${min} and ${max}`);

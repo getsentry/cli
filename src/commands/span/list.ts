@@ -5,6 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
+import type { SpanSortValue } from "../../lib/api/traces.js";
 import { listSpans } from "../../lib/api-client.js";
 import {
   parseOrgProjectArg,
@@ -37,24 +38,20 @@ import { validateTraceId } from "../../lib/trace-id.js";
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
-  readonly sort: "date" | "duration";
+  readonly sort: SpanSortValue;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
 
-type SortValue = "date" | "duration";
-
 /** Accepted values for the --sort flag (matches trace list) */
-const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
+const VALID_SORT_VALUES: SpanSortValue[] = ["date", "duration"];
 
 /**
  * CLI-side upper bound for --limit.
  *
- * The Sentry Events API (spans dataset) accepts `per_page` up to 100 per
- * request, but the CLI allows requesting up to 1000 as a convenience —
- * the API client paginates internally when needed. This matches the cap
- * used by `issue list`, `trace list`, and `log list`.
+ * Passed directly as `per_page` to the Sentry Events API (spans dataset).
+ * Matches the cap used by `issue list`, `trace list`, and `log list`.
  */
 const MAX_LIMIT = 1000;
 
@@ -62,7 +59,7 @@ const MAX_LIMIT = 1000;
 const DEFAULT_LIMIT = 25;
 
 /** Default sort order for span results */
-const DEFAULT_SORT: SortValue = "date";
+const DEFAULT_SORT: SpanSortValue = "date";
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
@@ -114,7 +111,7 @@ export function parsePositionalArgs(args: string[]): {
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, MAX_LIMIT);
+  return validateLimit(value, 1, MAX_LIMIT); // min=1 is validateLimit's default, explicit for clarity
 }
 
 /**
@@ -122,13 +119,13 @@ function parseLimit(value: string): number {
  *
  * @throws Error if value is not "date" or "duration"
  */
-export function parseSort(value: string): SortValue {
-  if (!VALID_SORT_VALUES.includes(value as SortValue)) {
+export function parseSort(value: string): SpanSortValue {
+  if (!VALID_SORT_VALUES.includes(value as SpanSortValue)) {
     throw new Error(
       `Invalid sort value. Must be one of: ${VALID_SORT_VALUES.join(", ")}`
     );
   }
-  return value as SortValue;
+  return value as SpanSortValue;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +207,7 @@ export const listCommand = buildCommand({
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of spans (1-${MAX_LIMIT})`,
+        brief: `Number of spans (<=${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
       query: {
