@@ -952,20 +952,23 @@ describe("listCommand.func — follow mode (trace)", () => {
     // (old logs from poll are filtered by timestamp_precise)
   });
 
-  test("streams JSON objects per-line in trace follow mode", async () => {
-    listTraceLogsSpy.mockResolvedValueOnce(sampleTraceLogs);
+  test("streams JSON in trace follow mode: first batch as array, then bare items", async () => {
+    listTraceLogsSpy
+      .mockResolvedValueOnce(sampleTraceLogs)
+      .mockResolvedValueOnce(newerTraceLogs);
     resolveOrgSpy.mockResolvedValue({ org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, { ...traceFollowFlags, json: true });
-    await Bun.sleep(50);
+    // Wait for initial fetch + poll timer (1s) + poll execution
+    await Bun.sleep(1200);
     sigint.trigger();
     await promise;
 
     const calls = stdoutWrite.mock.calls.map((c) => c[0]);
-    const jsonObjects = calls.filter((s: string) => {
+    const jsonLines = calls.filter((s: string) => {
       try {
         JSON.parse(s);
         return true;
@@ -973,7 +976,17 @@ describe("listCommand.func — follow mode (trace)", () => {
         return false;
       }
     });
-    expect(jsonObjects.length).toBe(3);
+    // First batch: 1 JSON line (array of 3 items from LogListResult)
+    // Poll batch: 1 JSON line per item (bare JSONL)
+    expect(jsonLines.length).toBe(2);
+    // First line is an array (the initial trace batch)
+    const firstBatch = JSON.parse(jsonLines[0]);
+    expect(Array.isArray(firstBatch)).toBe(true);
+    expect(firstBatch).toHaveLength(3);
+    // Second line is a bare object (polled item)
+    const pollItem = JSON.parse(jsonLines[1]);
+    expect(Array.isArray(pollItem)).toBe(false);
+    expect(pollItem.message).toBe("New poll result");
   });
 
   test("rejects with AuthError from poll", async () => {

@@ -52,17 +52,20 @@ type ListFlags = {
 };
 
 /**
- * Result yielded by the log list command — one per batch.
+ * Result yielded by the log list command in single-fetch mode.
  *
- * Both single-fetch and follow mode yield the same type. The human
- * renderer always renders incrementally (header on first non-empty
- * batch, rows per batch, footer via `finalize()`).
+ * Contains the full array of logs and optional trace context.
+ * Follow mode yields bare {@link LogLike} items instead — see
+ * {@link LogOutput} for the union type.
  */
 type LogListResult = {
   logs: LogLike[];
   /** Trace ID, present for trace-filtered queries */
   traceId?: string;
 };
+
+/** Output yielded by log list: either a batch (single-fetch) or an individual item (follow). */
+type LogOutput = LogLike | LogListResult;
 
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
@@ -279,9 +282,9 @@ async function fetchPoll<T extends LogLike>(
 /**
  * Async generator that streams log entries via follow-mode polling.
  *
- * Yields batches of log entries (chronological order). The command wraps
- * each batch in a `LogListResult` so the OutputConfig formatters can
- * handle incremental rendering and JSONL expansion.
+ * Yields batches of log entries (chronological order). The command
+ * unwraps each batch into individual {@link CommandOutput} yields so
+ * the OutputConfig formatters can handle incremental rendering and JSONL.
  *
  * The generator handles SIGINT via AbortController for clean shutdown.
  * It never touches stdout — all data output flows through yielded batches
@@ -340,13 +343,37 @@ async function* generateFollowLogs<T extends LogLike>(
  * The generator returns when SIGINT fires — the wrapper's `finalize()`
  * callback handles closing the streaming table.
  */
-async function* yieldFollowBatches<T extends LogLike>(
-  generator: AsyncGenerator<T[], void, undefined>,
-  extra?: Partial<LogListResult>
-): AsyncGenerator<unknown, void, undefined> {
+async function* yieldFollowItems<T extends LogLike>(
+  generator: AsyncGenerator<T[], void, undefined>
+): AsyncGenerator<CommandOutput<T>, void, undefined> {
   for await (const batch of generator) {
     for (const item of batch) {
-      yield new CommandOutput({ logs: [item], ...extra });
+      yield new CommandOutput(item);
+    }
+  }
+}
+
+/**
+ * Consume a trace follow-mode generator, yielding items individually.
+ *
+ * The first non-empty batch is yielded as a {@link LogListResult} so
+ * the human renderer can detect `traceId` and hide the trace column.
+ * Subsequent items are yielded bare for proper JSONL streaming.
+ */
+async function* yieldTraceFollowItems<T extends LogLike>(
+  generator: AsyncGenerator<T[], void, undefined>,
+  traceId: string
+): AsyncGenerator<CommandOutput<LogOutput>, void, undefined> {
+  let contextSent = false;
+  for await (const batch of generator) {
+    if (!contextSent && batch.length > 0) {
+      // First non-empty batch: yield as LogListResult to set trace context
+      yield new CommandOutput<LogOutput>({ logs: batch, traceId });
+      contextSent = true;
+    } else {
+      for (const item of batch) {
+        yield new CommandOutput<LogOutput>(item);
+      }
     }
   }
 }
@@ -427,31 +454,41 @@ function writeFollowBanner(
  * All yields go through `render()` — both single-fetch and follow mode.
  * The renderer emits the table header on the first non-empty batch, rows
  * per batch, and the table footer + hint via `finalize()`.
+ *
+ * Discriminates between {@link LogListResult} (single-fetch or first trace
+ * follow batch) and bare {@link LogLike} items (follow mode).
  */
-function createLogRenderer(): HumanRenderer<LogListResult> {
+function createLogRenderer(): HumanRenderer<LogOutput> {
   const plain = isPlainOutput();
   const table: StreamingTable | undefined = plain
     ? undefined
     : createLogStreamingTable();
+  let includeTrace = true; // default: show trace column
   let headerEmitted = false;
 
+  function isBatch(data: LogOutput): data is LogListResult {
+    return "logs" in data && Array.isArray((data as LogListResult).logs);
+  }
+
   return {
-    render(result: LogListResult): string {
-      if (result.logs.length === 0) {
+    render(data: LogOutput): string {
+      const logs: LogLike[] = isBatch(data) ? data.logs : [data];
+      if (logs.length === 0) {
         return "";
       }
 
-      const includeTrace = !result.traceId;
-      let text = "";
-
-      // Emit header on first non-empty batch
+      // First non-empty call: determine includeTrace and emit header
       if (!headerEmitted) {
-        text += table ? table.header() : formatLogsHeader();
+        if (isBatch(data) && data.traceId) {
+          includeTrace = false;
+        }
         headerEmitted = true;
+        let text = table ? table.header() : formatLogsHeader();
+        text += renderLogRows(logs, includeTrace, table);
+        return text.trimEnd();
       }
 
-      text += renderLogRows(result.logs, includeTrace, table);
-      return text.trimEnd();
+      return renderLogRows(logs, includeTrace, table).trimEnd();
     },
 
     finalize(hint?: string): string {
@@ -480,17 +517,20 @@ function createLogRenderer(): HumanRenderer<LogListResult> {
 /**
  * Transform log output into the JSON shape.
  *
- * Each yielded batch is written as a JSON array. In follow mode,
- * each batch is a short array (one poll result); in single-fetch mode
- * it's the full result set.
+ * Discriminates between {@link LogListResult} (single-fetch) and bare
+ * {@link LogLike} items (follow mode). Single-fetch yields a JSON array;
+ * follow mode yields one JSON object per line (JSONL).
  */
-function jsonTransformLogOutput(
-  result: LogListResult,
-  fields?: string[]
-): unknown {
-  return fields && fields.length > 0
-    ? result.logs.map((log) => filterFields(log, fields))
-    : result.logs;
+function jsonTransformLogOutput(data: LogOutput, fields?: string[]): unknown {
+  if ("logs" in data && Array.isArray((data as LogListResult).logs)) {
+    // Batch (single-fetch): return array
+    const logs = (data as LogListResult).logs;
+    return fields && fields.length > 0
+      ? logs.map((log) => filterFields(log, fields))
+      : logs;
+  }
+  // Single item (follow mode): return bare object for JSONL
+  return fields && fields.length > 0 ? filterFields(data, fields) : data;
 }
 
 export const listCommand = buildListCommand("log", {
@@ -631,7 +671,7 @@ export const listCommand = buildListCommand("log", {
           },
         });
 
-        yield* yieldFollowBatches(generator, { traceId });
+        yield* yieldTraceFollowItems(generator, traceId);
         return;
       }
 
@@ -674,7 +714,7 @@ export const listCommand = buildListCommand("log", {
           extractNew: (logs) => logs,
         });
 
-        yield* yieldFollowBatches(generator);
+        yield* yieldFollowItems(generator);
         return;
       }
 
