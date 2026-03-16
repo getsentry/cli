@@ -59,7 +59,7 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
   const countText = `Showing ${data.logs.length} log${data.logs.length === 1 ? "" : "s"} for trace ${data.traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
   parts.push(formatFooter(`${countText}${tip}`));
-  return parts.join("");
+  return parts.join("").trimEnd();
 }
 
 /** Maximum allowed value for --limit flag */

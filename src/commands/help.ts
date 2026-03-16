@@ -19,7 +19,7 @@ export const helpCommand = buildCommand({
       "Display help information. Run 'sentry help' for an overview, " +
       "or 'sentry help <command>' for detailed help on a specific command.",
   },
-  output: { human: (s: string) => s },
+  output: { human: (s: string) => s.trimEnd() },
   parameters: {
     flags: {},
     positional: {
