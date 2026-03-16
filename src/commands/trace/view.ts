@@ -9,13 +9,11 @@ import { getDetailedTrace } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   looksLikeIssueShortId,
-  parseOrgProjectArg,
-  parseSlashSeparatedArg,
   spansFlag,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import { ValidationError } from "../../lib/errors.js";
 import {
   computeTraceSummary,
   formatSimpleSpanTree,
@@ -28,12 +26,12 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
-import {
-  resolveOrgAndProject,
-  resolveProjectBySlug,
-} from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
-import { validateTraceId } from "../../lib/trace-id.js";
+import {
+  parseTraceTarget,
+  resolveTraceOrgProject,
+  warnIfNormalized,
+} from "../../lib/trace-target.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -44,83 +42,51 @@ type ViewFlags = {
 };
 
 /** Usage hint for ContextError messages */
-const USAGE_HINT = "sentry trace view <org>/<project> <trace-id>";
+const USAGE_HINT = "sentry trace view [<org>/<project>/]<trace-id>";
 
 /**
- * Parse positional arguments for trace view.
- * Handles: `<trace-id>` or `<target> <trace-id>`
+ * Detect UX issues in raw positional args before trace-target parsing.
  *
- * Validates the trace ID format (32-character hex) and silently strips
- * dashes from UUID-format inputs.
+ * - **Swapped args**: user typed `<trace-id> <org>/<project>` instead of
+ *   `<org>/<project> <trace-id>`. If detected, swaps them silently and warns.
+ * - **Issue short ID**: first arg looks like `CAM-82X` — suggests `sentry issue view`.
  *
- * @param args - Positional arguments from CLI
- * @returns Parsed trace ID and optional target arg
- * @throws {ContextError} If no arguments provided
- * @throws {ValidationError} If the trace ID format is invalid
+ * Returns corrected args and optional warnings to emit.
+ *
+ * @internal Exported for testing
  */
-export function parsePositionalArgs(args: string[]): {
-  traceId: string;
-  targetArg: string | undefined;
-  /** Warning message if arguments appear to be in the wrong order */
+export function preProcessArgs(args: string[]): {
+  correctedArgs: string[];
   warning?: string;
-  /** Suggestion when first arg looks like an issue short ID */
   suggestion?: string;
 } {
-  if (args.length === 0) {
-    throw new ContextError("Trace ID", USAGE_HINT);
+  if (args.length < 2) {
+    return { correctedArgs: args };
   }
 
   const first = args[0];
-  if (first === undefined) {
-    throw new ContextError("Trace ID", USAGE_HINT);
-  }
-
-  if (args.length === 1) {
-    const { id, targetArg } = parseSlashSeparatedArg(
-      first,
-      "Trace ID",
-      USAGE_HINT
-    );
-    return { traceId: validateTraceId(id), targetArg };
-  }
-
   const second = args[1];
-  if (second === undefined) {
-    return { traceId: validateTraceId(first), targetArg: undefined };
+  if (!(first && second)) {
+    return { correctedArgs: args };
   }
 
   // Detect swapped args: user put ID first and target second
   const swapWarning = detectSwappedViewArgs(first, second);
   if (swapWarning) {
+    // Swap them: put target first, trace ID second
     return {
-      traceId: validateTraceId(first),
-      targetArg: second,
+      correctedArgs: [second, first, ...args.slice(2)],
       warning: swapWarning,
     };
   }
 
-  // Detect issue short ID passed as first arg (e.g., "CAM-82X some-trace-id")
+  // Detect issue short ID passed as first arg
   const suggestion = looksLikeIssueShortId(first)
     ? `Did you mean: sentry issue view ${first}`
     : undefined;
 
-  // Two or more args - first is target, second is trace ID
-  return {
-    traceId: validateTraceId(second),
-    targetArg: first,
-    suggestion,
-  };
+  return { correctedArgs: args, suggestion };
 }
-
-/**
- * Resolved target type for trace commands.
- * @internal Exported for testing
- */
-export type ResolvedTraceTarget = {
-  org: string;
-  project: string;
-  detectedFrom?: string;
-};
 
 /**
  * Return type for trace view — includes all data both renderers need.
@@ -157,9 +123,9 @@ export const viewCommand = buildCommand({
     fullDescription:
       "View detailed information about a distributed trace by its ID.\n\n" +
       "Target specification:\n" +
-      "  sentry trace view <trace-id>              # auto-detect from DSN or config\n" +
-      "  sentry trace view <org>/<proj> <trace-id> # explicit org and project\n" +
-      "  sentry trace view <project> <trace-id>    # find project across all orgs\n\n" +
+      "  sentry trace view <trace-id>                       # auto-detect from DSN or config\n" +
+      "  sentry trace view <org>/<project>/<trace-id>       # explicit org and project\n" +
+      "  sentry trace view <project> <trace-id>             # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.",
   },
   output: {
@@ -170,9 +136,9 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "org/project/trace-id",
         brief:
-          "[<org>/<project>] <trace-id> - Target (optional) and trace ID (required)",
+          "[<org>/<project>/]<trace-id> - Target (optional) and trace ID (required)",
         parse: String,
       },
     },
@@ -192,67 +158,36 @@ export const viewCommand = buildCommand({
     const { cwd, setContext } = this;
     const log = logger.withTag("trace.view");
 
-    // Parse positional args
-    const { traceId, targetArg, warning, suggestion } =
-      parsePositionalArgs(args);
+    // Pre-process: detect swapped args and issue short IDs
+    const { correctedArgs, warning, suggestion } = preProcessArgs(args);
     if (warning) {
       log.warn(warning);
     }
     if (suggestion) {
       log.warn(suggestion);
     }
-    const parsed = parseOrgProjectArg(targetArg);
 
-    let target: ResolvedTraceTarget | null = null;
-
-    switch (parsed.type) {
-      case "explicit":
-        target = {
-          org: parsed.org,
-          project: parsed.project,
-        };
-        break;
-
-      case "project-search":
-        target = await resolveProjectBySlug(
-          parsed.projectSlug,
-          USAGE_HINT,
-          `sentry trace view <org>/${parsed.projectSlug} ${traceId}`
-        );
-        break;
-
-      case "org-all":
-        throw new ContextError("Specific project", USAGE_HINT);
-
-      case "auto-detect":
-        target = await resolveOrgAndProject({ cwd, usageHint: USAGE_HINT });
-        break;
-
-      default: {
-        // Exhaustive check - should never reach here
-        const _exhaustiveCheck: never = parsed;
-        throw new ValidationError(
-          `Invalid target specification: ${_exhaustiveCheck}`
-        );
-      }
-    }
-
-    if (!target) {
-      throw new ContextError("Organization and project", USAGE_HINT);
-    }
+    // Parse and resolve org/project/trace-id
+    const parsed = parseTraceTarget(correctedArgs, USAGE_HINT);
+    warnIfNormalized(parsed, "trace.view");
+    const { traceId, org, project } = await resolveTraceOrgProject(
+      parsed,
+      cwd,
+      USAGE_HINT
+    );
 
     // Set telemetry context
-    setContext([target.org], [target.project]);
+    setContext([org], [project]);
 
     if (flags.web) {
-      await openInBrowser(buildTraceUrl(target.org, traceId), "trace");
+      await openInBrowser(buildTraceUrl(org, traceId), "trace");
       return;
     }
 
     // The trace API requires a timestamp to help locate the trace data.
     // Use current time - the API will search around this timestamp.
     const timestamp = Math.floor(Date.now() / 1000);
-    const spans = await getDetailedTrace(target.org, traceId, timestamp);
+    const spans = await getDetailedTrace(org, traceId, timestamp);
 
     if (spans.length === 0) {
       throw new ValidationError(

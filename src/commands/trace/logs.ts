@@ -9,7 +9,6 @@ import { listTraceLogs } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { formatLogTable } from "../../lib/formatters/log.js";
 import { CommandOutput, formatFooter } from "../../lib/formatters/output.js";
@@ -18,9 +17,12 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
-import { validateTraceId } from "../../lib/trace-id.js";
+import {
+  parseTraceTarget,
+  resolveTraceOrg,
+  warnIfNormalized,
+} from "../../lib/trace-target.js";
 
 type LogsFlags = {
   readonly json: boolean;
@@ -65,9 +67,6 @@ function formatTraceLogsHuman(data: TraceLogsData): string {
 /** Maximum allowed value for --limit flag */
 const MAX_LIMIT = 1000;
 
-/** Minimum allowed value for --limit flag */
-const MIN_LIMIT = 1;
-
 /** Default number of log entries to show */
 const DEFAULT_LIMIT = 100;
 
@@ -79,71 +78,13 @@ const DEFAULT_LIMIT = 100;
 const DEFAULT_PERIOD = "14d";
 
 /** Usage hint shown in error messages */
-const USAGE_HINT = "sentry trace logs [<org>] <trace-id>";
+const USAGE_HINT = "sentry trace logs [<org>/]<trace-id>";
 
 /**
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, MIN_LIMIT, MAX_LIMIT);
-}
-
-/**
- * Parse positional arguments for trace logs.
- *
- * Accepted forms:
- * - `<trace-id>`              → auto-detect org
- * - `<org> <trace-id>`        → explicit org (space-separated)
- * - `<org>/<trace-id>`        → explicit org (slash-separated, one arg)
- *
- * @param args - Positional arguments from CLI
- * @returns Parsed trace ID and optional explicit org slug
- * @throws {ContextError} If no arguments are provided
- * @throws {ValidationError} If trace ID format is invalid
- */
-export function parsePositionalArgs(args: string[]): {
-  traceId: string;
-  orgArg: string | undefined;
-} {
-  if (args.length === 0) {
-    throw new ContextError("Trace ID", USAGE_HINT);
-  }
-
-  if (args.length === 1) {
-    const first = args[0];
-    if (first === undefined) {
-      throw new ContextError("Trace ID", USAGE_HINT);
-    }
-
-    // Check for "org/traceId" slash-separated form
-    const slashIdx = first.indexOf("/");
-    if (slashIdx !== -1) {
-      const orgArg = first.slice(0, slashIdx);
-      const traceId = first.slice(slashIdx + 1);
-
-      if (!orgArg) {
-        throw new ContextError("Organization", USAGE_HINT);
-      }
-      if (!traceId) {
-        throw new ContextError("Trace ID", USAGE_HINT);
-      }
-
-      return { traceId: validateTraceId(traceId), orgArg };
-    }
-
-    // Plain trace ID — org will be auto-detected
-    return { traceId: validateTraceId(first), orgArg: undefined };
-  }
-
-  // Two or more args — first is org, second is trace ID
-  const orgArg = args[0];
-  const traceId = args[1];
-
-  if (orgArg === undefined || traceId === undefined) {
-    throw new ContextError("Trace ID", USAGE_HINT);
-  }
-
-  return { traceId: validateTraceId(traceId), orgArg };
+  return validateLimit(value, 1, MAX_LIMIT);
 }
 
 export const logsCommand = buildCommand({
@@ -155,12 +96,11 @@ export const logsCommand = buildCommand({
       "automatically queries all projects — no project flag needed.\n\n" +
       "Target specification:\n" +
       "  sentry trace logs <trace-id>          # auto-detect org\n" +
-      "  sentry trace logs <org> <trace-id>    # explicit org\n" +
-      "  sentry trace logs <org>/<trace-id>    # slash-separated\n\n" +
+      "  sentry trace logs <org>/<trace-id>    # explicit org\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.\n\n" +
       "Examples:\n" +
       "  sentry trace logs abc123def456abc123def456abc123de\n" +
-      "  sentry trace logs myorg abc123def456abc123def456abc123de\n" +
+      "  sentry trace logs myorg/abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --period 7d abc123def456abc123def456abc123de\n" +
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
@@ -177,8 +117,8 @@ export const logsCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
-        brief: "[<org>] <trace-id> - Optional org and required trace ID",
+        placeholder: "org/trace-id",
+        brief: "[<org>/]<trace-id> - Optional org and required trace ID",
         parse: String,
       },
     },
@@ -197,7 +137,7 @@ export const logsCommand = buildCommand({
       limit: {
         kind: "parsed",
         parse: parseLimit,
-        brief: `Number of log entries (${MIN_LIMIT}-${MAX_LIMIT})`,
+        brief: `Number of log entries (<=${MAX_LIMIT})`,
         default: String(DEFAULT_LIMIT),
       },
       query: {
@@ -220,18 +160,10 @@ export const logsCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
-    const { traceId, orgArg } = parsePositionalArgs(args);
-
-    // Resolve org — trace-logs is org-scoped, no project needed
-    const resolved = await resolveOrg({ org: orgArg, cwd });
-    if (!resolved) {
-      throw new ContextError("Organization", USAGE_HINT, [
-        "Set a default org with 'sentry org list', or specify one explicitly",
-        `Example: sentry trace logs myorg ${traceId}`,
-      ]);
-    }
-
-    const { org } = resolved;
+    // Parse and resolve org/trace-id
+    const parsed = parseTraceTarget(args, USAGE_HINT);
+    warnIfNormalized(parsed, "trace.logs");
+    const { traceId, org } = await resolveTraceOrg(parsed, cwd, USAGE_HINT);
     setContext([org], []);
 
     if (flags.web) {
