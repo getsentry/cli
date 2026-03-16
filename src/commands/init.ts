@@ -7,7 +7,7 @@
  *
  * Supports org/project positional syntax to pin org and/or project name:
  *   sentry init                    — auto-detect everything
- *   sentry init acme               — explicit org, wizard picks project name
+ *   sentry init acme/              — explicit org, wizard picks project name
  *   sentry init acme/my-app        — explicit org + project name override
  *   sentry init --directory ./dir  — specify project directory
  */
@@ -18,6 +18,7 @@ import { parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError } from "../lib/errors.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
+import { validateResourceId } from "../lib/input-validation.js";
 
 const FEATURE_DELIMITER = /[,+ ]+/;
 
@@ -39,7 +40,7 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       "If omitted, the org is auto-detected from config defaults.\n\n" +
       "Examples:\n" +
       "  sentry init\n" +
-      "  sentry init acme\n" +
+      "  sentry init acme/\n" +
       "  sentry init acme/my-app\n" +
       "  sentry init acme/my-app --directory ./my-project\n" +
       "  sentry init --directory ./my-project",
@@ -50,7 +51,7 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
       parameters: [
         {
           placeholder: "target",
-          brief: "<org>/<project>, <org>, or omit for auto-detect",
+          brief: "<org>/<project>, <org>/, or omit for auto-detect",
           parse: String,
           optional: true,
         },
@@ -115,15 +116,14 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
         explicitProject = parsed.project;
         break;
       case "org-all":
-        // "acme/" or bare "acme" — org only, no project name override
         explicitOrg = parsed.org;
         break;
       case "project-search":
-        // Bare string without "/" — could be an org slug or a project name.
-        // Treat it as an org slug since `sentry init <org>` is the primary use case.
-        // Users who want to override the project name should use org/project syntax.
-        explicitOrg = parsed.projectSlug;
-        break;
+        // Bare string without "/" is ambiguous — could be an org or project slug.
+        // Require the trailing slash to disambiguate (consistent with other commands).
+        throw new ContextError("Target", `sentry init ${parsed.projectSlug}/`, [
+          `'${parsed.projectSlug}' is ambiguous. Use '${parsed.projectSlug}/' for org or '${parsed.projectSlug}/<project>' for org + project.`,
+        ]);
       case "auto-detect":
         // No target provided — auto-detect everything
         break;
@@ -131,6 +131,14 @@ export const initCommand = buildCommand<InitFlags, [string?], SentryContext>({
         const _exhaustive: never = parsed;
         throw new ContextError("Target", String(_exhaustive));
       }
+    }
+
+    // Validate explicit org slug format before passing to API calls
+    if (explicitOrg) {
+      validateResourceId(explicitOrg, "organization slug");
+    }
+    if (explicitProject) {
+      validateResourceId(explicitProject, "project name");
     }
 
     await runWizard({

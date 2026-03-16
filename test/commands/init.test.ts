@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { initCommand } from "../../src/commands/init.js";
+import { ContextError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 
@@ -193,19 +194,18 @@ describe("init command func", () => {
       expect(capturedArgs?.project).toBe("my-app");
     });
 
-    test("parses bare string as org (no project override)", async () => {
+    test("throws on bare string (ambiguous — could be org or project)", async () => {
       const ctx = makeContext();
-      await func.call(
-        ctx,
-        {
-          yes: true,
-          "dry-run": false,
-        },
-        "acme"
-      );
-
-      expect(capturedArgs?.org).toBe("acme");
-      expect(capturedArgs?.project).toBeUndefined();
+      expect(
+        func.call(
+          ctx,
+          {
+            yes: true,
+            "dry-run": false,
+          },
+          "acme"
+        )
+      ).rejects.toThrow(ContextError);
     });
 
     test("parses org/ as org-only (no project override)", async () => {
@@ -257,6 +257,40 @@ describe("init command func", () => {
       expect(capturedArgs?.org).toBe("acme");
       expect(capturedArgs?.project).toBe("my-app");
       expect(capturedArgs?.team).toBe("backend");
+    });
+
+    test("rejects org slug with invalid characters", async () => {
+      const ctx = makeContext();
+      expect(
+        func.call(
+          ctx,
+          {
+            yes: true,
+            "dry-run": false,
+          },
+          "acme corp/"
+        )
+      ).rejects.toThrow();
+    });
+
+    test("error message for bare string includes disambiguation hint", async () => {
+      const ctx = makeContext();
+      try {
+        await func.call(
+          ctx,
+          {
+            yes: true,
+            "dry-run": false,
+          },
+          "myorg"
+        );
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        const msg = (error as ContextError).message;
+        expect(msg).toContain("myorg/");
+        expect(msg).toContain("myorg/<project>");
+      }
     });
   });
 });
