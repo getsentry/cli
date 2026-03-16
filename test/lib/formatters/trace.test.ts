@@ -484,6 +484,17 @@ describe("translateSpanQuery", () => {
       'description:"GET /api"'
     );
   });
+
+  test("negated shorthand keys are translated correctly", () => {
+    expect(translateSpanQuery("!op:db")).toBe("!span.op:db");
+    expect(translateSpanQuery("!duration:>100ms")).toBe(
+      "!span.duration:>100ms"
+    );
+  });
+
+  test("negated non-alias keys pass through unchanged", () => {
+    expect(translateSpanQuery("!description:fetch")).toBe("!description:fetch");
+  });
 });
 
 // ---------------------------------------------------------------------------

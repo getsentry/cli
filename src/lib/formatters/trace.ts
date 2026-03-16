@@ -302,8 +302,6 @@ export type FlatSpan = {
   start_timestamp: number;
   project_slug?: string;
   transaction?: string;
-  depth?: number;
-  child_count?: number;
 };
 
 /** Result of finding a span by ID in the tree */
@@ -371,9 +369,15 @@ export function translateSpanQuery(query: string): string {
       if (colonIdx === -1) {
         return token;
       }
-      const key = token.slice(0, colonIdx).toLowerCase();
+      let key = token.slice(0, colonIdx).toLowerCase();
       const rest = token.slice(colonIdx);
-      return (SPAN_KEY_ALIASES[key] ?? key) + rest;
+      // Strip negation prefix before alias lookup, re-add after
+      const negated = key.startsWith("!");
+      if (negated) {
+        key = key.slice(1);
+      }
+      const resolved = SPAN_KEY_ALIASES[key] ?? key;
+      return (negated ? "!" : "") + resolved + rest;
     })
     .join(" ");
 }
