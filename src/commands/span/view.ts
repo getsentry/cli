@@ -284,14 +284,10 @@ export const viewCommand = buildCommand({
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
-    const cmdLog = logger.withTag("span.view");
 
     // Parse positional args: first is trace ID (with optional target), rest are span IDs
     const { traceId, spanIds, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
-    if (parsed.type !== "auto-detect" && parsed.normalized) {
-      cmdLog.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
-    }
 
     const target = await resolveTarget(parsed, traceId, cwd);
 
