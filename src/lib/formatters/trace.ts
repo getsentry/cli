@@ -23,7 +23,7 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
-import { type Column, formatTable, writeTable } from "./table.js";
+import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
 
 /**
@@ -324,40 +324,6 @@ export type FlatSpan = {
   child_count?: number;
 };
 
-/**
- * Flatten a hierarchical TraceSpan[] tree into a depth-first flat array.
- *
- * @param spans - Root-level spans from the /trace/ API
- * @returns Flat array with depth and child_count computed
- */
-export function flattenSpanTree(spans: TraceSpan[]): FlatSpan[] {
-  const result: FlatSpan[] = [];
-
-  function walk(span: TraceSpan, depth: number): void {
-    const children = span.children ?? [];
-    result.push({
-      span_id: span.span_id,
-      parent_span_id: span.parent_span_id,
-      op: span.op || span["transaction.op"],
-      description: span.description || span.transaction,
-      duration_ms: computeSpanDurationMs(span),
-      start_timestamp: span.start_timestamp,
-      project_slug: span.project_slug,
-      transaction: span.transaction,
-      depth,
-      child_count: children.length,
-    });
-    for (const child of children) {
-      walk(child, depth + 1);
-    }
-  }
-
-  for (const span of spans) {
-    walk(span, 0);
-  }
-  return result;
-}
-
 /** Result of finding a span by ID in the tree */
 export type FoundSpan = {
   span: TraceSpan;
@@ -381,7 +347,7 @@ export function findSpanById(
     depth: number,
     ancestors: TraceSpan[]
   ): FoundSpan | null {
-    if (span.span_id === spanId) {
+    if (span.span_id.toLowerCase() === spanId) {
       return { span, depth, ancestors };
     }
     for (const child of span.children ?? []) {
@@ -488,19 +454,6 @@ export const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
  */
 export function formatSpanTable(spans: FlatSpan[]): string {
   return formatTable(spans, SPAN_TABLE_COLUMNS, { truncate: true });
-}
-
-/**
- * Write a flat span list as a formatted table.
- *
- * @param stdout - Output writer
- * @param spans - Flat span array to display
- */
-export function writeSpanTable(
-  stdout: { write(s: string): void },
-  spans: FlatSpan[]
-): void {
-  writeTable(stdout, spans, SPAN_TABLE_COLUMNS, { truncate: true });
 }
 
 /**

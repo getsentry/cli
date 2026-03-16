@@ -21,6 +21,7 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { computeSpanDurationMs } from "../../lib/formatters/trace.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -217,7 +218,7 @@ function buildJsonResults(results: SpanResult[], traceId: string): unknown[] {
     description: r.span.description || r.span.transaction,
     start_timestamp: r.span.start_timestamp,
     end_timestamp: r.span.end_timestamp || r.span.timestamp,
-    duration: r.span.duration,
+    duration: computeSpanDurationMs(r.span),
     project_slug: r.span.project_slug,
     transaction: r.span.transaction,
     depth: r.depth,
