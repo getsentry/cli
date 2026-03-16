@@ -13,6 +13,12 @@ import {
   validateLimit,
 } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
+import {
+  buildPaginationContextKey,
+  clearPaginationCursor,
+  resolveOrgCursor,
+  setPaginationCursor,
+} from "../../lib/db/pagination.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
   type FlatSpan,
@@ -27,6 +33,7 @@ import {
   applyFreshFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
+  LIST_CURSOR_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -39,6 +46,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: SpanSortValue;
+  readonly cursor?: string;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -60,6 +68,9 @@ const DEFAULT_LIMIT = 25;
 
 /** Default sort order for span results */
 const DEFAULT_SORT: SpanSortValue = "date";
+
+/** Pagination storage key for cursor resume */
+export const PAGINATION_KEY = "span-list";
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
@@ -111,7 +122,7 @@ export function parsePositionalArgs(args: string[]): {
  * Parse --limit flag, delegating range validation to shared utility.
  */
 function parseLimit(value: string): number {
-  return validateLimit(value, 1, MAX_LIMIT); // min=1 is validateLimit's default, explicit for clarity
+  return validateLimit(value, 1, MAX_LIMIT);
 }
 
 /**
@@ -128,6 +139,24 @@ export function parseSort(value: string): SpanSortValue {
   return value as SpanSortValue;
 }
 
+/** Build the CLI hint for fetching the next page, preserving active flags. */
+function nextPageHint(
+  org: string,
+  project: string,
+  traceId: string,
+  flags: Pick<ListFlags, "sort" | "query">
+): string {
+  const base = `sentry span list ${org}/${project}/${traceId} -c last`;
+  const parts: string[] = [];
+  if (flags.sort !== DEFAULT_SORT) {
+    parts.push(`--sort ${flags.sort}`);
+  }
+  if (flags.query) {
+    parts.push(`-q "${flags.query}"`);
+  }
+  return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
+}
+
 // ---------------------------------------------------------------------------
 // Output config types and formatters
 // ---------------------------------------------------------------------------
@@ -138,6 +167,8 @@ type SpanListData = {
   flatSpans: FlatSpan[];
   /** Whether more results are available beyond the limit */
   hasMore: boolean;
+  /** Opaque cursor for fetching the next page (null/undefined when no more) */
+  nextCursor?: string | null;
   /** The trace ID being queried */
   traceId: string;
 };
@@ -161,15 +192,26 @@ function formatSpanListHuman(data: SpanListData): string {
 /**
  * Transform span list data for JSON output.
  *
- * Produces a `{ data: [...], hasMore }` envelope matching the standard
- * paginated list format. Applies `--fields` filtering per element.
+ * Produces a `{ data: [...], hasMore, nextCursor? }` envelope matching the
+ * standard paginated list format. Applies `--fields` filtering per element.
  */
 function jsonTransformSpanList(data: SpanListData, fields?: string[]): unknown {
   const items =
     fields && fields.length > 0
       ? data.flatSpans.map((item) => filterFields(item, fields))
       : data.flatSpans;
-  return { data: items, hasMore: data.hasMore };
+  const envelope: Record<string, unknown> = {
+    data: items,
+    hasMore: data.hasMore,
+  };
+  if (
+    data.nextCursor !== null &&
+    data.nextCursor !== undefined &&
+    data.nextCursor !== ""
+  ) {
+    envelope.nextCursor = data.nextCursor;
+  }
+  return envelope;
 }
 
 export const listCommand = buildCommand({
@@ -182,6 +224,8 @@ export const listCommand = buildCommand({
       "  sentry span list <org>/<project>/<trace-id>       # explicit org and project\n" +
       "  sentry span list <project> <trace-id>             # find project across all orgs\n\n" +
       "The trace ID is the 32-character hexadecimal identifier.\n\n" +
+      "Pagination:\n" +
+      "  sentry span list <trace-id> -c last               # fetch next page\n\n" +
       "Examples:\n" +
       "  sentry span list <trace-id>                       # List spans in trace\n" +
       "  sentry span list <trace-id> --limit 50            # Show more spans\n" +
@@ -223,6 +267,7 @@ export const listCommand = buildCommand({
         brief: `Sort order: ${VALID_SORT_VALUES.join(", ")}`,
         default: DEFAULT_SORT,
       },
+      cursor: LIST_CURSOR_FLAG,
       fresh: FRESH_FLAG,
     },
     aliases: {
@@ -230,6 +275,7 @@ export const listCommand = buildCommand({
       n: "limit",
       q: "query",
       s: "sort",
+      c: "cursor",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
@@ -288,6 +334,14 @@ export const listCommand = buildCommand({
     }
     const apiQuery = queryParts.join(" ");
 
+    // Build context key and resolve cursor for pagination
+    const contextKey = buildPaginationContextKey(
+      "span",
+      `${target.org}/${target.project}/${traceId}`,
+      { sort: flags.sort, q: flags.query }
+    );
+    const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
+
     // Fetch spans from EAP endpoint
     const { data: spanItems, nextCursor } = await listSpans(
       target.org,
@@ -296,22 +350,32 @@ export const listCommand = buildCommand({
         query: apiQuery,
         sort: flags.sort,
         limit: flags.limit,
+        cursor,
       }
     );
 
+    // Store or clear pagination cursor
+    if (nextCursor) {
+      setPaginationCursor(PAGINATION_KEY, contextKey, nextCursor);
+    } else {
+      clearPaginationCursor(PAGINATION_KEY, contextKey);
+    }
+
     const flatSpans = spanItems.map(spanListItemToFlatSpan);
-    const hasMore = nextCursor !== undefined;
+    const hasMore = !!nextCursor;
 
     // Build hint footer
     let hint: string | undefined;
-    if (flatSpans.length > 0) {
+    if (flatSpans.length === 0 && hasMore) {
+      hint = `Try the next page: ${nextPageHint(target.org, target.project, traceId, flags)}`;
+    } else if (flatSpans.length > 0) {
       const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
       hint = hasMore
-        ? `${countText} Use --limit to see more.`
+        ? `${countText} Next page: ${nextPageHint(target.org, target.project, traceId, flags)}`
         : `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
     }
 
-    yield new CommandOutput({ flatSpans, hasMore, traceId });
+    yield new CommandOutput({ flatSpans, hasMore, nextCursor, traceId });
     return { hint };
   },
 });

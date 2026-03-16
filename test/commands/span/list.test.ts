@@ -261,4 +261,100 @@ describe("listCommand.func", () => {
     // Should NOT have called resolveOrgAndProject
     expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
   });
+
+  test("passes cursor to API when --cursor is set", async () => {
+    listSpansSpy.mockResolvedValue({
+      data: [
+        {
+          id: "a1b2c3d4e5f67890",
+          timestamp: "2024-01-15T10:30:00+00:00",
+          project: "test-project",
+          trace: VALID_TRACE_ID,
+        },
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context } = createContext();
+
+    await func.call(
+      context,
+      {
+        limit: 25,
+        sort: "date",
+        cursor: "1735689600:0:0",
+        fresh: false,
+      },
+      VALID_TRACE_ID
+    );
+
+    expect(listSpansSpy).toHaveBeenCalledWith(
+      "test-org",
+      "test-project",
+      expect.objectContaining({
+        cursor: "1735689600:0:0",
+      })
+    );
+  });
+
+  test("includes nextCursor in JSON output when hasMore", async () => {
+    listSpansSpy.mockResolvedValue({
+      data: [
+        {
+          id: "a1b2c3d4e5f67890",
+          timestamp: "2024-01-15T10:30:00+00:00",
+          project: "test-project",
+          trace: VALID_TRACE_ID,
+        },
+      ],
+      nextCursor: "1735689600:0:1",
+    });
+
+    const { context, getStdout } = createContext();
+
+    await func.call(
+      context,
+      {
+        limit: 1,
+        sort: "date",
+        json: true,
+        fresh: false,
+      },
+      VALID_TRACE_ID
+    );
+
+    const output = getStdout();
+    const parsed = JSON.parse(output);
+    expect(parsed.hasMore).toBe(true);
+    expect(parsed.nextCursor).toBe("1735689600:0:1");
+  });
+
+  test("hint shows -c last when more pages available", async () => {
+    listSpansSpy.mockResolvedValue({
+      data: [
+        {
+          id: "a1b2c3d4e5f67890",
+          timestamp: "2024-01-15T10:30:00+00:00",
+          project: "test-project",
+          trace: VALID_TRACE_ID,
+        },
+      ],
+      nextCursor: "1735689600:0:1",
+    });
+
+    const { context, getStdout } = createContext();
+
+    await func.call(
+      context,
+      {
+        limit: 1,
+        sort: "date",
+        fresh: false,
+      },
+      VALID_TRACE_ID
+    );
+
+    const output = getStdout();
+    expect(output).toContain("-c last");
+  });
 });
