@@ -1,0 +1,118 @@
+# Plan: Update AGENTS.md with patterns from span commands work
+
+## Problem
+
+AGENTS.md has stale/missing guidance that led to preventable review cycles during the span commands PR. Key gaps:
+
+1. **Output system** section shows deprecated `stdout.write()` — contradicts the actual `async *func` + `CommandOutput` + `OutputConfig` pattern
+2. **No markdown rendering rules** — no prohibition on raw `muted()`/chalk; no `plainSafeMuted` pattern
+3. **No positional arg pattern** — `parseSlashSeparatedArg` for `[<org>/<project>/]<id>` not mentioned
+4. **Pagination** partially documented — missing `resolveOrgCursor`, `setPaginationCursor`, `clearPaginationCursor`; wrong function name
+5. **No hex ID validation** — `hex-id.ts`, `validateSpanId`, `validateTraceId` not mentioned
+6. **No sort convention** — `"date"` not `"time"` for timestamp sorts
+7. **No circular import guidance** — `time-utils.ts` breakout not documented
+8. **No SKILL.md guidance** — descriptive `placeholder` values, `bun run generate:skill`
+9. **Architecture tree** outdated — missing `span/`, `trace/`, `log/`, `api/`, `hex-id.ts`, `time-utils.ts`, `command.ts`, etc.
+
+## Changes
+
+### File: `AGENTS.md`
+
+#### 1. Update "CLI Commands (Stricli)" section
+
+Replace the deprecated example with the current pattern:
+
+```typescript
+import { buildCommand } from "../../lib/command.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
+
+export const myCommand = buildCommand({
+  docs: { brief: "Short description" },
+  output: {
+    human: formatMyData,
+    jsonTransform: jsonTransformMyData, // optional
+    jsonExclude: ["humanOnlyField"],    // optional
+  },
+  parameters: { /* ... */ },
+  async *func(this: SentryContext, flags) {
+    const data = await fetchData();
+    yield new CommandOutput(data);
+    return { hint: "Tip: ..." };
+  },
+});
+```
+
+Add explicit rules:
+- MUST import `buildCommand` from `../../lib/command.js`, NEVER from `@stricli/core`
+- MUST use `async *func()` (generator), yield `new CommandOutput(data)`, return `{ hint }`
+- MUST NOT use imperative `stdout.write()` or `if (flags.json)` branching — the wrapper handles it
+- `output.human` receives the same data object as JSON serialization
+
+#### 2. Add "Markdown Rendering" subsection under Key Patterns
+
+- All styled human output must use `renderMarkdown()` or `colorTag("muted", ...)` — never raw `muted()`/chalk
+- `isPlainOutput()` controls `NO_COLOR`, non-TTY, `SENTRY_PLAIN_OUTPUT`
+- Tree-structured output (box-drawing chars) that can't go through `renderMarkdown()` should use the `plainSafeMuted` pattern: `isPlainOutput() ? text : muted(text)`
+- Reference: `formatters/human.ts` for `plainSafeMuted`, `formatters/trace.ts` for `formatAncestorChain`
+
+#### 3. Add "Positional Arguments" subsection
+
+- Standard target+ID pattern: `[<org>/<project>/]<id>` parsed via `parseSlashSeparatedArg` from `arg-parsing.ts`
+- Required IDs should be positional args, not flags
+- `parseOrgProjectArg(targetArg)` to resolve the target into auto-detect/explicit/project-search/org-all modes
+- Reference: `span/list.ts`, `trace/view.ts`, `event/view.ts`
+
+#### 4. Add "List Command Pagination" subsection
+
+- All list commands with API pagination MUST use the shared cursor infrastructure
+- Imports: `LIST_CURSOR_FLAG`, `buildPaginationContextKey`, `resolveOrgCursor`, `setPaginationCursor`, `clearPaginationCursor`
+- Add `cursor: LIST_CURSOR_FLAG` to flags, `c: "cursor"` to aliases
+- Context key: `buildPaginationContextKey(type, scope, { sort, q })` — scope includes org/project/entityId
+- After API call: `setPaginationCursor` if `nextCursor`, else `clearPaginationCursor`
+- Hint footer: show `sentry <cmd> ... -c last` for next page
+- Include `nextCursor` in JSON envelope
+- Reference template: `trace/list.ts`
+
+#### 5. Add "ID Validation" subsection
+
+- `hex-id.ts`: `validateHexId(value, label)` for 32-char hex (trace IDs, log IDs); `validateSpanId(value)` for 16-char hex
+- `trace-id.ts`: `validateTraceId(value)` — thin wrapper
+- Both auto-strip dashes and normalize to lowercase
+- New ID types: add validators to `hex-id.ts`, thin wrappers in domain files
+
+#### 6. Add "Sort Convention" note
+
+- Use `"date"` for timestamp-based sort (not `"time"`) — matches `issue list`, `trace list`
+- Export sort type from the API layer (`SpanSortValue`), import in command
+
+#### 7. Add "SKILL.md" note under Quick Reference
+
+- `bun run generate:skill` — regenerate after changing command parameters
+- `bun run check:skill` — CI fails if stale
+- Positional `placeholder` values must be descriptive (e.g., `"org/project/trace-id"`, not `"args"`)
+
+#### 8. Update Architecture tree
+
+Add missing entries:
+- `src/commands/span/` — list, view
+- `src/commands/trace/` — list, view, logs
+- `src/commands/log/` — list, view
+- `src/lib/command.ts` — command builder with output/telemetry
+- `src/lib/hex-id.ts` — hex ID validation
+- `src/lib/trace-id.ts` — trace ID validation
+- `src/lib/api/` — domain modules (already in lore, add to tree)
+- `src/lib/db/pagination.ts` — cursor storage
+- `src/lib/formatters/time-utils.ts` — shared time/duration utils
+- `src/lib/formatters/trace.ts` — trace/span formatters
+- `src/lib/formatters/table.ts` — table rendering
+- `src/lib/formatters/markdown.ts` — markdown rendering engine
+
+#### 9. Update lore entry for circular import
+
+Add a new Architecture lore entry about `time-utils.ts` breaking the `human.ts ↔ trace.ts` cycle.
+
+## Verification
+
+1. `bun run lint` — AGENTS.md must not violate remark rules (it's in `.remarkignore` per existing lore)
+2. Read-through: each pattern section should be self-contained with a concrete code example and reference file
+3. `grep -c 'stdout.write' AGENTS.md` should be 0 (no deprecated patterns)
