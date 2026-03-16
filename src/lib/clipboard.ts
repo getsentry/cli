@@ -5,11 +5,11 @@
  * Includes both low-level copy function and interactive keyboard-triggered copy.
  */
 
-import type { Writer } from "../types/index.js";
-import { success } from "./formatters/colors.js";
+import { logger } from "./logger.js";
+
+const log = logger.withTag("clipboard");
 
 const CTRL_C = "\x03";
-const CLEAR_LINE = "\r\x1b[K";
 
 /**
  * Copy text to the system clipboard.
@@ -72,15 +72,16 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * Sets up a keyboard listener that copies text to clipboard when 'c' is pressed.
  * Only activates in TTY environments. Returns a cleanup function to restore stdin state.
  *
+ * Feedback ("Copied!") is written to stderr via the logger so stdout stays clean
+ * for structured command output.
+ *
  * @param stdin - The stdin stream to listen on
  * @param getText - Function that returns the text to copy
- * @param stdout - Output stream for feedback messages
  * @returns Cleanup function to restore stdin state
  */
 export function setupCopyKeyListener(
   stdin: NodeJS.ReadStream,
-  getText: () => string,
-  stdout: Writer
+  getText: () => string
 ): () => void {
   if (!stdin.isTTY) {
     return () => {
@@ -100,8 +101,7 @@ export function setupCopyKeyListener(
       const text = getText();
       const copied = await copyToClipboard(text);
       if (copied && active) {
-        stdout.write(CLEAR_LINE);
-        stdout.write(success("Copied!"));
+        log.success("Copied!");
       }
     }
 

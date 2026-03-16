@@ -10,6 +10,7 @@ import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -116,7 +117,7 @@ export const listCommand = buildCommand({
       "  sentry org list --limit 10\n" +
       "  sentry org list --json",
   },
-  output: { json: true, human: formatOrgListHuman },
+  output: { human: formatOrgListHuman },
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),
@@ -125,7 +126,7 @@ export const listCommand = buildCommand({
     // Only -n for --limit; no -c since org list has no --cursor flag
     aliases: { ...FRESH_ALIASES, n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags) {
+  async *func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
 
     const orgs = await listOrganizations();
@@ -151,6 +152,7 @@ export const listCommand = buildCommand({
       hints.push("Tip: Use 'sentry org view <slug>' for details");
     }
 
-    return { data: entries, hint: hints.join("\n") || undefined };
+    yield new CommandOutput(entries);
+    return { hint: hints.join("\n") || undefined };
   },
 });

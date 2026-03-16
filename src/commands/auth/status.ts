@@ -22,6 +22,7 @@ import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo } from "../../lib/db/user.js";
 import { AuthError, stringifyUnknown } from "../../lib/errors.js";
 import { formatAuthStatus, maskToken } from "../../lib/formatters/human.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -143,7 +144,7 @@ export const statusCommand = buildCommand({
       "Display information about your current authentication status, " +
       "including whether you're logged in and your default organization/project settings.",
   },
-  output: { json: true, human: formatAuthStatus },
+  output: { human: formatAuthStatus },
   parameters: {
     flags: {
       "show-token": {
@@ -155,7 +156,7 @@ export const statusCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async func(this: SentryContext, flags: StatusFlags) {
+  async *func(this: SentryContext, flags: StatusFlags) {
     applyFreshFlag(flags);
 
     const auth = getAuthConfig();
@@ -189,6 +190,6 @@ export const statusCommand = buildCommand({
       verification: await verifyCredentials(),
     };
 
-    return { data };
+    return yield new CommandOutput(data);
   },
 });

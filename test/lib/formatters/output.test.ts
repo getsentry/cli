@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type OutputConfig,
   renderCommandOutput,
+  resolveRenderer,
   writeFooter,
   writeOutput,
 } from "../../../src/lib/formatters/output.js";
@@ -20,6 +21,20 @@ function createTestWriter() {
       return chunks.join("");
     },
   };
+}
+
+/**
+ * Test helper: calls renderCommandOutput with a fresh renderer resolved
+ * from the config. Mirrors the real wrapper's per-invocation resolve.
+ */
+function render(
+  w: ReturnType<typeof createTestWriter>,
+  data: unknown,
+  config: OutputConfig<any>,
+  ctx: { json: boolean; fields?: string[] }
+) {
+  const renderer = resolveRenderer(config.human);
+  renderCommandOutput(w, data, config, renderer, ctx);
 }
 
 describe("writeOutput", () => {
@@ -174,11 +189,10 @@ describe("writeFooter", () => {
   test("writes empty line followed by muted text", () => {
     const w = createTestWriter();
     writeFooter(w, "Some hint");
-    // First chunk is the empty line separator
-    expect(w.chunks[0]).toBe("\n");
-    // Second chunk contains the hint text with trailing newline
-    expect(w.chunks[1]).toContain("Some hint");
-    expect(w.chunks[1]).toEndWith("\n");
+    const output = w.chunks.join("");
+    expect(output).toStartWith("\n");
+    expect(output).toContain("Some hint");
+    expect(output).toEndWith("\n");
   });
 });
 
@@ -190,70 +204,50 @@ describe("renderCommandOutput", () => {
   test("renders JSON when json=true", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string }> = {
-      json: true,
       human: (d) => `${d.name}`,
     };
-    renderCommandOutput(w, { id: 1, name: "Alice" }, config, { json: true });
+    render(w, { id: 1, name: "Alice" }, config, { json: true });
     expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
   });
 
   test("renders human output when json=false", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ name: string }> = {
-      json: true,
       human: (d) => `Hello ${d.name}`,
     };
-    renderCommandOutput(w, { name: "Alice" }, config, { json: false });
+    render(w, { name: "Alice" }, config, { json: false });
     expect(w.output).toBe("Hello Alice\n");
   });
 
   test("applies fields filtering in JSON mode", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string; secret: string }> = {
-      json: true,
-      human: () => "unused",
+      human: (_d) => "unused",
     };
-    renderCommandOutput(w, { id: 1, name: "Alice", secret: "x" }, config, {
+    render(w, { id: 1, name: "Alice", secret: "x" }, config, {
       json: true,
       fields: ["id", "name"],
     });
     expect(JSON.parse(w.output)).toEqual({ id: 1, name: "Alice" });
   });
 
-  test("renders hint in human mode", () => {
+  test("does not render hints (hints are rendered by the wrapper after generator completes)", () => {
     const w = createTestWriter();
     const config: OutputConfig<string> = {
-      json: true,
-      human: () => "Result",
+      human: (_d) => "Result",
     };
-    renderCommandOutput(w, "data", config, {
-      json: false,
-      hint: "Detected from .env.local",
-    });
-    expect(w.output).toContain("Result\n");
-    expect(w.output).toContain("Detected from .env.local");
-  });
-
-  test("suppresses hint in JSON mode", () => {
-    const w = createTestWriter();
-    const config: OutputConfig<string> = {
-      json: true,
-      human: () => "Result",
-    };
-    renderCommandOutput(w, "data", config, {
-      json: true,
-      hint: "Detected from .env.local",
-    });
-    expect(w.output).not.toContain(".env.local");
+    // renderCommandOutput only renders data — hints are handled by
+    // buildCommand's wrapper via the generator return value
+    render(w, "data", config, { json: false });
+    expect(w.output).toBe("Result\n");
   });
 
   test("works without hint", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ value: number }> = {
-      json: true,
       human: (d) => `Value: ${d.value}`,
     };
-    renderCommandOutput(w, { value: 42 }, config, { json: false });
+    render(w, { value: 42 }, config, { json: false });
     expect(w.output).toBe("Value: 42\n");
   });
 
@@ -264,11 +258,10 @@ describe("renderCommandOutput", () => {
       name: string;
       spanTreeLines?: string[];
     }> = {
-      json: true,
       human: (d) => `${d.id}: ${d.name}`,
       jsonExclude: ["spanTreeLines"],
     };
-    renderCommandOutput(
+    render(
       w,
       { id: 1, name: "Alice", spanTreeLines: ["line1", "line2"] },
       config,
@@ -285,17 +278,13 @@ describe("renderCommandOutput", () => {
       id: number;
       spanTreeLines?: string[];
     }> = {
-      json: true,
       human: (d) =>
         `${d.id}\n${d.spanTreeLines ? d.spanTreeLines.join("\n") : ""}`,
       jsonExclude: ["spanTreeLines"],
     };
-    renderCommandOutput(
-      w,
-      { id: 1, spanTreeLines: ["line1", "line2"] },
-      config,
-      { json: false }
-    );
+    render(w, { id: 1, spanTreeLines: ["line1", "line2"] }, config, {
+      json: false,
+    });
     expect(w.output).toContain("line1");
     expect(w.output).toContain("line2");
   });
@@ -303,11 +292,10 @@ describe("renderCommandOutput", () => {
   test("jsonExclude with empty array is a no-op", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; extra: string }> = {
-      json: true,
       human: (d) => `${d.id}`,
       jsonExclude: [],
     };
-    renderCommandOutput(w, { id: 1, extra: "keep" }, config, { json: true });
+    render(w, { id: 1, extra: "keep" }, config, { json: true });
     const parsed = JSON.parse(w.output);
     expect(parsed).toEqual({ id: 1, extra: "keep" });
   });
@@ -315,12 +303,11 @@ describe("renderCommandOutput", () => {
   test("jsonExclude strips fields from array elements", () => {
     const w = createTestWriter();
     const config: OutputConfig<any> = {
-      json: true,
       human: (d: { id: number; name: string }[]) =>
         d.map((e) => e.name).join(", "),
       jsonExclude: ["detectedFrom"],
     };
-    renderCommandOutput(
+    render(
       w,
       [
         { id: 1, name: "a", detectedFrom: "dsn" },
@@ -345,14 +332,13 @@ describe("renderCommandOutput", () => {
       org: string;
     };
     const config: OutputConfig<ListResult> = {
-      json: true,
       human: (d) => d.items.map((i) => i.name).join(", "),
       jsonTransform: (data) => ({
         data: data.items,
         hasMore: data.hasMore,
       }),
     };
-    renderCommandOutput(
+    render(
       w,
       { items: [{ id: 1, name: "Alice" }], hasMore: true, org: "test-org" },
       config,
@@ -374,8 +360,7 @@ describe("renderCommandOutput", () => {
       hasMore: boolean;
     };
     const config: OutputConfig<ListResult> = {
-      json: true,
-      human: () => "unused",
+      human: (_d) => "unused",
       jsonTransform: (data, fields) => ({
         data:
           fields && fields.length > 0
@@ -392,7 +377,7 @@ describe("renderCommandOutput", () => {
         hasMore: data.hasMore,
       }),
     };
-    renderCommandOutput(
+    render(
       w,
       {
         items: [{ id: 1, name: "Alice", secret: "x" }],
@@ -409,11 +394,10 @@ describe("renderCommandOutput", () => {
   test("jsonTransform is ignored in human mode", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ items: string[]; org: string }> = {
-      json: true,
       human: (d) => `${d.org}: ${d.items.join(", ")}`,
       jsonTransform: (data) => ({ data: data.items }),
     };
-    renderCommandOutput(w, { items: ["a", "b"], org: "test-org" }, config, {
+    render(w, { items: ["a", "b"], org: "test-org" }, config, {
       json: false,
     });
     expect(w.output).toBe("test-org: a, b\n");
@@ -422,19 +406,66 @@ describe("renderCommandOutput", () => {
   test("jsonTransform takes precedence over jsonExclude", () => {
     const w = createTestWriter();
     const config: OutputConfig<{ id: number; name: string; extra: string }> = {
-      json: true,
-      human: () => "unused",
+      human: (_d) => "unused",
       jsonExclude: ["extra"],
       jsonTransform: (data) => ({ transformed: true, id: data.id }),
     };
-    renderCommandOutput(
-      w,
-      { id: 1, name: "Alice", extra: "kept-by-transform" },
-      config,
-      { json: true }
-    );
+    render(w, { id: 1, name: "Alice", extra: "kept-by-transform" }, config, {
+      json: true,
+    });
     const parsed = JSON.parse(w.output);
     // jsonTransform output, not jsonExclude
     expect(parsed).toEqual({ transformed: true, id: 1 });
+  });
+
+  test("human factory creates fresh renderer per resolve", () => {
+    const calls: number[] = [];
+    const config: OutputConfig<{ n: number }> = {
+      human: () => ({
+        render: (d) => {
+          calls.push(d.n);
+          return `#${d.n}`;
+        },
+      }),
+    };
+
+    // First resolve + render
+    const r1 = resolveRenderer(config.human);
+    r1.render({ n: 1 });
+
+    // Second resolve = fresh renderer
+    const r2 = resolveRenderer(config.human);
+    r2.render({ n: 2 });
+
+    expect(calls).toEqual([1, 2]);
+  });
+
+  test("finalize is called with hint and output is written", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<{ value: string }> = {
+      human: () => ({
+        render: (d) => `[${d.value}]`,
+        finalize: (hint) => `=== END ===${hint ? `\n${hint}` : ""}`,
+      }),
+    };
+
+    const renderer = resolveRenderer(config.human);
+    renderCommandOutput(w, { value: "test" }, config, renderer, {
+      json: false,
+    });
+    expect(w.output).toBe("[test]\n");
+
+    // Simulate finalize
+    const footer = renderer.finalize?.("Done.");
+    expect(footer).toBe("=== END ===\nDone.");
+  });
+
+  test("plain function renderer has no finalize method", () => {
+    const config: OutputConfig<string> = {
+      human: (s) => s.toUpperCase(),
+    };
+    const renderer = resolveRenderer(config.human);
+    expect(renderer.render("hello")).toBe("HELLO");
+    expect(renderer.finalize).toBeUndefined();
   });
 });

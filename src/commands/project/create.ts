@@ -35,6 +35,7 @@ import {
   type ProjectCreatedResult,
 } from "../../lib/formatters/human.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
 import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
@@ -275,7 +276,6 @@ export const createCommand = buildCommand({
       "  sentry project create my-app go --json",
   },
   output: {
-    json: true,
     human: formatProjectCreated,
     jsonExclude: [
       "slugDiverged",
@@ -318,7 +318,7 @@ export const createCommand = buildCommand({
     },
     aliases: { t: "team", n: "dry-run" },
   },
-  async func(
+  async *func(
     this: SentryContext,
     flags: CreateFlags,
     nameArg?: string,
@@ -405,7 +405,7 @@ export const createCommand = buildCommand({
         expectedSlug,
         dryRun: true,
       };
-      return { data: result };
+      return yield new CommandOutput(result);
     }
 
     // Create the project
@@ -432,6 +432,6 @@ export const createCommand = buildCommand({
       expectedSlug,
     };
 
-    return { data: result };
+    return yield new CommandOutput(result);
   },
 });

@@ -16,8 +16,8 @@
  *
  * 3. **Output mode injection** — when `output` has an {@link OutputConfig},
  *    `--json` and `--fields` flags are injected automatically. The command
- *    returns a `{ data, hint? }` object and the wrapper handles rendering
- *    via the config's `human` formatter.
+ *    yields branded `CommandOutput` objects via {@link CommandOutput} and
+ *    optionally returns a `{ hint }` footer via {@link CommandReturn}.
  *    Commands that define their own `json` flag keep theirs.
  *
  * ALL commands MUST use `buildCommand` from this module, NOT from
@@ -36,12 +36,17 @@ import {
   buildCommand as stricliCommand,
   numberParser as stricliNumberParser,
 } from "@stricli/core";
+import type { Writer } from "../types/index.js";
 import { OutputError } from "./errors.js";
 import { parseFieldsList } from "./formatters/json.js";
 import {
-  type CommandOutput,
+  CommandOutput,
+  type CommandReturn,
+  type HumanRenderer,
   type OutputConfig,
   renderCommandOutput,
+  resolveRenderer,
+  writeFooter,
 } from "./formatters/output.js";
 import {
   LOG_LEVEL_NAMES,
@@ -63,6 +68,21 @@ type BaseFlags = Readonly<Partial<Record<string, unknown>>>;
 /** Base args type from Stricli */
 type BaseArgs = readonly unknown[];
 
+/**
+ * Type-erased Stricli builder arguments.
+ *
+ * At the `stricliCommand()` call site we've modified both `parameters`
+ * (injected hidden flags) and `func` (wrapped with telemetry/output
+ * logic), which breaks the original `FLAGS`/`ARGS` generic alignment
+ * that Stricli's `CommandBuilderArguments` enforces via `NoInfer`.
+ *
+ * Rather than silencing with `as any`, we cast through `unknown` to
+ * this type that matches Stricli's structural expectations while
+ * erasing the generic constraints we can no longer satisfy.
+ */
+type StricliBuilderArgs<CONTEXT extends CommandContext> =
+  import("@stricli/core").CommandBuilderArguments<BaseFlags, BaseArgs, CONTEXT>;
+
 /** Command documentation */
 type CommandDocumentation = {
   readonly brief: string;
@@ -70,25 +90,20 @@ type CommandDocumentation = {
 };
 
 /**
- * Return value from a command with `output` config.
- *
- * Commands can return:
- * - `void` — no automatic output (e.g. `--web` early exit)
- * - `Error` — Stricli error handling
- * - `CommandOutput<T>` — `{ data, hint? }` rendered by the output config
- */
-// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
-type SyncCommandReturn = void | Error | unknown;
-
-// biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
-type AsyncCommandReturn = Promise<void | Error | unknown>;
-
-/**
  * Command function type for Sentry CLI commands.
  *
- * When the command has an `output` config, it can return a
- * `{ data, hint? }` object — the wrapper renders it automatically.
- * Without `output`, it behaves like a standard Stricli command function.
+ * ALL command functions are async generators. The framework iterates
+ * each yielded value and renders it through the output config.
+ *
+ * - **Non-streaming**: yield a single `CommandOutput<T>`, optionally
+ *   return `{ hint }` for a post-output footer.
+ * - **Streaming**: yield multiple values; each is rendered immediately
+ *   (JSONL in `--json` mode, human text otherwise).
+ * - **Void**: return without yielding for early exits (e.g. `--web`).
+ *
+ * The return value (`CommandReturn`) is captured by the wrapper and
+ * rendered after all yields are consumed. Hints live exclusively on
+ * the return value — never on individual yields.
  */
 type SentryCommandFunction<
   FLAGS extends BaseFlags,
@@ -98,7 +113,8 @@ type SentryCommandFunction<
   this: CONTEXT,
   flags: FLAGS,
   ...args: ARGS
-) => SyncCommandReturn | AsyncCommandReturn;
+  // biome-ignore lint/suspicious/noConfusingVoidType: void is required here — generators that don't return a value have implicit void return, which is distinct from undefined in TypeScript's type system
+) => AsyncGenerator<unknown, CommandReturn | void, undefined>;
 
 /**
  * Arguments for building a command with a local function.
@@ -113,31 +129,22 @@ type LocalCommandBuilderArguments<
   readonly docs: CommandDocumentation;
   readonly func: SentryCommandFunction<FLAGS, ARGS, CONTEXT>;
   /**
-   * Output configuration — controls flag injection and optional auto-rendering.
+   * Output configuration — controls flag injection and auto-rendering.
    *
-   * Two forms:
-   *
-   * 1. **`"json"`** — injects `--json` and `--fields` flags only. The command
-   *    handles its own output via `writeOutput` or direct writes.
-   *
-   * 2. **`{ json: true, human: fn }`** — injects flags AND auto-renders.
-   *    The command returns `{ data }` or `{ data, hint }` and the wrapper
-   *    handles JSON/human branching. Void returns are ignored.
+   * When provided, `--json` and `--fields` flags are injected automatically.
+   * The command yields `new CommandOutput(data)` and the wrapper handles
+   * JSON/human branching. Void yields are ignored.
    *
    * @example
    * ```ts
-   * // Flag injection only:
-   * buildCommand({ output: "json", func() { writeOutput(...); } })
-   *
-   * // Full auto-render:
    * buildCommand({
-   *   output: { json: true, human: formatUserIdentity },
-   *   func() { return user; },
+   *   output: { human: formatUser },
+   *   async *func() { yield new CommandOutput(user); },
    * })
    * ```
    */
-  // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but we erase types at the builder level
-  readonly output?: "json" | OutputConfig<any>;
+  // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T>.human is contravariant in T, but the builder erases T because it doesn't know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
+  readonly output?: OutputConfig<any>;
 };
 
 // ---------------------------------------------------------------------------
@@ -248,7 +255,7 @@ export function applyLoggingFlags(
  *
  * Similarly, when a command already defines its own `json` flag (e.g. for
  * custom brief text), the injected `JSON_FLAG` is skipped. `--fields` is
- * always injected when `output: "json"` regardless.
+ * always injected when `output: { human: ... }` regardless.
  *
  * Flag keys use kebab-case because Stricli uses the literal object key as
  * the CLI flag name (e.g. `"log-level"` → `--log-level`).
@@ -265,11 +272,7 @@ export function buildCommand<
   builderArgs: LocalCommandBuilderArguments<FLAGS, ARGS, CONTEXT>
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
-  const rawOutput = builderArgs.output;
-  /** Resolved output config (object form), or undefined if no auto-rendering */
-  const outputConfig = typeof rawOutput === "object" ? rawOutput : undefined;
-  /** Whether to inject --json/--fields flags */
-  const hasJsonOutput = rawOutput === "json" || rawOutput?.json === true;
+  const outputConfig = builderArgs.output;
 
   // Merge logging flags into the command's flag definitions.
   // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
@@ -293,7 +296,7 @@ export function buildCommand<
   }
 
   // Inject --json and --fields when output config is set
-  if (hasJsonOutput) {
+  if (outputConfig) {
     if (!commandOwnsJson) {
       mergedFlags.json = JSON_FLAG;
     }
@@ -304,38 +307,21 @@ export function buildCommand<
   const mergedParams = { ...existingParams, flags: mergedFlags };
 
   /**
-   * Check if a value is a {@link CommandOutput} object (`{ data, hint? }`).
-   *
-   * The presence of a `data` property is the unambiguous discriminant —
-   * no heuristic key-sniffing needed.
+   * If the yielded value is a {@link CommandOutput}, render it via
+   * the output config. Void/undefined/Error/other values are ignored.
    */
-  function isCommandOutput(v: unknown): v is CommandOutput<unknown> {
-    return typeof v === "object" && v !== null && "data" in v;
-  }
-
-  /**
-   * If the command returned a {@link CommandOutput}, render it via the
-   * output config. Void/undefined/Error returns are ignored.
-   */
-  function handleReturnValue(
-    context: CONTEXT,
+  function handleYieldedValue(
+    stdout: Writer,
     value: unknown,
-    flags: Record<string, unknown>
+    flags: Record<string, unknown>,
+    // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
+    renderer?: HumanRenderer<any>
   ): void {
-    if (
-      !outputConfig ||
-      value === null ||
-      value === undefined ||
-      value instanceof Error ||
-      !isCommandOutput(value)
-    ) {
+    if (!(outputConfig && renderer && value instanceof CommandOutput)) {
       return;
     }
-    const stdout = (context as Record<string, unknown>)
-      .stdout as import("../types/index.js").Writer;
 
-    renderCommandOutput(stdout, value.data, outputConfig, {
-      hint: value.hint,
+    renderCommandOutput(stdout, value.data, outputConfig, renderer, {
       json: Boolean(flags.json),
       fields: flags.fields as string[] | undefined,
     });
@@ -345,7 +331,7 @@ export function buildCommand<
    * Strip injected flags from the raw Stricli-parsed flags object.
    * --log-level is always stripped. --verbose is stripped only when we
    * injected it (not when the command defines its own). --fields is
-   * pre-parsed from comma-string to string[] when output: "json".
+   * pre-parsed from comma-string to string[] when output: { human: ... }.
    */
   function cleanRawFlags(
     raw: Record<string, unknown>
@@ -360,15 +346,45 @@ export function buildCommand<
       }
       clean[key] = value;
     }
-    if (hasJsonOutput && typeof clean.fields === "string") {
+    if (outputConfig && typeof clean.fields === "string") {
       clean.fields = parseFieldsList(clean.fields);
     }
     return clean;
   }
 
-  // Wrap func to intercept logging flags, capture telemetry, then call original
-  // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
-  const wrappedFunc = function (this: CONTEXT, flags: any, ...args: any[]) {
+  /**
+   * Write post-generator output: either the renderer's `finalize()` result
+   * or the default `writeFooter(hint)`. Suppressed in JSON mode.
+   */
+  function writeFinalization(
+    stdout: Writer,
+    hint: string | undefined,
+    json: unknown,
+    // biome-ignore lint/suspicious/noExplicitAny: Renderer type mirrors erased OutputConfig<T>
+    renderer?: HumanRenderer<any>
+  ): void {
+    if (json) {
+      return;
+    }
+    if (renderer?.finalize) {
+      const text = renderer.finalize(hint);
+      if (text) {
+        stdout.write(text);
+      }
+      return;
+    }
+    if (hint) {
+      writeFooter(stdout, hint);
+    }
+  }
+
+  // Wrap func to intercept logging flags, capture telemetry, then call original.
+  // The wrapper is an async function that iterates the generator returned by func.
+  const wrappedFunc = async function (
+    this: CONTEXT,
+    flags: Record<string, unknown>,
+    ...args: unknown[]
+  ) {
     applyLoggingFlags(
       flags[LOG_LEVEL_KEY] as LogLevelName | undefined,
       flags.verbose as boolean
@@ -380,6 +396,14 @@ export function buildCommand<
       setArgsContext(args);
     }
 
+    const stdout = (this as unknown as { stdout: Writer }).stdout;
+
+    // Resolve the human renderer once per invocation. Factory creates
+    // fresh per-invocation state for streaming commands.
+    const renderer = outputConfig
+      ? resolveRenderer(outputConfig.human)
+      : undefined;
+
     // OutputError handler: render data through the output system, then
     // exit with the error's code. Stricli overwrites process.exitCode = 0
     // after successful returns, so process.exit() is the only way to
@@ -389,10 +413,11 @@ export function buildCommand<
       if (err instanceof OutputError && outputConfig) {
         // Only render if there's actual data to show
         if (err.data !== null && err.data !== undefined) {
-          handleReturnValue(
-            this,
-            { data: err.data } as CommandOutput<unknown>,
-            cleanFlags
+          handleYieldedValue(
+            stdout,
+            new CommandOutput(err.data),
+            cleanFlags,
+            renderer
           );
         }
         process.exit(err.exitCode);
@@ -400,37 +425,43 @@ export function buildCommand<
       throw err;
     };
 
-    // Call original and intercept data returns.
-    // Commands with output config return { data, hint? };
-    // the wrapper renders automatically. Void returns are ignored.
-    let result: ReturnType<typeof originalFunc>;
+    // Iterate the generator using manual .next() instead of for-await-of
+    // so we can capture the return value (done: true result). The return
+    // value carries the final `hint` — for-await-of discards it.
     try {
-      result = originalFunc.call(
+      const generator = originalFunc.call(
         this,
         cleanFlags as FLAGS,
         ...(args as unknown as ARGS)
       );
+      let result = await generator.next();
+      while (!result.done) {
+        handleYieldedValue(stdout, result.value, cleanFlags, renderer);
+        result = await generator.next();
+      }
+
+      // Generator completed successfully — finalize with hint.
+      const returned = result.value as CommandReturn | undefined;
+      writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
     } catch (err) {
+      // Finalize before error handling to close streaming state
+      // (e.g., table footer). No hint since the generator didn't
+      // complete. Only in human mode — JSON must not be corrupted.
+      if (!cleanFlags.json) {
+        writeFinalization(stdout, undefined, false, renderer);
+      }
       handleOutputError(err);
     }
+  };
 
-    if (result instanceof Promise) {
-      return result
-        .then((resolved) => {
-          handleReturnValue(this, resolved, cleanFlags);
-        })
-        .catch(handleOutputError) as ReturnType<typeof originalFunc>;
-    }
-
-    handleReturnValue(this, result, cleanFlags);
-    return result as ReturnType<typeof originalFunc>;
-  } as typeof originalFunc;
-
-  // Build the command with the wrapped function via Stricli
+  // Build the command with the wrapped function via Stricli.
+  // The cast is necessary because we modify both `parameters` (injecting
+  // hidden flags) and `func` (wrapping with telemetry/output logic),
+  // which breaks the original FLAGS/ARGS type alignment that Stricli's
+  // `CommandBuilderArguments` enforces via `NoInfer`.
   return stricliCommand({
     ...builderArgs,
     parameters: mergedParams,
     func: wrappedFunc,
-    // biome-ignore lint/suspicious/noExplicitAny: Stricli types are complex unions
-  } as any);
+  } as unknown as StricliBuilderArgs<CONTEXT>);
 }

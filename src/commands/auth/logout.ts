@@ -15,6 +15,7 @@ import {
 import { getDbPath } from "../../lib/db/index.js";
 import { AuthError } from "../../lib/errors.js";
 import { formatLogoutResult } from "../../lib/formatters/human.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 
 /** Structured result of the logout operation */
 export type LogoutResult = {
@@ -32,15 +33,16 @@ export const logoutCommand = buildCommand({
     fullDescription:
       "Remove stored authentication credentials from the local database.",
   },
-  output: { json: true, human: formatLogoutResult },
+  output: { human: formatLogoutResult },
   parameters: {
     flags: {},
   },
-  async func(this: SentryContext): Promise<{ data: LogoutResult }> {
+  async *func(this: SentryContext) {
     if (!(await isAuthenticated())) {
-      return {
-        data: { loggedOut: false, message: "Not currently authenticated." },
-      };
+      return yield new CommandOutput({
+        loggedOut: false,
+        message: "Not currently authenticated.",
+      });
     }
 
     if (isEnvTokenActive()) {
@@ -55,11 +57,9 @@ export const logoutCommand = buildCommand({
     const configPath = getDbPath();
     await clearAuth();
 
-    return {
-      data: {
-        loggedOut: true,
-        configPath,
-      },
-    };
+    return yield new CommandOutput({
+      loggedOut: true,
+      configPath,
+    });
   },
 });

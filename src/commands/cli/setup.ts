@@ -27,6 +27,7 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import {
   addToGitHubPath,
@@ -42,8 +43,6 @@ import {
   parseInstallationMethod,
 } from "../../lib/upgrade.js";
 
-const log = logger.withTag("cli.setup");
-
 type SetupFlags = {
   readonly install: boolean;
   readonly method?: InstallationMethod;
@@ -55,6 +54,25 @@ type SetupFlags = {
 };
 
 type Logger = (msg: string) => void;
+
+/** Structured result of the setup operation */
+type SetupResult = {
+  /** Status messages collected during setup */
+  messages: string[];
+  /** Warning messages from best-effort steps that failed non-fatally */
+  warnings: string[];
+  /** Whether a fresh binary was installed */
+  freshInstall: boolean;
+  /** Path to the installed binary */
+  binaryPath: string;
+  /** CLI version */
+  version: string;
+};
+
+/** Format setup result for human-readable output */
+function formatSetupResult(result: SetupResult): string {
+  return result.messages.join("\n");
+}
 
 /**
  * Handle binary installation from a temp location.
@@ -105,7 +123,7 @@ async function handlePathModification(
   shell: ShellInfo,
   env: NodeJS.ProcessEnv,
   emit: Logger
-): Promise<void> {
+) {
   const alreadyInPath = isInPath(binaryDir, env.PATH);
 
   if (alreadyInPath) {
@@ -235,7 +253,7 @@ async function handleCompletions(
  * Only produces output when the skill file is freshly created. Subsequent
  * runs (e.g. after upgrade) silently update without printing.
  */
-async function handleAgentSkills(homeDir: string, emit: Logger): Promise<void> {
+async function handleAgentSkills(homeDir: string, emit: Logger) {
   const location = await installAgentSkills(homeDir, CLI_VERSION);
 
   if (location?.created) {
@@ -276,7 +294,7 @@ async function bestEffort(
   stepName: string,
   fn: () => void | Promise<void>,
   warn: WarnLogger
-): Promise<void> {
+) {
   try {
     await fn();
   } catch (error) {
@@ -301,7 +319,7 @@ type ConfigStepOptions = {
  * Each step is independently guarded so a failure in one (e.g. DB permission
  * error) doesn't prevent the others from running.
  */
-async function runConfigurationSteps(opts: ConfigStepOptions): Promise<void> {
+async function runConfigurationSteps(opts: ConfigStepOptions) {
   const { flags, binaryPath, binaryDir, homeDir, env, emit, warn } = opts;
   const shell = detectShell(env.SHELL, homeDir, env.XDG_CONFIG_HOME);
 
@@ -441,19 +459,26 @@ export const setupCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: SetupFlags): Promise<void> {
+  output: { human: formatSetupResult },
+  async *func(this: SentryContext, flags: SetupFlags) {
     const { process, homeDir } = this;
+
+    const log = logger.withTag("cli.setup");
+    const messages: string[] = [];
+    const warnings: string[] = [];
 
     const emit: Logger = (msg: string) => {
       if (!flags.quiet) {
-        log.info(msg);
+        messages.push(msg);
       }
     };
 
     const warn: WarnLogger = (step, error) => {
       const msg =
         error instanceof Error ? error.message : "Unknown error occurred";
-      log.warn(`${step} failed: ${msg}`);
+      const warning = `${step} failed: ${msg}`;
+      log.warn(warning);
+      warnings.push(warning);
     };
 
     let binaryPath = process.execPath;
@@ -489,5 +514,13 @@ export const setupCommand = buildCommand({
     if (!flags.quiet && freshInstall) {
       printWelcomeMessage(emit, CLI_VERSION, binaryPath);
     }
+
+    return yield new CommandOutput<SetupResult>({
+      messages,
+      warnings,
+      freshInstall,
+      binaryPath,
+      version: CLI_VERSION,
+    });
   },
 });
