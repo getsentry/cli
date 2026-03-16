@@ -700,7 +700,7 @@ Start a product trial
 
 Initialize Sentry in your project
 
-#### `sentry init <directory>`
+#### `sentry init <target>`
 
 Initialize Sentry in your project
 
@@ -709,6 +709,7 @@ Initialize Sentry in your project
 - `--dry-run - Preview changes without applying them`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
 - `-t, --team <value> - Team slug to create the project under`
+- `-d, --directory <value> - Project directory (default: current directory)`
 
 ### Issues
 
