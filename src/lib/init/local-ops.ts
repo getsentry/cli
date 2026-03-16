@@ -735,24 +735,6 @@ async function tryGetExistingProject(
   }
 }
 
-/**
- * Resolve the org slug from CLI args, env, config, or interactive prompt.
- * Returns the org slug string, or a LocalOpResult if resolution fails or is cancelled.
- */
-async function resolveOrgForInit(
-  cwd: string,
-  options: WizardOptions
-): Promise<string | LocalOpResult> {
-  if (options.org) {
-    return options.org;
-  }
-  const orgResult = await resolveOrgSlug(cwd, options.yes);
-  if (typeof orgResult !== "string") {
-    return orgResult;
-  }
-  return orgResult;
-}
-
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -783,12 +765,17 @@ async function createSentryProject(
   }
 
   try {
-    // 1. Resolve org
-    const orgResult = await resolveOrgForInit(payload.cwd, options);
-    if (typeof orgResult !== "string") {
-      return orgResult;
+    // 1. Resolve org — skip interactive resolution if explicitly provided via CLI arg
+    let orgSlug: string;
+    if (options.org) {
+      orgSlug = options.org;
+    } else {
+      const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
+      if (typeof orgResult !== "string") {
+        return orgResult;
+      }
+      orgSlug = orgResult;
     }
-    const orgSlug = orgResult;
 
     // 2. If both org and project were provided, check if the project already exists.
     //    This avoids a 409 Conflict from the create API when re-running init on an
