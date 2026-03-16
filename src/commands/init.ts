@@ -106,8 +106,12 @@ async function resolveTarget(targetArg: string | undefined): Promise<{
 
   switch (parsed.type) {
     case "explicit":
+      // Validate user-provided slugs before they reach API calls
+      validateResourceId(parsed.org, "organization slug");
+      validateResourceId(parsed.project, "project name");
       return { org: parsed.org, project: parsed.project };
     case "org-all":
+      validateResourceId(parsed.org, "organization slug");
       return { org: parsed.org, project: undefined };
     case "project-search": {
       // Bare slug — search for a project with this name across all orgs.
@@ -219,18 +223,12 @@ export const initCommand = buildCommand<
       .filter(Boolean);
 
     // 4. Resolve target → org + project
+    //    Validation of user-provided slugs happens inside resolveTarget.
+    //    API-resolved values (from resolveProjectBySlug) are already valid.
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
 
-    // 5. Validate explicit slugs before passing to API calls
-    if (explicitOrg) {
-      validateResourceId(explicitOrg, "organization slug");
-    }
-    if (explicitProject) {
-      validateResourceId(explicitProject, "project name");
-    }
-
-    // 6. Run the wizard
+    // 5. Run the wizard
     await runWizard({
       directory: targetDir,
       yes: flags.yes,

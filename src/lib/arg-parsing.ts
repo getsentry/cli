@@ -89,11 +89,16 @@ export function looksLikeIssueShortId(str: string): boolean {
  * - `.` (current directory)
  * - `./foo`, `../foo` (relative paths)
  * - `/foo` (absolute paths)
- * - `~/foo` (home directory paths)
+ * - `~` or `~/foo` (home directory paths)
  *
  * Bare names like `my-org` or `my-project` never match, which is what makes
  * this useful for disambiguating positional arguments that could be either
  * a filesystem path or an org/project target.
+ *
+ * Note: `~` is only matched as `~` alone or `~/...`, not `~foo`. This avoids
+ * false positives on slugs that happen to start with tilde (valid in Sentry slugs).
+ * Shell expansion of `~/foo` happens before the CLI sees the argument, so a literal
+ * `~/foo` reaching this function means the shell didn't expand it (e.g., it was quoted).
  *
  * @param arg - CLI argument string to check
  * @returns true if the string looks like a filesystem path
@@ -104,16 +109,19 @@ export function looksLikeIssueShortId(str: string): boolean {
  * looksLikePath("../parent")   // true
  * looksLikePath("/absolute")   // true
  * looksLikePath("~/home")      // true
+ * looksLikePath("~")           // true
+ * looksLikePath("~foo")        // false (could be a slug)
  * looksLikePath("my-project")  // false
  * looksLikePath("acme/app")    // false
  */
 export function looksLikePath(arg: string): boolean {
   return (
     arg === "." ||
+    arg === "~" ||
     arg.startsWith("./") ||
     arg.startsWith("../") ||
     arg.startsWith("/") ||
-    arg.startsWith("~")
+    arg.startsWith("~/")
   );
 }
 

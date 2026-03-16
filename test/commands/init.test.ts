@@ -179,7 +179,7 @@ describe("init command func", () => {
       expect(capturedArgs?.org).toBeUndefined();
     });
 
-    test("~/home resolves relative to cwd", async () => {
+    test("~/path treated as literal path (no shell expansion)", async () => {
       const ctx = makeContext("/projects/app");
       await func.call(ctx, DEFAULT_FLAGS, "~/projects/other");
       expect(capturedArgs?.directory).toBe(
