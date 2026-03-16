@@ -347,7 +347,7 @@ export function findSpanById(
     depth: number,
     ancestors: TraceSpan[]
   ): FoundSpan | null {
-    if (span.span_id.toLowerCase() === spanId) {
+    if (span.span_id?.toLowerCase() === spanId) {
       return { span, depth, ancestors };
     }
     for (const child of span.children ?? []) {
