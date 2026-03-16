@@ -300,7 +300,7 @@ export async function resolveTraceOrgProject(
 
     case "org-scoped":
       throw new ContextError("Specific project", usageHint, [
-        `Use: ${usageHint.replace(USAGE_TARGET_RE, `${parsed.org}/<project>/`)}`,
+        `Use: ${usageHint.replace(USAGE_TARGET_RE, `${parsed.org}/<project>/${parsed.traceId}`)}`,
         `List projects: sentry project list ${parsed.org}/`,
       ]);
 
