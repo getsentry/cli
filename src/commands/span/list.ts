@@ -301,7 +301,7 @@ export const listCommand = buildCommand({
       const countText = `Showing ${flatSpans.length} span${flatSpans.length === 1 ? "" : "s"}.`;
       hint = hasMore
         ? `${countText} Use --limit to see more.`
-        : `${countText} Use 'sentry span view <span-id> --trace ${traceId}' to view span details.`;
+        : `${countText} Use 'sentry span view ${traceId} <span-id>' to view span details.`;
     }
 
     yield new CommandOutput({ flatSpans, hasMore, traceId });
