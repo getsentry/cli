@@ -39,7 +39,7 @@ import {
 } from "./markdown.js";
 import { sparkline } from "./sparkline.js";
 import { type Column, writeTable } from "./table.js";
-import { computeSpanDurationMs } from "./time-utils.js";
+import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
 
 // Color tag maps
 
@@ -199,9 +199,6 @@ export function formatStatusLabel(status: string | undefined): string {
     STATUS_LABELS[status as IssueStatus] ?? `${colorTag("yellow", "●")} Unknown`
   );
 }
-
-// formatRelativeTime moved to time-utils.ts to break circular import
-import { formatRelativeTime } from "./time-utils.js";
 
 // Issue Formatting
 
