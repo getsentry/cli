@@ -37,16 +37,16 @@ import { validateTraceId } from "../../lib/trace-id.js";
 type ListFlags = {
   readonly limit: number;
   readonly query?: string;
-  readonly sort: "time" | "duration";
+  readonly sort: "date" | "duration";
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
 
-type SortValue = "time" | "duration";
+type SortValue = "date" | "duration";
 
-/** Accepted values for the --sort flag */
-const VALID_SORT_VALUES: SortValue[] = ["time", "duration"];
+/** Accepted values for the --sort flag (matches trace list) */
+const VALID_SORT_VALUES: SortValue[] = ["date", "duration"];
 
 /**
  * CLI-side upper bound for --limit.
@@ -62,7 +62,7 @@ const MAX_LIMIT = 1000;
 const DEFAULT_LIMIT = 25;
 
 /** Default sort order for span results */
-const DEFAULT_SORT: SortValue = "time";
+const DEFAULT_SORT: SortValue = "date";
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry span list [<org>/<project>/]<trace-id>";
@@ -120,7 +120,7 @@ function parseLimit(value: string): number {
 /**
  * Parse and validate sort flag value.
  *
- * @throws Error if value is not "time" or "duration"
+ * @throws Error if value is not "date" or "duration"
  */
 export function parseSort(value: string): SortValue {
   if (!VALID_SORT_VALUES.includes(value as SortValue)) {

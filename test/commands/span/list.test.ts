@@ -98,12 +98,16 @@ describe("parsePositionalArgs", () => {
 });
 
 describe("parseSort", () => {
-  test("accepts 'time'", () => {
-    expect(parseSort("time")).toBe("time");
+  test("accepts 'date'", () => {
+    expect(parseSort("date")).toBe("date");
   });
 
   test("accepts 'duration'", () => {
     expect(parseSort("duration")).toBe("duration");
+  });
+
+  test("rejects 'time' (use 'date' instead)", () => {
+    expect(() => parseSort("time")).toThrow("Invalid sort value");
   });
 
   test("throws for invalid value", () => {
@@ -190,7 +194,7 @@ describe("listCommand.func", () => {
       context,
       {
         limit: 25,
-        sort: "time",
+        sort: "date",
         fresh: false,
       },
       VALID_TRACE_ID
@@ -219,7 +223,7 @@ describe("listCommand.func", () => {
       {
         limit: 25,
         query: "op:db",
-        sort: "time",
+        sort: "date",
         fresh: false,
       },
       VALID_TRACE_ID
@@ -243,7 +247,7 @@ describe("listCommand.func", () => {
       context,
       {
         limit: 25,
-        sort: "time",
+        sort: "date",
         fresh: false,
       },
       `my-org/my-project/${VALID_TRACE_ID}`
