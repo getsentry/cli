@@ -1,0 +1,216 @@
+# Plan: Issue #346 — Add `schema` subcommand for runtime API introspection by agents
+
+## Goal
+
+Enable AI agents to discover CLI commands and Sentry API endpoints at runtime via structured JSON output, eliminating reliance on static docs or pre-loaded system prompts.
+
+## Summary
+
+**Phase 1** (this PR): Add `--json` to the existing `sentry help` command to emit CLI command metadata as structured JSON.
+**Phase 2** (follow-up PR): Add `sentry schema` command to serve OpenAPI endpoint metadata for the Sentry API.
+
+**Implementation order**: Phase 1 PR first, Phase 2 as a separate follow-up PR.
+
+---
+
+## Phase 1: `sentry help --json [command]`
+
+### What it does
+- `sentry help --json` → Full command tree as JSON (all groups, all commands, flags, positional params)
+- `sentry help --json issue list` → Single command's metadata as JSON
+- `sentry help --json issue` → Route group metadata (subcommands listed)
+
+### Design Decisions
+
+1. **Shared introspection module** (`src/lib/introspect.ts`): Extract route-walking logic from `script/generate-skill.ts` into a runtime-usable module. The build script will then import from this module instead of duplicating types. `src/lib/help.ts` type guards will also be consolidated here.
+
+2. **Output format**: Use `output: "json"` on the help command (manual rendering), NOT `output: { json: true, human: fn }` because help's human output diverges completely (branded banner vs structured data).
+
+3. **JSON shape** — single command:
+   ```json
+   {
+     "path": "sentry issue list",
+     "brief": "List issues for a project",
+     "fullDescription": "...",
+     "flags": [
+       { "name": "limit", "brief": "Max items", "kind": "parsed", "default": 25, "optional": true, "variadic": false }
+     ],
+     "positional": "<target>",
+     "aliases": { "l": "limit", "q": "query" }
+   }
+   ```
+
+4. **JSON shape** — route group:
+   ```json
+   {
+     "name": "issue",
+     "brief": "Manage issues",
+     "commands": [ /* CommandInfo[] */ ]
+   }
+   ```
+
+5. **JSON shape** — full tree (no args):
+   ```json
+   {
+     "routes": [ /* RouteInfo[] — groups and standalone commands */ ]
+   }
+   ```
+
+6. **Hidden flags filtering**: Strip `log-level`, `verbose`, `help`, `helpAll` from JSON output (they're injected by the framework, not user-facing per-command).
+
+### Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/lib/introspect.ts` | **Create** | Shared route-tree introspection: types (`CommandInfo`, `FlagInfo`, `RouteInfo`, `PositionalInfo`), type guards (`isRouteMap`, `isCommand`), extraction functions (`extractFlags`, `buildCommandInfo`, `extractRouteGroupCommands`, `extractRoutes`, `resolveCommandPath`) |
+| `src/commands/help.ts` | **Modify** | Add `json` flag via `output: "json"`. When `--json`: import routes lazily (same dynamic import pattern), walk tree with introspect module, write JSON to stdout. When not `--json`: existing behavior unchanged. |
+| `src/lib/help.ts` | **Modify** | Remove duplicated type guards/types, import from `introspect.ts` instead. Keep `printCustomHelp` and formatting functions. |
+| `script/generate-skill.ts` | **Modify** | Remove duplicated type definitions and introspection functions, import from `src/lib/introspect.ts`. Keep markdown generation and doc-loading logic (those are build-time only). |
+| `test/lib/introspect.test.ts` | **Create** | Unit tests for introspection functions |
+| `test/lib/introspect.property.test.ts` | **Create** | Property-based tests: round-trip invariants (extractFlags always produces valid FlagInfo), hidden flag filtering, command path resolution |
+| `test/commands/help.test.ts` | **Create** | Integration tests for `help --json`, `help --json issue list`, `help --json issue` |
+
+### Implementation Steps
+
+1. **Create `src/lib/introspect.ts`**
+   - Move types from `generate-skill.ts`: `RouteMapEntry`, `RouteTarget`, `RouteMap`, `Command`, `PositionalParams`, `PositionalParam`, `FlagDef`, `CommandInfo`, `FlagInfo`, `RouteInfo`
+   - Move type guards: `isRouteMap()`, `isCommand()`
+   - Move extraction functions: `extractFlags()`, `getPositionalString()`, `buildCommandInfo()`, `extractRouteGroupCommands()`
+   - Add `extractAllRoutes(routeMap)` — sync version (no doc loading, unlike generate-skill.ts's `extractRoutes`)
+   - Add `resolveCommandPath(routeMap, path: string[])` — navigates to a specific command/group
+   - Filter hidden flags from output (name !== 'help', 'helpAll', 'log-level', 'verbose')
+   - Export everything needed by both help.ts, generate-skill.ts, and commands/help.ts
+
+2. **Update `src/commands/help.ts`**
+   - Add `output: "json"` to `buildCommand` config
+   - In `func`: check `flags.json`, if true:
+     - Dynamic import `routes` from `../app.js` and introspect functions from `../lib/introspect.js`
+     - If `commandPath.length === 0`: call `extractAllRoutes(routes)`, write `{ routes }` as JSON
+     - If `commandPath.length > 0`: call `resolveCommandPath(routes, commandPath)`, write single command or group as JSON
+   - Non-JSON path: unchanged
+
+3. **Simplify `src/lib/help.ts`**
+   - Remove duplicated `isRouteMap()`, `isCommand()`, `RouteMapEntry`, `PositionalParams`, `PositionalParam` types
+   - Import them from `introspect.ts`
+   - `generateCommands()` and `printCustomHelp()` remain, but use shared types
+
+4. **Simplify `script/generate-skill.ts`**
+   - Remove ~100 lines of duplicated type definitions and extraction functions
+   - Import from `../../src/lib/introspect.js`
+   - Keep the async `extractRoutes()` (with doc loading), but have it delegate to `buildCommandInfo()` from introspect
+   - Keep all markdown-generation and doc-loading code
+
+---
+
+## Phase 2: `sentry schema <resource> [operation]`
+
+### What it does
+- `sentry schema --list` → List all available API resources and operations
+- `sentry schema issues list` → Show OpenAPI schema for `GET /api/0/organizations/{org}/issues/`
+- `sentry schema issues retrieve` → Show OpenAPI schema for `GET /api/0/issues/{issue_id}/`
+
+### Design Decisions
+
+1. **Build-time schema extraction** (chosen approach — not runtime fetch, not bundling full 3.3MB spec):
+   - At build time, parse `@sentry/api/dist/index.js` (has `url:` and `.get()`/`.post()` patterns) and `@sentry/api/dist/sdk.gen.d.ts` (has JSDoc descriptions) to extract a lightweight endpoint index
+   - Each entry: `{ functionName, method, url, description, pathParams, queryParams }`
+   - Store as a JSON index bundled into the CLI (~50-100KB estimated)
+   - This avoids: fetching at runtime (needs network), bundling full spec (3.3MB too large), or depending on `sentry-api-schema` repo structure
+
+3. **Resource/operation naming**: Convert SDK function names to human-friendly `resource operation` pairs:
+   - `listAnOrganization_sIssues` → `issues list`
+   - `retrieveAnIssue` → `issues retrieve`
+   - `updateAnIssue` → `issues update`
+   - Build a mapping table at build time
+
+4. **Output**: Always JSON (this is an agent-facing command):
+   ```json
+   {
+     "method": "GET",
+     "path": "/api/0/organizations/{organization_id_or_slug}/issues/",
+     "description": "Return a list of issues bound to an organization.",
+     "pathParams": ["organization_id_or_slug"],
+     "queryParams": ["query", "cursor", "sort", "statsPeriod", ...],
+     "sdkFunction": "listAnOrganization_sIssues"
+   }
+   ```
+
+### Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `script/generate-api-index.ts` | **Create** | Build script: parses `@sentry/api` JS bundle + `.d.ts` to generate `src/generated/api-index.json` |
+| `src/generated/api-index.json` | **Generated** | Lightweight endpoint index (~50-100KB) |
+| `src/commands/schema/index.ts` | **Create** | Route map for `sentry schema` |
+| `src/commands/schema/list.ts` | **Create** | `sentry schema --list` or `sentry schema list` — shows all resources/operations |
+| `src/commands/schema/show.ts` | **Create** | `sentry schema <resource> [operation]` — shows endpoint details |
+| `src/app.ts` | **Modify** | Register `schema` route |
+| `test/commands/schema/` | **Create** | Tests for schema commands |
+
+### Implementation Steps
+
+1. **Build `script/generate-api-index.ts`**
+   - Parse `node_modules/@sentry/api/dist/index.js` with regex to extract function→{method, url} mappings
+   - Parse `node_modules/@sentry/api/dist/sdk.gen.d.ts` for JSDoc descriptions
+   - Build resource→operation index with human-friendly names
+   - Write to `src/generated/api-index.json`
+   - Add `generate:api-index` script to `package.json`
+
+2. **Create schema commands**
+   - `list.ts`: Read generated index, display as table (human) or JSON array
+   - `show.ts`: Look up specific resource+operation, display endpoint details
+   - Both support `--json` via `output: "json"`
+
+3. **Register in app.ts**
+   - Add `schema: schemaRoute` to routes
+   - No plural alias needed (agents will use `sentry schema`)
+
+---
+
+## Verification
+
+### Phase 1
+```bash
+# Full tree
+bun run dev help --json | jq '.routes | length'  # Should show all route groups
+
+# Specific command
+bun run dev help --json issue list | jq '.flags[].name'  # Should show limit, query, etc.
+
+# Specific group
+bun run dev help --json issue | jq '.commands[].path'  # Should list all issue subcommands
+
+# Human mode unchanged
+bun run dev help  # Should show branded banner as before
+bun run dev help issue list  # Should show Stricli help as before
+
+# Tests
+bun test test/lib/introspect.test.ts
+bun test test/lib/introspect.property.test.ts
+bun test test/commands/help.test.ts
+
+# Verify generate-skill still works
+bun run script/generate-skill.ts
+```
+
+### Phase 2
+```bash
+# List all endpoints
+bun run dev schema --list | head -20
+
+# Show specific endpoint
+bun run dev schema issues list --json | jq '.method, .path'
+
+# Tests
+bun test test/commands/schema/
+
+# Verify build script
+bun run script/generate-api-index.ts
+```
+
+### CI
+```bash
+bun run typecheck
+bun run lint
+bun test
+```
