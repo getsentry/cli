@@ -11,6 +11,7 @@ import path from "node:path";
 import { isCancel, select } from "@clack/prompts";
 import {
   createProject,
+  getProject,
   listOrganizations,
   tryGetPrimaryDsn,
 } from "../api-client.js";
@@ -702,6 +703,56 @@ async function resolveOrgSlug(
   return selected;
 }
 
+/**
+ * Try to fetch an existing project by org + slug. Returns a successful
+ * LocalOpResult if the project exists, or null if it doesn't (404).
+ * Other errors are left to propagate.
+ */
+async function tryGetExistingProject(
+  orgSlug: string,
+  projectSlug: string
+): Promise<LocalOpResult | null> {
+  try {
+    const project = await getProject(orgSlug, projectSlug);
+    const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
+    const url = buildProjectUrl(orgSlug, project.slug);
+    return {
+      ok: true,
+      data: {
+        orgSlug,
+        projectSlug: project.slug,
+        projectId: project.id,
+        dsn: dsn ?? "",
+        url,
+      },
+    };
+  } catch (error) {
+    // 404 means project doesn't exist — fall through to creation
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Resolve the org slug from CLI args, env, config, or interactive prompt.
+ * Returns the org slug string, or a LocalOpResult if resolution fails or is cancelled.
+ */
+async function resolveOrgForInit(
+  cwd: string,
+  options: WizardOptions
+): Promise<string | LocalOpResult> {
+  if (options.org) {
+    return options.org;
+  }
+  const orgResult = await resolveOrgSlug(cwd, options.yes);
+  if (typeof orgResult !== "string") {
+    return orgResult;
+  }
+  return orgResult;
+}
+
 async function createSentryProject(
   payload: CreateSentryProjectPayload,
   options: WizardOptions
@@ -732,35 +783,40 @@ async function createSentryProject(
   }
 
   try {
-    // 1. Resolve org — skip interactive resolution if explicitly provided via CLI arg
-    let orgSlug: string;
-    if (options.org) {
-      orgSlug = options.org;
-    } else {
-      const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
-      if (typeof orgResult !== "string") {
-        return orgResult;
+    // 1. Resolve org
+    const orgResult = await resolveOrgForInit(payload.cwd, options);
+    if (typeof orgResult !== "string") {
+      return orgResult;
+    }
+    const orgSlug = orgResult;
+
+    // 2. If both org and project were provided, check if the project already exists.
+    //    This avoids a 409 Conflict from the create API when re-running init on an
+    //    existing Sentry project (e.g., bare slug resolved via resolveProjectBySlug).
+    if (options.org && options.project) {
+      const existing = await tryGetExistingProject(orgSlug, slug);
+      if (existing) {
+        return existing;
       }
-      orgSlug = orgResult;
     }
 
-    // 2. Resolve or create team
+    // 3. Resolve or create team
     const team = await resolveOrCreateTeam(orgSlug, {
       team: options.team,
       autoCreateSlug: slug,
       usageHint: "sentry init",
     });
 
-    // 3. Create project
+    // 4. Create project
     const project = await createProject(orgSlug, team.slug, {
       name,
       platform,
     });
 
-    // 4. Get DSN (best-effort)
+    // 5. Get DSN (best-effort)
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
 
-    // 5. Build URL
+    // 6. Build URL
     const url = buildProjectUrl(orgSlug, project.slug);
 
     return {
@@ -774,14 +830,17 @@ async function createSentryProject(
       },
     };
   } catch (error) {
-    let message: string;
-    if (error instanceof ApiError) {
-      message = error.format();
-    } else if (error instanceof Error) {
-      message = error.message;
-    } else {
-      message = String(error);
-    }
-    return { ok: false, error: message };
+    return { ok: false, error: formatLocalOpError(error) };
   }
+}
+
+/** Format an error from a local-op into a user-facing message string. */
+function formatLocalOpError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.format();
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
