@@ -76,7 +76,7 @@ export function formatResult(result: WorkflowRunResult): void {
 
   log.info("Please review the changes above before committing.");
   log.info(
-    "You're one of the first to try the new setup wizard! Run `sentry feedback` to let us know how it went."
+    "You're one of the first to try the new setup wizard! Run `sentry cli feedback` to let us know how it went."
   );
 
   outro("Sentry SDK installed successfully!");
