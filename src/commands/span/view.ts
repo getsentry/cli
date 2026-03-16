@@ -37,7 +37,6 @@ import { validateTraceId } from "../../lib/trace-id.js";
 const log = logger.withTag("span.view");
 
 type ViewFlags = {
-  readonly trace: string;
   readonly json: boolean;
   readonly spans: number;
   readonly fresh: boolean;
@@ -49,7 +48,7 @@ const SPAN_ID_RE = /^[0-9a-f]{16}$/i;
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT =
-  "sentry span view [<org>/<project>] <span-id> [<span-id>...] --trace <trace-id>";
+  "sentry span view [<org>/<project>/]<trace-id> <span-id> [<span-id>...]";
 
 /**
  * Validate that a string is a 16-character hexadecimal span ID.
@@ -70,66 +69,54 @@ export function validateSpanId(value: string): string {
 }
 
 /**
- * Check if a string looks like a 16-char hex span ID.
- * Used to distinguish span IDs from target args without throwing.
- */
-function looksLikeSpanId(value: string): boolean {
-  return SPAN_ID_RE.test(value.trim());
-}
-
-/**
  * Parse positional arguments for span view.
- * Handles:
- * - `<span-id>` — single span ID (auto-detect org/project)
- * - `<span-id> <span-id> ...` — multiple span IDs
- * - `<target> <span-id> [<span-id>...]` — explicit target + span IDs
  *
- * The first arg is treated as a target if it contains "/" or doesn't look
- * like a 16-char hex span ID.
+ * Uses the same `[<org>/<project>/]<id>` pattern as other commands.
+ * The first positional is the trace ID (optionally slash-prefixed with
+ * org/project), and the remaining positionals are span IDs.
+ *
+ * Formats:
+ * - `<trace-id> <span-id> [...]` — auto-detect org/project
+ * - `<org>/<project>/<trace-id> <span-id> [...]` — explicit target
+ * - `<project>/<trace-id> <span-id> [...]` — project search
  *
  * @param args - Positional arguments from CLI
- * @returns Parsed span IDs and optional target arg
- * @throws {ContextError} If no arguments provided
- * @throws {ValidationError} If any span ID has an invalid format
+ * @returns Parsed trace ID, span IDs, and optional target arg
+ * @throws {ContextError} If insufficient arguments
+ * @throws {ValidationError} If any ID has an invalid format
  */
 export function parsePositionalArgs(args: string[]): {
+  traceId: string;
   spanIds: string[];
   targetArg: string | undefined;
 } {
   if (args.length === 0) {
-    throw new ContextError("Span ID", USAGE_HINT);
+    throw new ContextError("Trace ID and span ID", USAGE_HINT);
   }
 
   const first = args[0];
   if (first === undefined) {
-    throw new ContextError("Span ID", USAGE_HINT);
+    throw new ContextError("Trace ID and span ID", USAGE_HINT);
   }
 
-  if (args.length === 1) {
-    // Single arg — could be slash-separated or a plain span ID
-    const { id, targetArg } = parseSlashSeparatedArg(
-      first,
-      "Span ID",
-      USAGE_HINT
-    );
-    const spanIds = [validateSpanId(id)];
-    return { spanIds, targetArg };
-  }
+  // First arg is trace ID (possibly with org/project prefix)
+  const { id, targetArg } = parseSlashSeparatedArg(
+    first,
+    "Trace ID",
+    USAGE_HINT
+  );
+  const traceId = validateTraceId(id);
 
-  // Multiple args — determine if first is a target or span ID
-  if (first.includes("/") || !looksLikeSpanId(first)) {
-    // First arg is a target
-    const rawIds = args.slice(1);
-    const spanIds = rawIds.map((v) => validateSpanId(v));
-    if (spanIds.length === 0) {
-      throw new ContextError("Span ID", USAGE_HINT);
-    }
-    return { spanIds, targetArg: first };
+  // Remaining args are span IDs
+  const rawSpanIds = args.slice(1);
+  if (rawSpanIds.length === 0) {
+    throw new ContextError("Span ID", USAGE_HINT, [
+      `Use 'sentry span list ${first}' to find span IDs within this trace`,
+    ]);
   }
+  const spanIds = rawSpanIds.map((v) => validateSpanId(v));
 
-  // All args are span IDs
-  const spanIds = args.map((v) => validateSpanId(v));
-  return { spanIds, targetArg: undefined };
+  return { traceId, spanIds, targetArg };
 }
 
 /**
@@ -159,7 +146,6 @@ type ResolvedSpanTarget = { org: string; project: string };
  */
 async function resolveTarget(
   parsed: ReturnType<typeof parseOrgProjectArg>,
-  spanIds: string[],
   traceId: string,
   cwd: string
 ): Promise<ResolvedSpanTarget | null> {
@@ -171,7 +157,7 @@ async function resolveTarget(
       return await resolveProjectBySlug(
         parsed.projectSlug,
         USAGE_HINT,
-        `sentry span view <org>/${parsed.projectSlug} ${spanIds[0]} --trace ${traceId}`
+        `sentry span view <org>/${parsed.projectSlug}/${traceId} <span-id>`
       );
 
     case "org-all":
@@ -287,14 +273,15 @@ export const viewCommand = buildCommand({
     fullDescription:
       "View detailed information about one or more spans within a trace.\n\n" +
       "Target specification:\n" +
-      "  sentry span view <span-id> --trace <trace-id>              # auto-detect\n" +
-      "  sentry span view <org>/<proj> <span-id> --trace <trace-id> # explicit\n" +
-      "  sentry span view <project> <span-id> --trace <trace-id>    # project search\n\n" +
-      "The --trace flag is required to identify which trace contains the span(s).\n" +
-      "Multiple span IDs can be passed as separate arguments.\n\n" +
+      "  sentry span view <trace-id> <span-id>                        # auto-detect\n" +
+      "  sentry span view <org>/<project>/<trace-id> <span-id>        # explicit\n" +
+      "  sentry span view <project>/<trace-id> <span-id>              # project search\n\n" +
+      "The first argument is the trace ID (optionally prefixed with org/project),\n" +
+      "followed by one or more span IDs.\n\n" +
       "Examples:\n" +
-      "  sentry span view a1b2c3d4e5f67890 --trace <trace-id>\n" +
-      "  sentry span view a1b2c3d4e5f67890 b2c3d4e5f6789012 --trace <trace-id>",
+      "  sentry span view <trace-id> a1b2c3d4e5f67890\n" +
+      "  sentry span view <trace-id> a1b2c3d4e5f67890 b2c3d4e5f6789012\n" +
+      "  sentry span view sentry/my-project/<trace-id> a1b2c3d4e5f67890",
   },
   output: {
     human: formatSpanViewHuman,
@@ -304,38 +291,31 @@ export const viewCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "trace-id/span-id",
         brief:
-          "[<org>/<project>] <span-id> [<span-id>...] - Target (optional) and one or more span IDs",
+          "[<org>/<project>/]<trace-id> <span-id> [<span-id>...] - Trace ID and one or more span IDs",
         parse: String,
       },
     },
     flags: {
-      trace: {
-        kind: "parsed",
-        parse: validateTraceId,
-        brief: "Trace ID containing the span(s) (required)",
-      },
       ...spansFlag,
       fresh: FRESH_FLAG,
     },
-    aliases: { ...FRESH_ALIASES, t: "trace" },
+    aliases: { ...FRESH_ALIASES },
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
     const cmdLog = logger.withTag("span.view");
 
-    const traceId = flags.trace;
-
-    // Parse positional args
-    const { spanIds, targetArg } = parsePositionalArgs(args);
+    // Parse positional args: first is trace ID (with optional target), rest are span IDs
+    const { traceId, spanIds, targetArg } = parsePositionalArgs(args);
     const parsed = parseOrgProjectArg(targetArg);
     if (parsed.type !== "auto-detect" && parsed.normalized) {
       cmdLog.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
     }
 
-    const target = await resolveTarget(parsed, spanIds, traceId, cwd);
+    const target = await resolveTarget(parsed, traceId, cwd);
 
     if (!target) {
       throw new ContextError("Organization and project", USAGE_HINT);

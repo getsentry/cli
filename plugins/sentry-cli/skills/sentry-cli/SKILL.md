@@ -639,7 +639,7 @@ sentry log list --json | jq '.[] | select(.level == "error")'
 
 View spans in distributed traces
 
-#### `sentry span list <args...>`
+#### `sentry span list <org/project/trace-id...>`
 
 List spans in a trace
 
@@ -651,12 +651,11 @@ List spans in a trace
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
-#### `sentry span view <args...>`
+#### `sentry span view <trace-id/span-id...>`
 
 View details of specific spans
 
 **Flags:**
-- `-t, --trace <value> - Trace ID containing the span(s) (required)`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
@@ -837,7 +836,7 @@ List logs from a project
 
 List spans in a trace
 
-#### `sentry spans <args...>`
+#### `sentry spans <org/project/trace-id...>`
 
 List spans in a trace
 

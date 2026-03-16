@@ -12,15 +12,19 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  computeSpanDurationMs,
   computeTraceSummary,
+  findSpanById,
   formatTraceDuration,
   formatTraceRow,
   formatTraceSummary,
   formatTracesHeader,
   formatTraceTable,
+  spanListItemToFlatSpan,
   translateSpanQuery,
 } from "../../../src/lib/formatters/trace.js";
 import type {
+  SpanListItem,
   TraceSpan,
   TransactionListItem,
 } from "../../../src/types/index.js";
@@ -479,5 +483,141 @@ describe("translateSpanQuery", () => {
     expect(translateSpanQuery('description:"GET /api"')).toBe(
       'description:"GET /api"'
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findSpanById
+// ---------------------------------------------------------------------------
+
+describe("findSpanById", () => {
+  test("finds root-level span", () => {
+    const spans = [makeSpan({ span_id: "a1b2c3d4e5f67890" })];
+    const result = findSpanById(spans, "a1b2c3d4e5f67890");
+    expect(result).not.toBeNull();
+    expect(result?.span.span_id).toBe("a1b2c3d4e5f67890");
+    expect(result?.depth).toBe(0);
+    expect(result?.ancestors).toEqual([]);
+  });
+
+  test("finds nested span with ancestor chain", () => {
+    const child = makeSpan({ span_id: "childid123456789" });
+    const root = makeSpan({
+      span_id: "rootid1234567890",
+      children: [child],
+    });
+    const result = findSpanById([root], "childid123456789");
+    expect(result).not.toBeNull();
+    expect(result?.span.span_id).toBe("childid123456789");
+    expect(result?.depth).toBe(1);
+    expect(result?.ancestors).toHaveLength(1);
+    expect(result?.ancestors[0]?.span_id).toBe("rootid1234567890");
+  });
+
+  test("case-insensitive matching (API returns uppercase)", () => {
+    const spans = [makeSpan({ span_id: "A1B2C3D4E5F67890" })];
+    const result = findSpanById(spans, "a1b2c3d4e5f67890");
+    expect(result).not.toBeNull();
+    expect(result?.span.span_id).toBe("A1B2C3D4E5F67890");
+  });
+
+  test("returns null for non-existent span ID", () => {
+    const spans = [makeSpan({ span_id: "a1b2c3d4e5f67890" })];
+    const result = findSpanById(spans, "0000000000000000");
+    expect(result).toBeNull();
+  });
+
+  test("handles span with undefined span_id gracefully", () => {
+    const spans = [
+      { start_timestamp: 1000, children: [] } as unknown as TraceSpan,
+    ];
+    const result = findSpanById(spans, "a1b2c3d4e5f67890");
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeSpanDurationMs
+// ---------------------------------------------------------------------------
+
+describe("computeSpanDurationMs", () => {
+  test("returns duration when present", () => {
+    const span = { duration: 123.45, start_timestamp: 1000 } as TraceSpan;
+    expect(computeSpanDurationMs(span)).toBe(123.45);
+  });
+
+  test("falls back to timestamp arithmetic", () => {
+    const span = {
+      start_timestamp: 1000,
+      timestamp: 1001.5,
+    } as TraceSpan;
+    expect(computeSpanDurationMs(span)).toBe(1500);
+  });
+
+  test("prefers end_timestamp over timestamp", () => {
+    const span = {
+      start_timestamp: 1000,
+      end_timestamp: 1002,
+      timestamp: 1001,
+    } as TraceSpan;
+    expect(computeSpanDurationMs(span)).toBe(2000);
+  });
+
+  test("returns undefined when no duration data", () => {
+    const span = { start_timestamp: 1000 } as TraceSpan;
+    expect(computeSpanDurationMs(span)).toBeUndefined();
+  });
+
+  test("returns undefined for negative duration", () => {
+    const span = {
+      start_timestamp: 1002,
+      timestamp: 1000,
+    } as TraceSpan;
+    expect(computeSpanDurationMs(span)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spanListItemToFlatSpan
+// ---------------------------------------------------------------------------
+
+describe("spanListItemToFlatSpan", () => {
+  test("maps all fields correctly", () => {
+    const item: SpanListItem = {
+      id: "a1b2c3d4e5f67890",
+      parent_span: "1234567890abcdef",
+      "span.op": "http.client",
+      description: "GET /api/users",
+      "span.duration": 245.5,
+      timestamp: "2024-01-15T10:30:00+00:00",
+      project: "backend",
+      transaction: "/api/users",
+      trace: "aaaa1111bbbb2222cccc3333dddd4444",
+    };
+
+    const flat = spanListItemToFlatSpan(item);
+    expect(flat.span_id).toBe("a1b2c3d4e5f67890");
+    expect(flat.parent_span_id).toBe("1234567890abcdef");
+    expect(flat.op).toBe("http.client");
+    expect(flat.description).toBe("GET /api/users");
+    expect(flat.duration_ms).toBe(245.5);
+    expect(flat.project_slug).toBe("backend");
+    expect(flat.transaction).toBe("/api/users");
+  });
+
+  test("handles missing optional fields", () => {
+    const item: SpanListItem = {
+      id: "a1b2c3d4e5f67890",
+      timestamp: "2024-01-15T10:30:00+00:00",
+      trace: "aaaa1111bbbb2222cccc3333dddd4444",
+      project: "backend",
+    };
+
+    const flat = spanListItemToFlatSpan(item);
+    expect(flat.span_id).toBe("a1b2c3d4e5f67890");
+    expect(flat.parent_span_id).toBeUndefined();
+    expect(flat.op).toBeUndefined();
+    expect(flat.description).toBeUndefined();
+    expect(flat.duration_ms).toBeUndefined();
   });
 });

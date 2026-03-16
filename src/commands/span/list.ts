@@ -190,9 +190,9 @@ export const listCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "args",
+        placeholder: "org/project/trace-id",
         brief:
-          "[<org>/<project>] <trace-id> - Target (optional) and trace ID (required)",
+          "[<org>/<project>/]<trace-id> - Target (optional) and trace ID (required)",
         parse: String,
       },
     },
