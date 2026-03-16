@@ -13,6 +13,18 @@
  */
 
 import { routes } from "../src/app.js";
+import type {
+  CommandInfo,
+  FlagInfo,
+  RouteInfo,
+  RouteMap,
+} from "../src/lib/introspect.js";
+import {
+  buildCommandInfo,
+  extractRouteGroupCommands,
+  isCommand,
+  isRouteMap,
+} from "../src/lib/introspect.js";
 
 const OUTPUT_PATH = "plugins/sentry-cli/skills/sentry-cli/SKILL.md";
 const DOCS_PATH = "docs/src/content/docs";
@@ -26,61 +38,9 @@ const CODE_BLOCK_REGEX = /```(\w*)\n([\s\S]*?)```/g;
 /** Regex to extract npm command from PackageManagerCode Astro component (handles multi-line) */
 const PACKAGE_MANAGER_REGEX = /<PackageManagerCode[\s\S]*?npm="([^"]+)"/;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types for Stricli Route Introspection
-//
-// Note: While @stricli/core exports RouteMap and Command types, they require
-// complex generic parameters (CommandContext) and don't export internal types
-// like RouteMapEntry or FlagParameter. These simplified types are purpose-built
-// for introspection and documentation generation.
-// ─────────────────────────────────────────────────────────────────────────────
-
-type RouteMapEntry = {
-  name: { original: string };
-  target: RouteTarget;
-  hidden: boolean;
-};
-
-type RouteTarget = RouteMap | Command;
-
-type RouteMap = {
-  brief: string;
-  fullDescription?: string;
-  getAllEntries: () => RouteMapEntry[];
-};
-
-type Command = {
-  brief: string;
-  fullDescription?: string;
-  parameters: {
-    positional?: PositionalParams;
-    flags?: Record<string, FlagDef>;
-    aliases?: Record<string, string>;
-  };
-};
-
-type PositionalParams =
-  | { kind: "tuple"; parameters: PositionalParam[] }
-  | { kind: "array"; parameter: PositionalParam };
-
-type PositionalParam = {
-  brief?: string;
-  placeholder?: string;
-};
-
-type FlagDef = {
-  kind: "boolean" | "parsed";
-  brief?: string;
-  default?: unknown;
-  optional?: boolean;
-  variadic?: boolean;
-  placeholder?: string;
-  hidden?: boolean;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Markdown Parsing Utilities
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 /**
  * Strip YAML frontmatter from markdown content
@@ -175,9 +135,9 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Documentation Loading
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 /**
  * Load and parse a documentation file
@@ -398,132 +358,13 @@ async function loadCommandsOverview(): Promise<{
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Route Introspection
-// ─────────────────────────────────────────────────────────────────────────────
-
-function isRouteMap(target: RouteTarget): target is RouteMap {
-  return "getAllEntries" in target;
-}
-
-function isCommand(target: RouteTarget): target is Command {
-  return "parameters" in target && !("getAllEntries" in target);
-}
-
-type CommandInfo = {
-  path: string;
-  brief: string;
-  fullDescription?: string;
-  flags: FlagInfo[];
-  positional: string;
-  aliases: Record<string, string>;
-  examples: string[];
-};
-
-type FlagInfo = {
-  name: string;
-  brief: string;
-  kind: "boolean" | "parsed";
-  default?: unknown;
-  optional: boolean;
-  variadic: boolean;
-  hidden: boolean;
-};
-
-type RouteInfo = {
-  name: string;
-  brief: string;
-  commands: CommandInfo[];
-};
+// ---------------------------------------------------------------------------
+// Route Introspection (with async doc loading)
+// ---------------------------------------------------------------------------
 
 /**
- * Extract positional parameter placeholder string
- */
-function getPositionalString(params?: PositionalParams): string {
-  if (!params) {
-    return "";
-  }
-
-  if (params.kind === "tuple") {
-    return params.parameters
-      .map((p, i) => `<${p.placeholder ?? `arg${i}`}>`)
-      .join(" ");
-  }
-
-  if (params.kind === "array") {
-    const placeholder = params.parameter.placeholder ?? "args";
-    return `<${placeholder}...>`;
-  }
-
-  return "";
-}
-
-/**
- * Extract flag information from a command
- */
-function extractFlags(flags: Record<string, FlagDef> | undefined): FlagInfo[] {
-  if (!flags) {
-    return [];
-  }
-
-  return Object.entries(flags).map(([name, def]) => ({
-    name,
-    brief: def.brief ?? "",
-    kind: def.kind,
-    default: def.default,
-    optional: def.optional ?? def.kind === "boolean",
-    variadic: def.variadic ?? false,
-    hidden: def.hidden ?? false,
-  }));
-}
-
-/**
- * Build a CommandInfo from a Command
- */
-function buildCommandInfo(
-  cmd: Command,
-  path: string,
-  examples: string[] = []
-): CommandInfo {
-  return {
-    path,
-    brief: cmd.brief,
-    fullDescription: cmd.fullDescription,
-    flags: extractFlags(cmd.parameters.flags),
-    positional: getPositionalString(cmd.parameters.positional),
-    aliases: cmd.parameters.aliases ?? {},
-    examples,
-  };
-}
-
-/**
- * Extract commands from a route group
- */
-function extractRouteGroupCommands(
-  routeMap: RouteMap,
-  routeName: string,
-  docExamples: Map<string, string[]>
-): CommandInfo[] {
-  const commands: CommandInfo[] = [];
-
-  for (const subEntry of routeMap.getAllEntries()) {
-    if (subEntry.hidden) {
-      continue;
-    }
-
-    const subTarget = subEntry.target;
-    if (isCommand(subTarget)) {
-      const path = `sentry ${routeName} ${subEntry.name.original}`;
-      const examples = docExamples.get(path) ?? [];
-      commands.push(buildCommandInfo(subTarget, path, examples));
-    }
-  }
-
-  return commands;
-}
-
-/**
- * Walk the route tree and extract command information
+ * Walk the route tree and extract command information with doc examples.
+ * This is the async version that loads documentation examples from disk.
  */
 async function extractRoutes(routeMap: RouteMap): Promise<RouteInfo[]> {
   const result: RouteInfo[] = [];
@@ -559,9 +400,9 @@ async function extractRoutes(routeMap: RouteMap): Promise<RouteInfo[]> {
   return result;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Markdown Generation
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 /**
  * Generate the front matter for the skill file
@@ -588,7 +429,7 @@ function formatFlag(flag: FlagInfo, aliases: Record<string, string>): string {
     syntax = `-${alias}, ${syntax}`;
   }
 
-  if (flag.kind === "parsed" && !flag.variadic) {
+  if ((flag.kind === "parsed" || flag.kind === "enum") && !flag.variadic) {
     syntax += " <value>";
   } else if (flag.variadic) {
     syntax += " <value>...";
@@ -782,9 +623,9 @@ async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
   return sections.join("\n");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Main
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 const content = await generateSkillMarkdown(routes as unknown as RouteMap);
 await Bun.write(OUTPUT_PATH, content);
