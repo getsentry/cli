@@ -21,6 +21,7 @@ import {
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { renderMarkdown } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -182,7 +183,6 @@ export const listCommand = buildCommand({
       '  sentry span list <trace-id> -q "duration:>100ms" # Spans slower than 100ms',
   },
   output: {
-    json: true,
     human: formatSpanListHuman,
     jsonTransform: jsonTransformSpanList,
   },
@@ -225,7 +225,7 @@ export const listCommand = buildCommand({
       s: "sort",
     },
   },
-  async func(this: SentryContext, flags: ListFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
     const log = logger.withTag("span.list");
@@ -304,6 +304,7 @@ export const listCommand = buildCommand({
         : `${countText} Use 'sentry span view <span-id> --trace ${traceId}' to view span details.`;
     }
 
-    return { data: { flatSpans, hasMore, traceId }, hint };
+    yield new CommandOutput({ flatSpans, hasMore, traceId });
+    return { hint };
   },
 });

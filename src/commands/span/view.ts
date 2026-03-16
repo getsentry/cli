@@ -20,6 +20,7 @@ import {
   formatSpanDetails,
 } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -295,7 +296,6 @@ export const viewCommand = buildCommand({
       "  sentry span view a1b2c3d4e5f67890 b2c3d4e5f6789012 --trace <trace-id>",
   },
   output: {
-    json: true,
     human: formatSpanViewHuman,
     jsonTransform: jsonTransformSpanView,
   },
@@ -320,7 +320,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, t: "trace" },
   },
-  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
     const cmdLog = logger.withTag("span.view");
@@ -381,8 +381,6 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(spanIds, foundIds);
 
-    return {
-      data: { results, traceId, spansDepth: flags.spans },
-    };
+    yield new CommandOutput({ results, traceId, spansDepth: flags.spans });
   },
 });
