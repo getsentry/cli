@@ -827,6 +827,52 @@ describe("findProjectsBySlug", () => {
     const { projects } = await findProjectsBySlug("wrong-slug");
     expect(projects).toHaveLength(0);
   });
+
+  test("uses cached org regions to skip listOrganizations", async () => {
+    const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
+
+    // Seed org_regions cache — this is the optimization under test
+    await setOrgRegion("acme", DEFAULT_SENTRY_URL);
+
+    const requests: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      requests.push(url);
+
+      // getProject for acme/frontend — success
+      if (url.includes("/projects/acme/frontend/")) {
+        return new Response(
+          JSON.stringify({ id: "101", slug: "frontend", name: "Frontend" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const { projects, orgs } = await findProjectsBySlug("frontend");
+
+    // Found via cached orgs
+    expect(projects).toHaveLength(1);
+    expect(projects[0].slug).toBe("frontend");
+    expect(projects[0].orgSlug).toBe("acme");
+
+    // orgs is empty because we used cached path (no full listing)
+    expect(orgs).toHaveLength(0);
+
+    // The expensive listOrganizations calls were skipped
+    expect(requests.some((r) => r.includes("/users/me/regions/"))).toBe(false);
+    expect(
+      requests.some(
+        (r) => r.includes("/organizations/") && !r.includes("/projects/")
+      )
+    ).toBe(false);
+  });
 });
 
 describe("resolveEventInOrg", () => {
