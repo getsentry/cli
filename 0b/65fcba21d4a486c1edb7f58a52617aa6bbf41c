@@ -1,0 +1,104 @@
+# Fix: DSN Discovery Hang During `sentry issues`
+
+## Problem
+
+Running `sentry issues` in the CLI's own repo hangs because:
+
+1. **PR #420** bumped `MAX_SCAN_DEPTH` from 2→3, causing `test/` dirs to be scanned (7× more files)
+2. Test fixtures contain **~86 DSN strings** (fake DSNs like `https://abc123@o123.ingest.sentry.io/456`)
+3. All DSNs resolved via **unbounded `Promise.all`** at `resolve-target.ts:666` — zero concurrency limit
+4. Each DSN triggers 2 API calls (`resolveOrgRegion` + `getProject`), totaling ~190+ concurrent HTTP requests
+5. No deduplication — same orgId region is fetched N× in parallel on cold cache
+6. Sentry API rate-limits (429) → retry storms → effective hang
+
+## Fix Plan (6 changes, ordered for implementation)
+
+### Change 1: Fix `getDirMtime` dynamic import (trivial)
+**File**: `src/lib/dsn/code-scanner.ts` (lines 16, 433-441)
+
+Add `stat` to the existing `import { readdir } from "node:fs/promises"` and remove the dynamic import inside `getDirMtime`. Called once per scanned directory (~75+ times).
+
+### Change 2: Add test dirs to `ALWAYS_SKIP_DIRS` (highest impact, standalone)
+**File**: `src/lib/dsn/code-scanner.ts` (line 77)
+
+Add `"test"`, `"tests"`, `"__mocks__"`, `"fixtures"`, `"__fixtures__"` to `ALWAYS_SKIP_DIRS`. Test directories contain fixture DSNs, not real configuration. Real Sentry DSNs live in `src/`, `.env`, or config files — never in `test/`.
+
+### Change 3: In-flight dedup for `resolveOrgRegion` (standalone)
+**File**: `src/lib/region.ts` (lines 29-63)
+
+Use a module-level `Map<string, Promise<string>>` keyed by orgSlug. `resolveOrgRegion` becomes a synchronous function returning a Promise — either the cached in-flight promise or a newly created one. The inner `resolveOrgRegionUncached` checks SQLite then fetches from API.
+
+```typescript
+const regionPromises = new Map<string, Promise<string>>();
+
+export function resolveOrgRegion(orgSlug: string): Promise<string> {
+  const existing = regionPromises.get(orgSlug);
+  if (existing) return existing;
+  const promise = resolveOrgRegionUncached(orgSlug);
+  regionPromises.set(orgSlug, promise);
+  return promise;
+}
+```
+
+### Change 4: Deduplicate DSNs before resolution
+**File**: `src/lib/resolve-target.ts` (lines 665-668)
+
+Group DSNs by `(orgId, projectId)` or `publicKey` (for DSNs without orgId). Only resolve one representative DSN per unique key. Reduces ~86 DSNs to ~10-20 unique pairs.
+
+### Change 5: Add concurrency limit to DSN resolution
+**File**: `src/lib/resolve-target.ts`
+
+Add `p-limit(5)` around the deduped resolution. Combined with Change 4:
+
+```typescript
+import pLimit from "p-limit";
+
+const uniqueDsnMap = new Map<string, DetectedDsn>();
+for (const dsn of detection.all) {
+  const key = dsn.orgId ? `${dsn.orgId}:${dsn.projectId}` : `key:${dsn.publicKey}`;
+  if (!uniqueDsnMap.has(key)) uniqueDsnMap.set(key, dsn);
+}
+
+const limit = pLimit(5);
+const resolvedTargets = await Promise.all(
+  [...uniqueDsnMap.values()].map((dsn) => limit(() => resolveDsnToTarget(dsn)))
+);
+```
+
+### Change 6: Add overall 15s timeout with partial results
+**File**: `src/lib/resolve-target.ts`
+
+Race `Promise.all` against a 15s timeout. On timeout, use whichever results completed. Log a warning via consola.
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `src/lib/dsn/code-scanner.ts` | Static import `stat`, add test dirs to `ALWAYS_SKIP_DIRS` |
+| `src/lib/region.ts` | Promise-cached `resolveOrgRegion` with in-flight dedup |
+| `src/lib/resolve-target.ts` | DSN dedup by (orgId,projectId), p-limit(5), 15s timeout |
+
+## Expected Impact
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| CLI repo, cold cache | ~86 DSNs → ~190 HTTP requests, hangs | 0 DSNs from test/ (Change 2) |
+| Monorepo, cold cache | N DSNs → 2N concurrent requests | Deduped + max 5 concurrent |
+| API down | Hangs indefinitely | 15s timeout, partial results |
+
+## Verification
+
+1. `bun run typecheck && bun run lint:fix && bun test`
+2. Add unit test: `test/` dirs skipped in `ALWAYS_SKIP_DIRS`
+3. Add unit test: in-flight dedup for `resolveOrgRegion` — 5 concurrent calls = 1 HTTP request
+4. Add unit test: DSN dedup — 10 DSNs with 3 unique pairs = 3 resolutions
+5. Manual: `cd /path/to/cli && time bun run dev -- issues` — should complete in <5s
+
+## Implementation Order
+
+1. Change 1 (getDirMtime) — trivial standalone fix
+2. Changes 2 (ALWAYS_SKIP_DIRS) — biggest impact
+3. Change 3 (resolveOrgRegion dedup) — standalone
+4. Changes 4+5+6 (DSN dedup + concurrency + timeout) — combined in resolve-target.ts
+5. Write tests
+6. `bun run lint:fix` before committing
