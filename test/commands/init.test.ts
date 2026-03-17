@@ -9,9 +9,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { initCommand } from "../../src/commands/init.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as apiClient from "../../src/lib/api-client.js";
 import { ContextError } from "../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as prefetchNs from "../../src/lib/init/prefetch.js";
+import { resetPrefetch } from "../../src/lib/init/prefetch.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -21,8 +22,7 @@ import * as resolveTarget from "../../src/lib/resolve-target.js";
 let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 let resolveProjectSpy: ReturnType<typeof spyOn>;
-let resolveOrgSpy: ReturnType<typeof spyOn>;
-let listOrgsSpy: ReturnType<typeof spyOn>;
+let warmSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -49,6 +49,7 @@ const DEFAULT_FLAGS = { yes: true, "dry-run": false } as const;
 
 beforeEach(() => {
   capturedArgs = undefined;
+  resetPrefetch();
   runWizardSpy = spyOn(wizardRunner, "runWizard").mockImplementation(
     (args: Record<string, unknown>) => {
       capturedArgs = args;
@@ -63,21 +64,19 @@ beforeEach(() => {
     org: "resolved-org",
     project: slug,
   }));
-  // Mock resolveOrg and listOrganizations to prevent real DSN scans / API calls
-  // from the background detection promises fired in init's func()
-  resolveOrgSpy = spyOn(resolveTarget, "resolveOrg").mockImplementation(
-    async () => null
-  );
-  listOrgsSpy = spyOn(apiClient, "listOrganizations").mockImplementation(
-    async () => []
+  // Spy on warmOrgDetection to verify it's called/skipped appropriately.
+  // The mock prevents real DSN scans and API calls from the background.
+  warmSpy = spyOn(prefetchNs, "warmOrgDetection").mockImplementation(
+    // biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op mock
+    () => {}
   );
 });
 
 afterEach(() => {
   runWizardSpy.mockRestore();
   resolveProjectSpy.mockRestore();
-  resolveOrgSpy.mockRestore();
-  listOrgsSpy.mockRestore();
+  warmSpy.mockRestore();
+  resetPrefetch();
 });
 
 describe("init command func", () => {
@@ -342,55 +341,44 @@ describe("init command func", () => {
   // ── Background org detection ──────────────────────────────────────────
 
   describe("background org detection", () => {
-    test("passes bgOrgDetection when org is not explicit", async () => {
+    test("warms prefetch when org is not explicit", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS);
-      const bg = capturedArgs?.bgOrgDetection as
-        | { orgPromise: Promise<unknown>; orgListPromise: Promise<unknown> }
-        | undefined;
-      expect(bg).toBeDefined();
-      expect(bg?.orgPromise).toBeInstanceOf(Promise);
-      expect(bg?.orgListPromise).toBeInstanceOf(Promise);
+      expect(warmSpy).toHaveBeenCalledTimes(1);
+      expect(warmSpy).toHaveBeenCalledWith("/projects/app");
     });
 
-    test("fires resolveOrg for background detection", async () => {
-      const ctx = makeContext();
-      await func.call(ctx, DEFAULT_FLAGS);
-      expect(resolveOrgSpy).toHaveBeenCalled();
-    });
-
-    test("fires listOrganizations for background detection", async () => {
-      const ctx = makeContext();
-      await func.call(ctx, DEFAULT_FLAGS);
-      expect(listOrgsSpy).toHaveBeenCalled();
-    });
-
-    test("omits bgOrgDetection when org is explicit", async () => {
+    test("skips prefetch when org is explicit", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "acme/my-app");
-      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+      expect(warmSpy).not.toHaveBeenCalled();
     });
 
-    test("omits bgOrgDetection when org-only is explicit", async () => {
+    test("skips prefetch when org-only is explicit", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "acme/");
-      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+      expect(warmSpy).not.toHaveBeenCalled();
     });
 
-    test("passes bgOrgDetection for bare slug (project-search resolves org)", async () => {
-      // Even though resolveProjectBySlug finds an org, the bgDetection
-      // is skipped because explicitOrg is set from the resolved result
+    test("skips prefetch for bare slug (project-search resolves org)", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "my-app");
-      // resolveProjectBySlug returns { org: "resolved-org", project: "my-app" }
-      // so explicitOrg is set → bgOrgDetection should be undefined
-      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+      // resolveProjectBySlug returns { org: "resolved-org" } → org is known
+      expect(warmSpy).not.toHaveBeenCalled();
     });
 
-    test("passes bgOrgDetection for path-only arg", async () => {
+    test("warms prefetch for path-only arg", async () => {
       const ctx = makeContext();
       await func.call(ctx, DEFAULT_FLAGS, "./subdir");
-      expect(capturedArgs?.bgOrgDetection).toBeDefined();
+      expect(warmSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("warms prefetch with resolved directory path", async () => {
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, DEFAULT_FLAGS, "./subdir");
+      expect(warmSpy).toHaveBeenCalledWith(
+        path.resolve("/projects/app", "./subdir")
+      );
     });
   });
 });

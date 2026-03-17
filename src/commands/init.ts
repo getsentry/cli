@@ -19,15 +19,14 @@
 
 import path from "node:path";
 import type { SentryContext } from "../context.js";
-import { listOrganizations } from "../lib/api-client.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { ContextError } from "../lib/errors.js";
-import type { BgOrgDetection } from "../lib/init/types.js";
+import { warmOrgDetection } from "../lib/init/prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
-import { resolveOrg, resolveProjectBySlug } from "../lib/resolve-target.js";
+import { resolveProjectBySlug } from "../lib/resolve-target.js";
 
 const log = logger.withTag("init");
 
@@ -232,15 +231,11 @@ export const initCommand = buildCommand<
       await resolveTarget(targetArg);
 
     // 5. Start background org detection when org is not yet known.
-    //    These promises run concurrently with the preamble user-interaction
-    //    (experimental confirm, git status check) so the results are ready
-    //    by the time the wizard needs to create a Sentry project.
-    let bgOrgDetection: BgOrgDetection | undefined;
+    //    The prefetch runs concurrently with the preamble, the wizard startup,
+    //    and all early suspend/resume rounds — by the time the wizard needs the
+    //    org (inside createSentryProject), the result is already cached.
     if (!explicitOrg) {
-      bgOrgDetection = {
-        orgPromise: resolveOrg({ cwd: targetDir }).catch(() => null),
-        orgListPromise: listOrganizations().catch(() => []),
-      };
+      warmOrgDetection(targetDir);
     }
 
     // 6. Run the wizard
@@ -252,7 +247,6 @@ export const initCommand = buildCommand<
       team: flags.team,
       org: explicitOrg,
       project: explicitProject,
-      bgOrgDetection,
     });
   },
 });

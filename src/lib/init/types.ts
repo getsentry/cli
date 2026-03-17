@@ -4,22 +4,6 @@ export type DirEntry = {
   type: "file" | "directory";
 };
 
-/**
- * Pre-started background promises for org detection.
- *
- * Fired early in the `sentry init` flow (before the preamble user-interaction
- * phase) so that DSN scanning and org-list fetching overlap with the user
- * confirming the experimental warning and git status checks.  When the wizard
- * later needs the org (inside `createSentryProject`), the results are already
- * available — eliminating 2-5 s of cold-start latency.
- */
-export type BgOrgDetection = {
-  /** Resolves to the auto-detected org (from DSN/env/config), or `null` if none found. */
-  orgPromise: Promise<{ org: string; detectedFrom?: string } | null>;
-  /** Resolves to the user's accessible organizations, or `[]` on failure. */
-  orgListPromise: Promise<Array<{ id: string; slug: string; name: string }>>;
-};
-
 export type WizardOptions = {
   directory: string;
   yes: boolean;
@@ -31,8 +15,6 @@ export type WizardOptions = {
   org?: string;
   /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
   project?: string;
-  /** Pre-started org detection promises. Skipped when org is already explicit. */
-  bgOrgDetection?: BgOrgDetection;
 };
 
 // Local-op suspend payloads
