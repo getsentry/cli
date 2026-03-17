@@ -45,10 +45,18 @@ import { withTracing, withTracingSpan } from "./telemetry.js";
 const log = logger.withTag("delta-upgrade");
 
 /**
- * Maximum number of patches to chain before falling back to full download.
- * Prevents runaway chains from consuming excessive time or bandwidth.
+ * Maximum number of stable patches to chain before falling back to full download.
+ * Also controls the GitHub Releases `per_page` in {@link fetchRecentReleases}.
  */
-const MAX_CHAIN_DEPTH = 10;
+const MAX_STABLE_CHAIN_DEPTH = 10;
+
+/**
+ * Maximum number of nightly patches to chain before falling back to full download.
+ * Matches the GHCR cleanup `KEEP_COUNT` (30 retained nightly tags) so every
+ * retained patch tag is usable. Acts as a safety net against unbounded manifest
+ * fan-out — the size budget ({@link SIZE_THRESHOLD_RATIO}) is the primary guard.
+ */
+const MAX_NIGHTLY_CHAIN_DEPTH = 30;
 
 /**
  * Maximum ratio of total patch chain size to full download size.
@@ -151,7 +159,7 @@ export type GitHubRelease = {
 export async function fetchRecentReleases(
   signal?: AbortSignal
 ): Promise<GitHubRelease[]> {
-  const perPage = MAX_CHAIN_DEPTH + 2;
+  const perPage = MAX_STABLE_CHAIN_DEPTH + 2;
   let response: Response;
   try {
     response = await fetch(`${GITHUB_RELEASES_URL}?per_page=${perPage}`, {
@@ -274,7 +282,10 @@ export function extractStableChain(
 
   // Chain: [target, ..., current+1] (newest first, excludes current)
   const chainReleases = releases.slice(targetIdx, currentIdx);
-  if (chainReleases.length > MAX_CHAIN_DEPTH) {
+  if (chainReleases.length > MAX_STABLE_CHAIN_DEPTH) {
+    log.debug(
+      `Stable chain depth ${chainReleases.length} exceeds limit ${MAX_STABLE_CHAIN_DEPTH}`
+    );
     return null;
   }
 
@@ -299,6 +310,9 @@ export function extractStableChain(
     patchUrls.push(patchAsset.browser_download_url);
     totalSize += patchAsset.size;
     if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
+      log.debug(
+        `Stable chain size ${totalSize} exceeds ${Math.round(SIZE_THRESHOLD_RATIO * 100)}% of full download ${fullGzSize}`
+      );
       return null;
     }
   }
@@ -543,6 +557,9 @@ function validateNightlyChain(
       sizeLimit: remainingBudget,
     });
     if (!step) {
+      log.debug(
+        `Nightly chain step ${i + 1} failed validation (from=${prevVersion}, budget=${remainingBudget})`
+      );
       return null;
     }
 
@@ -666,7 +683,12 @@ export async function resolveNightlyChain(opts: {
     currentVersion,
     targetVersion
   );
-  if (chainTags.length === 0 || chainTags.length > MAX_CHAIN_DEPTH) {
+  if (chainTags.length === 0 || chainTags.length > MAX_NIGHTLY_CHAIN_DEPTH) {
+    log.debug(
+      chainTags.length === 0
+        ? "No patch tags found in version range"
+        : `Nightly chain depth ${chainTags.length} exceeds limit ${MAX_NIGHTLY_CHAIN_DEPTH}`
+    );
     return null;
   }
 
