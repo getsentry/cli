@@ -14,13 +14,16 @@ import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
- * In-flight promise cache for org region resolution, keyed by orgSlug.
+ * Promise cache for org region resolution, keyed by orgSlug.
  *
  * When multiple DSNs share an orgId, concurrent calls to resolveOrgRegion
  * deduplicate into a single HTTP request. A resolved promise returns
  * instantly on `await`, so this also serves as a warm in-memory cache.
+ *
+ * Rejected promises (e.g., AuthError) are automatically evicted so that
+ * retries after re-authentication can succeed without restarting the CLI.
  */
-const regionPromises = new Map<string, Promise<string>>();
+const regionCache = new Map<string, Promise<string>>();
 
 /**
  * Resolve the region URL for an organization.
@@ -41,13 +44,17 @@ const regionPromises = new Map<string, Promise<string>>();
  * @returns The region URL for the organization
  */
 export function resolveOrgRegion(orgSlug: string): Promise<string> {
-  const existing = regionPromises.get(orgSlug);
+  const existing = regionCache.get(orgSlug);
   if (existing) {
     return existing;
   }
 
   const promise = resolveOrgRegionUncached(orgSlug);
-  regionPromises.set(orgSlug, promise);
+  regionCache.set(orgSlug, promise);
+  // Evict on rejection (AuthError) so retries after re-login work.
+  // Non-auth errors already resolve to baseUrl fallback, so only
+  // AuthError re-throws can leave a rejected promise in the cache.
+  promise.catch(() => regionCache.delete(orgSlug));
   return promise;
 }
 

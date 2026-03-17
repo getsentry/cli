@@ -595,9 +595,15 @@ const DSN_RESOLVE_TIMEOUT_MS = 15_000;
 /**
  * Resolve DSNs with a concurrency limit and overall timeout.
  *
- * Uses p-limit to cap concurrent API calls (preventing rate-limit storms)
- * and races against a timeout so the CLI never hangs indefinitely.
- * On timeout, returns whichever results completed before the deadline.
+ * Uses p-limit's `map` helper for concurrency control and
+ * `AbortSignal.timeout` for a self-cleaning deadline. Queued tasks
+ * check the abort signal before doing work (same pattern as
+ * code-scanner's earlyExit flag from PR #414).
+ *
+ * Note: Cannot use `limit.clearQueue()` — as documented in
+ * code-scanner.ts, it causes cleared promises to never settle,
+ * hanging the map forever. Instead, queued tasks return null when
+ * the signal is aborted.
  *
  * @param dsns - Deduplicated DSNs to resolve
  * @returns Array of resolved targets (null for failures/timeouts)
@@ -606,22 +612,16 @@ async function resolveDsnsWithTimeout(
   dsns: DetectedDsn[]
 ): Promise<(ResolvedTarget | null)[]> {
   const limit = pLimit(DSN_RESOLVE_CONCURRENCY);
-  const results: (ResolvedTarget | null)[] = new Array(dsns.length).fill(null);
+  const signal = AbortSignal.timeout(DSN_RESOLVE_TIMEOUT_MS);
 
-  const resolvePromises = dsns.map((dsn, i) =>
-    limit(async () => {
-      results[i] = await resolveDsnToTarget(dsn);
-    })
-  );
+  const results = await limit.map(dsns, (dsn) => {
+    if (signal.aborted) {
+      return Promise.resolve(null);
+    }
+    return resolveDsnToTarget(dsn);
+  });
 
-  const allDone = Promise.all(resolvePromises).then(() => "done" as const);
-  const timeout = new Promise<"timeout">((resolve) =>
-    setTimeout(() => resolve("timeout"), DSN_RESOLVE_TIMEOUT_MS)
-  );
-
-  const raceResult = await Promise.race([allDone, timeout]);
-
-  if (raceResult === "timeout") {
+  if (signal.aborted) {
     log.warn(
       `DSN resolution timed out after ${DSN_RESOLVE_TIMEOUT_MS / 1000}s, returning partial results`
     );
