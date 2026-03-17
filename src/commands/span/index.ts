@@ -19,6 +19,7 @@ export const spanRoute = buildRouteMap({
       "View and explore individual spans within distributed traces.\n\n" +
       "Commands:\n" +
       "  list     List spans in a trace\n" +
-      "  view     View details of specific spans",
+      "  view     View details of specific spans\n\n" +
+      "Alias: `sentry spans` → `sentry span list`",
   },
 });

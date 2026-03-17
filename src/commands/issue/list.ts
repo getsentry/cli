@@ -1265,7 +1265,8 @@ export const listCommand = buildListCommand("issue", {
       "Projects with fewer issues than their share give their surplus to others. " +
       "Use --cursor / -c last to paginate through larger result sets.\n\n" +
       "By default, only issues with activity in the last 90 days are shown. " +
-      "Use --period to adjust (e.g. --period 24h, --period 14d).",
+      "Use --period to adjust (e.g. --period 24h, --period 14d).\n\n" +
+      "Alias: `sentry issues` → `sentry issue list`",
   },
   output: issueListOutput,
   parameters: {

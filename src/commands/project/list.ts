@@ -561,7 +561,8 @@ export const listCommand = buildListCommand("project", {
       "Filtering and output:\n" +
       "  sentry project list --platform javascript  # filter by platform\n" +
       "  sentry project list --limit 50              # show more results\n" +
-      "  sentry project list --json                  # output as JSON",
+      "  sentry project list --json                  # output as JSON\n\n" +
+      "Alias: `sentry projects` → `sentry project list`",
   },
   output: {
     human: (result: ListResult<ProjectWithOrg>) => {

@@ -9,7 +9,9 @@ export const trialRoute = buildRouteMap({
   },
   docs: {
     brief: "Manage product trials",
-    fullDescription: "List and start product trials for your organization.",
+    fullDescription:
+      "List and start product trials for your organization.\n\n" +
+      "Alias: `sentry trials` → `sentry trial list`",
     hideRoute: {},
   },
 });

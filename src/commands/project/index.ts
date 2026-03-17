@@ -11,7 +11,9 @@ export const projectRoute = buildRouteMap({
   },
   docs: {
     brief: "Work with Sentry projects",
-    fullDescription: "List and manage Sentry projects in your organizations.",
+    fullDescription:
+      "List and manage Sentry projects in your organizations.\n\n" +
+      "Alias: `sentry projects` → `sentry project list`",
     hideRoute: {},
   },
 });

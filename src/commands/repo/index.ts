@@ -8,7 +8,8 @@ export const repoRoute = buildRouteMap({
   docs: {
     brief: "Work with Sentry repositories",
     fullDescription:
-      "List and manage repositories connected to your Sentry organizations.",
+      "List and manage repositories connected to your Sentry organizations.\n\n" +
+      "Alias: `sentry repos` → `sentry repo list`",
     hideRoute: {},
   },
 });

@@ -115,7 +115,8 @@ export const listCommand = buildCommand({
       "Examples:\n" +
       "  sentry org list\n" +
       "  sentry org list --limit 10\n" +
-      "  sentry org list --json",
+      "  sentry org list --json\n\n" +
+      "Alias: `sentry orgs` → `sentry org list`",
   },
   output: { human: formatOrgListHuman },
   parameters: {

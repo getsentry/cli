@@ -553,7 +553,8 @@ export const listCommand = buildListCommand("log", {
       "  sentry log list -f 5               # Stream logs (5s poll interval)\n" +
       "  sentry log list --limit 50         # Show last 50 logs\n" +
       "  sentry log list -q 'level:error'   # Filter to errors only\n" +
-      "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace",
+      "  sentry log list --trace abc123def456abc123def456abc123de  # Filter by trace\n\n" +
+      "Alias: `sentry logs` → `sentry log list`",
   },
   output: {
     human: createLogRenderer,

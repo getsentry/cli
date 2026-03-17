@@ -182,7 +182,8 @@ export const listCommand = buildCommand({
       "  sentry span list <trace-id> --limit 50            # Show more spans\n" +
       '  sentry span list <trace-id> -q "op:db"            # Filter by operation\n' +
       "  sentry span list <trace-id> --sort duration       # Sort by slowest first\n" +
-      '  sentry span list <trace-id> -q "duration:>100ms"  # Spans slower than 100ms',
+      '  sentry span list <trace-id> -q "duration:>100ms"  # Spans slower than 100ms\n\n' +
+      "Alias: `sentry spans` → `sentry span list`",
   },
   output: {
     human: formatSpanListHuman,

@@ -200,7 +200,8 @@ export const listCommand = buildCommand({
       "Examples:\n" +
       "  sentry trial list\n" +
       "  sentry trial list my-org\n" +
-      "  sentry trial list --json",
+      "  sentry trial list --json\n\n" +
+      "Alias: `sentry trials` → `sentry trial list`",
   },
   output: {
     human: formatTrialListHuman,

@@ -22,7 +22,8 @@ export const traceRoute = buildRouteMap({
       "Commands:\n" +
       "  list     List recent traces in a project\n" +
       "  view     View details of a specific trace\n" +
-      "  logs     View logs associated with a trace",
+      "  logs     View logs associated with a trace\n\n" +
+      "Alias: `sentry traces` → `sentry trace list`",
     hideRoute: {},
   },
 });

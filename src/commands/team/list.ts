@@ -70,7 +70,8 @@ const docs: OrgListCommandDocs = {
     "  sentry team list              # auto-detect or list all\n" +
     "  sentry team list my-org/      # list teams in my-org (paginated)\n" +
     "  sentry team list --limit 10\n" +
-    "  sentry team list --json",
+    "  sentry team list --json\n\n" +
+    "Alias: `sentry teams` → `sentry team list`",
 };
 
 export const listCommand = buildOrgListCommand(teamListConfig, docs, "team");
