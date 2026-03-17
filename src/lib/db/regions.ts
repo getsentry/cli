@@ -32,6 +32,7 @@ type OrgRegionRow = {
   org_slug: string;
   org_id: string | null;
   org_name: string | null;
+  org_role: string | null;
   region_url: string;
   updated_at: number;
 };
@@ -42,6 +43,8 @@ export type OrgRegionEntry = {
   regionUrl: string;
   orgId?: string;
   orgName?: string;
+  /** The authenticated user's role in this organization (e.g., "member", "admin", "owner"). */
+  orgRole?: string;
 };
 
 /**
@@ -137,6 +140,9 @@ export async function setOrgRegions(entries: OrgRegionEntry[]): Promise<void> {
       if (entry.orgName) {
         row.org_name = entry.orgName;
       }
+      if (entry.orgRole) {
+        row.org_role = entry.orgRole;
+      }
       runUpsert(db, TABLE, row, ["org_slug"]);
     }
   })();
@@ -171,6 +177,8 @@ export type CachedOrg = {
   slug: string;
   id: string;
   name: string;
+  /** The authenticated user's role in this organization, if available. */
+  orgRole?: string;
 };
 
 /**
@@ -203,14 +211,41 @@ export async function getCachedOrganizations(): Promise<CachedOrg[]> {
   const cutoff = Date.now() - ORG_CACHE_TTL_MS;
   const rows = db
     .query(
-      `SELECT org_slug, org_id, org_name FROM ${TABLE} WHERE org_id IS NOT NULL AND org_name IS NOT NULL AND updated_at > ?`
+      `SELECT org_slug, org_id, org_name, org_role FROM ${TABLE} WHERE org_id IS NOT NULL AND org_name IS NOT NULL AND updated_at > ?`
     )
-    .all(cutoff) as Pick<OrgRegionRow, "org_slug" | "org_id" | "org_name">[];
+    .all(cutoff) as Pick<
+    OrgRegionRow,
+    "org_slug" | "org_id" | "org_name" | "org_role"
+  >[];
 
   return rows.map((row) => ({
     slug: row.org_slug,
     // org_id and org_name are guaranteed non-null by the WHERE clause
     id: row.org_id as string,
     name: row.org_name as string,
+    ...(row.org_role ? { orgRole: row.org_role } : {}),
   }));
+}
+
+/**
+ * Get the cached org role for a single organization.
+ *
+ * Returns the user's role from the org cache without an API call.
+ * The role is populated when `listOrganizations()` fetches from the API.
+ *
+ * @param orgSlug - The organization slug
+ * @returns The user's role (e.g., "member", "admin", "owner"), or undefined if not cached
+ */
+export async function getCachedOrgRole(
+  orgSlug: string
+): Promise<string | undefined> {
+  const db = getDatabase();
+  const cutoff = Date.now() - ORG_CACHE_TTL_MS;
+  const row = db
+    .query(
+      `SELECT org_role FROM ${TABLE} WHERE org_slug = ? AND org_role IS NOT NULL AND updated_at > ?`
+    )
+    .get(orgSlug, cutoff) as Pick<OrgRegionRow, "org_role"> | undefined;
+
+  return row?.org_role ?? undefined;
 }

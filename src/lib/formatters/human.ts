@@ -1447,6 +1447,13 @@ export function formatOrgDetails(org: SentryOrganization): string {
   }
   kvRows.push(["2FA", org.require2FA ? "Required" : "Not required"]);
   kvRows.push(["Early Adopter", org.isEarlyAdopter ? "Yes" : "No"]);
+  // orgRole is returned by the detail API but not yet typed in the SDK
+  const orgRole = (org as Record<string, unknown>).orgRole as
+    | string
+    | undefined;
+  if (orgRole) {
+    kvRows.push(["Your Role", orgRole]);
+  }
 
   lines.push(mdKvTable(kvRows));
 
@@ -1886,6 +1893,49 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
   }
 
   return renderMarkdown(lines.join("\n"));
+}
+
+// Project Deletion Formatting
+
+/**
+ * Result of a project deletion (or dry-run).
+ *
+ * Contains the minimum context needed for both human and JSON output.
+ * When `dryRun` is true, no deletion occurred — output uses tentative wording.
+ */
+export type ProjectDeleteResult = {
+  /** Organization slug */
+  orgSlug: string;
+  /** Project slug */
+  projectSlug: string;
+  /** Human-readable project name */
+  projectName: string;
+  /** Sentry web URL for the project */
+  url: string;
+  /** When true, nothing was actually deleted — output uses tentative wording */
+  dryRun?: boolean;
+};
+
+/**
+ * Format a project deletion result as rendered markdown.
+ *
+ * @param result - Deletion context
+ * @returns Rendered terminal string
+ */
+export function formatProjectDeleted(result: ProjectDeleteResult): string {
+  const nameEsc = escapeMarkdownInline(result.projectName);
+  const qualifiedSlug = `${result.orgSlug}/${result.projectSlug}`;
+
+  if (result.dryRun) {
+    return renderMarkdown(
+      `Would delete project '${nameEsc}' (${safeCodeSpan(qualifiedSlug)}).\n\n` +
+        `URL: ${result.url}`
+    );
+  }
+
+  return renderMarkdown(
+    `Deleted project '${nameEsc}' (${safeCodeSpan(qualifiedSlug)}).`
+  );
 }
 
 // CLI Fix Formatting
