@@ -2036,8 +2036,9 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     case "upgraded":
     case "downgraded": {
       const verb = ACTION_DESCRIPTIONS[data.action];
+      const offlineNote = data.offline ? " (offline, from cache)" : "";
       lines.push(
-        `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}`
+        `${colorTag("green", "✓")} ${verb} to ${safeCodeSpan(data.targetVersion)}${escapeMarkdownInline(offlineNote)}`
       );
       if (data.currentVersion !== data.targetVersion) {
         lines.push(

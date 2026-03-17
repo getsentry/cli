@@ -616,7 +616,8 @@ async function downloadStableToPath(
  */
 export async function downloadBinaryToTemp(
   version: string,
-  downloadTag?: string
+  downloadTag?: string,
+  offline?: boolean
 ): Promise<DownloadResult> {
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -632,10 +633,15 @@ export async function downloadBinaryToTemp(
 
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
-    const deltaResult = await tryDeltaUpgrade(version, tempPath);
+    const deltaResult = await tryDeltaUpgrade(version, tempPath, offline);
     if (deltaResult) {
       const kb = (deltaResult.patchBytes / 1024).toFixed(1);
       log.info(`Applied delta patch (${kb} KB downloaded)`);
+    } else if (offline) {
+      throw new UpgradeError(
+        "network_error",
+        `No cached patches available for upgrade to ${version}. Run 'sentry cli upgrade' with network access first.`
+      );
     } else {
       log.debug("Downloading full binary");
       await downloadFullBinary(version, downloadTag, tempPath);
@@ -671,9 +677,15 @@ export async function downloadBinaryToTemp(
  */
 async function tryDeltaUpgrade(
   version: string,
-  destPath: string
+  destPath: string,
+  offline?: boolean
 ): Promise<DeltaResult | null> {
-  return await attemptDeltaUpgrade(version, process.execPath, destPath);
+  return await attemptDeltaUpgrade(
+    version,
+    process.execPath,
+    destPath,
+    offline
+  );
 }
 
 /**
@@ -793,11 +805,12 @@ function executeUpgradePackageManager(
 export async function executeUpgrade(
   method: InstallationMethod,
   version: string,
-  downloadTag?: string
+  downloadTag?: string,
+  offline?: boolean
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return downloadBinaryToTemp(version, downloadTag);
+      return downloadBinaryToTemp(version, downloadTag, offline);
     case "brew":
       await executeUpgradeHomebrew();
       return null;

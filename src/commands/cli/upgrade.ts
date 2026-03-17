@@ -29,6 +29,7 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
+import { getVersionCheckInfo } from "../../lib/db/version-check.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -70,6 +71,8 @@ export type UpgradeResult = {
   method: string;
   /** Whether the user forced the upgrade */
   forced: boolean;
+  /** Whether the upgrade was performed offline (from cache) */
+  offline?: boolean;
   /** Warnings to display (e.g., PATH shadowing from old package manager install) */
   warnings?: string[];
 };
@@ -77,6 +80,7 @@ export type UpgradeResult = {
 type UpgradeFlags = {
   readonly check: boolean;
   readonly force: boolean;
+  readonly offline: boolean;
   readonly method?: InstallationMethod;
 };
 
@@ -106,6 +110,133 @@ function resolveChannelAndVersion(positional: string | undefined): {
     channel: getReleaseChannel(),
     versionArg: positional,
   };
+}
+
+/**
+ * Resolve the target version from the local cache (SQLite) instead of
+ * fetching from the network. Used by `--offline` and as automatic
+ * fallback when `fetchLatestVersion()` hits a network error.
+ *
+ * @param versionArg - Explicit version from the user, bypasses the cache lookup
+ * @returns The target version string
+ * @throws {UpgradeError} When no cached version is available
+ */
+function resolveOfflineTarget(versionArg: string | undefined): string {
+  if (versionArg) {
+    return versionArg.replace(VERSION_PREFIX_REGEX, "");
+  }
+  const { latestVersion } = getVersionCheckInfo();
+  if (!latestVersion) {
+    throw new UpgradeError(
+      "network_error",
+      "No cached version available. Run any command to trigger a background version check, then retry."
+    );
+  }
+  return latestVersion;
+}
+
+/**
+ * Resolve the target version, trying the network first and falling back to
+ * the local cache when offline or when the network is unavailable.
+ *
+ * @returns `{ target, offline }` — the resolved version and whether the
+ *   resolution used the offline path (explicit or automatic fallback).
+ *   Returns `null` when `resolveTargetVersion` returns a "done" result
+ *   (check-only or already up-to-date); the caller should yield that result.
+ */
+async function resolveTargetWithFallback(opts: {
+  resolveOpts: ResolveTargetOptions;
+  versionArg: string | undefined;
+  offline: boolean;
+  /** Only curl-installed binaries support offline fallback */
+  method: InstallationMethod;
+  /** Persist the channel after offline target resolution (deferred to avoid
+   *  clearing the version cache before the offline path can read it). */
+  persistChannelFn: () => void;
+}): Promise<
+  | { kind: "target"; target: string; offline: boolean }
+  | { kind: "done"; result: UpgradeResult }
+> {
+  const { resolveOpts, versionArg, offline, method, persistChannelFn } = opts;
+
+  if (offline) {
+    // Channel switching with --offline is not supported: the cached version
+    // belongs to the old channel and would install the wrong binary type.
+    if (resolveOpts.channelChanged && !versionArg) {
+      throw new UpgradeError(
+        "unsupported_operation",
+        "Cannot switch channels in offline mode — the cached version belongs to the current channel. " +
+          "Run 'sentry cli upgrade' with network access to switch channels."
+      );
+    }
+    // Read the cached version BEFORE persisting the channel — setReleaseChannel
+    // clears the version cache on channel changes.
+    const target = resolveOfflineTarget(versionArg);
+    persistChannelFn();
+    log.info(`Offline mode: using cached target ${target}`);
+    return { kind: "target", target, offline: true };
+  }
+
+  // Non-offline: persist channel upfront (no cache dependency)
+  persistChannelFn();
+
+  try {
+    const resolved = await resolveTargetVersion(resolveOpts);
+    if (resolved.kind === "done") {
+      return resolved;
+    }
+    return { kind: "target", target: resolved.target, offline: false };
+  } catch (error) {
+    // Automatic offline fallback: only for curl-installed binaries (package
+    // managers need the network for the actual install, not just version
+    // discovery), and only for network errors (not version_not_found etc.)
+    if (
+      method !== "curl" ||
+      !(error instanceof UpgradeError && error.reason === "network_error")
+    ) {
+      throw error;
+    }
+    try {
+      const target = resolveOfflineTarget(versionArg);
+      log.warn("Network unavailable, falling back to cached upgrade target");
+      log.info(`Using cached target: ${target}`);
+      return { kind: "target", target, offline: true };
+    } catch {
+      // No cached version either — re-throw original network error
+      throw error;
+    }
+  }
+}
+
+/**
+ * Validate the installation method against the requested flags and channel.
+ * Throws on unsupported combinations.
+ */
+function validateMethod(
+  method: InstallationMethod,
+  versionArg: string | undefined,
+  channel: ReleaseChannel,
+  offline: boolean
+): void {
+  if (method === "unknown") {
+    throw new UpgradeError("unknown_method");
+  }
+  // Homebrew manages versioning through the formula — pinning a specific
+  // stable version is not supported via this command.
+  if (method === "brew" && versionArg && channel === "stable") {
+    throw new UpgradeError(
+      "unsupported_operation",
+      "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
+    );
+  }
+  // Offline mode is only supported for curl-installed binaries — package
+  // managers always need network to fetch and install packages.
+  if (offline && method !== "curl") {
+    throw new UpgradeError(
+      "unsupported_operation",
+      "Offline upgrade is only supported for curl-installed binaries."
+    );
+  }
 }
 
 type ResolveTargetOptions = {
@@ -286,15 +417,21 @@ async function executeStandardUpgrade(opts: {
   versionArg: string | undefined;
   target: string;
   execPath: string;
+  offline?: boolean;
 }): Promise<void> {
-  const { method, channel, versionArg, target, execPath } = opts;
+  const { method, channel, versionArg, target, execPath, offline } = opts;
 
   // Use the rolling "nightly" tag only when upgrading to latest nightly
   // (no specific version was requested). A specific version arg always
   // uses its own tag so the correct release is downloaded.
   const downloadTag =
     channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
-  const downloadResult = await executeUpgrade(method, target, downloadTag);
+  const downloadResult = await executeUpgrade(
+    method,
+    target,
+    downloadTag,
+    offline
+  );
 
   // Run setup on the new binary to update completions, agent skills,
   // and record installation metadata.
@@ -398,6 +535,45 @@ async function migrateToStandaloneForNightly(
   return warnings;
 }
 
+/**
+ * Resolve the channel, version arg, method, and channel-changed flag from
+ * the positional version argument and flags. Extracted to keep `func()`
+ * complexity under the biome limit.
+ */
+async function resolveContext(
+  version: string | undefined,
+  flags: UpgradeFlags
+): Promise<{
+  channel: ReleaseChannel;
+  versionArg: string | undefined;
+  channelChanged: boolean;
+  method: InstallationMethod;
+}> {
+  const { channel, versionArg } = resolveChannelAndVersion(version);
+  const currentChannel = getReleaseChannel();
+  const channelChanged = channel !== currentChannel;
+
+  const method = flags.method ?? (await detectInstallationMethod());
+  validateMethod(method, versionArg, channel, flags.offline);
+  return { channel, versionArg, channelChanged, method };
+}
+
+/**
+ * Persist the release channel preference. Must be called **after** offline
+ * target resolution since `setReleaseChannel()` clears the version check
+ * cache on channel changes, which would prevent `resolveOfflineTarget()`
+ * from reading the cached version.
+ */
+function persistChannel(
+  channel: ReleaseChannel,
+  channelChanged: boolean,
+  version: string | undefined
+): void {
+  if (channelChanged || CHANNEL_VERSIONS.has(version ?? "")) {
+    setReleaseChannel(channel);
+  }
+}
+
 export const upgradeCommand = buildCommand({
   docs: {
     brief: "Update the Sentry CLI to the latest version",
@@ -416,7 +592,8 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade 0.5.0        # Install a specific stable version\n" +
       "  sentry cli upgrade --check      # Check for updates without installing\n" +
       "  sentry cli upgrade --force      # Force re-download even if up to date\n" +
-      "  sentry cli upgrade --method npm # Force using npm to upgrade",
+      "  sentry cli upgrade --method npm # Force using npm to upgrade\n" +
+      "  sentry cli upgrade --offline    # Upgrade from cached patches (no network)",
   },
   output: { human: formatUpgradeResult },
   parameters: {
@@ -443,6 +620,12 @@ export const upgradeCommand = buildCommand({
         brief: "Force upgrade even if already on the latest version",
         default: false,
       },
+      offline: {
+        kind: "boolean",
+        brief:
+          "Upgrade using only cached version info and patches (no network)",
+        default: false,
+      },
       method: {
         kind: "parsed",
         parse: parseInstallationMethod,
@@ -453,51 +636,52 @@ export const upgradeCommand = buildCommand({
     },
   },
   async *func(this: SentryContext, flags: UpgradeFlags, version?: string) {
-    // Resolve effective channel and version from positional
-    const { channel, versionArg } = resolveChannelAndVersion(version);
-
-    // Track whether the user is deliberately switching channels
-    const currentChannel = getReleaseChannel();
-    const channelChanged = channel !== currentChannel;
-
-    // Persist the channel so version-check and future upgrades respect it.
-    // We do this upfront — even if the download is skipped (e.g. --check) —
-    // so the preference is always recorded.
-    if (channelChanged || CHANNEL_VERSIONS.has(version ?? "")) {
-      setReleaseChannel(channel);
-    }
-
-    // Resolve installation method (detects or uses user-specified)
-    const method = flags.method ?? (await detectInstallationMethod());
-
-    if (method === "unknown") {
-      throw new UpgradeError("unknown_method");
-    }
-
-    // Homebrew manages versioning through the formula — pinning a specific
-    // stable version is not supported via this command.
-    if (method === "brew" && versionArg && channel === "stable") {
-      throw new UpgradeError(
-        "unsupported_operation",
-        "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
-      );
-    }
+    const { channel, versionArg, channelChanged, method } =
+      await resolveContext(version, flags);
 
     log.info(`Installation method: ${method}`);
     log.info(`Current version: ${CLI_VERSION}`);
 
-    const resolved = await resolveTargetVersion({
-      method,
-      channel,
+    const resolved = await resolveTargetWithFallback({
+      resolveOpts: { method, channel, versionArg, channelChanged, flags },
       versionArg,
-      channelChanged,
-      flags,
+      offline: flags.offline,
+      method,
+      persistChannelFn: () => persistChannel(channel, channelChanged, version),
     });
     if (resolved.kind === "done") {
       return yield new CommandOutput(resolved.result);
     }
 
-    const { target } = resolved;
+    const { target, offline } = resolved;
+
+    // --check with offline just reports the cached version
+    if (flags.check) {
+      const checkResult = buildCheckResult({
+        target,
+        versionArg,
+        method,
+        channel,
+        flags,
+      });
+      if (offline) {
+        checkResult.offline = true;
+      }
+      return yield new CommandOutput(checkResult);
+    }
+
+    // Skip if already on target — unless forced or switching channels
+    if (CLI_VERSION === target && !flags.force && !channelChanged) {
+      return yield new CommandOutput({
+        action: "up-to-date",
+        currentVersion: CLI_VERSION,
+        targetVersion: target,
+        channel,
+        method,
+        forced: false,
+        offline: offline || undefined,
+      } satisfies UpgradeResult);
+    }
     const downgrade = isDowngrade(CLI_VERSION, target);
     log.info(`${downgrade ? "Downgrading" : "Upgrading"} to ${target}...`);
 
@@ -528,6 +712,7 @@ export const upgradeCommand = buildCommand({
       versionArg,
       target,
       execPath: this.process.execPath,
+      offline,
     });
 
     yield new CommandOutput({
@@ -537,6 +722,7 @@ export const upgradeCommand = buildCommand({
       channel,
       method,
       forced: flags.force,
+      offline: offline || undefined,
     } satisfies UpgradeResult);
     return;
   },
