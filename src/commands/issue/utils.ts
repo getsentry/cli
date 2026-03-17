@@ -156,18 +156,21 @@ async function resolveProjectSearch(
   //    resolveFromDsn() reads from the DSN cache (populated by detectAllDsns
   //    in tryResolveFromAlias above) + project cache. This avoids the expensive
   //    listOrganizations() fan-out when the DSN matches the target project.
+  //    Only catch resolveFromDsn errors — getIssueByShortId errors (e.g. 404)
+  //    must propagate so we don't duplicate the expensive call via fallback.
+  let dsnTarget: Awaited<ReturnType<typeof resolveFromDsn>> | undefined;
   try {
-    const dsnTarget = await resolveFromDsn(cwd);
-    if (
-      dsnTarget &&
-      dsnTarget.project.toLowerCase() === projectSlug.toLowerCase()
-    ) {
-      const fullShortId = expandToFullShortId(suffix, dsnTarget.project);
-      const issue = await getIssueByShortId(dsnTarget.org, fullShortId);
-      return { org: dsnTarget.org, issue };
-    }
+    dsnTarget = await resolveFromDsn(cwd);
   } catch {
     // DSN resolution failed — fall through to full search
+  }
+  if (
+    dsnTarget &&
+    dsnTarget.project.toLowerCase() === projectSlug.toLowerCase()
+  ) {
+    const fullShortId = expandToFullShortId(suffix, dsnTarget.project);
+    const issue = await getIssueByShortId(dsnTarget.org, fullShortId);
+    return { org: dsnTarget.org, issue };
   }
 
   // 3. Search for project across all accessible orgs

@@ -210,6 +210,10 @@ export async function findProjectsBySlug(
 
   // Fast path: use cached org slugs to skip the expensive listOrganizations()
   // round-trip (getUserRegions + listOrganizationsInRegion).
+  // The cache is expected to be complete: callers reach this function via the
+  // project-search format (e.g. "buybridge-5BS") whose short suffix only comes
+  // from `sentry issue list` output — which already called listOrganizations()
+  // and populated org_regions with all accessible orgs.
   const cachedOrgRegions = await getAllOrgRegions();
   if (cachedOrgRegions.size > 0) {
     const cachedSlugs = [...cachedOrgRegions.keys()];
