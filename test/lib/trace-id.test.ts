@@ -8,7 +8,11 @@
 import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
 import { ValidationError } from "../../src/lib/errors.js";
-import { TRACE_ID_RE, validateTraceId } from "../../src/lib/trace-id.js";
+import {
+  isTraceId,
+  TRACE_ID_RE,
+  validateTraceId,
+} from "../../src/lib/trace-id.js";
 
 const HEX_CHARS = "0123456789abcdefABCDEF".split("");
 const VALID_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
@@ -124,6 +128,73 @@ describe("validateTraceId", () => {
     expect(validateTraceId("AAAA1111-BBBB-2222-CCCC-3333DDDD4444")).toBe(
       "aaaa1111bbbb2222cccc3333dddd4444"
     );
+  });
+});
+
+describe("isTraceId", () => {
+  test("returns true for valid 32-char hex string", () => {
+    expect(isTraceId(VALID_TRACE_ID)).toBe(true);
+  });
+
+  test("returns true for uppercase hex", () => {
+    expect(isTraceId("AAAA1111BBBB2222CCCC3333DDDD4444")).toBe(true);
+  });
+
+  test("returns true for UUID-format trace ID", () => {
+    expect(isTraceId("ed29abc8-71c4-475b-9675-4655ef1a02d0")).toBe(true);
+  });
+
+  test("returns false for project slug", () => {
+    expect(isTraceId("my-project")).toBe(false);
+  });
+
+  test("returns false for org slug", () => {
+    expect(isTraceId("my-org")).toBe(false);
+  });
+
+  test("returns false for short hex", () => {
+    expect(isTraceId("abc123")).toBe(false);
+  });
+
+  test("returns false for empty string", () => {
+    expect(isTraceId("")).toBe(false);
+  });
+
+  test("returns false for 33-char hex", () => {
+    expect(isTraceId(`${VALID_TRACE_ID}a`)).toBe(false);
+  });
+
+  test("handles whitespace", () => {
+    expect(isTraceId(`  ${VALID_TRACE_ID}  `)).toBe(true);
+  });
+});
+
+describe("property: isTraceId ↔ validateTraceId consistency", () => {
+  test("isTraceId(x) === true iff validateTraceId(x) does not throw", () => {
+    fcAssert(
+      property(validTraceIdArb, (id) => {
+        const isValid = isTraceId(id);
+        let validates = true;
+        try {
+          validateTraceId(id);
+        } catch {
+          validates = false;
+        }
+        expect(isValid).toBe(validates);
+      }),
+      { numRuns: 100 }
+    );
+  });
+
+  test("isTraceId returns false for invalid inputs", () => {
+    for (const invalid of [
+      "",
+      "abc",
+      "my-project",
+      "not-a-hex-string-at-all",
+    ]) {
+      expect(isTraceId(invalid)).toBe(false);
+    }
   });
 });
 

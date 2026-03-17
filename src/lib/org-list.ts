@@ -50,6 +50,7 @@ import {
 } from "./errors.js";
 import { filterFields } from "./formatters/json.js";
 import { logger } from "./logger.js";
+import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { resolveOrgsForListing } from "./resolve-target.js";
 
@@ -345,10 +346,14 @@ export async function handleOrgAll<TEntity, TWithOrg>(
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, contextKey, cursor } = options;
 
-  const response = await config.listPaginated(org, {
-    cursor,
-    perPage: flags.limit,
-  });
+  const response = await withProgress(
+    { message: `Fetching ${config.entityPlural}...` },
+    () =>
+      config.listPaginated(org, {
+        cursor,
+        perPage: flags.limit,
+      })
+  );
 
   const { data: rawItems, nextCursor } = response;
   const items = rawItems.map((entity) => config.withOrg(entity, org));
@@ -402,15 +407,18 @@ export async function handleAutoDetect<TEntity, TWithOrg>(
     skippedSelfHosted,
   } = await resolveOrgsForListing(undefined, cwd);
 
-  let allItems: TWithOrg[];
-  if (orgsToFetch.length > 0) {
-    const results = await Promise.all(
-      orgsToFetch.map((org) => fetchOrgSafe(config, org))
-    );
-    allItems = results.flat();
-  } else {
-    allItems = await fetchAllOrgs(config);
-  }
+  const allItems = await withProgress(
+    { message: `Fetching ${config.entityPlural}...` },
+    async () => {
+      if (orgsToFetch.length > 0) {
+        const results = await Promise.all(
+          orgsToFetch.map((org) => fetchOrgSafe(config, org))
+        );
+        return results.flat();
+      }
+      return fetchAllOrgs(config);
+    }
+  );
 
   const limitCount =
     orgsToFetch.length > 1 ? flags.limit * orgsToFetch.length : flags.limit;
@@ -527,7 +535,10 @@ export async function handleExplicitOrg<TEntity, TWithOrg>(
   options: ExplicitOrgOptions<TEntity, TWithOrg>
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, noteOrgScoped = false } = options;
-  const items = await fetchOrgSafe(config, org);
+  const items = await withProgress(
+    { message: `Fetching ${config.entityPlural}...` },
+    () => fetchOrgSafe(config, org)
+  );
 
   const result = buildFetchedItemsResult({
     config,
@@ -576,7 +587,10 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
       "handleExplicitProject called but config.listForProject is not defined"
     );
   }
-  const raw = await listForProject(org, project);
+  const raw = await withProgress(
+    { message: `Fetching ${config.entityPlural}...` },
+    () => listForProject(org, project)
+  );
   const items = raw.map((entity) => config.withOrg(entity, org));
 
   const result = buildFetchedItemsResult({
@@ -622,7 +636,10 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   }
 ): Promise<ListResult<TWithOrg>> {
   const { flags, orgAllFallback } = options;
-  const { projects: matches, orgs } = await findProjectsBySlug(projectSlug);
+  const { projects: matches, orgs } = await withProgress(
+    { message: `Fetching ${config.entityPlural}...` },
+    () => findProjectsBySlug(projectSlug)
+  );
 
   if (matches.length === 0) {
     const matchingOrg = orgs.find((o) => o.slug === projectSlug);

@@ -40,7 +40,28 @@ import {
   type OrgListConfig,
 } from "../../src/lib/org-list.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as polling from "../../src/lib/polling.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as region from "../../src/lib/region.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
+
+/**
+ * Bypass the withProgress spinner in all tests — prevents real stderr
+ * timers from piling up during full-suite runs and causing 5s timeouts.
+ */
+let withProgressSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+    (_opts, fn) =>
+      fn(() => {
+        /* no-op setMessage */
+      })
+  );
+});
+afterEach(() => {
+  withProgressSpy.mockRestore();
+});
 
 type FakeEntity = { id: string; name: string };
 type FakeWithOrg = FakeEntity & { orgSlug: string };
@@ -625,12 +646,19 @@ describe("dispatchOrgScopedList", () => {
   let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
   let setPaginationCursorSpy: ReturnType<typeof spyOn>;
   let clearPaginationCursorSpy: ReturnType<typeof spyOn>;
+  let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
     resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
     setPaginationCursorSpy = spyOn(paginationDb, "setPaginationCursor");
     clearPaginationCursorSpy = spyOn(paginationDb, "clearPaginationCursor");
+    // Prevent resolveEffectiveOrg from making real HTTP calls during
+    // full-suite runs where earlier tests may leave auth state behind.
+    resolveEffectiveOrgSpy = spyOn(
+      region,
+      "resolveEffectiveOrg"
+    ).mockImplementation((org: string) => Promise.resolve(org));
 
     getDefaultOrganizationSpy.mockResolvedValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
@@ -643,6 +671,7 @@ describe("dispatchOrgScopedList", () => {
     resolveAllTargetsSpy.mockRestore();
     setPaginationCursorSpy.mockRestore();
     clearPaginationCursorSpy.mockRestore();
+    resolveEffectiveOrgSpy.mockRestore();
   });
 
   test("throws ValidationError when --cursor used outside org-all mode", async () => {

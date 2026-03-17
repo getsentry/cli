@@ -54,6 +54,7 @@ import {
   type ListCommandMeta,
   type ListResult,
 } from "../../lib/org-list.js";
+import { withProgress } from "../../lib/polling.js";
 import {
   type ResolvedTarget,
   resolveAllTargets,
@@ -333,9 +334,9 @@ export async function handleAutoDetect(
     skippedSelfHosted,
   } = await resolveOrgsForAutoDetect(cwd);
 
-  const { projects: allProjects, nextCursor } = await fetchAutoDetectProjects(
-    orgsToFetch,
-    flags
+  const { projects: allProjects, nextCursor } = await withProgress(
+    { message: "Fetching projects..." },
+    () => fetchAutoDetectProjects(orgsToFetch, flags)
   );
 
   const filtered = filterByPlatform(allProjects, flags.platform);
@@ -390,7 +391,10 @@ export async function handleExplicit(
   projectSlug: string,
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
-  const projectResult = await withAuthGuard(() => getProject(org, projectSlug));
+  const projectResult = await withProgress(
+    { message: "Fetching projects..." },
+    () => withAuthGuard(() => getProject(org, projectSlug))
+  );
   if (!projectResult.ok) {
     return {
       items: [],
@@ -437,11 +441,14 @@ export async function handleOrgAll(
   options: OrgAllOptions
 ): Promise<ListResult<ProjectWithOrg>> {
   const { org, flags, contextKey, cursor } = options;
-  const response: PaginatedResponse<SentryProject[]> =
-    await listProjectsPaginated(org, {
-      cursor,
-      perPage: flags.limit,
-    });
+  const response: PaginatedResponse<SentryProject[]> = await withProgress(
+    { message: "Fetching projects..." },
+    () =>
+      listProjectsPaginated(org, {
+        cursor,
+        perPage: flags.limit,
+      })
+  );
 
   const projects: ProjectWithOrg[] = response.data.map((p) => ({
     ...p,
@@ -498,7 +505,10 @@ export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { projects } = await findProjectsBySlug(projectSlug);
+  const { projects } = await withProgress(
+    { message: "Fetching projects..." },
+    () => findProjectsBySlug(projectSlug)
+  );
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (filtered.length === 0) {

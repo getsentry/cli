@@ -13,6 +13,7 @@ import { ContextError } from "../../lib/errors.js";
 import { colorTag } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
+import { withProgress } from "../../lib/polling.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   daysRemainingFromDate,
@@ -230,7 +231,9 @@ export const listCommand = buildCommand({
       throw new ContextError("Organization", "sentry trial list <org>");
     }
 
-    const info = await getCustomerTrialInfo(resolved.org);
+    const info = await withProgress({ message: "Fetching trials..." }, () =>
+      getCustomerTrialInfo(resolved.org)
+    );
     const productTrials = info.productTrials ?? [];
 
     const entries: TrialListEntry[] = deduplicateTrials(

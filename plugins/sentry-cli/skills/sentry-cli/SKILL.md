@@ -554,7 +554,7 @@ sentry team list --json
 
 View Sentry logs
 
-#### `sentry log list <org/project>`
+#### `sentry log list <org/project-or-trace-id...>`
 
 List logs from a project
 
@@ -562,7 +562,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `--trace <value> - Filter logs by trace ID (32-character hex string)`
+- `-t, --period <value> - Time period (e.g., "90d", "14d", "24h") - (default: "90d")`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`

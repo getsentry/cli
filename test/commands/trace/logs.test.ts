@@ -25,6 +25,8 @@ import { logsCommand } from "../../../src/commands/trace/logs.js";
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ContextError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as polling from "../../../src/lib/polling.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceLog } from "../../../src/types/sentry.js";
 
@@ -103,19 +105,28 @@ function collectMockOutput(
 describe("logsCommand.func", () => {
   let listTraceLogsSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
     resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    // Bypass the withProgress spinner to prevent real stderr timers
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      (_opts, fn) =>
+        fn(() => {
+          /* no-op setMessage */
+        })
+    );
   });
 
   afterEach(() => {
     listTraceLogsSpy.mockRestore();
     resolveOrgSpy.mockRestore();
+    withProgressSpy.mockRestore();
   });
 
   describe("JSON output mode", () => {
-    test("outputs JSON array when --json flag is set", async () => {
+    test("outputs JSON envelope when --json flag is set", async () => {
       listTraceLogsSpy.mockResolvedValue(sampleLogs);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
@@ -129,13 +140,16 @@ describe("logsCommand.func", () => {
 
       const output = collectMockOutput(stdoutWrite);
       const parsed = JSON.parse(output);
-      expect(Array.isArray(parsed)).toBe(true);
-      expect(parsed).toHaveLength(3);
+      expect(parsed).toHaveProperty("data");
+      expect(parsed).toHaveProperty("hasMore");
+      expect(Array.isArray(parsed.data)).toBe(true);
+      expect(parsed.data).toHaveLength(3);
       // formatTraceLogs reverses to chronological order for JSON output
-      expect(parsed[0].id).toBe("log003");
+      expect(parsed.data[0].id).toBe("log003");
+      expect(parsed.hasMore).toBe(false);
     });
 
-    test("outputs empty JSON array when no logs found with --json", async () => {
+    test("outputs empty JSON envelope when no logs found with --json", async () => {
       listTraceLogsSpy.mockResolvedValue([]);
       resolveOrgSpy.mockResolvedValue({ org: ORG });
 
@@ -148,7 +162,8 @@ describe("logsCommand.func", () => {
       );
 
       const output = collectMockOutput(stdoutWrite);
-      expect(JSON.parse(output)).toEqual([]);
+      const parsed = JSON.parse(output);
+      expect(parsed).toEqual({ data: [], hasMore: false });
     });
   });
 

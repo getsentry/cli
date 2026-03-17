@@ -17,6 +17,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import {
   parseTraceTarget,
@@ -47,6 +48,7 @@ type TraceLogsData = {
   logs: LogLike[];
   traceId: string;
   limit: number;
+  hasMore: boolean;
   /** Message shown when no logs found */
   emptyMessage?: string;
 };
@@ -107,10 +109,11 @@ export const logsCommand = buildCommand({
   output: {
     human: formatTraceLogsHuman,
     jsonTransform: (data: TraceLogsData, fields?: string[]) => {
-      if (fields && fields.length > 0) {
-        return data.logs.map((entry) => filterFields(entry, fields));
-      }
-      return data.logs;
+      const items =
+        fields && fields.length > 0
+          ? data.logs.map((entry) => filterFields(entry, fields))
+          : data.logs;
+      return { data: items, hasMore: data.hasMore };
     },
   },
   parameters: {
@@ -171,14 +174,17 @@ export const logsCommand = buildCommand({
       return;
     }
 
-    const logs = await listTraceLogs(org, traceId, {
-      statsPeriod: flags.period,
-      limit: flags.limit,
-      query: flags.query,
-    });
+    const logs = await withProgress({ message: "Fetching trace logs..." }, () =>
+      listTraceLogs(org, traceId, {
+        statsPeriod: flags.period,
+        limit: flags.limit,
+        query: flags.query,
+      })
+    );
 
     // Reverse to chronological order (API returns newest-first)
     const chronological = [...logs].reverse();
+    const hasMore = chronological.length >= flags.limit;
 
     const emptyMessage =
       `No logs found for trace ${traceId} in the last ${flags.period}.\n\n` +
@@ -188,6 +194,7 @@ export const logsCommand = buildCommand({
       logs: chronological,
       traceId,
       limit: flags.limit,
+      hasMore,
       emptyMessage,
     });
   },

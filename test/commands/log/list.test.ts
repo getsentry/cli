@@ -2,15 +2,20 @@
  * Log List Command Tests
  *
  * Tests for the `sentry log list` command func() body, covering:
- * - Standard project-scoped mode (no --trace)
- * - Trace-filtered mode (--trace <id>)
- * - Org resolution failure in trace mode
+ * - Standard project-scoped mode (positional org/project)
+ * - Trace-filtered mode (positional 32-char hex trace-id)
+ * - Positional argument disambiguation (trace vs project)
+ * - Period flag behavior
  * - Follow/streaming mode for both standard and trace modes
  *
  * Uses spyOn mocking to avoid real HTTP calls or database access.
  * Follow-mode tests use SIGINT to cleanly stop the setTimeout-based
  * poll loop — the promise resolves on SIGINT (normal termination).
  * AuthError tests verify that fetch failures reject the promise.
+ *
+ * Non-follow (single-fetch) tests mock `withProgress` from `polling.ts`
+ * to bypass the spinner. Follow-mode tests do NOT mock `withProgress`
+ * because follow mode uses its own streaming banner, not the spinner.
  */
 
 import {
@@ -29,7 +34,11 @@ import { AuthError, ContextError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as formatters from "../../../src/lib/formatters/index.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as polling from "../../../src/lib/polling.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as traceTarget from "../../../src/lib/trace-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as versionCheck from "../../../src/lib/version-check.js";
 import type { SentryLog, TraceLog } from "../../../src/types/sentry.js";
@@ -111,6 +120,33 @@ function createMockContext() {
     stderrWrite,
   };
 }
+
+/** No-op setMessage callback for withProgress mock */
+function noop() {
+  // no-op for test
+}
+
+/** Passthrough mock for `withProgress` — bypasses spinner, calls fn directly */
+function mockWithProgress(
+  _opts: unknown,
+  fn: (setMessage: () => void) => unknown
+) {
+  return fn(noop);
+}
+
+/** Standard flags for non-follow batch mode */
+const BATCH_FLAGS = {
+  json: true,
+  limit: 100,
+  period: "90d",
+} as const;
+
+/** Human-mode flags for non-follow batch mode */
+const HUMAN_FLAGS = {
+  json: false,
+  limit: 100,
+  period: "90d",
+} as const;
 
 /** Sample project-scoped logs (SentryLog) */
 const sampleLogs: SentryLog[] = [
@@ -201,35 +237,42 @@ const newerLogs: SentryLog[] = [
 ];
 
 // ============================================================================
-// Standard mode (no --trace)
+// Standard mode (project-scoped, no trace-id positional)
 // ============================================================================
 
 describe("listCommand.func — standard mode", () => {
   let listLogsSpy: ReturnType<typeof spyOn>;
   let resolveOrgProjectSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listLogsSpy = spyOn(apiClient, "listLogs");
     resolveOrgProjectSpy = spyOn(resolveTarget, "resolveOrgProjectFromArg");
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      mockWithProgress
+    );
   });
 
   afterEach(() => {
     listLogsSpy.mockRestore();
     resolveOrgProjectSpy.mockRestore();
+    withProgressSpy.mockRestore();
   });
 
-  test("outputs JSON array for --json", async () => {
+  test("outputs JSON envelope with data and hasMore for --json", async () => {
     listLogsSpy.mockResolvedValue(sampleLogs);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(3);
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("hasMore");
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed.data).toHaveLength(3);
   });
 
   test("outputs JSON in chronological order (oldest first)", async () => {
@@ -240,13 +283,13 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
     // After reversal, oldest should be first
-    expect(parsed[0]["sentry.item_id"]).toBe("item001");
-    expect(parsed[2]["sentry.item_id"]).toBe("item003");
+    expect(parsed.data[0]["sentry.item_id"]).toBe("item001");
+    expect(parsed.data[2]["sentry.item_id"]).toBe("item003");
   });
 
   test("shows 'No logs found' for empty result (human mode)", async () => {
@@ -255,7 +298,7 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No logs found");
@@ -267,7 +310,7 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Request received");
@@ -281,7 +324,7 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 3 log");
@@ -294,7 +337,11 @@ describe("listCommand.func — standard mode", () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
     // limit equals number of returned logs → hasMore = true
-    await func.call(context, { json: false, limit: 3 }, `${ORG}/${PROJECT}`);
+    await func.call(
+      context,
+      { json: false, limit: 3, period: "90d" },
+      `${ORG}/${PROJECT}`
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Use --limit to show more");
@@ -306,13 +353,13 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).not.toContain("Use --limit to show more");
   });
 
-  test("passes query and limit to listLogs", async () => {
+  test("passes query, limit, and period to listLogs", async () => {
     listLogsSpy.mockResolvedValue([]);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
@@ -320,7 +367,7 @@ describe("listCommand.func — standard mode", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, limit: 50, query: "level:error" },
+      { json: false, limit: 50, query: "level:error", period: "90d" },
       `${ORG}/${PROJECT}`
     );
 
@@ -337,66 +384,109 @@ describe("listCommand.func — standard mode", () => {
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100 }, `${ORG}/${PROJECT}`);
+    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
 
     expect(context.setContext).toHaveBeenCalledWith([ORG], [PROJECT]);
+  });
+
+  test("hasMore is true when results match limit", async () => {
+    listLogsSpy.mockResolvedValue(sampleLogs);
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { json: true, limit: 3, period: "90d" },
+      `${ORG}/${PROJECT}`
+    );
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.hasMore).toBe(true);
+  });
+
+  test("hasMore is false when fewer results than limit", async () => {
+    listLogsSpy.mockResolvedValue(sampleLogs);
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.hasMore).toBe(false);
   });
 });
 
 // ============================================================================
-// Trace mode (--trace)
+// Trace mode (positional trace-id)
 // ============================================================================
 
 describe("listCommand.func — trace mode", () => {
   let listTraceLogsSpy: ReturnType<typeof spyOn>;
-  let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let resolveTraceOrgSpy: ReturnType<typeof spyOn>;
+  let warnIfNormalizedSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = spyOn(
+      traceTarget,
+      "warnIfNormalized"
+    ).mockReturnValue(undefined);
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      mockWithProgress
+    );
   });
 
   afterEach(() => {
     listTraceLogsSpy.mockRestore();
-    resolveOrgSpy.mockRestore();
+    resolveTraceOrgSpy.mockRestore();
+    warnIfNormalizedSpy.mockRestore();
+    withProgressSpy.mockRestore();
   });
 
-  test("outputs JSON array for --json --trace", async () => {
+  test("outputs JSON envelope with data and hasMore for --json", async () => {
     listTraceLogsSpy.mockResolvedValue(sampleTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100, trace: TRACE_ID });
+    await func.call(context, BATCH_FLAGS, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(3);
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("hasMore");
+    expect(Array.isArray(parsed.data)).toBe(true);
+    expect(parsed.data).toHaveLength(3);
   });
 
   test("outputs JSON in chronological order (oldest first)", async () => {
     const newestFirst = [...sampleTraceLogs].reverse();
     listTraceLogsSpy.mockResolvedValue(newestFirst);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100, trace: TRACE_ID });
+    await func.call(context, BATCH_FLAGS, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
-    expect(parsed[0].id).toBe("log001");
-    expect(parsed[2].id).toBe("log003");
+    expect(parsed.data[0].id).toBe("log001");
+    expect(parsed.data[2].id).toBe("log003");
   });
 
   test("shows empty-trace message in human mode", async () => {
     listTraceLogsSpy.mockResolvedValue([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100, trace: TRACE_ID });
+    await func.call(context, HUMAN_FLAGS, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No logs found");
@@ -405,11 +495,11 @@ describe("listCommand.func — trace mode", () => {
 
   test("renders trace log messages in human output", async () => {
     listTraceLogsSpy.mockResolvedValue(sampleTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100, trace: TRACE_ID });
+    await func.call(context, HUMAN_FLAGS, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Request received");
@@ -419,11 +509,11 @@ describe("listCommand.func — trace mode", () => {
 
   test("shows count footer with trace ID", async () => {
     listTraceLogsSpy.mockResolvedValue(sampleTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 100, trace: TRACE_ID });
+    await func.call(context, HUMAN_FLAGS, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Showing 3 log");
@@ -432,28 +522,31 @@ describe("listCommand.func — trace mode", () => {
 
   test("shows --limit tip when trace results match limit", async () => {
     listTraceLogsSpy.mockResolvedValue(sampleTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: false, limit: 3, trace: TRACE_ID });
+    await func.call(
+      context,
+      { json: false, limit: 3, period: "90d" },
+      TRACE_ID
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Use --limit to show more.");
   });
 
-  test("passes traceId, limit, and query to listTraceLogs", async () => {
+  test("passes traceId, limit, and query to listTraceLogs with 14d default", async () => {
     listTraceLogsSpy.mockResolvedValue([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, {
-      json: false,
-      limit: 50,
-      trace: TRACE_ID,
-      query: "level:error",
-    });
+    await func.call(
+      context,
+      { json: false, limit: 50, query: "level:error", period: "90d" },
+      TRACE_ID
+    );
 
     expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
       query: "level:error",
@@ -464,72 +557,234 @@ describe("listCommand.func — trace mode", () => {
 
   test("calls setContext with org and empty project array", async () => {
     listTraceLogsSpy.mockResolvedValue([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(context, { json: true, limit: 100, trace: TRACE_ID });
+    await func.call(context, BATCH_FLAGS, TRACE_ID);
 
     expect(context.setContext).toHaveBeenCalledWith([ORG], []);
   });
 
-  test("uses positional target as org slug in trace mode", async () => {
+  test("uses positional org/trace-id to resolve trace org", async () => {
     listTraceLogsSpy.mockResolvedValue([]);
-    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: "my-org" });
 
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, `my-org/${TRACE_ID}`);
+
+    // resolveTraceOrg receives the parsed ParsedTraceTarget
+    expect(resolveTraceOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "org-scoped",
+        org: "my-org",
+        traceId: TRACE_ID,
+      }),
+      "/tmp",
+      expect.any(String)
+    );
+  });
+});
+
+// ============================================================================
+// Positional argument disambiguation
+// ============================================================================
+
+describe("listCommand.func — positional disambiguation", () => {
+  let listLogsSpy: ReturnType<typeof spyOn>;
+  let listTraceLogsSpy: ReturnType<typeof spyOn>;
+  let resolveOrgProjectSpy: ReturnType<typeof spyOn>;
+  let resolveTraceOrgSpy: ReturnType<typeof spyOn>;
+  let warnIfNormalizedSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    listLogsSpy = spyOn(apiClient, "listLogs").mockResolvedValue([]);
+    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs").mockResolvedValue([]);
+    resolveOrgProjectSpy = spyOn(
+      resolveTarget,
+      "resolveOrgProjectFromArg"
+    ).mockResolvedValue({ org: ORG, project: PROJECT });
+    resolveTraceOrgSpy = spyOn(
+      traceTarget,
+      "resolveTraceOrg"
+    ).mockResolvedValue({
+      traceId: TRACE_ID,
+      org: ORG,
+    });
+    warnIfNormalizedSpy = spyOn(
+      traceTarget,
+      "warnIfNormalized"
+    ).mockReturnValue(undefined);
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      mockWithProgress
+    );
+  });
+
+  afterEach(() => {
+    listLogsSpy.mockRestore();
+    listTraceLogsSpy.mockRestore();
+    resolveOrgProjectSpy.mockRestore();
+    resolveTraceOrgSpy.mockRestore();
+    warnIfNormalizedSpy.mockRestore();
+    withProgressSpy.mockRestore();
+  });
+
+  test("32-char hex string triggers trace mode", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, TRACE_ID);
+
+    expect(listTraceLogsSpy).toHaveBeenCalled();
+    expect(listLogsSpy).not.toHaveBeenCalled();
+  });
+
+  test("non-hex string triggers project mode", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, `${ORG}/${PROJECT}`);
+
+    expect(listLogsSpy).toHaveBeenCalled();
+    expect(listTraceLogsSpy).not.toHaveBeenCalled();
+  });
+
+  test("org/trace-id triggers trace mode", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, `${ORG}/${TRACE_ID}`);
+
+    expect(listTraceLogsSpy).toHaveBeenCalled();
+    expect(listLogsSpy).not.toHaveBeenCalled();
+  });
+
+  test("org/project (non-hex) triggers project mode", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, BATCH_FLAGS, "my-org/my-project");
+
+    expect(listLogsSpy).toHaveBeenCalled();
+    expect(listTraceLogsSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Period flag behavior
+// ============================================================================
+
+describe("listCommand.func — period flag", () => {
+  let listTraceLogsSpy: ReturnType<typeof spyOn>;
+  let resolveTraceOrgSpy: ReturnType<typeof spyOn>;
+  let warnIfNormalizedSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs").mockResolvedValue([]);
+    resolveTraceOrgSpy = spyOn(
+      traceTarget,
+      "resolveTraceOrg"
+    ).mockResolvedValue({
+      traceId: TRACE_ID,
+      org: ORG,
+    });
+    warnIfNormalizedSpy = spyOn(
+      traceTarget,
+      "warnIfNormalized"
+    ).mockReturnValue(undefined);
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      mockWithProgress
+    );
+  });
+
+  afterEach(() => {
+    listTraceLogsSpy.mockRestore();
+    resolveTraceOrgSpy.mockRestore();
+    warnIfNormalizedSpy.mockRestore();
+    withProgressSpy.mockRestore();
+  });
+
+  test("trace mode uses 14d default when period is the command default 90d", async () => {
     const { context } = createMockContext();
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: true, limit: 100, trace: TRACE_ID },
-      "my-org"
+      { json: true, limit: 100, period: "90d" },
+      TRACE_ID
     );
 
-    expect(resolveOrgSpy).toHaveBeenCalledWith({
-      org: "my-org",
-      cwd: "/tmp",
+    expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
+      query: undefined,
+      limit: 100,
+      statsPeriod: "14d",
+    });
+  });
+
+  test("trace mode uses explicit period when set to non-default", async () => {
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(
+      context,
+      { json: true, limit: 100, period: "30d" },
+      TRACE_ID
+    );
+
+    expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
+      query: undefined,
+      limit: 100,
+      statsPeriod: "30d",
     });
   });
 });
 
 // ============================================================================
-// Org resolution failure in trace mode
+// Trace mode org resolution failure
 // ============================================================================
 
 describe("listCommand.func — trace mode org resolution failure", () => {
-  let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let resolveTraceOrgSpy: ReturnType<typeof spyOn>;
+  let warnIfNormalizedSpy: ReturnType<typeof spyOn>;
+  let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = spyOn(
+      traceTarget,
+      "warnIfNormalized"
+    ).mockReturnValue(undefined);
+    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
+      mockWithProgress
+    );
   });
 
   afterEach(() => {
-    resolveOrgSpy.mockRestore();
+    resolveTraceOrgSpy.mockRestore();
+    warnIfNormalizedSpy.mockRestore();
+    withProgressSpy.mockRestore();
   });
 
   test("throws ContextError when org cannot be resolved", async () => {
-    resolveOrgSpy.mockResolvedValue(null);
+    resolveTraceOrgSpy.mockRejectedValue(
+      new ContextError("Organization", "sentry log list [<org>/]<trace-id>")
+    );
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    await expect(
-      func.call(context, { json: false, limit: 100, trace: TRACE_ID })
-    ).rejects.toThrow(ContextError);
+    await expect(func.call(context, HUMAN_FLAGS, TRACE_ID)).rejects.toThrow(
+      ContextError
+    );
   });
 
   test("ContextError mentions Organization", async () => {
-    resolveOrgSpy.mockResolvedValue(null);
+    resolveTraceOrgSpy.mockRejectedValue(
+      new ContextError("Organization", "sentry log list [<org>/]<trace-id>")
+    );
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
     try {
-      await func.call(context, {
-        json: false,
-        limit: 100,
-        trace: TRACE_ID,
-      });
+      await func.call(context, HUMAN_FLAGS, TRACE_ID);
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ContextError);
@@ -539,12 +794,15 @@ describe("listCommand.func — trace mode org resolution failure", () => {
 });
 
 // ============================================================================
-// Follow mode — standard (--follow, no --trace)
+// Follow mode — standard (--follow, project-scoped)
 //
 // Strategy: SIGINT resolves the promise (normal termination). AuthError
 // from fetch rejects the promise. Tests use interceptSigint() to capture
 // the SIGINT handler and invoke it directly (process.emit("SIGINT")
 // kills the Bun test runner).
+//
+// Follow mode does NOT use withProgress (it has its own streaming banner),
+// so withProgress is NOT mocked here.
 // ============================================================================
 
 /**
@@ -602,6 +860,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     json: false,
     limit: 100,
     follow: 1,
+    period: "90d",
   } as const;
 
   test("writes initial logs then resolves on SIGINT", async () => {
@@ -851,12 +1110,13 @@ describe("listCommand.func — follow mode (standard)", () => {
 });
 
 // ============================================================================
-// Follow mode — trace (--follow + --trace)
+// Follow mode — trace (--follow + positional trace-id)
 // ============================================================================
 
 describe("listCommand.func — follow mode (trace)", () => {
   let listTraceLogsSpy: ReturnType<typeof spyOn>;
-  let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let resolveTraceOrgSpy: ReturnType<typeof spyOn>;
+  let warnIfNormalizedSpy: ReturnType<typeof spyOn>;
   let isPlainSpy: ReturnType<typeof spyOn>;
   let updateNotifSpy: ReturnType<typeof spyOn>;
   let sigint: ReturnType<typeof interceptSigint>;
@@ -865,7 +1125,11 @@ describe("listCommand.func — follow mode (trace)", () => {
   beforeEach(() => {
     sigint = interceptSigint();
     listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = spyOn(
+      traceTarget,
+      "warnIfNormalized"
+    ).mockReturnValue(undefined);
     isPlainSpy = spyOn(formatters, "isPlainOutput").mockReturnValue(true);
     updateNotifSpy = spyOn(
       versionCheck,
@@ -876,7 +1140,8 @@ describe("listCommand.func — follow mode (trace)", () => {
 
   afterEach(() => {
     listTraceLogsSpy.mockRestore();
-    resolveOrgSpy.mockRestore();
+    resolveTraceOrgSpy.mockRestore();
+    warnIfNormalizedSpy.mockRestore();
     isPlainSpy.mockRestore();
     updateNotifSpy.mockRestore();
     stderrSpy.mockRestore();
@@ -887,17 +1152,17 @@ describe("listCommand.func — follow mode (trace)", () => {
     json: false,
     limit: 100,
     follow: 1,
-    trace: TRACE_ID,
+    period: "90d",
   } as const;
 
   test("writes initial trace logs then resolves on SIGINT", async () => {
     listTraceLogsSpy.mockResolvedValueOnce(sampleTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     await Bun.sleep(50);
     sigint.trigger();
     await promise;
@@ -908,12 +1173,12 @@ describe("listCommand.func — follow mode (trace)", () => {
 
   test("writes stderr banner with trace ID in follow mode", async () => {
     listTraceLogsSpy.mockResolvedValueOnce([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     await Bun.sleep(50);
     sigint.trigger();
     await promise;
@@ -934,12 +1199,12 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy
       .mockResolvedValueOnce(sampleTraceLogs)
       .mockResolvedValueOnce(mixedLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
     await Bun.sleep(1200);
     sigint.trigger();
@@ -956,12 +1221,16 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy
       .mockResolvedValueOnce(sampleTraceLogs)
       .mockResolvedValueOnce(newerTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, { ...traceFollowFlags, json: true });
+    const promise = func.call(
+      context,
+      { ...traceFollowFlags, json: true },
+      TRACE_ID
+    );
     // Wait for initial fetch + poll timer (1s) + poll execution
     await Bun.sleep(1200);
     sigint.trigger();
@@ -976,16 +1245,16 @@ describe("listCommand.func — follow mode (trace)", () => {
         return false;
       }
     });
-    // First batch: 1 JSON line (array of 3 items from LogListResult)
+    // First batch: 1 JSON line (envelope with data array from LogListResult)
     // Poll batch: 1 JSON line per item (bare JSONL)
     expect(jsonLines.length).toBe(2);
-    // First line is an array (the initial trace batch)
+    // First line is an envelope with data array (the initial trace batch)
     const firstBatch = JSON.parse(jsonLines[0]);
-    expect(Array.isArray(firstBatch)).toBe(true);
-    expect(firstBatch).toHaveLength(3);
+    expect(firstBatch).toHaveProperty("data");
+    expect(Array.isArray(firstBatch.data)).toBe(true);
+    expect(firstBatch.data).toHaveLength(3);
     // Second line is a bare object (polled item)
     const pollItem = JSON.parse(jsonLines[1]);
-    expect(Array.isArray(pollItem)).toBe(false);
     expect(pollItem.message).toBe("New poll result");
   });
 
@@ -993,26 +1262,26 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new AuthError("expired"));
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    await expect(func.call(context, traceFollowFlags)).rejects.toThrow(
-      AuthError
-    );
+    await expect(
+      func.call(context, traceFollowFlags, TRACE_ID)
+    ).rejects.toThrow(AuthError);
   });
 
   test("continues polling after transient error (trace mode)", async () => {
     listTraceLogsSpy
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("server error"));
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
     await Bun.sleep(1200);
     sigint.trigger();
@@ -1026,12 +1295,12 @@ describe("listCommand.func — follow mode (trace)", () => {
 
   test("uses 1m statsPeriod for initial trace follow fetch", async () => {
     listTraceLogsSpy.mockResolvedValueOnce([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     await Bun.sleep(50);
     sigint.trigger();
     await promise;
@@ -1047,12 +1316,12 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy
       .mockResolvedValueOnce(sampleTraceLogs)
       .mockResolvedValueOnce([]);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
     await Bun.sleep(1200);
     sigint.trigger();
@@ -1071,12 +1340,12 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(newerTraceLogs);
-    resolveOrgSpy.mockResolvedValue({ org: ORG });
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
-    const promise = func.call(context, traceFollowFlags);
+    const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
     await Bun.sleep(1200);
     sigint.trigger();
