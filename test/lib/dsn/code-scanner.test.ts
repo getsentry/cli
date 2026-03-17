@@ -299,6 +299,64 @@ describe("Code Scanner", () => {
       expect(result).toBeNull();
     });
 
+    test("skips test directories", async () => {
+      // DSNs in test/ should be ignored (they contain test fixtures, not real config)
+      mkdirSync(join(testDir, "test/lib"), { recursive: true });
+      writeFileSync(
+        join(testDir, "test/lib/scanner.test.ts"),
+        'const DSN = "https://testkey@o123.ingest.sentry.io/456";'
+      );
+
+      const result = await scanCodeForFirstDsn(testDir);
+      expect(result).toBeNull();
+
+      // Also test tests/ directory
+      mkdirSync(join(testDir, "tests/unit"), { recursive: true });
+      writeFileSync(
+        join(testDir, "tests/unit/app.test.ts"),
+        'const DSN = "https://testkey@o999.ingest.sentry.io/789";'
+      );
+
+      const allResult = await scanCodeForDsns(testDir);
+      expect(allResult.dsns).toHaveLength(0);
+    });
+
+    test("skips __mocks__ and fixtures directories", async () => {
+      mkdirSync(join(testDir, "__mocks__"), { recursive: true });
+      writeFileSync(
+        join(testDir, "__mocks__/sentry.ts"),
+        'export const DSN = "https://mock@o123.ingest.sentry.io/111";'
+      );
+      mkdirSync(join(testDir, "fixtures"), { recursive: true });
+      writeFileSync(
+        join(testDir, "fixtures/config.ts"),
+        'export const DSN = "https://fixture@o123.ingest.sentry.io/222";'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(0);
+    });
+
+    test("still finds DSNs in src/ when test/ is skipped", async () => {
+      // Ensure test/ skipping doesn't affect real source directories
+      mkdirSync(join(testDir, "src"), { recursive: true });
+      writeFileSync(
+        join(testDir, "src/config.ts"),
+        'const DSN = "https://realkey@o123.ingest.sentry.io/456";'
+      );
+      mkdirSync(join(testDir, "test"), { recursive: true });
+      writeFileSync(
+        join(testDir, "test/fixture.ts"),
+        'const DSN = "https://fakekey@o999.ingest.sentry.io/999";'
+      );
+
+      const result = await scanCodeForDsns(testDir);
+      expect(result.dsns).toHaveLength(1);
+      expect(result.dsns[0].raw).toBe(
+        "https://realkey@o123.ingest.sentry.io/456"
+      );
+    });
+
     test("respects gitignore", async () => {
       writeFileSync(join(testDir, ".gitignore"), "ignored/");
       mkdirSync(join(testDir, "ignored"), { recursive: true });

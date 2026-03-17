@@ -258,4 +258,58 @@ describe("resolveOrgRegion", () => {
     expect(await resolveOrgRegion("org-a")).toBe("https://us.sentry.io");
     expect(await resolveOrgRegion("org-b")).toBe("https://de.sentry.io");
   });
+
+  test("deduplicates concurrent API calls for the same org", async () => {
+    let fetchCount = 0;
+
+    // Mock fetch to track call count
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/organizations/dedup-org/")) {
+        fetchCount += 1;
+        // Small delay to ensure concurrency overlap
+        await Bun.sleep(50);
+        return new Response(
+          JSON.stringify({
+            id: "789",
+            slug: "dedup-org",
+            name: "Dedup Organization",
+            links: {
+              organizationUrl: "https://us.sentry.io/organizations/dedup-org/",
+              regionUrl: "https://us.sentry.io",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    try {
+      // Fire 5 concurrent calls for the same org
+      const results = await Promise.all([
+        resolveOrgRegion("dedup-org"),
+        resolveOrgRegion("dedup-org"),
+        resolveOrgRegion("dedup-org"),
+        resolveOrgRegion("dedup-org"),
+        resolveOrgRegion("dedup-org"),
+      ]);
+
+      // All should return the same result
+      for (const result of results) {
+        expect(result).toBe("https://us.sentry.io");
+      }
+
+      // Only one fetch should have been made (in-flight dedup)
+      expect(fetchCount).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

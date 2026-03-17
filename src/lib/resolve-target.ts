@@ -14,6 +14,7 @@
  */
 
 import { basename } from "node:path";
+import pLimit from "p-limit";
 import {
   findProjectByDsnKey,
   findProjectsByPattern,
@@ -29,7 +30,7 @@ import {
   setCachedProject,
   setCachedProjectByDsnKey,
 } from "./db/project-cache.js";
-import type { DetectedDsn } from "./dsn/index.js";
+import type { DetectedDsn, DsnDetectionResult } from "./dsn/index.js";
 import {
   detectAllDsns,
   detectDsn,
@@ -579,10 +580,61 @@ export async function fetchProjectId(
 }
 
 /**
+ * Maximum concurrent DSN resolution API calls.
+ * Prevents overwhelming the Sentry API with parallel requests when
+ * many DSNs are detected (e.g., monorepos or repos with test fixtures).
+ */
+const DSN_RESOLVE_CONCURRENCY = 5;
+
+/**
+ * Maximum time (ms) to spend resolving DSNs before returning partial results.
+ * Prevents indefinite hangs when the API is slow or rate-limiting.
+ */
+const DSN_RESOLVE_TIMEOUT_MS = 15_000;
+
+/**
+ * Resolve DSNs with a concurrency limit and overall timeout.
+ *
+ * Uses p-limit to cap concurrent API calls (preventing rate-limit storms)
+ * and races against a timeout so the CLI never hangs indefinitely.
+ * On timeout, returns whichever results completed before the deadline.
+ *
+ * @param dsns - Deduplicated DSNs to resolve
+ * @returns Array of resolved targets (null for failures/timeouts)
+ */
+async function resolveDsnsWithTimeout(
+  dsns: DetectedDsn[]
+): Promise<(ResolvedTarget | null)[]> {
+  const limit = pLimit(DSN_RESOLVE_CONCURRENCY);
+  const results: (ResolvedTarget | null)[] = new Array(dsns.length).fill(null);
+
+  const resolvePromises = dsns.map((dsn, i) =>
+    limit(async () => {
+      results[i] = await resolveDsnToTarget(dsn);
+    })
+  );
+
+  const allDone = Promise.all(resolvePromises).then(() => "done" as const);
+  const timeout = new Promise<"timeout">((resolve) =>
+    setTimeout(() => resolve("timeout"), DSN_RESOLVE_TIMEOUT_MS)
+  );
+
+  const raceResult = await Promise.race([allDone, timeout]);
+
+  if (raceResult === "timeout") {
+    log.warn(
+      `DSN resolution timed out after ${DSN_RESOLVE_TIMEOUT_MS / 1000}s, returning partial results`
+    );
+  }
+
+  return results;
+}
+
+/**
  * Resolve all targets for monorepo-aware commands.
  *
  * When multiple DSNs are detected, resolves all of them in parallel
- * and returns a footer message for display.
+ * (with concurrency limiting) and returns a footer message for display.
  *
  * Resolution priority:
  * 1. Explicit org and project - returns single target
@@ -662,13 +714,46 @@ export async function resolveAllTargets(
     return inferFromDirectoryName(cwd);
   }
 
-  // Resolve all DSNs in parallel
-  const resolvedTargets = await Promise.all(
-    detection.all.map((dsn) => resolveDsnToTarget(dsn))
+  return resolveDetectedDsns(detection);
+}
+
+/**
+ * Deduplicate detected DSNs and resolve them with concurrency limiting.
+ *
+ * Groups DSNs by (orgId, projectId) or publicKey, resolves one per unique
+ * combination, then deduplicates resolved targets by org+project slug.
+ *
+ * @param detection - DSN detection result with all found DSNs
+ * @returns Resolved targets with optional footer message
+ */
+async function resolveDetectedDsns(
+  detection: DsnDetectionResult
+): Promise<ResolvedTargets> {
+  // Deduplicate DSNs by (orgId, projectId) or publicKey before resolution.
+  // Multiple DSNs in test fixtures or monorepos can share the same org+project
+  // — resolving each unique pair once avoids redundant API calls.
+  const uniqueDsnMap = new Map<string, DetectedDsn>();
+  for (const dsn of detection.all) {
+    const dedupeKey = dsn.orgId
+      ? `${dsn.orgId}:${dsn.projectId}`
+      : `key:${dsn.publicKey}`;
+    if (!uniqueDsnMap.has(dedupeKey)) {
+      uniqueDsnMap.set(dedupeKey, dsn);
+    }
+  }
+  const uniqueDsns = [...uniqueDsnMap.values()];
+
+  log.debug(
+    `Resolving ${uniqueDsns.length} unique DSN targets (${detection.all.length} total detected)`
   );
 
+  // Resolve with concurrency limit to avoid overwhelming the Sentry API.
+  // Without this, large repos can fire 100+ concurrent HTTP requests,
+  // triggering rate limiting (429) and retry storms.
+  const resolvedTargets = await resolveDsnsWithTimeout(uniqueDsns);
+
   // Filter out failed resolutions and deduplicate by org+project
-  // (multiple DSNs with different keys can point to same project)
+  // (different orgId forms can resolve to the same org slug)
   const seen = new Set<string>();
   const targets = resolvedTargets.filter((t): t is ResolvedTarget => {
     if (t === null) {

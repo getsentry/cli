@@ -13,7 +13,7 @@
  */
 
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
@@ -85,6 +85,12 @@ const ALWAYS_SKIP_DIRS = [
   ".cursor",
   // Node.js
   "node_modules",
+  // Test directories (contain fixture DSNs, not real configuration)
+  "test",
+  "tests",
+  "__mocks__",
+  "fixtures",
+  "__fixtures__",
   // Python
   "__pycache__",
   ".pytest_cache",
@@ -432,7 +438,6 @@ type CollectResult = {
  */
 async function getDirMtime(dir: string): Promise<number> {
   try {
-    const { stat } = await import("node:fs/promises");
     const stats = await stat(dir);
     return Math.floor(stats.mtimeMs);
   } catch {
