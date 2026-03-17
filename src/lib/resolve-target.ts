@@ -595,15 +595,15 @@ const DSN_RESOLVE_TIMEOUT_MS = 15_000;
 /**
  * Resolve DSNs with a concurrency limit and overall timeout.
  *
- * Uses p-limit's `map` helper for concurrency control and
- * `AbortSignal.timeout` for a self-cleaning deadline. Queued tasks
- * check the abort signal before doing work (same pattern as
- * code-scanner's earlyExit flag from PR #414).
+ * Uses p-limit's `map` helper for concurrency control and races it
+ * against `AbortSignal.timeout` so the CLI never hangs indefinitely.
+ * Queued tasks check the abort signal before doing work (same pattern
+ * as code-scanner's earlyExit flag from PR #414). In-flight tasks that
+ * already started are abandoned on timeout — their individual HTTP
+ * timeouts (30s in sentry-client.ts) bound them independently.
  *
- * Note: Cannot use `limit.clearQueue()` — as documented in
- * code-scanner.ts, it causes cleared promises to never settle,
- * hanging the map forever. Instead, queued tasks return null when
- * the signal is aborted.
+ * Results are written to a shared array so that tasks completing before
+ * the deadline are captured even when the overall operation times out.
  *
  * @param dsns - Deduplicated DSNs to resolve
  * @returns Array of resolved targets (null for failures/timeouts)
@@ -614,14 +614,31 @@ async function resolveDsnsWithTimeout(
   const limit = pLimit(DSN_RESOLVE_CONCURRENCY);
   const signal = AbortSignal.timeout(DSN_RESOLVE_TIMEOUT_MS);
 
-  const results = await limit.map(dsns, (dsn) => {
+  // Shared results array — tasks write their result as they complete,
+  // so partial results survive timeout.
+  const results: (ResolvedTarget | null)[] = new Array(dsns.length).fill(null);
+
+  const mapDone = limit.map(dsns, (dsn, i) => {
     if (signal.aborted) {
       return Promise.resolve(null);
     }
-    return resolveDsnToTarget(dsn);
+    return resolveDsnToTarget(dsn).then((target) => {
+      results[i] = target;
+      return target;
+    });
   });
 
-  if (signal.aborted) {
+  // Race limit.map against the abort signal so in-flight tasks
+  // don't block the timeout.
+  const aborted = new Promise<"timeout">((resolve) => {
+    signal.addEventListener("abort", () => resolve("timeout"), { once: true });
+  });
+  const raceResult = await Promise.race([
+    mapDone.then(() => "done" as const),
+    aborted,
+  ]);
+
+  if (raceResult === "timeout") {
     log.warn(
       `DSN resolution timed out after ${DSN_RESOLVE_TIMEOUT_MS / 1000}s, returning partial results`
     );
