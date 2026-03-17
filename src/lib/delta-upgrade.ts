@@ -776,7 +776,8 @@ export async function resolveNightlyChain(opts: {
 export function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  offline?: boolean
 ): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
     return Promise.resolve(null);
@@ -798,8 +799,18 @@ export function attemptDeltaUpgrade(
       try {
         const result =
           channel === "nightly"
-            ? await resolveNightlyDelta(targetVersion, oldBinaryPath, destPath)
-            : await resolveStableDelta(targetVersion, oldBinaryPath, destPath);
+            ? await resolveNightlyDelta(
+                targetVersion,
+                oldBinaryPath,
+                destPath,
+                offline
+              )
+            : await resolveStableDelta(
+                targetVersion,
+                oldBinaryPath,
+                destPath,
+                offline
+              );
 
         if (result) {
           span.setAttribute("delta.patch_bytes", result.patchBytes);
@@ -927,6 +938,8 @@ type ResolveAndApplyOpts = {
   resolveFromNetwork: () => Promise<PatchChain | null>;
   /** Channel label for log messages (e.g., "stable", "nightly") */
   channel: string;
+  /** When true, skip the network fallback — only use cached patches */
+  offline?: boolean;
 };
 
 /**
@@ -945,6 +958,7 @@ async function resolveAndApplyDelta(
     destPath,
     resolveFromNetwork,
     channel,
+    offline,
   } = opts;
   // Check patch cache first — enables fully offline upgrades
   const cached = await tryLoadCachedChain(CLI_VERSION, targetVersion);
@@ -955,6 +969,14 @@ async function resolveAndApplyDelta(
     );
     return await applyChainAndReturn(cached, oldBinaryPath, destPath);
   }
+
+  // In offline mode, skip the network resolution entirely — if the cache
+  // didn't have the patches, there's nothing more we can do.
+  if (offline) {
+    Sentry.getActiveSpan()?.setAttribute("delta.source", "offline_miss");
+    return null;
+  }
+
   Sentry.getActiveSpan()?.setAttribute("delta.source", "network");
 
   const chain = await resolveFromNetwork();
@@ -981,7 +1003,8 @@ async function resolveAndApplyDelta(
 export function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  offline?: boolean
 ): Promise<DeltaResult | null> {
   return resolveAndApplyDelta({
     targetVersion,
@@ -992,6 +1015,7 @@ export function resolveStableDelta(
         resolveStableChain(CLI_VERSION, targetVersion)
       ),
     channel: "stable",
+    offline,
   });
 }
 
@@ -1006,7 +1030,8 @@ export function resolveStableDelta(
 export function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  offline?: boolean
 ): Promise<DeltaResult | null> {
   return resolveAndApplyDelta({
     targetVersion,
@@ -1014,6 +1039,7 @@ export function resolveNightlyDelta(
     destPath,
     resolveFromNetwork: () => resolveNightlyChainWithContext(targetVersion),
     channel: "nightly",
+    offline,
   });
 }
 
