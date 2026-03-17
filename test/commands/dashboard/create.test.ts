@@ -90,7 +90,6 @@ describe("dashboard create", () => {
 
     expect(createDashboardSpy).toHaveBeenCalledWith("acme-corp", {
       title: "My Dashboard",
-      widgets: [],
       projects: undefined,
     });
   });
@@ -135,77 +134,8 @@ describe("dashboard create", () => {
 
     expect(createDashboardSpy).toHaveBeenCalledWith("my-org", {
       title: "My Dashboard",
-      widgets: [],
       projects: undefined,
     });
-  });
-
-  test("--widget-display and --widget-title creates dashboard with widget", async () => {
-    createDashboardSpy.mockResolvedValue({
-      ...sampleDashboard,
-      widgets: [
-        {
-          title: "Error Count",
-          displayType: "big_number",
-          widgetType: "spans",
-        },
-      ],
-    });
-
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-    await func.call(
-      context,
-      {
-        json: false,
-        "widget-title": "Error Count",
-        "widget-display": "big_number",
-      },
-      "My Dashboard"
-    );
-
-    expect(createDashboardSpy).toHaveBeenCalledWith(
-      "acme-corp",
-      expect.objectContaining({
-        title: "My Dashboard",
-        widgets: expect.arrayContaining([
-          expect.objectContaining({
-            title: "Error Count",
-            displayType: "big_number",
-          }),
-        ]),
-      })
-    );
-  });
-
-  test("--widget-title without --widget-display throws ValidationError", async () => {
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-
-    const err = await func
-      .call(
-        context,
-        { json: false, "widget-title": "Error Count" },
-        "My Dashboard"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain("--widget-display");
-  });
-
-  test("--widget-display without --widget-title throws ValidationError", async () => {
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-
-    const err = await func
-      .call(
-        context,
-        { json: false, "widget-display": "big_number" },
-        "My Dashboard"
-      )
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(ValidationError);
-    expect(err.message).toContain("--widget-title");
   });
 
   test("throws ContextError when org cannot be resolved", async () => {
