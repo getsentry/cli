@@ -501,6 +501,7 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
+- `--offline - Upgrade using only cached version info and patches (no network)`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
