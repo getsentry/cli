@@ -24,6 +24,19 @@ import {
 
 const TAGLINE = "The command-line interface for Sentry";
 
+/** Singular route name → plural shortcut (e.g. "issue" → "issues") */
+const SHORTCUT_ALIASES: Record<string, string> = {
+  issue: "issues",
+  org: "orgs",
+  project: "projects",
+  repo: "repos",
+  team: "teams",
+  log: "logs",
+  span: "spans",
+  trace: "traces",
+  trial: "trials",
+};
+
 type HelpCommand = {
   usage: string;
   description: string;
@@ -52,9 +65,13 @@ function generateCommands(): HelpCommand[] {
         const subNames = subEntries
           .map((sub: RouteMapEntry) => sub.name.original)
           .join(" | ");
+        const alias = SHORTCUT_ALIASES[routeName];
+        const description = alias
+          ? `${brief}  (alias: sentry ${alias})`
+          : brief;
         return {
           usage: `sentry ${routeName} ${subNames}`,
-          description: brief,
+          description,
         };
       }
 
