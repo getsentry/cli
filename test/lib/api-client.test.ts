@@ -19,7 +19,7 @@ import {
 } from "../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { setOrgRegion } from "../../src/lib/db/regions.js";
+import { setOrgRegion, setOrgRegions } from "../../src/lib/db/regions.js";
 import { useTestConfigDir } from "../helpers.js";
 
 useTestConfigDir("test-api-");
@@ -828,14 +828,23 @@ describe("findProjectsBySlug", () => {
     expect(projects).toHaveLength(0);
   });
 
-  test("uses cached org regions to skip listOrganizations", async () => {
+  test("uses cached orgs to skip listOrganizations API calls", async () => {
     const { findProjectsBySlug } = await import("../../src/lib/api-client.js");
 
-    // Seed org_regions cache — this is the optimization under test
-    await setOrgRegion("acme", DEFAULT_SENTRY_URL);
+    // Seed org_regions cache with full org data (slug, id, name, region)
+    // so listOrganizations() returns from cache without HTTP calls.
+    await setOrgRegions([
+      {
+        slug: "acme",
+        regionUrl: DEFAULT_SENTRY_URL,
+        orgId: "42",
+        orgName: "Acme Corp",
+      },
+    ]);
 
     const requests: string[] = [];
 
+    // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
       const url = req.url;
@@ -855,17 +864,14 @@ describe("findProjectsBySlug", () => {
       });
     };
 
-    const { projects, orgs } = await findProjectsBySlug("frontend");
+    const { projects } = await findProjectsBySlug("frontend");
 
     // Found via cached orgs
     expect(projects).toHaveLength(1);
     expect(projects[0].slug).toBe("frontend");
     expect(projects[0].orgSlug).toBe("acme");
 
-    // orgs is empty because we used cached path (no full listing)
-    expect(orgs).toHaveLength(0);
-
-    // The expensive listOrganizations calls were skipped
+    // The expensive listOrganizations API calls were skipped
     expect(requests.some((r) => r.includes("/users/me/regions/"))).toBe(false);
     expect(
       requests.some(

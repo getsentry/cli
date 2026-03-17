@@ -65,11 +65,44 @@ export async function listOrganizationsInRegion(
 }
 
 /**
- * List all organizations the user has access to across all regions.
- * Performs a fan-out to each region and combines results.
- * Also caches the region URL for each organization.
+ * List all organizations, returning cached data when available.
+ *
+ * On first call (cold cache), fetches from the API and populates the cache.
+ * On subsequent calls, returns organizations from the SQLite cache without
+ * any HTTP requests. This avoids the expensive getUserRegions() +
+ * listOrganizationsInRegion() fan-out (~800ms) on every command.
+ *
+ * Callers that need guaranteed-fresh data (e.g., `org list`, `auth status`)
+ * should use {@link listOrganizationsUncached} instead.
  */
 export async function listOrganizations(): Promise<SentryOrganization[]> {
+  const { getCachedOrganizations } = await import("../db/regions.js");
+
+  const cached = await getCachedOrganizations();
+  if (cached.length > 0) {
+    return cached.map((org) => ({
+      id: org.id,
+      slug: org.slug,
+      name: org.name,
+    }));
+  }
+
+  // Cache miss — fetch from API (also populates cache for next time)
+  return listOrganizationsUncached();
+}
+
+/**
+ * List all organizations by fetching from the API, bypassing the cache.
+ *
+ * Performs a fan-out to each region and combines results.
+ * Populates the org_regions cache with slug, region URL, org ID, and org name.
+ *
+ * Use this when you need guaranteed-fresh data (e.g., `org list`, `auth status`).
+ * Most callers should use {@link listOrganizations} instead.
+ */
+export async function listOrganizationsUncached(): Promise<
+  SentryOrganization[]
+> {
   const { setOrgRegions } = await import("../db/regions.js");
 
   // Self-hosted instances may not have the regions endpoint (404)
@@ -102,6 +135,7 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
     slug: r.org.slug,
     regionUrl: r.regionUrl,
     orgId: r.org.id,
+    orgName: r.org.name,
   }));
   await setOrgRegions(regionEntries);
 

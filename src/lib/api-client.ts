@@ -56,6 +56,7 @@ export {
   getUserRegions,
   listOrganizations,
   listOrganizationsInRegion,
+  listOrganizationsUncached,
 } from "./api/organizations.js";
 export {
   createProject,

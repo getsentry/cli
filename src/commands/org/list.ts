@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listOrganizations } from "../../lib/api-client.js";
+import { listOrganizationsUncached } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
@@ -130,7 +130,7 @@ export const listCommand = buildCommand({
   async *func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
 
-    const orgs = await listOrganizations();
+    const orgs = await listOrganizationsUncached();
     const limitedOrgs = orgs.slice(0, flags.limit);
 
     // Check if user has orgs in multiple regions

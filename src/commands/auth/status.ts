@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listOrganizations } from "../../lib/api-client.js";
+import { listOrganizationsUncached } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   type AuthConfig,
@@ -124,7 +124,7 @@ async function collectDefaults(): Promise<AuthStatusData["defaults"]> {
  */
 async function verifyCredentials(): Promise<AuthStatusData["verification"]> {
   try {
-    const orgs = await listOrganizations();
+    const orgs = await listOrganizationsUncached();
     return {
       success: true,
       organizations: orgs.map((o) => ({ name: o.name, slug: o.slug })),
