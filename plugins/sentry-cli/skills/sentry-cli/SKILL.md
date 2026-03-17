@@ -727,7 +727,7 @@ Start a product trial
 
 Initialize Sentry in your project
 
-#### `sentry init <directory>`
+#### `sentry init <target> <directory>`
 
 Initialize Sentry in your project
 
