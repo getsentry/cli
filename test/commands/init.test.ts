@@ -9,6 +9,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { initCommand } from "../../src/commands/init.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as apiClient from "../../src/lib/api-client.js";
 import { ContextError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
@@ -19,6 +21,8 @@ import * as resolveTarget from "../../src/lib/resolve-target.js";
 let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 let resolveProjectSpy: ReturnType<typeof spyOn>;
+let resolveOrgSpy: ReturnType<typeof spyOn>;
+let listOrgsSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -59,11 +63,21 @@ beforeEach(() => {
     org: "resolved-org",
     project: slug,
   }));
+  // Mock resolveOrg and listOrganizations to prevent real DSN scans / API calls
+  // from the background detection promises fired in init's func()
+  resolveOrgSpy = spyOn(resolveTarget, "resolveOrg").mockImplementation(
+    async () => null
+  );
+  listOrgsSpy = spyOn(apiClient, "listOrganizations").mockImplementation(
+    async () => []
+  );
 });
 
 afterEach(() => {
   runWizardSpy.mockRestore();
   resolveProjectSpy.mockRestore();
+  resolveOrgSpy.mockRestore();
+  listOrgsSpy.mockRestore();
 });
 
 describe("init command func", () => {
@@ -322,6 +336,61 @@ describe("init command func", () => {
       expect(capturedArgs?.org).toBe("acme");
       expect(capturedArgs?.project).toBe("my-app");
       expect(capturedArgs?.team).toBe("backend");
+    });
+  });
+
+  // ── Background org detection ──────────────────────────────────────────
+
+  describe("background org detection", () => {
+    test("passes bgOrgDetection when org is not explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS);
+      const bg = capturedArgs?.bgOrgDetection as
+        | { orgPromise: Promise<unknown>; orgListPromise: Promise<unknown> }
+        | undefined;
+      expect(bg).toBeDefined();
+      expect(bg?.orgPromise).toBeInstanceOf(Promise);
+      expect(bg?.orgListPromise).toBeInstanceOf(Promise);
+    });
+
+    test("fires resolveOrg for background detection", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS);
+      expect(resolveOrgSpy).toHaveBeenCalled();
+    });
+
+    test("fires listOrganizations for background detection", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS);
+      expect(listOrgsSpy).toHaveBeenCalled();
+    });
+
+    test("omits bgOrgDetection when org is explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "acme/my-app");
+      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+    });
+
+    test("omits bgOrgDetection when org-only is explicit", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "acme/");
+      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+    });
+
+    test("passes bgOrgDetection for bare slug (project-search resolves org)", async () => {
+      // Even though resolveProjectBySlug finds an org, the bgDetection
+      // is skipped because explicitOrg is set from the resolved result
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "my-app");
+      // resolveProjectBySlug returns { org: "resolved-org", project: "my-app" }
+      // so explicitOrg is set → bgOrgDetection should be undefined
+      expect(capturedArgs?.bgOrgDetection).toBeUndefined();
+    });
+
+    test("passes bgOrgDetection for path-only arg", async () => {
+      const ctx = makeContext();
+      await func.call(ctx, DEFAULT_FLAGS, "./subdir");
+      expect(capturedArgs?.bgOrgDetection).toBeDefined();
     });
   });
 });

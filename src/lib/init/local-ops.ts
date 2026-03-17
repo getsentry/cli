@@ -27,6 +27,7 @@ import {
 } from "./constants.js";
 import type {
   ApplyPatchsetPayload,
+  BgOrgDetection,
   CreateSentryProjectPayload,
   DirEntry,
   FileExistsBatchPayload,
@@ -658,19 +659,27 @@ function applyPatchset(
 /**
  * Resolve the org slug from local config, env vars, or by listing the user's
  * organizations from the API as a fallback.
- * Returns the slug on success, or a LocalOpResult error to return early.
+ *
+ * When `bgDetection` is provided, its pre-started promises are awaited instead
+ * of making fresh calls — this eliminates the 2-5 s cold-start DSN scan that
+ * would otherwise block here, because the scan was already running in the
+ * background during the preamble user-interaction phase.
+ *
+ * @returns The org slug on success, or a {@link LocalOpResult} error to return early.
  */
 async function resolveOrgSlug(
   cwd: string,
-  yes: boolean
+  yes: boolean,
+  bgDetection?: BgOrgDetection
 ): Promise<string | LocalOpResult> {
-  const resolved = await resolveOrg({ cwd });
+  // Use the pre-fetched org detection if available, otherwise run live
+  const resolved = await (bgDetection?.orgPromise ?? resolveOrg({ cwd }));
   if (resolved) {
     return resolved.org;
   }
 
-  // Fallback: list user's organizations from API
-  const orgs = await listOrganizations();
+  // Fallback: use pre-fetched org list if available, otherwise fetch live
+  const orgs = await (bgDetection?.orgListPromise ?? listOrganizations());
   if (orgs.length === 0) {
     return {
       ok: false,
@@ -770,7 +779,11 @@ async function createSentryProject(
     if (options.org) {
       orgSlug = options.org;
     } else {
-      const orgResult = await resolveOrgSlug(payload.cwd, options.yes);
+      const orgResult = await resolveOrgSlug(
+        payload.cwd,
+        options.yes,
+        options.bgOrgDetection
+      );
       if (typeof orgResult !== "string") {
         return orgResult;
       }
