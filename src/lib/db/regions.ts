@@ -161,21 +161,31 @@ export type CachedOrg = {
 };
 
 /**
+ * Maximum age (ms) for cached organization entries.
+ * Entries older than this are considered stale and ignored, forcing a
+ * fresh API fetch. 7 days balances offline usability with picking up
+ * new org memberships.
+ */
+const ORG_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Get all cached organizations with id, slug, and name.
  *
- * Returns organizations that have all three fields populated in the cache.
- * Rows with missing `org_id` or `org_name` (from before schema v9) are
- * excluded — callers should fall back to the API when the result is empty.
+ * Returns organizations that have all three fields populated and were
+ * updated within the TTL window. Rows with missing `org_id` or `org_name`
+ * (from before schema v9) or stale `updated_at` are excluded — callers
+ * should fall back to the API when the result is empty.
  *
- * @returns Array of cached org entries, or empty if cache is cold/incomplete
+ * @returns Array of cached org entries, or empty if cache is cold/stale/incomplete
  */
 export async function getCachedOrganizations(): Promise<CachedOrg[]> {
   const db = getDatabase();
+  const cutoff = Date.now() - ORG_CACHE_TTL_MS;
   const rows = db
     .query(
-      `SELECT org_slug, org_id, org_name FROM ${TABLE} WHERE org_id IS NOT NULL AND org_name IS NOT NULL`
+      `SELECT org_slug, org_id, org_name FROM ${TABLE} WHERE org_id IS NOT NULL AND org_name IS NOT NULL AND updated_at > ?`
     )
-    .all() as Pick<OrgRegionRow, "org_slug" | "org_id" | "org_name">[];
+    .all(cutoff) as Pick<OrgRegionRow, "org_slug" | "org_id" | "org_name">[];
 
   return rows.map((row) => ({
     slug: row.org_slug,
