@@ -18,6 +18,7 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 
+import { getAllOrgRegions } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
 import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
@@ -176,34 +177,56 @@ export type ProjectSearchResult = {
 export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectSearchResult> {
-  const orgs = await listOrganizations();
   const isNumericId = isAllDigits(projectSlug);
 
-  // Direct lookup in parallel — one API call per org instead of paginating all projects
-  const searchResults = await Promise.all(
-    orgs.map((org) =>
-      withAuthGuard(async () => {
-        const project = await getProject(org.slug, projectSlug);
-        // The API accepts project_id_or_slug, so a numeric input could
-        // resolve by ID instead of slug. When the input is all digits,
-        // accept the match (the user passed a numeric project ID).
-        // For non-numeric inputs, verify the slug actually matches to
-        // avoid false positives from coincidental ID collisions.
-        // Note: Sentry enforces that project slugs must start with a letter,
-        // so an all-digits input can only ever be a numeric ID, never a slug.
-        if (!isNumericId && project.slug !== projectSlug) {
-          return null;
-        }
-        return { ...project, orgSlug: org.slug };
-      })
-    )
-  );
+  /** Search for the project in a list of org slugs (parallel getProject per org). */
+  const searchOrgs = (orgSlugs: string[]) =>
+    Promise.all(
+      orgSlugs.map((orgSlug) =>
+        withAuthGuard(async () => {
+          const project = await getProject(orgSlug, projectSlug);
+          // The API accepts project_id_or_slug, so a numeric input could
+          // resolve by ID instead of slug. When the input is all digits,
+          // accept the match (the user passed a numeric project ID).
+          // For non-numeric inputs, verify the slug actually matches to
+          // avoid false positives from coincidental ID collisions.
+          // Note: Sentry enforces that project slugs must start with a letter,
+          // so an all-digits input can only ever be a numeric ID, never a slug.
+          if (!isNumericId && project.slug !== projectSlug) {
+            return null;
+          }
+          return { ...project, orgSlug };
+        })
+      )
+    );
 
-  return {
-    projects: searchResults
+  const extractProjects = (
+    results: Awaited<ReturnType<typeof searchOrgs>>
+  ): ProjectWithOrg[] =>
+    results
       .filter((r): r is AuthGuardSuccess<ProjectWithOrg | null> => r.ok)
       .map((r) => r.value)
-      .filter((v): v is ProjectWithOrg => v !== null),
+      .filter((v): v is ProjectWithOrg => v !== null);
+
+  // Fast path: use cached org slugs to skip the expensive listOrganizations()
+  // round-trip (getUserRegions + listOrganizationsInRegion).
+  const cachedOrgRegions = await getAllOrgRegions();
+  if (cachedOrgRegions.size > 0) {
+    const cachedSlugs = [...cachedOrgRegions.keys()];
+    const cachedResults = await searchOrgs(cachedSlugs);
+    const cachedProjects = extractProjects(cachedResults);
+    if (cachedProjects.length > 0) {
+      return { projects: cachedProjects, orgs: [] };
+    }
+    // Fall through: project might be in a new org not yet cached
+  }
+
+  // Full listing: fetch all orgs from API, then search each
+  const orgs = await listOrganizations();
+  const searchResults = await searchOrgs(orgs.map((o) => o.slug));
+
+  return {
+    projects: extractProjects(searchResults),
     orgs,
   };
 }
