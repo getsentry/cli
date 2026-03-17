@@ -11,6 +11,10 @@ export type WizardOptions = {
   features?: string[];
   /** Explicit team slug to create the project under. Skips team resolution. */
   team?: string;
+  /** Explicit org slug from CLI arg (e.g., "acme" from "acme/my-app"). Skips interactive org selection. */
+  org?: string;
+  /** Explicit project name from CLI arg (e.g., "my-app" from "acme/my-app"). Overrides wizard-detected name. */
+  project?: string;
 };
 
 // Local-op suspend payloads
