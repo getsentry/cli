@@ -215,8 +215,8 @@ export async function findProjectsBySlug(
   // from `sentry issue list` output — which already called listOrganizations()
   // and populated org_regions with all accessible orgs.
   const cachedOrgRegions = await getAllOrgRegions();
-  if (cachedOrgRegions.size > 0) {
-    const cachedSlugs = [...cachedOrgRegions.keys()];
+  const cachedSlugs = [...cachedOrgRegions.keys()];
+  if (cachedSlugs.length > 0) {
     const cachedResults = await searchOrgs(cachedSlugs);
     const cachedProjects = extractProjects(cachedResults);
     if (cachedProjects.length > 0) {
@@ -225,9 +225,13 @@ export async function findProjectsBySlug(
     // Fall through: project might be in a new org not yet cached
   }
 
-  // Full listing: fetch all orgs from API, then search each
+  // Full listing: fetch all orgs from API, then skip already-searched cached orgs
   const orgs = await listOrganizations();
-  const searchResults = await searchOrgs(orgs.map((o) => o.slug));
+  const cachedSet = new Set(cachedSlugs);
+  const newOrgSlugs = orgs
+    .filter((o) => !cachedSet.has(o.slug))
+    .map((o) => o.slug);
+  const searchResults = await searchOrgs(newOrgSlugs);
 
   return {
     projects: extractProjects(searchResults),
