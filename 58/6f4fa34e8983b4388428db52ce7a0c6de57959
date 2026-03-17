@@ -1,0 +1,103 @@
+# Fix: Delta Upgrade Fails for Nightlies Due to MAX_CHAIN_DEPTH
+
+## Root Cause
+
+When upgrading nightly from `0.16.0-dev.1773428991` → `0.17.0-dev.1773740582` (~3.6 days apart), there were **15 commits** on `main` in that window. Each commit produces a nightly build with a corresponding patch tag. The hard `MAX_CHAIN_DEPTH = 10` limit at line 669 of `delta-upgrade.ts` silently rejected the chain before the size threshold could even be evaluated:
+
+```typescript
+if (chainTags.length === 0 || chainTags.length > MAX_CHAIN_DEPTH) {
+  return null;  // no logging — completely silent
+}
+```
+
+## Key Insight
+
+The codebase **already has** a `SIZE_THRESHOLD_RATIO = 0.6` guard that rejects chains whose total patch size exceeds 60% of the full binary download. This check runs in both:
+- **Stable**: `extractStableChain` line 301 — accumulates `totalSize` and checks against `fullGzSize * 0.6`
+- **Nightly**: `validateNightlyChain` line 539 — tracks `remainingBudget` and checks each step incrementally
+
+The `MAX_CHAIN_DEPTH = 10` is a **redundant hard limit** that fires before the size check runs. Since the size threshold is the meaningful guard (it directly measures whether delta is worth it), we should **remove the hard depth limit for nightly** and let the size budget be the sole gatekeeper.
+
+For stable, `MAX_CHAIN_DEPTH` also controls `fetchRecentReleases`'s `per_page` parameter (line 154), so we keep a limit there but can raise it modestly.
+
+## Changes
+
+### 1. `src/lib/delta-upgrade.ts`
+
+**A. Replace the single constant with a stable-only constant (line 51 area)**
+
+```typescript
+// Remove:
+const MAX_CHAIN_DEPTH = 10;
+
+// Add:
+/** Max stable chain depth. Also controls GitHub Releases per_page. */
+const MAX_STABLE_CHAIN_DEPTH = 10;
+```
+
+**B. `fetchRecentReleases` (line 154)** — `MAX_CHAIN_DEPTH + 2` → `MAX_STABLE_CHAIN_DEPTH + 2` (no behavior change, just rename).
+
+**C. `extractStableChain` (line 277)** — `MAX_CHAIN_DEPTH` → `MAX_STABLE_CHAIN_DEPTH` (no behavior change, just rename).
+
+**D. `resolveNightlyChain` (line 669)** — Remove the depth check entirely. The existing `SIZE_THRESHOLD_RATIO` budget in `validateNightlyChain` (line 539) already guards against chains that aren't worth downloading. Keep the `chainTags.length === 0` check.
+
+```typescript
+// Before:
+if (chainTags.length === 0 || chainTags.length > MAX_CHAIN_DEPTH) {
+  return null;
+}
+
+// After:
+if (chainTags.length === 0) {
+  log.debug("No patch tags found in version range");
+  return null;
+}
+```
+
+**E. Add debug logging for rejection reasons** — When the stable depth limit or nightly empty-chain check triggers, log a debug message so `--verbose` reveals why delta was skipped:
+
+- In `extractStableChain` (line 277):
+  ```typescript
+  if (chainReleases.length > MAX_STABLE_CHAIN_DEPTH) {
+    log.debug(`Stable chain depth ${chainReleases.length} exceeds limit ${MAX_STABLE_CHAIN_DEPTH}`);
+    return null;
+  }
+  ```
+
+- In `extractStableChain` (line 301, existing size check):
+  ```typescript
+  if (totalSize > fullGzSize * SIZE_THRESHOLD_RATIO) {
+    log.debug(`Stable chain size ${totalSize} exceeds ${Math.round(SIZE_THRESHOLD_RATIO * 100)}% of full download ${fullGzSize}`);
+    return null;
+  }
+  ```
+
+- In `validateNightlyChain` when a step fails size budget (around line 545):
+  ```typescript
+  if (!step) {
+    log.debug(`Nightly chain step ${i + 1} failed validation (from=${prevVersion})`);
+    return null;
+  }
+  ```
+
+### 2. `test/lib/delta-upgrade.test.ts`
+
+**A. Update test at line 388** — Rename from "MAX_CHAIN_DEPTH (10)" to "MAX_STABLE_CHAIN_DEPTH (10)". No logic change — this tests `extractStableChain`.
+
+**B. Update test at line 403** — Same rename.
+
+**C. Add test** — Verify that `filterAndSortChainTags` correctly returns >10 tags for nightly (proving no hard cap). Create 25 patch tags spanning a version range, assert all 25 are returned.
+
+**D. Add test** — Verify that `validateNightlyChain` rejects a chain when cumulative patch size exceeds the 60% budget (demonstrating size-based rejection works without a depth cap).
+
+## Files to Modify
+
+- `src/lib/delta-upgrade.ts` — Remove nightly depth cap, rename stable constant, add debug logging
+- `test/lib/delta-upgrade.test.ts` — Update 2 test names, add 2 new tests
+
+## Verification
+
+1. `bun test test/lib/delta-upgrade.test.ts` — All tests pass
+2. `bun run typecheck` — No type errors
+3. `bun run lint` — No lint issues
+4. Manual: `bun run dev -- cli upgrade --verbose` — If the chain is within size budget, delta succeeds; if not, debug logs explain why
