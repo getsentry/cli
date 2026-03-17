@@ -1,0 +1,78 @@
+# Plan: Improve `cli upgrade` output formatting
+
+Apply the same markdown-rendering improvements we made to the auth login flow.
+
+## Problem
+
+The `cli upgrade` command dumps 5-6 consecutive `log.info()` lines to stderr, each with an `ℹ` prefix:
+
+```
+ℹ Installation method: curl
+ℹ Current version: 0.5.0
+ℹ Channel: stable
+ℹ Latest version: 0.6.0
+ℹ Upgrading to 0.6.0...
+```
+
+This metadata is already present in `UpgradeResult` (`method`, `channel`, `currentVersion`, `targetVersion`) which gets passed to `formatUpgradeResult` — but the formatter ignores it and only renders the action line. The nightly migration also has two `log.info()` lines that should move to stdout.
+
+## Approach
+
+1. **Remove `log.info()` diagnostic calls** from the command (`upgrade.ts`) and the `resolveTargetVersion` helper
+2. **Enhance `formatUpgradeResult`** in `human.ts` to render metadata as a markdown key-value table below the action line
+3. **Keep `log.info()` only for the in-progress action** ("Upgrading to...") since it happens before the result is ready, and for nightly migration messages which are progress indicators
+4. **Update tests** to match new output format (metadata now rendered via markdown, not raw `log.info` strings)
+
+## Files to modify
+
+### 1. `src/commands/cli/upgrade.ts`
+
+**Remove these `log.info()` calls:**
+- Lines 486-487: `log.info(\`Installation method: ${method}\`)` and `log.info(\`Current version: ${CLI_VERSION}\`)`
+- Lines 143-147 in `resolveTargetVersion`: `log.info(\`Channel: ...\`)`, `log.info(\`Latest version: ...\`)`, `log.info(\`Target version: ...\`)`
+
+**Keep:** Line 502 `log.info(\`${downgrade ? "Downgrading" : "Upgrading"} to ${target}...\`)` — this is a progress indicator that fires before the download/upgrade completes.
+
+**Keep:** Lines 352-353 in `migrateToStandaloneForNightly` — these are progress indicators for a long operation.
+
+### 2. `src/lib/formatters/human.ts` — `formatUpgradeResult`
+
+Enhance to render metadata below the action line using `mdKvTable` or inline markdown. The formatter already receives all the data. Add a metadata section:
+
+```
+✓ Upgraded to `0.6.0`
+0.5.0 → 0.6.0
+
+| | |
+|---|---|
+| **Method** | curl |
+| **Channel** | stable |
+```
+
+The table uses `mdKvTable()` for consistent formatting. Only show rows with non-obvious info:
+- **Method** — always show
+- **Channel** — always show
+- **Current** / **Target** — only in `checked` action when versions differ (for upgraded/downgraded, the version transition line already shows this)
+
+### 3. `test/commands/cli/upgrade.test.ts`
+
+Update assertions that check for the old `log.info()` format strings. Since `getOutput()` combines stderr + stdout, the metadata will still be in the combined output — just in a different format:
+
+| Old assertion | New assertion |
+|---|---|
+| `"Installation method: curl"` | `"curl"` (appears in the table) |
+| `"Current version: X"` | `X` (in table or transition line) |
+| `"Channel: nightly"` | `"nightly"` (in table) |
+| `"Latest version: X"` | `X` (in table or transition line) |
+| `"Target version: X"` | `X` (in table) |
+
+Most tests can just check for the value itself since it appears in the rendered table.
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun run lint`
+3. `bun test test/commands/cli/upgrade.test.ts`
+4. `bun test test/isolated/brew-upgrade.test.ts`
+5. `bun run check:skill`
+6. `bun test --filter "upgrade"` — run all upgrade-related tests
