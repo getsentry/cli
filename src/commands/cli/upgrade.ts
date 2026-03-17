@@ -271,10 +271,10 @@ async function resolveTargetVersion(
   const latest = await fetchLatestVersion(method, channel);
   const target = versionArg?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
 
-  log.info(`Channel: ${channel}`);
-  log.info(`Latest version: ${latest}`);
+  log.debug(`Channel: ${channel}`);
+  log.debug(`Latest version: ${latest}`);
   if (versionArg) {
-    log.info(`Target version: ${target}`);
+    log.debug(`Target version: ${target}`);
   }
 
   if (flags.check) {
@@ -639,8 +639,8 @@ export const upgradeCommand = buildCommand({
     const { channel, versionArg, channelChanged, method } =
       await resolveContext(version, flags);
 
-    log.info(`Installation method: ${method}`);
-    log.info(`Current version: ${CLI_VERSION}`);
+    log.debug(`Installation method: ${method}`);
+    log.debug(`Current version: ${CLI_VERSION}`);
 
     const resolved = await resolveTargetWithFallback({
       resolveOpts: { method, channel, versionArg, channelChanged, flags },

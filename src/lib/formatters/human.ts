@@ -2123,6 +2123,16 @@ export function formatUpgradeResult(data: UpgradeResult): string {
     }
   }
 
+  // Metadata table — renders method, channel, and version info below the
+  // action line so diagnostics go to stdout (via the markdown pipeline)
+  // instead of cluttering stderr with repeated log.info() lines.
+  const kvRows: [string, string][] = [
+    ["Method", escapeMarkdownInline(data.method)],
+    ["Channel", escapeMarkdownInline(data.channel)],
+  ];
+  lines.push("");
+  lines.push(mdKvTable(kvRows));
+
   // Append warnings with ⚠ markers
   if (data.warnings && data.warnings.length > 0) {
     lines.push("");

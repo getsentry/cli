@@ -12,7 +12,7 @@ import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
 import { formatError } from "./errors.js";
-import { muted } from "./formatters/colors.js";
+import { renderInlineMarkdown } from "./formatters/markdown.js";
 import { logger } from "./logger.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
@@ -36,6 +36,43 @@ export type InteractiveLoginOptions = {
   /** Timeout for OAuth flow in milliseconds (default: 900000 = 15 minutes) */
   timeout?: number;
 };
+
+/**
+ * Build the user-facing display lines for the device flow verification step.
+ *
+ * Shows the complete verification URL (with embedded user code) so it works
+ * in environments where the browser can't auto-open (SSH, CI, etc.).
+ * Uses `renderInlineMarkdown()` for styled output that respects `NO_COLOR`.
+ *
+ * Extracted from the `onUserCode` callback for testability.
+ *
+ * @param userCode - The device flow user code (e.g., "ABCD-EFGH")
+ * @param verificationUriComplete - Full URL with `?user_code=...` embedded
+ * @param browserOpened - Whether the browser was successfully opened
+ * @param isTTY - Whether stdin is a TTY (controls copy-to-clipboard hint)
+ * @returns Array of strings to emit via `log.log()`, one per call
+ */
+export function buildDeviceFlowDisplay(
+  userCode: string,
+  verificationUriComplete: string,
+  browserOpened: boolean,
+  isTTY: boolean
+): string[] {
+  const lines: string[] = [];
+
+  lines.push("");
+  lines.push(renderInlineMarkdown(`  URL:  ${verificationUriComplete}`));
+  lines.push(renderInlineMarkdown(`  Code: \`${userCode}\``));
+  lines.push("");
+
+  if (!browserOpened) {
+    const copyHint = isTTY ? renderInlineMarkdown(" *(`c` to copy URL)*") : "";
+    lines.push(`  Copy the URL above to sign in.${copyHint}`);
+    lines.push("");
+  }
+
+  return lines;
+}
 
 /**
  * Run the interactive OAuth device flow login.
@@ -69,7 +106,7 @@ export async function runInteractiveLogin(
       {
         onUserCode: async (
           userCode,
-          verificationUri,
+          _verificationUri,
           verificationUriComplete
         ) => {
           urlToCopy = verificationUriComplete;
@@ -86,21 +123,24 @@ export async function runInteractiveLogin(
             log.log(qr);
           }
 
-          log.info(`URL: ${verificationUri}`);
-          log.info(`Code: ${userCode}`);
-          const stdin = process.stdin;
-          const copyHint = stdin.isTTY ? ` ${muted("(c to copy)")}` : "";
-          log.info(
-            `Browser didn't open? Use the url above to sign in${copyHint}`
+          // Show the complete URL (with user_code embedded) and optional copy hint
+          const displayLines = buildDeviceFlowDisplay(
+            userCode,
+            verificationUriComplete,
+            browserOpened,
+            process.stdin.isTTY ?? false
           );
+          for (const line of displayLines) {
+            log.log(line);
+          }
 
           // Use a spinner for the "waiting" state instead of raw polling dots
           log.start("Waiting for authorization...");
 
           // Setup keyboard listener for 'c' to copy URL
-          if (stdin.isTTY) {
+          if (process.stdin.isTTY) {
             keyListener.cleanup = setupCopyKeyListener(
-              stdin as NodeJS.ReadStream & { fd: 0 },
+              process.stdin as NodeJS.ReadStream & { fd: 0 },
               () => urlToCopy
             );
           }
