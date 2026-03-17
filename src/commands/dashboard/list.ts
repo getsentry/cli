@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -90,7 +91,6 @@ export const listCommand = buildCommand({
       "  sentry dashboard list --web",
   },
   output: {
-    json: true,
     human: formatDashboardListHuman,
     jsonTransform: (result: DashboardListResult) => result.dashboards,
   },
@@ -118,7 +118,7 @@ export const listCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web", n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags, target?: string) {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -140,8 +140,8 @@ export const listCommand = buildCommand({
     );
     const url = buildDashboardsListUrl(orgSlug);
 
+    yield new CommandOutput({ dashboards, orgSlug } as DashboardListResult);
     return {
-      data: { dashboards, orgSlug } as DashboardListResult,
       hint: dashboards.length > 0 ? `Dashboards: ${url}` : undefined,
     };
   },

@@ -13,6 +13,7 @@ import {
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatDashboardCreated } from "../../lib/formatters/human.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   fetchProjectId,
   resolveAllTargets,
@@ -197,7 +198,6 @@ export const createCommand = buildCommand({
       '    --widget-title "Error Count" --widget-display big_number --widget-query count',
   },
   output: {
-    json: true,
     human: formatDashboardCreated,
   },
   parameters: {
@@ -261,7 +261,7 @@ export const createCommand = buildCommand({
       },
     },
   },
-  async func(this: SentryContext, flags: CreateFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: CreateFlags, ...args: string[]) {
     const { cwd } = this;
 
     const { title, targetArg } = parsePositionalArgs(args);
@@ -289,8 +289,6 @@ export const createCommand = buildCommand({
     });
     const url = buildDashboardUrl(orgSlug, dashboard.id);
 
-    return {
-      data: { ...dashboard, url } as CreateResult,
-    };
+    yield new CommandOutput({ ...dashboard, url } as CreateResult);
   },
 });
