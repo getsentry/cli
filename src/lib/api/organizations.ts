@@ -111,7 +111,17 @@ export async function listOrganizationsUncached(): Promise<
 
   if (regions.length === 0) {
     // Fall back to default API for self-hosted instances
-    return listOrganizationsInRegion(getApiBaseUrl());
+    const orgs = await listOrganizationsInRegion(getApiBaseUrl());
+    const baseUrl = getApiBaseUrl();
+    await setOrgRegions(
+      orgs.map((org) => ({
+        slug: org.slug,
+        regionUrl: baseUrl,
+        orgId: org.id,
+        orgName: org.name,
+      }))
+    );
+    return orgs;
   }
 
   const results = await Promise.all(

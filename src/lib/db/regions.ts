@@ -15,6 +15,19 @@ import { runUpsert } from "./utils.js";
 
 const TABLE = "org_regions";
 
+/** When true, getCachedOrganizations() returns empty (forces API fetch). */
+let orgCacheDisabled = false;
+
+/** Disable the org listing cache for this invocation (e.g., `--fresh` flag). */
+export function disableOrgCache(): void {
+  orgCacheDisabled = true;
+}
+
+/** Re-enable the org listing cache. Exported for testing. */
+export function enableOrgCache(): void {
+  orgCacheDisabled = false;
+}
+
 type OrgRegionRow = {
   org_slug: string;
   org_id: string | null;
@@ -176,9 +189,16 @@ const ORG_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * (from before schema v9) or stale `updated_at` are excluded — callers
  * should fall back to the API when the result is empty.
  *
- * @returns Array of cached org entries, or empty if cache is cold/stale/incomplete
+ * Returns empty when the cache is disabled via {@link disableOrgCache}
+ * (e.g., `--fresh` flag).
+ *
+ * @returns Array of cached org entries, or empty if cache is cold/stale/disabled/incomplete
  */
 export async function getCachedOrganizations(): Promise<CachedOrg[]> {
+  if (orgCacheDisabled) {
+    return [];
+  }
+
   const db = getDatabase();
   const cutoff = Date.now() - ORG_CACHE_TTL_MS;
   const rows = db

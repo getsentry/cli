@@ -17,6 +17,7 @@ import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
+import { disableOrgCache } from "./db/regions.js";
 import { disableDsnCache } from "./dsn/index.js";
 import { warning } from "./formatters/colors.js";
 import {
@@ -146,6 +147,7 @@ export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
   if (flags.fresh) {
     disableResponseCache();
     disableDsnCache();
+    disableOrgCache();
   }
 }
 
