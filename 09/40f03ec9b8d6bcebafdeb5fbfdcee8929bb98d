@@ -1,0 +1,170 @@
+# Add `--offline` Flag and Automatic Offline Fallback to `sentry cli upgrade`
+
+## Summary
+
+Add an `--offline` flag to the upgrade command that uses only cached version info + cached patches (no network calls). Additionally, when a normal upgrade encounters network failure, automatically fall back to the offline path if cached data is available.
+
+## Background
+
+The infrastructure for offline upgrades already exists:
+- **Background version checks** (`version-check.ts`) store the latest known version in SQLite (`version_check.latest_version`)
+- **Background patch prefetch** (`maybePrefetchPatches()`) downloads and caches patch chains to `~/.sentry/patch-cache/`
+- **Cache-first delta** (`resolveAndApplyDelta()`) already checks `loadCachedChain()` before hitting the network
+- All that's missing is a way to **skip the version discovery network call** and **prevent the full-binary download fallback**
+
+## Design
+
+### Two Modes
+
+1. **Explicit `--offline`**: User requests offline-only. Skip all network calls. Use cached version + cached patches. Fail with a clear error if cache is insufficient.
+2. **Automatic fallback**: Normal upgrade hits `UpgradeError("network_error")` during `fetchLatestVersion()`. Log a message, try the offline path. If that also fails, surface both errors.
+
+### Flow Changes
+
+```
+Current:
+  resolveTargetVersion() → fetchLatestVersion() [NETWORK] → target
+  downloadBinaryToTemp() → tryDeltaUpgrade(cache → network) → downloadFullBinary() [NETWORK]
+
+With --offline:
+  resolveTargetVersion() → getVersionCheckInfo().latestVersion [DB] → target
+  downloadBinaryToTemp() → tryDeltaUpgrade(cache ONLY, no network fallback) → error if no cache
+
+With auto-fallback:
+  resolveTargetVersion() → fetchLatestVersion() [FAILS] → catch → getVersionCheckInfo() → target
+  downloadBinaryToTemp() → tryDeltaUpgrade(cache → network fails → error if no cache)
+```
+
+## Files to Modify
+
+### 1. `src/commands/cli/upgrade.ts` — Add flag + offline resolve logic
+
+**A. Add `--offline` flag**:
+```typescript
+offline: {
+  kind: "boolean",
+  brief: "Upgrade using only cached version info and patches (no network)",
+  default: false,
+},
+```
+
+Add `offline` to `UpgradeFlags` type.
+
+**B. Add offline version resolution function**:
+```typescript
+function resolveOfflineTarget(channel: ReleaseChannel): ResolveResult {
+  const { latestVersion, lastChecked } = getVersionCheckInfo();
+  if (!latestVersion) {
+    throw new UpgradeError(
+      "network_error",
+      "No cached version available. Run any command to trigger a background version check first."
+    );
+  }
+  // Use cached version as target
+  return { kind: "target", target: latestVersion };
+}
+```
+
+**C. Modify `func()` to use offline path**:
+
+In the main `func()`, before calling `resolveTargetVersion()`:
+- If `flags.offline`, call `resolveOfflineTarget()` instead
+- Validate `method === "curl"` for offline (package managers always need network)
+- If not offline, wrap `resolveTargetVersion()` in try/catch for `UpgradeError("network_error")`:
+  - On catch: log warning, try `resolveOfflineTarget()`
+  - If offline target also fails: re-throw original error
+
+**D. Add `offline` to `UpgradeResult`**:
+```typescript
+/** Whether the upgrade was performed offline (from cache) */
+offline?: boolean;
+```
+
+### 2. `src/lib/upgrade.ts` — Add offline-aware download
+
+**A. Add `offline` parameter to `downloadBinaryToTemp()`**:
+```typescript
+export async function downloadBinaryToTemp(
+  version: string,
+  downloadTag?: string,
+  offline?: boolean,
+): Promise<DownloadResult> {
+```
+
+When `offline` is true and `tryDeltaUpgrade()` returns null (no cached patches), throw instead of falling through to `downloadFullBinary()`:
+```typescript
+if (deltaResult) {
+  // ... existing success path
+} else if (offline) {
+  throw new UpgradeError(
+    "network_error",
+    `No cached patches available for upgrade to ${version}. Run 'sentry cli upgrade' with network access first.`
+  );
+} else {
+  log.debug("Downloading full binary");
+  await downloadFullBinary(version, downloadTag, tempPath);
+}
+```
+
+**B. Thread `offline` through `executeUpgrade()`**:
+Add the parameter to `executeUpgrade()` so it reaches `downloadBinaryToTemp()`.
+
+### 3. `src/commands/cli/upgrade.ts` — Thread offline through execute path
+
+**A. Pass `offline` to `executeStandardUpgrade()`** and into `executeUpgrade()`.
+
+**B. `--offline` + `--check`**: Show cached version info without network. Use `resolveOfflineTarget()` and return a `"checked"` result with an `offline: true` marker.
+
+**C. `--offline` + explicit version arg**: Allow if the user provides a specific version. The delta cache may or may not have patches for that version — let it try and fail with a clear error.
+
+**D. `--offline` + brew/npm/etc**: Early error: `"Offline upgrade is only supported for curl-installed binaries."`
+
+### 4. `src/lib/formatters/human.ts` — Update upgrade output
+
+Add a note to the human output when upgrade was performed offline:
+```
+✓ Upgraded to 0.17.0 (offline, from cache)
+```
+
+### 5. `src/lib/upgrade.ts` — Add `offline` to `executeUpgrade` signature
+
+Thread the `offline` boolean from `executeUpgrade()` → `downloadBinaryToTemp()`.
+
+### 6. `src/lib/delta-upgrade.ts` — No changes needed
+
+The existing `resolveAndApplyDelta()` already implements cache-first logic. When patches are cached, it applies them without network. When they're not cached and the network fallback in `resolveFromNetwork()` fails, it returns null — which the caller (`downloadBinaryToTemp`) now handles based on the `offline` flag.
+
+## Interactions
+
+| Flag Combo | Behavior |
+|---|---|
+| `--offline` | Use cached version + cached patches only |
+| `--offline --check` | Show cached version info (no network) |
+| `--offline --force` | Force re-apply cached patches |
+| `--offline 0.15.0` | Try to use cached patches for that specific version |
+| `--offline --method npm` | Error: offline only for curl |
+| (no flag, network fails) | Auto-fallback: log warning, try offline path |
+| (no flag, network works) | Normal upgrade (unchanged) |
+
+## Error Messages
+
+| Scenario | Message |
+|---|---|
+| `--offline`, no cached version | `No cached version available. Run any command to trigger a background version check, then retry.` |
+| `--offline`, no cached patches | `No cached patches available for upgrade to X.Y.Z. Run 'sentry cli upgrade' with network access first.` |
+| Auto-fallback, no cached version | (re-throw original network error — no offline fallback possible) |
+| Auto-fallback, no cached patches | Same as above — fall through to original error |
+| `--offline` with brew/npm | `Offline upgrade is only supported for curl-installed binaries.` |
+
+## Verification
+
+1. `bun run typecheck` — No type errors
+2. `bun run lint` — No lint issues
+3. `bun test test/commands/cli/upgrade.test.ts` — Existing tests pass
+4. Add tests:
+   - `--offline` with cached version + patches → succeeds
+   - `--offline` with no cache → appropriate error
+   - `--offline` with brew → appropriate error
+   - Auto-fallback: mock network error + cached version → succeeds
+   - Auto-fallback: mock network error + no cache → original error propagates
+5. `bun run check:skill` — Regenerate SKILL.md if needed (new flag)
