@@ -180,6 +180,17 @@ Create a new project
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 
+#### `sentry project delete <org/project>`
+
+Delete a project
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force deletion without confirmation`
+- `-n, --dry-run - Validate and show what would be deleted without deleting`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
 #### `sentry project list <org/project>`
 
 List projects
@@ -501,7 +512,41 @@ Update the Sentry CLI to the latest version
 **Flags:**
 - `--check - Check for updates without installing`
 - `--force - Force upgrade even if already on the latest version`
+- `--offline - Upgrade using only cached version info and patches (no network)`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+### Dashboard
+
+Manage Sentry dashboards
+
+#### `sentry dashboard list <org/project>`
+
+List dashboards
+
+**Flags:**
+- `-w, --web - Open in browser`
+- `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry dashboard view <args...>`
+
+View a dashboard
+
+**Flags:**
+- `-w, --web - Open in browser`
+- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `--json - Output as JSON`
+- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+
+#### `sentry dashboard create <args...>`
+
+Create a dashboard
+
+**Flags:**
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
 

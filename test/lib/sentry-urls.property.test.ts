@@ -16,6 +16,8 @@ import {
 } from "fast-check";
 import {
   buildBillingUrl,
+  buildDashboardsListUrl,
+  buildDashboardUrl,
   buildEventSearchUrl,
   buildLogsUrl,
   buildOrgSettingsUrl,
@@ -73,6 +75,9 @@ const logIdArb = stringMatching(/^[a-f0-9]{32}$/);
 
 /** Valid trace IDs (32-char hex) */
 const traceIdArb = stringMatching(/^[a-f0-9]{32}$/);
+
+/** Valid dashboard IDs (numeric strings) */
+const dashboardIdArb = stringMatching(/^[1-9][0-9]{0,8}$/);
 
 /** Common Sentry regions */
 const sentryRegionArb = constantFrom("us", "de", "eu", "staging");
@@ -464,6 +469,71 @@ describe("buildTraceUrl properties", () => {
   });
 });
 
+describe("buildDashboardsListUrl properties", () => {
+  test("output contains /dashboards/ path", async () => {
+    await fcAssert(
+      property(slugArb, (orgSlug) => {
+        const result = buildDashboardsListUrl(orgSlug);
+        expect(result).toContain("/dashboards/");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains the org slug", async () => {
+    await fcAssert(
+      property(slugArb, (orgSlug) => {
+        const result = buildDashboardsListUrl(orgSlug);
+        expect(result).toContain(orgSlug);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(slugArb, (orgSlug) => {
+        const result = buildDashboardsListUrl(orgSlug);
+        expect(() => new URL(result)).not.toThrow();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
+describe("buildDashboardUrl properties", () => {
+  test("output contains /dashboard/{id}/ path", async () => {
+    await fcAssert(
+      property(tuple(slugArb, dashboardIdArb), ([orgSlug, dashboardId]) => {
+        const result = buildDashboardUrl(orgSlug, dashboardId);
+        expect(result).toContain(`/dashboard/${dashboardId}/`);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output contains org slug and dashboard ID", async () => {
+    await fcAssert(
+      property(tuple(slugArb, dashboardIdArb), ([orgSlug, dashboardId]) => {
+        const result = buildDashboardUrl(orgSlug, dashboardId);
+        expect(result).toContain(orgSlug);
+        expect(result).toContain(dashboardId);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("output is a valid URL", async () => {
+    await fcAssert(
+      property(tuple(slugArb, dashboardIdArb), ([orgSlug, dashboardId]) => {
+        const result = buildDashboardUrl(orgSlug, dashboardId);
+        expect(() => new URL(result)).not.toThrow();
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("SENTRY_HOST precedence", () => {
   test("SENTRY_HOST takes precedence over SENTRY_URL for URL builders", () => {
     process.env.SENTRY_HOST = "https://host.company.com";
@@ -518,6 +588,18 @@ describe("self-hosted URLs", () => {
     );
   });
 
+  test("buildDashboardsListUrl uses path-based pattern", () => {
+    expect(buildDashboardsListUrl("my-org")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/dashboards/`
+    );
+  });
+
+  test("buildDashboardUrl uses path-based pattern", () => {
+    expect(buildDashboardUrl("my-org", "42")).toBe(
+      `${SELF_HOSTED_URL}/organizations/my-org/dashboard/42/`
+    );
+  });
+
   test("buildProjectUrl uses path-based pattern", () => {
     expect(buildProjectUrl("my-org", "my-project")).toBe(
       `${SELF_HOSTED_URL}/settings/my-org/projects/my-project/`
@@ -556,6 +638,8 @@ describe("self-hosted URLs", () => {
             buildBillingUrl(orgSlug),
             buildLogsUrl(orgSlug),
             buildTraceUrl(orgSlug, eventId),
+            buildDashboardsListUrl(orgSlug),
+            buildDashboardUrl(orgSlug, "1"),
           ];
 
           for (const url of urls) {
@@ -584,6 +668,8 @@ describe("URL building cross-function properties", () => {
             buildSeerSettingsUrl(orgSlug),
             buildBillingUrl(orgSlug),
             buildBillingUrl(orgSlug, product),
+            buildDashboardsListUrl(orgSlug),
+            buildDashboardUrl(orgSlug, "42"),
           ];
 
           for (const url of urls) {
@@ -615,6 +701,12 @@ describe("URL building cross-function properties", () => {
           );
           expect(buildBillingUrl(orgSlug, product)).toBe(
             buildBillingUrl(orgSlug, product)
+          );
+          expect(buildDashboardsListUrl(orgSlug)).toBe(
+            buildDashboardsListUrl(orgSlug)
+          );
+          expect(buildDashboardUrl(orgSlug, "42")).toBe(
+            buildDashboardUrl(orgSlug, "42")
           );
         }
       ),
