@@ -760,9 +760,9 @@ function formatPriorityLabel(priority?: string | null): string {
     case "high":
       return colorTag("red", "High");
     case "medium":
-      return colorTag("yellow", "Med");
+      return colorTag("yellow", "Med ");
     case "low":
-      return colorTag("muted", "Low");
+      return colorTag("muted", "Low ");
     default:
       return priority;
   }
