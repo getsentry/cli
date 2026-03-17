@@ -92,6 +92,18 @@ export const routes = buildRouteMap({
     fullDescription:
       "sentry is a command-line interface for interacting with Sentry. " +
       "It provides commands for authentication, viewing issues, and making API calls.",
+    hideRoute: {
+      issues: true,
+      orgs: true,
+      projects: true,
+      repos: true,
+      teams: true,
+      logs: true,
+      spans: true,
+      traces: true,
+      trials: true,
+      whoami: true,
+    },
   },
 });
 
