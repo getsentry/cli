@@ -459,7 +459,7 @@ export const setupCommand = buildCommand({
       },
     },
   },
-  output: { human: formatSetupResult },
+  output: { renderHuman: formatSetupResult },
   async *func(this: SentryContext, flags: SetupFlags) {
     const { process, homeDir } = this;
 

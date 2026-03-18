@@ -319,7 +319,7 @@ export const viewCommand = buildCommand({
       "The log ID is the 32-character hexadecimal identifier shown in log listings.",
   },
   output: {
-    human: formatLogViewHuman,
+    renderHuman: formatLogViewHuman,
     // Preserve original JSON contract: bare array of log entries.
     // orgSlug exists only for the human formatter (trace URLs).
     jsonTransform: (data: LogViewData, fields) =>

@@ -20,7 +20,7 @@ export const tokenCommand = buildCommand({
       "piping to other commands or scripts.",
   },
   parameters: {},
-  output: { human: (token: string) => token },
+  output: { renderHuman: (token: string) => token },
   // biome-ignore lint/suspicious/useAwait: sync body but async generator required by buildCommand
   async *func(this: SentryContext) {
     const token = getAuthToken();

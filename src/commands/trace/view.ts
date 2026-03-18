@@ -129,7 +129,7 @@ export const viewCommand = buildCommand({
       "The trace ID is the 32-character hexadecimal identifier.",
   },
   output: {
-    human: formatTraceView,
+    renderHuman: formatTraceView,
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

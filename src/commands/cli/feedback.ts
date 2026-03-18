@@ -31,7 +31,7 @@ export const feedbackCommand = buildCommand({
       "Submit feedback about your experience with the Sentry CLI. " +
       "All text after 'feedback' is sent as your message.",
   },
-  output: { human: formatFeedbackResult },
+  output: { renderHuman: formatFeedbackResult },
   parameters: {
     flags: {},
     positional: {

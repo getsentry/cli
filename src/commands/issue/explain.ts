@@ -59,7 +59,7 @@ export const explainCommand = buildCommand({
       "  sentry issue explain 123456789 --json\n" +
       "  sentry issue explain 123456789 --force",
   },
-  output: { human: formatRootCauseList },
+  output: { renderHuman: formatRootCauseList },
   parameters: {
     positional: issueIdPositional,
     flags: {

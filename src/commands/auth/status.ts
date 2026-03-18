@@ -144,7 +144,7 @@ export const statusCommand = buildCommand({
       "Display information about your current authentication status, " +
       "including whether you're logged in and your default organization/project settings.",
   },
-  output: { human: formatAuthStatus },
+  output: { renderHuman: formatAuthStatus },
   parameters: {
     flags: {
       "show-token": {

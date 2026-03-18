@@ -171,7 +171,7 @@ export const planCommand = buildCommand({
       "  sentry issue plan 123456789 --force",
   },
   output: {
-    human: formatPlanOutput,
+    renderHuman: formatPlanOutput,
   },
   parameters: {
     positional: issueIdPositional,

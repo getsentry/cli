@@ -279,7 +279,7 @@ export const createCommand = buildCommand({
       "  sentry project create my-app go --json",
   },
   output: {
-    human: formatProjectCreated,
+    renderHuman: formatProjectCreated,
     jsonExclude: [
       "slugDiverged",
       "expectedSlug",

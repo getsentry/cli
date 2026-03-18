@@ -344,7 +344,7 @@ export const viewCommand = buildCommand({
       "  sentry event view <project> <event-id>    # find project across all orgs",
   },
   output: {
-    human: formatEventView,
+    renderHuman: formatEventView,
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

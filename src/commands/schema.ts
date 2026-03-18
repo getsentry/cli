@@ -273,7 +273,7 @@ export const schemaCommand = buildCommand({
       "  sentry schema --search monitor      Search endpoints by keyword",
   },
   output: {
-    human: formatSchemaHuman,
+    renderHuman: formatSchemaHuman,
     jsonTransform: jsonTransformSchema,
   },
   parameters: {

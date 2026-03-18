@@ -1053,7 +1053,7 @@ function logResponse(response: { status: number; headers: Headers }): void {
 }
 
 export const apiCommand = buildCommand({
-  output: { human: formatApiResponse },
+  output: { renderHuman: formatApiResponse },
   docs: {
     brief: "Make an authenticated API request",
     fullDescription:

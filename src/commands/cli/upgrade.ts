@@ -595,7 +595,7 @@ export const upgradeCommand = buildCommand({
       "  sentry cli upgrade --method npm # Force using npm to upgrade\n" +
       "  sentry cli upgrade --offline    # Upgrade from cached patches (no network)",
   },
-  output: { human: formatUpgradeResult },
+  output: { renderHuman: formatUpgradeResult },
   parameters: {
     positional: {
       kind: "tuple",

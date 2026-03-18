@@ -103,7 +103,7 @@ export const viewCommand = buildCommand({
       "where 'f' is the project alias shown in the list).",
   },
   output: {
-    human: formatIssueView,
+    renderHuman: formatIssueView,
     jsonExclude: ["spanTreeLines"],
   },
   parameters: {

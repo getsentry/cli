@@ -36,7 +36,7 @@ export const viewCommand = buildCommand({
       "  2. Config defaults\n" +
       "  3. SENTRY_DSN environment variable or source code detection",
   },
-  output: { human: formatOrgDetails },
+  output: { renderHuman: formatOrgDetails },
   parameters: {
     positional: {
       kind: "tuple",

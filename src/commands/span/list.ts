@@ -187,7 +187,7 @@ export const listCommand = buildCommand({
       "Alias: `sentry spans` → `sentry span list`",
   },
   output: {
-    human: formatSpanListHuman,
+    renderHuman: formatSpanListHuman,
     jsonTransform: jsonTransformSpanList,
   },
   parameters: {

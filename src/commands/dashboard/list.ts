@@ -91,7 +91,7 @@ export const listCommand = buildCommand({
       "  sentry dashboard list --web",
   },
   output: {
-    human: formatDashboardListHuman,
+    renderHuman: formatDashboardListHuman,
     jsonTransform: (result: DashboardListResult) => result.dashboards,
   },
   parameters: {

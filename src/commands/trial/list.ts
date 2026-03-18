@@ -205,7 +205,7 @@ export const listCommand = buildCommand({
       "Alias: `sentry trials` → `sentry trial list`",
   },
   output: {
-    human: formatTrialListHuman,
+    renderHuman: formatTrialListHuman,
     jsonExclude: ["displayName"],
   },
   parameters: {

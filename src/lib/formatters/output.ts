@@ -15,7 +15,7 @@
  *    `buildCommand`, then yield data from the generator:
  *    ```ts
  *    buildCommand({
- *      output: { human: formatUser },
+ *      output: { renderHuman: formatUser },
  *      async *func() { yield new CommandOutput(data); },
  *    })
  *    ```
@@ -86,57 +86,23 @@ export type HumanRenderer<T> = {
 };
 
 /**
- * Resolve the `human` field of an {@link OutputConfig} into a
- * {@link HumanRenderer}. Supports two forms:
+ * Resolve an {@link OutputConfig} into a per-invocation {@link HumanRenderer}.
  *
- * 1. **Plain function** — `(data: T) => string` — auto-wrapped into a
- *    stateless renderer (no `finalize`).
- * 2. **Factory** — `() => HumanRenderer<T>` — called once per invocation
- *    to produce a renderer with optional `finalize()`.
- *
- * Disambiguation: a function with `.length === 0` is treated as a factory.
+ * - `renderHuman` declares stateless formatting directly.
+ * - `createHumanRenderer` declares a stateful renderer factory explicitly.
  */
-export function resolveRenderer<T>(human: HumanOutput<T>): HumanRenderer<T> {
-  // Factory: zero-arg function that returns a renderer
-  if (human.length === 0) {
-    return (human as () => HumanRenderer<T>)();
+export function resolveRenderer<T>(config: OutputConfig<T>): HumanRenderer<T> {
+  if (config.createHumanRenderer) {
+    return config.createHumanRenderer();
   }
-  // Plain formatter: wrap in a stateless renderer
-  return { render: human as (data: T) => string };
+  return { render: config.renderHuman };
 }
 
-/**
- * Human rendering for an {@link OutputConfig}.
- *
- * Two forms:
- * - **Plain function** `(data: T) => string` — stateless, auto-wrapped.
- * - **Factory** `() => HumanRenderer<T>` — called per invocation for
- *   stateful renderers (e.g., streaming tables with `finalize()`).
- */
-export type HumanOutput<T> = ((data: T) => string) | (() => HumanRenderer<T>);
-
-/**
- * Output configuration declared on `buildCommand` for automatic rendering.
- *
- * When present, `--json` and `--fields` flags are injected and the wrapper
- * auto-renders yielded {@link CommandOutput} values.
- *
- * @typeParam T - Type of data the command yields (used by `human` formatter
- *   and serialized as-is to JSON)
- */
-export type OutputConfig<T> = {
-  /**
-   * Human-readable renderer.
-   *
-   * Pass a plain `(data: T) => string` for stateless formatting, or a
-   * zero-arg factory `() => HumanRenderer<T>` for stateful rendering
-   * with `finalize()` support.
-   */
-  human: HumanOutput<T>;
+type SharedOutputConfig<T> = {
   /**
    * Top-level keys to strip from JSON output.
    *
-   * Use this for fields that exist only for the human formatter
+   * Use this for fields that exist only for the human renderer
    * (e.g. pre-formatted terminal strings) and should not appear
    * in the JSON contract.
    *
@@ -161,6 +127,30 @@ export type OutputConfig<T> = {
 };
 
 /**
+ * Output configuration declared on `buildCommand` for automatic rendering.
+ *
+ * When present, `--json` and `--fields` flags are injected and the wrapper
+ * auto-renders yielded {@link CommandOutput} values.
+ *
+ * @typeParam T - Type of data the command yields and serializes as JSON
+ */
+export type OutputConfig<T> =
+  | (SharedOutputConfig<T> & {
+      /**
+       * Stateless human formatter for commands that render each chunk independently.
+       */
+      renderHuman: (data: T) => string;
+      createHumanRenderer?: never;
+    })
+  | (SharedOutputConfig<T> & {
+      /**
+       * Factory for commands that need per-invocation render state or `finalize()`.
+       */
+      createHumanRenderer: () => HumanRenderer<T>;
+      renderHuman?: never;
+    });
+
+/**
  * Yield type for commands with {@link OutputConfig}.
  *
  * Commands wrap each yielded value in this class so the `buildCommand`
@@ -173,7 +163,7 @@ export type OutputConfig<T> = {
  * @typeParam T - The data type (matches the `OutputConfig<T>` type parameter)
  */
 export class CommandOutput<T> {
-  /** The data to render (serialized as-is to JSON, passed to `human` formatter) */
+  /** The data to render (serialized as-is to JSON, passed to the resolved human renderer) */
   readonly data: T;
   constructor(data: T) {
     this.data = data;
@@ -273,7 +263,7 @@ function writeTransformedJson(stdout: Writer, transformed: unknown): void {
  * @param stdout - Writer to output to
  * @param data - The data yielded by the command
  * @param config - The output config declared on buildCommand
- * @param renderer - Per-invocation renderer (from `config.human()`)
+ * @param renderer - Per-invocation renderer (from the resolved output config)
  * @param ctx - Rendering context with flag values
  */
 // biome-ignore lint/nursery/useMaxParams: Framework function — config/renderer/ctx are all required for JSON vs human split.

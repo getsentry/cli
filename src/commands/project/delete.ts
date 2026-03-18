@@ -178,7 +178,7 @@ export const deleteCommand = buildCommand({
       "  sentry project delete acme-corp/my-app --dry-run",
   },
   output: {
-    human: formatProjectDeleted,
+    renderHuman: formatProjectDeleted,
     jsonTransform: (result: ProjectDeleteResult) => {
       if (result.dryRun) {
         return {

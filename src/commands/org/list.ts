@@ -119,7 +119,7 @@ export const listCommand = buildCommand({
       "  sentry org list --json\n\n" +
       "Alias: `sentry orgs` → `sentry org list`",
   },
-  output: { human: formatOrgListHuman },
+  output: { renderHuman: formatOrgListHuman },
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),

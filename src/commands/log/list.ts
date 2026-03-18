@@ -651,7 +651,7 @@ export const listCommand = buildListCommand("log", {
       "Alias: `sentry logs` → `sentry log list`",
   },
   output: {
-    human: createLogRenderer,
+    createHumanRenderer: createLogRenderer,
     jsonTransform: jsonTransformLogOutput,
   },
   parameters: {

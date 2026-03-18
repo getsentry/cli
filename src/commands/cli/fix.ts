@@ -669,7 +669,7 @@ export const fixCommand = buildCommand({
       "  sudo sentry cli fix         # Fix root-owned files\n" +
       "  sentry cli fix --dry-run    # Show what would be fixed without making changes",
   },
-  output: { human: formatFixResult },
+  output: { renderHuman: formatFixResult },
   parameters: {
     flags: {
       "dry-run": {

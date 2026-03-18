@@ -35,7 +35,7 @@ export const whoamiCommand = buildCommand({
       "the current token. Works with all token types: OAuth, API tokens, and OAuth App tokens.",
   },
   output: {
-    human: formatUserIdentity,
+    renderHuman: formatUserIdentity,
   },
   parameters: {
     flags: {

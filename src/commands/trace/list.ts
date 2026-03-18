@@ -182,7 +182,7 @@ export const listCommand = buildListCommand("trace", {
       "Alias: `sentry traces` → `sentry trace list`",
   },
   output: {
-    human: formatTraceListHuman,
+    renderHuman: formatTraceListHuman,
     jsonTransform: jsonTransformTraceList,
   },
   parameters: {

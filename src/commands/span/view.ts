@@ -211,7 +211,7 @@ export const viewCommand = buildCommand({
       "  sentry span view sentry/my-project/<trace-id> a1b2c3d4e5f67890",
   },
   output: {
-    human: formatSpanViewHuman,
+    renderHuman: formatSpanViewHuman,
     jsonTransform: jsonTransformSpanView,
   },
   parameters: {

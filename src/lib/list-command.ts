@@ -85,7 +85,7 @@ export function targetPatternExplanation(cursorNote?: string): string {
  * The `--json` flag shared by all list commands.
  * Outputs machine-readable JSON instead of a human-readable table.
  *
- * @deprecated Use `output: { human: ... }` on `buildCommand` instead, which
+ * @deprecated Use `output: { renderHuman: ... }` on `buildCommand` instead, which
  * injects `--json` and `--fields` automatically. This constant is kept
  * for commands that define `--json` with custom brief text.
  */
@@ -475,7 +475,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
   return buildListCommand(routeName, {
     docs,
     output: {
-      human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
+      renderHuman: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
       jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
         jsonTransformListResult(result, fields),
     } satisfies OutputConfig<ListResult<TWithOrg>>,

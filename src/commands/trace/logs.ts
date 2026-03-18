@@ -105,7 +105,7 @@ export const logsCommand = buildCommand({
       "  sentry trace logs --json abc123def456abc123def456abc123de",
   },
   output: {
-    human: formatTraceLogsHuman,
+    renderHuman: formatTraceLogsHuman,
     jsonTransform: (data: TraceLogsData, fields?: string[]) => {
       const items =
         fields && fields.length > 0

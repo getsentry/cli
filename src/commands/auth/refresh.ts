@@ -59,7 +59,7 @@ Examples:
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
     `.trim(),
   },
-  output: { human: formatRefreshResult },
+  output: { renderHuman: formatRefreshResult },
   parameters: {
     flags: {
       force: {

@@ -33,7 +33,7 @@ export const logoutCommand = buildCommand({
     fullDescription:
       "Remove stored authentication credentials from the local database.",
   },
-  output: { human: formatLogoutResult },
+  output: { renderHuman: formatLogoutResult },
   parameters: {
     flags: {},
   },

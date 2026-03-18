@@ -1240,7 +1240,7 @@ const jsonTransformIssueList = jsonTransformListResult;
 
 /** Output configuration for the issue list command. */
 const issueListOutput: OutputConfig<IssueListResult> = {
-  human: formatIssueListHuman,
+  renderHuman: formatIssueListHuman,
   jsonTransform: jsonTransformIssueList,
 };
 

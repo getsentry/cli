@@ -138,12 +138,12 @@ type LocalCommandBuilderArguments<
    * @example
    * ```ts
    * buildCommand({
-   *   output: { human: formatUser },
+   *   output: { renderHuman: formatUser },
    *   async *func() { yield new CommandOutput(user); },
    * })
    * ```
    */
-  // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T>.human is contravariant in T, but the builder erases T because it doesn't know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
+  // biome-ignore lint/suspicious/noExplicitAny: Variance erasure — OutputConfig<T> contains function positions that are contravariant in T, but the builder erases T because it does not know the output type. Using `any` allows commands to declare OutputConfig<SpecificType> while the wrapper handles it generically.
   readonly output?: OutputConfig<any>;
 };
 
@@ -255,7 +255,7 @@ export function applyLoggingFlags(
  *
  * Similarly, when a command already defines its own `json` flag (e.g. for
  * custom brief text), the injected `JSON_FLAG` is skipped. `--fields` is
- * always injected when `output: { human: ... }` regardless.
+ * always injected when `output: { renderHuman: ... }` regardless.
  *
  * Flag keys use kebab-case because Stricli uses the literal object key as
  * the CLI flag name (e.g. `"log-level"` → `--log-level`).
@@ -331,7 +331,7 @@ export function buildCommand<
    * Strip injected flags from the raw Stricli-parsed flags object.
    * --log-level is always stripped. --verbose is stripped only when we
    * injected it (not when the command defines its own). --fields is
-   * pre-parsed from comma-string to string[] when output: { human: ... }.
+   * pre-parsed from comma-string to string[] when output: { renderHuman: ... }.
    */
   function cleanRawFlags(
     raw: Record<string, unknown>
@@ -401,7 +401,7 @@ export function buildCommand<
     // Resolve the human renderer once per invocation. Factory creates
     // fresh per-invocation state for streaming commands.
     const renderer = outputConfig
-      ? resolveRenderer(outputConfig.human)
+      ? resolveRenderer(outputConfig)
       : undefined;
 
     // OutputError handler: render data through the output system, then

@@ -183,7 +183,7 @@ export const viewCommand = buildCommand({
       "In monorepos with multiple Sentry projects, shows details for all detected projects.",
   },
   output: {
-    human: formatProjectViewHuman,
+    renderHuman: formatProjectViewHuman,
     jsonExclude: ["detectedFrom"],
   },
   parameters: {

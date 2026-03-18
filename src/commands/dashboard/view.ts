@@ -47,7 +47,7 @@ export const viewCommand = buildCommand({
       "  sentry dashboard view 12345 --web",
   },
   output: {
-    human: formatDashboardView,
+    renderHuman: formatDashboardView,
   },
   parameters: {
     positional: {

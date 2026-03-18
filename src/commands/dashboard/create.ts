@@ -141,7 +141,7 @@ export const createCommand = buildCommand({
       "  sentry dashboard create my-org/my-project 'My Dashboard'",
   },
   output: {
-    human: formatDashboardCreated,
+    renderHuman: formatDashboardCreated,
   },
   parameters: {
     positional: {

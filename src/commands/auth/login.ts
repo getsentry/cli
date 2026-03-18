@@ -129,7 +129,7 @@ export const loginCommand = buildCommand({
       },
     },
   },
-  output: { human: formatLoginResult },
+  output: { renderHuman: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
     // Check if already authenticated and handle re-authentication
     if (await isAuthenticated()) {

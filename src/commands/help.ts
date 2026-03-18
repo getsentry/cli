@@ -28,7 +28,7 @@ export const helpCommand = buildCommand({
       "Use --json for machine-readable output suitable for AI agents.",
   },
   output: {
-    human: formatHelpHuman,
+    renderHuman: formatHelpHuman,
     jsonExclude: ["_banner"] as const,
   },
   parameters: {

@@ -89,7 +89,7 @@ export const startCommand = buildCommand({
       "  sentry trial start plan\n" +
       "  sentry trial start --json seer",
   },
-  output: { human: formatStartResult },
+  output: { renderHuman: formatStartResult },
   parameters: {
     positional: {
       kind: "tuple" as const,

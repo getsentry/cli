@@ -585,7 +585,7 @@ export const listCommand = buildListCommand("project", {
       "Alias: `sentry projects` → `sentry project list`",
   },
   output: {
-    human: (result: ListResult<ProjectWithOrg>) => {
+    renderHuman: (result: ListResult<ProjectWithOrg>) => {
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
       }
