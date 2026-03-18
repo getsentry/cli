@@ -443,7 +443,13 @@ ${caseBranches}
         else
           completions+=("\${value}")
         fi
-      done < <(${binaryName} __complete "$line[1]" "$line[2]" "\${words[@]}" 2>/dev/null)
+      done < <(
+        if (( \${#words} == 0 )); then
+          ${binaryName} __complete "$line[1]" "$line[2]" "" 2>/dev/null
+        else
+          ${binaryName} __complete "$line[1]" "$line[2]" "\${words[@]}" 2>/dev/null
+        fi
+      )
       if (( \${#completions} )); then
         _describe -t values 'value' completions
       fi
