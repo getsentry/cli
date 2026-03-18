@@ -14,6 +14,8 @@ import * as Sentry from "@sentry/bun";
  * - ENOENT: File or directory does not exist
  * - EACCES: Permission denied (e.g., no read access)
  * - EPERM: Operation not permitted (e.g., file locked, or system-level restriction)
+ * - EISDIR: Path is a directory, not a file (e.g., `.env/` directory instead of `.env` file)
+ * - ENOTDIR: A path component is not a directory (e.g., `/file.txt/child`)
  *
  * All other errors are unexpected and should be reported to Sentry.
  *
@@ -23,7 +25,13 @@ import * as Sentry from "@sentry/bun";
 function isIgnorableFileError(error: unknown): boolean {
   if (error instanceof Error && "code" in error) {
     const code = (error as NodeJS.ErrnoException).code;
-    return code === "ENOENT" || code === "EACCES" || code === "EPERM";
+    return (
+      code === "ENOENT" ||
+      code === "EACCES" ||
+      code === "EPERM" ||
+      code === "EISDIR" ||
+      code === "ENOTDIR"
+    );
   }
   return false;
 }
