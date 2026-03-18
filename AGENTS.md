@@ -781,4 +781,69 @@ mock.module("./some-module", () => ({
 | Add documentation | `docs/src/content/docs/` |
 
 <!-- This section is maintained by the coding agent via lore (https://github.com/BYK/opencode-lore) -->
+## Long-term Knowledge
+
+### Architecture
+
+<!-- lore:365e4299-37cf-48e0-8f2e-8503d4a249dd -->
+* **API client wraps all errors as CliError subclasses — no raw exceptions escape**: The API client (src/lib/api-client.ts) wraps ALL errors as CliError subclasses (ApiError or AuthError) — no raw exceptions escape. Commands don't need try-catch for error display; the central handler in app.ts formats CliError cleanly. Only add try-catch when a command needs to handle errors specially (e.g., login continuing despite user-info fetch failure).
+
+<!-- lore:019c8b60-d221-718a-823b-7c2c6e4ca1d5 -->
+* **Sentry API: events require org+project, issues have legacy global endpoint**: Sentry API scoping: Events require org+project in URL path (\`/projects/{org}/{project}/events/{id}/\`). Issues use legacy global endpoint (\`/api/0/issues/{id}/\`) without org context. Traces need only org (\`/organizations/{org}/trace/{traceId}/\`). Two-step lookup for events: fetch issue → extract org/project from response → fetch event. Cross-project event search possible via Discover endpoint \`/organizations/{org}/events/\` with \`query=id:{eventId}\`.
+
+<!-- lore:019cb6ab-ab98-7a9c-a25f-e154a5adbbe1 -->
+* **Sentry CLI authenticated fetch architecture with response caching**: \`createAuthenticatedFetch()\` wraps fetch with auth, 30s timeout, retry (max 2), 401 refresh, and span tracing. Response caching integrates BEFORE auth/retry via \`http-cache-semantics\` (RFC 7234) with filesystem storage at \`~/.sentry/cache/responses/\`. URL-based fallback TTL tiers: immutable (24hr), stable (5min), volatile (60s), no-cache (0). Only GET 2xx cached. \`--fresh\` and \`SENTRY\_NO\_CACHE=1\` bypass cache. Cache cleared on login/logout. \`hasServerCacheDirectives(policy)\` distinguishes \`max-age=0\` from missing headers.
+
+<!-- lore:019c8c72-b871-7d5e-a1a4-5214359a5a77 -->
+* **Sentry CLI has two distribution channels with different runtimes**: Sentry CLI ships two ways: (1) Standalone binary via \`Bun.build()\` with \`compile: true\`. (2) npm package via esbuild producing CJS \`dist/bin.cjs\` for Node 22+, with Bun API polyfills from \`script/node-polyfills.ts\`. \`Bun.$\` has NO polyfill — use \`execSync\` instead. \`require()\` in ESM is safe (Bun native, esbuild resolves at bundle time).
+
+<!-- lore:019c8b60-d21a-7d44-8a88-729f74ec7e02 -->
+* **Sentry CLI resolve-target cascade has 5 priority levels with env var support**: Resolve-target cascade (src/lib/resolve-target.ts) has 5 priority levels: (1) Explicit CLI flags, (2) SENTRY\_ORG/SENTRY\_PROJECT env vars, (3) SQLite config defaults, (4) DSN auto-detection, (5) Directory name inference. SENTRY\_PROJECT supports combo notation \`org/project\` — when used, SENTRY\_ORG is ignored. If combo parse fails (e.g. \`org/\`), the entire value is discarded. The \`resolveFromEnvVars()\` helper is injected into all four resolution functions.
+
+### Decision
+
+<!-- lore:019c9f9c-40ee-76b5-b98d-acf1e5867ebc -->
+* **Issue list global limit with fair per-project distribution and representation guarantees**: \`issue list --limit\` is a global total across all detected projects. \`fetchWithBudget\` Phase 1 divides evenly, Phase 2 redistributes surplus via cursor resume. \`trimWithProjectGuarantee\` ensures at least 1 issue per project before filling remaining slots. JSON output wraps in \`{ data, hasMore }\` with optional \`errors\` array. Compound cursor (pipe-separated) enables \`-c last\` for multi-target pagination, keyed by sorted target fingerprint.
+
+<!-- lore:019c8f05-c86f-7b46-babc-5e4faebff2e9 -->
+* **Sentry CLI config dir should stay at ~/.sentry/, not move to XDG**: Config dir stays at \`~/.sentry/\` (not XDG). The readonly DB errors on macOS are from \`sudo brew install\` creating root-owned files. Fixes: (1) bestEffort() makes setup steps non-fatal, (2) tryRepairReadonly() detects root-owned files and prints \`sudo chown\` instructions, (3) \`sentry cli fix\` handles ownership repair. Ownership must be checked BEFORE permissions — root-owned files cause chmod to EPERM.
+
+### Gotcha
+
+<!-- lore:019c8ee1-affd-7198-8d01-54aa164cde35 -->
+* **brew is not in VALID\_METHODS but Homebrew formula passes --method brew**: Homebrew install: \`isHomebrewInstall()\` detects via Cellar realpath (checked before stored install info). Upgrade command tells users \`brew upgrade getsentry/tools/sentry\`. Formula runs \`sentry cli setup --method brew --no-modify-path\` as post\_install. Version pinning throws 'unsupported\_operation'. Uses .gz artifacts. Tap at getsentry/tools.
+
+<!-- lore:70319dc2-556d-4e30-9562-e51d1b68cf45 -->
+* **Bun mock.module() leaks globally across test files in same process**: Bun's mock.module() replaces modules globally and leaks across test files in the same process. Solution: tests using mock.module() must run in a separate \`bun test\` invocation. In package.json, use \`bun run test:unit && bun run test:isolated\` instead of \`bun test\`. The \`test/isolated/\` directory exists for these tests. This was the root cause of ~100 test failures (getsentry/cli#258).
+
+<!-- lore:019cb8cc-bfa8-7dd8-8ec7-77c974fd7985 -->
+* **Making clearAuth() async breaks model-based tests — use non-async Promise\<void> return instead**: Making \`clearAuth()\` \`async\` breaks fast-check model-based tests — real async yields (macrotasks) during \`asyncModelRun\` cause \`createIsolatedDbContext\` cleanup to interleave. Fix: keep non-async, return \`clearResponseCache().catch(...)\` directly. Model-based tests should NOT await it. Also: model-based tests need explicit timeouts (e.g., \`30\_000\`) — Bun's default 5s causes false failures during shrinking.
+
+<!-- lore:a28c4f2a-e2b6-4f24-9663-a85461bc6412 -->
+* **Multiregion mock must include all control silo API routes**: When changing which Sentry API endpoint a function uses, mock routes must be updated in BOTH \`test/mocks/routes.ts\` (single-region) AND \`test/mocks/multiregion.ts\` \`createControlSiloRoutes()\`. Missing the multiregion mock causes 404s in multi-region test scenarios.
+
+<!-- lore:ce43057f-2eff-461f-b49b-fb9ebaadff9d -->
+* **Sentry /users/me/ endpoint returns 403 for OAuth tokens — use /auth/ instead**: The Sentry \`/users/me/\` endpoint returns 403 for OAuth tokens. Use \`/auth/\` instead — it works with ALL token types and lives on the control silo. In the CLI, \`getControlSiloUrl()\` handles routing correctly. \`SentryUserSchema\` (with \`.passthrough()\`) handles the \`/auth/\` response since it only requires \`id\`.
+
+<!-- lore:019ce2c5-c9b0-7151-9579-5273c0397203 -->
+* **Stricli command context uses this.stdout not this.process.stdout**: In Stricli command \`func()\` handlers, use \`this.stdout\` and \`this.stderr\` directly — NOT \`this.process.stdout\`. The \`SentryContext\` interface has both \`process\` and \`stdout\`/\`stderr\` as separate top-level properties. Test mock contexts typically provide \`stdout\` but not a full \`process\` object, so \`this.process.stdout\` causes \`TypeError: undefined is not an object\` at runtime in tests even though TypeScript doesn't flag it.
+
+<!-- lore:019c8bbe-bc63-7b5e-a4e0-de7e968dcacb -->
+* **Stricli defaultCommand blends default command flags into route completions**: When a Stricli route map has \`defaultCommand\` set, requesting completions for that route (e.g. \`\["issues", ""]\`) returns both the subcommand names AND the default command's flags/positional completions. This means completion tests that compare against \`extractCommandTree()\` subcommand lists will fail for groups with defaultCommand, since the actual completions include extra entries like \`--limit\`, \`--query\`, etc. Solution: track \`hasDefaultCommand\` in the command tree and skip strict subcommand-matching assertions for those groups.
+
+### Pattern
+
+<!-- lore:019cb100-4630-79ac-8a13-185ea3d7bbb7 -->
+* **Extract logic from Stricli func() handlers into standalone functions for testability**: Stricli command \`func()\` handlers are hard to unit test because they require full command context setup. To boost coverage, extract flag validation and body-building logic into standalone exported functions (e.g., \`resolveBody()\` extracted from the \`api\` command's \`func()\`). This moved ~20 lines of mutual-exclusivity checks and flag routing from an untestable handler into a directly testable pure function. Property-based tests on the extracted function drove patch coverage from 78% to 97%. The general pattern: keep \`func()\` as a thin orchestrator that calls exported helpers. This also keeps biome complexity under the limit (max 15).
+
+<!-- lore:d441d9e5-3638-4b5a-8148-f88c349b8979 -->
+* **Non-essential DB cache writes should be guarded with try-catch**: Non-essential DB cache writes (e.g., \`setUserInfo()\` in whoami.ts and login.ts) must be wrapped in try-catch. If the DB is broken, the cache write shouldn't crash the command when its primary operation already succeeded. In login.ts specifically, \`getCurrentUser()\` failure after token save must not block authentication — wrap in try-catch, log warning to stderr, let login succeed. This differs from \`getUserRegions()\` failure which should \`clearAuth()\` and fail hard (indicates invalid token).
+
+<!-- lore:019ce2c5-c9a8-7219-bdb8-154ead871d27 -->
+* **Stricli buildCommand output config injects json flag into func params**: When a Stricli command uses \`output: { json: true, human: formatFn }\`, the framework injects \`--json\` and \`--fields\` flags automatically. The \`func\` handler receives these as its first parameter. Type it explicitly (e.g., \`flags: { json?: boolean }\`) rather than \`\_flags: unknown\` to access the json flag for conditional behavior (e.g., skipping interactive output in JSON mode). The \`human\` formatter runs on the returned \`data\` for non-JSON output. Commands that produce interactive side effects (browser prompts, QR codes) should check \`flags.json\` and skip them when true.
+
+### Preference
+
+<!-- lore:019cb3e6-da61-7dfe-83c2-17fe3257bece -->
+* **PR workflow: address review comments, resolve threads, wait for CI**: User's PR workflow after creation: (1) Wait for CI checks to pass, (2) Check for unresolved review comments via \`gh api\` for PR review comments, (3) Fix issues in follow-up commits (not amends), (4) Reply to the comment thread explaining the fix, (5) Resolve the thread programmatically via \`gh api graphql\` with \`resolveReviewThread\` mutation, (6) Push and wait for CI again, (7) Final sweep for any remaining unresolved comments. Use \`git notes add\` to attach implementation plans to commits. Branch naming: \`fix/descriptive-slug\` or \`feat/descriptive-slug\`.
 <!-- End lore-managed section -->

@@ -17,11 +17,9 @@ import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
-  applyFreshFlag,
   buildListCommand,
-  FRESH_ALIASES,
-  FRESH_FLAG,
-  LIST_CURSOR_FLAG,
+  LIST_PERIOD_FLAG,
+  PERIOD_ALIASES,
   TARGET_PATTERN_NOTE,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -32,6 +30,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly sort: "date" | "duration";
+  readonly period: string;
   readonly json: boolean;
   readonly cursor?: string;
   readonly fresh: boolean;
@@ -77,11 +76,14 @@ const COMMAND_NAME = "trace list";
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "trace-list";
 
+/** Default time period for trace queries */
+const DEFAULT_PERIOD = "7d";
+
 /** Build the CLI hint for fetching the next page, preserving active flags. */
 function nextPageHint(
   org: string,
   project: string,
-  flags: Pick<ListFlags, "sort" | "query">
+  flags: Pick<ListFlags, "sort" | "query" | "period">
 ): string {
   const base = `sentry trace list ${org}/${project} -c last`;
   const parts: string[] = [];
@@ -90,6 +92,9 @@ function nextPageHint(
   }
   if (flags.query) {
     parts.push(`-q "${flags.query}"`);
+  }
+  if (flags.period !== DEFAULT_PERIOD) {
+    parts.push(`--period ${flags.period}`);
   }
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
 }
@@ -178,6 +183,7 @@ export const listCommand = buildListCommand("trace", {
       "  sentry trace list                     # List last 10 traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
       "  sentry trace list --sort duration     # Sort by slowest first\n" +
+      "  sentry trace list --period 24h        # Last 24 hours only\n" +
       '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction\n\n' +
       "Alias: `sentry traces` → `sentry trace list`",
   },
@@ -216,19 +222,16 @@ export const listCommand = buildListCommand("trace", {
         brief: "Sort by: date, duration",
         default: "date" as const,
       },
-      cursor: LIST_CURSOR_FLAG,
-      fresh: FRESH_FLAG,
+      period: LIST_PERIOD_FLAG,
     },
     aliases: {
-      ...FRESH_ALIASES,
+      ...PERIOD_ALIASES,
       n: "limit",
       q: "query",
       s: "sort",
-      c: "cursor",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection
@@ -243,6 +246,7 @@ export const listCommand = buildListCommand("trace", {
     const contextKey = buildPaginationContextKey("trace", `${org}/${project}`, {
       sort: flags.sort,
       q: flags.query,
+      period: flags.period,
     });
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
@@ -257,6 +261,7 @@ export const listCommand = buildListCommand("trace", {
           limit: flags.limit,
           sort: flags.sort,
           cursor,
+          statsPeriod: flags.period,
         })
     );
 

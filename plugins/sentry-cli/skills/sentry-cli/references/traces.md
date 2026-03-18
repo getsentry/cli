@@ -9,20 +9,21 @@ requires:
 
 # Trace & Span Commands
 
-View spans in distributed traces
+List and view spans in projects or traces
 
 View distributed traces
 
 ### `sentry span list <org/project/trace-id...>`
 
-List spans in a trace
+List spans in a project or trace
 
 **Flags:**
 - `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
 - `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
 - `-s, --sort <value> - Sort order: date, duration - (default: "date")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### `sentry span view <trace-id/span-id...>`
 
@@ -40,8 +41,9 @@ List recent traces in a project
 - `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort by: date, duration - (default: "date")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
+- `-t, --period <value> - Time period (e.g., "1h", "24h", "7d", "30d") - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### `sentry trace view <org/project/trace-id...>`
 

@@ -46,11 +46,8 @@ import {
   type OutputConfig,
 } from "../../lib/formatters/output.js";
 import {
-  applyFreshFlag,
   buildListCommand,
   buildListLimitFlag,
-  FRESH_ALIASES,
-  FRESH_FLAG,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
   parseCursorFlag,
@@ -1298,7 +1295,6 @@ export const listCommand = buildListCommand("issue", {
           'Pagination cursor for <org>/ or multi-target modes (use "last" to continue)',
         optional: true,
       },
-      fresh: FRESH_FLAG,
       compact: {
         kind: "boolean",
         brief: "Single-line rows for compact output (auto-detects if omitted)",
@@ -1307,14 +1303,12 @@ export const listCommand = buildListCommand("issue", {
     },
     aliases: {
       ...LIST_BASE_ALIASES,
-      ...FRESH_ALIASES,
       q: "query",
       s: "sort",
       t: "period",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
     const parsed = parseOrgProjectArg(target);
