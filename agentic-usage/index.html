@@ -152,17 +152,21 @@ svg:where(.astro-c6vsoqas){color:var(--sl-icon-color);font-size:var(--sl-icon-si
 <ul>
 <li><strong>View issues</strong> - List and inspect Sentry issues from your projects</li>
 <li><strong>Inspect events</strong> - Look at specific error events and their details</li>
+<li><strong>AI analysis</strong> - Get root cause analysis and fix plans via Seer AI</li>
 <li><strong>Browse projects</strong> - List projects and organizations you have access to</li>
+<li><strong>Explore the API</strong> - Browse API endpoints with <code dir="auto">sentry schema</code> and make arbitrary requests with <code dir="auto">sentry api</code></li>
 <li><strong>Make API calls</strong> - Execute arbitrary Sentry API requests</li>
 <li><strong>Authenticate</strong> - Help you set up CLI authentication</li>
 </ul>
 <h2 id="how-it-works">How It Works</h2>
-<p>When you ask your agent about Sentry errors or want to investigate an issue, the agent can use this skill to fetch real data from your Sentry account. For example:</p>
+<p>When you ask your agent about Sentry errors or want to investigate an issue, the agent uses CLI commands to fetch real data from your Sentry account. For example:</p>
 <ul>
-<li>"Show me the latest issues in my project"</li>
-<li>"What's the stack trace for ISSUE-123?"</li>
-<li>"List all projects in my organization"</li>
+<li>"Show me the latest issues in my project" → <code dir="auto">sentry issue list</code></li>
+<li>"What's the stack trace for ISSUE-123?" → <code dir="auto">sentry issue view ISSUE-123</code></li>
+<li>"List all projects in my organization" → <code dir="auto">sentry project list my-org</code></li>
+<li>"What API endpoints exist for releases?" → <code dir="auto">sentry schema releases</code></li>
 </ul>
+<p>The CLI has dedicated commands for most Sentry tasks, so agents should prefer <code dir="auto">sentry</code> commands over constructing raw API calls. The <code dir="auto">sentry schema</code> command provides built-in API exploration, and <code dir="auto">sentry api</code> handles authenticated requests for anything not covered by a dedicated command.</p>
 <p>The skill uses your existing CLI authentication, so you'll need to run <code dir="auto">sentry auth login</code> first if you haven't already.</p>
 <h2 id="requirements">Requirements</h2>
 <ul>
