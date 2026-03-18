@@ -30,7 +30,24 @@ describe("buildDeviceFlowDisplay", () => {
   test("includes complete URL with embedded code", () => {
     const lines = buildDeviceFlowDisplay(CODE, URL, true, false);
     const joined = lines.join("\n");
-    expect(joined).toContain(URL);
+    // URL is escaped for markdown safety (underscores become \_)
+    expect(joined).toContain("sentry.io/auth/device/");
+    expect(joined).toContain("ABCD-EFGH");
+  });
+
+  test("escapes markdown characters in URLs", () => {
+    const urlWithUnderscores =
+      "https://self_hosted.example.com/auth/device/?user_code=AB_CD";
+    const lines = buildDeviceFlowDisplay(
+      "AB_CD",
+      urlWithUnderscores,
+      true,
+      false
+    );
+    const joined = lines.join("\n");
+    // Underscores should be escaped so they aren't interpreted as emphasis
+    expect(joined).toContain("self\\_hosted");
+    expect(joined).not.toContain("<em>");
   });
 
   test("includes user code as inline code span", () => {

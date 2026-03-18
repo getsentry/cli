@@ -63,6 +63,11 @@ function createMockContext(
     ...overrides.env,
   };
 
+  // Force plain output so formatUpgradeResult renders raw markdown tables
+  // (ASCII pipes) instead of Unicode box-drawing characters in TTY mode.
+  const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
+  process.env.SENTRY_PLAIN_OUTPUT = "1";
+
   // Capture consola output (routed to process.stderr)
   const origWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -123,6 +128,11 @@ function createMockContext(
     errors,
     restore: () => {
       process.stderr.write = origWrite;
+      if (origPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = origPlain;
+      }
     },
   };
 }
