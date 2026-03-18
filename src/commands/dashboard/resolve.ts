@@ -152,7 +152,10 @@ export function resolveWidgetIndex(
     }
     return index;
   }
-  const matchIndex = widgets.findIndex((w) => w.title === title);
+  const lowerTitle = (title ?? "").toLowerCase();
+  const matchIndex = widgets.findIndex(
+    (w) => w.title.toLowerCase() === lowerTitle
+  );
   if (matchIndex === -1) {
     throw new ValidationError(
       `No widget with title '${title}' found in dashboard.`,
