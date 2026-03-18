@@ -160,10 +160,17 @@ type ParsedLogArgs =
 /**
  * Disambiguate log list positional arguments.
  *
- * Checks if the "tail" segment (last part after `/`, or the entire arg
- * if no `/`) looks like a 32-char hex trace ID. If so, delegates to
- * {@link parseTraceTarget} for full trace target parsing. Otherwise,
- * treats the argument as a project target.
+ * Detects trace mode by checking whether any argument segment looks like
+ * a 32-char hex trace ID:
+ *
+ * - **Single arg**: checks the tail segment (last part after `/`, or the
+ *   entire arg). `<trace-id>`, `<org>/<trace-id>`, `<org>/<project>/<trace-id>`.
+ * - **Two+ args**: checks the last positional (`<org> <trace-id>` or
+ *   `<org>/<project> <trace-id>` space-separated forms).
+ * - **No match**: treats the argument as a project target.
+ *
+ * When trace mode is detected, delegates to {@link parseTraceTarget} for
+ * full parsing and validation.
  *
  * @param args - Positional arguments from CLI
  * @returns Parsed args with mode discrimination
@@ -178,7 +185,19 @@ function parseLogListArgs(args: string[]): ParsedLogArgs {
     return { mode: "project" };
   }
 
-  // Check the tail segment: last part after `/`, or the entire arg
+  // Two+ args: check if the last arg is a trace ID (space-separated form)
+  // e.g., `sentry log list my-org abc123...` or `sentry log list my-org/proj abc123...`
+  if (args.length >= 2) {
+    const last = args.at(-1);
+    if (last && isTraceId(last)) {
+      return {
+        mode: "trace",
+        parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
+      };
+    }
+  }
+
+  // Single arg: check the tail segment (last part after `/`, or the entire arg)
   const lastSlash = first.lastIndexOf("/");
   const tail = lastSlash === -1 ? first : first.slice(lastSlash + 1);
 
@@ -192,15 +211,15 @@ function parseLogListArgs(args: string[]): ParsedLogArgs {
   return { mode: "project", target: first };
 }
 
+/** Default time period for project-scoped log queries */
+const DEFAULT_PROJECT_PERIOD = "90d";
+
 /**
  * Execute a single fetch of logs (non-streaming mode).
  *
  * Returns the logs and a hint. The caller yields the result and
  * returns the hint as a footer via `CommandReturn`.
  */
-/** Default time period for project-scoped log queries */
-const DEFAULT_PROJECT_PERIOD = "90d";
-
 async function executeSingleFetch(
   org: string,
   project: string,
