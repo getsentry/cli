@@ -298,8 +298,7 @@ export function generateBashCompletion(binaryName: string): string {
   const enumBranch = enumCaseEntries
     ? `elif [[ "\${prev}" == @(${enumCaseEntries}) ]]; then
         # Enum value completion (static)
-        local val_var="\${cmd}_\${subcmd}_\${prev#--}_values"
-        val_var=\${val_var//-/_}
+        local val_var="$(__${binaryName}_varname "\${cmd}")_$(__${binaryName}_varname "\${subcmd}")_$(__${binaryName}_varname "\${prev#--}")_values"
         if [[ -n "\${!val_var+x}" ]]; then
           COMPREPLY=($(compgen -W "\${!val_var}" -- "\${cur}"))
         fi`
@@ -307,6 +306,11 @@ export function generateBashCompletion(binaryName: string): string {
 
   return `# bash completion for ${binaryName}
 # Auto-generated from command definitions
+
+# Sanitize a string for use as a bash variable name suffix.
+# Matches shellVarName() in completions.ts: replaces hyphens, dots, spaces.
+__${binaryName}_varname() { echo "\${1//[-. ]/_}"; }
+
 _${binaryName}_completions() {
   local cur prev words cword
   _init_completion || return
@@ -331,14 +335,12 @@ ${caseBranches}
 
       if [[ "\${cur}" == --* ]]; then
         # Flag name completion (static)
-        local cmd_var="\${cmd}_\${subcmd}_flags"
-        cmd_var=\${cmd_var//-/_}
+        local cmd_var="$(__${binaryName}_varname "\${cmd}")_$(__${binaryName}_varname "\${subcmd}")_flags"
         if [[ -n "\${!cmd_var+x}" ]]; then
           COMPREPLY=($(compgen -W "\${!cmd_var}" -- "\${cur}"))
         else
           # Try standalone command flags
-          local standalone_var="\${cmd}_flags"
-          standalone_var=\${standalone_var//-/_}
+          local standalone_var="$(__${binaryName}_varname "\${cmd}")_flags"
           if [[ -n "\${!standalone_var+x}" ]]; then
             COMPREPLY=($(compgen -W "\${!standalone_var}" -- "\${cur}"))
           fi
@@ -500,8 +502,11 @@ complete -c ${binaryName} -f
 
 # Dynamic completion for positional values
 function __${binaryName}_complete_dynamic
-  set -l tokens (commandline -opc)
-  ${binaryName} __complete $tokens[2..] (commandline -ct) 2>/dev/null | while read -l line
+  # commandline -opc: all tokens before cursor (excludes current partial)
+  # commandline -ct: the current token being completed (the partial)
+  set -l preceding (commandline -opc)
+  set -l current (commandline -ct)
+  ${binaryName} __complete $preceding[2..] $current 2>/dev/null | while read -l line
     echo $line
   end
 end
