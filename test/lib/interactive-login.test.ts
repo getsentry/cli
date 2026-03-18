@@ -82,38 +82,4 @@ describe("buildDeviceFlowDisplay", () => {
     // Without browser: extra copy-hint line + blank line
     expect(withoutBrowser.length).toBeGreaterThan(withBrowser.length);
   });
-
-  test("includes user code as inline code span", () => {
-    const lines = buildDeviceFlowDisplay(CODE, URL, true, false);
-    const joined = lines.join("\n");
-    expect(joined).toContain(`\`${CODE}\``);
-  });
-
-  test("omits copy hint when browser opened", () => {
-    const lines = buildDeviceFlowDisplay(CODE, URL, true, true);
-    const joined = lines.join("\n");
-    expect(joined).not.toContain("Copy the URL above");
-    expect(joined).not.toContain("to copy URL");
-  });
-
-  test("shows copy hint when browser did not open (TTY)", () => {
-    const lines = buildDeviceFlowDisplay(CODE, URL, false, true);
-    const joined = lines.join("\n");
-    expect(joined).toContain("Copy the URL above to sign in.");
-    expect(joined).toContain("to copy URL");
-  });
-
-  test("shows copy hint without keyboard shortcut in non-TTY", () => {
-    const lines = buildDeviceFlowDisplay(CODE, URL, false, false);
-    const joined = lines.join("\n");
-    expect(joined).toContain("Copy the URL above to sign in.");
-    expect(joined).not.toContain("to copy URL");
-  });
-
-  test("returns more lines when browser did not open", () => {
-    const withBrowser = buildDeviceFlowDisplay(CODE, URL, true, false);
-    const withoutBrowser = buildDeviceFlowDisplay(CODE, URL, false, false);
-    // Without browser: extra copy-hint line + blank line
-    expect(withoutBrowser.length).toBeGreaterThan(withBrowser.length);
-  });
 });
