@@ -184,11 +184,17 @@ export async function completeOrgSlashProject(
     return [...orgCompletions, ...aliasCompletions];
   }
 
-  // Has slash — complete project within the org
+  // Has slash — complete project within the org.
+  // Fuzzy-resolve the org slug first so that "senry/" still finds "sentry" projects.
   const orgPart = partial.slice(0, slashIdx);
   const projectPart = partial.slice(slashIdx + 1);
 
-  return completeProjectSlugs(projectPart, orgPart);
+  const resolvedOrg = await fuzzyResolveOrg(orgPart);
+  if (!resolvedOrg) {
+    return [];
+  }
+
+  return completeProjectSlugs(projectPart, resolvedOrg);
 }
 
 /**
@@ -246,6 +252,27 @@ export async function completeProjectSlugs(
     value: `${orgSlug}/${slug}`,
     description: nameMap.get(slug),
   }));
+}
+
+/**
+ * Fuzzy-resolve an org slug to its canonical form.
+ *
+ * When the user types `senry/`, we need to find the actual cached org
+ * slug `sentry` so we can query projects for it. Returns the best
+ * fuzzy match, or the original slug if it matches exactly.
+ *
+ * @param orgPart - The potentially misspelled org slug
+ * @returns The resolved org slug, or undefined if no match
+ */
+async function fuzzyResolveOrg(orgPart: string): Promise<string | undefined> {
+  const orgs = await getCachedOrganizations();
+  if (orgs.length === 0) {
+    return;
+  }
+
+  const slugs = orgs.map((o) => o.slug);
+  const matched = fuzzyMatch(orgPart, slugs, { maxResults: 1 });
+  return matched[0];
 }
 
 /**

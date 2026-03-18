@@ -169,6 +169,30 @@ describe("completeOrgSlashProject", () => {
     ]);
   });
 
+  test("with fuzzy org slug before slash resolves to correct org", async () => {
+    await seedOrgs([{ slug: "sentry", name: "Sentry" }]);
+    await seedProjects([
+      {
+        orgId: "1",
+        projectId: "10",
+        orgSlug: "sentry",
+        projectSlug: "cli",
+        projectName: "CLI",
+      },
+    ]);
+
+    // "senry/" has a typo in the org — should fuzzy-resolve to "sentry"
+    const result = await completeOrgSlashProject("senry/");
+    expect(result).toHaveLength(1);
+    expect(result[0].value).toBe("sentry/cli");
+  });
+
+  test("with unresolvable org slug before slash returns empty", async () => {
+    await seedOrgs([{ slug: "sentry", name: "Sentry" }]);
+    const result = await completeOrgSlashProject("zzzzzzz/");
+    expect(result).toEqual([]);
+  });
+
   test("with slash and partial project filters", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Org" }]);
     await seedProjects([

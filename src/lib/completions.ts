@@ -401,24 +401,9 @@ export function generateZshCompletion(binaryName: string): string {
 # zsh completion for ${binaryName}
 # Auto-generated from command definitions
 
-# Dynamic completer for positional values (org slugs, project names)
-_${binaryName}_dynamic() {
-  local -a completions
-  local line
-  while IFS=$'\\t' read -r value desc; do
-    if [[ -n "$desc" ]]; then
-      completions+=("\${value}:\${desc}")
-    else
-      completions+=("\${value}")
-    fi
-  done < <(${binaryName} __complete \${words[2,-1]} 2>/dev/null)
-  if [[ \${#completions} -gt 0 ]]; then
-    _describe -t values 'value' completions
-  fi
-}
-
 _${binaryName}() {
   local -a commands
+  local curcontext="$curcontext" state line
   commands=(
 ${topLevelItems}
   )
@@ -435,13 +420,25 @@ ${subArrays}
       _describe -t commands 'command' commands
       ;;
     subcommand)
-      case "$words[1]" in
+      case "$line[1]" in
 ${caseBranches}
       esac
       ;;
     args)
-      # Dynamic completion for positional args
-      _${binaryName}_dynamic
+      # Dynamic completion for positional args (org slugs, project names)
+      # In the args state, $line[1] and $line[2] hold the parsed command
+      # and subcommand. Pass them to __complete for context detection.
+      local -a completions
+      while IFS=$'\\t' read -r value desc; do
+        if [[ -n "$desc" ]]; then
+          completions+=("\${value}:\${desc}")
+        else
+          completions+=("\${value}")
+        fi
+      done < <(${binaryName} __complete "$line[1]" "$line[2]" "\${words[@]}" 2>/dev/null)
+      if (( \${#completions} )); then
+        _describe -t values 'value' completions
+      fi
       ;;
   esac
 }
