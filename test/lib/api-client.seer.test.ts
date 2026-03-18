@@ -11,18 +11,13 @@ import {
   triggerSolutionPlanning,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import { useTestConfigDir } from "../helpers.js";
 
-// Test config directory
-let testConfigDir: string;
+useTestConfigDir("test-seer-api-");
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-seer-api-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-
   // Save original fetch
   originalFetch = globalThis.fetch;
 
@@ -32,10 +27,9 @@ beforeEach(async () => {
   await setOrgRegion("test-org", "https://sentry.io");
 });
 
-afterEach(async () => {
+afterEach(() => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
-  await cleanupTestDir(testConfigDir);
 });
 
 describe("triggerRootCauseAnalysis", () => {

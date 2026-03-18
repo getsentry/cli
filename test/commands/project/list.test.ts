@@ -32,7 +32,6 @@ import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
 import { setDefaults } from "../../../src/lib/db/defaults.js";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   getPaginationCursor,
   resolveOrgCursor,
@@ -45,22 +44,10 @@ import {
   ValidationError,
 } from "../../../src/lib/errors.js";
 import type { SentryProject } from "../../../src/types/index.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
-// Test config directory for DB-dependent tests
-let testConfigDir: string;
-
-beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-project-list-", {
-    isolateProjectRoot: true,
-  });
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-});
-
-afterEach(async () => {
-  await cleanupTestDir(testConfigDir);
-});
+useTestConfigDir("test-project-list-", { isolateProjectRoot: true });
 
 /** Create a minimal project for testing */
 function makeProject(

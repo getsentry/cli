@@ -7,10 +7,14 @@
 import { afterEach, beforeEach } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
 
-const TEST_TMP_DIR = resolve(import.meta.dir, "../.test-tmp");
+// biome-ignore lint/performance/noBarrelFile: re-exporting a single constant, not a barrel
+export { TEST_TMP_DIR } from "./constants.js";
+
+import { TEST_TMP_DIR } from "./constants.js";
+
 mkdirSync(TEST_TMP_DIR, { recursive: true });
 
 type TestConfigDirOptions = {
@@ -24,7 +28,7 @@ type TestConfigDirOptions = {
 
 /**
  * Creates a unique temporary directory for test isolation.
- * Uses a project-local temp directory to avoid read-only system /tmp issues.
+ * Uses a namespaced subdirectory under the OS temp directory.
  *
  * @param prefix - Directory name prefix (default: "sentry-test-")
  * @param options - Configuration options
@@ -111,6 +115,9 @@ export function useTestConfigDir(
     // Deleting process.env.SENTRY_CONFIG_DIR causes failures in test files
     // that load after this afterEach runs, because their module-level code
     // (or beforeEach hooks) may read the env var and get undefined.
+    // Note: preload.ts always sets SENTRY_CONFIG_DIR, so savedConfigDir is
+    // always defined in practice. The else branch is intentionally omitted
+    // to avoid the "delete process.env" anti-pattern.
     if (savedConfigDir !== undefined) {
       process.env[CONFIG_DIR_ENV_VAR] = savedConfigDir;
     }

@@ -12,17 +12,20 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
 import {
+  clearInstallInfo,
+  setInstallInfo,
+} from "../../../src/lib/db/install-info.js";
+import {
   getReleaseChannel,
   setReleaseChannel,
 } from "../../../src/lib/db/release-channel.js";
-import { useTestConfigDir } from "../../helpers.js";
+import { TEST_TMP_DIR, useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -648,16 +651,25 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   let spawnedArgs: string[][];
   let restoreStderr: (() => void) | undefined;
 
-  /** Default install paths (default curl dir) */
-  const defaultBinDir = join(homedir(), ".sentry", "bin");
+  /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
+  const spawnBinDir = join(TEST_TMP_DIR, "upgrade-spawn-bin");
+  const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+  const spawnInstallPath = join(spawnBinDir, binName);
 
   beforeEach(() => {
     testDir = join(
-      "/tmp",
+      TEST_TMP_DIR,
       `upgrade-spawn-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     mkdirSync(testDir, { recursive: true });
-    mkdirSync(defaultBinDir, { recursive: true });
+    mkdirSync(spawnBinDir, { recursive: true });
+    // Redirect getCurlInstallPaths() to temp dir
+    clearInstallInfo();
+    setInstallInfo({
+      method: "curl",
+      path: spawnInstallPath,
+      version: "0.0.0",
+    });
 
     originalFetch = globalThis.fetch;
     originalSpawn = Bun.spawn;
@@ -677,15 +689,15 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
 
-    // Clean up any temp binary files written to the default curl install path
-    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+    // Clean up any temp binary files written to the redirected install path
     for (const suffix of ["", ".download", ".old", ".lock"]) {
       try {
-        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+        await unlink(join(spawnBinDir, `${binName}${suffix}`));
       } catch {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   /**
@@ -856,15 +868,25 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
   let originalSpawn: typeof Bun.spawn;
   let restoreStderr: (() => void) | undefined;
 
-  const defaultBinDir = join(homedir(), ".sentry", "bin");
+  /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
+  const migrateBinDir = join(TEST_TMP_DIR, "upgrade-migrate-bin");
+  const migrateBinName = process.platform === "win32" ? "sentry.exe" : "sentry";
+  const migrateInstallPath = join(migrateBinDir, migrateBinName);
 
   beforeEach(() => {
     testDir = join(
-      "/tmp",
+      TEST_TMP_DIR,
       `upgrade-migrate-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     mkdirSync(testDir, { recursive: true });
-    mkdirSync(defaultBinDir, { recursive: true });
+    mkdirSync(migrateBinDir, { recursive: true });
+    // Redirect getCurlInstallPaths() to temp dir
+    clearInstallInfo();
+    setInstallInfo({
+      method: "curl",
+      path: migrateInstallPath,
+      version: "0.0.0",
+    });
 
     originalFetch = globalThis.fetch;
     originalSpawn = Bun.spawn;
@@ -881,14 +903,14 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
 
-    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
     for (const suffix of ["", ".download", ".old", ".lock"]) {
       try {
-        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+        await unlink(join(migrateBinDir, `${migrateBinName}${suffix}`));
       } catch {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   test("migrates npm install to standalone binary for nightly channel", async () => {
