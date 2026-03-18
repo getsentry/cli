@@ -15,6 +15,7 @@ import {
   isPlainOutput,
   renderInlineMarkdown,
   stripColorTags,
+  stripMarkdownInline,
 } from "./markdown.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
@@ -93,26 +94,40 @@ export type WriteTableOptions = {
  * Format items as a table string.
  *
  * Returns the rendered table instead of writing to a stream.
- * In plain/non-TTY mode emits CommonMark; in TTY mode emits a
- * Unicode-bordered table with ANSI styling.
+ * In plain/non-TTY mode emits a human-readable aligned table with
+ * Unicode box-drawing borders but no ANSI escape codes. In TTY mode
+ * emits a styled table with ANSI colors and hyperlinks.
  */
 export function formatTable<T>(
   items: T[],
   columns: Column<T>[],
   options?: WriteTableOptions
 ): string {
+  const headers = columns.map((c) => c.header);
+  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
+  const minWidths = columns.map((c) => c.minWidth ?? 0);
+  const shrinkable = columns.map((c) => c.shrinkable ?? true);
+
   if (isPlainOutput()) {
-    return `${buildMarkdownTable(items, columns)}\n`;
+    // Strip markdown syntax so plain output is human-readable (no **bold**,
+    // [link](url), or `code` artifacts). Use renderTextTable for proper
+    // column alignment with box-drawing borders.
+    const rows = items.map((item) =>
+      columns.map((c) => stripMarkdownInline(c.value(item)))
+    );
+    return renderTextTable(headers, rows, {
+      alignments,
+      minWidths,
+      shrinkable,
+      truncate: options?.truncate,
+      // Strip ANSI color from row separators in plain mode
+      rowSeparator: Boolean(options?.rowSeparator),
+    });
   }
 
-  const headers = columns.map((c) => c.header);
   const rows = items.map((item) =>
     columns.map((c) => renderInlineMarkdown(c.value(item)))
   );
-  const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
-
-  const minWidths = columns.map((c) => c.minWidth ?? 0);
-  const shrinkable = columns.map((c) => c.shrinkable ?? true);
 
   return renderTextTable(headers, rows, {
     alignments,

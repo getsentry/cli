@@ -292,18 +292,25 @@ describe("writeIssueTable", () => {
   });
 
   test("default mode shows title and subtitle (2-line)", () => {
-    const { writer, output } = capture();
-    const issueWithMeta: SentryIssue = {
-      ...mockIssue,
-      metadata: { value: "Cannot read property 'x' of null" },
-    };
-    const rows: IssueTableRow[] = [
-      { issue: issueWithMeta, orgSlug: "test-org", formatOptions: {} },
-    ];
-    writeIssueTable(writer, rows);
-    const text = stripAnsi(output());
-    expect(text).toContain("Test issue");
-    expect(text).toContain("Cannot read property");
+    // Use a wide terminal so the subtitle doesn't get truncated by column fitting
+    const savedCols = process.stdout.columns;
+    process.stdout.columns = 200;
+    try {
+      const { writer, output } = capture();
+      const issueWithMeta: SentryIssue = {
+        ...mockIssue,
+        metadata: { value: "Cannot read property 'x' of null" },
+      };
+      const rows: IssueTableRow[] = [
+        { issue: issueWithMeta, orgSlug: "test-org", formatOptions: {} },
+      ];
+      writeIssueTable(writer, rows);
+      const text = stripAnsi(output());
+      expect(text).toContain("Test issue");
+      expect(text).toContain("Cannot read property");
+    } finally {
+      process.stdout.columns = savedCols;
+    }
   });
 
   test("compact mode shows title only, no subtitle", () => {

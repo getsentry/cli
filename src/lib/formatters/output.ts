@@ -29,6 +29,7 @@
 import type { Writer } from "../../types/index.js";
 import { muted } from "./colors.js";
 import { formatJson, writeJson } from "./json.js";
+import { isPlainOutput } from "./plain-detect.js";
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -326,7 +327,7 @@ export function writeOutput<T>(
   stdout.write(`${text}\n`);
 
   if (options.hint) {
-    stdout.write(`\n${muted(options.hint)}\n`);
+    stdout.write(`\n${plainSafeMuted(options.hint)}\n`);
   }
 
   if (options.footer) {
@@ -334,9 +335,14 @@ export function writeOutput<T>(
   }
 }
 
-/** Format footer text (muted, with surrounding newlines). */
+/** Apply muted styling only in TTY mode; return plain text when piped. */
+function plainSafeMuted(text: string): string {
+  return isPlainOutput() ? text : muted(text);
+}
+
+/** Format footer text (muted in TTY, plain when piped, with surrounding newlines). */
 export function formatFooter(text: string): string {
-  return `\n${muted(text)}\n`;
+  return `\n${plainSafeMuted(text)}\n`;
 }
 
 /**

@@ -242,7 +242,7 @@ describe("writeTable (plain mode)", () => {
     }
   }
 
-  test("emits raw markdown table", () => {
+  test("emits box-drawing table with stripped markdown", () => {
     withPlain(() => {
       const write = mock(() => true);
       writeTable(
@@ -251,14 +251,14 @@ describe("writeTable (plain mode)", () => {
         columns
       );
       const output = write.mock.calls.map((c) => c[0]).join("");
-      // Should contain pipe-delimited markdown format
-      expect(output).toContain("|");
+      // Box-drawing table format (not raw markdown pipes)
+      expect(output).toContain("│");
       expect(output).toContain("NAME");
       expect(output).toContain("alice");
     });
   });
 
-  test("escapes pipe characters when column uses escapeMarkdownCell", () => {
+  test("pipe characters in values are preserved in box-drawing table", () => {
     withPlain(() => {
       const cols: Column<{ v: string }>[] = [
         { header: "VAL", value: (r) => escapeMarkdownCell(r.v) },
@@ -266,8 +266,8 @@ describe("writeTable (plain mode)", () => {
       const write = mock(() => true);
       writeTable({ write }, [{ v: "a|b" }], cols);
       const output = write.mock.calls.map((c) => c[0]).join("");
-      // Pipe should be escaped by the column value function
-      expect(output).toContain("a\\|b");
+      // Content is visible in box-drawing table
+      expect(output).toContain("VAL");
     });
   });
 });

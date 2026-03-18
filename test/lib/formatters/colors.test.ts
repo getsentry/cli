@@ -114,26 +114,84 @@ describe("fixabilityColor", () => {
 });
 
 describe("terminalLink", () => {
-  test("wraps text in OSC 8 escape sequences", () => {
-    const result = terminalLink("click me", "https://example.com");
-    expect(result).toContain("]8;;https://example.com");
-    expect(result).toContain("click me");
-    expect(result).toContain("]8;;");
+  /** Save/restore isTTY and env around TTY-specific tests */
+  function withTTY(fn: () => void): void {
+    const savedTTY = process.stdout.isTTY;
+    const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.stdout.isTTY = true;
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+    try {
+      fn();
+    } finally {
+      process.stdout.isTTY = savedTTY;
+      if (savedPlain !== undefined) {
+        process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+      } else {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+    }
+  }
+
+  test("wraps text in OSC 8 escape sequences on TTY", () => {
+    withTTY(() => {
+      const result = terminalLink("click me", "https://example.com");
+      expect(result).toContain("]8;;https://example.com");
+      expect(result).toContain("click me");
+      expect(result).toContain("]8;;");
+    });
   });
 
-  test("preserves display text", () => {
-    const result = terminalLink("display", "https://url.com");
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 8 uses control chars
-    const stripped = result.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
-    expect(stripped).toBe("display");
+  test("preserves display text on TTY", () => {
+    withTTY(() => {
+      const result = terminalLink("display", "https://url.com");
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 8 uses control chars
+      const stripped = result.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+      expect(stripped).toBe("display");
+    });
   });
 
-  test("uses text as URL when url is omitted", () => {
-    const result = terminalLink("https://example.com");
-    expect(result).toContain("]8;;https://example.com");
-    expect(result).toContain("https://example.com");
-    expect(result).toBe(
-      terminalLink("https://example.com", "https://example.com")
-    );
+  test("uses text as URL when url is omitted (TTY)", () => {
+    withTTY(() => {
+      const result = terminalLink("https://example.com");
+      expect(result).toContain("]8;;https://example.com");
+      expect(result).toContain("https://example.com");
+      expect(result).toBe(
+        terminalLink("https://example.com", "https://example.com")
+      );
+    });
+  });
+
+  test("returns plain text without OSC 8 when piped", () => {
+    const savedTTY = process.stdout.isTTY;
+    const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.stdout.isTTY = false as unknown as boolean;
+    delete process.env.SENTRY_PLAIN_OUTPUT;
+    try {
+      const result = terminalLink("click me", "https://example.com");
+      expect(result).toBe("click me");
+      expect(result).not.toContain("]8;;");
+    } finally {
+      process.stdout.isTTY = savedTTY;
+      if (savedPlain !== undefined) {
+        process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+      } else {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+    }
+  });
+
+  test("returns plain text when SENTRY_PLAIN_OUTPUT=1", () => {
+    const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "1";
+    try {
+      const result = terminalLink("display", "https://url.com");
+      expect(result).toBe("display");
+    } finally {
+      if (savedPlain !== undefined) {
+        process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+      } else {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+    }
   });
 });

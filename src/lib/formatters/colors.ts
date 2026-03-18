@@ -6,6 +6,7 @@
 
 import chalk from "chalk";
 import type { IssueLevel, IssueStatus } from "../../types/index.js";
+import { isPlainOutput } from "./plain-detect.js";
 
 // Color Palette (Full Sentinel palette)
 
@@ -57,6 +58,9 @@ export const boldUnderline = (text: string): string =>
  * @returns Text wrapped in OSC 8 hyperlink escape sequences
  */
 export function terminalLink(text: string, url: string = text): string {
+  if (isPlainOutput()) {
+    return text;
+  }
   // OSC 8 ; params ; URI BEL  text  OSC 8 ; ; BEL
   // \x1b] opens the OSC sequence; \x07 (BEL) terminates it.
   // Using BEL instead of ST (\x1b\\) for broad terminal compatibility.

@@ -49,10 +49,11 @@ describe("buildDeviceFlowDisplay", () => {
     expect(joined).not.toContain("\\_");
   });
 
-  test("includes user code as inline code span", () => {
+  test("includes user code in output", () => {
     const lines = buildDeviceFlowDisplay(CODE, URL, true, false);
     const joined = lines.join("\n");
-    expect(joined).toContain(`\`${CODE}\``);
+    // Plain mode strips backtick code spans — check for bare code
+    expect(joined).toContain(CODE);
   });
 
   test("omits copy hint when browser opened", () => {
