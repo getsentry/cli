@@ -1,0 +1,279 @@
+# Plan: Make piped/plain output human-readable (not raw CommonMark)
+
+## Problem
+
+When piping `sentry` output to `less` or other programs, the output is **raw CommonMark** — markdown table syntax (`| --- |`), markdown links (`[CLI-3B](https://...)`), bold markers (`**text**`), etc. This is unreadable for humans.
+
+There are two sub-problems:
+1. **FORCE_COLOR leaking ANSI** — When `FORCE_COLOR=1` is set (common in VS Code terminals), ANSI codes are emitted even in pipes. This is because `isPlainOutput()` treats `FORCE_COLOR` as higher priority than TTY detection.
+2. **Plain mode outputs raw CommonMark** — Even with FORCE_COLOR unset, the "plain" output is raw markdown source (intended for machine consumption), not formatted text.
+
+## Root Cause
+
+- `isPlainOutput()` in `markdown.ts:62-85` checks `FORCE_COLOR` before `!process.stdout.isTTY`, so `FORCE_COLOR=1` overrides pipe detection.
+- When `isPlainOutput()` returns `true`, `renderMarkdown()` returns `stripColorTags(md)` — raw markdown with only `<red>` tags stripped.
+- `formatTable()` in `table.ts:104-105` returns `buildMarkdownTable()` which produces raw CommonMark pipe-delimited tables.
+- `renderInlineMarkdown()` returns raw markdown with only color tags stripped — `**bold**`, `[link](url)`, `` `code` `` all pass through verbatim.
+
+## Solution: Two changes
+
+### Change 1: Fix `FORCE_COLOR` vs pipe priority in `isPlainOutput()`
+
+**File:** `src/lib/formatters/markdown.ts`
+
+Make `FORCE_COLOR` only apply when stdout IS a TTY. If stdout is a pipe, `FORCE_COLOR` should be ignored (fall through to the `!isTTY` check). The rationale: `FORCE_COLOR` is meant for interactive terminals that don't report color support correctly, not for overriding pipe detection.
+
+```typescript
+export function isPlainOutput(): boolean {
+  const plain = process.env.SENTRY_PLAIN_OUTPUT;
+  if (plain !== undefined) {
+    return isTruthyEnv(plain);
+  }
+
+  const noColor = process.env.NO_COLOR;
+  if (noColor !== undefined) {
+    return noColor !== "";
+  }
+
+  // FORCE_COLOR only applies to interactive terminals.
+  // When stdout is piped, FORCE_COLOR is ignored — users who truly want
+  // color in pipes can use SENTRY_PLAIN_OUTPUT=0.
+  const forceColor = process.env.FORCE_COLOR;
+  if (process.stdout.isTTY && forceColor !== undefined && forceColor !== "") {
+    return forceColor === "0";
+  }
+
+  return !process.stdout.isTTY;
+}
+```
+
+**Important:** `SENTRY_PLAIN_OUTPUT=0` remains the escape hatch to force colors in pipes (e.g., `SENTRY_PLAIN_OUTPUT=0 sentry issue list | less -R`).
+
+### Change 2: Make plain output human-readable instead of raw CommonMark
+
+The key insight: `renderTextTable()` in `text-table.ts` already produces nicely aligned tables with proper column fitting. We just need to use it in plain mode too, with:
+1. A markdown-stripping step to convert `**bold**` → `bold`, `[text](url)` → `text`, `` `code` `` → `code`
+2. The box-drawing borders are fine (Unicode, not ANSI) — they render correctly in any terminal/pager
+
+#### 2a. Add `stripMarkdownInline()` function
+
+**File:** `src/lib/formatters/markdown.ts`
+
+Add a new function that strips inline markdown syntax to produce plain text:
+
+```typescript
+/**
+ * Strip inline markdown syntax to produce plain text.
+ * Removes bold/italic markers, link syntax (keeps text), code backticks.
+ * Used for plain-mode output that should be human-readable.
+ */
+export function stripMarkdownInline(md: string): string {
+  let text = stripColorTags(md);
+  // Links: [text](url) → text
+  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Bold/italic: **text** or __text__ → text, *text* or _text_ → text
+  text = text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
+  text = text.replace(/_{1,2}([^_]+)_{1,2}/g, "$1");
+  // Code spans: `text` → text
+  text = text.replace(/`([^`]+)`/g, "$1");
+  return text;
+}
+```
+
+#### 2b. Update `formatTable()` to use `renderTextTable` in plain mode
+
+**File:** `src/lib/formatters/table.ts`
+
+Instead of `buildMarkdownTable()`, use `renderTextTable()` with stripped markdown:
+
+```typescript
+export function formatTable<T>(
+  items: T[],
+  columns: Column<T>[],
+  options?: WriteTableOptions
+): string {
+  if (isPlainOutput()) {
+    const headers = columns.map((c) => c.header);
+    const rows = items.map((item) =>
+      columns.map((c) => stripMarkdownInline(c.value(item)))
+    );
+    const alignments: Alignment[] = columns.map((c) => c.align ?? "left");
+    const minWidths = columns.map((c) => c.minWidth ?? 0);
+    const shrinkable = columns.map((c) => c.shrinkable ?? true);
+
+    return renderTextTable(headers, rows, {
+      alignments,
+      minWidths,
+      shrinkable,
+      truncate: options?.truncate,
+      // No rowSeparator color in plain mode
+      rowSeparator: options?.rowSeparator ? true : false,
+    });
+  }
+  // ... TTY path unchanged
+}
+```
+
+#### 2c. Update `renderMarkdown()` and `renderInlineMarkdown()` plain paths
+
+**File:** `src/lib/formatters/markdown.ts`
+
+For `renderInlineMarkdown` (used in table cells), simple regex stripping is sufficient:
+
+```typescript
+export function renderInlineMarkdown(md: string): string {
+  if (isPlainOutput()) {
+    return stripMarkdownInline(md);
+  }
+  // ... unchanged
+}
+```
+
+For `renderMarkdown` (used for full detail views with headings, blockquotes, tables, etc.), we should **parse and render to plain text** — reuse the existing `renderBlocks`/`renderInline` pipeline but without ANSI colors. The simplest way: call the existing renderer and strip ANSI codes from the result. This preserves all structural formatting (headings as "HEADING\n━━━━━", tables as `renderTextTable` output, indented blockquotes, etc.) without colors.
+
+```typescript
+import stripAnsi from "strip-ansi";
+
+export function renderMarkdown(md: string): string {
+  if (isPlainOutput()) {
+    // Parse and render to get structural formatting (headings, tables, lists),
+    // then strip ANSI codes. This is better than returning raw CommonMark
+    // because it produces human-readable output with aligned tables,
+    // proper heading emphasis, and clean text.
+    const tokens = marked.lexer(md);
+    return stripAnsi(renderBlocks(tokens)).trimEnd();
+  }
+  // ... unchanged
+}
+```
+
+**ANSI stripping:** Use a regex similar to tests: `/\x1b\[[0-9;]*m/g` for SGR codes. Also strip OSC 8 hyperlinks: `/\x1b\]8;;[^\x07]*\x07/g`. Can write a small `stripAnsi()` helper in `plain-detect.ts` rather than adding a new dependency. (Alternatively, `strip-ansi` is available as a transitive dep of `string-width` but not a direct dep — adding it would be cleaner.)
+
+This approach is elegant because:
+- Tables embedded in markdown (via `mdKvTable`) get rendered through `renderTextTable` → proper aligned columns
+- Headings get the `━━━━` underline (Unicode, not ANSI)
+- Blockquotes get indentation
+- Lists get bullet formatting
+- All ANSI color/bold codes are stripped at the end
+
+#### 2d. Extract `isPlainOutput()` to avoid circular dependency, then gate `terminalLink()`
+
+**Current import graph:** `markdown.ts` → `colors.ts` (imports `COLORS`, `muted`, `terminalLink`). Adding `colors.ts` → `markdown.ts` would create a cycle.
+
+**Solution:** Move `isPlainOutput()` and `isTruthyEnv()` to a new file `src/lib/formatters/plain-detect.ts`. Both `markdown.ts` and `colors.ts` import from it. Update all existing importers of `isPlainOutput` from `markdown.ts` to import from `plain-detect.ts` instead (or re-export from `markdown.ts` for backward compat).
+
+**File:** `src/lib/formatters/plain-detect.ts` (NEW)
+```typescript
+/**
+ * Detect whether output should be plain (no ANSI codes, no markdown syntax).
+ * Extracted to its own module to avoid circular dependencies between
+ * markdown.ts and colors.ts.
+ */
+
+function isTruthyEnv(value: string): boolean {
+  const v = value.toLowerCase().trim();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+export function isPlainOutput(): boolean {
+  // ... same logic as current, with FORCE_COLOR fix from Change 1
+}
+```
+
+**File:** `src/lib/formatters/colors.ts`
+
+```typescript
+import { isPlainOutput } from "./plain-detect.js";
+
+export function terminalLink(text: string, url: string = text): string {
+  if (isPlainOutput()) {
+    return text;
+  }
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+```
+
+**File:** `src/lib/formatters/markdown.ts` — re-export `isPlainOutput` from `plain-detect.ts` for backward compatibility:
+```typescript
+export { isPlainOutput } from "./plain-detect.js";
+```
+
+#### 2e. Gate `divider()` on plain mode
+
+**File:** `src/lib/formatters/markdown.ts`
+
+```typescript
+export function divider(width = 80): string {
+  const line = "─".repeat(width);
+  return isPlainOutput() ? line : muted(line);
+}
+```
+
+#### 2f. Gate footer/hint `muted()` calls on plain mode
+
+**File:** `src/lib/formatters/output.ts`
+
+```typescript
+import { isPlainOutput } from "./markdown.js";
+import { muted } from "./colors.js";
+
+function plainSafeMuted(text: string): string {
+  return isPlainOutput() ? text : muted(text);
+}
+
+// Use plainSafeMuted instead of muted in writeFooter/formatFooter/hint
+```
+
+### Change 3: Update streaming table plain mode (`mdRow`, `mdTableHeader`)
+
+**File:** `src/lib/formatters/markdown.ts`
+
+`mdRow()` (line 151) and `mdTableHeader()` (line 141) are used for streaming tables in plain mode by `trace list`, `log list`, and some `human.ts` formatters. Currently `mdRow` in plain mode outputs `| cell1 | cell2 |` with only `stripColorTags` — needs `stripMarkdownInline` instead:
+
+```typescript
+export function mdRow(cells: readonly string[]): string {
+  if (isPlainOutput()) {
+    return `| ${cells.map(stripMarkdownInline).join(" | ")} |\n`;
+  }
+  // ... TTY path unchanged
+}
+```
+
+Note: The pipe-delimited format is acceptable for streaming rows since `StreamingTable` isn't used in plain mode. The markdown link/bold stripping is the critical fix here.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/lib/formatters/plain-detect.ts` | **NEW** — Extract `isPlainOutput()`, `isTruthyEnv()`, `stripAnsi()` here to avoid circular deps |
+| `src/lib/formatters/markdown.ts` | Move `isPlainOutput()` to `plain-detect.ts` (re-export for compat); add `stripMarkdownInline()`; update `renderMarkdown()`/`renderInlineMarkdown()`/`mdRow()` plain paths; fix `divider()` |
+| `src/lib/formatters/table.ts` | Use `renderTextTable` + `stripMarkdownInline` in plain mode instead of `buildMarkdownTable` |
+| `src/lib/formatters/colors.ts` | Import `isPlainOutput` from `plain-detect.ts`; gate `terminalLink()` on plain mode |
+| `src/lib/formatters/output.ts` | Use `plainSafeMuted()` for footer/hint instead of raw `muted()` |
+
+## Verification
+
+1. **Unit tests**: Run existing tests — `bun test test/lib/formatters/`
+2. **Manual test (colors in pipe)**:
+   ```bash
+   FORCE_COLOR=1 bun run dev -- issue list | cat
+   # Should show NO ANSI escape codes
+   ```
+3. **Manual test (plain table format)**:
+   ```bash
+   bun run dev -- issue list | less
+   # Should show aligned columns with box-drawing borders, no markdown syntax
+   ```
+4. **Manual test (TTY still works)**:
+   ```bash
+   bun run dev -- issue list
+   # Should show full ANSI-colored, hyperlinked output
+   ```
+5. **Manual test (SENTRY_PLAIN_OUTPUT=0 override)**:
+   ```bash
+   SENTRY_PLAIN_OUTPUT=0 bun run dev -- issue list | less -R
+   # Should show colored output (forced)
+   ```
+6. **Typecheck**: `bun run typecheck`
+7. **Lint**: `bun run lint`
+8. **Check for circular imports** between `colors.ts` and `markdown.ts` — if found, extract `isPlainOutput()` to its own module
