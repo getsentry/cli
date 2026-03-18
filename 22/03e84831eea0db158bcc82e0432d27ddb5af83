@@ -1,0 +1,74 @@
+# Plan: Improve SKILL.md with Agent Workflow Guidance
+
+## Problem
+LLM agents load the sentry-cli skill but then resort to downloading OpenAPI schemas from GitHub instead of using CLI commands like `sentry issue view CLI-G5`. The SKILL.md is a pure command reference with no workflow guidance — agents don't know *when* to use *which* command.
+
+## Approach
+Add a **"Common Workflows"** section to SKILL.md that appears **before** the command reference. Source the content from the existing `docs/src/content/docs/agentic-usage.md` file (which is currently too basic). The generator already has the pattern for loading docs sections — we extend it to also pull from `agentic-usage.md`.
+
+## Files to Modify
+
+### 1. `docs/src/content/docs/agentic-usage.md` — Rewrite with agent workflow guidance
+
+Replace the current minimal content with structured workflow guidance including:
+
+**Key Principles** section:
+- The CLI is self-contained — always use `sentry` commands, never download API specs or make raw HTTP requests
+- Use `--json` for machine-readable output, pipe through `jq` for filtering
+- The CLI auto-detects org/project from DSN in your codebase — most commands work without explicit targets
+- Use `sentry schema` to explore the Sentry API interactively, not external OpenAPI files
+
+**Common Workflows** section with these patterns:
+
+1. **Investigate a specific issue** — `sentry issue view <id> --json` → `sentry issue explain <id>` → `sentry issue plan <id>`
+2. **Find recent issues** — `sentry issue list` or `sentry issue list <org>/<project> --query "..." --sort date`
+3. **Get AI root cause analysis** — `sentry issue explain <id>` (then `sentry issue plan <id>` for fix steps)
+4. **View an error event** — `sentry event view <event-id>`
+5. **Explore traces/spans** — `sentry trace list` → `sentry trace view <id>` → `sentry span list <trace-id>`
+6. **View logs** — `sentry log list` or `sentry log list -q 'level:error'`
+7. **Explore the API** — `sentry schema` to browse, `sentry api <endpoint>` for raw requests
+8. **Check auth** — `sentry auth status`
+
+### 2. `script/generate-skill.ts` — Load agentic-usage.md into SKILL.md
+
+Add a new function `loadAgenticUsage()` that:
+- Loads `docs/src/content/docs/agentic-usage.md`
+- Strips frontmatter and MDX components (using existing helpers)
+- Extracts the "Key Principles" and "Common Workflows" sections
+- Returns them as a formatted markdown block
+
+In `generateSkillMarkdown()`, insert the agentic usage content **after** prerequisites and **before** the command reference:
+
+```typescript
+const sections = [
+  generateFrontMatter(),
+  "",
+  "# Sentry CLI Usage Guide",
+  "",
+  "Help users interact with Sentry from the command line using the `sentry` CLI.",
+  "",
+  prerequisites,
+  "",
+  agenticUsage,    // <-- NEW: workflow guidance before commands
+  "",
+  generateCommandsSection(routeInfos),
+  supplementary,
+  "",
+];
+```
+
+### 3. `plugins/sentry-cli/skills/sentry-cli/SKILL.md` — Regenerated output
+
+After changes, run `bun run generate:skill` to regenerate. The new SKILL.md will have the workflow section between Prerequisites and Available Commands.
+
+## Verification
+
+1. `bun run generate:skill` — regenerates SKILL.md successfully
+2. `bun run check:skill` — passes (SKILL.md matches generated output)
+3. `bun run lint` — no lint errors in modified files
+4. Manual review: open the generated SKILL.md and confirm:
+   - "Key Principles" section appears before "Available Commands"
+   - "Common Workflows" section with step-by-step patterns appears
+   - Explicit guidance to use `sentry issue view` for investigating issues
+   - Explicit guidance to use `sentry schema` instead of downloading OpenAPI specs
+   - No duplicate content with the command reference section
