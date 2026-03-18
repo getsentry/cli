@@ -1,0 +1,181 @@
+# Plan: Auto-inject common flags in `buildListCommand`
+
+## Problem
+
+Every `buildListCommand` consumer manually wires the same boilerplate:
+- `fresh: FRESH_FLAG` flag + `...FRESH_ALIASES` alias + `applyFreshFlag(flags)` call
+- `cursor: LIST_CURSOR_FLAG` flag + `c: "cursor"` alias
+
+This results in ~6 extra imports and ~5 lines of repeated config per command.
+
+## Current state
+
+| Command | Builder | fresh | cursor | period | Notes |
+|---------|---------|-------|--------|--------|-------|
+| span list | `buildListCommand` | ✅ manual | ✅ manual | ✅ manual | `-f` = fresh |
+| trace list | `buildListCommand` | ✅ manual | ✅ manual | ✅ manual | `-f` = fresh |
+| log list | `buildListCommand` | ✅ manual | ❌ none | custom | `-f` = **follow** (conflict!) |
+| issue list | `buildListCommand` | ✅ manual | custom brief | custom | |
+| project list | `buildListCommand` | ✅ manual | ✅ manual | ❌ | |
+| team list | `buildOrgListCommand` | ✅ auto | ✅ auto | ❌ | Already consolidated |
+| repo list | `buildOrgListCommand` | ✅ auto | ✅ auto | ❌ | Already consolidated |
+
+## Approach
+
+Enhance `buildListCommand` to auto-inject `fresh` and `cursor` flags + aliases + `applyFreshFlag()` call, with opt-out for commands that have conflicts.
+
+### What gets auto-injected
+
+1. **`fresh: FRESH_FLAG`** — added to `flags` unless already present
+2. **`cursor: LIST_CURSOR_FLAG`** — added to `flags` unless already present
+3. **`{ f: "fresh", c: "cursor" }`** — merged into aliases (unless `noCursorFlag` or `noFreshAlias` opt-out)
+4. **`applyFreshFlag(flags)`** — called automatically in the `func` wrapper before delegating to the original func
+
+### Opt-out mechanism
+
+A new optional `options` parameter on `buildListCommand`:
+
+```typescript
+buildListCommand("span", {
+  // ... existing args
+}, {
+  noCursorFlag: true,   // log list: no cursor pagination
+  noFreshAlias: true,   // log list: -f is --follow, not --fresh
+});
+```
+
+- `noCursorFlag: true` — skips injecting `cursor` flag and `c` alias
+- `noFreshAlias: true` — skips injecting `f: "fresh"` alias (flag is still injected, just no `-f` shortcut)
+
+### What does NOT get auto-injected
+
+- **`period`** — only 2 of 5 commands use the standard `LIST_PERIOD_FLAG`; others have custom defaults (`"90d"`, `"14d"`, optional-with-no-default). Not worth auto-injecting.
+- **`limit`** — every command has different defaults and briefs. Not worth auto-injecting.
+- **`query`** — not all commands have it, and briefs differ.
+
+---
+
+## Files to modify
+
+### 1. `src/lib/list-command.ts`
+
+**Change `buildListCommand` signature:**
+```typescript
+type ListCommandOptions = {
+  /** Skip injecting cursor flag and -c alias (e.g., log list uses streaming) */
+  noCursorFlag?: boolean;
+  /** Skip injecting -f alias for --fresh (e.g., log list uses -f for --follow) */
+  noFreshAlias?: boolean;
+};
+
+export function buildListCommand<...>(
+  routeName: string,
+  builderArgs: { ... },
+  options?: ListCommandOptions,
+): Command<CONTEXT> {
+```
+
+**In the function body:**
+1. Merge `fresh` and `cursor` flags into `builderArgs.parameters.flags` (if not already present)
+2. Merge `f: "fresh"` and `c: "cursor"` into `builderArgs.parameters.aliases` (respecting opt-outs)
+3. Wrap `func` to call `applyFreshFlag(flags)` before delegating (in addition to existing subcommand interception)
+
+### 2. `src/commands/span/list.ts`
+
+Remove from flags: `cursor: LIST_CURSOR_FLAG`, `fresh: FRESH_FLAG`
+Remove from aliases: `...FRESH_ALIASES`, `c: "cursor"`
+Remove from func: `applyFreshFlag(flags)` call
+Remove from imports: `FRESH_ALIASES`, `FRESH_FLAG`, `LIST_CURSOR_FLAG`, `applyFreshFlag`
+
+### 3. `src/commands/trace/list.ts`
+
+Same removals as span list.
+
+### 4. `src/commands/issue/list.ts`
+
+Remove `fresh: FRESH_FLAG` from flags (auto-injected).
+Remove `...FRESH_ALIASES` from aliases (auto-injected).
+Remove `applyFreshFlag(flags)` from func.
+Keep custom `cursor` (it has a custom brief) — the auto-inject won't overwrite it since it's already present.
+
+### 5. `src/commands/project/list.ts`
+
+Remove `fresh: FRESH_FLAG`, `cursor: LIST_CURSOR_FLAG` from flags.
+Remove `...FRESH_ALIASES` from aliases, `c: "cursor"` (if spelled out separately — check).
+Remove `applyFreshFlag(flags)`.
+
+### 6. `src/commands/log/list.ts`
+
+Remove `fresh: FRESH_FLAG` from flags (auto-injected).
+Remove `applyFreshFlag(flags)` from func.
+Pass opt-outs:
+```typescript
+buildListCommand("log", { ... }, {
+  noCursorFlag: true,   // no cursor pagination
+  noFreshAlias: true,   // -f is --follow
+})
+```
+
+### 7. `src/lib/list-command.ts` — Clean up `buildOrgListCommand`
+
+`buildOrgListCommand` currently explicitly passes `cursor: LIST_CURSOR_FLAG`, `fresh: FRESH_FLAG`, `...FRESH_ALIASES`, and `applyFreshFlag(flags)` to its inner `buildListCommand` call. Since `buildListCommand` now auto-injects these, remove the redundant declarations from `buildOrgListCommand`:
+- Remove `cursor: LIST_CURSOR_FLAG` and `fresh: FRESH_FLAG` from the flags object
+- Remove `...FRESH_ALIASES` from the aliases spread
+- Remove `applyFreshFlag(flags)` call from the func body
+
+These become no-ops either way (the "if not already present" guard), but removing them keeps the code DRY and demonstrates the pattern.
+
+### 8. Tests — verify no regressions
+
+Run full test suite. No test changes expected since behavior is identical.
+
+### 9. SKILL.md — Regenerate
+
+---
+
+## Implementation detail: flag/alias merging
+
+```typescript
+// Inside buildListCommand:
+const params = builderArgs.parameters ?? {};
+const flags = { ...(params.flags ?? {}) };
+const aliases = { ...(params.aliases ?? {}) };
+
+// Auto-inject fresh flag (always)
+if (!('fresh' in flags)) {
+  flags.fresh = FRESH_FLAG;
+}
+
+// Auto-inject cursor flag (unless opted out)
+if (!options?.noCursorFlag && !('cursor' in flags)) {
+  flags.cursor = LIST_CURSOR_FLAG;
+}
+
+// Auto-inject aliases
+if (!options?.noFreshAlias && !('f' in aliases)) {
+  aliases.f = 'fresh';
+}
+if (!options?.noCursorFlag && !('c' in aliases)) {
+  aliases.c = 'cursor';
+}
+
+// Wrap func to auto-apply fresh flag
+const wrappedFunc = function(this, flags, ...args) {
+  applyFreshFlag(flags);
+  // ... existing subcommand interception ...
+  return originalFunc.call(this, flags, ...args);
+};
+```
+
+The "if not already present" check means commands that define their own `cursor` flag (like issue list with custom brief) keep theirs — no conflict.
+
+---
+
+## Verification
+
+1. `bun run typecheck`
+2. `bun run lint:fix`
+3. `bun test` — full suite, no test changes expected
+4. `bun run check:errors`
+5. `bun run generate:skill && bun run check:skill`
+6. Verify each command's `--help` output still shows `--fresh` and `--cursor` flags
