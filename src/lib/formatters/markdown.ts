@@ -227,12 +227,14 @@ export function stripMarkdownInline(md: string): string {
   let text = stripColorTags(md);
   // Links: [text](url) → text
   text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Code spans first (higher precedence than emphasis in CommonMark):
+  // `text` → text. Content inside backticks is literal, so bold/italic
+  // markers inside code spans must not be stripped.
+  text = text.replace(/`([^`]+)`/g, "$1");
   // Bold: **text** → text. Only strip asterisk-based emphasis, not
   // underscore-based (_text_) because underscores appear in identifiers
   // (e.g. payment_service_handler) and would be corrupted.
   text = text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
-  // Code spans: `text` → text
-  text = text.replace(/`([^`]+)`/g, "$1");
   // Backslash escapes: \| \< \> \\ \_ \* \[ \] \` → literal character.
   // escapeMarkdownCell/escapeMarkdownInline add these for the markdown parser;
   // the TTY path unescapes via marked.lexer(), but plain mode must do it here.
