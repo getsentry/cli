@@ -21,6 +21,7 @@ import {
   parseWidgetInput,
   prepareDashboardForUpdate,
   prepareWidgetQueries,
+  validateAggregateNames,
 } from "../../../types/dashboard.js";
 import {
   parseDashboardPositionalArgs,
@@ -83,6 +84,11 @@ function buildReplacement(
   existing: DashboardWidget
 ): DashboardWidget {
   const mergedQueries = mergeQueries(flags, existing.queries?.[0]);
+
+  // Validate aggregate names if query flags were provided
+  if (flags.query && mergedQueries?.[0]?.aggregates) {
+    validateAggregateNames(mergedQueries[0].aggregates, existing.widgetType);
+  }
 
   const limit = flags.limit !== undefined ? flags.limit : existing.limit;
 
