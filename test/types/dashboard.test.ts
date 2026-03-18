@@ -115,11 +115,12 @@ describe("SPAN_AGGREGATE_FUNCTIONS", () => {
     }
   });
 
-  test("contains rate functions and aliases", () => {
+  test("contains rate functions (canonical only, no aliases)", () => {
     expect(SPAN_AGGREGATE_FUNCTIONS).toContain("eps");
     expect(SPAN_AGGREGATE_FUNCTIONS).toContain("epm");
-    expect(SPAN_AGGREGATE_FUNCTIONS).toContain("sps");
-    expect(SPAN_AGGREGATE_FUNCTIONS).toContain("spm");
+    // sps/spm are aliases resolved in parseAggregate(), not canonical functions
+    expect(SPAN_AGGREGATE_FUNCTIONS).not.toContain("sps");
+    expect(SPAN_AGGREGATE_FUNCTIONS).not.toContain("spm");
   });
 
   test("zod schema validates known functions", () => {

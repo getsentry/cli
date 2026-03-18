@@ -17,6 +17,7 @@ import {
   parseSortExpression,
   parseWidgetInput,
   prepareWidgetQueries,
+  validateAggregateNames,
   WIDGET_TYPES,
 } from "../../types/dashboard.js";
 
@@ -181,6 +182,8 @@ export function buildWidgetFromFlags(opts: {
   limit?: number;
 }): DashboardWidget {
   const aggregates = (opts.query ?? ["count"]).map(parseAggregate);
+  validateAggregateNames(aggregates, opts.dataset);
+
   const columns = opts.groupBy ?? [];
   const orderby = opts.sort ? parseSortExpression(opts.sort) : undefined;
 

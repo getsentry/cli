@@ -214,14 +214,29 @@ export function parseWidgetInput(raw: unknown): DashboardWidget {
 // ---------------------------------------------------------------------------
 
 /**
- * Public aggregate functions available in the spans dataset (default for dashboard widgets).
- * These are the function names users pass to --query (e.g. `--query count`, `--query p95:span.duration`).
+ * Aggregate function aliases resolved before validation.
  *
- * Source: getsentry/sentry spans_indexed.py SpansIndexedDatasetConfig.function_converter
- * https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/datasets/spans_indexed.py#L89-L363
+ * The Sentry events API silently resolves these, but the dashboard widget UI
+ * only understands canonical function names from AggregationKey. Resolving
+ * aliases here ensures widgets render correctly in the UI.
  *
- * Aliases (sps→eps, spm→epm) defined in constants.py SPAN_FUNCTION_ALIASES:
- * https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/constants.py#L334
+ * Source: https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/constants.py
+ *   SPAN_FUNCTION_ALIASES: spm→epm, sps→eps
+ *   FUNCTION_ALIASES: tpm→epm, tps→eps
+ */
+export const AGGREGATE_ALIASES: Record<string, string> = {
+  spm: "epm",
+  sps: "eps",
+  tpm: "epm",
+  tps: "eps",
+};
+
+/**
+ * Canonical aggregate functions for the spans dataset (default for dashboard widgets).
+ * These are the function names the dashboard UI can render in the "Visualize" dropdown.
+ *
+ * Source: https://github.com/getsentry/sentry/blob/master/static/app/utils/fields/index.ts (AggregationKey enum)
+ * Dataset: https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/datasets/spans_indexed.py
  */
 export const SPAN_AGGREGATE_FUNCTIONS = [
   "count",
@@ -237,8 +252,6 @@ export const SPAN_AGGREGATE_FUNCTIONS = [
   "p100",
   "eps",
   "epm",
-  "sps",
-  "spm",
   "any",
   "min",
   "max",
@@ -250,11 +263,8 @@ export type SpanAggregateFunction = (typeof SPAN_AGGREGATE_FUNCTIONS)[number];
  * Additional aggregate functions from the discover dataset.
  * Available when widgetType is "discover" or "error-events".
  *
- * Source: getsentry/sentry discover.py DiscoverDatasetConfig.function_converter
- * https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/datasets/discover.py#L188-L1095
- *
- * Aliases (tpm→epm, tps→eps) defined in constants.py FUNCTION_ALIASES:
- * https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/constants.py#L325-L328
+ * Source: https://github.com/getsentry/sentry/blob/master/static/app/utils/fields/index.ts (AggregationKey enum)
+ * Dataset: https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/datasets/discover.py
  */
 export const DISCOVER_AGGREGATE_FUNCTIONS = [
   ...SPAN_AGGREGATE_FUNCTIONS,
@@ -275,8 +285,6 @@ export const DISCOVER_AGGREGATE_FUNCTIONS = [
   "performance_score",
   "opportunity_score",
   "count_scores",
-  "tpm",
-  "tps",
 ] as const;
 
 export type DiscoverAggregateFunction =
@@ -338,10 +346,13 @@ export const IsFilterValueSchema = z.enum(IS_FILTER_VALUES);
 
 /**
  * Parse a shorthand aggregate expression into Sentry query syntax.
+ * Resolves aliases (spm→epm, tpm→epm, etc.) so widgets render in the dashboard UI.
+ *
  * Accepts three formats:
  *   "count"              → "count()"
  *   "p95:span.duration"  → "p95(span.duration)"
  *   "count()"            → "count()"  (passthrough if already has parens)
+ *   "spm"                → "epm()"    (alias resolved)
  */
 export function parseAggregate(input: string): string {
   if (input.includes("(")) {
@@ -349,9 +360,54 @@ export function parseAggregate(input: string): string {
   }
   const colonIdx = input.indexOf(":");
   if (colonIdx > 0) {
-    return `${input.slice(0, colonIdx)}(${input.slice(colonIdx + 1)})`;
+    const fn = input.slice(0, colonIdx);
+    const resolved = AGGREGATE_ALIASES[fn] ?? fn;
+    return `${resolved}(${input.slice(colonIdx + 1)})`;
   }
-  return `${input}()`;
+  const resolved = AGGREGATE_ALIASES[input] ?? input;
+  return `${resolved}()`;
+}
+
+/**
+ * Extract the function name from a parsed aggregate string.
+ *   "count()"              → "count"
+ *   "p95(span.duration)"   → "p95"
+ */
+function extractFunctionName(aggregate: string): string {
+  const parenIdx = aggregate.indexOf("(");
+  return parenIdx > 0 ? aggregate.slice(0, parenIdx) : aggregate;
+}
+
+/**
+ * Validate that all aggregate function names in a list are known.
+ * Throws a ValidationError listing valid functions if any are invalid.
+ *
+ * @param aggregates - Parsed aggregate strings (e.g. ["count()", "p95(span.duration)"])
+ * @param dataset - Widget dataset, determines which function list to validate against
+ */
+export function validateAggregateNames(
+  aggregates: string[],
+  dataset?: string
+): void {
+  const validFunctions: readonly string[] =
+    dataset === "discover" || dataset === "error-events"
+      ? DISCOVER_AGGREGATE_FUNCTIONS
+      : SPAN_AGGREGATE_FUNCTIONS;
+
+  for (const agg of aggregates) {
+    const fn = extractFunctionName(agg);
+    if (!validFunctions.includes(fn)) {
+      const aliasList = Object.entries(AGGREGATE_ALIASES)
+        .map(([from, to]) => `${from}→${to}`)
+        .join(", ");
+      throw new ValidationError(
+        `Unknown aggregate function "${fn}".\n\n` +
+          `Valid functions: ${validFunctions.join(", ")}\n` +
+          `Aliases (auto-resolved): ${aliasList}`,
+        "query"
+      );
+    }
+  }
 }
 
 /**
