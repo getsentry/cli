@@ -34,10 +34,8 @@ import {
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import { isTraceId } from "../../lib/trace-id.js";
 import {
-  type ParsedTraceTarget,
-  parseTraceTarget,
+  parseDualModeArgs,
   resolveTraceOrg,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
@@ -145,68 +143,15 @@ type FetchResult = {
 // ---------------------------------------------------------------------------
 
 /**
- * Parsed result from log list positional arguments.
- *
- * Discriminated on `mode`:
- * - `"project"` — standard project-scoped log listing (existing path)
- * - `"trace"` — trace-filtered log listing via trace-logs endpoint
- */
-type ParsedLogArgs =
-  | { mode: "project"; target?: string }
-  | { mode: "trace"; parsed: ParsedTraceTarget };
-
-/**
  * Disambiguate log list positional arguments.
  *
- * Detects trace mode by checking whether any argument segment looks like
- * a 32-char hex trace ID:
- *
- * - **Single arg**: checks the tail segment (last part after `/`, or the
- *   entire arg). `<trace-id>`, `<org>/<trace-id>`, `<org>/<project>/<trace-id>`.
- * - **Two+ args**: checks the last positional (`<org> <trace-id>` or
- *   `<org>/<project> <trace-id>` space-separated forms).
- * - **No match**: treats the argument as a project target.
- *
- * When trace mode is detected, delegates to {@link parseTraceTarget} for
- * full parsing and validation.
- *
- * @param args - Positional arguments from CLI
- * @returns Parsed args with mode discrimination
+ * Thin wrapper around {@link parseDualModeArgs} that binds the
+ * trace-mode usage hint for log list.
  */
-function parseLogListArgs(args: string[]): ParsedLogArgs {
-  if (args.length === 0) {
-    return { mode: "project" };
-  }
-
-  const first = args[0];
-  if (first === undefined) {
-    return { mode: "project" };
-  }
-
-  // Two+ args: check if the last arg is a trace ID (space-separated form)
-  // e.g., `sentry log list my-org abc123...` or `sentry log list my-org/proj abc123...`
-  if (args.length >= 2) {
-    const last = args.at(-1);
-    if (last && isTraceId(last)) {
-      return {
-        mode: "trace",
-        parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-      };
-    }
-  }
-
-  // Single arg: check the tail segment (last part after `/`, or the entire arg)
-  const lastSlash = first.lastIndexOf("/");
-  const tail = lastSlash === -1 ? first : first.slice(lastSlash + 1);
-
-  if (isTraceId(tail)) {
-    return {
-      mode: "trace",
-      parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-    };
-  }
-
-  return { mode: "project", target: first };
+function parseLogListArgs(
+  args: string[]
+): ReturnType<typeof parseDualModeArgs> {
+  return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
 /** Default time period for project-scoped log queries */

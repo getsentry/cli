@@ -37,10 +37,9 @@ import {
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
-import { isTraceId } from "../../lib/trace-id.js";
 import {
   type ParsedTraceTarget,
-  parseTraceTarget,
+  parseDualModeArgs,
   resolveTraceOrgProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
@@ -109,70 +108,16 @@ export function parseSort(value: string): SpanSortValue {
   return value as SpanSortValue;
 }
 
-// ---------------------------------------------------------------------------
-// Positional argument disambiguation
-// ---------------------------------------------------------------------------
-
-/**
- * Parsed result from span list positional arguments.
- *
- * Discriminated on `mode`:
- * - `"project"` — project-scoped span listing (no trace ID)
- * - `"trace"` — trace-scoped span listing (trace ID provided)
- */
-type ParsedSpanListArgs =
-  | { mode: "project"; target?: string }
-  | { mode: "trace"; parsed: ParsedTraceTarget };
-
 /**
  * Disambiguate span list positional arguments.
  *
- * Detects trace mode by checking whether any argument segment looks like
- * a 32-char hex trace ID:
- *
- * - **No args**: project mode (auto-detect org/project)
- * - **Single arg**: checks the tail segment (last part after `/`). If it
- *   looks like a trace ID → trace mode. Otherwise → project target.
- * - **Two+ args**: checks the last positional. If it's a trace ID → trace
- *   mode (space-separated form). Otherwise → project target (first arg only).
- *
- * @param args - Positional arguments from CLI
- * @returns Parsed args with mode discrimination
+ * Thin wrapper around {@link parseDualModeArgs} that binds the
+ * trace-mode usage hint for span list.
  */
-export function parseSpanListArgs(args: string[]): ParsedSpanListArgs {
-  if (args.length === 0) {
-    return { mode: "project" };
-  }
-
-  const first = args[0];
-  if (first === undefined) {
-    return { mode: "project" };
-  }
-
-  // Two+ args: check if the last arg is a trace ID (space-separated form)
-  // e.g., `sentry span list my-project abc123...`
-  if (args.length >= 2) {
-    const last = args.at(-1);
-    if (last && isTraceId(last)) {
-      return {
-        mode: "trace",
-        parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-      };
-    }
-  }
-
-  // Single arg: check the tail segment (last part after "/", or entire arg)
-  const segments = first.split("/");
-  const tail = segments.at(-1) ?? first;
-  if (isTraceId(tail)) {
-    return {
-      mode: "trace",
-      parsed: parseTraceTarget(args, TRACE_USAGE_HINT),
-    };
-  }
-
-  // Not a trace ID → treat as project target
-  return { mode: "project", target: first };
+export function parseSpanListArgs(
+  args: string[]
+): ReturnType<typeof parseDualModeArgs> {
+  return parseDualModeArgs(args, TRACE_USAGE_HINT);
 }
 
 // ---------------------------------------------------------------------------
