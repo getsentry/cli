@@ -28,7 +28,7 @@ import {
   type DashboardWidget,
   DISPLAY_TYPES,
 } from "../../types/dashboard.js";
-import { buildWidgetFromFlags } from "./resolve.js";
+import { buildWidgetFromFlags, validateWidgetEnums } from "./resolve.js";
 
 type CreateFlags = {
   readonly "widget-title"?: string;
@@ -253,6 +253,7 @@ export const createCommand = buildCommand({
 
     const widgets: DashboardWidget[] = [];
     if (flags["widget-display"]) {
+      validateWidgetEnums(flags["widget-display"], flags["widget-dataset"]);
       const validated = buildInlineWidget(flags);
       widgets.push(assignDefaultLayout(validated, widgets));
     } else if (flags["widget-title"]) {

@@ -89,7 +89,7 @@ export const viewCommand = buildCommand({
     }
 
     const dashboard = await withProgress(
-      { message: "Fetching dashboard..." },
+      { message: "Fetching dashboard...", json: flags.json },
       () => getDashboard(orgSlug, dashboardId)
     );
 
