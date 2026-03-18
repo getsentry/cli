@@ -12,7 +12,11 @@
 import { chmodSync, statSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
-import { CLI_VERSION, SENTRY_CLI_DSN } from "./constants.js";
+import {
+  CLI_VERSION,
+  getConfiguredSentryUrl,
+  SENTRY_CLI_DSN,
+} from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import { ApiError, AuthError } from "./errors.js";
 import { attachSentryReporter } from "./logger.js";
@@ -245,6 +249,37 @@ const EXCLUDED_INTEGRATIONS = new Set([
 /** Current beforeExit handler, tracked so it can be replaced on re-init */
 let currentBeforeExitHandler: (() => void) | null = null;
 
+/** Match all SaaS regional URLs (us.sentry.io, de.sentry.io, o1234.ingest.us.sentry.io, etc.) */
+const SENTRY_SAAS_SUBDOMAIN_RE = /^https:\/\/[^/]*\.sentry\.io(\/|$)/;
+
+/** Match the bare sentry.io domain itself */
+const SENTRY_SAAS_ROOT_RE = /^https:\/\/sentry\.io(\/|$)/;
+
+/**
+ * Build trace propagation targets for Sentry API URLs.
+ *
+ * Matches:
+ * - SaaS: *.sentry.io (all regional URLs like us.sentry.io, de.sentry.io)
+ * - SaaS: sentry.io itself
+ * - Self-hosted: the configured SENTRY_HOST/SENTRY_URL if non-SaaS
+ *
+ * @internal Exported for testing
+ */
+export function getSentryTracePropagationTargets(): (string | RegExp)[] {
+  const targets: (string | RegExp)[] = [
+    SENTRY_SAAS_SUBDOMAIN_RE,
+    SENTRY_SAAS_ROOT_RE,
+  ];
+
+  // Also match self-hosted Sentry instances
+  const customUrl = getConfiguredSentryUrl();
+  if (customUrl && !isSentrySaasUrl(customUrl)) {
+    targets.push(customUrl);
+  }
+
+  return targets;
+}
+
 /**
  * Initialize Sentry for telemetry.
  *
@@ -272,8 +307,8 @@ export function initSentry(enabled: boolean): Sentry.BunClient | undefined {
     tracesSampleRate: 1,
     sampleRate: 1,
     release: CLI_VERSION,
-    // Don't propagate traces to external services
-    tracePropagationTargets: [],
+    // Propagate traces to Sentry API for distributed tracing
+    tracePropagationTargets: getSentryTracePropagationTargets(),
 
     beforeSendTransaction: (event) => {
       // Remove server_name which may contain hostname (PII)

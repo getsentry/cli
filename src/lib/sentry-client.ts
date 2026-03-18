@@ -8,6 +8,7 @@
  * through the SDK function options (baseUrl, fetch, headers).
  */
 
+import { getTraceData } from "@sentry/bun";
 import {
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
@@ -80,6 +81,19 @@ function prepareHeaders(
   if (!headers.has("User-Agent")) {
     headers.set("User-Agent", getUserAgent());
   }
+
+  // Inject distributed tracing headers to connect CLI spans to backend traces.
+  // Manual injection is required because Bun's fetch doesn't fire undici
+  // diagnostics channels, so the SDK's nativeNodeFetchIntegration cannot work.
+  // When telemetry is disabled, getTraceData() returns {} — no headers injected.
+  const traceData = getTraceData();
+  if (traceData["sentry-trace"]) {
+    headers.set("sentry-trace", traceData["sentry-trace"]);
+  }
+  if (traceData.baggage) {
+    headers.set("baggage", traceData.baggage);
+  }
+
   return headers;
 }
 
