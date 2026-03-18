@@ -14,13 +14,11 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
-  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
-  stripMarkdownInline,
 } from "./markdown.js";
 import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
@@ -125,14 +123,6 @@ export function formatTraceTable(items: TransactionListItem[]): string {
   const alignments = TRACE_TABLE_COLS.map((c) =>
     c.endsWith(":") ? ("right" as const) : ("left" as const)
   );
-
-  if (isPlainOutput()) {
-    const rows = items.map((item) =>
-      buildTraceRowCells(item).map((c) => stripMarkdownInline(c))
-    );
-    return renderTextTable(headers, rows, { alignments });
-  }
-
   const rows = items.map((item) =>
     buildTraceRowCells(item).map((c) => renderInlineMarkdown(c))
   );

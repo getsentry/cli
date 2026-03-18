@@ -94,19 +94,11 @@ export function mdTableHeader(cols: readonly string[]): string {
  * in rendered mode applies inline styling and replaces `|` with `│`.
  */
 export function mdRow(cells: readonly string[]): string {
-  if (isPlainOutput()) {
-    // Strip markdown syntax, then replace literal pipes with box-drawing │
-    // to prevent them from breaking the pipe-delimited table format.
-    const stripped = cells.map((c) =>
-      stripMarkdownInline(c).replace(/\|/g, "\u2502")
-    );
-    return `| ${stripped.join(" | ")} |\n`;
-  }
+  // Both modes render through the same pipeline; plain mode strips ANSI.
+  // Literal pipes are replaced with box-drawing │ to prevent breaking the
+  // pipe-delimited table format.
   const out = cells.map((c) =>
-    renderInline(marked.lexer(c).flatMap(flattenInline)).replace(
-      /\|/g,
-      "\u2502"
-    )
+    renderInlineMarkdown(c).replace(/\|/g, "\u2502")
   );
   return `| ${out.join(" | ")} |\n`;
 }
@@ -217,32 +209,6 @@ export function stripColorTags(text: string): string {
 }
 
 /**
- * Strip inline markdown syntax to produce plain text.
- *
- * Removes bold/italic markers, link syntax (keeps display text), code
- * backticks, and color tags. Used for plain-mode output that should be
- * human-readable without any markdown artifacts.
- */
-export function stripMarkdownInline(md: string): string {
-  let text = stripColorTags(md);
-  // Links: [text](url) → text
-  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  // Code spans first (higher precedence than emphasis in CommonMark):
-  // `text` → text. Content inside backticks is literal, so bold/italic
-  // markers inside code spans must not be stripped.
-  text = text.replace(/`([^`]+)`/g, "$1");
-  // Bold: **text** → text. Only strip asterisk-based emphasis, not
-  // underscore-based (_text_) because underscores appear in identifiers
-  // (e.g. payment_service_handler) and would be corrupted.
-  text = text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1");
-  // Backslash escapes: \| \< \> \\ \_ \* \[ \] \` → literal character.
-  // escapeMarkdownCell/escapeMarkdownInline add these for the markdown parser;
-  // the TTY path unescapes via marked.lexer(), but plain mode must do it here.
-  text = text.replace(/\\([|<>\\*_`[\]])/g, "$1");
-  return text;
-}
-
-/**
  * Render an inline HTML token as a color-tagged string.
  *
  * Handles self-contained `<tag>text</tag>` forms. Bare open/close
@@ -297,8 +263,22 @@ function flattenInline(token: Token): Token[] {
 }
 
 /**
+ * Render a code span token.
+ *
+ * Plain mode: raw text without padding so table column widths aren't inflated.
+ * TTY mode: styled with background color and padded spaces for visual weight.
+ */
+function renderCodespan(token: Tokens.Codespan): string {
+  if (isPlainOutput()) {
+    return token.text;
+  }
+  return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(` ${token.text} `);
+}
+
+/**
  * Render a single inline token to an ANSI string.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inline token switch is inherently branchy
 function renderOneInline(token: Token): string {
   switch (token.type) {
     case "strong":
@@ -306,9 +286,7 @@ function renderOneInline(token: Token): string {
     case "em":
       return chalk.italic(renderInline((token as Tokens.Em).tokens));
     case "codespan":
-      return chalk.bgHex(COLORS.codeBg).hex(COLORS.codeFg)(
-        ` ${(token as Tokens.Codespan).text} `
-      );
+      return renderCodespan(token as Tokens.Codespan);
     case "link": {
       const link = token as Tokens.Link;
       let linkText = renderInline(link.tokens);
@@ -584,13 +562,16 @@ export function renderMarkdown(md: string): string {
  * Render inline markdown (bold, code spans, emphasis, links) as styled
  * terminal output, or return plain text when in plain mode.
  *
+ * Both modes use the same `marked.lexer()` → `renderInline()` pipeline.
+ * In plain mode, ANSI codes are stripped from the result, producing
+ * clean text. This avoids maintaining a separate regex-based stripping
+ * function that would need to replicate the markdown parser's rules.
+ *
  * @param md - Inline markdown text
- * @returns Styled string (TTY) or plain text with markdown syntax stripped (non-TTY / plain mode)
+ * @returns Styled string (TTY) or plain text (non-TTY / plain mode)
  */
 export function renderInlineMarkdown(md: string): string {
-  if (isPlainOutput()) {
-    return stripMarkdownInline(md);
-  }
   const tokens = marked.lexer(md);
-  return renderInline(tokens.flatMap(flattenInline));
+  const rendered = renderInline(tokens.flatMap(flattenInline));
+  return isPlainOutput() ? stripAnsi(rendered) : rendered;
 }

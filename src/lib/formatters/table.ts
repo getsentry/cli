@@ -15,7 +15,6 @@ import {
   isPlainOutput,
   renderInlineMarkdown,
   stripColorTags,
-  stripMarkdownInline,
 } from "./markdown.js";
 import { type Alignment, renderTextTable } from "./text-table.js";
 
@@ -94,9 +93,9 @@ export type WriteTableOptions = {
  * Format items as a table string.
  *
  * Returns the rendered table instead of writing to a stream.
- * In plain/non-TTY mode emits a human-readable aligned table with
- * Unicode box-drawing borders but no ANSI escape codes. In TTY mode
- * emits a styled table with ANSI colors and hyperlinks.
+ * Cell values are markdown strings rendered through {@link renderInlineMarkdown},
+ * which produces ANSI-styled text in TTY mode and clean plain text when piped.
+ * In plain mode, row separator ANSI coloring is stripped to `true` (plain borders).
  */
 export function formatTable<T>(
   items: T[],
@@ -108,23 +107,6 @@ export function formatTable<T>(
   const minWidths = columns.map((c) => c.minWidth ?? 0);
   const shrinkable = columns.map((c) => c.shrinkable ?? true);
 
-  if (isPlainOutput()) {
-    // Strip markdown syntax so plain output is human-readable (no **bold**,
-    // [link](url), or `code` artifacts). Use renderTextTable for proper
-    // column alignment with box-drawing borders.
-    const rows = items.map((item) =>
-      columns.map((c) => stripMarkdownInline(c.value(item)))
-    );
-    return renderTextTable(headers, rows, {
-      alignments,
-      minWidths,
-      shrinkable,
-      truncate: options?.truncate,
-      // Strip ANSI color from row separators in plain mode
-      rowSeparator: Boolean(options?.rowSeparator),
-    });
-  }
-
   const rows = items.map((item) =>
     columns.map((c) => renderInlineMarkdown(c.value(item)))
   );
@@ -134,7 +116,10 @@ export function formatTable<T>(
     minWidths,
     shrinkable,
     truncate: options?.truncate,
-    rowSeparator: options?.rowSeparator,
+    // Strip ANSI color from row separators in plain mode
+    rowSeparator: isPlainOutput()
+      ? Boolean(options?.rowSeparator)
+      : options?.rowSeparator,
   });
 }
 

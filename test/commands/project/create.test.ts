@@ -490,9 +490,9 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    // Plain mode strips backtick code spans
-    expect(output).toContain("Slug  my-app-0g  was assigned");
-    expect(output).toContain("my-app  is already taken");
+    // Plain mode renders code spans as plain text without padding
+    expect(output).toContain("Slug my-app-0g was assigned");
+    expect(output).toContain("my-app is already taken");
   });
 
   test("does not show slug note when slug matches name", async () => {

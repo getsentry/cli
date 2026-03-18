@@ -10,13 +10,11 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
-  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
-  stripMarkdownInline,
 } from "./markdown.js";
 import {
   renderTextTable,
@@ -175,16 +173,6 @@ export function formatLogsHeader(): string {
  */
 export function formatLogTable(logs: LogLike[], includeTrace = true): string {
   const headers = [...LOG_TABLE_COLS];
-
-  if (isPlainOutput()) {
-    const rows = logs.map((log) =>
-      buildLogRowCells(log, false, includeTrace).map((c) =>
-        stripMarkdownInline(c)
-      )
-    );
-    return renderTextTable(headers, rows);
-  }
-
   const rows = logs.map((log) =>
     buildLogRowCells(log, false, includeTrace).map((c) =>
       renderInlineMarkdown(c)
