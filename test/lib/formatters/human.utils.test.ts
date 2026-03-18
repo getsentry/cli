@@ -17,11 +17,11 @@ import {
 import {
   formatDuration,
   formatExpiration,
-  formatRelativeTime,
   formatStatusIcon,
   formatStatusLabel,
   maskToken,
 } from "../../../src/lib/formatters/human.js";
+import { formatRelativeTime } from "../../../src/lib/formatters/time-utils.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
 // Helper to strip ANSI codes and markdown color tags for content testing.

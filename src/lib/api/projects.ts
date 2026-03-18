@@ -176,8 +176,11 @@ export type ProjectSearchResult = {
 export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectSearchResult> {
-  const orgs = await listOrganizations();
   const isNumericId = isAllDigits(projectSlug);
+
+  // listOrganizations() returns from cache when populated, avoiding
+  // the expensive getUserRegions() + listOrganizationsInRegion() fan-out.
+  const orgs = await listOrganizations();
 
   // Direct lookup in parallel — one API call per org instead of paginating all projects
   const searchResults = await Promise.all(

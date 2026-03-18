@@ -140,6 +140,30 @@ describe("dashboard create", () => {
     });
   });
 
+  test("throws ContextError when org cannot be resolved", async () => {
+    resolveOrgSpy.mockResolvedValue(null);
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    await expect(
+      func.call(context, { json: false }, "My Dashboard")
+    ).rejects.toThrow(ContextError);
+  });
+
+  test("explicit org/project target calls fetchProjectId", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false },
+      "my-org/my-project",
+      "My Dashboard"
+    );
+
+    expect(fetchProjectIdSpy).toHaveBeenCalledWith("my-org", "my-project");
+  });
+
   test("--widget-display and --widget-title creates dashboard with widget", async () => {
     createDashboardSpy.mockResolvedValue({
       ...sampleDashboard,
@@ -198,37 +222,9 @@ describe("dashboard create", () => {
     const func = await createCommand.loader();
 
     const err = await func
-      .call(
-        context,
-        { json: false, "widget-display": "big_number" },
-        "My Dashboard"
-      )
+      .call(context, { json: false, "widget-display": "line" }, "My Dashboard")
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("--widget-title");
-  });
-
-  test("throws ContextError when org cannot be resolved", async () => {
-    resolveOrgSpy.mockResolvedValue(null);
-
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-
-    await expect(
-      func.call(context, { json: false }, "My Dashboard")
-    ).rejects.toThrow(ContextError);
-  });
-
-  test("explicit org/project target calls fetchProjectId", async () => {
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-    await func.call(
-      context,
-      { json: false },
-      "my-org/my-project",
-      "My Dashboard"
-    );
-
-    expect(fetchProjectIdSpy).toHaveBeenCalledWith("my-org", "my-project");
   });
 });

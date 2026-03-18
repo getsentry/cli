@@ -1,5 +1,11 @@
 /**
  * Unit tests for JSON formatting and field filtering.
+ *
+ * Note: Core invariants (idempotency, subset property, missing field handling,
+ * primitive pass-through, array element filtering, deduplication, whitespace
+ * tolerance) are tested via property-based tests in json.property.test.ts.
+ * These tests focus on specific output documentation, edge cases, and the
+ * writeJson/writeJsonList/formatJson APIs not covered by property tests.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -19,23 +25,7 @@ function filter(data: unknown, fields: string[]): unknown {
   return filterFields(data, fields);
 }
 
-// ---------------------------------------------------------------------------
-// filterFields — unit tests for specific behaviors
-// ---------------------------------------------------------------------------
-
-describe("filterFields", () => {
-  test("picks top-level fields", () => {
-    expect(
-      filter({ id: 1, title: "bug", status: "open", count: 42 }, [
-        "id",
-        "title",
-      ])
-    ).toEqual({
-      id: 1,
-      title: "bug",
-    });
-  });
-
+describe("filterFields edge cases", () => {
   test("picks nested fields via dot-notation", () => {
     const data = {
       id: 1,
@@ -49,18 +39,6 @@ describe("filterFields", () => {
       metadata: { value: "ReferenceError" },
       contexts: { trace: { traceId: "abc" } },
     });
-  });
-
-  test("silently skips missing fields", () => {
-    expect(
-      filter({ id: 1, title: "bug" }, ["id", "nonexistent", "also.missing"])
-    ).toEqual({
-      id: 1,
-    });
-  });
-
-  test("handles empty fields list", () => {
-    expect(filter({ a: 1, b: 2 }, [])).toEqual({});
   });
 
   test("preserves null values", () => {
@@ -77,43 +55,12 @@ describe("filterFields", () => {
     });
   });
 
-  test("handles arrays of objects", () => {
-    const data = [
-      { id: 1, title: "first", extra: true },
-      { id: 2, title: "second", extra: false },
-    ];
-    expect(filter(data, ["id", "title"])).toEqual([
-      { id: 1, title: "first" },
-      { id: 2, title: "second" },
-    ]);
-  });
-
-  test("handles empty array", () => {
-    expect(filter([], ["id"])).toEqual([]);
-  });
-
   test("stops at null intermediate in dot-path", () => {
     expect(filter({ a: { b: null } }, ["a.b.c"])).toEqual({});
   });
 
   test("stops at primitive intermediate in dot-path", () => {
     expect(filter({ a: { b: 42 } }, ["a.b.c"])).toEqual({});
-  });
-
-  test("passes through null data unchanged", () => {
-    expect(filter(null, ["id"])).toBeNull();
-  });
-
-  test("passes through undefined data unchanged", () => {
-    expect(filter(undefined, ["id"])).toBeUndefined();
-  });
-
-  test("passes through string data unchanged", () => {
-    expect(filter("hello", ["length"])).toBe("hello");
-  });
-
-  test("passes through number data unchanged", () => {
-    expect(filter(42, ["id"])).toBe(42);
   });
 
   test("merges nested paths into shared parents", () => {
@@ -152,10 +99,6 @@ describe("filterFields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// parseFieldsList — unit tests
-// ---------------------------------------------------------------------------
-
 describe("parseFieldsList", () => {
   test("parses comma-separated fields", () => {
     expect(parseFieldsList("id,title,status")).toEqual([
@@ -179,14 +122,6 @@ describe("parseFieldsList", () => {
     );
   });
 
-  test("deduplicates fields", () => {
-    expect(parseFieldsList("id,title,id,title")).toEqual(["id", "title"]);
-  });
-
-  test("filters empty segments from double commas", () => {
-    expect(parseFieldsList("id,,title")).toEqual(["id", "title"]);
-  });
-
   test("handles single field", () => {
     expect(parseFieldsList("id")).toEqual(["id"]);
   });
@@ -194,22 +129,9 @@ describe("parseFieldsList", () => {
   test("returns empty array for empty string", () => {
     expect(parseFieldsList("")).toEqual([]);
   });
-
-  test("returns empty array for whitespace-only", () => {
-    expect(parseFieldsList("   ")).toEqual([]);
-  });
-
-  test("returns empty array for commas-only", () => {
-    expect(parseFieldsList(",,,")).toEqual([]);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// writeJson with fields — integration tests
-// ---------------------------------------------------------------------------
-
 describe("writeJson with fields", () => {
-  /** Capture stdout writes */
   function capture(): {
     writer: { write: (s: string) => void };
     output: () => string;
@@ -288,10 +210,6 @@ describe("writeJson with fields", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formatJson — basic sanity
-// ---------------------------------------------------------------------------
-
 describe("formatJson", () => {
   test("pretty-prints with 2-space indentation", () => {
     expect(formatJson({ a: 1 })).toBe('{\n  "a": 1\n}');
@@ -306,12 +224,7 @@ describe("formatJson", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// writeJsonList — paginated list output with per-element field filtering
-// ---------------------------------------------------------------------------
-
 describe("writeJsonList", () => {
-  /** Capture stdout writes and parse the result as JSON */
   function capture(): {
     writer: { write: (s: string) => void };
     output: () => string;
@@ -417,7 +330,6 @@ describe("writeJsonList", () => {
       { id: 1, title: "Bug" },
       { id: 2, title: "Feature" },
     ]);
-    // Wrapper metadata is always preserved
     expect(result.hasMore).toBe(true);
   });
 
@@ -429,7 +341,6 @@ describe("writeJsonList", () => {
       fields: ["id"],
     });
     const result = parsed() as Record<string, unknown>;
-    // Only array elements are filtered — wrapper keys preserved
     expect(result.data).toEqual([{ id: 1 }]);
     expect(result.hasMore).toBe(true);
     expect(result.nextCursor).toBe("xyz");
@@ -487,9 +398,7 @@ describe("writeJsonList", () => {
       extra: { hint: "use --cursor" },
     });
     const result = parsed() as Record<string, unknown>;
-    // Items are filtered
     expect(result.data).toEqual([{ id: 1 }]);
-    // Extra is in wrapper, not filtered
     expect(result.hint).toBe("use --cursor");
   });
 

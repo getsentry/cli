@@ -5,11 +5,12 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listOrganizations } from "../../lib/api-client.js";
+import { listOrganizationsUncached } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import { DEFAULT_SENTRY_HOST } from "../../lib/constants.js";
 import { getAllOrgRegions } from "../../lib/db/regions.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
@@ -114,9 +115,10 @@ export const listCommand = buildCommand({
       "Examples:\n" +
       "  sentry org list\n" +
       "  sentry org list --limit 10\n" +
-      "  sentry org list --json",
+      "  sentry org list --json\n\n" +
+      "Alias: `sentry orgs` → `sentry org list`",
   },
-  output: { json: true, human: formatOrgListHuman },
+  output: { human: formatOrgListHuman },
   parameters: {
     flags: {
       limit: buildListLimitFlag("organizations"),
@@ -125,10 +127,10 @@ export const listCommand = buildCommand({
     // Only -n for --limit; no -c since org list has no --cursor flag
     aliases: { ...FRESH_ALIASES, n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags) {
+  async *func(this: SentryContext, flags: ListFlags) {
     applyFreshFlag(flags);
 
-    const orgs = await listOrganizations();
+    const orgs = await listOrganizationsUncached();
     const limitedOrgs = orgs.slice(0, flags.limit);
 
     // Check if user has orgs in multiple regions
@@ -151,6 +153,7 @@ export const listCommand = buildCommand({
       hints.push("Tip: Use 'sentry org view <slug>' for details");
     }
 
-    return { data: entries, hint: hints.join("\n") || undefined };
+    yield new CommandOutput(entries);
+    return { hint: hints.join("\n") || undefined };
   },
 });

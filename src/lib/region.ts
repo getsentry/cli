@@ -14,20 +14,56 @@ import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
+ * Promise cache for org region resolution, keyed by orgSlug.
+ *
+ * When multiple DSNs share an orgId, concurrent calls to resolveOrgRegion
+ * deduplicate into a single HTTP request. A resolved promise returns
+ * instantly on `await`, so this also serves as a warm in-memory cache.
+ *
+ * Rejected promises (e.g., AuthError) are automatically evicted so that
+ * retries after re-authentication can succeed without restarting the CLI.
+ */
+const regionCache = new Map<string, Promise<string>>();
+
+/**
  * Resolve the region URL for an organization.
  *
+ * Deduplicates concurrent calls for the same orgSlug — only one HTTP
+ * request fires per unique org, even when many DSNs trigger resolution
+ * in parallel.
+ *
  * Resolution order:
- * 1. Check SQLite cache
- * 2. Fetch organization details via SDK to get region URL
- * 3. Fall back to default URL if resolution fails
+ * 1. Return in-flight or previously resolved promise (instant)
+ * 2. Check SQLite cache
+ * 3. Fetch organization details via SDK to get region URL
+ * 4. Fall back to default URL if resolution fails
  *
  * Uses the SDK directly (not api-client) to avoid circular dependency.
  *
  * @param orgSlug - The organization slug
  * @returns The region URL for the organization
  */
-export async function resolveOrgRegion(orgSlug: string): Promise<string> {
-  // 1. Check cache first
+export function resolveOrgRegion(orgSlug: string): Promise<string> {
+  const existing = regionCache.get(orgSlug);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = resolveOrgRegionUncached(orgSlug);
+  regionCache.set(orgSlug, promise);
+  // Evict on rejection (AuthError) so retries after re-login work.
+  // Non-auth errors already resolve to baseUrl fallback, so only
+  // AuthError re-throws can leave a rejected promise in the cache.
+  promise.catch(() => regionCache.delete(orgSlug));
+  return promise;
+}
+
+/**
+ * Resolve org region from SQLite cache or API.
+ * Called at most once per orgSlug per process lifetime.
+ */
+async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
+  // 1. Check SQLite cache first
   const cached = await getOrgRegion(orgSlug);
   if (cached) {
     return cached;
@@ -126,13 +162,13 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
     return fromCache;
   }
 
-  // Cache is cold or identifier is unknown — refresh the org list.
-  // listOrganizations() populates org_regions with slug, region, and org_id.
+  // Cache is cold or identifier is unknown — refresh the org list from API.
+  // listOrganizationsUncached() populates org_regions with slug, region, org_id, and name.
   // Any error (auth failure, network error, etc.) falls back to the original
   // slug; the downstream API call will produce a relevant error if needed.
   try {
-    const { listOrganizations } = await import("./api-client.js");
-    await listOrganizations();
+    const { listOrganizationsUncached } = await import("./api-client.js");
+    await listOrganizationsUncached();
   } catch {
     return orgSlug;
   }

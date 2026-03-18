@@ -1,6 +1,99 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.16.0
+
+### New Features ✨
+
+#### Init
+
+- Support org/project positional to pin org and project name by @MathurAditya724 in [#428](https://github.com/getsentry/cli/pull/428)
+- Show feedback hint after successful setup by @betegon in [#430](https://github.com/getsentry/cli/pull/430)
+- Add --team flag to relay team selection to project creation by @MathurAditya724 in [#403](https://github.com/getsentry/cli/pull/403)
+- Enforce canonical feature display order by @betegon in [#388](https://github.com/getsentry/cli/pull/388)
+- Accept multiple delimiter formats for --features flag by @betegon in [#386](https://github.com/getsentry/cli/pull/386)
+- Add git safety checks before wizard modifies files by @betegon in [#379](https://github.com/getsentry/cli/pull/379)
+- Add experimental warning before wizard runs by @betegon in [#378](https://github.com/getsentry/cli/pull/378)
+- Add init command for guided Sentry project setup by @betegon in [#283](https://github.com/getsentry/cli/pull/283)
+
+#### Issue List
+
+- Auto-compact when table exceeds terminal height by @BYK in [#395](https://github.com/getsentry/cli/pull/395)
+- Redesign table to match Sentry web UI by @BYK in [#372](https://github.com/getsentry/cli/pull/372)
+
+#### Other
+
+- (auth) Allow re-authentication without manual logout by @BYK in [#417](https://github.com/getsentry/cli/pull/417)
+- (trial) Auto-prompt for Seer trial + sentry trial list/start commands by @BYK in [#399](https://github.com/getsentry/cli/pull/399)
+- Add --json flag to help command for agent introspection by @BYK in [#432](https://github.com/getsentry/cli/pull/432)
+- Add `sentry span list` and `sentry span view` commands by @betegon in [#393](https://github.com/getsentry/cli/pull/393)
+- Support SENTRY_HOST as alias for SENTRY_URL by @betegon in [#409](https://github.com/getsentry/cli/pull/409)
+- Add --dry-run flag to mutating commands by @BYK in [#387](https://github.com/getsentry/cli/pull/387)
+- Return-based output with OutputConfig on buildCommand by @BYK in [#380](https://github.com/getsentry/cli/pull/380)
+- Add --fields flag for context-window-friendly JSON output by @BYK in [#373](https://github.com/getsentry/cli/pull/373)
+- Magic `@` selectors (`@latest`, `@most_frequent`) for issue commands by @BYK in [#371](https://github.com/getsentry/cli/pull/371)
+- Input hardening against agent hallucinations by @BYK in [#370](https://github.com/getsentry/cli/pull/370)
+- Add response caching for read-only API calls by @BYK in [#330](https://github.com/getsentry/cli/pull/330)
+
+### Bug Fixes 🐛
+
+#### Dsn
+
+- Make code scanner monorepo-aware and extend --fresh to bypass DSN cache by @betegon in [#420](https://github.com/getsentry/cli/pull/420)
+- Prevent silent exit during uncached DSN auto-detection (#411) by @BYK in [#414](https://github.com/getsentry/cli/pull/414)
+
+#### Init
+
+- Align multiselect hint lines with clack's visual frame by @MathurAditya724 in [#435](https://github.com/getsentry/cli/pull/435)
+- Make URLs clickable with OSC 8 terminal hyperlinks by @MathurAditya724 in [#423](https://github.com/getsentry/cli/pull/423)
+- Remove implementation detail from help text by @betegon in [#385](https://github.com/getsentry/cli/pull/385)
+- Truncate uncommitted file list to first 5 entries by @MathurAditya724 in [#381](https://github.com/getsentry/cli/pull/381)
+
+#### Other
+
+- (api) Convert --data to query params for GET requests by @BYK in [#383](https://github.com/getsentry/cli/pull/383)
+- (docs) Remove double borders and fix column alignment on landing page tables by @betegon in [#369](https://github.com/getsentry/cli/pull/369)
+- (help) Hide plural aliases from help output by @betegon in [#441](https://github.com/getsentry/cli/pull/441)
+- (trace) Show span IDs in trace view and fix event_id mapping by @betegon in [#400](https://github.com/getsentry/cli/pull/400)
+- Show human-friendly names in trial list and surface plan trials by @BYK in [#412](https://github.com/getsentry/cli/pull/412)
+- Add trace ID validation to trace view + UUID dash-stripping by @BYK in [#375](https://github.com/getsentry/cli/pull/375)
+
+### Documentation 📚
+
+- (commands) Add alias info to subcommand help output by @betegon in [#442](https://github.com/getsentry/cli/pull/442)
+- Update AGENTS.md with patterns from span commands work by @BYK in [#433](https://github.com/getsentry/cli/pull/433)
+- Update credential storage docs and remove stale config.json references by @betegon in [#408](https://github.com/getsentry/cli/pull/408)
+
+### Internal Changes 🔧
+
+#### Init
+
+- Remove --force flag by @betegon in [#377](https://github.com/getsentry/cli/pull/377)
+- Remove dead determine-pm step label by @betegon in [#374](https://github.com/getsentry/cli/pull/374)
+
+#### Tests
+
+- Consolidate unit tests subsumed by property tests by @BYK in [#422](https://github.com/getsentry/cli/pull/422)
+- Remove redundant and low-value tests by @BYK in [#418](https://github.com/getsentry/cli/pull/418)
+
+#### Other
+
+- (lint) Enforce command output conventions via Biome plugins by @BYK in [#439](https://github.com/getsentry/cli/pull/439)
+- (log/list) Convert non-follow paths to return CommandOutput by @BYK in [#410](https://github.com/getsentry/cli/pull/410)
+- Unified trace-target parsing and resolution by @BYK in [#438](https://github.com/getsentry/cli/pull/438)
+- Centralize slug normalization warning in parseOrgProjectArg by @BYK in [#436](https://github.com/getsentry/cli/pull/436)
+- Unify commands as generators with HumanRenderer factory, remove stdout plumbing by @BYK in [#416](https://github.com/getsentry/cli/pull/416)
+- Convert list command handlers to return data instead of writing stdout by @BYK in [#404](https://github.com/getsentry/cli/pull/404)
+- Split api-client.ts into focused domain modules by @BYK in [#405](https://github.com/getsentry/cli/pull/405)
+- Migrate non-streaming commands to CommandOutput with markdown rendering by @BYK in [#398](https://github.com/getsentry/cli/pull/398)
+- Convert Tier 2-3 commands to return-based output and consola by @BYK in [#394](https://github.com/getsentry/cli/pull/394)
+- Convert remaining Tier 1 commands to return-based output by @BYK in [#382](https://github.com/getsentry/cli/pull/382)
+- Converge Tier 1 commands to writeOutput helper by @BYK in [#376](https://github.com/getsentry/cli/pull/376)
+
+### Other
+
+- Minify JSON on read and pretty-print on write in init local ops by @MathurAditya724 in [#396](https://github.com/getsentry/cli/pull/396)
+
 ## 0.15.0
 
 ### New Features ✨

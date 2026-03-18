@@ -9,14 +9,20 @@ import { listDashboards } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { colorTag, escapeMarkdownCell } from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, writeTable } from "../../lib/formatters/table.js";
 import {
   applyFreshFlag,
+  buildListLimitFlag,
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { buildDashboardsListUrl } from "../../lib/sentry-urls.js";
+import { withProgress } from "../../lib/polling.js";
+import {
+  buildDashboardsListUrl,
+  buildDashboardUrl,
+} from "../../lib/sentry-urls.js";
 import type { DashboardListItem } from "../../types/dashboard.js";
 import type { Writer } from "../../types/index.js";
 import { resolveOrgFromTarget } from "./resolve.js";
@@ -24,18 +30,24 @@ import { resolveOrgFromTarget } from "./resolve.js";
 type ListFlags = {
   readonly web: boolean;
   readonly fresh: boolean;
+  readonly limit: number;
   readonly json: boolean;
   readonly fields?: string[];
+};
+
+type DashboardListResult = {
+  dashboards: DashboardListItem[];
+  orgSlug: string;
 };
 
 /**
  * Format dashboard list for human-readable terminal output.
  *
- * Renders a table with ID, title, and widget count columns.
+ * Renders a table with ID, title (clickable link), and widget count columns.
  * Returns "No dashboards found." for empty results.
  */
-function formatDashboardListHuman(dashboards: DashboardListItem[]): string {
-  if (dashboards.length === 0) {
+function formatDashboardListHuman(result: DashboardListResult): string {
+  if (result.dashboards.length === 0) {
     return "No dashboards found.";
   }
 
@@ -45,11 +57,14 @@ function formatDashboardListHuman(dashboards: DashboardListItem[]): string {
     widgets: string;
   };
 
-  const rows: DashboardRow[] = dashboards.map((d) => ({
-    id: d.id,
-    title: escapeMarkdownCell(d.title),
-    widgets: String(d.widgetDisplay?.length ?? 0),
-  }));
+  const rows: DashboardRow[] = result.dashboards.map((d) => {
+    const url = buildDashboardUrl(result.orgSlug, d.id);
+    return {
+      id: d.id,
+      title: `${escapeMarkdownCell(d.title)}\n${colorTag("muted", url)}`,
+      widgets: String(d.widgetDisplay?.length ?? 0),
+    };
+  });
 
   const columns: Column<DashboardRow>[] = [
     { header: "ID", value: (r) => r.id },
@@ -75,7 +90,10 @@ export const listCommand = buildCommand({
       "  sentry dashboard list --json\n" +
       "  sentry dashboard list --web",
   },
-  output: { json: true, human: formatDashboardListHuman },
+  output: {
+    human: formatDashboardListHuman,
+    jsonTransform: (result: DashboardListResult) => result.dashboards,
+  },
   parameters: {
     positional: {
       kind: "tuple",
@@ -95,11 +113,12 @@ export const listCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
+      limit: buildListLimitFlag("dashboards"),
       fresh: FRESH_FLAG,
     },
-    aliases: { ...FRESH_ALIASES, w: "web" },
+    aliases: { ...FRESH_ALIASES, w: "web", n: "limit" },
   },
-  async func(this: SentryContext, flags: ListFlags, target?: string) {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -115,11 +134,14 @@ export const listCommand = buildCommand({
       return;
     }
 
-    const dashboards = await listDashboards(orgSlug);
+    const dashboards = await withProgress(
+      { message: `Fetching dashboards (up to ${flags.limit})...` },
+      () => listDashboards(orgSlug, { perPage: flags.limit })
+    );
     const url = buildDashboardsListUrl(orgSlug);
 
+    yield new CommandOutput({ dashboards, orgSlug } as DashboardListResult);
     return {
-      data: dashboards,
       hint: dashboards.length > 0 ? `Dashboards: ${url}` : undefined,
     };
   },

@@ -19,7 +19,8 @@ export const logRoute = buildRouteMap({
       "View and stream logs from your Sentry projects.\n\n" +
       "Commands:\n" +
       "  list     List or stream logs from a project\n" +
-      "  view     View details of a specific log entry",
+      "  view     View details of a specific log entry\n\n" +
+      "Alias: `sentry logs` → `sentry log list`",
     hideRoute: {},
   },
 });

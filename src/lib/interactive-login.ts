@@ -7,16 +7,29 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/bun";
-import type { Writer } from "../types/index.js";
 import { openBrowser } from "./browser.js";
 import { setupCopyKeyListener } from "./clipboard.js";
 import { getDbPath } from "./db/index.js";
 import { setUserInfo } from "./db/user.js";
 import { formatError } from "./errors.js";
-import { error as errorColor, muted, success } from "./formatters/colors.js";
-import { formatDuration, formatUserIdentity } from "./formatters/human.js";
+import { muted } from "./formatters/colors.js";
+import { logger } from "./logger.js";
 import { completeOAuthFlow, performDeviceFlow } from "./oauth.js";
 import { generateQRCode } from "./qrcode.js";
+
+const log = logger.withTag("auth.login");
+
+/** Structured result returned on successful authentication. */
+export type LoginResult = {
+  /** Authentication method used. */
+  method: "oauth" | "token";
+  /** User identity if available. */
+  user?: { name?: string; email?: string; username?: string; id?: string };
+  /** Path where credentials are stored. */
+  configPath: string;
+  /** Token lifetime in seconds, if known. */
+  expiresIn?: number;
+};
 
 /** Options for the interactive login flow */
 export type InteractiveLoginOptions = {
@@ -33,21 +46,19 @@ export type InteractiveLoginOptions = {
  * - Setting up keyboard listener for copying URL
  * - Storing the token and user info on success
  *
- * @param stdout - Output stream for displaying UI messages
- * @param stderr - Error stream for error messages
- * @param stdin - Input stream for keyboard listener (must be TTY)
+ * All UI output goes to stderr via the logger, keeping stdout clean for
+ * structured command output. A spinner replaces raw polling dots for a
+ * cleaner interactive experience.
+ *
  * @param options - Optional configuration
- * @returns true on successful authentication, false on failure/cancellation
+ * @returns Structured login result on success, or null on failure/cancellation
  */
 export async function runInteractiveLogin(
-  stdout: Writer,
-  stderr: Writer,
-  stdin: NodeJS.ReadStream & { fd: 0 },
   options?: InteractiveLoginOptions
-): Promise<boolean> {
+): Promise<LoginResult | null> {
   const timeout = options?.timeout ?? 900_000; // 15 minutes default
 
-  stdout.write("Starting authentication...\n\n");
+  log.info("Starting authentication...");
 
   let urlToCopy = "";
   // Object wrapper needed for TypeScript control flow analysis with async callbacks
@@ -67,39 +78,39 @@ export async function runInteractiveLogin(
           const browserOpened = await openBrowser(verificationUriComplete);
 
           if (browserOpened) {
-            stdout.write("Opening in browser...\n\n");
+            log.info("Opening in browser...");
           } else {
             // Show QR code as fallback when browser can't open
-            stdout.write("Scan this QR code or visit the URL below:\n\n");
+            log.info("Scan this QR code or visit the URL below:");
             const qr = await generateQRCode(verificationUriComplete);
-            stdout.write(qr);
-            stdout.write("\n");
+            log.log(qr);
           }
 
-          stdout.write(`URL: ${verificationUri}\n`);
-          stdout.write(`Code: ${userCode}\n\n`);
+          log.info(`URL: ${verificationUri}`);
+          log.info(`Code: ${userCode}`);
+          const stdin = process.stdin;
           const copyHint = stdin.isTTY ? ` ${muted("(c to copy)")}` : "";
-          stdout.write(
-            `Browser didn't open? Use the url above to sign in${copyHint}\n\n`
+          log.info(
+            `Browser didn't open? Use the url above to sign in${copyHint}`
           );
-          stdout.write("Waiting for authorization...\n");
+
+          // Use a spinner for the "waiting" state instead of raw polling dots
+          log.start("Waiting for authorization...");
 
           // Setup keyboard listener for 'c' to copy URL
-          keyListener.cleanup = setupCopyKeyListener(
-            stdin,
-            () => urlToCopy,
-            stdout
-          );
-        },
-        onPolling: () => {
-          stdout.write(".");
+          if (stdin.isTTY) {
+            keyListener.cleanup = setupCopyKeyListener(
+              stdin as NodeJS.ReadStream & { fd: 0 },
+              () => urlToCopy
+            );
+          }
         },
       },
       timeout
     );
 
-    // Clear the polling dots
-    stdout.write("\n");
+    // Stop the spinner
+    log.success("Authorization received!");
 
     // Store the token
     await completeOAuthFlow(tokenResponse);
@@ -119,23 +130,19 @@ export async function runInteractiveLogin(
       }
     }
 
-    stdout.write(`${success("✓")} Authentication successful!\n`);
+    const result: LoginResult = {
+      method: "oauth",
+      configPath: getDbPath(),
+      expiresIn: tokenResponse.expires_in,
+    };
     if (user) {
-      stdout.write(`  Logged in as: ${muted(formatUserIdentity(user))}\n`);
+      result.user = user;
     }
-    stdout.write(`  Config saved to: ${getDbPath()}\n`);
-
-    if (tokenResponse.expires_in) {
-      stdout.write(
-        `  Token expires in: ${formatDuration(tokenResponse.expires_in)}\n`
-      );
-    }
-
-    return true;
+    return result;
   } catch (err) {
-    stdout.write("\n");
-    stderr.write(`${errorColor("Error:")} ${formatError(err)}\n`);
-    return false;
+    log.fail("Authorization failed");
+    log.error(formatError(err));
+    return null;
   } finally {
     // Always cleanup keyboard listener
     keyListener.cleanup?.();

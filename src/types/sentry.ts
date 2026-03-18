@@ -667,6 +667,36 @@ export const TransactionsResponseSchema = z.object({
 
 export type TransactionsResponse = z.infer<typeof TransactionsResponseSchema>;
 
+/** A single span item from the EAP spans search endpoint */
+export const SpanListItemSchema = z
+  .object({
+    id: z.string(),
+    parent_span: z.string().nullable().optional(),
+    "span.op": z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    "span.duration": z.number().nullable().optional(),
+    timestamp: z.string(),
+    project: z.string(),
+    transaction: z.string().nullable().optional(),
+    trace: z.string(),
+  })
+  .passthrough();
+
+export type SpanListItem = z.infer<typeof SpanListItemSchema>;
+
+/** Response from the spans events endpoint */
+export const SpansResponseSchema = z.object({
+  data: z.array(SpanListItemSchema),
+  meta: z
+    .object({
+      fields: z.record(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
+export type SpansResponse = z.infer<typeof SpansResponseSchema>;
+
 // Repository
 
 /** Repository provider (e.g., GitHub, GitLab) */
@@ -735,10 +765,26 @@ export const ProductTrialSchema = z.object({
 
 export type ProductTrial = z.infer<typeof ProductTrialSchema>;
 
+/** Subset of plan details needed for plan trial display */
+export const PlanDetailsSubsetSchema = z.object({
+  /** Human-readable plan name (e.g., "Developer", "Business") */
+  name: z.string(),
+  /** Plan ID of the trial plan (e.g., "am3_t"), null if no trial plan */
+  trialPlan: z.string().nullable().optional(),
+});
+
 /** Subset of customer data needed for trial availability checks */
 export const CustomerTrialInfoSchema = z.object({
   /** Available and active product trials for the organization */
-  productTrials: z.array(ProductTrialSchema).optional(),
+  productTrials: z.array(ProductTrialSchema).nullable().optional(),
+  /** Whether the organization can start a plan-level trial */
+  canTrial: z.boolean().optional(),
+  /** Whether the organization is currently on a plan trial */
+  isTrial: z.boolean().optional(),
+  /** ISO date when the plan trial ends, null if not on trial */
+  trialEnd: z.string().nullable().optional(),
+  /** Plan details with trial plan info */
+  planDetails: PlanDetailsSubsetSchema.optional(),
 });
 
 export type CustomerTrialInfo = z.infer<typeof CustomerTrialInfoSchema>;

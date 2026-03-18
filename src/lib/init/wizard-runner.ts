@@ -13,6 +13,7 @@ import { captureException } from "@sentry/bun";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { getAuthToken } from "../db/auth.js";
+import { terminalLink } from "../formatters/colors.js";
 import {
   abortIfCancelled,
   STEP_LABELS,
@@ -251,7 +252,7 @@ export async function runWizard(options: WizardOptions): Promise<void> {
 
   log.info(
     "This wizard uses AI to analyze your project and configure Sentry." +
-      `\nFor manual setup: ${SENTRY_DOCS_URL}`
+      `\nFor manual setup: ${terminalLink(SENTRY_DOCS_URL)}`
   );
 
   const tracingOptions = {

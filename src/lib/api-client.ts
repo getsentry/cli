@@ -62,6 +62,7 @@ export {
   getUserRegions,
   listOrganizations,
   listOrganizationsInRegion,
+  listOrganizationsUncached,
 } from "./api/organizations.js";
 export {
   createProject,
@@ -95,9 +96,12 @@ export {
 } from "./api/teams.js";
 export {
   getDetailedTrace,
+  listSpans,
   listTransactions,
+  normalizeTraceSpan,
 } from "./api/traces.js";
 export {
+  getCustomerTrialInfo,
   getProductTrials,
   startProductTrial,
 } from "./api/trials.js";

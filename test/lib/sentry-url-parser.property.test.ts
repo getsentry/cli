@@ -20,11 +20,21 @@ import {
 } from "../../src/lib/sentry-urls.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
-/** Generates valid org slugs (lowercase, alphanumeric with hyphens) */
-const orgSlugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
+/**
+ * Generates valid org slugs (lowercase, alphanumeric with hyphens).
+ *
+ * Excludes `xn--` prefixes (punycode-encoded IDN labels) because the URL
+ * constructor silently decodes them, collapsing `xn--XX.sentry.io` into
+ * `sentry.io` and dropping the org subdomain.
+ */
+const orgSlugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/).filter(
+  (s) => !s.startsWith("xn--")
+);
 
 /** Generates valid project slugs (lowercase, alphanumeric with hyphens) */
-const projectSlugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/);
+const projectSlugArb = stringMatching(/^[a-z][a-z0-9-]{1,20}[a-z0-9]$/).filter(
+  (s) => !s.startsWith("xn--")
+);
 
 /** Generates valid 32-character hex trace IDs */
 const traceIdArb = stringMatching(/^[0-9a-f]{32}$/);

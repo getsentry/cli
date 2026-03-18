@@ -23,7 +23,11 @@ import { expandToFullShortId, isShortSuffix } from "../../lib/issue-id.js";
 import { logger } from "../../lib/logger.js";
 import { poll } from "../../lib/polling.js";
 import { resolveEffectiveOrg } from "../../lib/region.js";
-import { resolveOrg, resolveOrgAndProject } from "../../lib/resolve-target.js";
+import {
+  resolveFromDsn,
+  resolveOrg,
+  resolveOrgAndProject,
+} from "../../lib/resolve-target.js";
 import { parseSentryUrl } from "../../lib/sentry-url-parser.js";
 import { isAllDigits } from "../../lib/utils.js";
 import type { SentryIssue } from "../../types/index.js";
@@ -148,7 +152,28 @@ async function resolveProjectSearch(
     return aliasResult;
   }
 
-  // 2. Search for project across all accessible orgs
+  // 2. Check if DSN detection already resolved this project.
+  //    resolveFromDsn() reads from the DSN cache (populated by detectAllDsns
+  //    in tryResolveFromAlias above) + project cache. This avoids the expensive
+  //    listOrganizations() fan-out when the DSN matches the target project.
+  //    Only catch resolveFromDsn errors — getIssueByShortId errors (e.g. 404)
+  //    must propagate so we don't duplicate the expensive call via fallback.
+  let dsnTarget: Awaited<ReturnType<typeof resolveFromDsn>> | undefined;
+  try {
+    dsnTarget = await resolveFromDsn(cwd);
+  } catch {
+    // DSN resolution failed — fall through to full search
+  }
+  if (
+    dsnTarget &&
+    dsnTarget.project.toLowerCase() === projectSlug.toLowerCase()
+  ) {
+    const fullShortId = expandToFullShortId(suffix, dsnTarget.project);
+    const issue = await getIssueByShortId(dsnTarget.org, fullShortId);
+    return { org: dsnTarget.org, issue };
+  }
+
+  // 3. Search for project across all accessible orgs
   const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {

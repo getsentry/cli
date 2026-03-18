@@ -8,6 +8,7 @@
 
 import { ContextError, ValidationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
+import { logger } from "./logger.js";
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
 import { applySentryUrlContext, parseSentryUrl } from "./sentry-url-parser.js";
 import { isAllDigits } from "./utils.js";
@@ -38,6 +39,36 @@ export function normalizeSlug(slug: string): {
     return { slug: slug.replace(/_/g, "-"), normalized: true };
   }
   return { slug, normalized: false };
+}
+
+const log = logger.withTag("arg-parsing");
+
+/**
+ * Emit a warning when slug normalization replaced underscores with dashes.
+ * Called internally by {@link parseOrgProjectArg} — callers do not need to
+ * check `parsed.normalized` themselves.
+ */
+function warnNormalized(
+  parsed: Exclude<ParsedOrgProject, { type: "auto-detect" }>
+): void {
+  let slug: string;
+  switch (parsed.type) {
+    case "explicit":
+      slug = `${parsed.org}/${parsed.project}`;
+      break;
+    case "org-all":
+      slug = `${parsed.org}/`;
+      break;
+    case "project-search":
+      slug = parsed.projectSlug;
+      break;
+    default:
+      return;
+  }
+
+  log.warn(
+    `Normalized slug to '${slug}' (Sentry slugs use dashes, never underscores)`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +110,52 @@ export function looksLikeIssueShortId(str: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Path detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a string looks like a filesystem path rather than a slug/identifier.
+ *
+ * Uses purely syntactic checks — no filesystem I/O. Detects:
+ * - `.` (current directory)
+ * - `./foo`, `../foo` (relative paths)
+ * - `/foo` (absolute paths)
+ * - `~` or `~/foo` (home directory paths)
+ *
+ * Bare names like `my-org` or `my-project` never match, which is what makes
+ * this useful for disambiguating positional arguments that could be either
+ * a filesystem path or an org/project target.
+ *
+ * Note: `~` is only matched as `~` alone or `~/...`, not `~foo`. This avoids
+ * false positives on slugs that happen to start with tilde (valid in Sentry slugs).
+ * Shell expansion of `~/foo` happens before the CLI sees the argument, so a literal
+ * `~/foo` reaching this function means the shell didn't expand it (e.g., it was quoted).
+ *
+ * @param arg - CLI argument string to check
+ * @returns true if the string looks like a filesystem path
+ *
+ * @example
+ * looksLikePath(".")           // true
+ * looksLikePath("./subdir")    // true
+ * looksLikePath("../parent")   // true
+ * looksLikePath("/absolute")   // true
+ * looksLikePath("~/home")      // true
+ * looksLikePath("~")           // true
+ * looksLikePath("~foo")        // false (could be a slug)
+ * looksLikePath("my-project")  // false
+ * looksLikePath("acme/app")    // false
+ */
+export function looksLikePath(arg: string): boolean {
+  return (
+    arg === "." ||
+    arg === "~" ||
+    arg.startsWith("./") ||
+    arg.startsWith("../") ||
+    arg.startsWith("/") ||
+    arg.startsWith("~/")
+  );
+}
+
 // Argument swap detection for view commands
 // ---------------------------------------------------------------------------
 
@@ -176,7 +253,7 @@ export function detectSwappedTrialArgs(
  * validateLimit("0", 1, 1000)   // throws
  * validateLimit("abc", 1, 1000) // throws
  */
-export function validateLimit(value: string, min: number, max: number): number {
+export function validateLimit(value: string, min = 1, max = 1000): number {
   const num = Number.parseInt(value, 10);
   if (Number.isNaN(num) || num < min || num > max) {
     throw new Error(`--limit must be between ${min} and ${max}`);
@@ -420,18 +497,25 @@ export function parseOrgProjectArg(arg: string | undefined): ParsedOrgProject {
     return orgProjectFromUrl(urlParsed);
   }
 
+  let parsed: ParsedOrgProject;
   if (trimmed.includes("/")) {
-    return parseSlashOrgProject(trimmed);
+    parsed = parseSlashOrgProject(trimmed);
+  } else {
+    // No slash → search for project across all orgs
+    validateResourceId(trimmed, "project slug");
+    const np = normalizeSlug(trimmed);
+    parsed = {
+      type: "project-search",
+      projectSlug: np.slug,
+      ...(np.normalized && { normalized: true }),
+    };
   }
 
-  // No slash → search for project across all orgs
-  validateResourceId(trimmed, "project slug");
-  const np = normalizeSlug(trimmed);
-  return {
-    type: "project-search",
-    projectSlug: np.slug,
-    ...(np.normalized && { normalized: true }),
-  };
+  if (parsed.type !== "auto-detect" && parsed.normalized) {
+    warnNormalized(parsed);
+  }
+
+  return parsed;
 }
 
 /**

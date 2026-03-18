@@ -30,6 +30,7 @@ import {
   colorTag,
   escapeMarkdownCell,
   escapeMarkdownInline,
+  isPlainOutput,
   mdKvTable,
   mdRow,
   mdTableHeader,
@@ -38,6 +39,7 @@ import {
 } from "./markdown.js";
 import { sparkline } from "./sparkline.js";
 import { type Column, writeTable } from "./table.js";
+import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
 
 // Color tag maps
 
@@ -196,43 +198,6 @@ export function formatStatusLabel(status: string | undefined): string {
   return (
     STATUS_LABELS[status as IssueStatus] ?? `${colorTag("yellow", "●")} Unknown`
   );
-}
-
-// Date Formatting
-
-/**
- * Format a date as relative time (e.g., "2h ago", "3d ago") or short date for older dates.
- *
- * - < 1 hour: "Xm ago"
- * - < 24 hours: "Xh ago"
- * - < 3 days: "Xd ago"
- * - >= 3 days: Short date (e.g., "Jan 18")
- */
-export function formatRelativeTime(dateString: string | undefined): string {
-  if (!dateString) {
-    return colorTag("muted", "—");
-  }
-
-  const date = new Date(dateString);
-  const now = Date.now();
-  const diffMs = now - date.getTime();
-  const diffMins = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-
-  let text: string;
-  if (diffMins < 60) {
-    text = `${diffMins}m ago`;
-  } else if (diffHours < 24) {
-    text = `${diffHours}h ago`;
-  } else if (diffDays < 3) {
-    text = `${diffDays}d ago`;
-  } else {
-    // Short date: "Jan 18"
-    text = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  }
-
-  return text;
 }
 
 // Issue Formatting
@@ -795,9 +760,9 @@ function formatPriorityLabel(priority?: string | null): string {
     case "high":
       return colorTag("red", "High");
     case "medium":
-      return colorTag("yellow", "Med");
+      return colorTag("yellow", "Med ");
     case "low":
-      return colorTag("muted", "Low");
+      return colorTag("muted", "Low ");
     default:
       return priority;
   }
@@ -1077,21 +1042,14 @@ function buildRequestMarkdown(requestEntry: RequestEntry): string {
 // Span Tree Formatting
 
 /**
- * Compute the duration of a span in milliseconds.
- * Prefers the API-provided `duration` field, falls back to timestamp arithmetic.
+ * Apply muted styling only in TTY/colored mode.
  *
- * @returns Duration in milliseconds, or undefined if not computable
+ * Tree output uses box-drawing characters and indentation that can't go
+ * through full `renderMarkdown()`. This helper ensures no raw ANSI escapes
+ * leak when `NO_COLOR` is set, output is piped, or `isPlainOutput()` is true.
  */
-function computeSpanDurationMs(span: TraceSpan): number | undefined {
-  if (span.duration !== undefined && Number.isFinite(span.duration)) {
-    return span.duration;
-  }
-  const endTs = span.end_timestamp || span.timestamp;
-  if (endTs !== undefined && Number.isFinite(endTs)) {
-    const ms = (endTs - span.start_timestamp) * 1000;
-    return ms >= 0 ? ms : undefined;
-  }
-  return;
+function plainSafeMuted(text: string): string {
+  return isPlainOutput() ? text : muted(text);
 }
 
 type FormatSpanOptions = {
@@ -1115,12 +1073,14 @@ function formatSpanSimple(span: TraceSpan, opts: FormatSpanOptions): void {
   const branch = isLast ? "└─" : "├─";
   const childPrefix = prefix + (isLast ? "   " : "│  ");
 
-  let line = `${prefix}${branch} ${muted(op)} — ${desc}`;
+  let line = `${prefix}${branch} ${plainSafeMuted(op)} — ${desc}`;
 
   const durationMs = computeSpanDurationMs(span);
   if (durationMs !== undefined) {
-    line += `  ${muted(`(${prettyMs(durationMs)})`)}`;
+    line += `  ${plainSafeMuted(`(${prettyMs(durationMs)})`)}`;
   }
+
+  line += `  ${plainSafeMuted(span.span_id ?? "")}`;
 
   lines.push(line);
 
@@ -1176,9 +1136,9 @@ export function formatSimpleSpanTree(
 
     const lines: string[] = [];
     lines.push("");
-    lines.push(muted("─── Span Tree ───"));
+    lines.push(plainSafeMuted("─── Span Tree ───"));
     lines.push("");
-    lines.push(`${muted("Trace —")} ${traceId}`);
+    lines.push(`${plainSafeMuted("Trace —")} ${traceId}`);
 
     const totalRootSpans = spans.length;
     const truncated = totalRootSpans > MAX_ROOT_SPANS;
@@ -1198,7 +1158,7 @@ export function formatSimpleSpanTree(
     if (truncated) {
       const remaining = totalRootSpans - MAX_ROOT_SPANS;
       lines.push(
-        `└─ ${muted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
+        `└─ ${plainSafeMuted(`... ${remaining} more root span${remaining === 1 ? "" : "s"} (${totalRootSpans} total). Use --json to see all.`)}`
       );
     }
 

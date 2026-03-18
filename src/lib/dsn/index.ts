@@ -20,6 +20,8 @@
 // Cache Management
 export {
   clearDsnCache,
+  disableDsnCache,
+  enableDsnCache,
   getCachedDsn,
   setCachedDsn,
   updateCachedResolution,

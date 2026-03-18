@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { formatDashboardView } from "../../lib/formatters/human.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -46,7 +47,6 @@ export const viewCommand = buildCommand({
       "  sentry dashboard view 12345 --web",
   },
   output: {
-    json: true,
     human: formatDashboardView,
   },
   parameters: {
@@ -67,7 +67,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -89,8 +89,6 @@ export const viewCommand = buildCommand({
 
     const dashboard = await getDashboard(orgSlug, dashboardId);
 
-    return {
-      data: { ...dashboard, url } as ViewResult,
-    };
+    yield new CommandOutput({ ...dashboard, url } as ViewResult);
   },
 });

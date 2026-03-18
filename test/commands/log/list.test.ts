@@ -547,12 +547,34 @@ describe("listCommand.func — trace mode org resolution failure", () => {
 // kills the Bun test runner).
 // ============================================================================
 
+/**
+ * Collect all output written to a `process.stderr.write` spy.
+ * Handles both string and Buffer arguments from consola/logger.
+ */
+function collectProcessStderr(
+  spy: ReturnType<typeof spyOn<typeof process.stderr, "write">>
+): string {
+  return spy.mock.calls
+    .map((c) => {
+      const arg = c[0];
+      if (typeof arg === "string") {
+        return arg;
+      }
+      if (arg instanceof Uint8Array) {
+        return new TextDecoder().decode(arg);
+      }
+      return String(arg);
+    })
+    .join("");
+}
+
 describe("listCommand.func — follow mode (standard)", () => {
   let listLogsSpy: ReturnType<typeof spyOn>;
   let resolveOrgProjectSpy: ReturnType<typeof spyOn>;
   let isPlainSpy: ReturnType<typeof spyOn>;
   let updateNotifSpy: ReturnType<typeof spyOn>;
   let sigint: ReturnType<typeof interceptSigint>;
+  let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, "write">>;
 
   beforeEach(() => {
     sigint = interceptSigint();
@@ -563,6 +585,7 @@ describe("listCommand.func — follow mode (standard)", () => {
       versionCheck,
       "getUpdateNotification"
     ).mockReturnValue(null);
+    stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
@@ -570,6 +593,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     resolveOrgProjectSpy.mockRestore();
     isPlainSpy.mockRestore();
     updateNotifSpy.mockRestore();
+    stderrSpy.mockRestore();
     sigint.restore();
   });
 
@@ -631,7 +655,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     listLogsSpy.mockResolvedValueOnce([]);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
@@ -639,7 +663,8 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint.trigger();
     await promise;
 
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Banner now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).toContain("Streaming logs");
     expect(stderr).toContain("Ctrl+C");
   });
@@ -648,7 +673,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     listLogsSpy.mockResolvedValueOnce([]);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(
@@ -660,7 +685,8 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint.trigger();
     await promise;
 
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Banner now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).not.toContain("Streaming logs");
   });
 
@@ -748,7 +774,7 @@ describe("listCommand.func — follow mode (standard)", () => {
       .mockRejectedValueOnce(new Error("network timeout"));
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
@@ -757,8 +783,8 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint.trigger();
     await promise;
 
-    // Transient error should be reported to stderr
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Transient error now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).toContain("Error fetching logs");
     expect(stderr).toContain("network timeout");
   });
@@ -810,7 +836,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     listLogsSpy.mockResolvedValueOnce([]);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
@@ -818,7 +844,8 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint.trigger();
     await promise;
 
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Update notification now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).toContain("Update available: v2.0.0");
   });
 });
@@ -833,6 +860,7 @@ describe("listCommand.func — follow mode (trace)", () => {
   let isPlainSpy: ReturnType<typeof spyOn>;
   let updateNotifSpy: ReturnType<typeof spyOn>;
   let sigint: ReturnType<typeof interceptSigint>;
+  let stderrSpy: ReturnType<typeof spyOn<typeof process.stderr, "write">>;
 
   beforeEach(() => {
     sigint = interceptSigint();
@@ -843,6 +871,7 @@ describe("listCommand.func — follow mode (trace)", () => {
       versionCheck,
       "getUpdateNotification"
     ).mockReturnValue(null);
+    stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
@@ -850,6 +879,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     resolveOrgSpy.mockRestore();
     isPlainSpy.mockRestore();
     updateNotifSpy.mockRestore();
+    stderrSpy.mockRestore();
     sigint.restore();
   });
 
@@ -880,7 +910,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     listTraceLogsSpy.mockResolvedValueOnce([]);
     resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, traceFollowFlags);
@@ -888,7 +918,8 @@ describe("listCommand.func — follow mode (trace)", () => {
     sigint.trigger();
     await promise;
 
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Banner now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).toContain("Streaming logs");
     expect(stderr).toContain(TRACE_ID);
     expect(stderr).toContain("Ctrl+C");
@@ -921,20 +952,23 @@ describe("listCommand.func — follow mode (trace)", () => {
     // (old logs from poll are filtered by timestamp_precise)
   });
 
-  test("streams JSON objects per-line in trace follow mode", async () => {
-    listTraceLogsSpy.mockResolvedValueOnce(sampleTraceLogs);
+  test("streams JSON in trace follow mode: first batch as array, then bare items", async () => {
+    listTraceLogsSpy
+      .mockResolvedValueOnce(sampleTraceLogs)
+      .mockResolvedValueOnce(newerTraceLogs);
     resolveOrgSpy.mockResolvedValue({ org: ORG });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, { ...traceFollowFlags, json: true });
-    await Bun.sleep(50);
+    // Wait for initial fetch + poll timer (1s) + poll execution
+    await Bun.sleep(1200);
     sigint.trigger();
     await promise;
 
     const calls = stdoutWrite.mock.calls.map((c) => c[0]);
-    const jsonObjects = calls.filter((s: string) => {
+    const jsonLines = calls.filter((s: string) => {
       try {
         JSON.parse(s);
         return true;
@@ -942,7 +976,17 @@ describe("listCommand.func — follow mode (trace)", () => {
         return false;
       }
     });
-    expect(jsonObjects.length).toBe(3);
+    // First batch: 1 JSON line (array of 3 items from LogListResult)
+    // Poll batch: 1 JSON line per item (bare JSONL)
+    expect(jsonLines.length).toBe(2);
+    // First line is an array (the initial trace batch)
+    const firstBatch = JSON.parse(jsonLines[0]);
+    expect(Array.isArray(firstBatch)).toBe(true);
+    expect(firstBatch).toHaveLength(3);
+    // Second line is a bare object (polled item)
+    const pollItem = JSON.parse(jsonLines[1]);
+    expect(Array.isArray(pollItem)).toBe(false);
+    expect(pollItem.message).toBe("New poll result");
   });
 
   test("rejects with AuthError from poll", async () => {
@@ -965,7 +1009,7 @@ describe("listCommand.func — follow mode (trace)", () => {
       .mockRejectedValueOnce(new Error("server error"));
     resolveOrgSpy.mockResolvedValue({ org: ORG });
 
-    const { context, stderrWrite } = createMockContext();
+    const { context } = createMockContext();
     const func = await listCommand.loader();
 
     const promise = func.call(context, traceFollowFlags);
@@ -974,7 +1018,8 @@ describe("listCommand.func — follow mode (trace)", () => {
     sigint.trigger();
     await promise;
 
-    const stderr = stderrWrite.mock.calls.map((c) => c[0]).join("");
+    // Transient error now goes through logger → process.stderr
+    const stderr = collectProcessStderr(stderrSpy);
     expect(stderr).toContain("Error fetching logs");
     expect(stderr).toContain("server error");
   });

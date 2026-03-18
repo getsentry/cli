@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
 import { ValidationError } from "../../../lib/errors.js";
 import { formatWidgetAdded } from "../../../lib/formatters/human.js";
+import { CommandOutput } from "../../../lib/formatters/output.js";
 import { buildDashboardUrl } from "../../../lib/sentry-urls.js";
 import {
   assignDefaultLayout,
@@ -91,7 +92,6 @@ export const addCommand = buildCommand({
       "  -count         → -count()        (descending)",
   },
   output: {
-    json: true,
     human: formatWidgetAdded,
   },
   parameters: {
@@ -156,7 +156,7 @@ export const addCommand = buildCommand({
       n: "limit",
     },
   },
-  async func(this: SentryContext, flags: AddFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: AddFlags, ...args: string[]) {
     const { cwd } = this;
 
     const { dashboardArgs, title } = parseAddPositionalArgs(args);
@@ -202,8 +202,10 @@ export const addCommand = buildCommand({
     const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
-    return {
-      data: { dashboard: updated, widget: newWidget, url } as AddResult,
-    };
+    yield new CommandOutput({
+      dashboard: updated,
+      widget: newWidget,
+      url,
+    } as AddResult);
   },
 });

@@ -9,7 +9,7 @@
         "@biomejs/biome": "2.3.8",
         "@clack/prompts": "^0.11.0",
         "@mastra/client-js": "^1.4.0",
-        "@sentry/api": "^0.21.0",
+        "@sentry/api": "^0.54.0",
         "@sentry/bun": "10.39.0",
         "@sentry/esbuild-plugin": "^2.23.0",
         "@sentry/node": "10.39.0",
@@ -272,7 +272,7 @@
 
     "@prisma/instrumentation": ["@prisma/instrumentation@7.2.0", "", { "dependencies": { "@opentelemetry/instrumentation": "^0.207.0" }, "peerDependencies": { "@opentelemetry/api": "^1.8" } }, "sha512-Rh9Z4x5kEj1OdARd7U18AtVrnL6rmLSI0qYShaB4W7Wx5BKbgzndWF+QnuzMb7GLfVdlT5aYCXoPQVYuYtVu0g=="],
 
-    "@sentry/api": ["@sentry/api@0.21.0", "", {}, "sha512-Q4Et4FfIbZ9gETLLG+SJ0/IpUCXC3W0C/o7jOQAfOj0qUgK5Rk0w1AHs23GTJhiN1QdlFSyy4QNS+JComkK6EQ=="],
+    "@sentry/api": ["@sentry/api@0.54.0", "", {}, "sha512-ZBvp9Q95WDr2CCEsjUH3hEhm2rCfV8Mta5s7Y+ksXbR6VGmCPtY2Wkm5ISIcb/yYP/HhdQmPg4mYPtYpEti4yQ=="],
 
     "@sentry/babel-plugin-component-annotate": ["@sentry/babel-plugin-component-annotate@2.23.1", "", {}, "sha512-l1z8AvI6k9I+2z49OgvP3SlzB1M0Lw24KtceiJibNaSyQwxsItoT9/XftZ/8BBtkosVmNOTQhL1eUsSkuSv1LA=="],
 

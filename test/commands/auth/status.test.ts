@@ -81,7 +81,7 @@ describe("statusCommand.func", () => {
     getDefaultOrgSpy = spyOn(dbDefaults, "getDefaultOrganization");
     getDefaultProjectSpy = spyOn(dbDefaults, "getDefaultProject");
     getDbPathSpy = spyOn(dbIndex, "getDbPath");
-    listOrgsSpy = spyOn(apiClient, "listOrganizations");
+    listOrgsSpy = spyOn(apiClient, "listOrganizationsUncached");
 
     // Defaults that most tests override
     getUserInfoSpy.mockReturnValue(null);

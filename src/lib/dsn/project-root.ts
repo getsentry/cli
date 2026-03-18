@@ -13,7 +13,7 @@
  * Stops at: home directory or filesystem root
  */
 
-import { stat } from "node:fs/promises";
+import { opendir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { anyTrue } from "../promises.js";
@@ -187,23 +187,35 @@ function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
 
 /**
  * Check if any files matching glob patterns exist in a directory.
- * Runs pattern checks in parallel and resolves as soon as any finds a match.
+ * Uses `opendir` to lazily stream directory entries and exits on first match
+ * without reading the entire directory. Matches via synchronous
+ * `Bun.Glob.match()` (no async I/O, event-loop safe).
  *
  * @param dir - Directory to check
  * @param patterns - Glob patterns to match
  * @returns True if any matching file exists
  */
-function anyGlobMatches(
+async function anyGlobMatches(
   dir: string,
   patterns: readonly string[]
 ): Promise<boolean> {
-  return anyTrue(patterns, async (pattern) => {
-    const glob = new Bun.Glob(pattern);
-    for await (const _match of glob.scan({ cwd: dir, onlyFiles: true })) {
-      return true;
+  // Bun's opendir() may not throw on a missing directory — the error
+  // surfaces when iterating. Wrap the full open+iterate in one try/catch.
+  // No explicit handle.close() needed: for-await-of auto-closes the Dir
+  // handle when the loop exits (including early return or break).
+  try {
+    for await (const entry of await opendir(dir)) {
+      if (
+        entry.isFile() &&
+        patterns.some((p) => new Bun.Glob(p).match(entry.name))
+      ) {
+        return true;
+      }
     }
     return false;
-  });
+  } catch {
+    return false;
+  }
 }
 
 /**

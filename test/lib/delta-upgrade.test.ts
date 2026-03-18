@@ -27,6 +27,8 @@ import {
   getPatchTargetSha256,
   getStableTargetSha256,
   type PatchChain,
+  prefetchNightlyPatches,
+  prefetchStablePatches,
   resolveNightlyChain,
   resolveNightlyDelta,
   resolveStableChain,
@@ -385,7 +387,7 @@ describe("extractStableChain", () => {
     expect(result).toBeNull();
   });
 
-  test("returns null for chain depth exceeding MAX_CHAIN_DEPTH (10)", () => {
+  test("returns null for chain depth exceeding MAX_STABLE_CHAIN_DEPTH (10)", () => {
     const versions = Array.from({ length: 12 }, (_, i) => `0.${i + 1}.0`);
     versions.reverse();
     const releases = buildReleases(versions, "sentry-linux-x64", 100);
@@ -400,7 +402,7 @@ describe("extractStableChain", () => {
     expect(result).toBeNull();
   });
 
-  test("handles exactly MAX_CHAIN_DEPTH (10) hops", () => {
+  test("handles exactly MAX_STABLE_CHAIN_DEPTH (10) hops", () => {
     const versions = Array.from({ length: 11 }, (_, i) => `0.${i + 1}.0`);
     versions.reverse();
     const releases = buildReleases(versions, "sentry-linux-x64", 100);
@@ -644,6 +646,44 @@ describe("filterAndSortChainTags", () => {
     expect(result).toEqual([
       "patch-0.14.0-dev.1772732047",
       "patch-0.14.0-dev.1772800000",
+    ]);
+  });
+
+  test("returns >10 tags for nightly chains (higher depth limit than stable)", () => {
+    // Simulate 25 nightly builds — should all be returned since nightly
+    // chains allow up to MAX_NIGHTLY_CHAIN_DEPTH (30) hops
+    const tags = Array.from(
+      { length: 25 },
+      (_, i) => `patch-0.14.0-dev.${1000 + i + 1}`
+    );
+    const result = filterAndSortChainTags(
+      tags,
+      "0.14.0-dev.1000",
+      "0.14.0-dev.1025"
+    );
+    expect(result).toHaveLength(25);
+    expect(result[0]).toBe("patch-0.14.0-dev.1001");
+    expect(result[24]).toBe("patch-0.14.0-dev.1025");
+  });
+
+  test("handles cross-minor version nightly chains", () => {
+    // Versions crossing 0.16.x → 0.17.x boundary
+    const tags = [
+      "patch-0.16.0-dev.200",
+      "patch-0.16.0-dev.300",
+      "patch-0.17.0-dev.400",
+      "patch-0.17.0-dev.500",
+    ];
+    const result = filterAndSortChainTags(
+      tags,
+      "0.16.0-dev.100",
+      "0.17.0-dev.500"
+    );
+    expect(result).toEqual([
+      "patch-0.16.0-dev.200",
+      "patch-0.16.0-dev.300",
+      "patch-0.17.0-dev.400",
+      "patch-0.17.0-dev.500",
     ]);
   });
 
@@ -920,6 +960,29 @@ describe("resolveStableChain", () => {
     const chain = await resolveStableChain("0.13.0", "0.14.0");
     expect(chain).toBeNull();
   });
+
+  test("returns null when chain depth exceeds stable limit", async () => {
+    const binaryName = getPlatformBinaryName();
+    // 15 releases = 14 hops, exceeds MAX_STABLE_CHAIN_DEPTH (10)
+    const versions = Array.from({ length: 15 }, (_, i) => `0.${i + 1}.0`);
+    versions.reverse(); // newest first
+    const releases = versions.map((v) =>
+      makeRelease(v, [
+        makeAsset({ name: binaryName, digest: `sha256:${versionHex(v)}` }),
+        makeAsset({
+          name: `${binaryName}.patch`,
+          size: 100,
+          browser_download_url: `https://example.com/${v}.patch`,
+        }),
+        makeAsset({ name: `${binaryName}.gz`, size: 100_000 }),
+      ])
+    );
+
+    setupStableMocks(releases, new Map());
+
+    const chain = await resolveStableChain("0.1.0", "0.15.0");
+    expect(chain).toBeNull();
+  });
 });
 
 // resolveNightlyChain (async orchestrator)
@@ -1035,6 +1098,275 @@ describe("resolveNightlyChain", () => {
       token: "test-token",
       currentVersion: "0.0.0-dev.100",
       targetVersion: "0.0.0-dev.102",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when chain depth exceeds MAX_NIGHTLY_CHAIN_DEPTH (30)", async () => {
+    // 35 tags exceeds the nightly limit of 30
+    const tags = Array.from(
+      { length: 35 },
+      (_, i) => `patch-0.0.0-dev.${101 + i}`
+    );
+
+    setupNightlyMocks(tags, new Map(), new Map());
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.135",
+      fullGzSize: 100_000,
+      preloadedTags: tags,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("resolves multi-hop nightly chain", async () => {
+    const patchA = new Uint8Array([10, 20]);
+    const patchB = new Uint8Array([30, 40]);
+    const digestA = "sha256:aaaa1111";
+    const digestB = "sha256:bbbb2222";
+
+    const manifestA = makePatchManifest("0.0.0-dev.100", {}, [
+      {
+        digest: digestA,
+        mediaType: "application/octet-stream",
+        size: 50,
+        annotations: {
+          "org.opencontainers.image.title": PATCH_NAME,
+        },
+      },
+    ]);
+
+    const manifestB = makePatchManifest(
+      "0.0.0-dev.101",
+      { [BINARY_NAME]: "finalhash" },
+      [
+        {
+          digest: digestB,
+          mediaType: "application/octet-stream",
+          size: 60,
+          annotations: {
+            "org.opencontainers.image.title": PATCH_NAME,
+          },
+        },
+      ]
+    );
+
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101", "patch-0.0.0-dev.102"],
+      new Map([
+        ["patch-0.0.0-dev.101", manifestA],
+        ["patch-0.0.0-dev.102", manifestB],
+      ]),
+      new Map([
+        [digestA, patchA],
+        [digestB, patchB],
+      ])
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.102",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).not.toBeNull();
+    expect(chain?.patches).toHaveLength(2);
+    expect(chain?.patches[0]?.data).toEqual(patchA);
+    expect(chain?.patches[1]?.data).toEqual(patchB);
+    expect(chain?.expectedSha256).toBe("finalhash");
+    expect(chain?.steps).toEqual([
+      { fromVersion: "0.0.0-dev.100", toVersion: "0.0.0-dev.101" },
+      { fromVersion: "0.0.0-dev.101", toVersion: "0.0.0-dev.102" },
+    ]);
+  });
+
+  test("returns null when from-version does not match chain linkage", async () => {
+    // Manifest claims from-version is dev.99 but chain expects dev.100
+    const patchManifest = makePatchManifest(
+      "0.0.0-dev.99", // wrong — should be dev.100
+      { [BINARY_NAME]: "aabb1122" },
+      [
+        {
+          digest: "sha256:dd1122",
+          mediaType: "application/octet-stream",
+          size: 50,
+          annotations: {
+            "org.opencontainers.image.title": PATCH_NAME,
+          },
+        },
+      ]
+    );
+
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map([["patch-0.0.0-dev.101", patchManifest]]),
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when patch layer exceeds size budget", async () => {
+    // Patch layer size (90_000) > fullGzSize * 0.6 (60_000)
+    const patchManifest = makePatchManifest(
+      "0.0.0-dev.100",
+      { [BINARY_NAME]: "aabb1122" },
+      [
+        {
+          digest: "sha256:bigpatch",
+          mediaType: "application/octet-stream",
+          size: 90_000,
+          annotations: {
+            "org.opencontainers.image.title": PATCH_NAME,
+          },
+        },
+      ]
+    );
+
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map([["patch-0.0.0-dev.101", patchManifest]]),
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when manifest fetch fails for a chain tag", async () => {
+    // Tag exists but manifest 404s — fetchChainManifests catches the error
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map(), // no manifests — will 404
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when last tag version does not match target", async () => {
+    // Chain has patch-dev.101 but target is dev.102 — chain stops short
+    const patchManifest = makePatchManifest(
+      "0.0.0-dev.100",
+      { [BINARY_NAME]: "aabb1122" },
+      [
+        {
+          digest: "sha256:dd1122",
+          mediaType: "application/octet-stream",
+          size: 50,
+          annotations: {
+            "org.opencontainers.image.title": PATCH_NAME,
+          },
+        },
+      ]
+    );
+
+    // Only patch-dev.101 is in the graph, but target is dev.102
+    // filterAndSortChainTags will include dev.101 (it's in range)
+    // but the last tag (dev.101) != targetVersion (dev.102)
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map([["patch-0.0.0-dev.101", patchManifest]]),
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.102",
+      fullGzSize: 100_000,
+      preloadedTags: ["patch-0.0.0-dev.101"],
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when target manifest lacks sha256 annotation", async () => {
+    // Manifest is valid but missing the sha256-<binary> annotation
+    const patchManifest = makePatchManifest(
+      "0.0.0-dev.100",
+      {}, // no sha256 annotations
+      [
+        {
+          digest: "sha256:dd1122",
+          mediaType: "application/octet-stream",
+          size: 50,
+          annotations: {
+            "org.opencontainers.image.title": PATCH_NAME,
+          },
+        },
+      ]
+    );
+
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map([["patch-0.0.0-dev.101", patchManifest]]),
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
+      fullGzSize: 100_000,
+    });
+
+    expect(chain).toBeNull();
+  });
+
+  test("returns null when patch layer name is missing from manifest", async () => {
+    // Manifest has a layer but with a different title
+    const patchManifest = makePatchManifest(
+      "0.0.0-dev.100",
+      { [BINARY_NAME]: "aabb1122" },
+      [
+        {
+          digest: "sha256:dd1122",
+          mediaType: "application/octet-stream",
+          size: 50,
+          annotations: {
+            "org.opencontainers.image.title": "wrong-name.patch",
+          },
+        },
+      ]
+    );
+
+    setupNightlyMocks(
+      ["patch-0.0.0-dev.101"],
+      new Map([["patch-0.0.0-dev.101", patchManifest]]),
+      new Map()
+    );
+
+    const chain = await resolveNightlyChain({
+      token: "test-token",
+      currentVersion: "0.0.0-dev.100",
+      targetVersion: "0.0.0-dev.101",
       fullGzSize: 100_000,
     });
 
@@ -1240,6 +1572,75 @@ describe("resolveStableDelta", () => {
 // resolveNightlyDelta (high-level orchestrator)
 
 describe("resolveNightlyDelta", () => {
+  const BINARY_NAME_ND = getPlatformBinaryName();
+
+  /** Set up GHCR mocks for the full resolveNightlyDelta flow */
+  function setupFullNightlyMocks(opts: {
+    targetVersion: string;
+    targetManifest: OciManifest;
+    patchTags: string[];
+    patchManifests: Map<string, OciManifest>;
+    blobs: Map<string, Uint8Array>;
+  }): void {
+    mockFetch(async (url) => {
+      const urlStr = String(url);
+
+      // Token exchange
+      if (urlStr.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+        });
+      }
+
+      // Tag listing
+      if (urlStr.includes("/tags/list")) {
+        return new Response(JSON.stringify({ tags: opts.patchTags }), {
+          status: 200,
+        });
+      }
+
+      // Manifest fetch — target nightly or patch manifests
+      const manifestMatch = urlStr.match(/\/manifests\/(.+)$/);
+      if (manifestMatch) {
+        const tag = manifestMatch[1] ?? "";
+        if (tag === `nightly-${opts.targetVersion}`) {
+          return new Response(JSON.stringify(opts.targetManifest), {
+            status: 200,
+          });
+        }
+        const patchManifest = opts.patchManifests.get(tag);
+        if (patchManifest) {
+          return new Response(JSON.stringify(patchManifest), { status: 200 });
+        }
+        return new Response("Not Found", { status: 404 });
+      }
+
+      // Blob redirect
+      const blobMatch = urlStr.match(/\/blobs\/(sha256:[a-f0-9A-F]+)/);
+      if (blobMatch) {
+        const digest = blobMatch[1] ?? "";
+        if (opts.blobs.has(digest)) {
+          return new Response(null, {
+            status: 307,
+            headers: { Location: `https://blob.test/${digest}` },
+          });
+        }
+        return new Response("Not Found", { status: 404 });
+      }
+
+      // Follow redirect
+      if (urlStr.includes("blob.test/")) {
+        const digestFromUrl = urlStr.split("blob.test/")[1] ?? "";
+        const blobData = opts.blobs.get(digestFromUrl);
+        if (blobData) {
+          return new Response(blobData.buffer as ArrayBuffer, { status: 200 });
+        }
+      }
+
+      return new Response("Not Found", { status: 404 });
+    });
+  }
+
   test("returns null when GHCR token fetch fails", async () => {
     // Mock token endpoint to fail → resolveNightlyDelta throws → caught by caller
     mockFetch(async () => new Response("Unauthorized", { status: 401 }));
@@ -1247,6 +1648,86 @@ describe("resolveNightlyDelta", () => {
     await expect(
       resolveNightlyDelta("0.14.0-dev.123", "/tmp/fake-old", "/tmp/fake-out")
     ).rejects.toThrow();
+  });
+
+  test("returns null when no patch tags exist for the version range", async () => {
+    // Target manifest exists with .gz layer, but no patch tags match
+    // Exercises: resolveNightlyChainWithContext → resolveAndApplyDelta null path
+    const targetManifest: OciManifest = {
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: {
+        digest: "sha256:config",
+        mediaType: "application/vnd.oci.empty.v1+json",
+        size: 2,
+      },
+      layers: [
+        {
+          digest: "sha256:targetgz",
+          mediaType: "application/octet-stream",
+          size: 100_000,
+          annotations: {
+            "org.opencontainers.image.title": `${BINARY_NAME_ND}.gz`,
+          },
+        },
+      ],
+      annotations: {},
+    };
+
+    setupFullNightlyMocks({
+      targetVersion: "0.14.0-dev.200",
+      targetManifest,
+      patchTags: [], // no patches
+      patchManifests: new Map(),
+      blobs: new Map(),
+    });
+
+    const result = await resolveNightlyDelta(
+      "0.14.0-dev.200",
+      "/tmp/fake-old",
+      "/tmp/fake-out"
+    );
+    expect(result).toBeNull();
+  });
+
+  test("returns null when target manifest has no .gz layer", async () => {
+    // Target manifest exists but lacks the .gz layer needed for size threshold
+    // Exercises: resolveNightlyChainWithContext gzLayer null check
+    const targetManifest: OciManifest = {
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: {
+        digest: "sha256:config",
+        mediaType: "application/vnd.oci.empty.v1+json",
+        size: 2,
+      },
+      layers: [
+        {
+          digest: "sha256:onlypatch",
+          mediaType: "application/octet-stream",
+          size: 500,
+          annotations: {
+            "org.opencontainers.image.title": `${BINARY_NAME_ND}.patch`,
+          },
+        },
+      ],
+      annotations: {},
+    };
+
+    setupFullNightlyMocks({
+      targetVersion: "0.14.0-dev.200",
+      targetManifest,
+      patchTags: ["patch-0.14.0-dev.200"],
+      patchManifests: new Map(),
+      blobs: new Map(),
+    });
+
+    const result = await resolveNightlyDelta(
+      "0.14.0-dev.200",
+      "/tmp/fake-old",
+      "/tmp/fake-out"
+    );
+    expect(result).toBeNull();
   });
 });
 
@@ -1260,5 +1741,30 @@ describe("attemptDeltaUpgrade", () => {
       "/tmp/fake-out"
     );
     expect(result).toBeNull();
+  });
+});
+
+// prefetch functions (background version-check optimization)
+// CLI_VERSION is "0.0.0-dev" in test, so canAttemptDelta bails early.
+// This exercises the function entry and the guard in prefetchAndCache.
+
+describe("prefetchNightlyPatches", () => {
+  test("returns immediately when CLI_VERSION is dev", async () => {
+    // Should not make any fetch calls since canAttemptDelta returns false
+    mockFetch(async () => {
+      throw new Error("fetch should not be called");
+    });
+
+    await prefetchNightlyPatches("0.14.0-dev.123");
+  });
+});
+
+describe("prefetchStablePatches", () => {
+  test("returns immediately when CLI_VERSION is dev", async () => {
+    mockFetch(async () => {
+      throw new Error("fetch should not be called");
+    });
+
+    await prefetchStablePatches("0.14.0");
   });
 });

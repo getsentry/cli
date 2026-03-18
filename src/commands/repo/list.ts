@@ -66,7 +66,8 @@ const docs: OrgListCommandDocs = {
     "  sentry repo list              # auto-detect or list all\n" +
     "  sentry repo list my-org/      # list repositories in my-org (paginated)\n" +
     "  sentry repo list --limit 10\n" +
-    "  sentry repo list --json",
+    "  sentry repo list --json\n\n" +
+    "Alias: `sentry repos` → `sentry repo list`",
 };
 
 export const listCommand = buildOrgListCommand(repoListConfig, docs, "repo");

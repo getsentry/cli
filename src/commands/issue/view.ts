@@ -12,8 +12,10 @@ import { buildCommand } from "../../lib/command.js";
 import {
   formatEventDetails,
   formatIssueDetails,
+  isPlainOutput,
   muted,
 } from "../../lib/formatters/index.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -101,7 +103,6 @@ export const viewCommand = buildCommand({
       "where 'f' is the project alias shown in the list).",
   },
   output: {
-    json: true,
     human: formatIssueView,
     jsonExclude: ["spanTreeLines"],
   },
@@ -118,7 +119,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ViewFlags, issueArg: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -159,19 +160,24 @@ export const viewCommand = buildCommand({
     if (spanTreeResult) {
       spanTreeLines = spanTreeResult.lines;
     } else if (!orgSlug) {
-      spanTreeLines = [
-        muted("\nOrganization context required to fetch span tree."),
-      ];
+      const msg = "\nOrganization context required to fetch span tree.";
+      spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
     } else if (!event) {
-      spanTreeLines = [muted("\nCould not fetch event to display span tree.")];
+      const msg = "\nCould not fetch event to display span tree.";
+      spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
     }
 
     const trace = spanTreeResult?.success
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
+    yield new CommandOutput({
+      issue,
+      event: event ?? null,
+      trace,
+      spanTreeLines,
+    });
     return {
-      data: { issue, event: event ?? null, trace, spanTreeLines },
       hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
     };
   },

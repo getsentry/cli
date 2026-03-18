@@ -51,11 +51,12 @@ export const boldUnderline = (text: string): string =>
  * `string-width` treats OSC 8 sequences as zero-width, so column sizing
  * in tables is not affected.
  *
- * @param text - Display text
- * @param url - Target URL
+ * @param text - Display text (also used as the link target when `url` is omitted)
+ * @param url - Target URL. Defaults to `text`, which is convenient when the
+ *   display text is already the full URL.
  * @returns Text wrapped in OSC 8 hyperlink escape sequences
  */
-export function terminalLink(text: string, url: string): string {
+export function terminalLink(text: string, url: string = text): string {
   // OSC 8 ; params ; URI BEL  text  OSC 8 ; ; BEL
   // \x1b] opens the OSC sequence; \x07 (BEL) terminates it.
   // Using BEL instead of ST (\x1b\\) for broad terminal compatibility.

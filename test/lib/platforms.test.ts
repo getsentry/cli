@@ -4,7 +4,6 @@ import {
   isValidPlatform,
   suggestPlatform,
   VALID_PLATFORM_SET,
-  VALID_PLATFORMS,
 } from "../../src/lib/platforms.js";
 
 describe("isValidPlatform", () => {
@@ -84,11 +83,5 @@ describe("COMMON_PLATFORMS is a subset of VALID_PLATFORMS", () => {
     for (const p of COMMON_PLATFORMS) {
       expect(VALID_PLATFORM_SET.has(p)).toBe(true);
     }
-  });
-});
-
-describe("VALID_PLATFORMS", () => {
-  test("contains 109 entries", () => {
-    expect(VALID_PLATFORMS.length).toBe(109);
   });
 });

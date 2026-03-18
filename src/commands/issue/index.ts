@@ -26,7 +26,8 @@ export const issueRoute = buildRouteMap({
       "Examples:\n" +
       "  sentry issue view @latest\n" +
       "  sentry issue explain @most_frequent\n" +
-      "  sentry issue plan my-org/@latest",
+      "  sentry issue plan my-org/@latest\n\n" +
+      "Alias: `sentry issues` → `sentry issue list`",
     hideRoute: {},
   },
 });

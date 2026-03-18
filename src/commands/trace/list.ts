@@ -15,7 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import type { CommandOutput } from "../../lib/formatters/output.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   buildListCommand,
@@ -177,10 +177,10 @@ export const listCommand = buildListCommand("trace", {
       "  sentry trace list                     # List last 10 traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
       "  sentry trace list --sort duration     # Sort by slowest first\n" +
-      '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction',
+      '  sentry trace list -q "transaction:GET /api/users"  # Filter by transaction\n\n' +
+      "Alias: `sentry traces` → `sentry trace list`",
   },
   output: {
-    json: true,
     human: formatTraceListHuman,
     jsonTransform: jsonTransformTraceList,
   },
@@ -226,11 +226,7 @@ export const listCommand = buildListCommand("trace", {
       c: "cursor",
     },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<TraceListResult>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
@@ -276,9 +272,7 @@ export const listCommand = buildListCommand("trace", {
         : `${countText} Use 'sentry trace view <TRACE_ID>' to view the full span tree.`;
     }
 
-    return {
-      data: { traces, hasMore, nextCursor, org, project },
-      hint,
-    };
+    yield new CommandOutput({ traces, hasMore, nextCursor, org, project });
+    return { hint };
   },
 });

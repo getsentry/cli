@@ -645,29 +645,31 @@ describe("stripWidgetServerFields", () => {
     expect(query).not.toHaveProperty("widgetId");
     expect(query).not.toHaveProperty("dateCreated");
     expect(query.aggregates).toEqual(["count()"]);
-    expect(query.name).toBe("Query 1");
   });
 
-  test("preserves user-facing fields", () => {
+  test("strips isResizable from layout", () => {
     const widget: DashboardWidget = {
-      title: "My Widget",
-      displayType: "table",
-      widgetType: "spans",
-      layout: { x: 0, y: 0, w: 6, h: 2 },
-      queries: [
-        {
-          aggregates: ["count()"],
-          columns: ["browser.name"],
-          conditions: "is:unresolved",
-          name: "",
-        },
-      ],
+      title: "Test",
+      displayType: "line",
+      layout: { x: 0, y: 0, w: 3, h: 2, isResizable: true },
     };
     const result = stripWidgetServerFields(widget);
-    expect(result.title).toBe("My Widget");
-    expect(result.displayType).toBe("table");
+    expect(result.layout).not.toHaveProperty("isResizable");
+    expect(result.layout!.x).toBe(0);
+    expect(result.layout!.w).toBe(3);
+  });
+
+  test("preserves widgetType, displayType, and layout", () => {
+    const widget: DashboardWidget = {
+      id: "100",
+      title: "Test",
+      displayType: "bar",
+      widgetType: "spans",
+      layout: { x: 1, y: 2, w: 3, h: 4 },
+    };
+    const result = stripWidgetServerFields(widget);
+    expect(result.displayType).toBe("bar");
     expect(result.widgetType).toBe("spans");
-    expect(result.layout).toBeDefined();
-    expect(result.queries![0]!.conditions).toBe("is:unresolved");
+    expect(result.layout).toEqual({ x: 1, y: 2, w: 3, h: 4 });
   });
 });

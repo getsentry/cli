@@ -15,18 +15,33 @@ import { runUpsert } from "./utils.js";
 
 const TABLE = "org_regions";
 
+/** When true, getCachedOrganizations() returns empty (forces API fetch). */
+let orgCacheDisabled = false;
+
+/** Disable the org listing cache for this invocation (e.g., `--fresh` flag). */
+export function disableOrgCache(): void {
+  orgCacheDisabled = true;
+}
+
+/** Re-enable the org listing cache. Exported for testing. */
+export function enableOrgCache(): void {
+  orgCacheDisabled = false;
+}
+
 type OrgRegionRow = {
   org_slug: string;
   org_id: string | null;
+  org_name: string | null;
   region_url: string;
   updated_at: number;
 };
 
-/** Entry for batch-caching org regions with optional numeric ID. */
+/** Entry for batch-caching org regions with optional metadata. */
 export type OrgRegionEntry = {
   slug: string;
   regionUrl: string;
   orgId?: string;
+  orgName?: string;
 };
 
 /**
@@ -119,6 +134,9 @@ export async function setOrgRegions(entries: OrgRegionEntry[]): Promise<void> {
       if (entry.orgId) {
         row.org_id = entry.orgId;
       }
+      if (entry.orgName) {
+        row.org_name = entry.orgName;
+      }
       runUpsert(db, TABLE, row, ["org_slug"]);
     }
   })();
@@ -146,4 +164,53 @@ export async function getAllOrgRegions(): Promise<Map<string, string>> {
     .all() as Pick<OrgRegionRow, "org_slug" | "region_url">[];
 
   return new Map(rows.map((row) => [row.org_slug, row.region_url]));
+}
+
+/** Cached org entry with the fields needed to reconstruct a SentryOrganization. */
+export type CachedOrg = {
+  slug: string;
+  id: string;
+  name: string;
+};
+
+/**
+ * Maximum age (ms) for cached organization entries.
+ * Entries older than this are considered stale and ignored, forcing a
+ * fresh API fetch. 7 days balances offline usability with picking up
+ * new org memberships.
+ */
+const ORG_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Get all cached organizations with id, slug, and name.
+ *
+ * Returns organizations that have all three fields populated and were
+ * updated within the TTL window. Rows with missing `org_id` or `org_name`
+ * (from before schema v9) or stale `updated_at` are excluded — callers
+ * should fall back to the API when the result is empty.
+ *
+ * Returns empty when the cache is disabled via {@link disableOrgCache}
+ * (e.g., `--fresh` flag).
+ *
+ * @returns Array of cached org entries, or empty if cache is cold/stale/disabled/incomplete
+ */
+export async function getCachedOrganizations(): Promise<CachedOrg[]> {
+  if (orgCacheDisabled) {
+    return [];
+  }
+
+  const db = getDatabase();
+  const cutoff = Date.now() - ORG_CACHE_TTL_MS;
+  const rows = db
+    .query(
+      `SELECT org_slug, org_id, org_name FROM ${TABLE} WHERE org_id IS NOT NULL AND org_name IS NOT NULL AND updated_at > ?`
+    )
+    .all(cutoff) as Pick<OrgRegionRow, "org_slug" | "org_id" | "org_name">[];
+
+  return rows.map((row) => ({
+    slug: row.org_slug,
+    // org_id and org_name are guaranteed non-null by the WHERE clause
+    id: row.org_id as string,
+    name: row.org_name as string,
+  }));
 }

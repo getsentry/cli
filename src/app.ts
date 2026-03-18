@@ -26,6 +26,9 @@ import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
+import { schemaCommand } from "./commands/schema.js";
+import { spanRoute } from "./commands/span/index.js";
+import { listCommand as spanListCommand } from "./commands/span/list.js";
 import { teamRoute } from "./commands/team/index.js";
 import { listCommand as teamListCommand } from "./commands/team/list.js";
 import { traceRoute } from "./commands/trace/index.js";
@@ -53,6 +56,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   repos: "repo",
   teams: "team",
   logs: "log",
+  spans: "span",
   traces: "trace",
   trials: "trial",
 };
@@ -71,10 +75,12 @@ export const routes = buildRouteMap({
     issue: issueRoute,
     event: eventRoute,
     log: logRoute,
+    span: spanRoute,
     trace: traceRoute,
     trial: trialRoute,
     init: initCommand,
     api: apiCommand,
+    schema: schemaCommand,
     dashboards: dashboardListCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
@@ -82,6 +88,7 @@ export const routes = buildRouteMap({
     repos: repoListCommand,
     teams: teamListCommand,
     logs: logListCommand,
+    spans: spanListCommand,
     traces: traceListCommand,
     trials: trialListCommand,
     whoami: whoamiCommand,
@@ -92,6 +99,19 @@ export const routes = buildRouteMap({
     fullDescription:
       "sentry is a command-line interface for interacting with Sentry. " +
       "It provides commands for authentication, viewing issues, and making API calls.",
+    hideRoute: {
+      dashboards: true,
+      issues: true,
+      orgs: true,
+      projects: true,
+      repos: true,
+      teams: true,
+      logs: true,
+      spans: true,
+      traces: true,
+      trials: true,
+      whoami: true,
+    },
   },
 });
 

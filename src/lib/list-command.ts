@@ -17,8 +17,14 @@ import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
+import { disableOrgCache } from "./db/regions.js";
+import { disableDsnCache } from "./dsn/index.js";
 import { warning } from "./formatters/colors.js";
-import type { CommandOutput, OutputConfig } from "./formatters/output.js";
+import {
+  CommandOutput,
+  type CommandReturn,
+  type OutputConfig,
+} from "./formatters/output.js";
 import {
   dispatchOrgScopedList,
   jsonTransformListResult,
@@ -79,7 +85,7 @@ export function targetPatternExplanation(cursorNote?: string): string {
  * The `--json` flag shared by all list commands.
  * Outputs machine-readable JSON instead of a human-readable table.
  *
- * @deprecated Use `output: "json"` on `buildCommand` instead, which
+ * @deprecated Use `output: { human: ... }` on `buildCommand` instead, which
  * injects `--json` and `--fields` automatically. This constant is kept
  * for commands that define `--json` with custom brief text.
  */
@@ -110,7 +116,7 @@ export const LIST_JSON_FLAG = {
  */
 export const FRESH_FLAG = {
   kind: "boolean" as const,
-  brief: "Bypass cache and fetch fresh data",
+  brief: "Bypass cache, re-detect projects, and fetch fresh data",
   default: false,
 } as const;
 
@@ -133,13 +139,15 @@ export const FRESH_ALIASES = { f: "fresh" } as const;
  * Call at the top of a command's `func()` after defining the `fresh` flag:
  * ```ts
  * flags: { fresh: FRESH_FLAG },
- * async func(this: SentryContext, flags) {
+ * async *func(this: SentryContext, flags) {
  *   applyFreshFlag(flags);
  * ```
  */
 export function applyFreshFlag(flags: { readonly fresh: boolean }): void {
   if (flags.fresh) {
     disableResponseCache();
+    disableDsnCache();
+    disableOrgCache();
   }
 }
 
@@ -308,12 +316,10 @@ type BaseFlags = Readonly<Partial<Record<string, unknown>>>;
 type BaseArgs = readonly unknown[];
 
 /**
- * Wider command function type that allows returning `CommandOutput<T>`.
+ * Command function type that returns an async generator.
  *
- * Mirrors `SentryCommandFunction` from `command.ts`. The Stricli
- * `CommandFunction` type constrains returns to `void | Error`, which is
- * too narrow for the return-based output pattern. This type adds `unknown`
- * to the return union so `{ data, hint }` objects pass through.
+ * Mirrors `SentryCommandFunction` from `command.ts`. All command functions
+ * are async generators — non-streaming commands yield once and return.
  */
 type ListCommandFunction<
   FLAGS extends BaseFlags,
@@ -323,8 +329,8 @@ type ListCommandFunction<
   this: CONTEXT,
   flags: FLAGS,
   ...args: ARGS
-  // biome-ignore lint/suspicious/noConfusingVoidType: void required to match async functions returning nothing (Promise<void>)
-) => void | Error | unknown | Promise<void | Error | unknown>;
+  // biome-ignore lint/suspicious/noConfusingVoidType: void is required here — generators that don't return a value have implicit void return, which is distinct from undefined in TypeScript's type system
+) => AsyncGenerator<unknown, CommandReturn | void, undefined>;
 
 /**
  * Build a Stricli command for a list endpoint with automatic plural-alias
@@ -365,7 +371,7 @@ export function buildListCommand<
     };
     readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
     // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
-    readonly output?: "json" | OutputConfig<any>;
+    readonly output?: OutputConfig<any>;
   }
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
@@ -469,7 +475,6 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
   return buildListCommand(routeName, {
     docs,
     output: {
-      json: true,
       human: (result: ListResult<TWithOrg>) => formatListHuman(result, config),
       jsonTransform: (result: ListResult<TWithOrg>, fields?: string[]) =>
         jsonTransformListResult(result, fields),
@@ -483,7 +488,7 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       },
       aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES },
     },
-    async func(
+    async *func(
       this: SentryContext,
       flags: {
         readonly limit: number;
@@ -493,21 +498,21 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
         readonly fields?: string[];
       },
       target?: string
-    ): Promise<CommandOutput<ListResult<TWithOrg>>> {
+    ) {
       applyFreshFlag(flags);
-      const { stdout, cwd } = this;
+      const { cwd } = this;
       const parsed = parseOrgProjectArg(target);
       const result = await dispatchOrgScopedList({
         config,
-        stdout,
         cwd,
         flags,
         parsed,
       });
+      yield new CommandOutput(result);
       // Only forward hint to the footer when items exist — empty results
       // already render hint text inside the human formatter.
       const hint = result.items.length > 0 ? result.hint : undefined;
-      return { data: result, hint };
+      return { hint };
     },
   });
 }

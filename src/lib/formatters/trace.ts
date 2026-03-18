@@ -2,12 +2,18 @@
  * Trace-specific formatters
  *
  * Provides formatting utilities for displaying Sentry traces in the CLI.
+ * Includes flat span utilities for `span list` and `span view` commands.
  */
 
-import type { TraceSpan, TransactionListItem } from "../../types/index.js";
-import { formatRelativeTime } from "./human.js";
+import type {
+  SpanListItem,
+  TraceSpan,
+  TransactionListItem,
+} from "../../types/index.js";
 import {
+  colorTag,
   escapeMarkdownCell,
+  escapeMarkdownInline,
   isPlainOutput,
   mdKvTable,
   mdRow,
@@ -16,7 +22,9 @@ import {
   renderMarkdown,
   stripColorTags,
 } from "./markdown.js";
+import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
+import { computeSpanDurationMs, formatRelativeTime } from "./time-utils.js";
 
 /**
  * Format a duration in milliseconds to a human-readable string.
@@ -278,4 +286,247 @@ export function formatTraceSummary(summary: TraceSummary): string {
 
   const md = `## Trace \`${summary.traceId}\`\n\n${mdKvTable(kvRows)}\n`;
   return renderMarkdown(md);
+}
+
+// ---------------------------------------------------------------------------
+// Flat span utilities (for span list / span view)
+// ---------------------------------------------------------------------------
+
+/** Flat span for list output — no nested children */
+export type FlatSpan = {
+  span_id: string;
+  parent_span_id?: string | null;
+  op?: string;
+  description?: string | null;
+  duration_ms?: number;
+  start_timestamp: number;
+  project_slug?: string;
+  transaction?: string;
+};
+
+/** Result of finding a span by ID in the tree */
+export type FoundSpan = {
+  span: TraceSpan;
+  depth: number;
+  ancestors: TraceSpan[];
+};
+
+/**
+ * Find a span by ID in the tree, returning the span, its depth, and ancestor chain.
+ *
+ * @param spans - Root-level spans from the /trace/ API
+ * @param spanId - The span ID to search for
+ * @returns Found span with depth and ancestors (root→parent), or null
+ */
+export function findSpanById(
+  spans: TraceSpan[],
+  spanId: string
+): FoundSpan | null {
+  function search(
+    span: TraceSpan,
+    depth: number,
+    ancestors: TraceSpan[]
+  ): FoundSpan | null {
+    if (span.span_id?.toLowerCase() === spanId) {
+      return { span, depth, ancestors };
+    }
+    for (const child of span.children ?? []) {
+      const found = search(child, depth + 1, [...ancestors, span]);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  for (const root of spans) {
+    const found = search(root, 0, []);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** Map of CLI shorthand keys to Sentry API span attribute names */
+const SPAN_KEY_ALIASES: Record<string, string> = {
+  op: "span.op",
+  duration: "span.duration",
+};
+
+/**
+ * Translate CLI shorthand query keys to Sentry API span attribute names.
+ * Bare words pass through unchanged (server treats them as free-text search).
+ *
+ * @param query - Raw query string from --query flag
+ * @returns Translated query for the spans API
+ */
+export function translateSpanQuery(query: string): string {
+  const tokens = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+  return tokens
+    .map((token) => {
+      const colonIdx = token.indexOf(":");
+      if (colonIdx === -1) {
+        return token;
+      }
+      let key = token.slice(0, colonIdx).toLowerCase();
+      const rest = token.slice(colonIdx);
+      // Strip negation prefix before alias lookup, re-add after
+      const negated = key.startsWith("!");
+      if (negated) {
+        key = key.slice(1);
+      }
+      const resolved = SPAN_KEY_ALIASES[key] ?? key;
+      return (negated ? "!" : "") + resolved + rest;
+    })
+    .join(" ");
+}
+
+/**
+ * Map a SpanListItem from the EAP spans endpoint to a FlatSpan for display.
+ *
+ * @param item - Span item from the spans search API
+ * @returns FlatSpan suitable for table display
+ */
+export function spanListItemToFlatSpan(item: SpanListItem): FlatSpan {
+  return {
+    span_id: item.id,
+    parent_span_id: item.parent_span ?? undefined,
+    op: item["span.op"] ?? undefined,
+    description: item.description ?? undefined,
+    duration_ms: item["span.duration"] ?? undefined,
+    start_timestamp: new Date(item.timestamp).getTime() / 1000,
+    project_slug: item.project,
+    transaction: item.transaction ?? undefined,
+  };
+}
+
+/** Column definitions for the flat span table */
+const SPAN_TABLE_COLUMNS: Column<FlatSpan>[] = [
+  {
+    header: "Span ID",
+    value: (s) => `\`${s.span_id}\``,
+    minWidth: 18,
+    shrinkable: false,
+  },
+  {
+    header: "Op",
+    value: (s) => escapeMarkdownCell(s.op || "—"),
+    minWidth: 6,
+  },
+  {
+    header: "Description",
+    value: (s) => escapeMarkdownCell(s.description || "(no description)"),
+    truncate: true,
+  },
+  {
+    header: "Duration",
+    value: (s) =>
+      s.duration_ms !== undefined ? formatTraceDuration(s.duration_ms) : "—",
+    align: "right",
+    minWidth: 8,
+    shrinkable: false,
+  },
+];
+
+/**
+ * Format a flat span list as a rendered table string.
+ *
+ * Prefer this in return-based command output pipelines.
+ * Uses {@link formatTable} (return-based) internally.
+ *
+ * @param spans - Flat span array to display
+ * @returns Rendered table string
+ */
+export function formatSpanTable(spans: FlatSpan[]): string {
+  return formatTable(spans, SPAN_TABLE_COLUMNS, { truncate: true });
+}
+
+/**
+ * Build key-value rows for a span's metadata.
+ */
+function buildSpanKvRows(span: TraceSpan, traceId: string): [string, string][] {
+  const kvRows: [string, string][] = [];
+
+  kvRows.push(["Span ID", `\`${span.span_id}\``]);
+  kvRows.push(["Trace ID", `\`${traceId}\``]);
+
+  if (span.parent_span_id) {
+    kvRows.push(["Parent", `\`${span.parent_span_id}\``]);
+  }
+
+  const op = span.op || span["transaction.op"];
+  if (op) {
+    kvRows.push(["Op", `\`${op}\``]);
+  }
+
+  const desc = span.description || span.transaction;
+  if (desc) {
+    kvRows.push(["Description", escapeMarkdownCell(desc)]);
+  }
+
+  const durationMs = computeSpanDurationMs(span);
+  if (durationMs !== undefined) {
+    kvRows.push(["Duration", formatTraceDuration(durationMs)]);
+  }
+
+  if (span.project_slug) {
+    kvRows.push(["Project", span.project_slug]);
+  }
+
+  if (isValidTimestamp(span.start_timestamp)) {
+    const date = new Date(span.start_timestamp * 1000);
+    kvRows.push(["Started", date.toLocaleString("sv-SE")]);
+  }
+
+  kvRows.push(["Children", String((span.children ?? []).length)]);
+
+  return kvRows;
+}
+
+/**
+ * Format an ancestor chain as indented tree lines.
+ *
+ * Uses `colorTag()` + `renderMarkdown()` so output respects `NO_COLOR`
+ * and `isPlainOutput()` instead of leaking raw ANSI escapes.
+ */
+function formatAncestorChain(ancestors: TraceSpan[]): string {
+  const lines: string[] = ["", colorTag("muted", "─── Ancestors ───"), ""];
+  for (let i = 0; i < ancestors.length; i++) {
+    const a = ancestors[i];
+    if (!a) {
+      continue;
+    }
+    const indent = "  ".repeat(i);
+    const aOp = a.op || a["transaction.op"] || "unknown";
+    const aDesc = a.description || a.transaction || "(no description)";
+    lines.push(
+      `${indent}${colorTag("muted", aOp)} — ${escapeMarkdownInline(aDesc)} ${colorTag("muted", `(${a.span_id})`)}`
+    );
+  }
+  return `${renderMarkdown(lines.join("\n"))}\n`;
+}
+
+/**
+ * Format a single span's details for human-readable output.
+ *
+ * @param span - The TraceSpan to format
+ * @param ancestors - Ancestor chain from root to parent
+ * @param traceId - The trace ID for context
+ * @returns Rendered terminal string
+ */
+export function formatSpanDetails(
+  span: TraceSpan,
+  ancestors: TraceSpan[],
+  traceId: string
+): string {
+  const kvRows = buildSpanKvRows(span, traceId);
+  const md = `## Span \`${span.span_id}\`\n\n${mdKvTable(kvRows)}\n`;
+  let output = renderMarkdown(md);
+
+  if (ancestors.length > 0) {
+    output += formatAncestorChain(ancestors);
+  }
+
+  return output;
 }

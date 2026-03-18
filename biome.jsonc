@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/core"],
+  "plugins": [
+    "./lint-rules/no-stdout-write-in-commands.grit",
+    "./lint-rules/no-process-stdout-in-commands.grit"
+  ],
   "files": {
     "includes": ["!docs", "!test/init-eval/templates"]
   },
@@ -74,6 +78,31 @@
         "rules": {
           "style": {
             "noRestrictedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      // Commands must use colorTag() from markdown.ts — not raw chalk.
+      // Raw chalk bypasses the plain-output pipeline (NO_COLOR, SENTRY_PLAIN_OUTPUT).
+      "includes": ["src/commands/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@stricli/core": {
+                    "importNames": ["buildCommand"],
+                    "message": "Import buildCommand from '../lib/command.js' instead. The wrapper injects telemetry, --log-level, and --verbose."
+                  },
+                  "chalk": {
+                    "message": "Use colorTag() from formatters/markdown.js for colored output. Raw chalk bypasses the plain-output pipeline (NO_COLOR, SENTRY_PLAIN_OUTPUT)."
+                  }
+                }
+              }
+            }
           }
         }
       }

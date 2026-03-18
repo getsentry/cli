@@ -107,12 +107,14 @@ async function handleMultiSelect(
   }
 
   const hints: string[] = [];
+  // Use clack's vertical bar character so hint lines align with the option lines below
+  const bar = chalk.gray("\u2502");
   if (hasRequired) {
     hints.push(
-      chalk.dim(`  ${featureLabel(REQUIRED_FEATURE)} is always included`)
+      `${bar}  ${chalk.dim(`${featureLabel(REQUIRED_FEATURE)} is always included`)}`
     );
   }
-  hints.push(chalk.dim("  space=toggle, a=all, enter=confirm"));
+  hints.push(`${bar}  ${chalk.dim("space=toggle, a=all, enter=confirm")}`);
 
   const selected = await multiselect({
     message: `${payload.prompt}\n${hints.join("\n")}`,

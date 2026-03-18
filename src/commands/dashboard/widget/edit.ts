@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
 import { ValidationError } from "../../../lib/errors.js";
 import { formatWidgetEdited } from "../../../lib/formatters/human.js";
+import { CommandOutput } from "../../../lib/formatters/output.js";
 import { buildDashboardUrl } from "../../../lib/sentry-urls.js";
 import {
   type DashboardDetail,
@@ -113,7 +114,6 @@ export const editCommand = buildCommand({
       "  sentry dashboard widget edit 12345 --title 'Old Name' --new-title 'New Name'",
   },
   output: {
-    json: true,
     human: formatWidgetEdited,
   },
   parameters: {
@@ -199,7 +199,7 @@ export const editCommand = buildCommand({
       n: "limit",
     },
   },
-  async func(this: SentryContext, flags: EditFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: EditFlags, ...args: string[]) {
     const { cwd } = this;
 
     if (flags.index === undefined && !flags.title) {
@@ -235,8 +235,10 @@ export const editCommand = buildCommand({
     const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
-    return {
-      data: { dashboard: updated, widget: replacement, url } as EditResult,
-    };
+    yield new CommandOutput({
+      dashboard: updated,
+      widget: replacement,
+      url,
+    } as EditResult);
   },
 });

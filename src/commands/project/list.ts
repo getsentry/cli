@@ -32,9 +32,9 @@ import {
 } from "../../lib/db/pagination.js";
 import { ContextError, withAuthGuard } from "../../lib/errors.js";
 import { escapeMarkdownCell } from "../../lib/formatters/markdown.js";
-import type {
+import {
   CommandOutput,
-  OutputConfig,
+  type OutputConfig,
 } from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import {
@@ -561,10 +561,10 @@ export const listCommand = buildListCommand("project", {
       "Filtering and output:\n" +
       "  sentry project list --platform javascript  # filter by platform\n" +
       "  sentry project list --limit 50              # show more results\n" +
-      "  sentry project list --json                  # output as JSON",
+      "  sentry project list --json                  # output as JSON\n\n" +
+      "Alias: `sentry projects` → `sentry project list`",
   },
   output: {
-    json: true,
     human: (result: ListResult<ProjectWithOrg>) => {
       if (result.items.length === 0) {
         return result.hint ?? "No projects found.";
@@ -592,19 +592,14 @@ export const listCommand = buildListCommand("project", {
     },
     aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES, p: "platform" },
   },
-  async func(
-    this: SentryContext,
-    flags: ListFlags,
-    target?: string
-  ): Promise<CommandOutput<ListResult<ProjectWithOrg>>> {
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
     applyFreshFlag(flags);
-    const { stdout, cwd } = this;
+    const { cwd } = this;
 
     const parsed = parseOrgProjectArg(target);
 
     const result = await dispatchOrgScopedList({
       config: projectListMeta,
-      stdout,
       cwd,
       flags,
       parsed,
@@ -640,6 +635,7 @@ export const listCommand = buildListCommand("project", {
     // Only forward hint to the footer when items exist — empty results
     // already render hint text inside the human formatter.
     const hint = result.items.length > 0 ? result.hint : undefined;
-    return { data: result, hint };
+    yield new CommandOutput(result);
+    return { hint };
   },
 });

@@ -58,10 +58,14 @@ function createMockContext(
     ...overrides.env,
   };
 
+  const stdoutChunks: string[] = [];
   const context = {
     process: {
       stdout: {
-        write: mock((_s: string) => true),
+        write: mock((s: string) => {
+          stdoutChunks.push(String(s));
+          return true;
+        }),
       },
       stderr: {
         write: mock((_s: string) => true),
@@ -80,7 +84,10 @@ function createMockContext(
     configDir: "/tmp/test-config",
     env,
     stdout: {
-      write: mock((_s: string) => true),
+      write: mock((s: string) => {
+        stdoutChunks.push(String(s));
+        return true;
+      }),
     },
     stderr: {
       write: mock((_s: string) => true),
@@ -96,8 +103,9 @@ function createMockContext(
 
   return {
     context,
-    getOutput: () => stderrChunks.join(""),
+    getOutput: () => stdoutChunks.join("") + stderrChunks.join(""),
     clearOutput: () => {
+      stdoutChunks.length = 0;
       stderrChunks.length = 0;
     },
     restore: () => {
@@ -821,8 +829,7 @@ describe("sentry cli setup", () => {
 
       const combined = getOutput();
       // Setup must complete even though the completions step threw —
-      // the warning goes to stderr via consola ([warn] format)
-      expect(combined).toContain("[warn]");
+      // the warning appears in the formatted output
       expect(combined).toContain("Shell completions failed");
 
       chmod(zshDir, 0o755);

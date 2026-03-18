@@ -1,14 +1,17 @@
 /**
  * Shared Hex ID Validation
  *
- * Provides regex and validation for 32-character hexadecimal identifiers
- * used across the CLI (log IDs, trace IDs, etc.).
+ * Provides regex and validation for hexadecimal identifiers used across
+ * the CLI (trace IDs, log IDs, span IDs, etc.).
  */
 
 import { ValidationError } from "./errors.js";
 
 /** Regex for a valid 32-character hexadecimal ID */
 export const HEX_ID_RE = /^[0-9a-f]{32}$/i;
+
+/** Regex for a valid 16-character hexadecimal span ID */
+export const SPAN_ID_RE = /^[0-9a-f]{16}$/i;
 
 /**
  * Regex for UUID format with dashes: 8-4-4-4-12 hex groups.
@@ -56,6 +59,34 @@ export function validateHexId(value: string, label: string): string {
     throw new ValidationError(
       `Invalid ${label} "${display}". Expected a 32-character hexadecimal string.\n\n` +
         "Example: abc123def456abc123def456abc123de"
+    );
+  }
+
+  return trimmed;
+}
+
+/**
+ * Validate that a string is a 16-character hexadecimal span ID.
+ * Trims whitespace and normalizes to lowercase before validation.
+ *
+ * Dashes are stripped automatically so users can paste IDs in dash-separated
+ * formats (e.g., from debugging tools that format span IDs with dashes).
+ *
+ * @param value - The string to validate
+ * @returns The trimmed, lowercased, validated span ID
+ * @throws {ValidationError} If the format is invalid
+ */
+export function validateSpanId(value: string): string {
+  const trimmed = value.trim().toLowerCase().replace(/-/g, "");
+
+  if (!SPAN_ID_RE.test(trimmed)) {
+    const display =
+      trimmed.length > MAX_DISPLAY_LENGTH
+        ? `${trimmed.slice(0, MAX_DISPLAY_LENGTH - 3)}...`
+        : trimmed;
+    throw new ValidationError(
+      `Invalid span ID "${display}". Expected a 16-character hexadecimal string.\n\n` +
+        "Example: a1b2c3d4e5f67890"
     );
   }
 

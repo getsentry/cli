@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.16.0-dev.0",
+  "version": "0.17.0-dev.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getsentry/cli.git"
@@ -10,7 +10,7 @@
     "@biomejs/biome": "2.3.8",
     "@clack/prompts": "^0.11.0",
     "@mastra/client-js": "^1.4.0",
-    "@sentry/api": "^0.21.0",
+    "@sentry/api": "^0.54.0",
     "@sentry/bun": "10.39.0",
     "@sentry/esbuild-plugin": "^2.23.0",
     "@sentry/node": "10.39.0",
@@ -59,10 +59,10 @@
     "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch"
   },
   "scripts": {
-    "dev": "bun run src/bin.ts",
-    "build": "bun run script/build.ts --single",
-    "build:all": "bun run script/build.ts",
-    "bundle": "bun run script/bundle.ts",
+    "dev": "bun run generate:schema && bun run src/bin.ts",
+    "build": "bun run generate:schema && bun run script/build.ts --single",
+    "build:all": "bun run generate:schema && bun run script/build.ts",
+    "bundle": "bun run generate:schema && bun run script/bundle.ts",
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
     "lint:fix": "bunx ultracite fix",
@@ -72,6 +72,7 @@
     "test:e2e": "bun test --timeout 15000 test/e2e",
     "test:init-eval": "bun test test/init-eval --timeout 600000 --concurrency 6",
     "generate:skill": "bun run script/generate-skill.ts",
+    "generate:schema": "bun run script/generate-api-schema.ts",
     "check:skill": "bun run script/check-skill.ts",
     "check:deps": "bun run script/check-no-deps.ts"
   },

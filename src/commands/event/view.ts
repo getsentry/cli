@@ -23,6 +23,7 @@ import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ResolutionError } from "../../lib/errors.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
   FRESH_ALIASES,
@@ -303,7 +304,6 @@ export const viewCommand = buildCommand({
       "  sentry event view <project> <event-id>    # find project across all orgs",
   },
   output: {
-    json: true,
     human: formatEventView,
     jsonExclude: ["spanTreeLines"],
   },
@@ -328,7 +328,7 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
@@ -344,9 +344,6 @@ export const viewCommand = buildCommand({
       log.warn(suggestion);
     }
     const parsed = parseOrgProjectArg(targetArg);
-    if (parsed.type !== "auto-detect" && parsed.normalized) {
-      log.warn("Normalized slug (Sentry slugs use dashes, not underscores)");
-    }
 
     const target = await resolveEventTarget({
       parsed,
@@ -380,8 +377,12 @@ export const viewCommand = buildCommand({
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
       : null;
 
+    yield new CommandOutput({
+      event,
+      trace,
+      spanTreeLines: spanTreeResult?.lines,
+    });
     return {
-      data: { event, trace, spanTreeLines: spanTreeResult?.lines },
       hint: target.detectedFrom
         ? `Detected from ${target.detectedFrom}`
         : undefined,

@@ -19,6 +19,30 @@ import { runUpsert } from "./utils.js";
 /** Cache TTL in milliseconds (24 hours) */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Module-level flag to disable DSN cache reads.
+ * When true, getCachedDsn() and getCachedDetection() return undefined.
+ * Cache writes still proceed so the re-scanned result gets stored.
+ */
+let dsnCacheDisabled = false;
+
+/**
+ * Disable DSN cache reads for this invocation.
+ * Called when `--fresh` is set to force a full re-scan.
+ */
+export function disableDsnCache(): void {
+  dsnCacheDisabled = true;
+}
+
+/**
+ * Re-enable DSN cache reads after `disableDsnCache()` was called.
+ * Only needed in tests to prevent one test's `--fresh` flag from
+ * leaking into subsequent tests.
+ */
+export function enableDsnCache(): void {
+  dsnCacheDisabled = false;
+}
+
 /** Row type matching the dsn_cache table schema (including v4 columns) */
 type DsnCacheRow = {
   directory: string;
@@ -116,6 +140,10 @@ function touchCacheEntry(directory: string): void {
 export async function getCachedDsn(
   directory: string
 ): Promise<CachedDsnEntry | undefined> {
+  if (dsnCacheDisabled) {
+    return;
+  }
+
   const db = getDatabase();
 
   const row = db
@@ -301,6 +329,10 @@ async function validateDirMtimes(
 export async function getCachedDetection(
   projectRoot: string
 ): Promise<CachedDetection | undefined> {
+  if (dsnCacheDisabled) {
+    return;
+  }
+
   const db = getDatabase();
 
   const row = db

@@ -10,6 +10,7 @@ import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
 import { ValidationError } from "../../../lib/errors.js";
 import { formatWidgetDeleted } from "../../../lib/formatters/human.js";
+import { CommandOutput } from "../../../lib/formatters/output.js";
 import { buildDashboardUrl } from "../../../lib/sentry-urls.js";
 import {
   type DashboardDetail,
@@ -47,7 +48,6 @@ export const deleteCommand = buildCommand({
       "  sentry dashboard widget delete 'My Dashboard' --title 'Error Rate'",
   },
   output: {
-    json: true,
     human: formatWidgetDeleted,
   },
   parameters: {
@@ -74,7 +74,7 @@ export const deleteCommand = buildCommand({
     },
     aliases: { i: "index", t: "title" },
   },
-  async func(this: SentryContext, flags: DeleteFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: DeleteFlags, ...args: string[]) {
     const { cwd } = this;
 
     if (flags.index === undefined && !flags.title) {
@@ -106,8 +106,10 @@ export const deleteCommand = buildCommand({
     const updated = await updateDashboard(orgSlug, dashboardId, updateBody);
     const url = buildDashboardUrl(orgSlug, dashboardId);
 
-    return {
-      data: { dashboard: updated, widgetTitle, url } as DeleteResult,
-    };
+    yield new CommandOutput({
+      dashboard: updated,
+      widgetTitle,
+      url,
+    } as DeleteResult);
   },
 });

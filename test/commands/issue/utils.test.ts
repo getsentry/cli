@@ -14,6 +14,7 @@ import {
 } from "../../../src/commands/issue/utils.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
+import { setCachedProject } from "../../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ResolutionError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -1655,5 +1656,97 @@ describe("resolveIssue: numeric 404 error handling", () => {
         command: "view",
       })
     ).rejects.not.toBeInstanceOf(ResolutionError);
+  });
+});
+
+describe("resolveIssue: project-search DSN shortcut", () => {
+  const getDsnTestConfigDir = useTestConfigDir("test-dsn-shortcut-", {
+    isolateProjectRoot: true,
+  });
+
+  let dsnOriginalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    dsnOriginalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+    await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    // Seed project cache so resolveFromDsn resolves without any API call.
+    // orgId is "123" (DSN parser strips the "o" prefix from o123.ingest.*)
+    await setCachedProject("123", "456", {
+      orgSlug: "my-org",
+      orgName: "My Org",
+      projectSlug: "my-project",
+      projectName: "My Project",
+      projectId: "456",
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = dsnOriginalFetch;
+  });
+
+  test("uses DSN shortcut when project matches, skips listOrganizations", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const cwd = getDsnTestConfigDir();
+
+    // Write a DSN so detectDsn finds it
+    writeFileSync(
+      join(cwd, ".env"),
+      "SENTRY_DSN=https://abc@o123.ingest.us.sentry.io/456"
+    );
+
+    const requests: string[] = [];
+
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+      requests.push(url);
+
+      // Short ID resolution — the only HTTP call the shortcut should make
+      if (url.includes("/shortids/MY-PROJECT-5BS/")) {
+        return new Response(
+          JSON.stringify({
+            organizationSlug: "my-org",
+            projectSlug: "my-project",
+            group: {
+              id: "999",
+              shortId: "MY-PROJECT-5BS",
+              title: "Test Issue",
+              status: "unresolved",
+              platform: "javascript",
+              type: "error",
+              count: "1",
+              userCount: 1,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await resolveIssue({
+      issueArg: "my-project-5BS",
+      cwd,
+      command: "view",
+    });
+
+    // Shortcut resolved correctly
+    expect(result.org).toBe("my-org");
+    expect(result.issue.id).toBe("999");
+
+    // The expensive listOrganizations calls were skipped
+    expect(requests.some((r) => r.includes("/users/me/regions/"))).toBe(false);
+    expect(
+      requests.some(
+        (r) => r.includes("/organizations/") && !r.includes("/shortids/")
+      )
+    ).toBe(false);
   });
 });

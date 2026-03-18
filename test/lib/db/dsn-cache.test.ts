@@ -9,6 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   clearDsnCache,
+  disableDsnCache,
+  enableDsnCache,
   getCachedDetection,
   getCachedDsn,
   setCachedDetection,
@@ -36,6 +38,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  enableDsnCache();
   delete process.env.SENTRY_CLI_CONFIG_DIR;
   await cleanupTestDir(testConfigDir);
 });
@@ -173,10 +176,6 @@ describe("clearDsnCache", () => {
   });
 });
 
-// =============================================================================
-// Full Detection Cache Tests (v4 functionality)
-// =============================================================================
-
 const createTestDsn = (overrides: Partial<DetectedDsn> = {}): DetectedDsn => ({
   protocol: "https",
   publicKey: "testkey",
@@ -188,6 +187,81 @@ const createTestDsn = (overrides: Partial<DetectedDsn> = {}): DetectedDsn => ({
   sourcePath: "src/app.ts",
   ...overrides,
 });
+
+// =============================================================================
+// Cache Bypass Tests (--fresh flag support)
+// =============================================================================
+
+describe("disableDsnCache / enableDsnCache", () => {
+  test("getCachedDsn returns undefined when cache is disabled", async () => {
+    await setCachedDsn(testProjectDir, {
+      dsn: "https://abc@o123.ingest.sentry.io/456",
+      projectId: "456",
+      orgId: "123",
+      source: "code",
+    });
+
+    // Verify it exists before disabling
+    expect(await getCachedDsn(testProjectDir)).toBeDefined();
+
+    disableDsnCache();
+    expect(await getCachedDsn(testProjectDir)).toBeUndefined();
+
+    // Re-enable and verify it's still there
+    enableDsnCache();
+    expect(await getCachedDsn(testProjectDir)).toBeDefined();
+  });
+
+  test("getCachedDetection returns undefined when cache is disabled", async () => {
+    const testDsn = createTestDsn();
+    const sourceMtimes = {
+      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+    };
+    const { stat } = await import("node:fs/promises");
+    const rootStats = await stat(testProjectDir);
+    const rootDirMtime = Math.floor(rootStats.mtimeMs);
+
+    await setCachedDetection(testProjectDir, {
+      fingerprint: "test-fp",
+      allDsns: [testDsn],
+      sourceMtimes,
+      dirMtimes: {},
+      rootDirMtime,
+    });
+
+    // Verify it exists before disabling
+    expect(await getCachedDetection(testProjectDir)).toBeDefined();
+
+    disableDsnCache();
+    expect(await getCachedDetection(testProjectDir)).toBeUndefined();
+
+    enableDsnCache();
+    expect(await getCachedDetection(testProjectDir)).toBeDefined();
+  });
+
+  test("cache writes still work when disabled", async () => {
+    disableDsnCache();
+
+    // Write while disabled
+    await setCachedDsn(testProjectDir, {
+      dsn: "https://abc@o123.ingest.sentry.io/456",
+      projectId: "456",
+      source: "code",
+    });
+
+    // Can't read while disabled
+    expect(await getCachedDsn(testProjectDir)).toBeUndefined();
+
+    // Re-enable and verify the write persisted
+    enableDsnCache();
+    const result = await getCachedDsn(testProjectDir);
+    expect(result?.dsn).toBe("https://abc@o123.ingest.sentry.io/456");
+  });
+});
+
+// =============================================================================
+// Full Detection Cache Tests (v4 functionality)
+// =============================================================================
 
 describe("getCachedDetection", () => {
   test("returns undefined when no cache entry exists", async () => {
