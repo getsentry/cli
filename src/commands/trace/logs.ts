@@ -174,12 +174,14 @@ export const logsCommand = buildCommand({
       return;
     }
 
-    const logs = await withProgress({ message: "Fetching trace logs..." }, () =>
-      listTraceLogs(org, traceId, {
-        statsPeriod: flags.period,
-        limit: flags.limit,
-        query: flags.query,
-      })
+    const logs = await withProgress(
+      { message: "Fetching trace logs...", json: flags.json },
+      () =>
+        listTraceLogs(org, traceId, {
+          statsPeriod: flags.period,
+          limit: flags.limit,
+          query: flags.query,
+        })
     );
 
     // Reverse to chronological order (API returns newest-first)

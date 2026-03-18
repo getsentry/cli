@@ -247,7 +247,7 @@ export const listCommand = buildListCommand("trace", {
     const cursor = resolveOrgCursor(flags.cursor, PAGINATION_KEY, contextKey);
 
     const { data: traces, nextCursor } = await withProgress(
-      { message: "Fetching traces..." },
+      { message: "Fetching traces...", json: flags.json },
       () =>
         listTransactions(org, project, {
           query: flags.query,

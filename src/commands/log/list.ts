@@ -49,7 +49,7 @@ type ListFlags = {
   readonly limit: number;
   readonly query?: string;
   readonly follow?: number;
-  readonly period: string;
+  readonly period?: string;
   readonly json: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -198,15 +198,19 @@ function parseLogListArgs(args: string[]): ParsedLogArgs {
  * Returns the logs and a hint. The caller yields the result and
  * returns the hint as a footer via `CommandReturn`.
  */
+/** Default time period for project-scoped log queries */
+const DEFAULT_PROJECT_PERIOD = "90d";
+
 async function executeSingleFetch(
   org: string,
   project: string,
   flags: ListFlags
 ): Promise<FetchResult> {
+  const period = flags.period ?? DEFAULT_PROJECT_PERIOD;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
-    statsPeriod: flags.period,
+    statsPeriod: period,
   });
 
   if (logs.length === 0) {
@@ -459,9 +463,9 @@ async function executeTraceSingleFetch(
   traceId: string,
   flags: ListFlags
 ): Promise<FetchResult> {
-  // In trace mode, use a shorter default period if the user hasn't
-  // explicitly changed it from the command-level default of "90d".
-  const period = flags.period === "90d" ? DEFAULT_TRACE_PERIOD : flags.period;
+  // Use the explicit period if set, otherwise default to 14d for trace mode.
+  // The flag is optional (no default) so undefined means "not explicitly set".
+  const period = flags.period ?? DEFAULT_TRACE_PERIOD;
 
   const logs = await listTraceLogs(org, traceId, {
     query: flags.query,
@@ -663,8 +667,9 @@ export const listCommand = buildListCommand("log", {
       period: {
         kind: "parsed",
         parse: String,
-        brief: 'Time period (e.g., "90d", "14d", "24h")',
-        default: "90d",
+        brief:
+          'Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)',
+        optional: true,
       },
       fresh: FRESH_FLAG,
     },
@@ -740,7 +745,7 @@ export const listCommand = buildListCommand("log", {
       }
 
       const { result, hint } = await withProgress(
-        { message: "Fetching logs..." },
+        { message: "Fetching logs...", json: flags.json },
         () => executeTraceSingleFetch(org, traceId, flags)
       );
       yield new CommandOutput(result);
@@ -781,7 +786,7 @@ export const listCommand = buildListCommand("log", {
       }
 
       const { result, hint } = await withProgress(
-        { message: "Fetching logs..." },
+        { message: "Fetching logs...", json: flags.json },
         () => executeSingleFetch(org, project, flags)
       );
       yield new CommandOutput(result);

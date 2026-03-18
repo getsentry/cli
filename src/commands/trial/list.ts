@@ -221,7 +221,7 @@ export const listCommand = buildCommand({
       ],
     },
   },
-  async *func(this: SentryContext, _flags: ListFlags, org?: string) {
+  async *func(this: SentryContext, flags: ListFlags, org?: string) {
     const resolved = await resolveOrg({
       org,
       cwd: this.cwd,
@@ -231,8 +231,9 @@ export const listCommand = buildCommand({
       throw new ContextError("Organization", "sentry trial list <org>");
     }
 
-    const info = await withProgress({ message: "Fetching trials..." }, () =>
-      getCustomerTrialInfo(resolved.org)
+    const info = await withProgress(
+      { message: "Fetching trials...", json: flags.json },
+      () => getCustomerTrialInfo(resolved.org)
     );
     const productTrials = info.productTrials ?? [];
 

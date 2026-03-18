@@ -134,18 +134,16 @@ function mockWithProgress(
   return fn(noop);
 }
 
-/** Standard flags for non-follow batch mode */
+/** Standard flags for non-follow batch mode (period omitted = use mode default) */
 const BATCH_FLAGS = {
   json: true,
   limit: 100,
-  period: "90d",
 } as const;
 
-/** Human-mode flags for non-follow batch mode */
+/** Human-mode flags for non-follow batch mode (period omitted = use mode default) */
 const HUMAN_FLAGS = {
   json: false,
   limit: 100,
-  period: "90d",
 } as const;
 
 /** Sample project-scoped logs (SentryLog) */
@@ -337,11 +335,7 @@ describe("listCommand.func — standard mode", () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
     // limit equals number of returned logs → hasMore = true
-    await func.call(
-      context,
-      { json: false, limit: 3, period: "90d" },
-      `${ORG}/${PROJECT}`
-    );
+    await func.call(context, { json: false, limit: 3 }, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Use --limit to show more");
@@ -367,7 +361,7 @@ describe("listCommand.func — standard mode", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, limit: 50, query: "level:error", period: "90d" },
+      { json: false, limit: 50, query: "level:error" },
       `${ORG}/${PROJECT}`
     );
 
@@ -395,11 +389,7 @@ describe("listCommand.func — standard mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(
-      context,
-      { json: true, limit: 3, period: "90d" },
-      `${ORG}/${PROJECT}`
-    );
+    await func.call(context, { json: true, limit: 3 }, `${ORG}/${PROJECT}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -526,11 +516,7 @@ describe("listCommand.func — trace mode", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(
-      context,
-      { json: false, limit: 3, period: "90d" },
-      TRACE_ID
-    );
+    await func.call(context, { json: false, limit: 3 }, TRACE_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Use --limit to show more.");
@@ -544,7 +530,7 @@ describe("listCommand.func — trace mode", () => {
     const func = await listCommand.loader();
     await func.call(
       context,
-      { json: false, limit: 50, query: "level:error", period: "90d" },
+      { json: false, limit: 50, query: "level:error" },
       TRACE_ID
     );
 
@@ -703,14 +689,10 @@ describe("listCommand.func — period flag", () => {
     withProgressSpy.mockRestore();
   });
 
-  test("trace mode uses 14d default when period is the command default 90d", async () => {
+  test("trace mode uses 14d default when period is omitted", async () => {
     const { context } = createMockContext();
     const func = await listCommand.loader();
-    await func.call(
-      context,
-      { json: true, limit: 100, period: "90d" },
-      TRACE_ID
-    );
+    await func.call(context, { json: true, limit: 100 }, TRACE_ID);
 
     expect(listTraceLogsSpy).toHaveBeenCalledWith(ORG, TRACE_ID, {
       query: undefined,
@@ -860,7 +842,6 @@ describe("listCommand.func — follow mode (standard)", () => {
     json: false,
     limit: 100,
     follow: 1,
-    period: "90d",
   } as const;
 
   test("writes initial logs then resolves on SIGINT", async () => {
@@ -1152,7 +1133,6 @@ describe("listCommand.func — follow mode (trace)", () => {
     json: false,
     limit: 100,
     follow: 1,
-    period: "90d",
   } as const;
 
   test("writes initial trace logs then resolves on SIGINT", async () => {

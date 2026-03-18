@@ -812,7 +812,7 @@ async function handleOrgAllIssues(
   setContext([org], []);
 
   const { issues, nextCursor } = await withProgress(
-    { message: `Fetching issues (up to ${flags.limit})...` },
+    { message: `Fetching issues (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
       fetchOrgAllIssues(org, flags, cursor, (fetched, limit) =>
         setMessage(
@@ -954,7 +954,7 @@ async function handleResolvedTargets(
       : "Fetching issues";
 
   const { results, hasMore } = await withProgress(
-    { message: `${baseMessage} (up to ${flags.limit})...` },
+    { message: `${baseMessage} (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
       fetchWithBudget(
         activeTargets,

@@ -335,7 +335,7 @@ export async function handleAutoDetect(
   } = await resolveOrgsForAutoDetect(cwd);
 
   const { projects: allProjects, nextCursor } = await withProgress(
-    { message: "Fetching projects..." },
+    { message: "Fetching projects...", json: flags.json },
     () => fetchAutoDetectProjects(orgsToFetch, flags)
   );
 
@@ -392,7 +392,7 @@ export async function handleExplicit(
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
   const projectResult = await withProgress(
-    { message: "Fetching projects..." },
+    { message: "Fetching projects...", json: flags.json },
     () => withAuthGuard(() => getProject(org, projectSlug))
   );
   if (!projectResult.ok) {
@@ -442,7 +442,7 @@ export async function handleOrgAll(
 ): Promise<ListResult<ProjectWithOrg>> {
   const { org, flags, contextKey, cursor } = options;
   const response: PaginatedResponse<SentryProject[]> = await withProgress(
-    { message: "Fetching projects..." },
+    { message: "Fetching projects...", json: flags.json },
     () =>
       listProjectsPaginated(org, {
         cursor,
@@ -506,7 +506,7 @@ export async function handleProjectSearch(
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
   const { projects } = await withProgress(
-    { message: "Fetching projects..." },
+    { message: "Fetching projects...", json: flags.json },
     () => findProjectsBySlug(projectSlug)
   );
   const filtered = filterByPlatform(projects, flags.platform);

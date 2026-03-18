@@ -148,6 +148,9 @@ function startSpinner(initialMessage: string): {
 export type WithProgressOptions = {
   /** Initial spinner message */
   message: string;
+  /** Suppress progress output (JSON mode). When true, the operation runs
+   *  without a spinner — matching the behaviour of {@link poll}. */
+  json?: boolean;
 };
 
 /**
@@ -156,6 +159,10 @@ export type WithProgressOptions = {
  * The spinner uses the same braille frames as the Seer polling spinner,
  * giving a consistent look across all CLI commands. Progress output goes
  * to stderr, so it never contaminates stdout (safe to use alongside JSON output).
+ *
+ * When `options.json` is true the spinner is suppressed entirely, matching
+ * the behaviour of {@link poll}. This avoids noisy ANSI escape sequences on
+ * stderr when agents or CI pipelines consume `--json` output.
  *
  * The callback receives a `setMessage` function to update the displayed
  * message as work progresses (e.g. to show page counts during pagination).
@@ -182,6 +189,13 @@ export async function withProgress<T>(
   options: WithProgressOptions,
   fn: (setMessage: (msg: string) => void) => Promise<T>
 ): Promise<T> {
+  if (options.json) {
+    // JSON mode: skip the spinner entirely, pass a no-op setMessage
+    return fn(() => {
+      /* spinner suppressed in JSON mode */
+    });
+  }
+
   const spinner = startSpinner(options.message);
 
   try {
