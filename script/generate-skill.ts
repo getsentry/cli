@@ -138,7 +138,6 @@ const GLOBAL_FLAG_NAMES = new Set([
   "help",
   "helpAll",
   "log-level",
-  "verbose",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -606,9 +605,9 @@ function generateCompactCommandsSection(
       lines.push(generateCompactCommandLine(cmd));
     }
 
-    // Add reference file pointer
-    const refName = ROUTE_TO_REFERENCE[route.name];
-    const refFile = refName ? referenceFiles.get(refName) : undefined;
+    // Add reference file pointer (fallback matches groupRoutesByReference)
+    const refName = ROUTE_TO_REFERENCE[route.name] ?? route.name;
+    const refFile = referenceFiles.get(refName);
     if (refFile) {
       lines.push("");
       lines.push(`→ Full flags and examples: \`references/${refFile}\``);
