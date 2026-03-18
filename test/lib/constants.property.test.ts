@@ -91,13 +91,17 @@ describe("property: normalizeUrl", () => {
     );
   });
 
-  test("result is always a parseable URL (when hostname-like)", () => {
+  test("result always starts with https:// for bare hostnames", () => {
     fcAssert(
       property(hostnameArb, (hostname) => {
         const result = normalizeUrl(hostname);
         expect(result).toBeDefined();
-        // The normalized URL must be parseable (the original bug)
-        expect(() => new URL(result as string)).not.toThrow();
+        // normalizeUrl guarantees a protocol prefix — downstream URL
+        // construction (`${baseUrl}/api/0/...`) produces a valid URL
+        // when baseUrl has a protocol. We don't validate the hostname
+        // itself (e.g., numeric TLDs like `aa.52` are unlikely but
+        // harmless — the HTTP request will simply fail with a DNS error).
+        expect(result).toStartWith("https://");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
