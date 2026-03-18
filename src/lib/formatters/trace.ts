@@ -20,7 +20,7 @@ import {
   mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
-  stripColorTags,
+  stripMarkdownInline,
 } from "./markdown.js";
 import { type Column, formatTable } from "./table.js";
 import { renderTextTable } from "./text-table.js";
@@ -119,15 +119,17 @@ export function formatTracesHeader(): string {
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatTraceTable(items: TransactionListItem[]): string {
-  if (isPlainOutput()) {
-    const rows = items
-      .map((item) => mdRow(buildTraceRowCells(item)).trimEnd())
-      .join("\n");
-    return `${stripColorTags(mdTableHeader(TRACE_TABLE_COLS))}\n${rows}\n`;
-  }
   const headers = TRACE_TABLE_COLS.map((c) =>
     c.endsWith(":") ? c.slice(0, -1) : c
   );
+
+  if (isPlainOutput()) {
+    const rows = items.map((item) =>
+      buildTraceRowCells(item).map((c) => stripMarkdownInline(c))
+    );
+    return renderTextTable(headers, rows);
+  }
+
   const rows = items.map((item) =>
     buildTraceRowCells(item).map((c) => renderInlineMarkdown(c))
   );

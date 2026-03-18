@@ -16,7 +16,7 @@ import {
   mdTableHeader,
   renderInlineMarkdown,
   renderMarkdown,
-  stripColorTags,
+  stripMarkdownInline,
 } from "./markdown.js";
 import {
   renderTextTable,
@@ -174,13 +174,17 @@ export function formatLogsHeader(): string {
  * @returns Rendered terminal string with Unicode-bordered table
  */
 export function formatLogTable(logs: LogLike[], includeTrace = true): string {
-  if (isPlainOutput()) {
-    const rows = logs
-      .map((log) => mdRow(buildLogRowCells(log, false, includeTrace)).trimEnd())
-      .join("\n");
-    return `${stripColorTags(mdTableHeader(LOG_TABLE_COLS))}\n${rows}\n`;
-  }
   const headers = [...LOG_TABLE_COLS];
+
+  if (isPlainOutput()) {
+    const rows = logs.map((log) =>
+      buildLogRowCells(log, false, includeTrace).map((c) =>
+        stripMarkdownInline(c)
+      )
+    );
+    return renderTextTable(headers, rows);
+  }
+
   const rows = logs.map((log) =>
     buildLogRowCells(log, false, includeTrace).map((c) =>
       renderInlineMarkdown(c)
