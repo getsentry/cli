@@ -607,7 +607,7 @@ List logs from a project
 - `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
 - `-q, --query <value> - Filter query (Sentry search syntax)`
 - `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `-t, --period <value> - Time period (e.g., "90d", "14d", "24h") - (default: "90d")`
+- `-t, --period <value> - Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)`
 - `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `--json - Output as JSON`
 - `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
