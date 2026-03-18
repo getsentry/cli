@@ -198,6 +198,11 @@ export async function completeOrgSlashProject(
   const orgPart = partial.slice(0, slashIdx);
   const projectPart = partial.slice(slashIdx + 1);
 
+  // Bare "/" has no org part — can't resolve to a specific org
+  if (!orgPart) {
+    return [];
+  }
+
   const resolvedOrg = await fuzzyResolveOrg(orgPart);
   if (!resolvedOrg) {
     return [];
