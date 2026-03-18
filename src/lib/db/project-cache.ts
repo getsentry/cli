@@ -149,12 +149,14 @@ export async function getCachedProjectsForOrg(
   orgSlug: string
 ): Promise<{ projectSlug: string; projectName: string }[]> {
   const db = getDatabase();
-  // Group by project_slug to deduplicate — take the most recently cached name
-  // in case the same project appears under different cache keys with slightly
-  // different names (e.g., after a rename between caching events).
+  // Use MAX(cached_at) to deterministically pick the most recently cached
+  // project_name when the same project appears under different cache keys
+  // (e.g., both orgId:projectId and dsn:publicKey).
+  // SQLite guarantees that non-aggregated columns come from the row that
+  // produced the MAX/MIN aggregate value.
   const rows = db
     .query(
-      "SELECT project_slug, project_name FROM project_cache WHERE org_slug = ? GROUP BY project_slug ORDER BY cached_at DESC"
+      "SELECT project_slug, project_name, MAX(cached_at) FROM project_cache WHERE org_slug = ? GROUP BY project_slug"
     )
     .all(orgSlug) as Pick<ProjectCacheRow, "project_slug" | "project_name">[];
 
