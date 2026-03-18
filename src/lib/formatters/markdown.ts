@@ -555,9 +555,8 @@ function renderList(list: Tokens.List, depth = 0): string {
  * Converts marked's `Tokens.Table` into headers + rows + alignments and
  * delegates to `renderTextTable()` for column fitting and box drawing.
  *
- * When all header cells are empty (e.g. from {@link mdKvTable} without a
- * heading), the header row is hidden so the rendered table starts directly
- * with data rows — no empty cells or separator line.
+ * Empty header rows (e.g. from {@link mdKvTable} without a heading) are
+ * auto-hidden by `renderTextTable` — no explicit detection needed here.
  */
 function renderTableToken(table: Tokens.Table): string {
   const headers = table.header.map((cell) => renderInline(cell.tokens));
@@ -575,11 +574,7 @@ function renderTableToken(table: Tokens.Table): string {
     return "left";
   });
 
-  // Hide the header row when all cells are empty — avoids rendering a
-  // visually empty bordered row above the data (common in mdKvTable output).
-  const hideHeaders = headers.every((h) => h.trim() === "");
-
-  return renderTextTable(headers, rows, { alignments, hideHeaders });
+  return renderTextTable(headers, rows, { alignments });
 }
 
 // ──────────────────────── Public API ─────────────────────────────────

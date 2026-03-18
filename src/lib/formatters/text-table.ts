@@ -64,7 +64,8 @@ export type TextTableOptions = {
    * the markdown source requires empty header cells (`| | |`) to satisfy
    * table syntax, but the visual output shouldn't show them.
    *
-   * @default false
+   * When omitted, auto-detects: hides headers when **all** header cells
+   * are empty or whitespace-only. Pass `true`/`false` explicitly to override.
    */
   hideHeaders?: boolean;
   /**
@@ -105,7 +106,7 @@ export function renderTextTable(
     minWidths = [],
     shrinkable = [],
     truncate = false,
-    hideHeaders = false,
+    hideHeaders = options.hideHeaders ?? headers.every((h) => h.trim() === ""),
     rowSeparator = false,
   } = options;
 

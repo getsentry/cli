@@ -131,10 +131,29 @@ describe("renderTextTable", () => {
       expect(topBorderHide).toBe(topBorderShow);
     });
 
-    test("hideHeaders: false (default) includes header row", () => {
+    test("auto-hides headers when all cells are empty", () => {
+      const out = renderTextTable(["", ""], [["Key", "Val"]]);
+      expect(out).toContain("Key");
+      expect(out).toContain("Val");
+      // Should auto-hide: only 1 content line (data row), no empty header row
+      const lines = out.split("\n").filter((l) => l.includes("\u2502"));
+      expect(lines).toHaveLength(1);
+    });
+
+    test("does not auto-hide when headers have content", () => {
       const out = renderTextTable(["H1", "H2"], [["d1", "d2"]]);
       expect(out).toContain("H1");
       expect(out).toContain("H2");
+    });
+
+    test("explicit hideHeaders: false overrides auto-detection", () => {
+      const out = renderTextTable(["", ""], [["Key", "Val"]], {
+        hideHeaders: false,
+      });
+      // Empty header row should be visible (explicit override)
+      const lines = out.split("\n").filter((l) => l.includes("\u2502"));
+      // 2 content lines: empty header + data row
+      expect(lines).toHaveLength(2);
     });
   });
 
