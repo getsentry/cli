@@ -363,29 +363,35 @@ type ListCommandFunction<
 ) => AsyncGenerator<unknown, CommandReturn | void, undefined>;
 
 /**
+ * Options for controlling which flags {@link buildListCommand} auto-injects.
+ *
+ * By default, `buildListCommand` adds `--fresh`, `--cursor`, and their aliases
+ * (`-f`, `-c`). Use these options to opt out when a command has conflicts.
+ */
+export type ListCommandOptions = {
+  /** Skip injecting `--cursor` flag and `-c` alias (e.g., log list uses streaming). */
+  noCursorFlag?: boolean;
+  /** Skip injecting `-f` alias for `--fresh` (e.g., log list uses `-f` for `--follow`). */
+  noFreshAlias?: boolean;
+};
+
+/**
  * Build a Stricli command for a list endpoint with automatic plural-alias
- * interception.
+ * interception and common flag injection.
  *
- * This is a drop-in replacement for `buildCommand` that wraps the command
- * function to intercept subcommand names passed through plural aliases.
- * For example, when `sentry projects list` passes "list" as a positional
- * target to the project list command, it is intercepted and treated as
- * auto-detect mode with a command-specific hint on stderr.
+ * This is a drop-in replacement for `buildCommand` that:
+ * 1. Intercepts subcommand names passed through plural aliases
+ * 2. Auto-injects `--fresh` and `--cursor` flags (unless already defined)
+ * 3. Auto-injects `-f` and `-c` aliases (with opt-outs via `options`)
+ * 4. Auto-calls `applyFreshFlag(flags)` before the command function runs
  *
- * Usage:
- * ```ts
- * // Before:
- * import { buildCommand } from "../../lib/command.js";
- * export const listCommand = buildCommand({ ... });
- *
- * // After:
- * import { buildListCommand } from "../../lib/list-command.js";
- * export const listCommand = buildListCommand("project", { ... });
- * ```
+ * Commands that define their own `cursor` or `fresh` flags (e.g., with a
+ * custom `brief`) keep theirs — auto-injection skips flags already present.
  *
  * @param routeName - Singular route name (e.g. "project", "issue") for the
  *   hint message and subcommand lookup
  * @param builderArgs - Same arguments as `buildCommand` from `lib/command.js`
+ * @param options - Control which flags are auto-injected
  */
 export function buildListCommand<
   const FLAGS extends BaseFlags = NonNullable<unknown>,
@@ -402,12 +408,50 @@ export function buildListCommand<
     readonly func: ListCommandFunction<FLAGS, ARGS, CONTEXT>;
     // biome-ignore lint/suspicious/noExplicitAny: OutputConfig is generic but type is erased at the builder level
     readonly output?: OutputConfig<any>;
-  }
+  },
+  options?: ListCommandOptions
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
 
+  // Auto-inject common flags and aliases into parameters
+  const params = (builderArgs.parameters ?? {}) as Record<string, unknown>;
+  const existingFlags = (params.flags ?? {}) as Record<string, unknown>;
+  const existingAliases = (params.aliases ?? {}) as Record<string, string>;
+
+  const mergedFlags = { ...existingFlags };
+  const mergedAliases = { ...existingAliases };
+
+  // Always inject --fresh unless the command already defines it
+  if (!("fresh" in mergedFlags)) {
+    mergedFlags.fresh = FRESH_FLAG;
+  }
+
+  // Inject --cursor unless opted out or already defined
+  if (!(options?.noCursorFlag || "cursor" in mergedFlags)) {
+    mergedFlags.cursor = LIST_CURSOR_FLAG;
+  }
+
+  // Inject -f alias unless opted out or already defined
+  if (!(options?.noFreshAlias || "f" in mergedAliases)) {
+    mergedAliases.f = "fresh";
+  }
+
+  // Inject -c alias unless cursor is opted out or already defined
+  if (!(options?.noCursorFlag || "c" in mergedAliases)) {
+    mergedAliases.c = "cursor";
+  }
+
+  const mergedParams = {
+    ...params,
+    flags: mergedFlags,
+    aliases: mergedAliases,
+  };
+
   // biome-ignore lint/suspicious/noExplicitAny: Stricli's CommandFunction type is complex
   const wrappedFunc = function (this: CONTEXT, flags: FLAGS, ...args: any[]) {
+    // Auto-apply fresh flag before command runs
+    applyFreshFlag(flags as unknown as { readonly fresh: boolean });
+
     // The first positional arg is always the target (org/project pattern).
     // Intercept it to handle plural alias confusion.
     if (
@@ -427,6 +471,7 @@ export function buildListCommand<
 
   return buildCommand({
     ...builderArgs,
+    parameters: mergedParams,
     func: wrappedFunc,
     output: builderArgs.output,
   });
@@ -513,10 +558,8 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       positional: LIST_TARGET_POSITIONAL,
       flags: {
         limit: buildListLimitFlag(config.entityPlural),
-        cursor: LIST_CURSOR_FLAG,
-        fresh: FRESH_FLAG,
       },
-      aliases: { ...LIST_BASE_ALIASES, ...FRESH_ALIASES },
+      aliases: LIST_BASE_ALIASES,
     },
     async *func(
       this: SentryContext,
@@ -529,7 +572,6 @@ export function buildOrgListCommand<TEntity, TWithOrg>(
       },
       target?: string
     ) {
-      applyFreshFlag(flags);
       const { cwd } = this;
       const parsed = parseOrgProjectArg(target);
       const result = await dispatchOrgScopedList({

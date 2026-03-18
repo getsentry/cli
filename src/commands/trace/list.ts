@@ -17,11 +17,7 @@ import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
-  applyFreshFlag,
   buildListCommand,
-  FRESH_ALIASES,
-  FRESH_FLAG,
-  LIST_CURSOR_FLAG,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   TARGET_PATTERN_NOTE,
@@ -227,20 +223,15 @@ export const listCommand = buildListCommand("trace", {
         default: "date" as const,
       },
       period: LIST_PERIOD_FLAG,
-      cursor: LIST_CURSOR_FLAG,
-      fresh: FRESH_FLAG,
     },
     aliases: {
-      ...FRESH_ALIASES,
       ...PERIOD_ALIASES,
       n: "limit",
       q: "query",
       s: "sort",
-      c: "cursor",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    applyFreshFlag(flags);
     const { cwd, setContext } = this;
 
     // Resolve org/project from positional arg, config, or DSN auto-detection

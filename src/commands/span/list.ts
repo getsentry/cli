@@ -30,11 +30,7 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
-  applyFreshFlag,
   buildListCommand,
-  FRESH_ALIASES,
-  FRESH_FLAG,
-  LIST_CURSOR_FLAG,
   LIST_PERIOD_FLAG,
   PERIOD_ALIASES,
   TARGET_PATTERN_NOTE,
@@ -497,20 +493,15 @@ export const listCommand = buildListCommand("span", {
         default: DEFAULT_SORT,
       },
       period: LIST_PERIOD_FLAG,
-      cursor: LIST_CURSOR_FLAG,
-      fresh: FRESH_FLAG,
     },
     aliases: {
-      ...FRESH_ALIASES,
       ...PERIOD_ALIASES,
       n: "limit",
       q: "query",
       s: "sort",
-      c: "cursor",
     },
   },
   async *func(this: SentryContext, flags: ListFlags, ...args: string[]) {
-    applyFreshFlag(flags);
     const { cwd, setContext } = this;
     const parsed = parseSpanListArgs(args);
     const modeCtx: ModeContext = { cwd, flags, setContext };

@@ -19,8 +19,8 @@ List repositories
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 ### `sentry team list <org/project>`
 
@@ -28,8 +28,8 @@ List teams
 
 **Flags:**
 - `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
 
 **Examples:**
 
