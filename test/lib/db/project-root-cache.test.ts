@@ -4,7 +4,7 @@
  * Tests for cwd -> projectRoot caching with mtime-based invalidation.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -13,24 +13,16 @@ import {
   getCachedProjectRoot,
   setCachedProjectRoot,
 } from "../../../src/lib/db/project-root-cache.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { cleanupTestDir, useTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
+const getConfigDir = useTestConfigDir("test-project-root-cache-");
 let testProjectDir: string;
 
-beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-project-root-cache-");
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
-
+beforeEach(() => {
   // Create a test project directory with a file (to have a stable mtime)
-  testProjectDir = join(testConfigDir, "project");
+  testProjectDir = join(getConfigDir(), "project");
   mkdirSync(testProjectDir, { recursive: true });
   writeFileSync(join(testProjectDir, "package.json"), "{}");
-});
-
-afterEach(async () => {
-  delete process.env.SENTRY_CLI_CONFIG_DIR;
-  await cleanupTestDir(testConfigDir);
 });
 
 describe("getCachedProjectRoot", () => {
@@ -72,7 +64,7 @@ describe("getCachedProjectRoot", () => {
   });
 
   test("invalidates cache when directory is deleted", async () => {
-    const tempDir = join(testConfigDir, "temp-dir");
+    const tempDir = join(getConfigDir(), "temp-dir");
     mkdirSync(tempDir);
     writeFileSync(join(tempDir, "file.txt"), "test");
 
@@ -136,8 +128,8 @@ describe("setCachedProjectRoot", () => {
 
 describe("clearProjectRootCache", () => {
   test("removes all cached entries", async () => {
-    const dir1 = join(testConfigDir, "dir1");
-    const dir2 = join(testConfigDir, "dir2");
+    const dir1 = join(getConfigDir(), "dir1");
+    const dir2 = join(getConfigDir(), "dir2");
     mkdirSync(dir1);
     mkdirSync(dir2);
 
@@ -170,8 +162,8 @@ describe("clearProjectRootCache", () => {
 
 describe("clearProjectRootCacheFor", () => {
   test("removes only the specified entry", async () => {
-    const dir1 = join(testConfigDir, "dir1");
-    const dir2 = join(testConfigDir, "dir2");
+    const dir1 = join(getConfigDir(), "dir1");
+    const dir2 = join(getConfigDir(), "dir2");
     mkdirSync(dir1);
     mkdirSync(dir2);
 

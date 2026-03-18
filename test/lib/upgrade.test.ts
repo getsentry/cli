@@ -9,6 +9,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+
 import {
   acquireLock,
   getBinaryDownloadUrl,
@@ -33,7 +34,7 @@ import {
   startCleanupOldBinary,
   versionExists,
 } from "../../src/lib/upgrade.js";
-import { useTestConfigDir } from "../helpers.js";
+import { TEST_TMP_DIR, useTestConfigDir } from "../helpers.js";
 
 // Store original fetch for restoration
 let originalFetch: typeof globalThis.fetch;
@@ -853,12 +854,12 @@ describe("isProcessRunning", () => {
 });
 
 describe("acquireLock", () => {
-  const binDir = join(homedir(), ".sentry", "bin");
-  const testLockPath = join(binDir, "test-upgrade.lock");
+  const lockBinDir = join(TEST_TMP_DIR, "upgrade-lock-test");
+  const testLockPath = join(lockBinDir, "test-upgrade.lock");
 
   beforeEach(() => {
     // Ensure directory exists
-    mkdirSync(binDir, { recursive: true });
+    mkdirSync(lockBinDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -940,11 +941,12 @@ describe("acquireLock", () => {
 });
 
 describe("releaseLock", () => {
-  const testLockPath = join(homedir(), ".sentry", "bin", "test-release.lock");
+  const releaseBinDir = join(TEST_TMP_DIR, "release-lock-test");
+  const testLockPath = join(releaseBinDir, "test-release.lock");
 
   test("removes lock file", async () => {
     // Create a lock file
-    mkdirSync(join(homedir(), ".sentry", "bin"), { recursive: true });
+    mkdirSync(releaseBinDir, { recursive: true });
     writeFileSync(testLockPath, String(process.pid));
 
     // Verify it exists
@@ -964,7 +966,8 @@ describe("releaseLock", () => {
 });
 
 describe("executeUpgrade with curl method", () => {
-  const binDir = join(homedir(), ".sentry", "bin");
+  const upgradeBinDir = join(TEST_TMP_DIR, "upgrade-curl-test");
+  const upgradeInstallPath = join(upgradeBinDir, "sentry");
 
   // Compute paths fresh for each test to avoid stale database state issues
   function getTestPaths() {
@@ -972,10 +975,14 @@ describe("executeUpgrade with curl method", () => {
   }
 
   beforeEach(() => {
-    // Clear any stored install info to ensure we use default paths
+    // Redirect getCurlInstallPaths() to temp dir instead of ~/.sentry/bin/
     clearInstallInfo();
-    // Ensure directory exists
-    mkdirSync(binDir, { recursive: true });
+    mkdirSync(upgradeBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: upgradeInstallPath,
+      version: "0.0.0",
+    });
   });
 
   afterEach(async () => {
@@ -1233,7 +1240,8 @@ describe("fetchLatestNightlyVersion", () => {
 });
 
 describe("executeUpgrade with curl method (nightly)", () => {
-  const binDir = join(homedir(), ".sentry", "bin");
+  const nightlyBinDir = join(TEST_TMP_DIR, "upgrade-nightly-test");
+  const nightlyInstallPath = join(nightlyBinDir, "sentry");
 
   function getTestPaths() {
     return getCurlInstallPaths();
@@ -1241,7 +1249,12 @@ describe("executeUpgrade with curl method (nightly)", () => {
 
   beforeEach(() => {
     clearInstallInfo();
-    mkdirSync(binDir, { recursive: true });
+    mkdirSync(nightlyBinDir, { recursive: true });
+    setInstallInfo({
+      method: "curl",
+      path: nightlyInstallPath,
+      version: "0.0.0",
+    });
   });
 
   afterEach(async () => {

@@ -18,17 +18,14 @@ import {
   updateCachedResolution,
 } from "../../../src/lib/db/dsn-cache.js";
 import type { DetectedDsn } from "../../../src/lib/dsn/types.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
+const getConfigDir = useTestConfigDir("test-dsn-cache-");
 let testProjectDir: string;
 
-beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-dsn-cache-");
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
-
+beforeEach(() => {
   // Create a test project directory with source files
-  testProjectDir = join(testConfigDir, "project");
+  testProjectDir = join(getConfigDir(), "project");
   mkdirSync(testProjectDir, { recursive: true });
   mkdirSync(join(testProjectDir, "src"), { recursive: true });
   writeFileSync(
@@ -37,10 +34,8 @@ beforeEach(async () => {
   );
 });
 
-afterEach(async () => {
+afterEach(() => {
   enableDsnCache();
-  delete process.env.SENTRY_CLI_CONFIG_DIR;
-  await cleanupTestDir(testConfigDir);
 });
 
 // =============================================================================
@@ -153,8 +148,8 @@ describe("clearDsnCache", () => {
   });
 
   test("removes all caches when no directory specified", async () => {
-    const dir1 = join(testConfigDir, "dir1");
-    const dir2 = join(testConfigDir, "dir2");
+    const dir1 = join(getConfigDir(), "dir1");
+    const dir2 = join(getConfigDir(), "dir2");
     mkdirSync(dir1);
     mkdirSync(dir2);
 
