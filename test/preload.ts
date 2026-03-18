@@ -5,13 +5,19 @@
  * Runs before all tests via bunfig.toml preload.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 // Load .env.local for test credentials (SENTRY_TEST_*)
 // This mimics what would happen in CI where secrets are injected as env vars
-const envLocalPath = resolve(import.meta.dir, "../.env.local");
+const envLocalPath = join(import.meta.dir, "../.env.local");
 if (existsSync(envLocalPath)) {
   const content = readFileSync(envLocalPath, "utf-8");
   for (const line of content.split("\n")) {
@@ -43,8 +49,33 @@ if (existsSync(envLocalPath)) {
   }
 }
 
-// Create isolated test directory
-const testDir = join(homedir(), `.sentry-cli-test-${process.pid}`);
+import { TEST_TMP_DIR } from "./constants.js";
+
+// Wipe stale test temp leftovers from previous runs (or crashes).
+// This is the primary cleanup mechanism — individual test afterEach hooks
+// clean up on success, but crashes/SIGKILL leave dirs behind.
+try {
+  rmSync(TEST_TMP_DIR, { recursive: true, force: true });
+} catch {
+  // Ignore — directory may not exist on first run
+}
+mkdirSync(TEST_TMP_DIR, { recursive: true });
+
+// One-time migration: clean up old $HOME/.sentry-cli-test-* dirs left by
+// the previous test infrastructure. Safe to remove after a few months.
+try {
+  const home = homedir();
+  for (const entry of readdirSync(home)) {
+    if (entry.startsWith(".sentry-cli-test-")) {
+      rmSync(join(home, entry), { recursive: true, force: true });
+    }
+  }
+} catch {
+  // Ignore — home dir may not be listable in some CI environments
+}
+
+// Create isolated test directory under OS temp (not $HOME)
+const testDir = join(TEST_TMP_DIR, `preload-${process.pid}`);
 mkdirSync(testDir, { recursive: true });
 
 // Override config directory for all tests

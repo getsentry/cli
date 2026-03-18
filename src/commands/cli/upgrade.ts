@@ -379,6 +379,7 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
   const args = [
     "cli",
     "setup",
+    "--quiet",
     "--method",
     method,
     "--channel",

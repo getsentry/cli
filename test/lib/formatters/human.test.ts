@@ -756,7 +756,7 @@ describe("formatUpgradeResult", () => {
     }
   }
 
-  test("renders metadata table with method and channel", () => {
+  test("renders compact metadata line with method and channel", () => {
     withPlain(() => {
       const result = formatUpgradeResult({
         action: "upgraded",
@@ -766,12 +766,28 @@ describe("formatUpgradeResult", () => {
         method: "curl",
         forced: false,
       });
-      expect(result).toContain("| **Method** | curl |");
-      expect(result).toContain("| **Channel** | stable |");
+      expect(result).toContain("Method: curl");
+      expect(result).toContain("Channel: stable");
     });
   });
 
-  test("renders nightly channel in metadata table", () => {
+  test("includes from-version in upgraded action", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "upgraded",
+        currentVersion: "0.5.0",
+        targetVersion: "0.6.0",
+        channel: "stable",
+        method: "curl",
+        forced: false,
+      });
+      expect(result).toContain("Upgraded to");
+      expect(result).toContain("0.6.0");
+      expect(result).toContain("(from 0.5.0)");
+    });
+  });
+
+  test("renders nightly channel in metadata line", () => {
     withPlain(() => {
       const result = formatUpgradeResult({
         action: "checked",
@@ -781,12 +797,12 @@ describe("formatUpgradeResult", () => {
         method: "npm",
         forced: false,
       });
-      expect(result).toContain("| **Method** | npm |");
-      expect(result).toContain("| **Channel** | nightly |");
+      expect(result).toContain("Method: npm");
+      expect(result).toContain("Channel: nightly");
     });
   });
 
-  test("up-to-date action includes metadata table", () => {
+  test("up-to-date action includes compact metadata", () => {
     withPlain(() => {
       const result = formatUpgradeResult({
         action: "up-to-date",
@@ -797,8 +813,39 @@ describe("formatUpgradeResult", () => {
         forced: false,
       });
       expect(result).toContain("Already up to date");
-      expect(result).toContain("| **Method** | brew |");
-      expect(result).toContain("| **Channel** | stable |");
+      expect(result).toContain("Method: brew");
+      expect(result).toContain("Channel: stable");
+    });
+  });
+
+  test("offline upgrade shows offline note instead of from-version", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "upgraded",
+        currentVersion: "0.5.0",
+        targetVersion: "0.6.0",
+        channel: "stable",
+        method: "curl",
+        forced: false,
+        offline: true,
+      });
+      expect(result).toContain("(offline, from cache)");
+      expect(result).not.toContain("(from 0.5.0)");
+    });
+  });
+
+  test("does not include from-version when versions match", () => {
+    withPlain(() => {
+      const result = formatUpgradeResult({
+        action: "upgraded",
+        currentVersion: "0.5.0",
+        targetVersion: "0.5.0",
+        channel: "stable",
+        method: "curl",
+        forced: true,
+      });
+      expect(result).toContain("Upgraded to");
+      expect(result).not.toContain("(from");
     });
   });
 });

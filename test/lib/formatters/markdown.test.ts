@@ -703,6 +703,40 @@ describe("renderMarkdown blocks (rendered mode)", () => {
     expect(stripAnsi(result)).toContain("1");
     expect(stripAnsi(result)).toContain("2");
   });
+
+  test("hides empty header row in rendered KV tables", () => {
+    // mdKvTable without heading produces `| | |` empty headers
+    const md = mdKvTable([
+      ["Method", "curl"],
+      ["Channel", "stable"],
+    ]);
+    const result = rendered(md);
+    const plain = stripAnsi(result);
+
+    // Data rows should be present
+    expect(plain).toContain("Method");
+    expect(plain).toContain("curl");
+    expect(plain).toContain("Channel");
+    expect(plain).toContain("stable");
+
+    // Count content rows (lines containing │ vertical border)
+    const contentLines = plain.split("\n").filter((l) => l.includes("\u2502"));
+    // Should have exactly 2 data rows, no empty header row
+    expect(contentLines).toHaveLength(2);
+  });
+
+  test("shows header row when headers are non-empty", () => {
+    const md = "| Key | Value |\n|---|---|\n| a | b |";
+    const result = rendered(md);
+    const plain = stripAnsi(result);
+
+    expect(plain).toContain("Key");
+    expect(plain).toContain("Value");
+
+    // Content rows: header + data = 3 minimum
+    const contentLines = plain.split("\n").filter((l) => l.includes("\u2502"));
+    expect(contentLines.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 // ---------------------------------------------------------------------------

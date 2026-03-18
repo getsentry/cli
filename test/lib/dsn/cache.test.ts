@@ -4,37 +4,18 @@
  * Tests for DSN detection caching functionality.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
 import {
   clearDsnCache,
   getCachedDsn,
   setCachedDsn,
   updateCachedResolution,
 } from "../../../src/lib/db/dsn-cache.js";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-// Use a unique test config directory
-const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-cache");
+useTestConfigDir("test-dsn-cache-");
 
 describe("DSN Cache", () => {
-  beforeEach(() => {
-    // Set up test config directory
-    process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
-    mkdirSync(TEST_CONFIG_DIR, { recursive: true });
-  });
-
-  afterEach(() => {
-    // Clean up test config directory
-    try {
-      rmSync(TEST_CONFIG_DIR, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
-  });
-
   describe("getCachedDsn", () => {
     test("returns undefined when no cache exists", async () => {
       const result = await getCachedDsn("/some/path");

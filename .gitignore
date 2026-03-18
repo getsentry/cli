@@ -17,7 +17,6 @@ coverage-isolated
 *.lcov
 
 # test artifacts
-.test-tmp
 *.junit.xml
 
 # logs

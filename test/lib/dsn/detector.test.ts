@@ -5,45 +5,28 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { clearDsnCache, getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
-import { CONFIG_DIR_ENV_VAR } from "../../../src/lib/db/index.js";
 import {
   detectAllDsns,
   detectDsn,
   getDsnSourceDescription,
 } from "../../../src/lib/dsn/detector.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-// Test helpers
-function createTempDir(): string {
-  const dir = join(
-    homedir(),
-    `.sentry-cli-test-detector-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function cleanupDir(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-}
-
-// Test config directory
-const TEST_CONFIG_DIR = join(homedir(), ".sentry-cli-test-detector-config");
+const getConfigDir = useTestConfigDir("test-dsn-detector-");
 
 describe("DSN Detector (New Module)", () => {
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = createTempDir();
-    process.env[CONFIG_DIR_ENV_VAR] = TEST_CONFIG_DIR;
-    mkdirSync(TEST_CONFIG_DIR, { recursive: true });
+    // Create project dir inside the config dir managed by useTestConfigDir.
+    // Add .git to create a project root boundary so detectDsn doesn't
+    // walk up into the real project and find its DSNs.
+    testDir = join(getConfigDir(), "project");
+    mkdirSync(testDir, { recursive: true });
+    mkdirSync(join(testDir, ".git"), { recursive: true });
     // Clear any cached DSN for the test directory
     await clearDsnCache(testDir);
     // Clear SENTRY_DSN env var
@@ -52,8 +35,6 @@ describe("DSN Detector (New Module)", () => {
 
   afterEach(() => {
     delete process.env.SENTRY_DSN;
-    cleanupDir(testDir);
-    cleanupDir(TEST_CONFIG_DIR);
   });
 
   describe("detectDsn with caching", () => {

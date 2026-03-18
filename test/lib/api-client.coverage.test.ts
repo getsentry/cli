@@ -40,27 +40,23 @@ import {
   updateIssueStatus,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR } from "../../src/lib/db/index.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import { ApiError, AuthError } from "../../src/lib/errors.js";
-import { cleanupTestDir, createTestConfigDir, mockFetch } from "../helpers.js";
+import { mockFetch, useTestConfigDir } from "../helpers.js";
 
 // --- Shared test setup ---
 
-let testConfigDir: string;
+useTestConfigDir("test-api-coverage-");
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-api-coverage-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
   originalFetch = globalThis.fetch;
   await setAuthToken("test-token");
   await setOrgRegion("test-org", "https://sentry.io");
 });
 
-afterEach(async () => {
+afterEach(() => {
   globalThis.fetch = originalFetch;
-  await cleanupTestDir(testConfigDir);
 });
 
 // --- Helpers ---

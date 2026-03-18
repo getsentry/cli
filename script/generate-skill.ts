@@ -1,17 +1,25 @@
 #!/usr/bin/env bun
 /**
- * Generate SKILL.md from Stricli Command Metadata and Docs
+ * Generate Skill Files from Stricli Command Metadata and Docs
  *
  * Introspects the CLI's route tree and merges with documentation
  * to generate structured documentation for AI agents.
+ *
+ * Produces:
+ *   - SKILL.md: compact index with agent guidance + command summaries
+ *   - references/*.md: full per-group command documentation
+ *   - index.json: skill discovery manifest for .well-known
  *
  * Usage:
  *   bun run script/generate-skill.ts
  *
  * Output:
  *   plugins/sentry-cli/skills/sentry-cli/SKILL.md
+ *   plugins/sentry-cli/skills/sentry-cli/references/*.md
+ *   docs/public/.well-known/skills/index.json
  */
 
+import { rmSync } from "node:fs";
 import { routes } from "../src/app.js";
 import type {
   CommandInfo,
@@ -26,8 +34,17 @@ import {
   isRouteMap,
 } from "../src/lib/introspect.js";
 
-const OUTPUT_PATH = "plugins/sentry-cli/skills/sentry-cli/SKILL.md";
+const SKILL_DIR = "plugins/sentry-cli/skills/sentry-cli";
+const OUTPUT_PATH = `${SKILL_DIR}/SKILL.md`;
+const REFERENCES_DIR = `${SKILL_DIR}/references`;
+const INDEX_JSON_PATH = "docs/public/.well-known/skills/index.json";
 const DOCS_PATH = "docs/src/content/docs";
+
+/** Read version from package.json for YAML frontmatter */
+async function getPackageVersion(): Promise<string> {
+  const pkg = await Bun.file("package.json").json();
+  return pkg.version;
+}
 
 /** Regex to match YAML frontmatter at the start of a file */
 const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---\n/;
@@ -38,83 +55,142 @@ const CODE_BLOCK_REGEX = /```(\w*)\n([\s\S]*?)```/g;
 /** Regex to extract npm command from PackageManagerCode Astro component (handles multi-line) */
 const PACKAGE_MANAGER_REGEX = /<PackageManagerCode[\s\S]*?npm="([^"]+)"/;
 
+/**
+ * Skill description used in YAML frontmatter and index.json.
+ * Kept as a constant to ensure consistency across all generated files.
+ */
+const SKILL_DESCRIPTION =
+  "Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.";
+
+// ---------------------------------------------------------------------------
+// Route-to-Reference-File Mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps route names to reference file names.
+ * Related routes are grouped into a single file (e.g., trace + span → traces.md).
+ * Routes not listed here get their own file based on route name.
+ */
+const ROUTE_TO_REFERENCE: Record<string, string> = {
+  auth: "auth",
+  org: "organizations",
+  project: "projects",
+  issue: "issues",
+  event: "events",
+  api: "api",
+  dashboard: "dashboards",
+  team: "teams",
+  repo: "teams",
+  log: "logs",
+  trace: "traces",
+  span: "traces",
+  trial: "trials",
+  cli: "setup",
+  init: "setup",
+  schema: "setup",
+};
+
+/** Display titles for reference file groups */
+const REFERENCE_TITLES: Record<string, string> = {
+  auth: "Authentication Commands",
+  organizations: "Organization Commands",
+  projects: "Project Commands",
+  issues: "Issue Commands",
+  events: "Event Commands",
+  api: "API Command",
+  dashboards: "Dashboard Commands",
+  teams: "Team & Repository Commands",
+  logs: "Log Commands",
+  traces: "Trace & Span Commands",
+  trials: "Trial Commands",
+  setup: "CLI Setup Commands",
+};
+
+/** Brief descriptions for reference file frontmatter */
+const REFERENCE_DESCRIPTIONS: Record<string, string> = {
+  auth: "Authenticate with Sentry via OAuth or API tokens",
+  organizations: "List and view Sentry organizations",
+  projects: "Create, list, and manage Sentry projects",
+  issues: "List, view, and analyze Sentry issues with AI",
+  events: "View individual error events",
+  api: "Make arbitrary Sentry API requests",
+  dashboards: "List, view, and create Sentry dashboards",
+  teams: "List teams and repositories in a Sentry organization",
+  logs: "List and stream logs from Sentry projects",
+  traces: "List and inspect traces and spans for performance analysis",
+  trials: "List and start product trials",
+  setup: "Configure the CLI, install integrations, and manage upgrades",
+};
+
+/**
+ * Preferred display order for routes in the SKILL.md index.
+ * Routes not listed here appear after these in alphabetical order.
+ */
+const ROUTE_ORDER = ["help", "auth", "org", "project", "issue", "event", "api"];
+
+/**
+ * Flags that are globally injected and should be omitted from compact index
+ * and only mentioned once in the Global Options section.
+ */
+const GLOBAL_FLAG_NAMES = new Set([
+  "json",
+  "fields",
+  "help",
+  "helpAll",
+  "log-level",
+]);
+
 // ---------------------------------------------------------------------------
 // Markdown Parsing Utilities
 // ---------------------------------------------------------------------------
 
-/**
- * Strip YAML frontmatter from markdown content
- */
+/** Strip YAML frontmatter from markdown content */
 function stripFrontmatter(markdown: string): string {
   const match = markdown.match(FRONTMATTER_REGEX);
   return match ? markdown.slice(match[0].length) : markdown;
 }
 
-/**
- * Strip MDX/Astro import statements and JSX components
- */
+/** Strip MDX/Astro import statements and JSX components */
 function stripMdxComponents(markdown: string): string {
-  // Remove import statements
   let result = markdown.replace(/^import\s+.*?;\s*$/gm, "");
-
-  // Remove export statements
   result = result.replace(/^export\s+.*?;\s*$/gm, "");
-
-  // Remove JSX-style components (both self-closing and with children)
-  // This handles <Component ... /> and <Component>...</Component>
   result = result.replace(/<[A-Z][a-zA-Z]*[^>]*\/>/g, "");
   result = result.replace(
     /<[A-Z][a-zA-Z]*[^>]*>[\s\S]*?<\/[A-Z][a-zA-Z]*>/g,
     ""
   );
-
-  // Clean up excessive blank lines
   result = result.replace(/\n{3,}/g, "\n\n");
-
   return result.trim();
 }
 
-/**
- * Extract a specific section from markdown by heading
- */
+/** Extract a specific section from markdown by heading */
 function extractSection(markdown: string, heading: string): string | null {
-  // Match heading at any level (##, ###, etc.)
   const headingPattern = new RegExp(
     `^(#{1,6})\\s+${escapeRegex(heading)}\\s*$`,
     "m"
   );
   const match = markdown.match(headingPattern);
-
   if (!match || match.index === undefined) {
     return null;
   }
-
   const headingLevel = match[1].length;
   const startIndex = match.index + match[0].length;
-
-  // Find the next heading of same or higher level
   const nextHeadingPattern = new RegExp(`^#{1,${headingLevel}}\\s+`, "m");
   const remainingContent = markdown.slice(startIndex);
   const nextMatch = remainingContent.match(nextHeadingPattern);
-
   const endIndex = nextMatch?.index
     ? startIndex + nextMatch.index
     : markdown.length;
-
   return markdown.slice(startIndex, endIndex).trim();
 }
 
-/**
- * Extract all code blocks from markdown
- */
+/** Extract all code blocks from markdown */
 function extractCodeBlocks(
   markdown: string,
   language?: string
 ): { code: string; lang: string }[] {
   const blocks: { code: string; lang: string }[] = [];
-  // Create a new regex instance for each call to reset lastIndex
   const pattern = new RegExp(CODE_BLOCK_REGEX.source, CODE_BLOCK_REGEX.flags);
-
   let match = pattern.exec(markdown);
   while (match !== null) {
     const lang = match[1] || "";
@@ -124,13 +200,10 @@ function extractCodeBlocks(
     }
     match = pattern.exec(markdown);
   }
-
   return blocks;
 }
 
-/**
- * Escape special regex characters in a string
- */
+/** Escape special regex characters in a string */
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -139,32 +212,24 @@ function escapeRegex(str: string): string {
 // Documentation Loading
 // ---------------------------------------------------------------------------
 
-/**
- * Load and parse a documentation file
- */
+/** Load and parse a documentation file */
 async function loadDoc(relativePath: string): Promise<string | null> {
   const fullPath = `${DOCS_PATH}/${relativePath}`;
   const file = Bun.file(fullPath);
-
   if (!(await file.exists())) {
     return null;
   }
-
   const content = await file.text();
   return stripMdxComponents(stripFrontmatter(content));
 }
 
-/**
- * Extract npm command from PackageManagerCode Astro component
- */
+/** Extract npm command from PackageManagerCode Astro component */
 function extractPackageManagerCommand(rawContent: string): string | null {
   const match = rawContent.match(PACKAGE_MANAGER_REGEX);
   return match ? match[1] : null;
 }
 
-/**
- * Generate installation section from docs content
- */
+/** Generate installation section from docs content */
 function generateInstallSection(
   installSection: string,
   rawContent: string
@@ -172,22 +237,13 @@ function generateInstallSection(
   const lines: string[] = [];
   lines.push("### Installation");
   lines.push("");
-
-  // Get bash code blocks (install script)
   const codeBlocks = extractCodeBlocks(installSection, "bash");
-
-  // Also extract npm command from PackageManagerCode component in raw content
   const npmCommand = extractPackageManagerCommand(rawContent);
-
   if (codeBlocks.length > 0 || npmCommand) {
     lines.push("```bash");
-
-    // Add install script from code blocks
     for (const block of codeBlocks) {
       lines.push(block.code);
     }
-
-    // Add package manager command if found
     if (npmCommand) {
       if (codeBlocks.length > 0) {
         lines.push("");
@@ -195,21 +251,16 @@ function generateInstallSection(
       }
       lines.push(npmCommand);
     }
-
     lines.push("```");
   }
-
   return lines;
 }
 
-/**
- * Generate authentication section from docs content
- */
+/** Generate authentication section from docs content */
 function generateAuthSection(authSection: string): string[] {
   const lines: string[] = [];
   lines.push("### Authentication");
   lines.push("");
-
   const codeBlocks = extractCodeBlocks(authSection, "bash");
   if (codeBlocks.length > 0) {
     lines.push("```bash");
@@ -218,50 +269,36 @@ function generateAuthSection(authSection: string): string[] {
     }
     lines.push("```");
   }
-
   return lines;
 }
 
-/**
- * Load prerequisites (installation + authentication) from getting-started.mdx
- */
+/** Load prerequisites (installation + authentication) from getting-started.mdx */
 async function loadPrerequisites(): Promise<string> {
   const fullPath = `${DOCS_PATH}/getting-started.mdx`;
   const file = Bun.file(fullPath);
-
   if (!(await file.exists())) {
     return getDefaultPrerequisites();
   }
-
   const rawContent = await file.text();
   const content = stripMdxComponents(stripFrontmatter(rawContent));
-
   const lines: string[] = [];
   lines.push("## Prerequisites");
   lines.push("");
   lines.push("The CLI must be installed and authenticated before use.");
   lines.push("");
-
-  // Extract and add Installation section
   const installSection = extractSection(content, "Installation");
   if (installSection) {
     lines.push(...generateInstallSection(installSection, rawContent));
   }
-
   lines.push("");
-
-  // Extract and add Authentication section
   const authSection = extractSection(content, "Authentication");
   if (authSection) {
     lines.push(...generateAuthSection(authSection));
   }
-
   return lines.join("\n");
 }
 
-/**
- * Default prerequisites if docs aren't available
- */
+/** Default prerequisites if docs aren't available */
 function getDefaultPrerequisites(): string {
   return `## Prerequisites
 
@@ -295,31 +332,23 @@ sentry auth status
 const COMMAND_SECTION_REGEX =
   /###\s+`(sentry\s+\S+(?:\s+\S+)?)`\s*\n([\s\S]*?)(?=###\s+`|$)/g;
 
-/**
- * Load examples for a specific command from docs
- */
+/** Load examples for a specific command from docs */
 async function loadCommandExamples(
   commandGroup: string
 ): Promise<Map<string, string[]>> {
   const docContent = await loadDoc(`commands/${commandGroup}.md`);
   const examples = new Map<string, string[]>();
-
   if (!docContent) {
     return examples;
   }
-
-  // Find all command sections (### `sentry ...`)
   const commandPattern = new RegExp(
     COMMAND_SECTION_REGEX.source,
     COMMAND_SECTION_REGEX.flags
   );
   let match = commandPattern.exec(docContent);
-
   while (match !== null) {
     const commandPath = match[1];
     const sectionContent = match[2];
-
-    // Extract bash code blocks from this section
     const codeBlocks = extractCodeBlocks(sectionContent, "bash");
     if (codeBlocks.length > 0) {
       examples.set(
@@ -329,33 +358,35 @@ async function loadCommandExamples(
     }
     match = commandPattern.exec(docContent);
   }
-
   return examples;
 }
 
-/**
- * Load supplementary content from commands/index.md
- */
+/** Load supplementary content from commands/index.md */
 async function loadCommandsOverview(): Promise<{
   globalOptions: string;
   jsonOutput: string;
   webFlag: string;
 } | null> {
   const content = await loadDoc("commands/index.md");
-
   if (!content) {
     return null;
   }
-
   const globalSection = extractSection(content, "Global Options");
   const jsonSection = extractSection(content, "JSON Output");
   const webSection = extractSection(content, "Opening in Browser");
-
   return {
     globalOptions: globalSection || "",
     jsonOutput: jsonSection || "",
     webFlag: webSection || "",
   };
+}
+
+/**
+ * Load agent guidance content from docs/src/content/docs/agent-guidance.md.
+ * Returns the body content (frontmatter and title stripped).
+ */
+async function loadAgentGuidance(): Promise<string | null> {
+  return await loadDoc("agent-guidance.md");
 }
 
 // ---------------------------------------------------------------------------
@@ -368,18 +399,13 @@ async function loadCommandsOverview(): Promise<{
  */
 async function extractRoutes(routeMap: RouteMap): Promise<RouteInfo[]> {
   const result: RouteInfo[] = [];
-
   for (const entry of routeMap.getAllEntries()) {
     if (entry.hidden) {
       continue;
     }
-
     const routeName = entry.name.original;
     const target = entry.target;
-
-    // Load examples from docs for this route
     const docExamples = await loadCommandExamples(routeName);
-
     if (isRouteMap(target)) {
       result.push({
         name: routeName,
@@ -396,78 +422,72 @@ async function extractRoutes(routeMap: RouteMap): Promise<RouteInfo[]> {
       });
     }
   }
-
   return result;
 }
 
 // ---------------------------------------------------------------------------
-// Markdown Generation
+// Sorting
 // ---------------------------------------------------------------------------
 
-/**
- * Generate the front matter for the skill file
- */
-function generateFrontMatter(): string {
-  return `---
-name: sentry-cli
-description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
----`;
+/** Sort routes by the preferred display order */
+function sortRoutes(routeInfos: RouteInfo[]): RouteInfo[] {
+  return [...routeInfos].sort((a, b) => {
+    const aIndex = ROUTE_ORDER.indexOf(a.name);
+    const bIndex = ROUTE_ORDER.indexOf(b.name);
+    const aOrder = aIndex === -1 ? 999 : aIndex;
+    const bOrder = bIndex === -1 ? 999 : bIndex;
+    return aOrder - bOrder;
+  });
 }
 
-/**
- * Format a flag for display in documentation
- */
+// ---------------------------------------------------------------------------
+// Markdown Formatting Helpers
+// ---------------------------------------------------------------------------
+
+/** Format a flag for display in documentation */
 function formatFlag(flag: FlagInfo, aliases: Record<string, string>): string {
   const parts: string[] = [];
-
-  // Find alias for this flag
   const alias = Object.entries(aliases).find(([, v]) => v === flag.name)?.[0];
-
-  // Build flag syntax
   let syntax = `--${flag.name}`;
   if (alias) {
     syntax = `-${alias}, ${syntax}`;
   }
-
   if ((flag.kind === "parsed" || flag.kind === "enum") && !flag.variadic) {
     syntax += " <value>";
   } else if (flag.variadic) {
     syntax += " <value>...";
   }
-
   parts.push(syntax);
-
-  // Add description
   if (flag.brief) {
     parts.push(flag.brief);
   }
-
-  // Add default if present
   if (flag.default !== undefined && flag.kind !== "boolean") {
     parts.push(`(default: ${JSON.stringify(flag.default)})`);
   }
-
   return parts.join(" - ");
 }
 
 /**
- * Generate documentation for a single command
+ * Get the visible, non-global flags for a command.
+ * Excludes hidden flags, help, and globally-injected flags.
  */
-function generateCommandDoc(cmd: CommandInfo): string {
+function getVisibleFlags(cmd: CommandInfo): FlagInfo[] {
+  return cmd.flags.filter((f) => !(f.hidden || GLOBAL_FLAG_NAMES.has(f.name)));
+}
+
+// ---------------------------------------------------------------------------
+// Reference File Generation (full detail)
+// ---------------------------------------------------------------------------
+
+/** Generate full documentation for a single command (used in reference files) */
+function generateFullCommandDoc(cmd: CommandInfo): string {
   const lines: string[] = [];
-
-  // Command signature
   const signature = cmd.positional ? `${cmd.path} ${cmd.positional}` : cmd.path;
-
-  lines.push(`#### \`${signature}\``);
+  lines.push(`### \`${signature}\``);
   lines.push("");
   lines.push(cmd.brief);
 
-  // Flags section — exclude help flags and hidden global flags (e.g. --log-level, --verbose)
-  const visibleFlags = cmd.flags.filter(
-    (f) => !f.hidden && f.name !== "help" && f.name !== "helpAll"
-  );
-
+  const visibleFlags = getVisibleFlags(cmd);
   if (visibleFlags.length > 0) {
     lines.push("");
     lines.push("**Flags:**");
@@ -476,13 +496,11 @@ function generateCommandDoc(cmd: CommandInfo): string {
     }
   }
 
-  // Examples section (from docs)
   if (cmd.examples.length > 0) {
     lines.push("");
     lines.push("**Examples:**");
     lines.push("");
     lines.push("```bash");
-    // Join examples with blank lines between them
     lines.push(cmd.examples.join("\n\n"));
     lines.push("```");
   }
@@ -491,77 +509,121 @@ function generateCommandDoc(cmd: CommandInfo): string {
 }
 
 /**
- * Generate documentation for a route group
+ * Generate a complete reference file for a group of routes.
+ *
+ * @param refName - Reference file key (e.g., "issues", "traces")
+ * @param groupRoutes - Routes belonging to this reference group
+ * @param version - CLI version for frontmatter
  */
-function generateRouteDoc(route: RouteInfo): string {
+function generateReferenceFile(
+  refName: string,
+  groupRoutes: RouteInfo[],
+  version: string
+): string {
+  const title = REFERENCE_TITLES[refName] ?? `${refName} Commands`;
+  const description =
+    REFERENCE_DESCRIPTIONS[refName] ?? `Sentry CLI ${refName} commands`;
+
   const lines: string[] = [];
 
-  // Section header
-  const titleCase = route.name.charAt(0).toUpperCase() + route.name.slice(1);
-  lines.push(`### ${titleCase}`);
-  lines.push("");
-  lines.push(route.brief);
+  // YAML frontmatter
+  lines.push("---");
+  lines.push(`name: sentry-cli-${refName}`);
+  lines.push(`version: ${version}`);
+  lines.push(`description: ${description}`);
+  lines.push("requires:");
+  lines.push('  bins: ["sentry"]');
+  lines.push("  auth: true");
+  lines.push("---");
   lines.push("");
 
-  // Commands in this route
-  for (const cmd of route.commands) {
-    lines.push(generateCommandDoc(cmd));
+  lines.push(`# ${title}`);
+  lines.push("");
+
+  // Brief from each route
+  for (const route of groupRoutes) {
+    lines.push(route.brief);
+    lines.push("");
+  }
+
+  // Full command docs
+  for (const route of groupRoutes) {
+    for (const cmd of route.commands) {
+      lines.push(generateFullCommandDoc(cmd));
+      lines.push("");
+    }
+  }
+
+  // Note about global flags
+  lines.push(
+    "All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags."
+  );
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// SKILL.md Index Generation (compact)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a compact command summary for the SKILL.md index.
+ * Includes the command signature and brief, but NOT full flags or examples.
+ */
+function generateCompactCommandLine(cmd: CommandInfo): string {
+  const signature = cmd.positional ? `${cmd.path} ${cmd.positional}` : cmd.path;
+  return `- \`${signature}\` — ${cmd.brief}`;
+}
+
+/**
+ * Generate the compact command reference section for SKILL.md.
+ * Each route group gets a heading, brief, command list, and a pointer to the reference file.
+ */
+function generateCompactCommandsSection(
+  routeInfos: RouteInfo[],
+  referenceFiles: Map<string, string>
+): string {
+  const lines: string[] = [];
+  lines.push("## Command Reference");
+  lines.push("");
+
+  const sortedRoutes = sortRoutes(routeInfos);
+
+  for (const route of sortedRoutes) {
+    if (route.name === "help") {
+      continue;
+    }
+
+    const titleCase = route.name.charAt(0).toUpperCase() + route.name.slice(1);
+    lines.push(`### ${titleCase}`);
+    lines.push("");
+    lines.push(route.brief);
+    lines.push("");
+
+    for (const cmd of route.commands) {
+      lines.push(generateCompactCommandLine(cmd));
+    }
+
+    // Add reference file pointer (fallback matches groupRoutesByReference)
+    const refName = ROUTE_TO_REFERENCE[route.name] ?? route.name;
+    const refFile = referenceFiles.get(refName);
+    if (refFile) {
+      lines.push("");
+      lines.push(`→ Full flags and examples: \`references/${refFile}\``);
+    }
+
     lines.push("");
   }
 
   return lines.join("\n");
 }
 
-/**
- * Generate the Available Commands section
- */
-function generateCommandsSection(routeInfos: RouteInfo[]): string {
-  const lines: string[] = [];
-
-  lines.push("## Available Commands");
-  lines.push("");
-
-  // Define the order we want routes to appear
-  const routeOrder = [
-    "help",
-    "auth",
-    "org",
-    "project",
-    "issue",
-    "event",
-    "api",
-  ];
-
-  // Sort routes by our preferred order
-  const sortedRoutes = [...routeInfos].sort((a, b) => {
-    const aIndex = routeOrder.indexOf(a.name);
-    const bIndex = routeOrder.indexOf(b.name);
-    const aOrder = aIndex === -1 ? 999 : aIndex;
-    const bOrder = bIndex === -1 ? 999 : bIndex;
-    return aOrder - bOrder;
-  });
-
-  for (const route of sortedRoutes) {
-    // Skip help command from detailed docs (it's self-explanatory)
-    if (route.name === "help") {
-      continue;
-    }
-
-    lines.push(generateRouteDoc(route));
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Generate supplementary sections (Global Options, Output Formats) from docs
- */
+/** Generate supplementary sections (Global Options, Output Formats) from docs */
 async function generateSupplementarySections(): Promise<string> {
   const overview = await loadCommandsOverview();
-
   const lines: string[] = [];
 
-  // Global Options section
   if (overview?.globalOptions) {
     lines.push("## Global Options");
     lines.push("");
@@ -569,7 +631,6 @@ async function generateSupplementarySections(): Promise<string> {
     lines.push("");
   }
 
-  // Output Formats section
   lines.push("## Output Formats");
   lines.push("");
 
@@ -598,36 +659,165 @@ async function generateSupplementarySections(): Promise<string> {
   return lines.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Multi-File Generation
+// ---------------------------------------------------------------------------
+
+/** Result of generating all skill files */
+type GeneratedFiles = Map<string, string>;
+
 /**
- * Generate the complete SKILL.md content
+ * Group routes by their reference file mapping.
+ * Returns a map of reference file name → array of routes.
  */
-async function generateSkillMarkdown(routeMap: RouteMap): Promise<string> {
+function groupRoutesByReference(
+  routeInfos: RouteInfo[]
+): Map<string, RouteInfo[]> {
+  const groups = new Map<string, RouteInfo[]>();
+  for (const route of routeInfos) {
+    if (route.name === "help") {
+      continue;
+    }
+    const refName = ROUTE_TO_REFERENCE[route.name] ?? route.name;
+    const existing = groups.get(refName) ?? [];
+    existing.push(route);
+    groups.set(refName, existing);
+  }
+  return groups;
+}
+
+/**
+ * Generate all skill files: SKILL.md index + per-group reference files.
+ *
+ * @returns Map of relative file paths → content
+ */
+async function generateAllSkillFiles(
+  routeMap: RouteMap
+): Promise<GeneratedFiles> {
+  const files: GeneratedFiles = new Map();
+  const version = await getPackageVersion();
   const routeInfos = await extractRoutes(routeMap);
   const prerequisites = await loadPrerequisites();
   const supplementary = await generateSupplementarySections();
+  const agentGuidance = await loadAgentGuidance();
 
-  const sections = [
-    generateFrontMatter(),
+  // Group routes into reference files
+  const routeGroups = groupRoutesByReference(routeInfos);
+
+  // Generate reference files
+  const referenceFileNames = new Map<string, string>();
+  for (const [refName, groupRoutes] of routeGroups) {
+    const fileName = `${refName}.md`;
+    referenceFileNames.set(refName, fileName);
+    const content = generateReferenceFile(refName, groupRoutes, version);
+    files.set(`references/${fileName}`, content);
+  }
+
+  // Generate SKILL.md (compact index)
+  const indexSections = [
+    // YAML frontmatter
+    "---",
+    "name: sentry-cli",
+    `version: ${version}`,
+    `description: ${SKILL_DESCRIPTION}`,
+    "requires:",
+    `  bins: ["sentry"]`,
+    "  auth: true",
+    "---",
     "",
     "# Sentry CLI Usage Guide",
     "",
     "Help users interact with Sentry from the command line using the `sentry` CLI.",
     "",
-    prerequisites,
-    "",
-    generateCommandsSection(routeInfos),
-    supplementary,
-    "",
   ];
 
-  return sections.join("\n");
+  // Agent guidance section — bump heading levels down by one so they nest
+  // under ## Agent Guidance (## → ###, ### → ####, etc.)
+  if (agentGuidance) {
+    indexSections.push("## Agent Guidance");
+    indexSections.push("");
+    const nestedGuidance = agentGuidance.replace(
+      /^(#{2,6})\s/gm,
+      (_, hashes: string) => `#${hashes} `
+    );
+    indexSections.push(nestedGuidance);
+    indexSections.push("");
+  }
+
+  // Prerequisites
+  indexSections.push(prerequisites);
+  indexSections.push("");
+
+  // Compact command reference
+  indexSections.push(
+    generateCompactCommandsSection(routeInfos, referenceFileNames)
+  );
+
+  // Supplementary sections
+  indexSections.push(supplementary);
+  indexSections.push("");
+
+  files.set("SKILL.md", indexSections.join("\n"));
+
+  return files;
+}
+
+/**
+ * Generate the .well-known/skills/index.json discovery manifest.
+ * Lists all generated files for external tooling to discover.
+ */
+function generateIndexJson(generatedFiles: GeneratedFiles): string {
+  const fileList = [...generatedFiles.keys()].sort((a, b) => {
+    // SKILL.md always first
+    if (a === "SKILL.md") {
+      return -1;
+    }
+    if (b === "SKILL.md") {
+      return 1;
+    }
+    return a.localeCompare(b);
+  });
+
+  const index = {
+    skills: [
+      {
+        name: "sentry-cli",
+        description: SKILL_DESCRIPTION,
+        files: fileList,
+      },
+    ],
+  };
+
+  return `${JSON.stringify(index, null, 2)}\n`;
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-const content = await generateSkillMarkdown(routes as unknown as RouteMap);
-await Bun.write(OUTPUT_PATH, content);
+const files = await generateAllSkillFiles(routes as unknown as RouteMap);
 
-console.log(`Generated ${OUTPUT_PATH}`);
+// Clean references directory to remove stale files
+try {
+  rmSync(REFERENCES_DIR, { recursive: true, force: true });
+} catch {
+  // Directory may not exist yet
+}
+
+// Write all generated files
+for (const [relativePath, content] of files) {
+  const fullPath = `${SKILL_DIR}/${relativePath}`;
+  await Bun.write(fullPath, content);
+}
+
+// Write index.json
+const indexJson = generateIndexJson(files);
+await Bun.write(INDEX_JSON_PATH, indexJson);
+
+// Report what was generated
+const refCount = [...files.keys()].filter((k) =>
+  k.startsWith("references/")
+).length;
+console.log(
+  `Generated ${OUTPUT_PATH} + ${refCount} reference files + ${INDEX_JSON_PATH}`
+);

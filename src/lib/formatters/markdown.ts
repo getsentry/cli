@@ -554,6 +554,9 @@ function renderList(list: Tokens.List, depth = 0): string {
  *
  * Converts marked's `Tokens.Table` into headers + rows + alignments and
  * delegates to `renderTextTable()` for column fitting and box drawing.
+ *
+ * Empty header rows (e.g. from {@link mdKvTable} without a heading) are
+ * auto-hidden by `renderTextTable` — no explicit detection needed here.
  */
 function renderTableToken(table: Tokens.Table): string {
   const headers = table.header.map((cell) => renderInline(cell.tokens));

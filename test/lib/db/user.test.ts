@@ -2,21 +2,11 @@
  * User Info Storage Tests
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { getUserInfo, setUserInfo } from "../../../src/lib/db/user.js";
-import { cleanupTestDir, createTestConfigDir } from "../../helpers.js";
+import { useTestConfigDir } from "../../helpers.js";
 
-let testConfigDir: string;
-
-beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-user-");
-  process.env.SENTRY_CLI_CONFIG_DIR = testConfigDir;
-});
-
-afterEach(async () => {
-  delete process.env.SENTRY_CLI_CONFIG_DIR;
-  await cleanupTestDir(testConfigDir);
-});
+useTestConfigDir("test-user-");
 
 describe("getUserInfo", () => {
   test("returns undefined when no user info stored", () => {

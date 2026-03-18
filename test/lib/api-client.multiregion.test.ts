@@ -13,21 +13,17 @@ import {
   listOrganizationsInRegion,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
-import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../../src/lib/db/index.js";
 import {
   clearOrgRegions,
   getAllOrgRegions,
   setOrgRegion,
 } from "../../src/lib/db/regions.js";
-import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
+import { useTestConfigDir } from "../helpers.js";
 
-let testConfigDir: string;
+useTestConfigDir("test-multiregion-");
 let originalFetch: typeof globalThis.fetch;
 
 beforeEach(async () => {
-  testConfigDir = await createTestConfigDir("test-multiregion-");
-  process.env[CONFIG_DIR_ENV_VAR] = testConfigDir;
-
   // Save original fetch
   originalFetch = globalThis.fetch;
 
@@ -38,11 +34,9 @@ beforeEach(async () => {
   await clearOrgRegions();
 });
 
-afterEach(async () => {
+afterEach(() => {
   // Restore original fetch
   globalThis.fetch = originalFetch;
-  closeDatabase();
-  await cleanupTestDir(testConfigDir);
 });
 
 /**

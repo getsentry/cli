@@ -4,57 +4,8 @@
  * Shared utilities for creating isolated test environments.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-
-/**
- * Create a temporary directory for testing
- *
- * @param options - Configuration for the temp directory
- * @returns Disposable temp directory object
- */
-export async function tmpdir(options?: {
-  files?: Record<string, string>;
-  env?: Record<string, string>;
-}) {
-  const dir = join(
-    homedir(),
-    `.sentry-cli-test-${Math.random().toString(36).slice(2)}`
-  );
-  mkdirSync(dir, { recursive: true });
-
-  // Create files if specified
-  if (options?.files) {
-    for (const [filepath, content] of Object.entries(options.files)) {
-      const fullPath = join(dir, filepath);
-      const dirPath = fullPath.slice(0, fullPath.lastIndexOf("/"));
-      if (dirPath && dirPath !== dir) {
-        mkdirSync(dirPath, { recursive: true });
-      }
-      writeFileSync(fullPath, content);
-    }
-  }
-
-  // Create .env file if specified
-  if (options?.env) {
-    const envContent = Object.entries(options.env)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("\n");
-    writeFileSync(join(dir, ".env"), envContent);
-  }
-
-  return {
-    path: dir,
-    [Symbol.asyncDispose]: async () => {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup errors
-      }
-    },
-  };
-}
 
 /**
  * Mock process for capturing CLI output
@@ -187,6 +138,9 @@ export function createE2EContext(
         if (prevDir !== undefined) {
           process.env[CONFIG_DIR_ENV_VAR] = prevDir;
         } else {
+          // This delete is acceptable here — it's a scoped try/finally restore,
+          // not a test lifecycle hook. preload.ts always sets the var so this
+          // branch rarely fires.
           delete process.env[CONFIG_DIR_ENV_VAR];
         }
       }

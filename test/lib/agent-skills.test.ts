@@ -2,7 +2,7 @@
  * Agent Skills Tests
  *
  * Unit tests for Claude Code detection, version-pinned URL construction,
- * skill content fetching, and file installation.
+ * skill content fetching (SKILL.md + reference files), and file installation.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -10,6 +10,7 @@ import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   detectClaudeCode,
+  fetchAllSkillFiles,
   fetchSkillContent,
   getSkillInstallPath,
   getSkillUrl,
@@ -100,6 +101,20 @@ describe("agent-skills", () => {
         "https://cli.sentry.dev/.well-known/skills/sentry-cli/SKILL.md"
       );
     });
+
+    test("returns versioned URL for reference files", () => {
+      const url = getSkillUrl("0.8.0", "references/issues.md");
+      expect(url).toBe(
+        "https://raw.githubusercontent.com/getsentry/cli/0.8.0/plugins/sentry-cli/skills/sentry-cli/references/issues.md"
+      );
+    });
+
+    test("returns fallback URL for reference files with dev versions", () => {
+      const url = getSkillUrl("0.9.0-dev.0", "references/issues.md");
+      expect(url).toBe(
+        "https://cli.sentry.dev/.well-known/skills/sentry-cli/references/issues.md"
+      );
+    });
   });
 
   describe("fetchSkillContent", () => {
@@ -158,6 +173,52 @@ describe("agent-skills", () => {
     });
   });
 
+  describe("fetchAllSkillFiles", () => {
+    test("returns SKILL.md + reference files on success", async () => {
+      mockFetch(async (url) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        if (urlStr.includes("SKILL.md")) {
+          return new Response("# Index", { status: 200 });
+        }
+        if (urlStr.includes("references/")) {
+          const filename = urlStr.split("/").pop();
+          return new Response(`# ${filename}`, { status: 200 });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const files = await fetchAllSkillFiles("0.8.0");
+      expect(files).not.toBeNull();
+      expect(files!.get("SKILL.md")).toBe("# Index");
+      expect(files!.size).toBeGreaterThan(1);
+      // Should have reference files
+      expect(files!.has("references/issues.md")).toBe(true);
+    });
+
+    test("returns null when SKILL.md fetch fails", async () => {
+      mockFetch(async () => new Response("Error", { status: 500 }));
+
+      const files = await fetchAllSkillFiles("0.8.0");
+      expect(files).toBeNull();
+    });
+
+    test("returns SKILL.md even when reference files fail", async () => {
+      mockFetch(async (url) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        if (urlStr.includes("SKILL.md")) {
+          return new Response("# Index", { status: 200 });
+        }
+        return new Response("Error", { status: 500 });
+      });
+
+      const files = await fetchAllSkillFiles("0.8.0");
+      expect(files).not.toBeNull();
+      expect(files!.get("SKILL.md")).toBe("# Index");
+      // Only SKILL.md, no reference files
+      expect(files!.size).toBe(1);
+    });
+  });
+
   describe("installAgentSkills", () => {
     let testDir: string;
 
@@ -168,10 +229,19 @@ describe("agent-skills", () => {
       );
       mkdirSync(testDir, { recursive: true });
 
-      mockFetch(
-        async () =>
-          new Response("# Sentry CLI Skill\nTest content", { status: 200 })
-      );
+      mockFetch(async (url) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        if (urlStr.includes("SKILL.md")) {
+          return new Response("# Sentry CLI Skill\nTest content", {
+            status: 200,
+          });
+        }
+        if (urlStr.includes("references/")) {
+          const filename = urlStr.split("/").pop();
+          return new Response(`# Reference: ${filename}`, { status: 200 });
+        }
+        return new Response("Not found", { status: 404 });
+      });
     });
 
     afterEach(() => {
@@ -183,7 +253,7 @@ describe("agent-skills", () => {
       expect(result).toBeNull();
     });
 
-    test("installs skill file when Claude Code is detected", async () => {
+    test("installs skill file and reference files when Claude Code is detected", async () => {
       mkdirSync(join(testDir, ".claude"), { recursive: true });
 
       const result = await installAgentSkills(testDir, "0.8.0");
@@ -197,6 +267,18 @@ describe("agent-skills", () => {
 
       const content = await Bun.file(result!.path).text();
       expect(content).toContain("# Sentry CLI Skill");
+
+      // Check reference files were created
+      expect(result!.referenceCount).toBeGreaterThan(0);
+      const refsDir = join(
+        testDir,
+        ".claude",
+        "skills",
+        "sentry-cli",
+        "references"
+      );
+      expect(existsSync(refsDir)).toBe(true);
+      expect(existsSync(join(refsDir, "issues.md"))).toBe(true);
     });
 
     test("creates intermediate directories", async () => {

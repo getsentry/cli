@@ -12,17 +12,20 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
 import {
+  clearInstallInfo,
+  setInstallInfo,
+} from "../../../src/lib/db/install-info.js";
+import {
   getReleaseChannel,
   setReleaseChannel,
 } from "../../../src/lib/db/release-channel.js";
-import { useTestConfigDir } from "../../helpers.js";
+import { TEST_TMP_DIR, useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -63,8 +66,8 @@ function createMockContext(
     ...overrides.env,
   };
 
-  // Force plain output so formatUpgradeResult renders raw markdown tables
-  // (ASCII pipes) instead of Unicode box-drawing characters in TTY mode.
+  // Force plain output so formatUpgradeResult renders raw markdown
+  // instead of ANSI-styled output in TTY mode.
   const origPlain = process.env.SENTRY_PLAIN_OUTPUT;
   process.env.SENTRY_PLAIN_OUTPUT = "1";
 
@@ -278,7 +281,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| curl |");
+      expect(combined).toContain("Method: curl");
       expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
@@ -372,7 +375,7 @@ describe("sentry cli upgrade", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| brew |");
+      expect(combined).toContain("Method: brew");
       expect(combined).toContain("99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
@@ -509,7 +512,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
     });
 
     test("'stable' positional sets channel to stable", async () => {
@@ -528,7 +531,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| stable |");
+      expect(combined).toContain("Channel: stable");
     });
 
     test("without positional, uses persisted channel", async () => {
@@ -547,7 +550,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
     });
   });
 
@@ -602,7 +605,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
       expect(combined).toContain(CLI_VERSION);
       expect(combined).toContain("You are already on the target version");
     });
@@ -622,7 +625,7 @@ describe("sentry cli upgrade — nightly channel", () => {
       );
 
       const combined = getOutput();
-      expect(combined).toContain("| nightly |");
+      expect(combined).toContain("Channel: nightly");
       expect(combined).toContain("0.99.0-dev.9999999999");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
@@ -648,16 +651,25 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   let spawnedArgs: string[][];
   let restoreStderr: (() => void) | undefined;
 
-  /** Default install paths (default curl dir) */
-  const defaultBinDir = join(homedir(), ".sentry", "bin");
+  /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
+  const spawnBinDir = join(TEST_TMP_DIR, "upgrade-spawn-bin");
+  const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+  const spawnInstallPath = join(spawnBinDir, binName);
 
   beforeEach(() => {
     testDir = join(
-      "/tmp",
+      TEST_TMP_DIR,
       `upgrade-spawn-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     mkdirSync(testDir, { recursive: true });
-    mkdirSync(defaultBinDir, { recursive: true });
+    mkdirSync(spawnBinDir, { recursive: true });
+    // Redirect getCurlInstallPaths() to temp dir
+    clearInstallInfo();
+    setInstallInfo({
+      method: "curl",
+      path: spawnInstallPath,
+      version: "0.0.0",
+    });
 
     originalFetch = globalThis.fetch;
     originalSpawn = Bun.spawn;
@@ -677,15 +689,15 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
 
-    // Clean up any temp binary files written to the default curl install path
-    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
+    // Clean up any temp binary files written to the redirected install path
     for (const suffix of ["", ".download", ".old", ".lock"]) {
       try {
-        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+        await unlink(join(spawnBinDir, `${binName}${suffix}`));
       } catch {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   /**
@@ -729,6 +741,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     expect(setupCall).toBeDefined();
     expect(setupCall).toContain("cli");
     expect(setupCall).toContain("setup");
+    expect(setupCall).toContain("--quiet");
     expect(setupCall).toContain("--method");
     expect(setupCall).toContain("curl");
     expect(setupCall).toContain("--install");
@@ -856,15 +869,25 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
   let originalSpawn: typeof Bun.spawn;
   let restoreStderr: (() => void) | undefined;
 
-  const defaultBinDir = join(homedir(), ".sentry", "bin");
+  /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
+  const migrateBinDir = join(TEST_TMP_DIR, "upgrade-migrate-bin");
+  const migrateBinName = process.platform === "win32" ? "sentry.exe" : "sentry";
+  const migrateInstallPath = join(migrateBinDir, migrateBinName);
 
   beforeEach(() => {
     testDir = join(
-      "/tmp",
+      TEST_TMP_DIR,
       `upgrade-migrate-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     mkdirSync(testDir, { recursive: true });
-    mkdirSync(defaultBinDir, { recursive: true });
+    mkdirSync(migrateBinDir, { recursive: true });
+    // Redirect getCurlInstallPaths() to temp dir
+    clearInstallInfo();
+    setInstallInfo({
+      method: "curl",
+      path: migrateInstallPath,
+      version: "0.0.0",
+    });
 
     originalFetch = globalThis.fetch;
     originalSpawn = Bun.spawn;
@@ -881,14 +904,14 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
     Bun.spawn = originalSpawn;
     rmSync(testDir, { recursive: true, force: true });
 
-    const binName = process.platform === "win32" ? "sentry.exe" : "sentry";
     for (const suffix of ["", ".download", ".old", ".lock"]) {
       try {
-        await unlink(join(defaultBinDir, `${binName}${suffix}`));
+        await unlink(join(migrateBinDir, `${migrateBinName}${suffix}`));
       } catch {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   test("migrates npm install to standalone binary for nightly channel", async () => {

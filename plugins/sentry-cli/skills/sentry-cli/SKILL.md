@@ -1,11 +1,104 @@
 ---
 name: sentry-cli
+version: 0.18.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
+requires:
+  bins: ["sentry"]
+  auth: true
 ---
 
 # Sentry CLI Usage Guide
 
 Help users interact with Sentry from the command line using the `sentry` CLI.
+
+## Agent Guidance
+
+Best practices and operational guidance for AI coding agents using the Sentry CLI.
+
+### Design Principles
+
+The `sentry` CLI follows conventions from well-known tools — if you're familiar with them, that knowledge transfers directly:
+
+- **`gh` (GitHub CLI) conventions**: The `sentry` CLI uses the same `<noun> <verb>` command pattern (e.g., `sentry issue list`, `sentry org view`). Flags follow `gh` conventions: `--json` for machine-readable output, `--fields` to select specific fields, `-w`/`--web` to open in browser, `-q`/`--query` for filtering, `-n`/`--limit` for result count.
+- **`sentry api` mimics `curl`**: The `sentry api` command provides direct API access with a `curl`-like interface — `--method` for HTTP method, `--data` for request body, `--header` for custom headers. It handles authentication automatically. If you know how to call a REST API with `curl`, the same patterns apply.
+
+### Context Window Tips
+
+- Use `--fields id,title,status` on list commands to reduce output size
+- Use `--json` when piping output between commands or processing programmatically
+- Use `--limit` to cap the number of results (default is usually 10–100)
+- Prefer `sentry issue view PROJECT-123` over listing and filtering manually
+- Use `sentry api` for endpoints not covered by dedicated commands
+
+### Safety Rules
+
+- Always confirm with the user before running destructive commands: `project delete`, `trial start`
+- Verify the org/project context is correct before mutations — use `sentry auth status` to check defaults
+- Never store or log authentication tokens — use `sentry auth login` and let the CLI manage credentials
+- When in doubt about the target org/project, use explicit `<org>/<project>` arguments instead of auto-detection
+
+### Workflow Patterns
+
+#### Investigate an Issue
+
+```bash
+# 1. Find the issue
+sentry issue list my-org/my-project --query "is:unresolved" --limit 5
+
+# 2. Get details
+sentry issue view PROJECT-123
+
+# 3. Get AI root cause analysis
+sentry issue explain PROJECT-123
+
+# 4. Get a fix plan
+sentry issue plan PROJECT-123
+```
+
+#### Explore Traces and Performance
+
+```bash
+# 1. List recent traces
+sentry trace list my-org/my-project --limit 5
+
+# 2. View a specific trace with span tree
+sentry trace view my-org/my-project/abc123def456...
+
+# 3. View spans for a trace
+sentry span list my-org/my-project/abc123def456...
+
+# 4. View logs associated with a trace
+sentry trace logs my-org/abc123def456...
+```
+
+#### Stream Logs
+
+```bash
+# Stream logs in real-time
+sentry log list my-org/my-project --follow
+
+# Filter logs by severity
+sentry log list my-org/my-project --query "severity:error"
+```
+
+#### Arbitrary API Access
+
+```bash
+# GET request (default)
+sentry api /api/0/organizations/my-org/
+
+# POST request with data
+sentry api /api/0/organizations/my-org/projects/ --method POST --data '{"name":"new-project","platform":"python"}'
+```
+
+### Common Mistakes
+
+- **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
+- **Forgetting authentication**: Run `sentry auth login` before any other command. Check with `sentry auth status`.
+- **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
+- **Org/project ambiguity**: Auto-detection scans for DSNs in `.env` files and source code. If the project is ambiguous, specify explicitly: `sentry issue list my-org/my-project`.
+- **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
+- **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 
 ## Prerequisites
 
@@ -31,778 +124,160 @@ sentry auth status
 sentry auth logout
 ```
 
-## Available Commands
+## Command Reference
 
 ### Auth
 
 Authenticate with Sentry
 
-#### `sentry auth login`
+- `sentry auth login` — Authenticate with Sentry
+- `sentry auth logout` — Log out of Sentry
+- `sentry auth refresh` — Refresh your authentication token
+- `sentry auth status` — View authentication status
+- `sentry auth token` — Print the stored authentication token
+- `sentry auth whoami` — Show the currently authenticated user
 
-Authenticate with Sentry
-
-**Flags:**
-- `--token <value> - Authenticate using an API token instead of OAuth`
-- `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
-- `--force - Re-authenticate without prompting`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# OAuth device flow (recommended)
-sentry auth login
-
-# Using an API token
-sentry auth login --token YOUR_TOKEN
-
-SENTRY_URL=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
-
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
-```
-
-#### `sentry auth logout`
-
-Log out of Sentry
-
-**Flags:**
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry auth logout
-```
-
-#### `sentry auth refresh`
-
-Refresh your authentication token
-
-**Flags:**
-- `--force - Force refresh even if token is still valid`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry auth refresh
-```
-
-#### `sentry auth status`
-
-View authentication status
-
-**Flags:**
-- `--show-token - Show the stored token (masked by default)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry auth status
-```
-
-#### `sentry auth token`
-
-Print the stored authentication token
-
-**Flags:**
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry auth whoami`
-
-Show the currently authenticated user
-
-**Flags:**
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/auth.md`
 
 ### Org
 
 Work with Sentry organizations
 
-#### `sentry org list`
+- `sentry org list` — List organizations
+- `sentry org view <org>` — View details of an organization
 
-List organizations
-
-**Flags:**
-- `-n, --limit <value> - Maximum number of organizations to list - (default: "30")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry org list
-
-sentry org list --json
-```
-
-#### `sentry org view <org>`
-
-View details of an organization
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry org view <org-slug>
-
-sentry org view my-org
-
-sentry org view my-org -w
-```
+→ Full flags and examples: `references/organizations.md`
 
 ### Project
 
 Work with Sentry projects
 
-#### `sentry project create <name> <platform>`
+- `sentry project create <name> <platform>` — Create a new project
+- `sentry project delete <org/project>` — Delete a project
+- `sentry project list <org/project>` — List projects
+- `sentry project view <org/project>` — View details of a project
 
-Create a new project
-
-**Flags:**
-- `-t, --team <value> - Team to create the project under`
-- `-n, --dry-run - Validate inputs and show what would be created without creating it`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry project delete <org/project>`
-
-Delete a project
-
-**Flags:**
-- `-y, --yes - Skip confirmation prompt`
-- `-f, --force - Force deletion without confirmation`
-- `-n, --dry-run - Validate and show what would be deleted without deleting`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry project list <org/project>`
-
-List projects
-
-**Flags:**
-- `-n, --limit <value> - Maximum number of projects to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `-p, --platform <value> - Filter by platform (e.g., javascript, python)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# List all projects
-sentry project list
-
-# List projects in a specific organization
-sentry project list <org-slug>
-
-# Filter by platform
-sentry project list --platform javascript
-```
-
-#### `sentry project view <org/project>`
-
-View details of a project
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# Auto-detect from DSN or config
-sentry project view
-
-# Explicit org and project
-sentry project view <org>/<project>
-
-# Find project across all orgs
-sentry project view <project>
-
-sentry project view my-org/frontend
-
-sentry project view my-org/frontend -w
-```
+→ Full flags and examples: `references/projects.md`
 
 ### Issue
 
 Manage Sentry issues
 
-#### `sentry issue list <org/project>`
+- `sentry issue list <org/project>` — List issues in a project
+- `sentry issue explain <issue>` — Analyze an issue's root cause using Seer AI
+- `sentry issue plan <issue>` — Generate a solution plan using Seer AI
+- `sentry issue view <issue>` — View details of a specific issue
 
-List issues in a project
-
-**Flags:**
-- `-q, --query <value> - Search query (Sentry search syntax)`
-- `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
-- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `-t, --period <value> - Time period for issue activity (e.g. 24h, 14d, 90d) - (default: "90d")`
-- `-c, --cursor <value> - Pagination cursor for <org>/ or multi-target modes (use "last" to continue)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--compact - Single-line rows for compact output (auto-detects if omitted)`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# Explicit org and project
-sentry issue list <org>/<project>
-
-# All projects in an organization
-sentry issue list <org>/
-
-# Search for project across all accessible orgs
-sentry issue list <project>
-
-# Auto-detect from DSN or config
-sentry issue list
-
-# List issues in a specific project
-sentry issue list my-org/frontend
-
-sentry issue list my-org/
-
-sentry issue list frontend
-
-sentry issue list my-org/frontend --query "TypeError"
-
-sentry issue list my-org/frontend --sort freq --limit 20
-
-# Show only unresolved issues
-sentry issue list my-org/frontend --query "is:unresolved"
-
-# Show resolved issues
-sentry issue list my-org/frontend --query "is:resolved"
-
-# Combine with other search terms
-sentry issue list my-org/frontend --query "is:unresolved TypeError"
-```
-
-#### `sentry issue explain <issue>`
-
-Analyze an issue's root cause using Seer AI
-
-**Flags:**
-- `--force - Force new analysis even if one exists`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry issue explain <issue-id>
-
-# By numeric issue ID
-sentry issue explain 123456789
-
-# By short ID with org prefix
-sentry issue explain my-org/MYPROJECT-ABC
-
-# By project-suffix format
-sentry issue explain myproject-G
-
-# Force a fresh analysis
-sentry issue explain 123456789 --force
-```
-
-#### `sentry issue plan <issue>`
-
-Generate a solution plan using Seer AI
-
-**Flags:**
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
-- `--force - Force new plan even if one exists`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry issue plan <issue-id>
-
-# After running explain, create a plan
-sentry issue plan 123456789
-
-# Specify which root cause to plan for (if multiple were found)
-sentry issue plan 123456789 --cause 0
-
-# By short ID with org prefix
-sentry issue plan my-org/MYPROJECT-ABC --cause 1
-
-# By project-suffix format
-sentry issue plan myproject-G --cause 0
-```
-
-#### `sentry issue view <issue>`
-
-View details of a specific issue
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# By issue ID
-sentry issue view <issue-id>
-
-# By short ID
-sentry issue view <short-id>
-
-sentry issue view FRONT-ABC
-
-sentry issue view FRONT-ABC -w
-```
+→ Full flags and examples: `references/issues.md`
 
 ### Event
 
 View Sentry events
 
-#### `sentry event view <args...>`
+- `sentry event view <args...>` — View details of a specific event
 
-View details of a specific event
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry event view <event-id>
-
-sentry event view abc123def456
-
-sentry event view abc123def456 -w
-```
+→ Full flags and examples: `references/events.md`
 
 ### Api
 
 Make an authenticated API request
 
-#### `sentry api <endpoint>`
+- `sentry api <endpoint>` — Make an authenticated API request
 
-Make an authenticated API request
-
-**Flags:**
-- `-X, --method <value> - The HTTP method for the request - (default: "GET")`
-- `-d, --data <value> - Inline JSON body for the request (like curl -d)`
-- `-F, --field <value>... - Add a typed parameter (key=value, key[sub]=value, key[]=value)`
-- `-f, --raw-field <value>... - Add a string parameter without JSON parsing`
-- `-H, --header <value>... - Add a HTTP request header in key:value format`
-- `--input <value> - The file to use as body for the HTTP request (use "-" to read from standard input)`
-- `--silent - Do not print the response body`
-- `--verbose - Include full HTTP request and response in the output`
-- `-n, --dry-run - Show the resolved request without sending it`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-sentry api <endpoint> [options]
-
-# List organizations
-sentry api /organizations/
-
-# Get a specific organization
-sentry api /organizations/my-org/
-
-# Get project details
-sentry api /projects/my-org/my-project/
-
-# Create a new project
-sentry api /teams/my-org/my-team/projects/ \
-  --method POST \
-  --field name="New Project" \
-  --field platform=javascript
-
-# Update an issue status
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field status=resolved
-
-# Assign an issue
-sentry api /issues/123456789/ \
-  --method PUT \
-  --field assignedTo="user@example.com"
-
-# Delete a project
-sentry api /projects/my-org/my-project/ \
-  --method DELETE
-
-sentry api /organizations/ \
-  --header "X-Custom-Header:value"
-
-sentry api /organizations/ --verbose
-
-# Get all issues (automatically follows pagination)
-sentry api /projects/my-org/my-project/issues/ --paginate
-```
+→ Full flags and examples: `references/api.md`
 
 ### Cli
 
 CLI-related commands
 
-#### `sentry cli feedback <message...>`
+- `sentry cli feedback <message...>` — Send feedback about the CLI
+- `sentry cli fix` — Diagnose and repair CLI database issues
+- `sentry cli setup` — Configure shell integration
+- `sentry cli upgrade <version>` — Update the Sentry CLI to the latest version
 
-Send feedback about the CLI
-
-**Flags:**
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry cli fix`
-
-Diagnose and repair CLI database issues
-
-**Flags:**
-- `--dry-run - Show what would be fixed without making changes`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry cli setup`
-
-Configure shell integration
-
-**Flags:**
-- `--install - Install the binary from a temp location to the system path`
-- `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
-- `--channel <value> - Release channel to persist (stable or nightly)`
-- `--no-modify-path - Skip PATH modification`
-- `--no-completions - Skip shell completion installation`
-- `--no-agent-skills - Skip agent skill installation for AI coding assistants`
-- `--quiet - Suppress output (for scripted usage)`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry cli upgrade <version>`
-
-Update the Sentry CLI to the latest version
-
-**Flags:**
-- `--check - Check for updates without installing`
-- `--force - Force upgrade even if already on the latest version`
-- `--offline - Upgrade using only cached version info and patches (no network)`
-- `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/setup.md`
 
 ### Dashboard
 
 Manage Sentry dashboards
 
-#### `sentry dashboard list <org/project>`
+- `sentry dashboard list <org/project>` — List dashboards
+- `sentry dashboard view <args...>` — View a dashboard
+- `sentry dashboard create <args...>` — Create a dashboard
+- `sentry dashboard widget add <args...>` — Add a widget to a dashboard
+- `sentry dashboard widget edit <args...>` — Edit a widget in a dashboard
+- `sentry dashboard widget delete <args...>` — Delete a widget from a dashboard
 
-List dashboards
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `-n, --limit <value> - Maximum number of dashboards to list - (default: "30")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry dashboard view <args...>`
-
-View a dashboard
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry dashboard create <args...>`
-
-Create a dashboard
-
-**Flags:**
-- `--widget-title <value> - Inline widget title`
-- `--widget-display <value> - Inline widget display type (line, bar, table, big_number, ...)`
-- `--widget-dataset <value> - Inline widget dataset (default: spans)`
-- `--widget-query <value>... - Inline widget aggregate (e.g. count, p95:span.duration)`
-- `--widget-where <value> - Inline widget search conditions filter`
-- `--widget-group-by <value>... - Inline widget group-by column (repeatable)`
-- `--widget-sort <value> - Inline widget order by (prefix - for desc)`
-- `--widget-limit <value> - Inline widget result limit`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+> Full flags and examples: `references/dashboards.md`
 
 ### Repo
 
 Work with Sentry repositories
 
-#### `sentry repo list <org/project>`
+- `sentry repo list <org/project>` — List repositories
 
-List repositories
-
-**Flags:**
-- `-n, --limit <value> - Maximum number of repositories to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/teams.md`
 
 ### Team
 
 Work with Sentry teams
 
-#### `sentry team list <org/project>`
+- `sentry team list <org/project>` — List teams
 
-List teams
-
-**Flags:**
-- `-n, --limit <value> - Maximum number of teams to list - (default: "30")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# Auto-detect organization or list all
-sentry team list
-
-# List teams in a specific organization
-sentry team list <org-slug>
-
-# Limit results
-sentry team list --limit 10
-
-sentry team list --json
-```
+→ Full flags and examples: `references/teams.md`
 
 ### Log
 
 View Sentry logs
 
-#### `sentry log list <org/project-or-trace-id...>`
+- `sentry log list <org/project-or-trace-id...>` — List logs from a project
+- `sentry log view <args...>` — View details of one or more log entries
 
-List logs from a project
-
-**Flags:**
-- `-n, --limit <value> - Number of log entries (1-1000) - (default: "100")`
-- `-q, --query <value> - Filter query (Sentry search syntax)`
-- `-f, --follow <value> - Stream logs (optionally specify poll interval in seconds)`
-- `-t, --period <value> - Time period (e.g., "90d", "14d", "24h"). Default: 90d (project mode), 14d (trace mode)`
-- `--fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# Auto-detect from DSN or config
-sentry log list
-
-# Explicit org and project
-sentry log list <org>/<project>
-
-# Search for project across all accessible orgs
-sentry log list <project>
-
-# List last 100 logs (default)
-sentry log list
-
-# Stream with default 2-second poll interval
-sentry log list -f
-
-# Stream with custom 5-second poll interval
-sentry log list -f 5
-
-# Show only error logs
-sentry log list -q 'level:error'
-
-# Filter by message content
-sentry log list -q 'database'
-
-# Show last 50 logs
-sentry log list --limit 50
-
-# Show last 500 logs
-sentry log list -n 500
-
-# Stream error logs from a specific project
-sentry log list my-org/backend -f -q 'level:error'
-```
-
-#### `sentry log view <args...>`
-
-View details of one or more log entries
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-**Examples:**
-
-```bash
-# Auto-detect from DSN or config
-sentry log view <log-id>
-
-# Explicit org and project
-sentry log view <org>/<project> <log-id>
-
-# Search for project across all accessible orgs
-sentry log view <project> <log-id>
-
-sentry log view 968c763c740cfda8b6728f27fb9e9b01
-
-sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
-
-sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
-
-sentry log list --json | jq '.[] | select(.level == "error")'
-```
+→ Full flags and examples: `references/logs.md`
 
 ### Span
 
 View spans in distributed traces
 
-#### `sentry span list <org/project/trace-id...>`
+- `sentry span list <org/project/trace-id...>` — List spans in a trace
+- `sentry span view <trace-id/span-id...>` — View details of specific spans
 
-List spans in a trace
-
-**Flags:**
-- `-n, --limit <value> - Number of spans (<=1000) - (default: "25")`
-- `-q, --query <value> - Filter spans (e.g., "op:db", "duration:>100ms", "project:backend")`
-- `-s, --sort <value> - Sort order: date, duration - (default: "date")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry span view <trace-id/span-id...>`
-
-View details of specific spans
-
-**Flags:**
-- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/traces.md`
 
 ### Trace
 
 View distributed traces
 
-#### `sentry trace list <org/project>`
+- `sentry trace list <org/project>` — List recent traces in a project
+- `sentry trace view <org/project/trace-id...>` — View details of a specific trace
+- `sentry trace logs <org/trace-id...>` — View logs associated with a trace
 
-List recent traces in a project
-
-**Flags:**
-- `-n, --limit <value> - Number of traces (1-1000) - (default: "20")`
-- `-q, --query <value> - Search query (Sentry search syntax)`
-- `-s, --sort <value> - Sort by: date, duration - (default: "date")`
-- `-c, --cursor <value> - Pagination cursor (use "last" to continue from previous page)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry trace view <org/project/trace-id...>`
-
-View details of a specific trace
-
-**Flags:**
-- `-w, --web - Open in browser`
-- `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry trace logs <org/trace-id...>`
-
-View logs associated with a trace
-
-**Flags:**
-- `-w, --web - Open trace in browser`
-- `-t, --period <value> - Time period to search (e.g., "14d", "7d", "24h"). Default: 14d - (default: "14d")`
-- `-n, --limit <value> - Number of log entries (<=1000) - (default: "100")`
-- `-q, --query <value> - Additional filter query (Sentry search syntax)`
-- `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/traces.md`
 
 ### Trial
 
 Manage product trials
 
-#### `sentry trial list <org>`
+- `sentry trial list <org>` — List product trials
+- `sentry trial start <name> <org>` — Start a product trial
 
-List product trials
-
-**Flags:**
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
-
-#### `sentry trial start <name> <org>`
-
-Start a product trial
-
-**Flags:**
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/trials.md`
 
 ### Init
 
 Initialize Sentry in your project
 
-#### `sentry init <target> <directory>`
+- `sentry init <target> <directory>` — Initialize Sentry in your project
 
-Initialize Sentry in your project
-
-**Flags:**
-- `-y, --yes - Non-interactive mode (accept defaults)`
-- `--dry-run - Preview changes without applying them`
-- `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics`
-- `-t, --team <value> - Team slug to create the project under`
+→ Full flags and examples: `references/setup.md`
 
 ### Schema
 
 Browse the Sentry API schema
 
-#### `sentry schema <resource...>`
+- `sentry schema <resource...>` — Browse the Sentry API schema
 
-Browse the Sentry API schema
-
-**Flags:**
-- `--all - Show all endpoints in a flat list`
-- `-q, --search <value> - Search endpoints by keyword`
-- `--json - Output as JSON`
-- `--fields <value> - Comma-separated fields to include in JSON output (dot.notation supported)`
+→ Full flags and examples: `references/setup.md`
 
 ## Global Options
 
