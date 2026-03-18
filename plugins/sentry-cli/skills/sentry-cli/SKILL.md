@@ -234,9 +234,9 @@ View Sentry logs
 
 ### Span
 
-View spans in distributed traces
+List and view spans in projects or traces
 
-- `sentry span list <org/project/trace-id...>` — List spans in a trace
+- `sentry span list <org/project/trace-id...>` — List spans in a project or trace
 - `sentry span view <trace-id/span-id...>` — View details of specific spans
 
 → Full flags and examples: `references/traces.md`

@@ -216,6 +216,36 @@ export function buildListLimitFlag(
 }
 
 /**
+ * The `--period` / `-t` flag for list commands that query time-bounded data.
+ *
+ * Controls the `statsPeriod` parameter sent to the Sentry Events API.
+ * Accepts Sentry duration strings like `"1h"`, `"24h"`, `"7d"`, `"30d"`.
+ *
+ * Default is `"7d"` (7 days). Commands that need a different default (e.g.,
+ * `issue list` uses `"90d"`) should define their own flag inline.
+ *
+ * @example
+ * ```ts
+ * flags: { ..., period: LIST_PERIOD_FLAG },
+ * aliases: { ...PERIOD_ALIASES },
+ * ```
+ */
+export const LIST_PERIOD_FLAG = {
+  kind: "parsed" as const,
+  parse: String,
+  brief: 'Time period (e.g., "1h", "24h", "7d", "30d")',
+  default: "7d",
+};
+
+/**
+ * Alias map for the `--period` flag: `-t` → `--period`.
+ *
+ * Exported separately from `LIST_BASE_ALIASES` because not all list commands
+ * need a period flag, and some commands already use `-t` for other purposes.
+ */
+export const PERIOD_ALIASES = { t: "period" } as const;
+
+/**
  * Alias map shared by all list commands.
  * `-n` → `--limit`, `-c` → `--cursor`.
  *

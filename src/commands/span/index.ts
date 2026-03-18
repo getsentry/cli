@@ -1,7 +1,7 @@
 /**
  * sentry span
  *
- * View and explore individual spans within distributed traces.
+ * List and explore individual spans within distributed traces or across projects.
  */
 
 import { buildRouteMap } from "@stricli/core";
@@ -14,11 +14,11 @@ export const spanRoute = buildRouteMap({
     view: viewCommand,
   },
   docs: {
-    brief: "View spans in distributed traces",
+    brief: "List and view spans in projects or traces",
     fullDescription:
-      "View and explore individual spans within distributed traces.\n\n" +
+      "List and explore individual spans within distributed traces or across projects.\n\n" +
       "Commands:\n" +
-      "  list     List spans in a trace\n" +
+      "  list     List spans in a project or trace\n" +
       "  view     View details of specific spans\n\n" +
       "Alias: `sentry spans` → `sentry span list`",
   },
