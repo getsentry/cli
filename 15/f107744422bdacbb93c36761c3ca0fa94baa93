@@ -1,0 +1,353 @@
+# Plan: Dynamic Cache-Backed Shell Completions
+
+## Summary
+
+Add dynamic, offline-first shell completions that suggest cached org slugs, project slugs, and project aliases alongside existing command/subcommand names. Uses a **hybrid approach**: static command/subcommand/flag completion stays in the generated shell script, while a runtime callback to the binary provides dynamic value completions from the SQLite cache.
+
+## Design Decisions
+
+- **`__complete` is hidden** — fast-path in `bin.ts`, not a real Stricli command, never shown in help
+- **Lazy project cache population** — on first `__complete` call for an org's projects, fetch and cache them if not present (one-time latency hit per org)
+- **Enum flag values included** — extract enum/choice values from Stricli flag definitions and complete them statically in shell scripts
+- **Fuzzy matching for dynamic values** — use Levenshtein distance (already exists in `src/lib/platforms.ts`) to suggest close matches even for typos (e.g., `tnry` → `sentry`)
+
+## Approach: Hybrid Static + Dynamic
+
+**Why hybrid?** Pure static scripts can't access the cache. Pure dynamic (calling the binary for every tab press) adds ~50-100ms latency even for command names. The hybrid approach keeps command name completion instant (static) and only invokes the binary when completing positional **values** (org slugs, project names).
+
+### How It Works
+
+1. **Shell script** (installed by `sentry cli setup`) contains:
+   - Static word lists for commands and subcommands (same as today)
+   - Static flag names per command (new — extracted from introspect.ts)
+   - Static enum values per flag where applicable
+   - A dynamic callback `sentry __complete <context-info>` for value positions
+
+2. **Binary dispatch** (`src/bin.ts`) detects the `__complete` arg and:
+   - Opens the SQLite cache (~1ms)
+   - Returns filtered suggestions based on context (org slugs, project slugs, aliases)
+   - For project slugs: if cache is empty for that org, does a single API call to populate
+   - Exits immediately — no Stricli boot, no telemetry, no auth check
+
+3. **Shell integration** pipes the binary's stdout back as completions
+
+### Performance Budget
+- Static completions (commands, flags, enum values): **0ms** (no binary call)
+- Dynamic completions (cached values): **< 50ms** (DB read only)
+- Dynamic completions (cache miss, lazy fetch): **200-500ms** (one-time per org)
+
+---
+
+## Implementation Plan
+
+### Phase 1: New DB helpers for project cache queries
+
+**File: `src/lib/db/project-cache.ts`** — Add two new functions:
+
+```typescript
+/** Get all cached org/project pairs (for completion). */
+export async function getAllCachedProjects(): Promise<{ orgSlug: string; projectSlug: string; projectName: string }[]>
+
+/** Get cached project slugs for a specific org. */
+export async function getCachedProjectsForOrg(orgSlug: string): Promise<{ projectSlug: string; projectName: string }[]>
+```
+
+These use simple `SELECT DISTINCT` queries on the existing `project_cache` table.
+
+**Tests:** `test/lib/db/project-cache.test.ts` — add tests for the new queries.
+
+### Phase 2: Extract Levenshtein into shared utility
+
+**File: `src/lib/fuzzy.ts`** (new) — Shared fuzzy matching utilities:
+
+The `levenshtein()` function currently lives as a private function in `src/lib/platforms.ts` (line 220). Extract it into a shared module so both `platforms.ts` and the completion engine can use it.
+
+```typescript
+/**
+ * Fuzzy string matching utilities.
+ *
+ * Provides Levenshtein distance and ranked fuzzy matching for use in
+ * completions, platform suggestions, and error messages.
+ */
+
+/** Levenshtein edit distance between two strings. */
+export function levenshtein(a: string, b: string): number
+
+/**
+ * Rank candidates by relevance to a partial input.
+ *
+ * Scoring strategy (ordered by priority):
+ * 1. Exact match → score 0 (highest)
+ * 2. Prefix match → score = 1 (partial is a prefix of candidate)
+ * 3. Contains match → score = 2 (partial appears as substring)
+ * 4. Fuzzy match → score = Levenshtein distance (capped by threshold)
+ *
+ * Threshold: max(2, floor(partial.length / 3)) — same formula used
+ * in platforms.ts. This means "tnry" (len=4, threshold=2) matches
+ * "sentry" (distance=2). Candidates beyond threshold are excluded.
+ *
+ * Returns candidates sorted by score, then alphabetically.
+ */
+export function fuzzyMatch(
+  partial: string,
+  candidates: string[],
+  opts?: { maxResults?: number }
+): string[]
+```
+
+**File: `src/lib/platforms.ts`** — Update to import from `fuzzy.ts`:
+- Remove the local `levenshtein()` function
+- Import `{ levenshtein }` from `./fuzzy.js`
+- `findFuzzyMatches()` stays in `platforms.ts` (uses platform-specific logic) but calls shared `levenshtein()`
+
+**Tests:** `test/lib/fuzzy.test.ts` (new) — property-based and unit tests:
+- Property: `levenshtein(a, a) === 0` for any string
+- Property: `levenshtein(a, b) === levenshtein(b, a)` (symmetry)
+- Property: `levenshtein(a, b) <= a.length + b.length` (upper bound)
+- Unit: `fuzzyMatch("tnry", ["sentry", "entry", "notary"])` → `["sentry", "entry"]`
+- Unit: `fuzzyMatch("sen", ["sentry", "sentinel", "send"])` → all three (prefix match)
+- Unit: empty partial returns all candidates
+
+### Phase 3: Build the completion engine
+
+**File: `src/lib/complete.ts`** (new) — Core completion logic:
+
+```typescript
+/**
+ * Shell completion engine.
+ *
+ * Handles the `__complete` fast-path: parses completion context from
+ * shell words, queries the SQLite cache, and outputs suggestions.
+ * Designed for minimal startup time — no Stricli, no telemetry.
+ */
+
+/** Main entry point, called from bin.ts fast-path. */
+export async function handleComplete(args: string[]): Promise<void>
+
+/** Complete org slugs with fuzzy matching. */
+function completeOrgSlugs(partial: string): Promise<string[]>
+
+/** Complete project slugs for a specific org. Lazy-fetches if cache is empty. Fuzzy-matched. */
+function completeProjectSlugs(partial: string, orgSlug: string): Promise<string[]>
+
+/** Complete the org/project positional pattern.
+ *  - No slash in partial → fuzzyMatch org slugs, append trailing "/"
+ *  - Has "org/" → fuzzyMatch project slugs for that org, prepend "org/"
+ */
+function completeOrgSlashProject(partial: string): Promise<string[]>
+
+/** Complete project aliases (a, b, c from monorepo detection). */
+function completeAliases(partial: string): Promise<string[]>
+```
+
+All completers use `fuzzyMatch()` from `src/lib/fuzzy.ts` instead of simple prefix filtering. This means:
+- `sentry issue list tnry/<TAB>` → suggests `sentry/` (fuzzy match on org slug)
+- `sentry issue list sentry/cl<TAB>` → suggests `sentry/cli` (prefix match on project)
+- `sentry issue list sentry/cil<TAB>` → suggests `sentry/cli` (fuzzy match on project, distance=1)
+
+**`__complete` protocol:**
+
+Input: `sentry __complete <word1> <word2> ... <partial>`
+- Words are the COMP_WORDS tokens minus the binary name
+- Last token is the partial being completed (may be empty string)
+
+Output: One completion per line to stdout
+- `value\tdescription` format (tab-separated; shells that support descriptions use it)
+- Exit code 0 on success
+
+Context parsing logic:
+1. Walk words through the static command tree (reuse `extractCommandTree()`)
+2. Once a leaf command is identified, determine which positional parameter the cursor is on
+3. Based on the parameter type, delegate to the appropriate completer
+4. For commands using `LIST_TARGET_POSITIONAL` or `parseSlashSeparatedArg` patterns → `completeOrgSlashProject()`
+
+**Lazy project fetching:**
+When `completeProjectSlugs()` finds no cached projects for an org:
+1. Check if auth token exists (from DB, no env var — keep it fast)
+2. If authenticated, make a lightweight API call to list projects for that org
+3. Cache the results in `project_cache`
+4. Return the results
+5. If not authenticated or API fails, return empty (graceful degradation)
+
+**Tests:** `test/lib/complete.test.ts` (new) — test each completer, context parsing, lazy fetch, error handling, fuzzy matching.
+
+### Phase 4: Extend command tree extraction for flags
+
+**File: `src/lib/completions.ts`** — Extend the `CommandTree` types:
+
+```typescript
+type CommandEntry = {
+  name: string;
+  brief: string;
+  flags: FlagEntry[];
+};
+
+type FlagEntry = {
+  name: string;        // e.g. "limit"
+  brief: string;
+  enumValues?: string[]; // for enum/choice flags
+};
+
+type CommandGroup = {
+  name: string;
+  brief: string;
+  subcommands: CommandEntry[];  // now includes flags per subcommand
+};
+```
+
+Update `extractCommandTree()` to pull flag info using `introspect.ts`'s `extractFlags()` and the Stricli route map's command parameters. For enum flags, extract the possible values.
+
+### Phase 5: Update shell script generators
+
+**File: `src/lib/completions.ts`** — Rewrite the three generators:
+
+#### Bash (`generateBashCompletion`)
+
+```bash
+_sentry_completions() {
+  local cur prev words cword
+  _init_completion || return
+
+  local commands="help auth cli issue org project ..."
+  local auth_commands="login logout status refresh whoami"
+  # ... (static subcommand lists, same as today)
+
+  # Flag lists per command (new)
+  local issue_list_flags="--limit --query --sort --status --cursor --fresh --json --fields"
+  local issue_list_sort_values="date priority new freq"
+  # ...
+
+  case "${COMP_CWORD}" in
+    1) COMPREPLY=($(compgen -W "${commands}" -- "${cur}")) ;;
+    2)
+      case "${prev}" in
+        auth) COMPREPLY=($(compgen -W "${auth_commands}" -- "${cur}")) ;;
+        # ...
+      esac ;;
+    *)
+      # Determine command path
+      local cmd="${COMP_WORDS[1]}"
+      local subcmd="${COMP_WORDS[2]}"
+
+      if [[ "${cur}" == --* ]]; then
+        # Flag name completion (static)
+        local flagvar="${cmd}_${subcmd}_flags"
+        COMPREPLY=($(compgen -W "${!flagvar}" -- "${cur}"))
+      elif [[ "${prev}" == --sort || "${prev}" == --status ]]; then
+        # Enum value completion (static)
+        local valvar="${cmd}_${subcmd}_${prev#--}_values"
+        COMPREPLY=($(compgen -W "${!valvar}" -- "${cur}"))
+      else
+        # Dynamic value completion (from cache, with fuzzy matching)
+        # NOTE: Do NOT use `compgen -W ... -- "${cur}"` here — that does
+        # prefix filtering which would discard fuzzy matches. The binary
+        # already returns only relevant matches (prefix + fuzzy).
+        local IFS=$'\n'
+        COMPREPLY=($(sentry __complete "${COMP_WORDS[@]:1}" 2>/dev/null))
+        # Strip tab-separated descriptions (bash doesn't support them)
+        COMPREPLY=($(printf '%s\n' "${COMPREPLY[@]}" | cut -f1))
+      fi
+      ;;
+  esac
+}
+complete -F _sentry_completions sentry
+```
+
+#### Zsh (`generateZshCompletion`)
+
+Zsh natively supports descriptions. Update to:
+- Use `_arguments` with completion functions for value positions
+- Dynamic completer calls `sentry __complete` and parses `value\tdescription` output
+- Flag completion via `_arguments` specs: `'--limit[Max items]:number:'`
+
+#### Fish (`generateFishCompletion`)
+
+Fish also supports descriptions natively:
+- For dynamic completions: `complete -c sentry -a '(sentry __complete (commandline -opc) 2>/dev/null | string replace \t "\t")'`
+- Static flag completions via `complete -c sentry -l limit -d "Max items"` etc.
+
+### Phase 6: Wire up `__complete` in bin.ts
+
+**File: `src/bin.ts`** — Add fast-path at the very top of `main()`:
+
+```typescript
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  // Fast-path: shell completion (no telemetry, no middleware)
+  if (args[0] === "__complete") {
+    const { handleComplete } = await import("./lib/complete.js");
+    await handleComplete(args.slice(1));
+    return;
+  }
+
+  // ... rest of main() unchanged
+}
+```
+
+Key: use dynamic `import()` so the completion module isn't loaded on normal CLI runs.
+
+### Phase 7: Update existing tests
+
+**File: `test/lib/completions.test.ts`** — Update tests for:
+- Flag lists in generated scripts
+- Dynamic callback sections in generated scripts
+- New `extractCommandTree()` output shape (includes flags)
+
+**File: `test/lib/completions.property.test.ts`** — Update:
+- Real bash simulation test: verify flag completion works
+- Add test: dynamic callback section is present in all shell scripts
+- Property: all visible flags appear in the generated script for their command
+
+---
+
+## Files to Create/Modify
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/lib/fuzzy.ts` | **Create** | Shared Levenshtein distance + `fuzzyMatch()` utility |
+| `src/lib/platforms.ts` | **Modify** | Remove local `levenshtein()`, import from `fuzzy.ts` |
+| `src/lib/complete.ts` | **Create** | Completion engine: context parsing, cache querying, lazy fetch, fuzzy matching |
+| `src/bin.ts` | **Modify** | Add `__complete` fast-path dispatch at top of `main()` |
+| `src/lib/completions.ts` | **Modify** | Extend command tree with flags; update bash/zsh/fish generators |
+| `src/lib/db/project-cache.ts` | **Modify** | Add `getAllCachedProjects()`, `getCachedProjectsForOrg()` |
+| `test/lib/fuzzy.test.ts` | **Create** | Property-based + unit tests for fuzzy matching |
+| `test/lib/complete.test.ts` | **Create** | Tests for completion engine |
+| `test/lib/completions.test.ts` | **Modify** | Tests for updated shell scripts |
+| `test/lib/completions.property.test.ts` | **Modify** | Property tests including flag completions |
+| `test/lib/db/project-cache.test.ts` | **Modify** | Tests for new query functions |
+
+---
+
+## Implementation Order
+
+1. `src/lib/fuzzy.ts` — Extract Levenshtein + build `fuzzyMatch()` + tests
+2. `src/lib/platforms.ts` — Update to use shared `levenshtein()` (existing tests must still pass)
+3. `src/lib/db/project-cache.ts` — Add new query functions + tests
+4. `src/lib/complete.ts` — Build completion engine with fuzzy matching + tests
+5. `src/bin.ts` — Add `__complete` fast-path
+6. `src/lib/completions.ts` — Extend `extractCommandTree()` with flags
+7. `src/lib/completions.ts` — Update bash generator
+8. `src/lib/completions.ts` — Update zsh generator
+9. `src/lib/completions.ts` — Update fish generator
+10. Update completion tests (unit + property)
+11. `bun run generate:skill` — regenerate SKILL.md if needed
+
+## Verification
+
+1. `bun test` — all existing tests pass (including `platforms.test.ts` after refactor)
+2. `bun test test/lib/fuzzy.test.ts` — fuzzy matching tests pass
+3. `bun test test/lib/complete.test.ts` — completion engine tests pass
+4. `bun test test/lib/completions.test.ts` — updated script tests pass
+5. `bun run typecheck` — no type errors
+6. `bun run lint:fix && bun run lint` — no lint issues
+7. Manual testing in a real shell:
+   - `sentry cli setup` to install updated completion scripts
+   - `sentry <TAB>` → shows commands (static, instant)
+   - `sentry issue <TAB>` → shows subcommands (static, instant)
+   - `sentry issue list --<TAB>` → shows flags (static, instant)
+   - `sentry issue list --sort <TAB>` → shows enum values (static, instant)
+   - `sentry issue list <TAB>` → shows cached org slugs with trailing `/` (dynamic)
+   - `sentry issue list myorg/<TAB>` → shows projects in that org (dynamic, lazy-fetches if cold)
+   - `sentry issue list tnry/<TAB>` → suggests `sentry/` via fuzzy match (dynamic)
+8. `bun run check:skill` — SKILL.md consistent
