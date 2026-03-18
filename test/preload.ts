@@ -12,7 +12,7 @@ import {
   readFileSync,
   rmSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 // Load .env.local for test credentials (SENTRY_TEST_*)
@@ -49,10 +49,11 @@ if (existsSync(envLocalPath)) {
   }
 }
 
+import { TEST_TMP_DIR } from "./constants.js";
+
 // Wipe stale test temp leftovers from previous runs (or crashes).
 // This is the primary cleanup mechanism — individual test afterEach hooks
 // clean up on success, but crashes/SIGKILL leave dirs behind.
-const TEST_TMP_DIR = join(tmpdir(), "sentry-cli-test");
 try {
   rmSync(TEST_TMP_DIR, { recursive: true, force: true });
 } catch {

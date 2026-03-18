@@ -7,12 +7,14 @@
 import { afterEach, beforeEach } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_ENV_VAR, closeDatabase } from "../src/lib/db/index.js";
 
-/** Shared temp directory for all test files. Lives under the OS temp dir. */
-export const TEST_TMP_DIR = join(tmpdir(), "sentry-cli-test");
+// biome-ignore lint/performance/noBarrelFile: re-exporting a single constant, not a barrel
+export { TEST_TMP_DIR } from "./constants.js";
+
+import { TEST_TMP_DIR } from "./constants.js";
+
 mkdirSync(TEST_TMP_DIR, { recursive: true });
 
 type TestConfigDirOptions = {
