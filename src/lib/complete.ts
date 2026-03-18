@@ -112,13 +112,6 @@ export async function getCompletions(
       ? `${precedingWords[0]} ${precedingWords[1]}`
       : "";
 
-  // Check if this is a flag value position (previous word is a flag)
-  const lastWord = precedingWords.at(-1);
-  if (lastWord?.startsWith("--")) {
-    // We're completing a flag value — don't provide org/project completions
-    return [];
-  }
-
   if (ORG_PROJECT_COMMANDS.has(cmdPath)) {
     return await completeOrgSlashProject(partial);
   }
@@ -132,15 +125,19 @@ export async function getCompletions(
 }
 
 /**
- * Complete organization slugs with fuzzy matching.
+ * Fuzzy-match cached org slugs and build completions.
  *
- * Queries the org_regions cache for all known org slugs and matches
- * them against the partial input.
+ * Shared by both `completeOrgSlugs` (bare slugs) and the slash variant
+ * (slugs with trailing `/`). Avoids duplicating the cache query, fuzzy
+ * match, and name lookup logic.
  *
  * @param partial - Partial org slug to match
- * @returns Completions with org names as descriptions
+ * @param formatValue - Transform a matched slug into the completion value
  */
-export async function completeOrgSlugs(partial: string): Promise<Completion[]> {
+async function matchOrgSlugs(
+  partial: string,
+  formatValue: (slug: string) => string
+): Promise<Completion[]> {
   const orgs = await getCachedOrganizations();
   if (orgs.length === 0) {
     return [];
@@ -149,13 +146,25 @@ export async function completeOrgSlugs(partial: string): Promise<Completion[]> {
   const slugs = orgs.map((o) => o.slug);
   const matched = fuzzyMatch(partial, slugs);
 
-  // Build a slug→name lookup for descriptions
   const nameMap = new Map(orgs.map((o) => [o.slug, o.name]));
 
   return matched.map((slug) => ({
-    value: slug,
+    value: formatValue(slug),
     description: nameMap.get(slug),
   }));
+}
+
+/**
+ * Complete organization slugs with fuzzy matching.
+ *
+ * Queries the org_regions cache for all known org slugs and matches
+ * them against the partial input.
+ *
+ * @param partial - Partial org slug to match
+ * @returns Completions with org names as descriptions
+ */
+export function completeOrgSlugs(partial: string): Promise<Completion[]> {
+  return matchOrgSlugs(partial, (slug) => slug);
 }
 
 /**
@@ -203,23 +212,8 @@ export async function completeOrgSlashProject(
  * When the user types `sentry issue list sen<TAB>`, we want to suggest
  * `sentry/` so they can continue typing the project name.
  */
-async function completeOrgSlugsWithSlash(
-  partial: string
-): Promise<Completion[]> {
-  const orgs = await getCachedOrganizations();
-  if (orgs.length === 0) {
-    return [];
-  }
-
-  const slugs = orgs.map((o) => o.slug);
-  const matched = fuzzyMatch(partial, slugs);
-
-  const nameMap = new Map(orgs.map((o) => [o.slug, o.name]));
-
-  return matched.map((slug) => ({
-    value: `${slug}/`,
-    description: nameMap.get(slug),
-  }));
+function completeOrgSlugsWithSlash(partial: string): Promise<Completion[]> {
+  return matchOrgSlugs(partial, (slug) => `${slug}/`);
 }
 
 /**

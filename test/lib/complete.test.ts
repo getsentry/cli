@@ -79,10 +79,11 @@ describe("getCompletions: context detection", () => {
     expect(result[0].value).toBe("my-org"); // no trailing slash
   });
 
-  test("skips completions when previous word is a flag", async () => {
+  test("still provides completions after boolean flags", async () => {
     await seedOrgs([{ slug: "my-org", name: "My Organization" }]);
-    const result = await getCompletions(["issue", "list", "--sort"], "");
-    expect(result).toEqual([]);
+    // After --verbose (a boolean flag), completions should still work
+    const result = await getCompletions(["issue", "list", "--verbose"], "");
+    expect(result.length).toBeGreaterThan(0);
   });
 
   test("returns org/project completions for project list", async () => {
