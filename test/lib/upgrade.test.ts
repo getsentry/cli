@@ -1001,6 +1001,7 @@ describe("executeUpgrade with curl method", () => {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   test("downloads and decompresses gzip binary when .gz URL succeeds", async () => {
@@ -1272,6 +1273,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
         // Ignore
       }
     }
+    clearInstallInfo();
   });
 
   test("downloads and decompresses nightly binary from GHCR", async () => {
